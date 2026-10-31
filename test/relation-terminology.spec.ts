@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import adviceTerminologySource from "../src/advice-terminology.json";
 import lexicalClassesSource from "../src/hpsg/lexical-classes.json";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { listMedicationLocaleLexemes } from "../src/lexer/locale";
 import { SITE_ANCHORS, SITE_SELF_DISPLAY_ANCHORS } from "../src/hpsg/lexical-classes";
 import { AdviceRelation } from "../src/types";

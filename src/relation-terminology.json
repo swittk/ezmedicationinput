@@ -2,6 +2,7 @@
   "adviceRelations": [
     {
       "relation": "with",
+      "coding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"},
       "actionSurfaces": [
         "with"
       ],
@@ -46,6 +47,7 @@
     },
     {
       "relation": "without",
+      "coding": {"system": "http://snomed.info/sct", "code": "45169001", "display": "Without"},
       "adviceSurfaces": [
         "without"
       ],
@@ -69,6 +71,7 @@
     },
     {
       "relation": "before",
+      "coding": {"system": "http://snomed.info/sct", "code": "421718005", "display": "Before - dosing instruction fragment"},
       "actionSurfaces": [
         "before"
       ],
@@ -105,6 +108,7 @@
     },
     {
       "relation": "after",
+      "coding": {"system": "http://snomed.info/sct", "code": "255234002", "display": "After"},
       "actionSurfaces": [
         "after"
       ],
@@ -141,6 +145,7 @@
     },
     {
       "relation": "during",
+      "coding": {"system": "http://snomed.info/sct", "code": "421994004", "display": "During - dosing instruction fragment"},
       "actionSurfaces": [
         "during"
       ],
@@ -170,6 +175,7 @@
     },
     {
       "relation": "between",
+      "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C94545", "display": "Between"},
       "actionSurfaces": [
         "between"
       ],
@@ -192,6 +198,7 @@
     },
     {
       "relation": "then",
+      "coding": {"system": "http://snomed.info/sct", "code": "421067001", "display": "Then - dosing instruction fragment"},
       "adviceSurfaces": [
         "then"
       ],
@@ -241,6 +248,7 @@
     },
     {
       "relation": "until",
+      "coding": {"system": "http://snomed.info/sct", "code": "421548005", "display": "Until - dosing instruction fragment"},
       "actionSurfaces": [
         "until"
       ],
@@ -269,6 +277,7 @@
     },
     {
       "relation": "for",
+      "coding": {"system": "http://snomed.info/sct", "code": "86495002", "display": "For"},
       "actionSurfaces": [
         "for"
       ],
@@ -283,6 +292,10 @@
           },
           {
             "surface": "เป็น เวลา",
+            "canonical": "for"
+          },
+          {
+            "surface": "นาน",
             "canonical": "for"
           }
         ]
@@ -306,6 +319,7 @@
     },
     {
       "relation": "in",
+      "coding": {"system": "http://snomed.info/sct", "code": "18720000", "display": "In"},
       "actionSurfaces": [
         "in"
       ],
@@ -335,6 +349,7 @@
     },
     {
       "relation": "into",
+      "coding": {"system": "http://snomed.info/sct", "code": "30507006", "display": "Into"},
       "actionSurfaces": [
         "into"
       ],
@@ -374,6 +389,7 @@
     },
     {
       "relation": "on",
+      "coding": {"system": "http://snomed.info/sct", "code": "420862001", "display": "On"},
       "actionSurfaces": [
         "on",
         "onto",
@@ -422,6 +438,7 @@
     },
     {
       "relation": "to",
+      "coding": {"system": "http://snomed.info/sct", "code": "421035004", "display": "To - dosing instruction fragment"},
       "actionSurfaces": [
         "to"
       ],
@@ -445,6 +462,7 @@
     },
     {
       "relation": "if",
+      "coding": {"system": "http://snomed.info/sct", "code": "421803000", "display": "If - dosing instruction fragment"},
       "actionSurfaces": [
         "if"
       ],
@@ -501,6 +519,7 @@
     },
     {
       "relation": "when",
+      "coding": {"system": "http://snomed.info/sct", "code": "420974001", "display": "When - dosing instruction fragment"},
       "actionSurfaces": [
         "when"
       ],
@@ -586,6 +605,7 @@
     },
     {
       "canonical": "around",
+      "coding": {"system": "http://snomed.info/sct", "code": "355648006", "display": "Surrounding"},
       "aliases": [
         "around",
         "surrounding"
@@ -721,6 +741,7 @@
     },
     {
       "canonical": "inside",
+      "coding": {"system": "http://snomed.info/sct", "code": "260521003", "display": "Internal"},
       "aliases": [
         "inside",
         "within"
@@ -739,6 +760,7 @@
     },
     {
       "canonical": "near",
+      "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C48927", "display": "Near"},
       "aliases": [
         "near",
         "next to",
@@ -762,6 +784,7 @@
     },
     {
       "canonical": "outside",
+      "coding": {"system": "http://snomed.info/sct", "code": "261074009", "display": "External"},
       "aliases": [
         "outside",
         "outside of"
@@ -783,6 +806,7 @@
     },
     {
       "canonical": "between",
+      "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C94545", "display": "Between"},
       "aliases": [
         "between"
       ],
@@ -821,6 +845,7 @@
     },
     {
       "canonical": "external",
+      "coding": {"system": "http://snomed.info/sct", "code": "261074009", "display": "External"},
       "aliases": [
         "external"
       ],
@@ -844,6 +869,7 @@
     },
     {
       "canonical": "center",
+      "coding": {"system": "http://snomed.info/sct", "code": "26216008", "display": "Central"},
       "aliases": [
         "center",
         "centre"
@@ -862,6 +888,7 @@
     },
     {
       "canonical": "front",
+      "coding": {"system": "http://snomed.info/sct", "code": "255549009", "display": "Anterior"},
       "aliases": [
         "front"
       ],
@@ -879,6 +906,7 @@
     },
     {
       "canonical": "left side",
+      "coding": {"system": "http://snomed.info/sct", "code": "7771000", "display": "Left"},
       "aliases": [
         "left side"
       ],
@@ -896,6 +924,7 @@
     },
     {
       "canonical": "right side",
+      "coding": {"system": "http://snomed.info/sct", "code": "24028007", "display": "Right"},
       "aliases": [
         "right side"
       ],
@@ -913,6 +942,7 @@
     },
     {
       "canonical": "both sides",
+      "coding": {"system": "http://snomed.info/sct", "code": "51440002", "display": "Right and left"},
       "aliases": [
         "both sides"
       ],
@@ -930,6 +960,7 @@
     },
     {
       "canonical": "bilateral sides",
+      "coding": {"system": "http://snomed.info/sct", "code": "51440002", "display": "Right and left"},
       "aliases": [
         "bilateral sides"
       ],
@@ -947,6 +978,7 @@
     },
     {
       "canonical": "middle",
+      "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25569", "display": "Middle"},
       "aliases": [
         "middle"
       ],
@@ -1042,6 +1074,7 @@
     },
     {
       "canonical": "at",
+      "coding": {"system": "http://snomed.info/sct", "code": "420246001", "display": "At - dosing instruction fragment"},
       "aliases": [
         "at"
       ],

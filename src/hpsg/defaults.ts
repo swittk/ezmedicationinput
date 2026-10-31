@@ -38,16 +38,46 @@ function inferUnitFromRoute(state: ParserState): string | undefined {
   return undefined;
 }
 
+// Plain tablets/capsules describe the medicine's form, not an exclusive
+// administration route. The oral default must not override a stated
+// sublingual or vaginal route or create a false conflict warning.
+const ROUTE_NEUTRAL_ORAL_FORMS = new Set(["tablet", "capsule, hard"]);
+const TABLET_ALTERNATE_ROUTES = new Set<RouteCode>([
+  RouteCode["Sublingual route"],
+  RouteCode["Buccal route"],
+  RouteCode["Oropharyngeal route (qualifier value)"],
+  RouteCode["Per vagina"]
+]);
+
 function applyRouteDefault(
   state: ParserState,
   context: MedicationContext | undefined,
   deps: HpsgDefaultConstraintDeps
 ): void {
+  const contextRoute = inferRouteFromContext(context);
   if (state.routeCode !== undefined) {
+    // Routes such as topical vs intravitreal or oral vs sublingual are not
+    // interchangeable. Do not invent broad route-family equivalences.
+    if (contextRoute !== undefined && state.routeCode !== contextRoute &&
+        !(contextRoute === RouteCode["Oral route"] &&
+          ROUTE_NEUTRAL_ORAL_FORMS.has(normalizeDosageForm(context?.dosageForm) ?? "") &&
+          TABLET_ALTERNATE_ROUTES.has(state.routeCode))) {
+      addWarning(
+        state,
+        `Explicit route ${ROUTE_TEXT[state.routeCode]} conflicts with dosage-form context route ${ROUTE_TEXT[contextRoute]}; using the explicit route.`
+      );
+    }
     return;
   }
   if (state.unit === "puff") {
     deps.setRoute(state, RouteCode["Respiratory tract route (qualifier value)"], ROUTE_TEXT[RouteCode["Respiratory tract route (qualifier value)"]]);
+    return;
+  }
+  // Dosage-form context is more specific than a generic administration verb.
+  // In particular, "apply" does not turn eye drops or a transdermal patch into
+  // an unspecified topical product.
+  if (contextRoute !== undefined) {
+    deps.setRoute(state, contextRoute, ROUTE_TEXT[contextRoute]);
     return;
   }
   if (state.methodCoding?.code === "738991002" || state.methodText?.toLowerCase() === "apply") {
@@ -60,10 +90,6 @@ function applyRouteDefault(
       deps.setRoute(state, RouteCode["Topical route"], ROUTE_TEXT[RouteCode["Topical route"]]);
       return;
     }
-  }
-  const route = inferRouteFromContext(context);
-  if (route !== undefined) {
-    deps.setRoute(state, route, ROUTE_TEXT[route]);
   }
 }
 
@@ -379,15 +405,12 @@ function normalizeMealRelations(when: EventTiming[], options: ParseOptions): Eve
       relation = code;
       break;
     }
-    const candidate = MEAL_RELATION_BY_CODE[code];
-    if (candidate && candidate !== EventTiming.Meal) {
-      relation = candidate;
-      break;
-    }
   }
   if (!relation) {
     return when;
   }
+  // Specific before/after events are complete grammar results, not defaults
+  // to spread across sibling events with their own explicit relation.
   const hasSpecificMealTarget = when.some((code) => SPECIFIC_MEAL_INDEX[code] !== undefined);
   if (!hasSpecificMealTarget) {
     return when;
@@ -399,7 +422,8 @@ function normalizeMealRelations(when: EventTiming[], options: ParseOptions): Eve
       continue;
     }
     const index = SPECIFIC_MEAL_INDEX[code];
-    normalized.push(index === undefined ? code : related[index] ?? code);
+    normalized.push(index === undefined || MEAL_RELATION_BY_CODE[code] !== EventTiming.Meal
+      ? code : related[index] ?? code);
   }
   return normalized.length ? normalized : when;
 }
@@ -496,11 +520,12 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   let durationSpan: { start: number; end: number } | undefined;
   let durationSpanCount = 0;
   for (const item of state.primaryClause.evidence) {
-    if (item.rule === "hpsg.lex.method") {
+    if (item.lexicalCategory === "method") {
       for (const span of item.spans) {
         if (span.end > methodEnd) methodEnd = span.end;
       }
-    } else if (item.rule.startsWith("hpsg.lex.schedule.duration")) {
+    } else if ((item.scheduleFields?.indexOf("duration") ?? -1) >= 0 &&
+               (item.scheduleFields?.indexOf("durationUnit") ?? -1) >= 0) {
       for (const span of item.spans) {
         durationSpan = span;
         durationSpanCount += 1;
@@ -522,9 +547,49 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   delete schedule.durationUnit;
 }
 
+/** A coordinated weekday recurrence supplies its slot cardinality unless
+ * an independent frequency constituent explicitly specifies that cardinality. */
+function applyCoordinatedWeekdayFrequency(state: ParserState): void {
+  const schedule = state.primaryClause.schedule;
+  if (!schedule?.dayOfWeek || schedule.dayOfWeek.length < 2 ||
+      schedule.frequency !== 1 || schedule.period !== 1 ||
+      schedule.periodUnit !== FhirPeriodUnit.Week || schedule.timingCode !== undefined) return;
+  let weekdayRecurrence = false;
+  for (const evidence of state.primaryClause.evidence) {
+    const fields = evidence.scheduleFields;
+    if (!fields || fields.indexOf("frequency") < 0) continue;
+    if (fields.indexOf("dayOfWeek") < 0) return;
+    weekdayRecurrence = true;
+  }
+  if (weekdayRecurrence) {
+    // Standalone meal/daypart events are administration slots, just as
+    // explicit clocks are. Do not add both lists blindly: "08:00 morning"
+    // can describe one clock-qualified dose rather than two doses.
+    const slots = schedule.timeOfDay?.length || schedule.when?.length || 1;
+    schedule.frequency = schedule.dayOfWeek.length * slots;
+  }
+}
+
+/** A headed "days N–M of each month" construction selects eligible
+ * administration days, not the number of doses on each day. Supply one
+ * administration per eligible day only when no independent cadence or
+ * event/clock has already expressed how many administrations occur.
+ */
+function applyMonthlyDefaultForDayFilters(state: ParserState): void {
+  if (!state.primaryClause.schedule?.dayOfMonth?.length ||
+      state.occurrenceCap !== undefined ||
+      state.frequency !== undefined || state.frequencyMax !== undefined ||
+      state.period !== undefined || state.periodMax !== undefined ||
+      state.periodUnit !== undefined || state.when.length || state.timeOfDay?.length) return;
+  state.frequency = 1;
+  state.period = 1;
+  state.periodUnit = FhirPeriodUnit.Day;
+}
+
 function applyWeeklyDefaultForDayFilters(state: ParserState): void {
   if (
     state.dayOfWeek.length &&
+    state.occurrenceCap === undefined &&
     state.frequency === undefined &&
     state.frequencyMax === undefined &&
     state.period === undefined &&
@@ -549,7 +614,9 @@ export function applyHpsgDefaultConstraints(
   applyUnitDefault(state, tokens, context, options);
   applySingleDoseDefault(state, options);
   applyRouteSiteDefault(state);
+  applyMonthlyDefaultForDayFilters(state);
   applyWeeklyDefaultForDayFilters(state);
+  applyCoordinatedWeekdayFrequency(state);
   applyAdministrationDurationSemantics(state, options);
   applySmartMealExpansion(state, options);
   applyCompletenessWarnings(state);

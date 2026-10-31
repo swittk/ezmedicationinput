@@ -208,9 +208,17 @@ function commaContinuesFrontedHpsgClause(
   const full = parseClauseState(fullText, options);
   if (findUnparsedTokenGroups(full).length || !hasAdministrationHead(full)) return false;
   const commaOffset = comma.sourceStart - segmentStart;
-  const frontedCondition = full.primaryClause.evidence.some((item) =>
-    item.rule === "hpsg.lex.condition" &&
-    item.spans.some((span) => span.start < commaOffset)
+  // A typed IF/UNLESS relation (or typed clinical adjunct) licenses a
+  // fronted condition. Never infer grammatical scope from a rule's name:
+  // production identifiers are provenance, not semantic authority.
+  const clause = full.primaryClause;
+  const frontedCondition = Boolean(
+    clause.instructionGraph?.relations?.some(relation =>
+      (relation.kind === "if" || relation.kind === "unless") &&
+      relation.span !== undefined && relation.span.start < commaOffset
+    ) ||
+    (clause.clinicalAdjuncts?.condition &&
+      clause.clinicalAdjuncts.localRanges?.some(range => range.start < commaOffset))
   );
   return frontedAdjunct || frontedCondition;
 }
@@ -318,7 +326,11 @@ function scheduleOnlyAdministrationContinuation(
   if (!prefixText) return false;
   const prefix = parseClauseState(prefixText, options);
   if (!hasAdministrationHead(prefix)) {
-    if (!inheritedAdministrationHead) return false;
+    // Clinical shorthand commonly omits the administration verb entirely:
+    // "1 drop OS QID x1mo then BID". A typed dose + schedule is already an
+    // administration phase; do not require an inherited verb merely to split
+    // its following schedule-only continuation.
+    if (!inheritedAdministrationHead && !prefix.primaryClause.dose) return false;
     if (findUnparsedTokenGroups(prefix).length || !hasMeaningfulSchedule(prefix)) return false;
   }
   if (connectorLower === "then") return true;
@@ -381,17 +393,17 @@ function doseBearingAdministrationContinuation(
   connectorIndex: number,
   segmentStart: number,
   options?: ParseOptions
-): boolean {
+): boolean | undefined {
   const connector = tokens[connectorIndex];
   const first = tokens[connectorIndex + 1];
-  if (!connector || !first) return false;
+  if (!connector || !first) return undefined;
   const connectorLower = normalizeSegmentLexeme(connector);
   if (!ACTION_SEQUENCE_MARKERS.has(connectorLower) && !ACTION_COORDINATION_CONNECTORS.has(connectorLower)) {
-    return false;
+    return undefined;
   }
   const probeEnd = nextContinuationProbeEnd(input, tokens, connectorIndex + 1);
   const continuationText = input.slice(first.sourceStart, probeEnd).trim();
-  if (!continuationText) return false;
+  if (!continuationText) return undefined;
 
   // Cheap lexical rejection before invoking the full parser. Most sequence/
   // coordination markers belong to procedural prose, not a heterogeneous
@@ -406,20 +418,23 @@ function doseBearingAdministrationContinuation(
       break;
     }
   }
-  if (!hasExplicitDoseUnit) return false;
+  if (!hasExplicitDoseUnit) return undefined;
 
   const prefixText = input.slice(segmentStart, connector.sourceStart).replace(/[,;]\s*$/u, "").trim();
-  if (!prefixText) return false;
+  if (!prefixText) return undefined;
   const prefix = parseClauseState(prefixText, options);
-  if (!prefix.primaryClause.dose) return false;
+  if (!prefix.primaryClause.dose) return undefined;
   const continuationActions = parseInstructionActions(continuationText, 0, options);
   if (continuationActions.some((action) => action.args.some((arg) =>
     arg.conceptId === "after-first-administration"
-  ))) return false;
+  ))) return undefined;
   const continuation = parseClauseState(continuationText, options);
   const clause = continuation.primaryClause;
-  if (!clause.dose) return false;
-  return hasMeaningfulSchedule(continuation) || Boolean(clause.method?.text || clause.method?.coding?.code);
+  if (!clause.dose) return undefined;
+  if (!hasMeaningfulSchedule(continuation) && !clause.method?.text && !clause.method?.coding?.code) {
+    return undefined;
+  }
+  return true;
 }
 
 function isSlashClauseBoundary(tokens: Token[], index: number): boolean {
@@ -556,10 +571,16 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       const scheduleContinuation = scheduleOnlyAdministrationContinuation(
         input, tokens, index + 1, start, options, inheritedAdministrationContinuation
       );
-      const doseContinuation = !scheduleContinuation &&
-        doseBearingAdministrationContinuation(input, tokens, index + 1, start, options);
+      const doseContinuation = scheduleContinuation
+        ? undefined
+        : doseBearingAdministrationContinuation(input, tokens, index + 1, start, options);
       if (scheduleContinuation || doseContinuation) {
-        pushSegment(segments, input, start, token.sourceStart);
+        pushSegment(
+          segments,
+          input,
+          start,
+          token.sourceStart
+        );
         start = nextToken.sourceEnd;
         inheritedAdministrationContinuation = true;
         index += 1;
@@ -570,10 +591,16 @@ export function parseSigSegments(input: string, options?: ParseOptions): HpsgSig
       const scheduleContinuation = scheduleOnlyAdministrationContinuation(
         input, tokens, index, start, options, inheritedAdministrationContinuation
       );
-      const doseContinuation = !scheduleContinuation &&
-        doseBearingAdministrationContinuation(input, tokens, index, start, options);
+      const doseContinuation = scheduleContinuation
+        ? undefined
+        : doseBearingAdministrationContinuation(input, tokens, index, start, options);
       if (scheduleContinuation || doseContinuation) {
-        pushSegment(segments, input, start, token.sourceStart);
+        pushSegment(
+          segments,
+          input,
+          start,
+          token.sourceStart
+        );
         start = token.sourceEnd;
         inheritedAdministrationContinuation = true;
         scannedOffset = token.sourceEnd;

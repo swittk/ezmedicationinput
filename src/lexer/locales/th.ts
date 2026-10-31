@@ -1,3 +1,5 @@
+import { findMedicationDateListSpans } from "../../date-interpretation";
+import type { ParseOptions } from "../../types";
 import {
   DAY_OF_WEEK_TOKENS,
   DEFAULT_BODY_SITE_SNOMED,
@@ -59,6 +61,9 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ทุก": "every",
   "และ": "and",
   "หรือ": "or",
+  // Bare Thai temporal linker maps to the already declared Until relation;
+  // relation semantics stay owned by the shared relation grammar.
+  "จน": "until",
   "บางๆ": "thinly",
   "ห้าม": "avoid",
   "ควร": "should",
@@ -67,6 +72,7 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "ปรึกษา": "consult",
   "แพทย์": "doctor",
   "ประมาณ": "about",
+  "อีก": "additional",
   "ปรับ": "adjust",
   "ตาม": "depending",
   "แปะ": "apply_patch",
@@ -78,6 +84,24 @@ const NON_RELATION_THAI_LEXEME_ALIASES: Readonly<Record<string, string>> = {
   "การออกกำลังกาย": "exercise",
   "วันเว้นวัน": "qod",
   "สัปดาห์ละครั้ง": "weekly",
+  "เดือนละครั้ง": "monthly",
+
+  // bounded medication quantities: retain the Thai surface/span while feeding
+  // the same canonical number-word entries used by the typed dose and cadence
+  // constructions for English
+  "ครึ่ง": "half",
+  "หนึ่ง": "one",
+  "สอง": "two",
+  "สาม": "three",
+  "สี่": "four",
+  "ห้า": "five",
+  "หก": "six",
+  "เจ็ด": "seven",
+  "แปด": "eight",
+  "เก้า": "nine",
+  "สิบ": "ten",
+  "สิบเอ็ด": "eleven",
+  "สิบสอง": "twelve",
 
   // cadence / event timing
   "ครั้ง": "times",
@@ -328,6 +352,13 @@ const THAI_PHRASES: readonly LocalePhrase[] = [
   { parts: ["ทุก", "สัปดาห์"], canonical: "weekly" },
   { parts: ["ทุก", "เดือน"], canonical: "monthly" },
   { parts: ["ทุก", "วัน"], canonical: "daily" },
+  // Keep the distributive ละ with ต่อ + period, not as an orphan count token.
+  { parts: ["ต่อ", "สัปดาห์", "ละ"], canonical: "weekly" },
+  { parts: ["ต่อ", "เดือน", "ละ"], canonical: "monthly" },
+  { parts: ["ต่อ", "วัน", "ละ"], canonical: "daily" },
+  { parts: ["ต่อ", "สัปดาห์"], canonical: "weekly" },
+  { parts: ["ต่อ", "เดือน"], canonical: "monthly" },
+  { parts: ["ต่อ", "วัน"], canonical: "daily" },
   { parts: ["สวน", "ล้าง"], canonical: "douche" },
   { parts: ["ชั่วโมง", "ละ"], canonical: "hourly" },
   { parts: ["สัปดาห์", "ละ"], canonical: "weekly" },
@@ -372,24 +403,28 @@ function mergeSourceSpan(
 
 const THAI_GRAMMAR_PREFIXES = getRelationSplitPrefixes("th");
 
+/** Intermediate locale passes reuse unchanged readonly lexical objects.
+ * Only final normalization emits independently owned tokens before reindexing;
+ * avoiding repeated spreads is safe because no intermediate pass mutates them.
+ */
 function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
   const result: LexToken[] = [];
   for (const token of tokens) {
     if (token.kind !== LexKind.Word || isKnownThaiDomainTerm(token.lower)) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const prefix = THAI_GRAMMAR_PREFIXES.find((candidate) =>
       token.lower.startsWith(candidate) && token.lower.length > candidate.length
     );
     if (!prefix) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const remainder = token.lower.slice(prefix.length);
     const remainderCanonical = canonicalLocaleLexeme(remainder);
     if (!isKnownThaiDomainTerm(remainder) && !remainderCanonical) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const splitAt = token.sourceStart + prefix.length;
@@ -417,17 +452,29 @@ function splitThaiGrammarPrefixTokens(tokens: readonly LexToken[]): LexToken[] {
   return result;
 }
 
-function splitThaiDistributiveUnitTokens(tokens: readonly LexToken[]): LexToken[] {
+function splitThaiQuantityTokens(tokens: readonly LexToken[], input: string): LexToken[] {
   const result: LexToken[] = [];
-  for (const token of tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const decimal = thaiDecimalTokenAt(tokens, index, input);
+    if (decimal) {
+      result.push(decimal);
+      index += 2;
+      continue;
+    }
+    const numericParts = splitThaiCompactNumericToken(token, input);
+    if (numericParts) {
+      result.push(...numericParts);
+      continue;
+    }
     if (token.kind !== LexKind.Word || !token.lower.startsWith("ละ") || token.lower.length <= 2) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const unitSurface = token.lower.slice(2);
     const canonicalUnit = canonicalLocaleLexeme(unitSurface);
     if (!canonicalUnit || !DOSE_UNIT_CANONICALS.has(canonicalUnit.toLowerCase())) {
-      result.push({ ...token });
+      result.push(token);
       continue;
     }
     const splitAt = token.sourceStart + 2;
@@ -472,11 +519,14 @@ function knownDomainCompoundAt(
     if (
       !current ||
       current.kind !== LexKind.Word ||
-      previous.sourceEnd !== current.sourceStart
+      (previous.sourceEnd !== current.sourceStart &&
+       !(current.original === "ๆ" &&
+         /^\s*$/u.test(input.slice(previous.sourceEnd, current.sourceStart))))
     ) {
       break;
     }
-    const sourceText = input.slice(first.sourceStart, current.sourceEnd);
+    const sourceText = input.slice(first.sourceStart, current.sourceEnd)
+      .replace(/\s+ๆ/gu, "ๆ");
     if (isKnownThaiDomainTerm(sourceText)) {
       bestEnd = end;
     }
@@ -484,7 +534,8 @@ function knownDomainCompoundAt(
   if (bestEnd < 0) {
     return undefined;
   }
-  const sourceText = input.slice(first.sourceStart, tokens[bestEnd].sourceEnd).toLowerCase();
+  const sourceText = input.slice(first.sourceStart, tokens[bestEnd].sourceEnd)
+    .replace(/\s+ๆ/gu, "ๆ").toLowerCase();
   return {
     token: mergeSourceSpan(
       tokens,
@@ -566,8 +617,219 @@ export function listThaiMedicationLocaleLexemes(locale: string): MedicationLocal
   return result;
 }
 
+// Keep ISO first: the shorter numeric alternative would otherwise match the
+// `26-11-01` suffix of `2026-11-01` and leave the leading `20` attached.
+const NUMERIC_DATE_LEXEME = /\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?/gu;
+
+function medicationNumberValue(original: string): number | undefined {
+  let normalized = "";
+  let digitCount = 0;
+  for (const char of original) {
+    if (char >= "0" && char <= "9") {
+      normalized += char;
+      digitCount += 1;
+      continue;
+    }
+    if (char >= "๐" && char <= "๙") {
+      normalized += String(char.charCodeAt(0) - "๐".charCodeAt(0));
+      digitCount += 1;
+      continue;
+    }
+    if (char === ".") {
+      normalized += char;
+      continue;
+    }
+    return undefined;
+  }
+  if (!digitCount || !/^(?:\d+(?:\.\d+)?|\.\d+)$/u.test(normalized)) return undefined;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function hasClinicalCompactNumericNeighbor(original: string): boolean {
+  const nonNumericParts = original
+    .split(/[0-9๐-๙]+(?:\.[0-9๐-๙]+)?/u)
+    .filter(Boolean);
+  return nonNumericParts.some((part) => {
+    const canonical = canonicalLocaleLexeme(part);
+    return Boolean(
+      canonical && (
+        DOSE_UNIT_CANONICALS.has(canonical.toLowerCase()) ||
+        canonical === "times" ||
+        canonical === "second" ||
+        canonical === "minute" ||
+        canonical === "hour" ||
+        canonical === "day" ||
+        canonical === "week" ||
+        canonical === "month"
+      )
+    );
+  });
+}
+
+function fragmentToken(token: LexToken, input: string, start: number, end: number): LexToken {
+  const original = input.slice(start, end);
+  const numericValue = medicationNumberValue(original);
+  return {
+    ...token,
+    original,
+    lower: original.toLowerCase(),
+    canonical: undefined,
+    kind: numericValue !== undefined ? LexKind.Number : LexKind.Word,
+    value: numericValue,
+    low: undefined,
+    high: undefined,
+    sourceStart: start,
+    sourceEnd: end,
+    sourceText: original,
+    surfaceIndices: [...token.surfaceIndices],
+    derived: true
+  };
+}
+
+function thaiDecimalTokenAt(
+  tokens: readonly LexToken[],
+  index: number,
+  input: string
+): LexToken | undefined {
+  const whole = tokens[index];
+  const point = tokens[index + 1];
+  const fraction = tokens[index + 2];
+  if (
+    !whole || !point || !fraction ||
+    point.original !== "." ||
+    whole.sourceEnd !== point.sourceStart ||
+    point.sourceEnd !== fraction.sourceStart ||
+    medicationNumberValue(whole.original) === undefined ||
+    medicationNumberValue(fraction.original) === undefined
+  ) {
+    return undefined;
+  }
+  const original = input.slice(whole.sourceStart, fraction.sourceEnd);
+  if (!/[๐-๙]/u.test(original) || medicationNumberValue(original) === undefined) {
+    return undefined;
+  }
+  const token = fragmentToken(whole, input, whole.sourceStart, fraction.sourceEnd);
+  token.surfaceIndices = [];
+  for (const part of [whole, point, fraction]) {
+    for (const surfaceIndex of part.surfaceIndices) {
+      if (token.surfaceIndices.indexOf(surfaceIndex) === -1) {
+        token.surfaceIndices.push(surfaceIndex);
+      }
+    }
+  }
+  return token;
+}
+
+/**
+ * ICU can keep a digit and its adjacent Thai word in one segment
+ * (`วันละ๒ครั้ง`, `2เม็ด`). Split only the numeric run, preserving the exact
+ * source offsets, so ordinary locale phrases and typed quantity rules can
+ * consume the resulting daughters.
+ */
+function splitThaiCompactNumericToken(
+  token: LexToken,
+  input: string
+): LexToken[] | undefined {
+  if (
+    token.kind !== LexKind.Word ||
+    !/[\u0E00-\u0E7F]/u.test(token.original) ||
+    !/[0-9๐-๙]/u.test(token.original) ||
+    (medicationNumberValue(token.original) === undefined &&
+     !hasClinicalCompactNumericNeighbor(token.original))
+  ) {
+    return undefined;
+  }
+  const output: LexToken[] = [];
+  let cursor = 0;
+  const numericRun = /[0-9๐-๙]+(?:\.[0-9๐-๙]+)?/gu;
+  for (
+    let match = numericRun.exec(token.original);
+    match;
+    match = numericRun.exec(token.original)
+  ) {
+    const relativeStart = match.index;
+    if (relativeStart > cursor) {
+      output.push(fragmentToken(
+        token,
+        input,
+        token.sourceStart + cursor,
+        token.sourceStart + relativeStart
+      ));
+    }
+    const relativeEnd = relativeStart + match[0].length;
+    output.push(fragmentToken(
+      token,
+      input,
+      token.sourceStart + relativeStart,
+      token.sourceStart + relativeEnd
+    ));
+    cursor = relativeEnd;
+  }
+  if (cursor < token.original.length) {
+    output.push(fragmentToken(
+      token,
+      input,
+      token.sourceStart + cursor,
+      token.sourceEnd
+    ));
+  }
+  return output;
+}
+
+/**
+ * Split only at numeric calendar-date boundaries already recognized from raw text.
+ * This is intentionally not a general Thai-letter/digit splitter.
+ */
+function splitTokensAtRecognizedThaiDateBoundaries(
+  tokens: readonly LexToken[],
+  input: string,
+  options?: ParseOptions
+): LexToken[] {
+  const cuts = new Set<number>();
+  for (const span of findMedicationDateListSpans(input, options)) {
+    // An unresolved span is still structurally date-shaped. Splitting its
+    // lexical boundary does not resolve it or assign calendar semantics.
+    NUMERIC_DATE_LEXEME.lastIndex = 0;
+    for (
+      let match = NUMERIC_DATE_LEXEME.exec(span.sourceText);
+      match;
+      match = NUMERIC_DATE_LEXEME.exec(span.sourceText)
+    ) {
+      const start = span.start + match.index;
+      cuts.add(start);
+      cuts.add(start + match[0].length);
+    }
+  }
+  if (!cuts.size) return tokens.slice();
+
+  const output: LexToken[] = [];
+  for (const token of tokens) {
+    const boundaries = [...cuts]
+      .filter(cut => token.sourceStart < cut && cut < token.sourceEnd)
+      .sort((left, right) => left - right);
+    if (!boundaries.length) {
+      output.push({ ...token });
+      continue;
+    }
+    let start = token.sourceStart;
+    for (const end of [...boundaries, token.sourceEnd]) {
+      if (end > start) output.push(fragmentToken(token, input, start, end));
+      start = end;
+    }
+  }
+  for (let index = 0; index < output.length; index++) output[index].index = index;
+  return output;
+}
+
 export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: string): LexToken[] {
-  const prepared = splitThaiGrammarPrefixTokens(splitThaiDistributiveUnitTokens(tokens));
+  // Only numeric dates with adjoining digits and / or - can need the
+  // structural numeric-date token split. Ordinary Thai SIGs skip the date
+  // list scanner; English textual dates contain no numeric token cuts here.
+  const dateBounded = /[0-9๐-๙][/-][0-9๐-๙]/u.test(input)
+    ? splitTokensAtRecognizedThaiDateBoundaries(tokens, input, { locale: "th" })
+    : tokens;
+  const prepared = splitThaiGrammarPrefixTokens(splitThaiQuantityTokens(dateBounded, input));
   const normalized: LexToken[] = [];
   let cursor = 0;
 

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -19,6 +20,9 @@ function replace(source, anchor, replacement, count = 1) {
 /** Build-only injection of real experimental components. No working-tree or published-source edits. */
 export function candidateTransform(source, filename) {
   const file = normalizeCandidateModulePath(filename);
+  // Once the audited boundary modules are promoted to src/regimen, the old
+  // shadow adapter must not inject a second copy into the production pipeline.
+  if (existsSync(path.join(root, 'src/regimen/planner.ts'))) return undefined;
   if (file === candidateSourcePath('src/index.ts')) {
     source = replace(source,
       'const segments = expandMealDashSegments(parseSigSegments(input, options), options);',

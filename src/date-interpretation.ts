@@ -1,3 +1,4 @@
+import { TEMPORAL_DATE_RELATION_SOURCES } from "./hpsg/lexical-classes";
 import { inferMedicationLocale } from "./locale-detection";
 import {
   CanonicalCalendarEventExpr,
@@ -20,6 +21,8 @@ export interface MedicationDateListMatch {
   start: number;
   end: number;
   sourceText: string;
+  /** True when medication syntax explicitly introduced the date relation (for example `until` or `วันที่`). */
+  explicitLead?: boolean;
   relation: MedicationDateRelation;
   events: CanonicalCalendarEventExpr[];
   unresolved: boolean;
@@ -27,22 +30,24 @@ export interface MedicationDateListMatch {
 
 const DATE_RESOLVERS = new Map<string, MedicationDateResolver>();
 const YEARFUL_SLASH_DATE_SOURCE = String.raw`\d{1,2}\/\d{1,2}\/\d{2,4}`;
+const ISO_DATE_SOURCE = String.raw`\d{4}-\d{2}-\d{2}`;
 const NUMERIC_DATE_SOURCE = String.raw`(?:\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}-\d{1,2}(?:-\d{2,4})?)`;
 const ENGLISH_MONTH_NAME_SOURCE = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
 const TEXTUAL_ENGLISH_DMY_DATE_SOURCE = String.raw`\d{1,2}\s+${ENGLISH_MONTH_NAME_SOURCE}\s+\d{4}`;
 const TEXTUAL_ENGLISH_MDY_DATE_SOURCE = String.raw`${ENGLISH_MONTH_NAME_SOURCE}\s+\d{1,2}(?:,\s*|\s+)\d{4}`;
 const TEXTUAL_ENGLISH_DATE_SOURCE = String.raw`(?:${TEXTUAL_ENGLISH_DMY_DATE_SOURCE}|${TEXTUAL_ENGLISH_MDY_DATE_SOURCE})`;
-const CALENDAR_DATE_SOURCE = String.raw`(?:${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
+const CALENDAR_DATE_SOURCE = String.raw`(?:${ISO_DATE_SOURCE}|${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})`;
 const DATE_LIST_SEPARATOR_SOURCE = String.raw`\s*(?:,|และ|and)\s*`;
 const DATE_LIST_PART_SOURCE = String.raw`(?:${CALENDAR_DATE_SOURCE}|\d{1,2})`;
 const DATE_LIST_SOURCE = String.raw`${CALENDAR_DATE_SOURCE}(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
-const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
+const UNANCHORED_YEARFUL_DATE_LIST_SOURCE = String.raw`(?:${ISO_DATE_SOURCE}|${YEARFUL_SLASH_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE})(?:${DATE_LIST_SEPARATOR_SOURCE}${DATE_LIST_PART_SOURCE})*`;
 const DATE_EVENT_LEAD_SOURCE = String.raw`(?:\bon\b\s+|วันที่\s*)`;
-const DATE_START_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bfrom\b\s+|\bstarting(?:\s+(?:on|from))?\b\s+|ตั้งแต่(?:วันที่)?\s*)`;
-const DATE_START_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bafter\b\s+|หลัง(?:วันที่)?\s*)`;
-const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\buntil\b\s+|\bthrough\b\s+|\btill\b\s+|(?:จน)?ถึง(?:วันที่)?\s*)`;
-const DATE_END_EXCLUSIVE_LEAD_SOURCE = String.raw`(?:\bbefore\b\s+|ก่อน(?:วันที่)?\s*)`;
+const DATE_START_INCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startInclusive;
+const DATE_START_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.startExclusive;
+const DATE_END_INCLUSIVE_LEAD_SOURCE = String.raw`(?:\bup\s+to\b\s*|${TEMPORAL_DATE_RELATION_SOURCES.endInclusive})`;
+const DATE_END_EXCLUSIVE_LEAD_SOURCE = TEMPORAL_DATE_RELATION_SOURCES.endExclusive;
 const DATE_LEAD_REQUIRED_SOURCE = String.raw`(?:${DATE_START_INCLUSIVE_LEAD_SOURCE}|${DATE_START_EXCLUSIVE_LEAD_SOURCE}|${DATE_END_INCLUSIVE_LEAD_SOURCE}|${DATE_END_EXCLUSIVE_LEAD_SOURCE}|${DATE_EVENT_LEAD_SOURCE})`;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/u;
 const NUMERIC_DATE_RE = /^(\d{1,2})([/-])(\d{1,2})(?:\2(\d{2,4}))?$/u;
 const TEXTUAL_ENGLISH_DMY_DATE_RE = new RegExp(
   `^(\\d{1,2})\\s+(${ENGLISH_MONTH_NAME_SOURCE})\\s+(\\d{4})$`,
@@ -53,7 +58,7 @@ const TEXTUAL_ENGLISH_MDY_DATE_RE = new RegExp(
   "iu"
 );
 const DATE_COMPONENT_RE = new RegExp(
-  `${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE}|\\d{1,2}`,
+  `${ISO_DATE_SOURCE}|${NUMERIC_DATE_SOURCE}|${TEXTUAL_ENGLISH_DATE_SOURCE}|\\d{1,2}`,
   "giu"
 );
 const ENGLISH_MONTH_TOKEN_RE = new RegExp(`\\b${ENGLISH_MONTH_NAME_SOURCE}\\b`, "iu");
@@ -109,6 +114,12 @@ function referenceYear(context: MedicationDateResolverContext): number {
   return Number(context.referenceDate.slice(0, 4));
 }
 
+// The built-in Gregorian resolver accepts only these explicit year values.
+// YMD remains explicitly Gregorian in every locale; a Buddhist-era 2569
+// written as 2569-10-25 must not silently schedule Gregorian year 2569.
+const GREGORIAN_YEAR_MIN = 1600;
+const GREGORIAN_YEAR_MAX = 2399;
+
 function nearestCenturyYear(twoDigitYear: number, reference: number): number {
   const century = Math.floor(reference / 100) * 100;
   const candidates = [
@@ -138,7 +149,7 @@ registerMedicationDateResolver({
       const calendarYear = nearestCenturyYear(sourceYear, referenceYear(context));
       return { isoYear: calendarYear, calendarYear, inferredYear: true };
     }
-    if (sourceYear < 1600 || sourceYear > 2399) return undefined;
+    if (sourceYear < GREGORIAN_YEAR_MIN || sourceYear > GREGORIAN_YEAR_MAX) return undefined;
     return { isoYear: sourceYear, calendarYear: sourceYear, inferredYear: false };
   }
 });
@@ -250,6 +261,8 @@ interface NumericDatePart {
   year?: number;
   yearDigits?: number;
   yearWasExplicit?: boolean;
+  /** ISO YYYY-MM-DD uses Gregorian YMD in any locale. */
+  isoYearFirst?: boolean;
 }
 
 function parseStructuralParts(listText: string): { parts: NumericDatePart[]; effectiveEnd: number } {
@@ -257,7 +270,8 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
   DATE_COMPONENT_RE.lastIndex = 0;
   for (let match = DATE_COMPONENT_RE.exec(listText); match; match = DATE_COMPONENT_RE.exec(listText)) {
     const text = match[0];
-    const full = text.match(NUMERIC_DATE_RE);
+    const iso = text.match(ISO_DATE_RE);
+    const full = iso ? null : text.match(NUMERIC_DATE_RE);
     const textualDmy = text.match(TEXTUAL_ENGLISH_DMY_DATE_RE);
     const textualMdy = text.match(TEXTUAL_ENGLISH_MDY_DATE_RE);
     const textualMonth = textualDmy
@@ -269,7 +283,12 @@ function parseStructuralParts(listText: string): { parts: NumericDatePart[]; eff
       sourceText: text,
       start: match.index,
       end: match.index + text.length,
-      ...(full
+      ...(iso
+        ? {
+            year: Number(iso[1]), month: Number(iso[2]), day: Number(iso[3]),
+            yearDigits: 4, yearWasExplicit: true, isoYearFirst: true
+          }
+        : full
         ? {
             day: Number(full[1]),
             month: Number(full[3]),
@@ -358,6 +377,41 @@ function resolveDatePart(
   };
   if (source.day === undefined || source.month === undefined) return undefined;
 
+  const dateContext: MedicationDateResolverContext = {
+    locale,
+    referenceDate: referenceIsoDate(options?.datePolicy)
+  };
+
+  // YYYY-MM-DD is structurally YMD. A year in the Buddhist range is a useful
+  // best-effort Buddhist interpretation even in an English SIG when the
+  // converted Gregorian year is clinically plausible around the reference
+  // date. This supports Thai clinics that type English directions but BE dates
+  // without turning arbitrary distant four-digit years into Buddhist dates.
+  if (part.isoYearFirst) {
+    if (source.year === undefined) return undefined;
+    const enabledCalendars = options?.datePolicy?.calendars;
+    const buddhistAllowed = enabledCalendars === undefined ||
+      enabledCalendars.some(calendar => calendar.toLowerCase() === "buddhist");
+    if (buddhistAllowed && source.year >= 2400 && source.year <= 2999) {
+      const gregorianYear = source.year - 543;
+      if (validGregorianDate(gregorianYear, source.month, source.day) &&
+          inferredYearPlausible(gregorianYear, dateContext, options?.datePolicy)) {
+        return {
+          isoDate: isoDate(gregorianYear, source.month, source.day),
+          calendar: "buddhist", calendarYear: source.year,
+          month: source.month, day: source.day, sourceText: part.sourceText
+        };
+      }
+    }
+    if (source.year < GREGORIAN_YEAR_MIN || source.year > GREGORIAN_YEAR_MAX ||
+        !validGregorianDate(source.year, source.month, source.day)) return undefined;
+    return {
+      isoDate: isoDate(source.year, source.month, source.day),
+      calendar: "gregory", calendarYear: source.year,
+      month: source.month, day: source.day, sourceText: part.sourceText
+    };
+  }
+
   const textualEnglishDate =
     TEXTUAL_ENGLISH_DMY_DATE_RE.test(part.sourceText) ||
     TEXTUAL_ENGLISH_MDY_DATE_RE.test(part.sourceText);
@@ -367,14 +421,22 @@ function resolveDatePart(
     : dateFields(source.day, source.month, order);
   if (!fields) return undefined;
 
-  const context: MedicationDateResolverContext = {
-    locale,
-    referenceDate: referenceIsoDate(options?.datePolicy)
-  };
+  const context = dateContext;
   const configuredCalendars = options?.datePolicy?.calendars;
   const enabled = configuredCalendars !== undefined
     ? configuredCalendars.map((id) => id.toLowerCase())
     : defaultCalendars(locale);
+  // A full four-digit BE year in a slash/DMY date is just as explicit as
+  // BE year-first syntax. English clinical directions can carry Thai dates;
+  // only offer the extra resolver when the caller has not fixed the calendars
+  // and the converted year is plausible for the clinical reference date.
+  if (configuredCalendars === undefined &&
+      source.yearDigits === 4 &&
+      source.year !== undefined && source.year >= 2400 && source.year <= 2999 &&
+      inferredYearPlausible(source.year - 543, context, options?.datePolicy) &&
+      enabled.indexOf("buddhist") === -1) {
+    enabled.push("buddhist");
+  }
   if (!enabled.length) return undefined;
 
   const candidates: CanonicalCalendarEventExpr[] = [];
@@ -462,6 +524,7 @@ function parseMatchedDateList(
         start,
         end: start + lead.length + structural.effectiveEnd,
         sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
+        explicitLead: lead.length > 0,
         relation: lead.relation,
         events: [],
         unresolved: true
@@ -474,6 +537,7 @@ function parseMatchedDateList(
     start,
     end: start + lead.length + structural.effectiveEnd,
     sourceText: input.slice(start, start + lead.length + structural.effectiveEnd),
+    explicitLead: lead.length > 0,
     relation: lead.relation,
     events: lead.relation === "event" || events.length === 1 ? events : [],
     unresolved: lead.relation !== "event" && events.length !== 1

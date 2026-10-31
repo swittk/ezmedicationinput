@@ -2,6 +2,8 @@ import type { SigTranslationConfig } from "./i18n";
 
 export interface FhirCoding {
   system?: string;
+  /** Terminology edition used to define this code. */
+  version?: string;
   code?: string;
   display?: string;
   extension?: FhirExtension[];
@@ -17,16 +19,30 @@ export interface FhirCodeableConcept {
 }
 
 export interface FhirExtension {
+  id?: string;
   url: string;
   extension?: FhirExtension[];
   valueCode?: string;
   valueString?: string;
+  valueDate?: string;
   valueBoolean?: boolean;
   valueInteger?: number;
   valueDecimal?: number;
   valueQuantity?: FhirQuantity;
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
+  valueUri?: string;
+  valueCanonical?: string;
+  valueDateTime?: string;
+  valueTime?: string;
+  valuePositiveInt?: number;
+  valueUnsignedInt?: number;
+  valueRange?: FhirRange;
+  valueRatio?: FhirRatio;
+  valueExpression?: FhirExpression;
+  valueReference?: NonNullable<FhirCodeableReference["reference"]>;
+  valueCodeableReference?: FhirCodeableReference;
+  valueTiming?: FhirTiming;
 }
 
 export interface FhirElement {
@@ -38,15 +54,21 @@ export interface FhirBackboneElement extends FhirElement {
   modifierExtension?: FhirExtension[];
 }
 
-export interface FhirPrimitiveElement {
-  extension?: FhirExtension[];
-}
+/** FHIR primitive metadata can carry both Element.id and extensions. */
+export type FhirPrimitiveElement = FhirElement;
 
-export interface FhirQuantity {
+export interface FhirQuantity extends FhirElement {
   value?: number;
+  /** FHIR R5 Quantity comparator. 'ad' was added in R5. */
+  comparator?: "<" | "<=" | ">=" | ">" | "ad";
   unit?: string;
   system?: string;
   code?: string;
+  /** Primitive Element metadata is valid on every FHIR Quantity specialization. */
+  _value?: FhirPrimitiveElement;
+  _unit?: FhirPrimitiveElement;
+  _system?: FhirPrimitiveElement;
+  _code?: FhirPrimitiveElement;
 }
 
 export type DoseUnitKind =
@@ -99,14 +121,24 @@ export interface EstimatedQuantity extends FhirQuantity {
   source?: string;
 }
 
-export interface FhirRange {
-  low?: FhirQuantity;
-  high?: FhirQuantity;
+/** FHIR SimpleQuantity: Quantity with the comparator constrained to absent. */
+export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator"> & {
+  comparator?: never;
+};
+
+/** FHIR R6 also supports the approximate (~) comparator in general Quantity. */
+export type FhirR6Quantity = Omit<FhirQuantity, "comparator"> & {
+  comparator?: FhirQuantity["comparator"] | "~";
+};
+
+export interface FhirRange extends FhirElement {
+  low?: FhirSimpleQuantity;
+  high?: FhirSimpleQuantity;
 }
 
-export interface FhirRatio {
+export interface FhirRatio extends FhirElement {
   numerator?: FhirQuantity;
-  denominator?: FhirQuantity;
+  denominator?: FhirSimpleQuantity;
 }
 
 /**
@@ -368,16 +400,115 @@ export interface FhirTiming extends FhirElement {
   code?: FhirCodeableConcept;
 }
 
+/** FHIR Expression: enough structure to preserve external R6 dose/rate expressions. */
+export interface FhirExpression extends FhirElement {
+  description?: string;
+  name?: string;
+  /** FHIR R5/R6 Expression.language is optional (0..1). */
+  language?: string;
+  expression?: string;
+  reference?: string;
+}
+
 export interface FhirDoseAndRate extends FhirBackboneElement {
   type?: FhirCodeableConcept;
   doseRange?: FhirRange;
-  doseQuantity?: FhirQuantity;
+  doseQuantity?: FhirSimpleQuantity;
   rateRatio?: FhirRatio;
   rateRange?: FhirRange;
-  rateQuantity?: FhirQuantity;
+  rateQuantity?: FhirSimpleQuantity;
+}
+
+/** R6 additions to the R5 DoseAndRate child object. */
+export interface EzDoseAndRate extends FhirDoseAndRate {
+  doseExpression?: FhirExpression;
+  rateExpression?: FhirExpression;
+}
+
+/**
+ * The meaning of a condition is independent of its wording.
+ * all/any/not are explicit: FHIR R6 condition[] alone is OR, not AND.
+ * Free-text predicates remain representable but need a caller evaluator.
+ */
+export type MedicationCondition =
+  | { kind: "measurement"; name: string; operation: "gt" | "ge" | "lt" | "le" | "eq" | "ne"; value: number; unit?: string; text: string }
+  | { kind: "state"; name: string; text: string; expected: boolean }
+  | { kind: "text"; text: string }
+  | { kind: "not"; condition: MedicationCondition }
+  | { kind: "all" | "any"; conditions: MedicationCondition[] };
+
+/** FHIR R6 draft DosageCondition compatible subset. */
+export interface FhirR6DosageCondition extends FhirBackboneElement {
+  code: FhirCodeableConcept;
+  details?: FhirCodeableConcept;
+  operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+  valueBoolean?: boolean;
+  valueQuantity?: FhirR6Quantity;
+  valueString?: string;
+  text?: string;
+}
+
+/** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
+export type FhirR6DoseLimit = FhirBackboneElement & {
+  scope: "dosage" | "period" | "administration" | "lifetime";
+  period?: FhirQuantity;
+  text?: string;
+} & (
+  | { valueQuantity: FhirR6Quantity; valueInteger?: never; valueExpression?: never }
+  | { valueInteger: number; valueQuantity?: never; valueExpression?: never }
+  | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never }
+);
+
+export interface FhirR6DosageSafety extends FhirBackboneElement {
+  doseLimit?: FhirR6DoseLimit[];
+  ifExceeded?: string;
+}
+
+/** FHIR R6 CodeableReference allows either a concept or resource reference. */
+export interface FhirCodeableReference {
+  concept?: FhirCodeableConcept;
+  reference?: { reference?: string; type?: string; display?: string };
+}
+
+/** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
+export interface FhirR6Dosage extends Omit<FhirDosage,
+  "sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
+  "maxDosePerLifetime" | "doseAndRate"> {
+  condition?: FhirR6DosageCondition[];
+  site?: FhirCodeableReference;
+  doseAndRate?: EzDoseAndRate[];
+  safety?: FhirR6DosageSafety;
+}
+
+export interface FhirR6RelativeTime extends FhirBackboneElement {
+  contextReference?: { reference?: string };
+  contextDefinition?: string;
+  contextPath?: string;
+  contextCode?: FhirCodeableConcept;
+  offsetDuration?: FhirQuantity;
+  offsetRange?: FhirRange;
+  text?: string;
+}
+
+export interface FhirR6DosageStep extends FhirBackboneElement {
+  start?: FhirR6RelativeTime;
+  end?: FhirR6RelativeTime;
+  count?: number;
+  component: FhirR6Dosage[];
+  safety?: FhirR6DosageSafety;
+}
+
+/** R6's step/component course representation. */
+export interface FhirR6DosageDetails extends FhirBackboneElement {
+  renderedInstruction?: string;
+  repeatCycle?: FhirQuantity;
+  step: FhirR6DosageStep[];
+  safety?: FhirR6DosageSafety;
 }
 
 export interface FhirDosage extends FhirBackboneElement {
+  /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */
+  sequence?: number;
   text?: string;
   patientInstruction?: string;
   timing?: FhirTiming;
@@ -385,9 +516,51 @@ export interface FhirDosage extends FhirBackboneElement {
   site?: FhirCodeableConcept;
   method?: FhirCodeableConcept;
   additionalInstruction?: FhirCodeableConcept[];
-  asNeededBoolean?: boolean;
+  /** FHIR R5 spelling. */
+  asNeeded?: boolean;
   asNeededFor?: FhirCodeableConcept[];
   doseAndRate?: FhirDoseAndRate[];
+  maxDosePerPeriod?: FhirRatio[];
+  maxDosePerAdministration?: FhirSimpleQuantity;
+  maxDosePerLifetime?: FhirSimpleQuantity;
+}
+
+/**
+ * EZMED's primary dose object. Retains the useful FHIR R5 Dosage shape and
+ * lifts a small number of actual R6 features into optional typed fields.
+ * This is NOT strict FHIR R5 JSON: call toFhirR5Dosages() for wire export.
+ */
+export interface EzDosage extends Omit<FhirDosage, "doseAndRate"> {
+  doseAndRate?: EzDoseAndRate[];
+  /** FHIR R6 Dosage.condition, including compound conditions when needed. */
+  condition?: FhirR6DosageCondition[];
+  /** FHIR R6 Dosage.safety, alongside the R5 maximum fields. */
+  safety?: FhirR6DosageSafety;
+  /** FHIR R6 Dosage.site.reference, while site remains R5 CodeableConcept. */
+  siteReference?: FhirCodeableReference["reference"];
+  /** EZMED-specific dates omitted from a repeating schedule; not an HL7 core field. */
+  excludedDates?: string[];
+}
+
+/**
+ * Small amount of course-level metadata that does not logically belong to an
+ * individual dosage. Each step row addresses the usual R5 Dosage.sequence.
+ * The fields under step come directly from FHIR R6 DosageDetails.step.
+ */
+export interface EzCourseStep extends FhirBackboneElement {
+  /** R5 global sequence corresponding to this R6 step. */
+  sequence: number;
+  start?: FhirR6RelativeTime;
+  end?: FhirR6RelativeTime;
+  count?: number;
+  safety?: FhirR6DosageSafety;
+}
+
+export interface EzCourseMetadata extends FhirBackboneElement {
+  renderedInstruction?: string;
+  repeatCycle?: FhirQuantity;
+  safety?: FhirR6DosageSafety;
+  step?: EzCourseStep[];
 }
 
 export type RouteCode = SNOMEDCTRouteCodes;
@@ -404,7 +577,8 @@ export interface MedicationContext {
   /** "Simple" strength string; might be the only way strength is provided
    * for discrete units this is the amount of medication for unit e.g. "500 mg" (1 tablet), or for mixed tablets might be like "400 mg + 80 mg"
    * for things like creams or fluids or syrupsit might be "2%", 5 g/100g, 100mg/ 100 g, 262 mg/15 mL, 200 mg/2 mL, 1 mg/dL, or "400 mg/5mL + 80 mg/5mL"
-   * In the "x + y" case, the strengthQuantity/strengthRatio will be the sum of the two ingredients.
+   * For combination products, individual ingredient strengths must remain
+   * separate; never sum the parts into one strengthQuantity/strengthRatio.
    */
   strength?: string;
   strengthQuantity?: FhirQuantity;
@@ -478,11 +652,41 @@ export interface BodySiteSpatialRelation {
   sourceText?: string;
 }
 
+export type BodySiteRestrictionPredicateForm =
+  | "state"
+  | "existential"
+  | "raw";
+
+/**
+ * A source-backed predicate that narrows an administration site. It is not a
+ * diagnosis or a regimen-wide execution condition.
+ */
+export interface BodySiteRestrictionPredicate {
+  text: string;
+  lemma?: string;
+  form: BodySiteRestrictionPredicateForm;
+  /** Predicate payload after a declarative introducer such as "there is". */
+  focusText?: string;
+  range?: TextRange;
+}
+
+/** A restrictive relative clause attached locally to a body-site sign. */
+export interface BodySiteRestriction {
+  relation: "where";
+  sourceText: string;
+  range?: TextRange;
+  markerRange?: TextRange;
+  predicate: BodySiteRestrictionPredicate;
+}
+
 export interface BodySiteDefinition {
   coding?: BodySiteCode;
   text?: string;
   spatialRelation?: BodySiteSpatialRelation;
   routeHint?: RouteCode;
+  /** Only applies when a typed locative places medication INSIDE this site;
+   * external skin administration retains the product/administration route. */
+  internalRouteHint?: RouteCode;
   administrationTargetCount?: number;
   /** Optional surface used when the dose applies independently to each target. */
   perTargetText?: string;
@@ -579,13 +783,31 @@ export enum AdviceArgumentRole {
   Free = "free"
 }
 
+/** A constituent of a compound meaning, not an alternative coding of that whole meaning. */
+export interface InstructionConceptComponent {
+  role: "head" | "qualifier" | "amount";
+  text: string;
+  coding?: FhirCoding;
+}
+
+/** A standard-coded constituent of an instruction predicate, not an equivalent
+ * code for the whole imperative or an unvalidated SNOMED expression. */
+export interface InstructionActionSemanticComponent {
+  role: "activity" | "technique" | "target-state" | "target-site" | "target-object" | "operation" | "orientation" | "mechanism" | "situation";
+  coding: FhirCoding;
+}
+
 export interface AdviceArgument {
   role: AdviceArgumentRole;
   text: string;
+  /** Independent typed relation from this action to its argument.
+   * Permits material WITH and event BEFORE to coexist on one action. */
+  relation?: AdviceRelation;
   normalized?: string;
   conceptId?: string;
   coding?: FhirCoding;
   codings?: FhirCoding[];
+  components?: InstructionConceptComponent[];
   i18n?: Record<string, string>;
   quantity?: {
     value?: number;
@@ -598,6 +820,8 @@ export interface AdviceArgument {
 export interface AdviceFrame {
   force: AdviceForce;
   polarity?: AdvicePolarity;
+  /** Shared directive scope may differ from this action's own source wording. */
+  polaritySource?: "shared";
   modality?: AdviceModality;
   predicate: {
     lemma: string;
@@ -609,6 +833,8 @@ export interface AdviceFrame {
     realizerConfig?: MedicationInstructionActionRealizerConfig;
     /** Internal/custom action coding followed by any trustworthy external mappings. */
     codings?: FhirCoding[];
+    /** Independently coded constituents, not alternative predicate Codings. */
+    semanticComponents?: InstructionActionSemanticComponent[];
   };
   relation?: AdviceRelation;
   args: AdviceArgument[];
@@ -851,6 +1077,13 @@ export interface MedicationInstructionActionContextualCodingRule {
   coding: FhirCoding;
 }
 
+/** Bind independently coded parts to a typed semantic argument rather than
+ * to an ambiguous bare verb. Reuses existing contextual coding match semantics. */
+export interface MedicationInstructionActionContextualSemanticComponentRule {
+  whenArgument: MedicationInstructionActionContextualCodingRule["whenArgument"];
+  component: InstructionActionSemanticComponent;
+}
+
 export interface MedicationInstructionActionLocaleRealizerConfig {
   fallbackObject?: string;
   suppressActivityConcepts?: string[];
@@ -881,6 +1114,8 @@ export interface MedicationInstructionActionDefinition {
   roundtripI18n?: Record<string, string>;
   /** Surface forms that should resolve to this action. */
   aliases?: string[];
+  /** Ambiguous aliases licensed only at a directive boundary or after an explicit directive. */
+  directiveOnlyAliases?: string[];
   /** Surface forms licensed only when immediately sequence-scoped (e.g. `then off`). */
   sequenceAliases?: string[];
   /** Locale-specific parser lexemes. Display translation belongs in `i18n`; parsing aliases are explicit. */
@@ -894,6 +1129,12 @@ export interface MedicationInstructionActionDefinition {
   /** Declarative realization family used by English/Thai graph generation. */
   realizer?: MedicationInstructionActionRealizer;
   argumentParserConfig?: {
+    /** Polarity that licenses this lexical frame as a directive rather than an event predicate. */
+    requiredDirectivePolarity?: AdvicePolarity;
+    /** Semantic effect of an affirmative conditional action on its medication-dose complement.
+     * The selected-dose form requires an explicit medication object or a typed dose-slot target;
+     * it never treats a bare avoidance verb, food object, or negation as withholding. */
+    medicationConditionEffect?: "withhold" | "withhold-selected-dose";
     primaryConcepts?: string[];
     secondaryConcepts?: string[];
     implicitMatchedConcept?: string;
@@ -923,6 +1164,8 @@ export interface MedicationInstructionActionDefinition {
   applicationVerb?: boolean;
   /** Extra exact codings licensed by a typed semantic argument. */
   contextualCodings?: MedicationInstructionActionContextualCodingRule[];
+  /** Add accurate standard-coded constituents only in the matched argument context. */
+  contextualSemanticComponents?: MedicationInstructionActionContextualSemanticComponentRule[];
   /** A method-capable procedural action that may serve as the primary administration head. */
   primaryAdministrationHead?: boolean;
   /** Semantically light verb that yields to an immediately following stronger administration head. */
@@ -936,6 +1179,8 @@ export interface MedicationInstructionActionDefinition {
   coding?: FhirCoding;
   /** Exact external terminology mappings; never fuzzy/approximate mappings. */
   externalCodings?: FhirCoding[];
+  /** Standard-coded parts of the instruction; preserve its local action coding. */
+  semanticComponents?: InstructionActionSemanticComponent[];
 }
 
 export interface MedicationInstructionActionInput
@@ -946,6 +1191,14 @@ export interface MedicationInstructionActionInput
 export interface MedicationInstructionConceptDefinition {
   code: string;
   role: AdviceArgumentRole;
+  /** A registered compound noun may entail a second independently typed
+   * argument, e.g. a temporal material "before first use" also supplies
+   * its explicit first-use event. Not a free-form text rewrite. */
+  impliedArgument?: {
+    role: AdviceArgumentRole;
+    conceptId: string;
+    relation: AdviceRelation;
+  };
   display: string;
   i18n?: Record<string, string>;
   aliases?: string[];
@@ -953,6 +1206,8 @@ export interface MedicationInstructionConceptDefinition {
   localeAliases?: Record<string, string[]>;
   coding?: FhirCoding;
   externalCodings?: FhirCoding[];
+  /** Separately coded head and modifiers when there is no equivalent code for the whole phrase. */
+  components?: InstructionConceptComponent[];
 }
 
 export interface MedicationInstructionConceptInput
@@ -1230,10 +1485,29 @@ export interface CanonicalSiteExpr {
   i18n?: Record<string, string>;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  restrictions?: BodySiteRestriction[];
   administrationTargetCount?: number;
   source?: "abbreviation" | "text" | "selection" | "resolver";
   inferred?: boolean;
   evidence?: CanonicalEvidence[];
+  range?: TextRange;
+}
+
+export type AdministrationTargetCoordinationKind =
+  | "conjunction"
+  | "disjunction"
+  | "mixed";
+
+/**
+ * A grammatical coordination of administration sites. Each target is an
+ * independently typed site atom; the relation is retained before the singular
+ * FHIR Dosage.site projection chooses whether conjunction fan-out is needed.
+ */
+export interface CanonicalAdministrationTargetGroup {
+  coordination: AdministrationTargetCoordinationKind;
+  sourceText: string;
+  range?: TextRange;
+  targets: CanonicalSiteExpr[];
 }
 
 export interface CanonicalMethodExpr {
@@ -1245,6 +1519,14 @@ export interface CanonicalMethodExpr {
 
 export interface CanonicalOccurrenceCapExpr {
   max: number;
+  period: number;
+  periodUnit: FhirPeriodUnit;
+}
+
+/** Explicit maximum medication quantity within a recurring period. */
+export interface CanonicalDosePeriodMaximumExpr {
+  amount: number;
+  unit: string;
   period: number;
   periodUnit: FhirPeriodUnit;
 }
@@ -1264,6 +1546,15 @@ export interface CanonicalActivityTimingExpr {
   offsetMax?: number;
 }
 
+/** Caller-resolved daily administration window. Unlike a WHEN anchor, this
+ * bounds recurring opportunities rather than defining one administration.
+ * Both endpoints are clinical EventTiming codes, never inferred clock times.
+ */
+export interface CanonicalEventWindowExpr {
+  start: EventTiming;
+  end: EventTiming;
+}
+
 export interface CanonicalCalendarEventExpr {
   /** Gregorian ISO calendar date used for date-only FHIR Timing.event values and display. */
   isoDate: string;
@@ -1281,7 +1572,36 @@ export interface CanonicalCalendarEventExpr {
   inferredYear?: boolean;
 }
 
+/** A recognized cycle-day restriction whose calendar eligibility is unresolved.
+ * Independent dose/route/clock fields remain useful for clinician editing.
+ */
+export interface CanonicalCycleDayConstraint {
+  days: number[];
+  periodDays?: number;
+  cycles?: number;
+  anchor?: string;
+  reason: string;
+  sourceText: string;
+}
+
 export interface CanonicalScheduleExpr {
+  /** Required cycle-day eligibility; do not execute the independent cadence until resolved. */
+  cycleDayConstraint?: CanonicalCycleDayConstraint;
+  /** Typed whole-course interval for a recurring active/rest construction. */
+  repeatCycle?: FhirQuantity;
+  /** Explicit finite number of whole-course repetitions; absent means unbounded. */
+  repeatCount?: number;
+  /** Explicit local-clock interval window; not a list of endpoint doses. */
+  clockWindow?: { start: string; end: string; endInclusive: boolean };
+  /** Weekday occurrence in each month; -1 denotes the last occurrence. */
+  weekdayOrdinal?: -1 | 1 | 2 | 3 | 4 | 5;
+  /** Source-anaphoric timing (e.g. "at the same times") awaiting a licensed
+   * previous regimen daughter. Resolved within HPSG/regimen, never by FHIR. */
+  timingReference?: "previous" | "previous-weekday-complement";
+  /** Source-relative phase onset, in elapsed days from treatment start. */
+  treatmentStartOffsetDays?: number;
+  /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
+  administrationOffsetMinutes?: number;
   timingCode?: string;
   count?: number;
   countMax?: number;
@@ -1308,14 +1628,23 @@ export interface CanonicalScheduleExpr {
   /** Maximum event offset in minutes when the source says “at most”. */
   offsetMax?: number;
   dayOfWeek?: FhirDayOfWeek[];
+  /** Source-specified calendar days of each month, not medication dose amounts. */
+  dayOfMonth?: number[];
   when?: EventTiming[];
   timeOfDay?: string[];
+  /** Typed recurring window, distinct from an instantaneous WHEN event. */
+  eventWindow?: CanonicalEventWindowExpr;
   /** Explicit calendar occurrences, projected to FHIR Timing.event. */
   calendarEvents?: CanonicalCalendarEventExpr[];
   activityTiming?: CanonicalActivityTimingExpr[];
   occurrenceCap?: CanonicalOccurrenceCapExpr;
+  /** Quantity cap, distinct from occurrenceCap's maximum administration count. */
+  maxDosePerPeriod?: CanonicalDosePeriodMaximumExpr[];
   evidence?: CanonicalEvidence[];
 }
+
+/** Schedule fields explicitly contributed by typed grammar evidence. */
+export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence">;
 
 export interface CanonicalPrnReasonExpr {
   text?: string;
@@ -1377,24 +1706,74 @@ export interface CanonicalSourceSpan extends TextRange {
   tokenIndices?: number[];
 }
 
+/** Lexical grammatical role carried from the originating typed sign.
+ * Production names remain diagnostic labels, never semantic dispatch keys. */
+export type CanonicalLexicalCategory = "dose" | "method" | "prn" | "connector" | "instruction" | "workflow";
+
 export interface CanonicalEvidence {
   rule: string;
+  /** Role of the actual lexical sign, independent of the grammar-rule label. */
+  lexicalCategory?: CanonicalLexicalCategory;
   spans: CanonicalSourceSpan[];
+  /** Exact schedule semantics owned by this evidence, independent of rule names. */
+  scheduleFields?: CanonicalScheduleSemanticField[];
   score?: number;
   note?: string;
 }
 
+/**
+ * Clinical adjuncts are grammatical facts on a typed administration clause.
+ * Local surface recognizers produce them; HPSG constructions determine their
+ * scope; FHIR only projects the resulting semantics. Raw/source data is kept.
+ */
+export interface CanonicalClinicalAdjuncts {
+  /** Finite medication-free interval selected by a typed withholding head. */
+  treatmentPause?: { durationDays: number; range: TextRange };
+  condition?: MedicationCondition;
+  /** Source-typed calendar membership, distinct from unrelated clinical guards. */
+  calendarDayCondition?: MedicationCondition;
+  /** Typed nominal reference of a conditional administration instruction.
+   * Resolved across related regimen daughters before any FHIR lowering. */
+  conditionTarget?: {
+    when?: EventTiming[];
+    /** Explicit existing clock slots selected by the nominal dose object. */
+    timeOfDay?: string[];
+    /** Lexical daypart membership over already stated clocks; creates no times. */
+    clockRange?: { startHour: number; endHour: number };
+    quantifier?: "all" | "both";
+  };
+  excludedDates?: string[];
+  excludedWeekdays?: FhirDayOfWeek[];
+  /** Local source spans for lint ownership, not inherited donor spans. */
+  localRanges?: TextRange[];
+  evidence?: CanonicalEvidence[];
+}
+
 export interface CanonicalSigClause {
   kind: "administration";
+  /** Source-backed phase operation; resolved by the typed regimen graph. */
+  regimenAdjustment?: "replace" | "add" | "replace-target";
   rawText: string;
   span?: TextRange;
   raw: CanonicalSourceSpan;
   dose?: CanonicalDoseExpr;
   route?: CanonicalRouteExpr;
   site?: CanonicalSiteExpr;
+  administrationTargetGroup?: CanonicalAdministrationTargetGroup;
   method?: CanonicalMethodExpr;
+  /** Only the executable schedule. Undefined when scheduling is unresolved. */
   schedule?: CanonicalScheduleExpr;
+  /**
+   * Recognized but NON-EXECUTABLE schedule features retained for review/UI.
+   * An unresolved medication can still have trustworthy dose, route, site,
+   * clocks and bounds. Never schedule or calculate supply from this field;
+   * execution requires a resolved schedule and the dosage safety checks.
+   */
+  provisionalSchedule?: CanonicalScheduleExpr;
   prn?: CanonicalPrnExpr;
+  clinicalAdjuncts?: CanonicalClinicalAdjuncts;
+  /** Closed HPSG condition ownership, projected into instruction-graph relations. */
+  instructionScopes?: Array<{ kind: AdviceRelation; span: TextRange; target: TextRange }>;
   patientInstruction?: string;
   instructionGraph?: CanonicalInstructionGraph;
   additionalInstructions?: CanonicalAdditionalInstructionExpr[];
@@ -1445,6 +1824,8 @@ export interface BodySiteDetail {
   text?: string;
   coding?: BodySiteCode;
   spatialRelation?: BodySiteSpatialRelation;
+  /** Typed site-local predicates retained for editable normalized suggestions. */
+  restrictions?: BodySiteRestriction[];
   administrationTargetCount?: number;
 }
 
@@ -1463,21 +1844,15 @@ export interface ParseBatchSegmentMeta {
 export interface ParseBatchResult {
   input: string;
   count: number;
+  /** Per-clause parser diagnostics and intermediate R5-compatible dosage shapes. */
   items: ParseResult[];
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
-  fhir: FhirDosage;
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
+  /** Primary output: COMPLETE flat R5-like dosage array with additive R6 fields. */
+  fhir: EzDosage[];
+  /** Strict R6 snapshot projection of the same prescription. */
+  fhirNext: FhirR6DosageDetails;
+  /** Optional R6 step/course metadata not owned by a single dose. */
+  course?: EzCourseMetadata;
   shortText: string;
-  /**
-   * Top-level compatibility field mirroring the first parsed item so existing
-   * single-sig integrations can migrate incrementally.
-   */
   longText: string;
   warnings: string[];
   meta: {
@@ -1566,8 +1941,18 @@ export interface NextDueDoseConfig {
 /**
  * Options bag for next-due dose generation.
  */
+export type MedicationConditionEvaluator = (condition: MedicationCondition, at: string) => boolean | undefined;
+
 export interface NextDueDoseOptions {
   from: Date | string;
+  /** Explicit course-local selection for exactly-one alternative groups.
+   * Keys are getDosageAlternativeChoice(...).groupId; values are branchId.
+   * Omit only for ordinary courses without mutually exclusive alternatives.
+   * Parsing and editing never require a selection; execution and supply do.
+   */
+  alternativeChoices?: Readonly<Record<string, string>>;
+  /** Evaluate structured conditional instructions at each candidate occurrence. Required for conditional scheduling. */
+  evaluateCondition?: MedicationConditionEvaluator;
   orderedAt?: Date | string;
   limit?: number;
   priorCount?: number;
@@ -1580,8 +1965,22 @@ export interface NextDueDoseOptions {
   config?: NextDueDoseConfig;
 }
 
+/** Due times calculated with each ordered medication-instruction phase respected. */
+export interface RegimenDueTimes {
+  dosageIndex: number;
+  sequence: number;
+  phaseStart: string;
+  timestamps: string[];
+}
+
 export interface TotalUnitsResult {
   totalUnits: number;
+  /** Unit of totalUnits, when known. */
+  unit?: string;
+  /** PRN and unresolved clinical observations yield the maximum planned supply, not actual consumption. */
+  quantityKind?: "scheduled" | "maximum";
+  /** Human-readable basis/assumptions suitable for displaying alongside a calculated quantity. */
+  explanation?: string;
   totalContainers?: number;
   totalContainerQuantity?: FhirQuantity;
   totalApproximateQuantity?: EstimatedQuantity;
@@ -1589,7 +1988,9 @@ export interface TotalUnitsResult {
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
-  dosage: FhirDosage | FhirDosage[];
+  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageDetails | ParseBatchResult;
+  /** Required to resolve per-kg administered doses into an actual quantity. */
+  patientWeightKg?: number;
   durationValue: number;
   durationUnit: FhirPeriodUnit;
   roundToMultiple?: number;

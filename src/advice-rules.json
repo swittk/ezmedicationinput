@@ -1,6 +1,193 @@
 {
   "rules": [
     {
+      "id": "hl7-entity-handling-do-not-shake",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "PSA",
+        "display": "do not shake",
+        "text": "Do not shake",
+        "thai": "ห้ามเขย่า"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "polarity": "negate",
+          "predicate": {
+            "lemma": "shake",
+            "semanticClass": "prepare"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "shake"
+          ],
+          "polarity": "negate"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-protect-from-light",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "PRTL",
+        "display": "Protect from Light",
+        "text": "Protect from light",
+        "thai": "เก็บให้พ้นแสง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "protect-from-light",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "protect-from-light"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-store-dry",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "DRY",
+        "display": "dry",
+        "text": "Store in a dry place",
+        "thai": "เก็บในที่แห้ง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "store-dry",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "store-dry"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-store-upright",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "UPR",
+        "display": "upright",
+        "text": "Store upright",
+        "thai": "เก็บภาชนะในแนวตั้ง"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "store-upright",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "store-upright"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-refrigerate-4-8",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "REF",
+        "display": "Refrigerated temperature",
+        "text": "Refrigerate at 4-8°C",
+        "thai": "เก็บที่อุณหภูมิ 4-8 องศาเซลเซียส"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "refrigerate-4-8",
+            "semanticClass": "storage"
+          },
+          "args": []
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "refrigerate-4-8"
+          ],
+          "polarity": "affirm"
+        }
+      }
+    },
+    {
+      "id": "hl7-entity-handling-shake-before-use",
+      "definition": {
+        "system": "http://terminology.hl7.org/CodeSystem/v3-EntityHandling",
+        "code": "SBU",
+        "display": "Shake before use",
+        "text": "Shake before use",
+        "thai": "เขย่าก่อนใช้"
+      },
+      "frames": [
+        {
+          "force": "instruction",
+          "predicate": {
+            "lemma": "shake",
+            "semanticClass": "prepare"
+          },
+          "relation": "before",
+          "args": [
+            {
+              "role": "activity",
+              "text": "use",
+              "conceptId": "use"
+            }
+          ]
+        }
+      ],
+      "matcher": {
+        "frame": {
+          "predicateLemmas": [
+            "shake"
+          ],
+          "relations": [
+            "before"
+          ],
+          "polarity": "affirm",
+          "argConcepts": [
+            {
+              "conceptIds": [
+                "use"
+              ],
+              "role": "activity"
+            }
+          ]
+        }
+      }
+    },
+    {
       "id": "after-food",
       "definition": {
         "code": "225758001",
@@ -298,8 +485,8 @@
           "args": [
             {
               "role": "substance",
-              "text": "water",
-              "conceptId": "water"
+              "text": "plenty of water",
+              "conceptId": "plenty-of-water"
             }
           ]
         }
@@ -314,14 +501,15 @@
               "argConcepts": [
                 {
                   "conceptIds": [
-                    "water"
+                    "plenty-of-water"
                   ],
                   "role": "substance"
                 }
               ],
               "predicateLemmas": [
                 "take"
-              ]
+              ],
+              "polarity": "affirm"
             }
           },
           {
@@ -329,10 +517,11 @@
               "predicateLemmas": [
                 "drink"
               ],
+              "polarity": "affirm",
               "argConcepts": [
                 {
                   "conceptIds": [
-                    "water"
+                    "plenty-of-water"
                   ],
                   "role": "substance"
                 }
@@ -373,12 +562,19 @@
             "dissolve",
             "mix"
           ],
+          "polarity": "affirm",
+          "relations": ["with", "in"],
           "argConcepts": [
             {
               "conceptIds": [
                 "water"
               ],
               "role": "substance"
+            },
+            {
+              "conceptIds": ["medication-administration", "drinking-activity"],
+              "role": "activity",
+              "relations": ["before"]
             }
           ]
         }
@@ -846,6 +1042,17 @@
       "frames": [
         {
           "force": "instruction",
+          "polarity": "affirm",
+          "predicate": {
+            "lemma": "swallow",
+            "semanticClass": "ingest"
+          },
+          "args": [
+            { "role": "manner", "text": "whole", "conceptId": "whole" }
+          ]
+        },
+        {
+          "force": "instruction",
           "polarity": "negate",
           "predicate": {
             "lemma": "crush",
@@ -864,21 +1071,29 @@
         }
       ],
       "matcher": {
+        "sharedReferent": true,
         "allOf": [
           {
             "frame": {
-              "predicateLemmas": [
-                "crush"
-              ],
-              "polarity": "negate"
+              "predicateLemmas": ["swallow"],
+              "polarity": "affirm",
+              "argConcepts": [
+                { "role": "manner", "conceptIds": ["whole"] }
+              ]
             }
           },
           {
             "frame": {
-              "predicateLemmas": [
-                "chew"
-              ],
+              "predicateLemmas": ["chew"],
               "polarity": "negate"
+            }
+          },
+          {
+            "not": {
+              "frame": {
+                "predicateLemmas": ["chew"],
+                "polarity": "affirm"
+              }
             }
           }
         ]
@@ -908,7 +1123,8 @@
             "frame": {
               "predicateLemmas": [
                 "chew"
-              ]
+              ],
+              "polarity": "affirm"
             }
           },
           {
@@ -1048,28 +1264,48 @@
         }
       ],
       "matcher": {
-        "normalizedTexts": [
-          "thinly",
-          "apply thinly",
-          "use thinly",
-          "thin layer",
-          "a thin layer",
-          "apply thin layer",
-          "apply a thin layer",
-          "use thin layer",
-          "use a thin layer",
-          "thin film",
-          "a thin film",
-          "apply thin film",
-          "apply a thin film",
-          "thin coat",
-          "a thin coat",
-          "apply thin coat",
-          "apply a thin coat",
-          "ทาบางๆ",
-          "ทาบาง ๆ",
-          "บางๆ",
-          "บาง ๆ"
+        "anyOf": [
+          {
+            "normalizedTexts": [
+              "thinly",
+              "apply thinly",
+              "use thinly",
+              "thin layer",
+              "a thin layer",
+              "apply thin layer",
+              "apply a thin layer",
+              "use thin layer",
+              "use a thin layer",
+              "thin film",
+              "a thin film",
+              "apply thin film",
+              "apply a thin film",
+              "thin coat",
+              "a thin coat",
+              "apply thin coat",
+              "apply a thin coat",
+              "ทาบางๆ",
+              "ทาบาง ๆ",
+              "บางๆ",
+              "บาง ๆ"
+            ]
+          },
+          {
+            "frame": {
+              "predicateLemmas": ["apply", "spread"],
+              "polarity": "affirm",
+              "argConcepts": [
+                {
+                  "role": "manner",
+                  "conceptIds": [
+                    "thin layer",
+                    "thin_layer",
+                    "thin-application-manner"
+                  ]
+                }
+              ]
+            }
+          }
         ]
       }
     },

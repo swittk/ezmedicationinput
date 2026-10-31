@@ -1,3 +1,4 @@
+import { cloneStructuredValue } from "./stable-structure";
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { baseLanguageTag } from "./localization";
 import { inferMedicationLocale } from "./locale-detection";
@@ -5,6 +6,8 @@ import { lexInput } from "./lexer/lex";
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
   medicationInstructionActionCodings,
+  medicationInstructionActionContextualCodings,
+  medicationInstructionActionSemanticComponentsForArgs,
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import {
@@ -38,10 +41,6 @@ function toArray<T>(value: T | T[] | undefined): T[] {
 
 function isPromise<T>(value: unknown): value is Promise<T> {
   return !!value && typeof (value as { then?: unknown }).then === "function";
-}
-
-function cloneGraph(graph: CanonicalInstructionGraph): CanonicalInstructionGraph {
-  return JSON.parse(JSON.stringify(graph)) as CanonicalInstructionGraph;
 }
 
 function validRelativeRange(range: TextRange, sourceLength: number): boolean {
@@ -141,16 +140,13 @@ function buildConceptArgument(
   const definition = resolveMedicationInstructionConcept(proposal.concept, options);
   if (!definition) return undefined;
   const codings = medicationInstructionConceptCodings(definition);
-  const preferred = definition.coding
-    ? codings[0]
-    : definition.externalCodings?.length
-      ? codings[1]
-      : codings[0];
+  const preferred = codings[0];
   return {
     role: proposal.role,
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
+    ...(definition.components?.length ? { components: definition.components } : {}),
     coding: preferred,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) },
@@ -233,7 +229,11 @@ function validateActionProposal(
       semanticClass: definition.semanticClass,
       display: definition.display,
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
-      codings: medicationInstructionActionCodings(definition)
+      codings: [
+        ...medicationInstructionActionCodings(definition),
+        ...medicationInstructionActionContextualCodings(definition, args)
+      ],
+      semanticComponents: medicationInstructionActionSemanticComponentsForArgs(definition, args)
     },
     args,
     span: absolute,
@@ -335,7 +335,7 @@ function requestForOpaque(
     range: { start: opaque.start, end: opaque.end },
     locale: options?.locale,
     context: options?.context,
-    existingGraph: cloneGraph(graph)
+    existingGraph: cloneStructuredValue(graph)
   };
 }
 

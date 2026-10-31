@@ -1,4 +1,9 @@
 import {
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays,
+  getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays
+} from "./dosage-course";
+import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
+import {
   buildAdditionalInstructionFramesFromCoding,
   findAdditionalInstructionDefinitionByCoding
 } from "./advice";
@@ -31,22 +36,28 @@ import {
   ROUTE_BY_SNOMED,
   ROUTE_SNOMED,
   ROUTE_TEXT,
-  findPrnReasonDefinitionByCoding
+  findPrnReasonDefinitionByCoding,
+  getStandardDoseUnitCoding
 } from "./maps";
 import {
   AdvicePolarity,
   CanonicalActivityTimingExpr,
   CanonicalCalendarEventExpr,
+  CanonicalCycleDayConstraint,
+  CanonicalDosePeriodMaximumExpr,
   CanonicalOccurrenceCapExpr,
   CanonicalDoseRange,
   CanonicalSigClause,
+  BodySiteRestriction,
   BodySiteSpatialRelation,
   EventTiming,
   FhirCodeableConcept,
   FhirDosage,
+  FhirExtension,
   FhirPeriodUnit,
   FhirPrimitiveElement,
   FhirQuantity,
+  FhirSimpleQuantity,
   FhirRange,
   FhirTimingRepeat,
   RouteCode,
@@ -55,17 +66,329 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 
-export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min";
-export const TIMING_OFFSET_MIN_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-min";
-export const TIMING_OFFSET_MAX_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-max";
-export const TIMING_OFFSET_EXACT_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-offset-exact";
-export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window";
-export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap";
-export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-timing-event-calendar-source";
-export const PRN_TRIGGER_PHASE_EXTENSION_URL = "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase";
+/** Known modifier: an independent cadence is restricted by unresolved cycle days. */
+export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
+
+/** Read the recognized cycle constraint without interpreting narrative text.
+ * @param dosage Editable R5/R6-compatible dosage with a retained known modifier.
+ */
+export function getCycleDayConstraint(dosage: FhirDosage): CanonicalCycleDayConstraint | undefined {
+  const extension = dosage.modifierExtension?.find(item => item.url === CYCLE_DAY_ELIGIBILITY_EXTENSION_URL);
+  if (!extension) return undefined;
+  const child = (url: string) => extension.extension?.find(item => item.url === url);
+  const days = extension.extension?.filter(item => item.url === "day")
+    .map(item => item.valueInteger).filter((day): day is number => typeof day === "number") ?? [];
+  const periodDays = child("periodDays")?.valueInteger;
+  const cycles = child("cycles")?.valueInteger;
+  const anchor = child("anchor")?.valueString;
+  return {
+    days,
+    ...(periodDays !== undefined ? { periodDays } : {}),
+    ...(cycles !== undefined ? { cycles } : {}),
+    ...(anchor !== undefined ? { anchor } : {}),
+    reason: child("reason")?.valueCode ?? "unresolved-cycle-eligibility",
+    sourceText: child("source")?.valueString ?? ""
+  };
+}
+
+/** Preserve the source-decided cycle restriction as a genuine dosage modifier.
+ * @param constraint Recognized cycle ordinals and the unresolved calendar dependency.
+ */
+function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): FhirExtension {
+  return {
+    url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
+    extension: [
+      ...constraint.days.map(day => ({ url: "day", valueInteger: day })),
+      ...(constraint.periodDays !== undefined ? [{ url: "periodDays", valueInteger: constraint.periodDays }] : []),
+      ...(constraint.cycles !== undefined ? [{ url: "cycles", valueInteger: constraint.cycles }] : []),
+      ...(constraint.anchor !== undefined ? [{ url: "anchor", valueString: constraint.anchor }] : []),
+      { url: "reason", valueCode: constraint.reason },
+      { url: "source", valueString: constraint.sourceText }
+    ]
+  };
+}
+
+export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min";
+/** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
+export const ADMINISTRATION_OFFSET_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-administration-offset";
+
+export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | undefined {
+  const quantity = dosage.modifierExtension?.find(extension =>
+    extension.url === ADMINISTRATION_OFFSET_EXTENSION_URL)?.valueQuantity;
+  return quantity?.value !== undefined && Number.isFinite(quantity.value) &&
+    (quantity.code ?? quantity.unit) === "min" && !quantity.comparator ? quantity.value : undefined;
+}
+
+/** Modifier retaining a course duration alongside its absolute calendar bounds. */
+export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration";
+
+/** Read the authored temporal quantity without reconstructing it from dates or text.
+ * @param dosage R5/R6-compatible dosage containing the known duration modifier.
+ * @returns The retained duration quantity or range, when supplied.
+ */
+export function getAnchoredCourseDuration(
+  dosage: Pick<FhirDosage, "modifierExtension">
+): Pick<FhirExtension, "valueQuantity" | "valueRange"> | undefined {
+  return dosage.modifierExtension?.find(extension =>
+    extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+}
+
+export const TIMING_OFFSET_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min";
+export const TIMING_OFFSET_MAX_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-max";
+export const TIMING_OFFSET_EXACT_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-exact";
+export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window";
+/** Recurring administration opportunity window; distinct from a punctual
+ * FHIR Timing.repeat.when WAKE or HS administration. */
+export const TIMING_EVENT_WINDOW_EXTENSION_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-event-window";
+
+export const TIMING_CLOCK_WINDOW_EXTENSION_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-clock-window";
+
+/** Read a local-clock recurrence window from structural timing metadata.
+ * @param repeat FHIR Timing.repeat containing a typed window extension.
+ * @returns Source clock endpoints and explicit endpoint inclusivity.
+ */
+export function getTimingClockWindow(
+  repeat: FhirTimingRepeat | undefined
+): { start: string; end: string; endInclusive: boolean } | undefined {
+  const parts = repeat?.extension?.find(part => part.url === TIMING_CLOCK_WINDOW_EXTENSION_URL)?.extension;
+  if (!parts) return undefined;
+  const start = parts.find(part => part.url === "start")?.valueTime;
+  const end = parts.find(part => part.url === "end")?.valueTime;
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/u;
+  return start && end && clock.test(start) && clock.test(end) ? {
+    start, end, endInclusive: parts.find(part => part.url === "endInclusive")?.valueBoolean ?? true
+  } : undefined;
+}
+
+/** Standard HL7 extension for day-of-month timing (repeatable positive integer). */
+export const TIMING_DAY_OF_MONTH_EXTENSION_URL =
+  "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth";
+
+/** Retrieve bounded executable month-day selection without interpreting prose.
+ * Unknown and malformed extensions remain in the original FHIR object.
+ * @param repeat Original FHIR R5 Timing.repeat with optional standard extensions.
+ * @returns Sorted unique calendar days, or undefined when none are recognized.
+ */
+export function getTimingMonthDays(repeat: FhirTimingRepeat | undefined): number[] | undefined {
+  const extensions = repeat?.extension;
+  if (!extensions?.length) return undefined;
+  const days: number[] = [];
+  for (const extension of extensions) {
+    if (extension.url !== TIMING_DAY_OF_MONTH_EXTENSION_URL) continue;
+    const value = extension.valuePositiveInt;
+    if (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 31 &&
+        days.indexOf(value) < 0) days.push(value);
+  }
+  return days.length ? days.sort((left, right) => left - right) : undefined;
+}
+
+export const TIMING_WEEKDAY_ORDINAL_EXTENSION_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-weekday-ordinal";
+
+/** Read the explicitly encoded ordinal, independent of prose and scheduling anchors.
+ * @param repeat Typed FHIR timing repeat containing an optional ordinal extension.
+ * @returns The source weekday occurrence, including -1 for last, when valid.
+ */
+export function getTimingWeekdayOrdinal(
+  repeat: FhirTimingRepeat | undefined
+): -1 | 1 | 2 | 3 | 4 | 5 | undefined {
+  const value = repeat?.extension?.find(part => part.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL)?.valueInteger;
+  return value === -1 || value === 1 || value === 2 || value === 3 || value === 4 || value === 5
+    ? value : undefined;
+}
+
+/** Read an explicitly encoded daily event window without examining SIG text. */
+export function getTimingEventWindow(
+  repeat: FhirTimingRepeat | undefined
+): { start: EventTiming; end: EventTiming } | undefined {
+  const extension = repeat?.extension?.find(part => part.url === TIMING_EVENT_WINDOW_EXTENSION_URL);
+  if (!extension) return undefined;
+  const start = extension.extension?.find(part => part.url === "start")?.valueCode;
+  const end = extension.extension?.find(part => part.url === "end")?.valueCode;
+  const allowed = objectValues(EventTiming);
+  if (!start || !end || allowed.indexOf(start as EventTiming) < 0 ||
+      allowed.indexOf(end as EventTiming) < 0) return undefined;
+  return { start: start as EventTiming, end: end as EventTiming };
+}
+
+export const TIMING_OCCURRENCE_CAP_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-occurrence-cap";
+export const TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-event-calendar-source";
+export const PRN_TRIGGER_PHASE_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase";
+export const BODY_SITE_RESTRICTION_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-body-site-restriction";
+
+export const INFUSION_CARRIER_MATERIAL_EXTENSION_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-infusion-carrier-material";
+
+/** Draft FHIR R5 extension definition, produced from the same typed child
+ * contract as the live encoder. Carrier material is a descriptive vehicle
+ * role, not a verified drug code or a modified administration choice.
+ * External HL7 conformance validation remains a separate release check.
+ */
+export function buildInfusionCarrierMaterialStructureDefinition() {
+  const slice = (name: string, code: "string" | "integer", min: number) => [
+    { id: "Extension.extension:" + name, path: "Extension.extension",
+      sliceName: name, min, max: "1", type: [{ code: "Extension" }] },
+    { id: "Extension.extension:" + name + ".extension",
+      path: "Extension.extension.extension", max: "0" },
+    { id: "Extension.extension:" + name + ".url",
+      path: "Extension.extension.url", fixedUri: name },
+    { id: "Extension.extension:" + name + ".value[x]",
+      path: "Extension.extension.value[x]", min: 1, max: "1",
+      type: [{ code }] }
+  ];
+  return {
+    resourceType: "StructureDefinition" as const,
+    id: "medication-infusion-carrier-material",
+    url: INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+    name: "MedicationInfusionCarrierMaterial",
+    title: "Source-backed infusion carrier material",
+    status: "draft" as const,
+    description: "Uncoded original vehicle-noun phrase tied to a separately typed carrier volume and infusion duration; does not identify the administered active substance.",
+    kind: "complex-type" as const,
+    abstract: false,
+    type: "Extension",
+    baseDefinition: "http://hl7.org/fhir/StructureDefinition/Extension",
+    derivation: "constraint" as const,
+    context: [{ type: "element" as const, expression: "Dosage" }],
+    differential: { element: [
+      { id: "Extension", path: "Extension", isModifier: false },
+      { id: "Extension.extension", path: "Extension.extension",
+        slicing: { discriminator: [{ type: "value", path: "url" }],
+          ordered: false, rules: "closed" } },
+      ...slice("material", "string", 1),
+      ...slice("start", "integer", 0),
+      ...slice("end", "integer", 0),
+      { id: "Extension.url", path: "Extension.url",
+        fixedUri: INFUSION_CARRIER_MATERIAL_EXTENSION_URL },
+      { id: "Extension.value[x]", path: "Extension.value[x]", max: "0" }
+    ] }
+  };
+}
+
+/** Preserve a clinically named vehicle without claiming it has a verified
+ * terminology identity. This describes the volume-owned material and never
+ * changes dose/rate scheduling or converts a vehicle into the active drug.
+ */
+function infusionCarrierMaterialExtension(
+  material: NonNullable<HpsgClinicalQuantityFeature["carrierMaterial"]>
+): FhirExtension {
+  return {
+    url: INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
+    extension: [
+      { url: "material", valueString: material.text },
+      ...(material.range ? [
+        { url: "start", valueInteger: material.range.start },
+        { url: "end", valueInteger: material.range.end }
+      ] : [])
+    ]
+  };
+}
+
+/** Typed FHIR extraction: retain only supplied extension children, never
+ * guess a vehicle from original SIG text or volume/mass alone.
+ */
+function infusionCarrierMaterialFromFhir(
+  dosage: FhirDosage
+): HpsgClinicalQuantityFeature["carrierMaterial"] {
+  const extension = dosage.extension?.find(part =>
+    part.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL);
+  const child = (url: string) => extension?.extension?.find(part => part.url === url);
+  const text = child("material")?.valueString;
+  if (!text?.trim()) return undefined;
+  const start = child("start")?.valueInteger;
+  const end = child("end")?.valueInteger;
+  return {
+    text,
+    ...(start !== undefined && end !== undefined &&
+        Number.isInteger(start) && Number.isInteger(end) &&
+        start >= 0 && end >= start ? { range: { start, end } } : {})
+  };
+}
+
+/** Retain a source FHIR quantity code if its authored label cannot reproduce
+ * that same coding on output; familiar aliases need no duplicated state.
+ */
+function nonRegenerableUnitCoding(quantity: FhirQuantity | undefined):
+  { system?: string; code: string } | undefined {
+  if (!quantity?.code) return undefined;
+  const inferred = getStandardDoseUnitCoding(quantity.unit ?? quantity.code);
+  if (inferred?.system === quantity.system && inferred?.code === quantity.code) return undefined;
+  return { ...(quantity.system ? { system: quantity.system } : {}), code: quantity.code };
+}
+
+/** Reconstitute dimensional R5 meaning only where the role and amount were
+ * explicitly supplied. Other external rateRatio dosages remain untouched.
+ */
+function clinicalCarrierQuantityFromFhir(
+  dosage: FhirDosage
+): HpsgClinicalQuantityFeature | undefined {
+  const material = infusionCarrierMaterialFromFhir(dosage);
+  const measure = dosage.doseAndRate?.[0];
+  const active = measure?.doseQuantity;
+  const carrier = measure?.rateRatio?.numerator;
+  const duration = measure?.rateRatio?.denominator;
+  const doseUnit = active?.code ?? active?.unit;
+  const volumeUnit = carrier?.code ?? carrier?.unit;
+  const doseLabel = active?.unit ?? active?.code;
+  const volumeLabel = carrier?.unit ?? carrier?.code;
+  const durationUnit = duration?.code ?? duration?.unit;
+  const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
+  if ((!material && !selfCarrier) ||
+      typeof active?.value !== "number" || !Number.isFinite(active.value) ||
+      typeof carrier?.value !== "number" || !Number.isFinite(carrier.value) ||
+      typeof duration?.value !== "number" || !Number.isFinite(duration.value) ||
+      active.value <= 0 || carrier.value <= 0 || duration.value <= 0 ||
+      !doseUnit || !volumeUnit ||
+      !/^(?:mL|L)$/u.test(volumeUnit) ||
+      (durationUnit !== "h" && durationUnit !== "min")) return undefined;
+  const periodUnit = durationUnit === "h" ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
+  return {
+    representation: "dose-with-rate-ratio",
+    status: "resolved",
+    numerator: {
+      value: carrier.value, unit: volumeLabel ?? volumeUnit, dimension: "volume",
+      ...nonRegenerableUnitCoding(carrier)
+    },
+    denominators: [{ value: duration.value, unit: periodUnit, dimension: "time" }],
+    projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active) },
+    ...(material || doseLabel !== volumeLabel
+      ? { rateNumerator: {
+          value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier)
+        } }
+      : {}),
+    administrationDuration: { value: duration.value, unit: periodUnit },
+    ...(material ? { carrierMaterial: material } : {})
+  };
+}
+
+/** Make an implicit multi-clock cadence explicit without overriding a stated frequency.
+ * @param repeat Editable FHIR timing currently being lowered.
+ */
+function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
+  if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit ||
+      (repeat.timeOfDay?.length ?? 0) < 2 || repeat.when?.length) return;
+  const clocks = new Set(repeat.timeOfDay).size;
+  if (repeat.periodUnit === 'd') {
+    repeat.frequency = clocks;
+    return;
+  }
+  const weekdays = new Set(repeat.dayOfWeek ?? []).size;
+  if (repeat.periodUnit === 'wk' && repeat.period === 1 && weekdays > 0) {
+    repeat.frequency = clocks * weekdays;
+  }
+}
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
+const FHIR_GTS_TIMING_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+// R5 preferred TimingAbbreviation expansion, not arbitrary local Q12H/Q24H.
+const FHIR_GTS_TIMING_CODES = new Set([
+  "BID", "TID", "QID", "AM", "PM", "QD", "QOD",
+  "Q1H", "Q2H", "Q3H", "Q4H", "Q6H", "Q8H",
+  "BED", "WK", "MO"
+]);
 
 function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
@@ -76,6 +399,92 @@ function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset"
     (candidate) => candidate.url === PRN_TRIGGER_PHASE_EXTENSION_URL
   )?.valueCode;
   return value === "onset" ? "onset" : undefined;
+}
+
+function restrictionRangeExtension(
+  prefix: string,
+  range: { start: number; end: number } | undefined
+): FhirExtension[] {
+  return range
+    ? [
+        { url: `${prefix}Start`, valueInteger: range.start },
+        { url: `${prefix}End`, valueInteger: range.end }
+      ]
+    : [];
+}
+
+function buildBodySiteRestrictionExtensions(
+  restrictions: BodySiteRestriction[] | undefined
+): FhirExtension[] {
+  if (!restrictions?.length) return [];
+  return restrictions.map((restriction) => ({
+    url: BODY_SITE_RESTRICTION_EXTENSION_URL,
+    extension: [
+      { url: "relation", valueCode: restriction.relation },
+      { url: "sourceText", valueString: restriction.sourceText },
+      { url: "predicateText", valueString: restriction.predicate.text },
+      { url: "predicateForm", valueCode: restriction.predicate.form },
+      ...(restriction.predicate.lemma
+        ? [{ url: "predicateLemma", valueString: restriction.predicate.lemma }]
+        : []),
+      ...(restriction.predicate.focusText
+        ? [{ url: "predicateFocusText", valueString: restriction.predicate.focusText }]
+        : []),
+      ...restrictionRangeExtension("source", restriction.range),
+      ...restrictionRangeExtension("marker", restriction.markerRange),
+      ...restrictionRangeExtension("predicate", restriction.predicate.range)
+    ]
+  }));
+}
+
+function restrictionExtensionChild(
+  extension: FhirExtension,
+  url: string
+): FhirExtension | undefined {
+  return extension.extension?.find((candidate) => candidate.url === url);
+}
+
+function restrictionRangeFromExtension(
+  extension: FhirExtension,
+  prefix: string
+): { start: number; end: number } | undefined {
+  const start = restrictionExtensionChild(extension, `${prefix}Start`)?.valueInteger;
+  const end = restrictionExtensionChild(extension, `${prefix}End`)?.valueInteger;
+  return Number.isInteger(start) && Number.isInteger(end) && (end as number) >= (start as number)
+    ? { start: start as number, end: end as number }
+    : undefined;
+}
+
+function parseBodySiteRestrictionExtensions(
+  concept: FhirCodeableConcept | undefined
+): BodySiteRestriction[] | undefined {
+  if (!concept?.extension?.length) return undefined;
+  const result: BodySiteRestriction[] = [];
+  for (const extension of concept.extension) {
+    if (extension.url !== BODY_SITE_RESTRICTION_EXTENSION_URL) continue;
+    const relation = restrictionExtensionChild(extension, "relation")?.valueCode;
+    const predicateText = restrictionExtensionChild(extension, "predicateText")?.valueString?.trim();
+    if (relation !== "where" || !predicateText) continue;
+    const rawForm = restrictionExtensionChild(extension, "predicateForm")?.valueCode;
+    const form = rawForm === "state" || rawForm === "existential" || rawForm === "raw"
+      ? rawForm
+      : "raw";
+    result.push({
+      relation,
+      sourceText: restrictionExtensionChild(extension, "sourceText")?.valueString?.trim() ??
+        `where ${predicateText}`,
+      range: restrictionRangeFromExtension(extension, "source"),
+      markerRange: restrictionRangeFromExtension(extension, "marker"),
+      predicate: {
+        text: predicateText,
+        lemma: restrictionExtensionChild(extension, "predicateLemma")?.valueString?.trim() || undefined,
+        form,
+        focusText: restrictionExtensionChild(extension, "predicateFocusText")?.valueString?.trim() || undefined,
+        range: restrictionRangeFromExtension(extension, "predicate")
+      }
+    });
+  }
+  return result.length ? result : undefined;
 }
 
 function timingOffsetExtensionValue(
@@ -187,7 +596,33 @@ export function getTimingOccurrenceCap(
   return { max, period, periodUnit: mappedUnit };
 }
 
-function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
+function canonicalDosePeriodMaximums(
+  dosage: FhirDosage
+): CanonicalDosePeriodMaximumExpr[] | undefined {
+  const result: CanonicalDosePeriodMaximumExpr[] = [];
+  for (const ratio of dosage.maxDosePerPeriod ?? []) {
+    const amount = ratio.numerator?.value;
+    const unit = ratio.numerator?.unit ?? ratio.numerator?.code;
+    const period = ratio.denominator?.value;
+    const rawPeriodUnit = ratio.denominator?.code ?? ratio.denominator?.unit;
+    if (amount === undefined || !Number.isFinite(amount) || amount <= 0 || !unit ||
+        period === undefined || !Number.isFinite(period) || period <= 0 ||
+        !rawPeriodUnit ||
+        ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(rawPeriodUnit) < 0) continue;
+    result.push({
+      amount,
+      unit,
+      period,
+      periodUnit: rawPeriodUnit as FhirPeriodUnit
+    });
+  }
+  return result.length ? result : undefined;
+}
+
+/** Read typed activity-event relations from Timing extensions without parsing
+ * narrative instructions or inferring an activity's calendar instant.
+ */
+export function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
   const result: CanonicalActivityTimingExpr[] = [];
   for (const extension of repeat?.extension ?? []) {
     if (extension.url !== TIMING_ACTIVITY_WINDOW_EXTENSION_URL) continue;
@@ -215,6 +650,8 @@ function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): Ca
 type CodeableConceptCoding = NonNullable<FhirCodeableConcept["coding"]>[number];
 
 export interface FhirProjectionOptions {
+  /** Typed regimen-graph sequence; serialized without inferring phase meaning. */
+  sequence?: number;
   /**
    * Defaults to true. When true, structured spatial body-site phrases such as
    * "top of head" can emit a SNOMED topographical modifier expression in
@@ -430,20 +867,22 @@ function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): str
   return focusText && siteText ? `${focusText} at ${siteText}` : focusText;
 }
 
+/** Build a quantity using exact standard terminology when available.
+ * @param value Authored quantity; coding never changes its magnitude.
+ * @param unit Authored/canonical unit label, retained even for local units.
+ */
+function buildFhirDoseQuantity(value: number, unit: string | undefined): FhirSimpleQuantity {
+  return { value, unit, ...getStandardDoseUnitCoding(unit) };
+}
+
 function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
   const fhirRange: FhirRange = {};
 
   if (range.low !== undefined) {
-    fhirRange.low = {
-      value: range.low,
-      unit
-    };
+    fhirRange.low = buildFhirDoseQuantity(range.low, unit);
   }
   if (range.high !== undefined) {
-    fhirRange.high = {
-      value: range.high,
-      unit
-    };
+    fhirRange.high = buildFhirDoseQuantity(range.high, unit);
   }
 
   if (!fhirRange.low && !fhirRange.high) {
@@ -538,7 +977,7 @@ function calendarEventFromFhir(
   };
 }
 
-function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirQuantity {
+function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirSimpleQuantity {
   return {
     value,
     unit: describeDurationUnit(unit, value),
@@ -602,29 +1041,29 @@ function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUn
 }
 
 function extractCanonicalTimingBounds(
-  repeat: FhirTimingRepeat | undefined
+  dosage: FhirDosage
 ): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; warning?: string } {
-  if (!repeat) {
-    return {};
-  }
-
-  if (repeat.boundsDuration?.value !== undefined) {
-    const durationUnit = parseFhirDurationUnit(repeat.boundsDuration);
+  const repeat = dosage.timing?.repeat;
+  const retained = getAnchoredCourseDuration(dosage);
+  const boundsDuration = repeat?.boundsDuration ?? retained?.valueQuantity;
+  const boundsRange = repeat?.boundsRange ?? retained?.valueRange;
+  if (boundsDuration?.value !== undefined) {
+    const durationUnit = parseFhirDurationUnit(boundsDuration);
     if (!durationUnit) {
       return {};
     }
     return {
-      duration: repeat.boundsDuration.value,
+      duration: boundsDuration.value,
       durationUnit
     };
   }
 
-  if (!repeat.boundsRange) {
+  if (!boundsRange) {
     return {};
   }
 
-  const low = repeat.boundsRange.low;
-  const high = repeat.boundsRange.high;
+  const low = boundsRange.low;
+  const high = boundsRange.high;
   const lowUnit = parseFhirDurationUnit(low);
   const highUnit = parseFhirDurationUnit(high);
   const durationUnit = lowUnit ?? highUnit;
@@ -692,14 +1131,58 @@ export function canonicalToFhir(
   textOverride?: string,
   options?: FhirProjectionOptions
 ): FhirDosage {
-  const dosage: FhirDosage = {};
+  const dosage: FhirDosage = options?.sequence !== undefined
+    ? { sequence: options.sequence }
+    : {};
   const instructionGraphExtension = buildInstructionGraphExtension(clause.instructionGraph);
   if (instructionGraphExtension) {
     dosage.extension = [instructionGraphExtension];
   }
+  // The complete topical APPLY + COVER WITH OCCLUSIVE DRESSING program is
+  // a formally coded technique. A dressing OBJECT by itself is not that route.
+  // Keep the original route, method, action, object and all local codings.
+  const occlusiveTopicalTechnique =
+    clause.route?.code === "6064005" &&
+    clause.method?.coding?.code === "738991002" &&
+    Boolean(clause.instructionGraph?.actions.some(action =>
+      action.predicate.lemma === "cover" &&
+      action.polarity !== AdvicePolarity.Negate &&
+      action.args.some(arg => arg.conceptId === "occlusive_dressing")
+    ));
+  // An ordered oral swish followed by spit is a complete coded technique,
+  // not two independent equivalent actions. Exclude swallowing and negation.
+  const instructionActions = clause.instructionGraph?.actions ?? [];
+  const swishIndex = instructionActions.findIndex(action =>
+    action.predicate.lemma === "swish" && action.polarity !== AdvicePolarity.Negate);
+  const swishSpit = swishIndex >= 0 &&
+    // A single Dosage.route cannot claim that a separately administered
+    // tablet/lotion has the same route as the oral rinse in a mixed clause.
+    !clause.route?.code && !clause.method?.coding?.code &&
+    !instructionActions.some(action =>
+      action.predicate.lemma === "swallow" && action.polarity !== AdvicePolarity.Negate) &&
+    instructionActions.some((action, index) =>
+      index > swishIndex && action.predicate.lemma === "spit" &&
+      action.polarity !== AdvicePolarity.Negate);
+  const swishSwallow = swishIndex >= 0 && !swishSpit &&
+    clause.route?.code === "26643006" &&
+    clause.method?.coding?.code === "738995006" &&
+    clause.dose?.unit === "mL" &&
+    !instructionActions.some(action =>
+      action.predicate.lemma === "spit" && action.polarity !== AdvicePolarity.Negate) &&
+    instructionActions.some((action, index) =>
+      index > swishIndex && action.predicate.lemma === "swallow" &&
+      action.polarity !== AdvicePolarity.Negate &&
+      !action.args.some(arg =>
+        arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
   const repeat: FhirTimingRepeat = {};
   let hasRepeat = false;
   const schedule = clause.schedule;
+  if (schedule?.administrationOffsetMinutes !== undefined) {
+    dosage.modifierExtension = [{
+      url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: schedule.administrationOffsetMinutes, unit: "min", code: "min", system: "http://unitsofmeasure.org" }
+    }];
+  }
 
   if (schedule?.calendarEvents?.length) {
     dosage.timing = {
@@ -743,15 +1226,22 @@ export function canonicalToFhir(
     }
     hasRepeat = true;
   }
+  // Timing permits one bounds[x]. Keep absolute bounds in boundsPeriod and
+  // retain the authored duration/range as a typed modifier for exact execution
+  // and editing, including partial days that have no date-only endpoint.
   if (schedule?.duration !== undefined && schedule.durationUnit) {
-    if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-      repeat.boundsRange = buildFhirBoundsRange(
-        schedule.duration,
-        schedule.durationMax,
-        schedule.durationUnit
-      );
+    const ranged = schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration;
+    const duration = ranged ? undefined : buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
+    const range = ranged ? buildFhirBoundsRange(schedule.duration, schedule.durationMax!, schedule.durationUnit) : undefined;
+    if (repeat.boundsPeriod) {
+      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
+        url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+        ...(range ? { valueRange: range } : { valueQuantity: duration! })
+      }];
+    } else if (range) {
+      repeat.boundsRange = range;
     } else {
-      repeat.boundsDuration = buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
+      repeat.boundsDuration = duration;
     }
     hasRepeat = true;
   }
@@ -797,12 +1287,48 @@ export function canonicalToFhir(
     repeat.dayOfWeek = [...schedule.dayOfWeek];
     hasRepeat = true;
   }
+  if (schedule?.dayOfMonth?.length) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      ...schedule.dayOfMonth.map(day => ({
+        url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day
+      }))
+    ];
+    hasRepeat = true;
+  }
+
   if (schedule?.when?.length) {
     repeat.when = [...schedule.when];
     hasRepeat = true;
   }
   if (schedule?.timeOfDay?.length) {
     repeat.timeOfDay = [...schedule.timeOfDay];
+    hasRepeat = true;
+  }
+  if (schedule?.clockWindow) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueTime: schedule.clockWindow.start },
+        { url: "end", valueTime: schedule.clockWindow.end },
+        { url: "endInclusive", valueBoolean: schedule.clockWindow.endInclusive }
+      ]
+    }];
+    hasRepeat = true;
+  }
+  if (schedule?.weekdayOrdinal !== undefined) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, valueInteger: schedule.weekdayOrdinal
+    }];
+    hasRepeat = true;
+  }
+  if (schedule?.eventWindow) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_EVENT_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueCode: schedule.eventWindow.start },
+        { url: "end", valueCode: schedule.eventWindow.end }
+      ] }
+    ];
     hasRepeat = true;
   }
   if (schedule?.activityTiming?.length) {
@@ -820,6 +1346,19 @@ export function canonicalToFhir(
     hasRepeat = true;
   }
 
+  if (schedule?.maxDosePerPeriod?.length) {
+    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({
+      numerator: buildFhirDoseQuantity(maximum.amount, maximum.unit),
+      denominator: {
+        value: maximum.period,
+        unit: maximum.periodUnit,
+        system: UCUM_SYSTEM,
+        code: maximum.periodUnit
+      }
+    }));
+  }
+
+  normalizeClockFrequency(repeat);
   if (hasRepeat) {
     dosage.timing = {
       ...(dosage.timing ?? {}),
@@ -829,10 +1368,13 @@ export function canonicalToFhir(
 
   if (schedule?.timingCode) {
     dosage.timing = dosage.timing ?? {};
-    dosage.timing.code = {
-      coding: [{ code: schedule.timingCode }],
-      text: schedule.timingCode
-    };
+    const normalizedCode = schedule.timingCode.toUpperCase();
+    // A CodeableConcept.text preserves supported local wording without
+    // falsely attaching an HL7 standard identity to non-standard codes.
+    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
+      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
+          text: schedule.timingCode }
+      : { text: schedule.timingCode };
   }
 
   if (clause.dose?.range) {
@@ -847,13 +1389,15 @@ export function canonicalToFhir(
   } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
-        doseQuantity: {
-          value: clause.dose.value,
-          unit: clause.dose.unit
-        }
+        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit)
       }
     ];
   }
+
+  // HPSG produces the dimensional meaning; FHIR simply lowers that typed
+  // value. Safety checks must never reparse and overwrite clinical dosage.
+  if (clause.clinicalQuantity)
+    projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
 
   if (clause.route?.code || clause.route?.text) {
     const routeCode = clause.route?.code;
@@ -868,7 +1412,11 @@ export function canonicalToFhir(
             system: SNOMED_SYSTEM,
             code: coding.code,
             display: coding.display
-          }
+          },
+          ...(occlusiveTopicalTechnique ? [{
+            system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+            code: "OCDRESTA", display: "Occlusive dressing technique"
+          }] : [])
         ]
       };
     } else if (text) {
@@ -876,9 +1424,31 @@ export function canonicalToFhir(
     }
   }
 
-  if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation) {
+  if (swishSpit || swishSwallow) {
+    dosage.route = {
+      text: dosage.route?.text ?? "swish and spit, oromucosal",
+      coding: [
+        ...(dosage.route?.coding ?? []),
+        { system: "http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration",
+          code: swishSpit ? "SWISHSPIT" : "SWISHSWAL",
+          display: swishSpit ? "Swish and spit out, oromucosal" : "Swish and swallow, oromucosal" },
+        { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+          code: swishSpit ? "C38302" : "C38303",
+          display: swishSpit ? "Swish and Spit Route of Administration"
+            : "Swish and Swallow Route of Administration" }
+      ]
+    };
+  }
+
+  if (clause.site?.text || clause.site?.coding?.code || clause.site?.spatialRelation ||
+      clause.site?.restrictions?.length) {
     const siteCoding = selectCanonicalSiteCoding(clause.site, options);
-    const siteTextElement = options?.includeTranslationExtensions
+    // A typed site coordination carries its own bilingual constituent meaning.
+    // Keep that meaning in the standard FHIR primitive translation extension
+    // even when the caller did not request additional translation metadata:
+    // FHIR has only one Dosage.site and cannot encode disjunction via codings.
+    const siteTextElement = options?.includeTranslationExtensions ||
+      (clause.administrationTargetGroup && clause.site?.i18n)
       ? buildTranslationPrimitiveElement(clause.site.i18n ?? siteCoding?.i18n)
       : undefined;
     const siteTargetCount =
@@ -901,6 +1471,7 @@ export function canonicalToFhir(
         : undefined;
     const siteExtensions = [
       ...(buildBodySiteSpatialRelationExtensions(clause.site?.spatialRelation) ?? []),
+      ...buildBodySiteRestrictionExtensions(clause.site?.restrictions),
       ...(siteTargetCountExtension ? [siteTargetCountExtension] : [])
     ];
     dosage.site = {
@@ -923,7 +1494,13 @@ export function canonicalToFhir(
             display: clause.method.coding.display,
             _display: clonePrimitiveElement(clause.method.coding._display) ??
               buildTranslationPrimitiveElement(clause.method.coding.i18n)
-          }
+          },
+          ...(occlusiveTopicalTechnique ? [
+            { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl",
+              code: "C38286", display: "Occlusive Dressing Technique" },
+            { system: SNOMED_SYSTEM,
+              code: "447056002", display: "Occlusive dressing technique" }
+          ] : [])
         ]
         : undefined
     };
@@ -933,11 +1510,17 @@ export function canonicalToFhir(
     text: string;
     i18n?: Record<string, string>;
     coding?: { system?: string; code?: string; display?: string };
+    hasTypedEvidence?: boolean;
   }> = [];
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
     if (!text) continue;
-    additionalInstructions.push({ text, i18n: instruction.i18n, coding: instruction.coding });
+    additionalInstructions.push({
+      text,
+      i18n: instruction.i18n,
+      coding: instruction.coding,
+      hasTypedEvidence: Boolean(instruction.evidence?.length)
+    });
   }
   for (const action of clause.instructionGraph?.actions ?? []) {
     if (action.polarity !== AdvicePolarity.Negate) continue;
@@ -953,7 +1536,13 @@ export function canonicalToFhir(
   if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
     for (const instruction of additionalInstructions) {
-      const textElement = options?.includeTranslationExtensions
+      // A typed, source-evidenced/coded adjunct carries authoritative localized
+      // meaning even without a locale request. Preserve its standard FHIR
+      // translation on default export. Loose untyped advice can contain an
+      // incomplete machine-composed label; keep that original text-only unless
+      // the caller explicitly requests translation extensions.
+      const textElement = (options?.includeTranslationExtensions ||
+        instruction.coding?.code || instruction.hasTypedEvidence) && instruction.i18n
         ? buildTranslationPrimitiveElement(instruction.i18n)
         : undefined;
       dosage.additionalInstruction.push({
@@ -973,7 +1562,7 @@ export function canonicalToFhir(
   }
 
   if (clause.prn?.enabled) {
-    dosage.asNeededBoolean = true;
+    dosage.asNeeded = true;
     const reasons = clause.prn.reasons?.length ? clause.prn.reasons : clause.prn.reason ? [clause.prn.reason] : [];
     if (reasons.length) {
       dosage.asNeededFor = [];
@@ -1017,6 +1606,22 @@ export function canonicalToFhir(
     }
   }
 
+  // The HPSG clinical scope is already resolved in CanonicalSigClause.
+  // FHIR projects it exactly once; it must never decide which daughter
+  // receives an administration condition or calendar exclusion.
+  if (clause.schedule?.cycleDayConstraint) {
+    dosage.modifierExtension = [...(dosage.modifierExtension ?? []),
+      cycleDayConstraintExtension(clause.schedule.cycleDayConstraint)];
+  }
+  const adjunct = clause.clinicalAdjuncts;
+  if (adjunct?.condition) setDosageCondition(dosage, adjunct.condition, adjunct.calendarDayCondition);
+  if (adjunct?.excludedDates?.length) {
+    setDosageExcludedDates(dosage, adjunct.excludedDates);
+  }
+  if (adjunct?.excludedWeekdays?.length) {
+    setDosageExcludedWeekdays(dosage, adjunct.excludedWeekdays);
+  }
+
   const longText = textOverride ?? formatCanonicalClause(clause, "long");
   if (longText) {
     dosage.text = longText;
@@ -1034,9 +1639,38 @@ export function toFhir(state: ParserState): FhirDosage {
   return canonicalToFhir(clause);
 }
 
+/** Recover local FHIR Timing.code.text only when it is a recognizable
+ * abbreviation, not arbitrary prose. Coding identities always take priority.
+ */
+const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|QAM|QPM|QHS|BLD|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
+function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
+  const coding = dosage.timing?.code?.coding?.find(value => value.code)?.code;
+  if (coding) return coding;
+  const raw = dosage.timing?.code?.text?.trim();
+  return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
+}
+
+/** Restore explicitly supplied clinical guards without reparsing dosage text.
+ * @param dosage Editable FHIR dosage; native values take precedence in the shared getters.
+ */
+function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clinicalAdjuncts"] {
+  const condition = getDosageCondition(dosage);
+  const calendarDayCondition = getDosageCalendarDayCondition(dosage);
+  const excludedDates = getDosageExcludedDates(dosage);
+  const excludedWeekdays = getDosageExcludedWeekdays(dosage);
+  if (!condition && !excludedDates.length && !excludedWeekdays.length) return undefined;
+  return {
+    ...(condition ? { condition } : {}),
+    ...(calendarDayCondition ? { calendarDayCondition } : {}),
+    ...(excludedDates.length ? { excludedDates } : {}),
+    ...(excludedWeekdays.length ? { excludedWeekdays } : {})
+  };
+}
+
 export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
+  clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
   let routeCode: RouteCode | undefined;
 
@@ -1053,6 +1687,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   const siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
+  const siteRestrictions = parseBodySiteRestrictionExtensions(dosage.site);
   const siteText = getFallbackSiteText(dosage.site);
   const siteI18n = codeableConceptTranslationI18n(dosage.site, siteCoding);
   const siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
@@ -1060,12 +1695,14 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     siteText ||
     siteCoding?.code ||
     siteSpatialRelation ||
+    siteRestrictions?.length ||
     siteAdministrationTargetCount !== undefined
   ) {
     clause.site = {
       text: siteText,
       i18n: siteI18n.text,
       spatialRelation: siteSpatialRelation,
+      restrictions: siteRestrictions,
       administrationTargetCount: siteAdministrationTargetCount,
       coding: siteCoding?.code
         ? {
@@ -1097,6 +1734,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const repeat = dosage.timing?.repeat;
+  const timingCode = timingCodeFromFhir(dosage);
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
@@ -1106,15 +1744,30 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   );
   const offsetMinExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
-  const timingBounds = extractCanonicalTimingBounds(repeat);
+  const timingBounds = extractCanonicalTimingBounds(dosage);
   const activityTiming = parseActivityTimingExtensions(repeat);
+  const clockWindow = getTimingClockWindow(repeat);
+  const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
+  const dayOfMonth = getTimingMonthDays(repeat);
+  const eventWindow = getTimingEventWindow(repeat);
   const occurrenceCap = getTimingOccurrenceCap(repeat);
+  const cycleDayConstraint = getCycleDayConstraint(dosage);
+  const maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
+  const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
   if (
-    dosage.timing?.code?.coding?.[0]?.code ||
+    administrationOffsetMinutes !== undefined ||
+    timingBounds.duration !== undefined || timingBounds.durationMax !== undefined ||
+    timingCode ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
+    clockWindow !== undefined ||
+    weekdayOrdinal !== undefined ||
+    dayOfMonth !== undefined ||
+    eventWindow !== undefined ||
+    cycleDayConstraint !== undefined ||
     occurrenceCap !== undefined ||
+    maxDosePerPeriod?.length ||
     repeat?.boundsDuration ||
     repeat?.boundsPeriod?.start ||
     repeat?.boundsPeriod?.end ||
@@ -1138,7 +1791,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
-      timingCode: dosage.timing?.code?.coding?.[0]?.code,
+      cycleDayConstraint,
+      administrationOffsetMinutes,
+      timingCode,
       count: repeat?.count,
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
@@ -1158,8 +1813,13 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       offsetMin: offsetMinExtension,
       offsetMax: offsetMaxExtension,
       activityTiming,
+      clockWindow,
+      weekdayOrdinal,
+      eventWindow,
       occurrenceCap,
+      maxDosePerPeriod,
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
+      dayOfMonth,
       when: repeat?.when ? [...repeat.when] : undefined,
       timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
       calendarEvents: dosage.timing?.event
@@ -1185,6 +1845,9 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       unit: doseAndRate.doseQuantity.unit
     };
   }
+
+  const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
+  if (carrierQuantity) clause.clinicalQuantity = carrierQuantity;
 
   const prnReasons = dosage.asNeededFor?.length
     ? dosage.asNeededFor.map((concept) => {
@@ -1212,9 +1875,11 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     })
     : undefined;
   const primaryReason = prnReasons?.[0];
-  if (dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code) {
+  const asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
+  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
     clause.prn = {
-      enabled: Boolean(dosage.asNeededBoolean || primaryReason?.text || primaryReason?.coding?.code),
+      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
       reason:
         prnReasons?.length === 1
           ? primaryReason
@@ -1260,7 +1925,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
 
 export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
-  const timingBounds = extractCanonicalTimingBounds(dosage.timing?.repeat);
+  state.primaryClause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
+  const timingBounds = extractCanonicalTimingBounds(dosage);
   state.timeOfDay = dosage.timing?.repeat?.timeOfDay
     ? [...dosage.timing.repeat.timeOfDay]
     : [];
@@ -1272,7 +1938,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
   }
-  state.timingCode = dosage.timing?.code?.coding?.[0]?.code;
+  state.timingCode = timingCodeFromFhir(dosage);
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;
@@ -1302,16 +1968,48 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.offsetMin = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MIN_EXTENSION_URL);
   state.offsetMax = timingOffsetExtensionValue(dosage.timing?.repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   state.activityTiming = parseActivityTimingExtensions(dosage.timing?.repeat);
+  const clockWindow = getTimingClockWindow(dosage.timing?.repeat);
+  if (clockWindow) state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), clockWindow };
+  const dayOfMonth = getTimingMonthDays(dosage.timing?.repeat);
+  if (dayOfMonth) {
+    state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), dayOfMonth };
+  }
+  const weekdayOrdinal = getTimingWeekdayOrdinal(dosage.timing?.repeat);
+  if (weekdayOrdinal !== undefined) {
+    state.primaryClause.schedule = { ...(state.primaryClause.schedule ?? {}), weekdayOrdinal };
+  }
+  const eventWindow = getTimingEventWindow(dosage.timing?.repeat);
+  if (eventWindow) {
+    state.primaryClause.schedule = {
+      ...(state.primaryClause.schedule ?? {}), eventWindow
+    };
+  }
   state.occurrenceCap = getTimingOccurrenceCap(dosage.timing?.repeat);
+  const administrationOffsetMinutes = getAdministrationOffsetMinutes(dosage);
+  if (administrationOffsetMinutes !== undefined) {
+    const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    schedule.administrationOffsetMinutes = administrationOffsetMinutes;
+  }
+  const cycleConstraint = getCycleDayConstraint(dosage);
+  if (cycleConstraint) {
+    const schedule = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
+    schedule.cycleDayConstraint = cycleConstraint;
+  }
+  state.maxDosePerPeriod = canonicalDosePeriodMaximums(dosage);
   state.routeText = dosage.route?.text;
   const siteCoding = selectPreferredSiteCoding(dosage.site);
   state.siteText = getFallbackSiteText(dosage.site);
   state.siteSpatialRelation = parseBodySiteSpatialRelationExtension(dosage.site);
   state.siteAdministrationTargetCount = getBodySiteAdministrationTargetCount(dosage.site);
+  const siteRestrictions = parseBodySiteRestrictionExtensions(dosage.site);
+  if (siteRestrictions?.length) {
+    state.primaryClause.site = { ...state.primaryClause.site, restrictions: siteRestrictions };
+  }
   state.methodText = dosage.method?.text;
   state.methodTextElement = clonePrimitiveElement(dosage.method?._text);
   state.patientInstruction = dosage.patientInstruction;
-  state.asNeeded = dosage.asNeededBoolean;
+  state.asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
   if (dosage.asNeededFor?.length) {
     const prnReasons = dosage.asNeededFor.map((concept) => {
       const coding = selectFirstCodingWithCode(concept);
@@ -1483,5 +2181,80 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     }
   }
 
+  const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
+  if (carrierQuantity) state.primaryClause.clinicalQuantity = carrierQuantity;
+
   return state;
+}
+
+/**
+ * Lower a resolved, typed HPSG quantity without consulting source text. This
+ * remains part of the ordinary canonical-to-FHIR lowering, not a second parser.
+ * @param dosage FHIR output currently being assembled.
+ * @param quantity Resolved typed clinical quantity.
+ */
+function projectHpsgClinicalQuantityToFhir(
+  dosage: FhirDosage,
+  quantity: HpsgClinicalQuantityFeature
+): void {
+  if (quantity.status !== "resolved") {
+    // Preserve a recognized daily total even when no per-administration split
+    // was stated. It is a rate, not an invented dose, and remains editable.
+    if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
+      const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
+      dosage.doseAndRate = [{
+        rateQuantity: buildFhirDoseQuantity(quantity.numerator.value, unit)
+      }];
+    }
+    return;
+  }
+  if (quantity.representation === "dose") {
+    const dose = dosage.doseAndRate?.[0]?.doseQuantity;
+    if (dose && quantity.projectedDose) {
+      Object.assign(dose, getStandardDoseUnitCoding(quantity.projectedDose.unit));
+    }
+    return;
+  }
+  if (quantity.representation === "rate-quantity") {
+    const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
+    dosage.doseAndRate = [{
+      ...(quantity.projectedDose ? {
+        doseQuantity: buildFhirDoseQuantity(quantity.projectedDose.value, quantity.projectedDose.unit)
+      } : {}),
+      rateQuantity: buildFhirDoseQuantity(
+        quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
+        unit
+      )
+    }];
+    return;
+  }
+  const duration = quantity.administrationDuration;
+  const dose = quantity.projectedDose;
+  if (!duration || !dose) return;
+  const doseQuantity = { ...buildFhirDoseQuantity(dose.value, dose.unit),
+    ...(dose.system ? { system: dose.system } : {}),
+    ...(dose.code ? { code: dose.code } : {}) };
+  const rate = quantity.rateNumerator ?? dose;
+  const rateNumerator = { ...buildFhirDoseQuantity(rate.value, rate.unit),
+    ...(rate.system ? { system: rate.system } : {}),
+    ...(rate.code ? { code: rate.code } : {}) };
+  dosage.doseAndRate = [{
+    doseQuantity,
+    rateRatio: {
+      numerator: rateNumerator,
+      denominator: {
+        value: duration.value,
+        unit: duration.unit,
+        system: "http://unitsofmeasure.org",
+        code: duration.unit
+      }
+    }
+  }];
+  if (quantity.carrierMaterial?.text) {
+    dosage.extension = [
+      ...(dosage.extension ?? []).filter(part =>
+        part.url !== INFUSION_CARRIER_MATERIAL_EXTENSION_URL),
+      infusionCarrierMaterialExtension(quantity.carrierMaterial)
+    ];
+  }
 }

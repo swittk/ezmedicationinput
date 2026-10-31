@@ -62,6 +62,8 @@ const DEFAULT_LIMIT = 10;
 const SUGGESTION_LEXEME_CACHE = new Map<string, {
   revision: number;
   lexemes: ReturnType<typeof listMedicationLocaleLexemes>;
+  /** Lazily sorted lexical equivalence classes for repeated trajectory lookups. */
+  byCanonical: Map<string, ReturnType<typeof listMedicationLocaleLexemes>>;
 }>();
 function suggestionLexemes(locale: string) {
   const key = baseLanguageTag(locale) ?? locale.toLowerCase();
@@ -69,7 +71,8 @@ function suggestionLexemes(locale: string) {
   const cached = SUGGESTION_LEXEME_CACHE.get(key);
   if (cached?.revision === revision) return cached.lexemes;
   const lexemes = listMedicationLocaleLexemes(locale);
-  SUGGESTION_LEXEME_CACHE.set(key, { revision, lexemes });
+  SUGGESTION_LEXEME_CACHE.set(key, { revision, lexemes,
+    byCanonical: new Map() });
   return lexemes;
 }
 const DEFAULT_SUGGESTION_ACTIONS = listMedicationInstructionActions();
@@ -569,13 +572,20 @@ function directLocalePrnReasonSuggestions(
 
 function localeLexemeByCanonical(locale: string, canonical: string, preferred?: string): string | undefined {
   const lexemes = suggestionLexemes(locale);
+  const localeKey = baseLanguageTag(locale) ?? locale.toLowerCase();
+  const cache = SUGGESTION_LEXEME_CACHE.get(localeKey)!;
   const canonicalKey = normalizeKey(canonical);
-  const matches = lexemes.filter((lexeme) => normalizeKey(lexeme.canonical) === canonicalKey);
+  let matches = cache.byCanonical.get(canonicalKey);
+  if (!matches) {
+    matches = lexemes.filter(lexeme => normalizeKey(lexeme.canonical) === canonicalKey)
+      .sort((left, right) => left.surface.length - right.surface.length);
+    cache.byCanonical.set(canonicalKey, matches);
+  }
   if (preferred) {
     const exact = matches.find((lexeme) => lexeme.surface === preferred);
     if (exact) return exact.surface;
   }
-  return matches.sort((left, right) => left.surface.length - right.surface.length)[0]?.surface;
+  return matches[0]?.surface;
 }
 
 function parserAcceptsSuggestion(
@@ -1237,7 +1247,7 @@ function semanticTrajectorySuggestions(
   const actionDefinition = suggestionActionDefinitionForClause(normalized, clause, options);
   const supportsDose = actionDefinition?.definesDose === true || actionDefinition?.acceptsAmount === true;
   const actionOnly = (clause.evidence ?? []).length > 0 &&
-    (clause.evidence ?? []).every((evidence) => evidence.rule === "hpsg.lex.method");
+    (clause.evidence ?? []).every((evidence) => evidence.lexicalCategory === "method");
 
   const suggestions: string[] = [];
   const seen = new Set<string>();
@@ -1388,7 +1398,8 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   if (limit <= 0) {
     return [];
   }
-  const prefix = normalizeSpacing(input.toLowerCase());
+  const normalizedInput = normalizeSpacing(input);
+  const prefix = normalizedInput.toLowerCase();
   if (!prefix) {
     return defaultDirectionSuggestions(options, limit);
   }
@@ -1405,7 +1416,7 @@ export function suggestSig(input: string, options?: SuggestSigOptions): string[]
   if (directTime?.length) {
     return continueExactSemanticSuggestion(directTime, input, options, limit);
   }
-  const inputTokens = normalizeSpacing(input).split(" ");
+  const inputTokens = normalizedInput.split(" ");
   const lastToken = inputTokens[inputTokens.length - 1];
   if (lastToken && normalizeUnit(lastToken, options)) {
     const state = parseClauseState(input, options);

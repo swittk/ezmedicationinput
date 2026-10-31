@@ -60,6 +60,19 @@ function isStandaloneSurfaceChar(char: string): boolean {
   return classifySurfaceKind(char) !== undefined;
 }
 
+function isAsciiLetter(char: string): boolean {
+  return (char >= "A" && char <= "Z") || (char >= "a" && char <= "z");
+}
+
+function asciiLetterRunLength(input: string, start: number, step: -1 | 1): number {
+  let length = 0;
+  for (let index = start; index >= 0 && index < input.length; index += step) {
+    if (!isAsciiLetter(input[index])) break;
+    length += 1;
+  }
+  return length;
+}
+
 function isSentenceBoundaryChar(input: string, index: number): boolean {
   const char = input[index];
   if (char === "!" || char === "?") {
@@ -71,13 +84,23 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
   // Keep decimal points inside numeric tokens (e.g. 1.5 mL or clinician shorthand .5 tab).
-  if (/\d/.test(after) && (/\d/.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
+  if (/[0-9๐-๙]/u.test(after) &&
+      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || before === "(")) {
     return false;
   }
-  // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.).
-  if (/[A-Za-z]/.test(before) && /[A-Za-z]/.test(after)) return false;
+  // Keep clinical dotted abbreviations intact (O.D., I.U., b.i.d.). A period
+  // between complete multi-letter clinical terms remains visible to the
+  // clause grammar even without whitespace (e.g. BID.OS).
+  if (
+    isAsciiLetter(before) &&
+    isAsciiLetter(after) &&
+    asciiLetterRunLength(input, index - 1, -1) === 1 &&
+    asciiLetterRunLength(input, index + 1, 1) === 1
+  ) {
+    return false;
+  }
   const preceding = input.slice(Math.max(0, index - 3), index);
-  if (/[A-Za-z]\.[A-Za-z]$/.test(preceding)) return false;
+  if (!isAsciiLetter(after) && /[A-Za-z]\.[A-Za-z]$/.test(preceding)) return false;
   return true;
 }
 

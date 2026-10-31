@@ -3,7 +3,8 @@ import { mergeI18nRecords } from "./fhir-translations";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { objectEntries } from "./utils/object";
 import { AMBIGUOUS_DIGIT_SITE_KEYS, HAND_CONTEXT_KEYS, FOOT_CONTEXT_KEYS } from "./body-site-context-terminology";
-import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode } from "./types";
+import { BodySiteCode, BodySiteDefinition, BodySiteSpatialRelation, FhirCoding, RouteCode,
+  type BodySiteRestriction, type BodySiteRestrictionPredicate, type TextRange } from "./types";
 import {
   BODY_SITE_LOCATIVE_RELATION_PHRASES,
   BODY_SITE_LOCATIVE_RELATIONS,
@@ -23,7 +24,10 @@ import {
   BODY_SITE_PARTITIVE_MODIFIERS,
   NASAL_SITE_WORDS,
   OPHTHALMIC_SITE_WORDS,
-  OTIC_SITE_WORDS
+  OTIC_SITE_WORDS,
+  SITE_RESTRICTION_PREDICATES,
+  SITE_RESTRICTION_PREDICATES_BY_LEMMA,
+  SITE_RESTRICTION_PREDICATE_INTRODUCERS
 } from "./hpsg/lexical-classes";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -97,6 +101,11 @@ export interface ResolvedBodySitePhrase {
   definition?: BodySiteDefinition;
   features: BodySiteFeatureStructure;
   englishObjectText: string;
+  /** Composed localization of clinical qualifier + known nominal head.
+   * It deliberately grants no code to a qualified site merely because its
+   * unqualified anatomy is coded. */
+  siteI18n?: Record<string, string>;
+  restrictions?: BodySiteRestriction[];
   preferredPreposition?: "to" | "at" | "in" | "into";
 }
 
@@ -245,6 +254,39 @@ function longestTerminalBodySiteDefinition(
     const suffix = words.slice(start).join(" ");
     const definition = lookupDefinitionForCanonical(suffix, customSiteMap);
     if (definition?.coding?.code || definition?.routeHint) return { canonical: suffix, definition };
+  }
+  return undefined;
+}
+
+/**
+ * Interpret an open-class clinical modifier as an adjunct of a registered
+ * nominal site, not as an alias for the bare anatomy's SNOMED code.
+ * The symptom/predicate lexicons own the modifier meaning and locale; the
+ * body-site lexicon owns the nominal head. Unknown modifiers stay source-only.
+ */
+function composeClinicalAttributiveSite(
+  normalized: string,
+  customSiteMap?: Record<string, BodySiteDefinition>
+): Record<string, string> | undefined {
+  const words = normalized.split(/\s+/u).filter(Boolean);
+  if (words.length < 2) return undefined;
+  for (let start = 1; start < words.length; start += 1) {
+    const noun = words.slice(start).join(" ");
+    const definition = lookupDefinitionForCanonical(noun, customSiteMap);
+    const headThai = definition?.i18n?.th;
+    if (!headThai) continue;
+    const qualifiers: string[] = [];
+    let licensed = true;
+    for (const word of words.slice(0, start)) {
+      const predicate = SITE_RESTRICTION_PREDICATES.get(word);
+      const symptom = resolveSymptomDefinition(word);
+      const thai = predicate?.i18n?.th ?? symptom?.conditionI18n?.th;
+      if (!thai) { licensed = false; break; }
+      qualifiers.push(thai);
+    }
+    if (licensed && qualifiers.length) {
+      return { en: normalized, th: `${headThai}ที่${qualifiers.join("และ")}` };
+    }
   }
   return undefined;
 }
@@ -773,7 +815,75 @@ function matchBodySiteQualifier(lookupCanonical: string): BodySiteQualifierMatch
   return best;
 }
 
-function qualifiedBodySitePhrase(
+/** One lexical interpretation for standalone and clause-level site predicates.
+ * Introducers and terminology are resolved here once, never in FHIR lowering.
+ * @param text Predicate surface text, excluding the relation marker.
+ * @param range Optional original-source span owned by the lexical sign.
+ */
+export function resolveBodySiteRestrictionPredicate(text: string, range: TextRange): BodySiteRestrictionPredicate & { range: TextRange };
+export function resolveBodySiteRestrictionPredicate(text: string, range?: TextRange): BodySiteRestrictionPredicate;
+export function resolveBodySiteRestrictionPredicate(text: string, range?: TextRange): BodySiteRestrictionPredicate {
+  const words = text.trim().split(/\s+/u);
+  const normalized = words.join(" ").toLowerCase();
+  const lexical = SITE_RESTRICTION_PREDICATES.get(normalized);
+  const introducer = SITE_RESTRICTION_PREDICATE_INTRODUCERS.find(entry =>
+    entry.parts.length < words.length && entry.parts.every((part, index) => words[index].toLowerCase() === part));
+  const focusText = introducer ? words.slice(introducer.parts.length).join(" ") : undefined;
+  const symptom = resolveSymptomDefinition(focusText ?? normalized);
+  return {
+    text,
+    lemma: lexical?.lemma ?? symptom?.text?.trim().toLowerCase() ?? symptom?.coding?.display?.trim().toLowerCase(),
+    form: lexical?.form ?? introducer?.form ?? "raw",
+    focusText,
+    ...(range ? { range: { ...range } } : {})
+  };
+}
+
+/** Construct the same typed relative clause for either entrypoint. Full-SIG
+ * attachment remains the HPSG head-adjunct construction's responsibility.
+ * @param predicate Already interpreted lexical predicate.
+ * @param markerRange Original span of the relative marker.
+ * @param sourceText Original complete relative clause, when available.
+ */
+export function formBodySiteRestriction(
+  predicate: BodySiteRestrictionPredicate, markerRange?: TextRange, sourceText?: string
+): BodySiteRestriction {
+  const range = markerRange && predicate.range
+    ? { start: Math.min(markerRange.start, predicate.range.start), end: Math.max(markerRange.end, predicate.range.end) }
+    : undefined;
+  return {
+    relation: "where", sourceText: sourceText ?? `where ${predicate.text}`,
+    ...(range ? { range } : {}),
+    ...(markerRange ? { markerRange: { ...markerRange } } : {}),
+    predicate: { ...predicate, ...(predicate.range ? { range: { ...predicate.range } } : {}) }
+  };
+}
+
+/** Realize a typed restriction by lexical identity, never by re-parsing prose.
+ * @param restriction Typed site-local relative clause.
+ * @param locale English or Thai output locale.
+ */
+export function realizeBodySiteRestriction(restriction: BodySiteRestriction, locale: "en" | "th"): string | undefined {
+  const predicate = restriction.predicate;
+  const lexical = predicate.lemma ? SITE_RESTRICTION_PREDICATES_BY_LEMMA.get(predicate.lemma) : undefined;
+  const symptom = predicate.lemma ? resolveSymptomDefinition(predicate.lemma) : undefined;
+  const relation = getBodySiteRelationRealization(restriction.relation, locale)?.surface ?? restriction.relation;
+  if (locale === "en") {
+    const normalized = predicate.form !== "existential"
+      ? lexical?.i18n?.en ?? symptom?.conditionI18n?.en : undefined;
+    return normalized ? `${relation} ${normalized}` : restriction.sourceText.trim() || `${relation} ${predicate.text}`;
+  }
+  const completeCondition = symptom?.conditionI18n?.th;
+  const localized = lexical?.i18n?.th ?? completeCondition ?? symptom?.i18n?.th ??
+    (/^[\u0E00-\u0E7F]/u.test(predicate.text.trim()) ? predicate.text.trim() : undefined);
+  // Condition translations are already complete predicates (e.g. มีผื่น,
+  // เป็นสิว); prefix มี only when realizing a bare existential symptom noun.
+  const existentialLead = predicate.form === "existential" &&
+    localized !== completeCondition && !localized?.startsWith("มี") ? "มี" : "";
+  return localized ? `${relation}${existentialLead}${localized}` : undefined;
+}
+
+function resolveQualifiedBodySite(
   lookupCanonical: string,
   customSiteMap?: Record<string, BodySiteDefinition>,
   context?: BodySitePhraseContext
@@ -787,23 +897,30 @@ function qualifiedBodySitePhrase(
   if (!realization) return undefined;
 
   if (match.target === "symptom") {
-    const symptom = resolveSymptomDefinition(targetText);
-    if (!symptom) return undefined;
-    const conditionText = symptom.conditionI18n?.en ?? symptom.text?.toLowerCase() ?? targetText;
+    // This standalone API receives a normalized lookup phrase. Do not label
+    // normalized offsets as original-source spans; the full HPSG token path
+    // supplies exact ranges through the same shared constructor.
+    const predicate = resolveBodySiteRestrictionPredicate(targetText);
+    const symptom = predicate.lemma ? resolveSymptomDefinition(predicate.lemma) : undefined;
+    const restriction = formBodySiteRestriction(predicate, undefined, lookupCanonical.slice(match.start + 1));
+    const relative = realizeBodySiteRestriction(restriction, "en")!;
+    // Existing qualifier consumers receive a view of the shared predicate,
+    // not a second recognizer or a competing clinical interpretation.
     const qualifier: BodySiteQualifierFeatures = {
       kind: "symptom", relation: match.relation, text: targetText,
-      canonical: symptom.text?.toLowerCase() ?? targetText,
-      coding: symptom.coding ? { ...symptom.coding } : undefined,
-      i18n: { en: conditionText, ...(symptom.i18n ?? {}), ...(symptom.conditionI18n ?? {}) }
+      canonical: predicate.lemma ?? targetText,
+      coding: symptom?.coding ? { ...symptom.coding } : undefined,
+      i18n: { en: relative.slice(realization.surface.length).trim(),
+        ...(symptom?.i18n ?? {}), ...(symptom?.conditionI18n ?? {}) }
     };
     return {
-      ...base,
-      lookupCanonical,
+      ...base, lookupCanonical,
       resolutionCanonical: `${base.resolutionCanonical} ${match.relation} ${qualifier.canonical}`,
       canonical: `${base.canonical} ${match.relation} ${qualifier.canonical}`,
-      displayText: `${base.displayText} ${realization.surface} ${conditionText}`,
+      displayText: `${base.displayText} ${relative}`,
       features: withBodySiteQualifier(base.features, qualifier),
-      englishObjectText: `${base.englishObjectText} ${realization.surface} ${conditionText}`
+      restrictions: [...(base.restrictions ?? []), restriction],
+      englishObjectText: `${base.englishObjectText} ${relative}`
     };
   }
 
@@ -838,13 +955,29 @@ export function resolveBodySitePhrase(
     return undefined;
   }
   const lookupCanonical = normalizeBodySiteKey(trimmed);
-  const qualified = qualifiedBodySitePhrase(lookupCanonical, customSiteMap, context);
+  const qualified = resolveQualifiedBodySite(lookupCanonical, customSiteMap, context);
   if (qualified) return qualified;
+  return resolveBodySiteLexeme(trimmed, customSiteMap, context);
+}
 
+/** Anatomical vocabulary lookup only. Full-SIG lexical rules use this entrypoint
+ * so a lexical site cannot independently absorb a relative clause.
+ * @param text Anatomical constituent selected by the caller's grammar.
+ * @param customSiteMap Registered anatomy and custom terminology.
+ * @param context Contextual anatomy/terminal-modifier lookup options.
+ */
+export function resolveBodySiteLexeme(
+  text: string, customSiteMap?: Record<string, BodySiteDefinition>, context?: BodySitePhraseContext
+): ResolvedBodySitePhrase | undefined {
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (!trimmed) return undefined;
+  const lookupCanonical = normalizeBodySiteKey(trimmed);
   const contextualCanonical = resolveContextualBodySiteAlias(lookupCanonical, context);
   const displaySourceText = contextualCanonical ?? trimmed;
   const displayText = normalizeSiteDisplayText(displaySourceText, customSiteMap);
   const canonical = normalizeBodySiteKey(displayText);
+  const siteI18n = lookupDefinitionForCanonical(lookupCanonical, customSiteMap)
+    ? undefined : composeClinicalAttributiveSite(canonical, customSiteMap);
   const directDefinition =
     lookupBodySiteDefinition(customSiteMap, lookupCanonical) ??
     (contextualCanonical
@@ -886,6 +1019,7 @@ export function resolveBodySitePhrase(
     definition,
     features,
     englishObjectText: renderBodySiteObject(features),
+    siteI18n,
     preferredPreposition: inferPreferredPreposition(
       normalizeBodySiteKey(finalDisplayText) || canonical,
       features,

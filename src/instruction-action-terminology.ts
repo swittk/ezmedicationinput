@@ -1,6 +1,7 @@
 import source from "./instruction-action-terminology.json";
 import { localizedConfig } from "./localization";
 import {
+  AdviceArgument,
   FhirCoding,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionInput,
@@ -32,6 +33,7 @@ interface ActionSource {
   i18n?: Record<string, string>;
   roundtripI18n?: Record<string, string>;
   aliases?: string[];
+  directiveOnlyAliases?: string[];
   sequenceAliases?: string[];
   localeAliases?: Record<string, string[]>;
   separableAliases?: Array<{ lead: string; particle: string }>;
@@ -45,6 +47,7 @@ interface ActionSource {
   administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
   preferredRelationSemanticClasses?: MedicationInstructionActionDefinition["preferredRelationSemanticClasses"];
   contextualCodings?: MedicationInstructionActionDefinition["contextualCodings"];
+  contextualSemanticComponents?: MedicationInstructionActionDefinition["contextualSemanticComponents"];
   administrationMethod?: FhirCoding;
   verbRouteHint?: MedicationInstructionActionDefinition["verbRouteHint"];
   methodRouteOverride?: MedicationInstructionActionDefinition["methodRouteOverride"];
@@ -55,12 +58,15 @@ interface ActionSource {
   safetyScopeTarget?: boolean;
   acceptsAmount?: boolean;
   definesDose?: boolean;
+  coding?: FhirCoding;
   externalCodings?: FhirCoding[];
+  semanticComponents?: MedicationInstructionActionDefinition["semanticComponents"];
 }
 
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>();
+const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
@@ -72,8 +78,34 @@ for (const definition of DEFAULT_ACTIONS) {
     const normalized = normalizeActionSurface(alias);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) {
       DEFAULT_BY_ALIAS.set(normalized, definition);
+      const words = normalized.split(" ");
+      DEFAULT_SPAN_BY_LEAD.set(words[0], Math.max(
+        DEFAULT_SPAN_BY_LEAD.get(words[0]) ?? 4, words.length
+      ));
     }
   }
+}
+
+/** Bound phrase matching by the declared lexicon without widening unrelated scans.
+ * @param lead Normalized first token of a possible instruction action.
+ */
+export function medicationInstructionActionSpanLimit(lead: string, options?: ParseOptions): number {
+  let limit = DEFAULT_SPAN_BY_LEAD.get(lead) ?? 4;
+  const customMap = options?.instructionActionMap;
+  if (!customMap) return limit;
+  for (const surface of Object.keys(customMap)) {
+    const input = customMap[surface];
+    for (const alias of [
+      surface, input.code ?? "", ...(input.aliases ?? []),
+      ...(input.sequenceAliases ?? []), ...flattenLocaleAliases(input.localeAliases)
+    ]) {
+      const normalized = normalizeActionSurface(alias);
+      if (!normalized) continue;
+      const words = normalized.split(" ");
+      if (words[0] === lead) limit = Math.max(limit, words.length);
+    }
+  }
+  return limit;
 }
 
 export function normalizeActionSurface(value: string): string {
@@ -107,6 +139,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding
     ? {
       system: coding.system,
+      version: coding.version,
       code: coding.code,
       display: coding.display,
       extension: coding.extension?.map((extension) => ({ ...extension })),
@@ -114,6 +147,13 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
       i18n: coding.i18n ? { ...coding.i18n } : undefined
     }
     : undefined;
+}
+
+/** Preserve coded constituents separately from equivalent whole-action codings. */
+export function cloneMedicationInstructionActionSemanticComponents(
+  components: MedicationInstructionActionDefinition["semanticComponents"]
+): MedicationInstructionActionDefinition["semanticComponents"] {
+  return components?.map(part => ({ role: part.role, coding: cloneCoding(part.coding)! }));
 }
 
 export function cloneMedicationInstructionActionRealizerConfig(
@@ -150,6 +190,66 @@ function cloneContextualCodings(
   }));
 }
 
+function cloneContextualSemanticComponents(
+  rules: MedicationInstructionActionDefinition["contextualSemanticComponents"]
+): MedicationInstructionActionDefinition["contextualSemanticComponents"] {
+  return rules?.map(rule => ({
+    whenArgument: { ...rule.whenArgument },
+    component: { role: rule.component.role, coding: cloneCoding(rule.component.coding)! }
+  }));
+}
+
+/** Shared typed-argument matcher for both equivalent context codings and
+ * independent standards-coded constituents. No new language interpretation. */
+export function matchesMedicationInstructionActionContextArgument(
+  expected: NonNullable<MedicationInstructionActionDefinition["contextualCodings"]>[number]["whenArgument"],
+  args: readonly AdviceArgument[]
+): boolean {
+  return args.some(arg =>
+    (expected.role === undefined || arg.role === expected.role) &&
+    (expected.conceptId === undefined || arg.conceptId === expected.conceptId) &&
+    (expected.codingCode === undefined || arg.coding?.code === expected.codingCode) &&
+    (expected.normalized === undefined || arg.normalized === expected.normalized)
+  );
+}
+
+/** Resolve exact whole-action mappings licensed by typed argument semantics.
+ * Shared by the primary HPSG graph and optional semantic-resolver graph. */
+export function medicationInstructionActionContextualCodings(
+  definition: MedicationInstructionActionDefinition,
+  args: readonly AdviceArgument[]
+): FhirCoding[] {
+  const codings: FhirCoding[] = [];
+  for (const rule of definition.contextualCodings ?? []) {
+    if (!matchesMedicationInstructionActionContextArgument(rule.whenArgument, args) ||
+        codings.some(coding =>
+          coding.code === rule.coding.code && coding.system === rule.coding.system)) continue;
+    codings.push(cloneCoding(rule.coding)!);
+  }
+  return codings;
+}
+
+/** Combine only constituents justified by this action's actual typed arguments.
+ * Do not place fragment/finding/qualifier codes in whole-predicate Codings. */
+export function medicationInstructionActionSemanticComponentsForArgs(
+  definition: MedicationInstructionActionDefinition,
+  args: readonly AdviceArgument[]
+): MedicationInstructionActionDefinition["semanticComponents"] {
+  const fixed = cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents);
+  if (!definition.contextualSemanticComponents?.length) return fixed;
+  const combined = fixed ?? [];
+  for (const rule of definition.contextualSemanticComponents) {
+    if (!matchesMedicationInstructionActionContextArgument(rule.whenArgument, args)) continue;
+    if (combined.some(part => part.role === rule.component.role &&
+      part.coding.system === rule.component.coding.system &&
+      part.coding.code === rule.component.coding.code)) continue;
+    combined.push({
+      role: rule.component.role, coding: cloneCoding(rule.component.coding)!
+    });
+  }
+  return combined.length ? combined : undefined;
+}
+
 function cloneContinuationLicenses(
   rules: MedicationInstructionActionDefinition["continuationLicenses"]
 ): MedicationInstructionActionDefinition["continuationLicenses"] {
@@ -171,6 +271,7 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     roundtripI18n: definition.roundtripI18n ? { ...definition.roundtripI18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
+    directiveOnlyAliases: definition.directiveOnlyAliases ? [...definition.directiveOnlyAliases] : undefined,
     sequenceAliases: definition.sequenceAliases ? [...definition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
     separableAliases: definition.separableAliases?.map((alias) => ({ ...alias })),
@@ -188,6 +289,7 @@ function cloneDefinition(
     administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: definition.preferredRelationSemanticClasses ? [...definition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(definition.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(definition.contextualSemanticComponents),
     administrationMethod: cloneCoding(definition.administrationMethod),
     verbRouteHint: definition.verbRouteHint,
     methodRouteOverride: definition.methodRouteOverride,
@@ -199,7 +301,8 @@ function cloneDefinition(
     acceptsAmount: definition.acceptsAmount,
     definesDose: definition.definesDose,
     coding: cloneCoding(definition.coding),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(definition.semanticComponents)
   };
 }
 
@@ -211,6 +314,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     roundtripI18n: sourceDefinition.roundtripI18n ? { ...sourceDefinition.roundtripI18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
+    directiveOnlyAliases: sourceDefinition.directiveOnlyAliases ? [...sourceDefinition.directiveOnlyAliases] : undefined,
     sequenceAliases: sourceDefinition.sequenceAliases ? [...sourceDefinition.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     separableAliases: sourceDefinition.separableAliases?.map((alias) => ({ ...alias })),
@@ -228,6 +332,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     administrationDurationIntroducers: sourceDefinition.administrationDurationIntroducers ? [...sourceDefinition.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: sourceDefinition.preferredRelationSemanticClasses ? [...sourceDefinition.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(sourceDefinition.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(sourceDefinition.contextualSemanticComponents),
     administrationMethod: cloneCoding(sourceDefinition.administrationMethod),
     verbRouteHint: sourceDefinition.verbRouteHint,
     methodRouteOverride: sourceDefinition.methodRouteOverride,
@@ -238,7 +343,9 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
     safetyScopeTarget: sourceDefinition.safetyScopeTarget,
     acceptsAmount: sourceDefinition.acceptsAmount,
     definesDose: sourceDefinition.definesDose,
-    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    coding: cloneCoding(sourceDefinition.coding),
+    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(sourceDefinition.semanticComponents)
   };
 }
 
@@ -255,6 +362,7 @@ function normalizeCustomDefinition(
     i18n: input.i18n ? { ...input.i18n } : undefined,
     roundtripI18n: input.roundtripI18n ? { ...input.roundtripI18n } : undefined,
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
+    directiveOnlyAliases: input.directiveOnlyAliases ? [...input.directiveOnlyAliases] : undefined,
     sequenceAliases: input.sequenceAliases ? [...input.sequenceAliases] : undefined,
     localeAliases: cloneLocaleAliases(input.localeAliases),
     separableAliases: input.separableAliases?.map((alias) => ({ ...alias })),
@@ -272,6 +380,7 @@ function normalizeCustomDefinition(
     administrationDurationIntroducers: input.administrationDurationIntroducers ? [...input.administrationDurationIntroducers] : undefined,
     preferredRelationSemanticClasses: input.preferredRelationSemanticClasses ? [...input.preferredRelationSemanticClasses] : undefined,
     contextualCodings: cloneContextualCodings(input.contextualCodings),
+    contextualSemanticComponents: cloneContextualSemanticComponents(input.contextualSemanticComponents),
     administrationMethod: cloneCoding(input.administrationMethod),
     verbRouteHint: input.verbRouteHint,
     methodRouteOverride: input.methodRouteOverride,
@@ -283,7 +392,8 @@ function normalizeCustomDefinition(
     acceptsAmount: input.acceptsAmount,
     definesDose: input.definesDose,
     coding: cloneCoding(input.coding),
-    externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
+    externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!),
+    semanticComponents: cloneMedicationInstructionActionSemanticComponents(input.semanticComponents)
   };
 }
 
@@ -388,12 +498,17 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
     name: "MedicationInstructionAction",
-    title: "SolubleLabs Medication Instruction Action",
+    title: "Medication Instruction Action",
     status: "active",
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_ACTIONS.map((definition) => ({
+    concept: DEFAULT_ACTIONS.filter((definition) =>
+      // A local action remains part of the published CodeSystem even when
+      // extra NLM/HL7/SNOMED codings are provided for the same instruction.
+      definition.coding?.system === MEDICATION_INSTRUCTION_ACTION_SYSTEM ||
+      (!definition.coding && !definition.externalCodings?.length)
+    ).map((definition) => ({
       code: definition.code,
       display: definition.display,
       designation: Object.keys(definition.i18n ?? {}).map((language) => ({
@@ -407,8 +522,9 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
 export function medicationInstructionActionCoding(
   definition: MedicationInstructionActionDefinition
 ): FhirCoding {
-  return definition.coding
-    ? cloneCoding(definition.coding)!
+  const coding = definition.coding ?? definition.externalCodings?.[0];
+  return coding
+    ? cloneCoding(coding)!
     : {
       system: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
       code: definition.code,
@@ -420,8 +536,12 @@ export function medicationInstructionActionCoding(
 export function medicationInstructionActionCodings(
   definition: MedicationInstructionActionDefinition
 ): FhirCoding[] {
-  return [
-    medicationInstructionActionCoding(definition),
+  if (definition.coding) return [
+    cloneCoding(definition.coding)!,
     ...(definition.externalCodings ?? []).map((coding) => cloneCoding(coding)!)
   ];
+  if (definition.externalCodings?.length) {
+    return definition.externalCodings.map((coding) => cloneCoding(coding)!);
+  }
+  return [medicationInstructionActionCoding(definition)];
 }

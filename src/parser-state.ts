@@ -3,6 +3,7 @@ import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from "./fhir-translations";
 import {
   CanonicalAdditionalInstructionExpr,
+  CanonicalAdministrationTargetGroup,
   BodySiteSpatialRelation,
   CanonicalDoseRange,
   CanonicalPrnReasonExpr,
@@ -321,6 +322,14 @@ export class ParserState {
     this.ensureSchedule().occurrenceCap = value;
   }
 
+  get maxDosePerPeriod() {
+    return this.clause.schedule?.maxDosePerPeriod;
+  }
+
+  set maxDosePerPeriod(value) {
+    this.ensureSchedule().maxDosePerPeriod = value;
+  }
+
   get timingCode(): string | undefined {
     return this.clause.schedule?.timingCode;
   }
@@ -532,6 +541,30 @@ export class ParserState {
 
   get siteAdministrationTargetCount(): number | undefined {
     return this.clause.site?.administrationTargetCount;
+  }
+
+  get administrationTargetGroup(): CanonicalAdministrationTargetGroup | undefined {
+    return this.clause.administrationTargetGroup;
+  }
+
+  set administrationTargetGroup(value: CanonicalAdministrationTargetGroup | undefined) {
+    this.clause.administrationTargetGroup = value
+      ? {
+        coordination: value.coordination,
+        sourceText: value.sourceText,
+        range: value.range ? { ...value.range } : undefined,
+        targets: value.targets.map((target) => ({
+          ...target,
+          i18n: cloneI18nRecord(target.i18n),
+          coding: target.coding ? {
+            ...target.coding,
+            i18n: cloneI18nRecord(target.coding.i18n)
+          } : undefined,
+          spatialRelation: cloneBodySiteSpatialRelation(target.spatialRelation),
+          range: target.range ? { ...target.range } : undefined
+        }))
+      }
+      : undefined;
   }
 
   set siteAdministrationTargetCount(value: number | undefined) {

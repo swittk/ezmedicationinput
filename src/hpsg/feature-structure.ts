@@ -27,9 +27,18 @@ function synsemShapeKey(synsem: HpsgSynsem): string {
     synsem.valence.instructions?.length ? "I" : "",
     synsem.valence.patientInstruction ? "U" : "",
     synsem.cont.condition ? "C" : "",
+    synsem.cont.clinicalAdjunct ? "A" : "",
+    synsem.cont.guard ? `G${synsem.cont.guard.marker ?? synsem.cont.guard.operator ?? "predicate"}` : "",
     synsem.cont.scopedAdministrations?.length ? "X" : "",
     synsem.cont.scopeClosed ? "K" : "",
+    synsem.cont.coordinationMarker
+      ? `O${synsem.cont.coordinationMarker.coordination}`
+      : "",
+    synsem.cont.siteRelativeMarker ? "W" : "",
+    synsem.cont.sitePredicate ? "V" : "",
+    synsem.cont.siteRestriction ? "J" : "",
     synsem.nonlocal?.scopeRequirements?.length ? `Q${synsem.nonlocal.scopeRequirements.length}` : "",
+    synsem.cont.regimenAdjustment ?? "",
     synsem.cont.clauseKind ?? ""
   ].join("|");
 }
@@ -66,11 +75,30 @@ export function synsemFeatureStructure(synsem: HpsgSynsem): HpsgFeatureNode {
   if (synsem.cont.clauseKind) {
     contentFeatures.CLAUSE_KIND = featureAtom(synsem.cont.clauseKind);
   }
+  if (synsem.cont.regimenAdjustment) {
+    contentFeatures.REGIMEN_ADJUSTMENT = featureAtom(synsem.cont.regimenAdjustment);
+  }
   if (synsem.cont.condition) contentFeatures.CONDITION = featureNode("condition-feature");
+  if (synsem.cont.clinicalAdjunct) {
+    contentFeatures.CLINICAL_ADJUNCT = featureNode("clinical-adjunct-feature");
+  }
+  if (synsem.cont.guard) contentFeatures.GUARD = featureNode("guard-feature");
   if (synsem.cont.scopedAdministrations?.length) {
     contentFeatures.SCOPED_ADMINISTRATION = featureNode("scoped-administration-feature");
   }
   if (synsem.cont.scopeClosed) contentFeatures.SCOPE_CLOSED = featureAtom(true, "boolean");
+  if (synsem.cont.coordinationMarker) {
+    contentFeatures.COORDINATION_MARKER = featureNode("coordination-marker-feature");
+  }
+  if (synsem.cont.siteRelativeMarker) {
+    contentFeatures.SITE_RELATIVE_MARKER = featureNode("site-relative-marker-feature");
+  }
+  if (synsem.cont.sitePredicate) {
+    contentFeatures.SITE_PREDICATE = featureNode("site-predicate-feature");
+  }
+  if (synsem.cont.siteRestriction) {
+    contentFeatures.SITE_RESTRICTION = featureNode("site-restriction-feature");
+  }
 
   const nonlocalFeatures: Record<string, HpsgFeatureNode> = {};
   if (synsem.nonlocal?.scopeRequirements?.length) {

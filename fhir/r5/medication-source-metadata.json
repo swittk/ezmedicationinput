@@ -1,0 +1,4426 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source",
+      "resource": {
+        "resourceType": "StructureDefinition",
+        "id": "medication-course-reconciliation-source",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source",
+        "version": "0.2.0-ez.0",
+        "name": "MedicationCourseReconciliationSource",
+        "title": "Original unmerged extension retained as structured source",
+        "status": "draft",
+        "experimental": true,
+        "date": "2026-10-23",
+        "publisher": "ezmedicationinput contributors",
+        "description": "Original unmerged extension retained as structured source. Uses named typed extensions; JSON text payloads are not emitted.",
+        "fhirVersion": "5.0.0",
+        "kind": "complex-type",
+        "abstract": false,
+        "context": [
+          {
+            "type": "element",
+            "expression": "Element"
+          }
+        ],
+        "type": "Extension",
+        "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+        "derivation": "constraint",
+        "differential": {
+          "element": [
+            {
+              "id": "Extension",
+              "path": "Extension",
+              "min": 0,
+              "max": "1",
+              "isModifier": false
+            },
+            {
+              "id": "Extension.url",
+              "path": "Extension.url",
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source"
+            },
+            {
+              "id": "Extension.value[x]",
+              "path": "Extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension",
+              "path": "Extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step",
+      "resource": {
+        "resourceType": "StructureDefinition",
+        "id": "medication-retained-course-step",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step",
+        "version": "0.2.0-ez.0",
+        "name": "MedicationRetainedCourseStep",
+        "title": "Unmatched typed course step retained as source",
+        "status": "draft",
+        "experimental": true,
+        "date": "2026-10-23",
+        "publisher": "ezmedicationinput contributors",
+        "description": "Unmatched typed course step retained as source. Uses named typed extensions; JSON text payloads are not emitted.",
+        "fhirVersion": "5.0.0",
+        "kind": "complex-type",
+        "abstract": false,
+        "context": [
+          {
+            "type": "element",
+            "expression": "Element"
+          }
+        ],
+        "type": "Extension",
+        "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+        "derivation": "constraint",
+        "differential": {
+          "element": [
+            {
+              "id": "Extension",
+              "path": "Extension",
+              "min": 0,
+              "max": "1",
+              "isModifier": false
+            },
+            {
+              "id": "Extension.url",
+              "path": "Extension.url",
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step"
+            },
+            {
+              "id": "Extension.value[x]",
+              "path": "Extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension",
+              "path": "Extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:id",
+              "path": "Extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:id.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:id.extension",
+              "path": "Extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:id.value[x]",
+              "path": "Extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:extension",
+              "path": "Extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:extension.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:extension.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:extension.extension",
+              "path": "Extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:modifierExtension",
+              "path": "Extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:modifierExtension.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:start",
+              "path": "Extension.extension",
+              "sliceName": "start",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "start"
+            },
+            {
+              "id": "Extension.extension:start.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension",
+              "path": "Extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:start.extension:id",
+              "path": "Extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:id.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:start.extension:id.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:id.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:extension",
+              "path": "Extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:start.extension:extension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:start.extension:extension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:extension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:start.extension:modifierExtension",
+              "path": "Extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:start.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:start.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:start.extension:contextReference",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextReference",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextReference.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextReference"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextReference.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextReference.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Reference"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:contextDefinition",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextDefinition",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextDefinition.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextDefinition"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextDefinition.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextDefinition.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "canonical"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:contextPath",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextPath",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextPath.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextPath"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextPath.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextPath.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:contextCode",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextCode",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextCode.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextCode"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextCode.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:contextCode.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetDuration",
+              "path": "Extension.extension.extension",
+              "sliceName": "offsetDuration",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetDuration.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "offsetDuration"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetDuration.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetDuration.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetRange",
+              "path": "Extension.extension.extension",
+              "sliceName": "offsetRange",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetRange.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "offsetRange"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetRange.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:offsetRange.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Range"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:text",
+              "path": "Extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:text.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:start.extension:text.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:text.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:empty",
+              "path": "Extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:empty.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:start.extension:empty.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:empty.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:emptyArray",
+              "path": "Extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:emptyArray.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:start.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField",
+              "path": "Extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:start.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:end",
+              "path": "Extension.extension",
+              "sliceName": "end",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "end"
+            },
+            {
+              "id": "Extension.extension:end.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension",
+              "path": "Extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:end.extension:id",
+              "path": "Extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:id.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:end.extension:id.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:id.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:extension",
+              "path": "Extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:end.extension:extension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:end.extension:extension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:extension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:end.extension:modifierExtension",
+              "path": "Extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:end.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:end.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:end.extension:contextReference",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextReference",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextReference.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextReference"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextReference.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextReference.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Reference"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:contextDefinition",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextDefinition",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextDefinition.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextDefinition"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextDefinition.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextDefinition.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "canonical"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:contextPath",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextPath",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextPath.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextPath"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextPath.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextPath.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:contextCode",
+              "path": "Extension.extension.extension",
+              "sliceName": "contextCode",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextCode.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "contextCode"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextCode.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:contextCode.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetDuration",
+              "path": "Extension.extension.extension",
+              "sliceName": "offsetDuration",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetDuration.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "offsetDuration"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetDuration.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetDuration.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetRange",
+              "path": "Extension.extension.extension",
+              "sliceName": "offsetRange",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetRange.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "offsetRange"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetRange.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:offsetRange.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Range"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:text",
+              "path": "Extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:text.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:end.extension:text.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:text.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:empty",
+              "path": "Extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:empty.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:end.extension:empty.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:empty.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:emptyArray",
+              "path": "Extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:emptyArray.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:end.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField",
+              "path": "Extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:end.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:count",
+              "path": "Extension.extension",
+              "sliceName": "count",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:count.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "count"
+            },
+            {
+              "id": "Extension.extension:count.extension",
+              "path": "Extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:count.value[x]",
+              "path": "Extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "integer"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component",
+              "path": "Extension.extension",
+              "sliceName": "component",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "component"
+            },
+            {
+              "id": "Extension.extension:component.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension",
+              "path": "Extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:id",
+              "path": "Extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:id.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:component.extension:id.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:id.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:extension",
+              "path": "Extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:extension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:component.extension:extension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:extension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:modifierExtension",
+              "path": "Extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:component.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:text",
+              "path": "Extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:text.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:component.extension:text.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:text.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:patientInstruction",
+              "path": "Extension.extension.extension",
+              "sliceName": "patientInstruction",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:patientInstruction.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "patientInstruction"
+            },
+            {
+              "id": "Extension.extension:component.extension:patientInstruction.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:patientInstruction.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:timing",
+              "path": "Extension.extension.extension",
+              "sliceName": "timing",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:timing.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "timing"
+            },
+            {
+              "id": "Extension.extension:component.extension:timing.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:timing.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Timing"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:route",
+              "path": "Extension.extension.extension",
+              "sliceName": "route",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:route.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "route"
+            },
+            {
+              "id": "Extension.extension:component.extension:route.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:route.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:site",
+              "path": "Extension.extension.extension",
+              "sliceName": "site",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:site.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "site"
+            },
+            {
+              "id": "Extension.extension:component.extension:site.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:site.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableReference"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:method",
+              "path": "Extension.extension.extension",
+              "sliceName": "method",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:method.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "method"
+            },
+            {
+              "id": "Extension.extension:component.extension:method.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:method.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:additionalInstruction",
+              "path": "Extension.extension.extension",
+              "sliceName": "additionalInstruction",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:additionalInstruction.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "additionalInstruction"
+            },
+            {
+              "id": "Extension.extension:component.extension:additionalInstruction.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:additionalInstruction.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeeded",
+              "path": "Extension.extension.extension",
+              "sliceName": "asNeeded",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeeded.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "asNeeded"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeeded.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeeded.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeededFor",
+              "path": "Extension.extension.extension",
+              "sliceName": "asNeededFor",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeededFor.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "asNeededFor"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeededFor.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:asNeededFor.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition",
+              "path": "Extension.extension.extension",
+              "sliceName": "condition",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "condition"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:id",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:id.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:id.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:id.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:extension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:extension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:extension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:extension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:modifierExtension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:code",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "code",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:code.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "code"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:code.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:code.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:details",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "details",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:details.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "details"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:details.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:details.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:operation",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "operation",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:operation.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "operation"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:operation.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:operation.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueBoolean",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueBoolean",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueBoolean.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueBoolean"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueBoolean.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueBoolean.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueQuantity",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueQuantity",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueQuantity.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueQuantity"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueQuantity.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueQuantity.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "For an R6 approximate comparator, quantity (valueQuantity) and comparator (valueCode) are nested rather than putting an R6-only comparator into R5 Quantity."
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueString",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueString",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueString.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueString"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueString.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:valueString.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:text",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:text.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:text.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:text.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:empty",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:empty.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:empty.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:empty.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:emptyArray",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:emptyArray.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:condition.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety",
+              "path": "Extension.extension.extension",
+              "sliceName": "safety",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "safety"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:id",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:id.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:id.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:id.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:extension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:extension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:extension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:extension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:modifierExtension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:ifExceeded",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "ifExceeded",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:ifExceeded.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "ifExceeded"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:ifExceeded.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:ifExceeded.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "doseLimit",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "doseLimit"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:id",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:id.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:id.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:id.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:extension.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:extension.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:extension.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:modifierExtension",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:scope",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "scope",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:scope.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "scope"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:scope.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:scope.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:period",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "period",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:period.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "period"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:period.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:period.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueQuantity",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "valueQuantity",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueQuantity.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "valueQuantity"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueQuantity.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueQuantity.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "For an R6 approximate comparator, quantity (valueQuantity) and comparator (valueCode) are nested rather than putting an R6-only comparator into R5 Quantity."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueInteger",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "valueInteger",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueInteger.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "valueInteger"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueInteger.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueInteger.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "integer"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueExpression",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "valueExpression",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueExpression.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "valueExpression"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueExpression.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:valueExpression.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Expression"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:text",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:text.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:text.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:text.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:empty",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:empty.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:empty.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:empty.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:emptyArray",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:emptyArray.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:doseLimit.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:empty",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:empty.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:empty.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:empty.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:emptyArray",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:emptyArray.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:safety.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate",
+              "path": "Extension.extension.extension",
+              "sliceName": "doseAndRate",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "doseAndRate"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:id",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:id.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:id.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:id.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:extension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:extension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:extension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:extension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:modifierExtension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:type",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "type",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:type.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "type"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:type.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:type.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "CodeableConcept"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseRange",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "doseRange",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseRange.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "doseRange"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseRange.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseRange.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Range"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseQuantity",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "doseQuantity",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseQuantity.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "doseQuantity"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseQuantity.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseQuantity.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseExpression",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "doseExpression",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseExpression.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "doseExpression"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseExpression.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:doseExpression.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Expression"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRatio",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "rateRatio",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRatio.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "rateRatio"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRatio.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRatio.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Ratio"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRange",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "rateRange",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRange.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "rateRange"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRange.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateRange.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Range"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateQuantity",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "rateQuantity",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateQuantity.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "rateQuantity"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateQuantity.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateQuantity.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateExpression",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "rateExpression",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateExpression.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "rateExpression"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateExpression.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:rateExpression.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Expression"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:empty",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:empty.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:empty.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:empty.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:emptyArray",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:emptyArray.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:doseAndRate.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:component.extension:empty",
+              "path": "Extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:empty.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:component.extension:empty.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:empty.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:emptyArray",
+              "path": "Extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:emptyArray.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:component.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField",
+              "path": "Extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:component.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:safety",
+              "path": "Extension.extension",
+              "sliceName": "safety",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "safety"
+            },
+            {
+              "id": "Extension.extension:safety.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension",
+              "path": "Extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:id",
+              "path": "Extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:id.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:safety.extension:id.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:id.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:extension",
+              "path": "Extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:extension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:safety.extension:extension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:extension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:safety.extension:modifierExtension",
+              "path": "Extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:safety.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:safety.extension:ifExceeded",
+              "path": "Extension.extension.extension",
+              "sliceName": "ifExceeded",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:ifExceeded.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "ifExceeded"
+            },
+            {
+              "id": "Extension.extension:safety.extension:ifExceeded.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:ifExceeded.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit",
+              "path": "Extension.extension.extension",
+              "sliceName": "doseLimit",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "doseLimit"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:id",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "id",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:id.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "id"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:id.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:id.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:extension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "extension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:extension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "extension"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:extension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:extension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:modifierExtension",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "modifierExtension",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:modifierExtension.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "modifierExtension"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:modifierExtension.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:modifierExtension.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 1,
+              "max": "*",
+              "definition": "Nested structured content. Original extension children retain their own URL and native value[x]. Recursive predicate operands use the parent predicate shape; no serialized strings."
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:scope",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "scope",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:scope.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "scope"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:scope.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:scope.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:period",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "period",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:period.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "period"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:period.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:period.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueQuantity",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueQuantity",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueQuantity.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueQuantity"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueQuantity.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Quantity"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueQuantity.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "For an R6 approximate comparator, quantity (valueQuantity) and comparator (valueCode) are nested rather than putting an R6-only comparator into R5 Quantity."
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueInteger",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueInteger",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueInteger.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueInteger"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueInteger.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueInteger.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "integer"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueExpression",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "valueExpression",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueExpression.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "valueExpression"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueExpression.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:valueExpression.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "Expression"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:text",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "text",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:text.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "text"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:text.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:text.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:empty",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:empty.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:empty.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:empty.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:emptyArray",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:emptyArray.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:doseLimit.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:safety.extension:empty",
+              "path": "Extension.extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:empty.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:safety.extension:empty.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:empty.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:emptyArray",
+              "path": "Extension.extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:emptyArray.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:safety.extension:emptyArray.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:emptyArray.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField",
+              "path": "Extension.extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension",
+              "path": "Extension.extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:safety.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            },
+            {
+              "id": "Extension.extension:sequence",
+              "path": "Extension.extension",
+              "sliceName": "sequence",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:sequence.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "sequence"
+            },
+            {
+              "id": "Extension.extension:sequence.extension",
+              "path": "Extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:sequence.value[x]",
+              "path": "Extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "integer"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:empty",
+              "path": "Extension.extension",
+              "sliceName": "empty",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:empty.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "empty"
+            },
+            {
+              "id": "Extension.extension:empty.extension",
+              "path": "Extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:empty.value[x]",
+              "path": "Extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "boolean"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:emptyArray",
+              "path": "Extension.extension",
+              "sliceName": "emptyArray",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:emptyArray.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "emptyArray"
+            },
+            {
+              "id": "Extension.extension:emptyArray.extension",
+              "path": "Extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:emptyArray.value[x]",
+              "path": "Extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "code"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:retainedField",
+              "path": "Extension.extension",
+              "sliceName": "retainedField",
+              "min": 0,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:retainedField.url",
+              "path": "Extension.extension.url",
+              "fixedUri": "retainedField"
+            },
+            {
+              "id": "Extension.extension:retainedField.value[x]",
+              "path": "Extension.extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension",
+              "path": "Extension.extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:name",
+              "path": "Extension.extension.extension",
+              "sliceName": "name",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:name.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "name"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:name.extension",
+              "path": "Extension.extension.extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:name.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:value",
+              "path": "Extension.extension.extension",
+              "sliceName": "value",
+              "min": 0,
+              "max": "1"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:value.url",
+              "path": "Extension.extension.extension.url",
+              "fixedUri": "value"
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:value.value[x]",
+              "path": "Extension.extension.extension.value[x]",
+              "min": 0,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                },
+                {
+                  "code": "boolean"
+                },
+                {
+                  "code": "decimal"
+                }
+              ]
+            },
+            {
+              "id": "Extension.extension:retainedField.extension:value.extension",
+              "path": "Extension.extension.extension.extension",
+              "min": 0,
+              "max": "*",
+              "definition": "Lossless retained field: primitive value[x], or kind=object/array/null with typed field(name,value)/item children. Known clinical fields never use this fallback."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence",
+      "resource": {
+        "resourceType": "StructureDefinition",
+        "id": "medication-retained-r5-sequence",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence",
+        "version": "0.2.0-ez.0",
+        "name": "MedicationRetainedR5Sequence",
+        "title": "Original editable R5 sequence",
+        "status": "draft",
+        "experimental": true,
+        "date": "2026-10-23",
+        "publisher": "ezmedicationinput contributors",
+        "description": "Original editable R5 sequence. Uses named typed extensions; JSON text payloads are not emitted.",
+        "fhirVersion": "5.0.0",
+        "kind": "complex-type",
+        "abstract": false,
+        "context": [
+          {
+            "type": "element",
+            "expression": "Element"
+          }
+        ],
+        "type": "Extension",
+        "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+        "derivation": "constraint",
+        "differential": {
+          "element": [
+            {
+              "id": "Extension",
+              "path": "Extension",
+              "min": 0,
+              "max": "1",
+              "isModifier": false
+            },
+            {
+              "id": "Extension.url",
+              "path": "Extension.url",
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence"
+            },
+            {
+              "id": "Extension.extension",
+              "path": "Extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.value[x]",
+              "path": "Extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "decimal"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning",
+      "resource": {
+        "resourceType": "StructureDefinition",
+        "id": "medication-course-reconciliation-warning",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning",
+        "version": "0.2.0-ez.0",
+        "name": "MedicationCourseReconciliationWarning",
+        "title": "Course reconciliation note",
+        "status": "draft",
+        "experimental": true,
+        "date": "2026-10-23",
+        "publisher": "ezmedicationinput contributors",
+        "description": "Course reconciliation note. Uses named typed extensions; JSON text payloads are not emitted.",
+        "fhirVersion": "5.0.0",
+        "kind": "complex-type",
+        "abstract": false,
+        "context": [
+          {
+            "type": "element",
+            "expression": "Element"
+          }
+        ],
+        "type": "Extension",
+        "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+        "derivation": "constraint",
+        "differential": {
+          "element": [
+            {
+              "id": "Extension",
+              "path": "Extension",
+              "min": 0,
+              "max": "1",
+              "isModifier": false
+            },
+            {
+              "id": "Extension.url",
+              "path": "Extension.url",
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-warning"
+            },
+            {
+              "id": "Extension.extension",
+              "path": "Extension.extension",
+              "max": "0"
+            },
+            {
+              "id": "Extension.value[x]",
+              "path": "Extension.value[x]",
+              "min": 1,
+              "max": "1",
+              "type": [
+                {
+                  "code": "string"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "fullUrl": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
+      "resource": {
+        "resourceType": "StructureDefinition",
+        "id": "medication-unrecognized-bridge-field",
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
+        "version": "0.2.0-ez.0",
+        "name": "MedicationUnrecognizedBridgeField",
+        "title": "Unrecognized typed bridge child retained in its source context",
+        "status": "draft",
+        "experimental": true,
+        "date": "2026-10-23",
+        "publisher": "ezmedicationinput contributors",
+        "description": "Unrecognized typed bridge child retained in its source context. Uses named typed extensions; JSON text payloads are not emitted.",
+        "fhirVersion": "5.0.0",
+        "kind": "complex-type",
+        "abstract": false,
+        "context": [
+          {
+            "type": "element",
+            "expression": "Element"
+          }
+        ],
+        "type": "Extension",
+        "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+        "derivation": "constraint",
+        "differential": {
+          "element": [
+            {
+              "id": "Extension",
+              "path": "Extension",
+              "min": 0,
+              "max": "1",
+              "isModifier": false
+            },
+            {
+              "id": "Extension.url",
+              "path": "Extension.url",
+              "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field"
+            },
+            {
+              "id": "Extension.value[x]",
+              "path": "Extension.value[x]",
+              "max": "0"
+            },
+            {
+              "id": "Extension.extension",
+              "path": "Extension.extension",
+              "slicing": {
+                "discriminator": [
+                  {
+                    "type": "value",
+                    "path": "url"
+                  }
+                ],
+                "ordered": false,
+                "rules": "open"
+              },
+              "min": 1,
+              "max": "*"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

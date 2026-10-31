@@ -1,4 +1,52 @@
 {
+  "clockSuffixSequences": [["น", "."]],
+  "clinicalWeekdayAbbreviations": {
+    "mwf": ["mon", "wed", "fri"],
+    "m/w/f": ["mon", "wed", "fri"]
+  },
+  "cycleCountHeads": [
+    "cycle",
+    "cycles",
+    "รอบ"
+  ],
+  "measurementNameAliases": {
+    "น้ำตาล": "glucose",
+    "ระดับน้ำตาล": "glucose",
+    "น้ำตาลในเลือด": "glucose"
+  },
+  "doseTargetSlotHeads": [
+    "มื้อ"
+  ],
+  "doseTargetQuantifiers": {
+    "all": "all",
+    "both": "both",
+    "ทุก": "all",
+    "ทั้งสอง": "both"
+  },
+  "doseTargetEventMembers": {
+    "MORN": [
+      "MORN",
+      "MORN.early",
+      "MORN.late",
+      "CM",
+      "ACM",
+      "PCM"
+    ],
+    "NOON": [
+      "NOON",
+      "CD",
+      "ACD",
+      "PCD"
+    ],
+    "EVE": [
+      "EVE",
+      "EVE.early",
+      "EVE.late",
+      "CV",
+      "ACV",
+      "PCV"
+    ]
+  },
   "siteAnchors": [
     "to",
     "in",
@@ -10,6 +58,56 @@
     "ที่",
     "บริเวณ"
   ],
+  "siteRestrictionPredicateIntroducers": [
+    {
+      "parts": [
+        "there",
+        "is"
+      ],
+      "form": "existential"
+    },
+    {
+      "parts": [
+        "there",
+        "are"
+      ],
+      "form": "existential"
+    }
+  ],
+  "siteRestrictionPredicates": {
+    "affected": {
+      "lemma": "affected",
+      "form": "state",
+      "i18n": {
+        "en": "affected",
+        "th": "ได้รับผลกระทบ"
+      }
+    },
+    "irritated": {
+      "lemma": "irritated",
+      "form": "state",
+      "i18n": {
+        "en": "irritated",
+        "th": "ระคายเคือง"
+      }
+    },
+    "bruised": {
+      "lemma": "bruised",
+      "form": "state",
+      "i18n": {
+        "en": "there is bruising",
+        "th": "ช้ำ"
+      }
+    },
+    "ช้ำ": {
+      "lemma": "bruised",
+      "form": "state",
+      "i18n": {
+        "en": "there is bruising",
+        "th": "ช้ำ"
+      }
+    }
+  },
   "siteFillers": [
     "the",
     "a",
@@ -114,6 +212,7 @@
     "per",
     "per-dose",
     "to",
+    "from",
     "in",
     "into",
     "at",
@@ -121,9 +220,11 @@
     "an",
     "the",
     "of",
+    "either",
     "and",
     "or",
     "on",
+    "over",
     "every",
     "then",
     ",",
@@ -136,7 +237,8 @@
   "nonSiteAnchoredPhrases": [
     "empty stomach",
     "least",
-    "most"
+    "most",
+    "same time"
   ],
   "routeBlockedByFollowingPartitiveHeads": [
     "top"
@@ -158,6 +260,14 @@
     "whenever"
   ],
   "prnContextualReasonLeads": [
+    {
+      "parts": [
+        "only",
+        "if"
+      ],
+      "canonical": "if",
+      "requiresKnownReason": false
+    },
     {
       "parts": [
         "เวลา",
@@ -225,6 +335,34 @@
   "compoundDoseUnits": [
     {
       "head": "cm",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimeter",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimeters",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimetre",
+      "tails": [],
+      "requiresSiteContext": true,
+      "requiresProductContext": true,
+      "unit": "cm line"
+    },
+    {
+      "head": "centimetres",
       "tails": [],
       "requiresSiteContext": true,
       "requiresProductContext": true,
@@ -516,6 +654,19 @@
       "unit": "patch"
     }
   ],
+  "qualitativeDoseModifiers": [
+    "thin",
+    "thick",
+    "small"
+  ],
+  "qualitativeDoseUnits": [
+    "ribbon",
+    "strip",
+    "line",
+    "film",
+    "layer",
+    "coat"
+  ],
   "implicitSingleDoseUnits": [
     "pea-sized amount",
     "finger length"
@@ -526,6 +677,7 @@
   },
   "doseFractionWords": {
     "half": 0.5,
+    "½": 0.5,
     "quarter": 0.25,
     "fourth": 0.25,
     "third": 0.3333333333333333,
@@ -536,10 +688,7 @@
     "ninth": 0.1111111111111111,
     "tenth": 0.1,
     "eleventh": 0.09090909090909091,
-    "twelfth": 0.08333333333333333,
-    "whole": 1,
-    "entire": 1,
-    "full": 1
+    "twelfth": 0.08333333333333333
   },
   "doseFractionDenominatorWords": {
     "half": 0.5,
@@ -567,6 +716,13 @@
     "twelfth": 0.08333333333333333,
     "twelfths": 0.08333333333333333
   },
+  "doseAdditiveQuantityConnectors": [
+    "and"
+  ],
+  "doseFractionArticles": [
+    "a",
+    "an"
+  ],
   "doseNumberWords": {
     "a": 1,
     "an": 1,
@@ -587,7 +743,10 @@
     "of",
     "a",
     "an",
-    "the"
+    "the",
+    "whole",
+    "entire",
+    "full"
   ],
   "millionDoseMultiplierTokens": [
     "m"
@@ -630,10 +789,28 @@
   ],
   "maximumCountLeadSequences": [
     [
+      "at",
+      "most"
+    ],
+    [
+      "up",
+      "to"
+    ],
+    [
       "max"
     ],
     [
       "maximum"
+    ],
+    [
+      "do",
+      "not",
+      "exceed"
+    ],
+    [
+      "no",
+      "more",
+      "than"
     ],
     [
       "ไม่",
@@ -673,6 +850,23 @@
       "periodUnit": "d"
     }
   ],
+  "occurrenceCountModifiers": [
+    "additional",
+    "more",
+    "further",
+    "another"
+  ],
+  "maximumPeriodPrepositions": [
+    "in",
+    "within",
+    "per",
+    "/",
+    "a"
+  ],
+  "maximumPeriodModifiers": [
+    "rolling",
+    "consecutive"
+  ],
   "occurrenceCountWords": [
     "dose",
     "doses",
@@ -696,8 +890,164 @@
     "nine": 9,
     "ten": 10,
     "eleven": 11,
-    "twelve": 12
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "ninety": 90
   },
+  "courseContinuationModifiers": [
+    "next",
+    "following"
+  ],
+  "ordinalWeekStageHeaders": {
+    "unitTokens": [
+      "week"
+    ],
+    "ordinalFillers": [
+      "the",
+      "at",
+      "ที่"
+    ],
+    "ordinalValues": {
+      "first": 1,
+      "one": 1,
+      "แรก": 1,
+      "second": 2,
+      "two": 2,
+      "third": 3,
+      "three": 3,
+      "fourth": 4,
+      "four": 4
+    },
+    "openEndedSequences": [
+      [
+        "onward"
+      ],
+      [
+        "onwards"
+      ],
+      [
+        "forward"
+      ],
+      [
+        "forwards"
+      ],
+      [
+        "ต่อ",
+        "ไป"
+      ],
+      [
+        "เป็นต้น",
+        "ไป"
+      ]
+    ]
+  },
+  "calendarComplementDayModifiers": [
+    "other",
+    "remaining",
+    "อื่น",
+    "อื่นๆ"
+  ],
+  "calendarComplementDeterminers": [
+    "the",
+    "all"
+  ],
+  "calendarUniversalDayQuantifiers": [
+    "all",
+    "every",
+    "each"
+  ],
+  "openEndedCourseEndConditions": [
+    {
+      "kind": "next-event",
+      "modifiers": [
+        "next"
+      ],
+      "heads": [
+        "appointment",
+        "visit"
+      ],
+      "code": "1287351008",
+      "display": "Until next appointment",
+      "i18n": {
+        "th": "ใช้ยาจนถึงการนัดครั้งถัดไป"
+      }
+    },
+    {
+      "kind": "state-change",
+      "subjects": [
+        "symptom",
+        "symptoms"
+      ],
+      "predicates": [
+        "improve",
+        "improves"
+      ],
+      "code": "1287353006",
+      "display": "Until symptoms improve",
+      "i18n": {
+        "th": "ใช้ยาจนกว่าอาการจะดีขึ้น"
+      }
+    },
+    {
+      "kind": "state-change",
+      "subjects": [
+        "itching"
+      ],
+      "predicates": [
+        "resolves",
+        "resolve",
+        "subsides"
+      ],
+      "code": null,
+      "display": "Until itching resolves",
+      "i18n": {
+        "th": "ใช้ยาจนกว่าอาการคันจะหาย"
+      }
+    },
+    {
+      "kind": "state-change",
+      "subjects": [
+        "rash"
+      ],
+      "predicates": [
+        "resolves",
+        "resolve",
+        "subsides"
+      ],
+      "code": null,
+      "display": "Until rash resolves",
+      "i18n": {
+        "th": "ใช้ยาจนกว่าผื่นจะหาย"
+      }
+    },
+    {
+      "kind": "state-change",
+      "subjects": [
+        "redness"
+      ],
+      "predicates": [
+        "improves",
+        "resolves",
+        "subsides"
+      ],
+      "code": null,
+      "display": "Until redness improves",
+      "i18n": {
+        "th": "ใช้ยาจนกว่ารอยแดงจะดีขึ้น"
+      }
+    }
+  ],
   "frequencyTimesWords": [
     "time",
     "times",
@@ -715,10 +1065,44 @@
     "หรือ"
   ],
   "singleOccurrencePhrases": [
-    ["once", "only"],
-    ["only", "once"],
-    ["one", "time", "only"],
-    ["only", "one", "time"]
+    [
+      "once",
+      "only"
+    ],
+    [
+      "only",
+      "once"
+    ],
+    [
+      "one",
+      "time",
+      "only"
+    ],
+    [
+      "only",
+      "one",
+      "time"
+    ],
+    [
+      "as",
+      "a",
+      "single",
+      "dose"
+    ],
+    [
+      "as",
+      "one",
+      "dose"
+    ],
+    [
+      "a",
+      "single",
+      "dose"
+    ],
+    [
+      "single",
+      "dose"
+    ]
   ],
   "frequencyAdverbUnits": {
     "daily": "Day",
@@ -760,6 +1144,16 @@
     "shake",
     "mix"
   ],
+  "workflowEventPhaseVerbs": [
+    "end",
+    "ends",
+    "finish",
+    "finishes",
+    "start",
+    "starts",
+    "begin",
+    "begins"
+  ],
   "workflowNouns": [
     "bowel",
     "change",
@@ -787,6 +1181,55 @@
     ",",
     "and"
   ],
+  "thaiDaypartListSeparators": [
+    "-",
+    "/"
+  ],
+  "phaseAdjustmentLeadSequences": [
+    [
+      "resume"
+    ],
+    [
+      "restart"
+    ],
+    [
+      "reduce",
+      "to"
+    ],
+    [
+      "decrease",
+      "to"
+    ],
+    [
+      "lower",
+      "to"
+    ],
+    [
+      "taper",
+      "to"
+    ],
+    [
+      "increase",
+      "to"
+    ],
+    [
+      "raise",
+      "to"
+    ],
+    [
+      "เพิ่ม",
+      "เป็น"
+    ],
+    [
+      "ลด",
+      "เหลือ"
+    ],
+    [
+      "ลด",
+      "ลง",
+      "เหลือ"
+    ]
+  ],
   "medicationObjectFillers": [
     "medication",
     "medicine",
@@ -797,11 +1240,41 @@
     "@",
     "at"
   ],
+  "timingAnaphoraPhrases": [
+    [
+      "at",
+      "the",
+      "same",
+      "times"
+    ],
+    [
+      "at",
+      "same",
+      "times"
+    ],
+    [
+      "at",
+      "the",
+      "same",
+      "time"
+    ],
+    [
+      "at",
+      "same",
+      "time"
+    ],
+    [
+      "at",
+      "those",
+      "times"
+    ]
+  ],
   "eventPrepositions": [
     "in",
     "at",
     "on",
-    "every"
+    "every",
+    "upon"
   ],
   "eventArticleTokens": [
     "the"
@@ -889,9 +1362,13 @@
     "half": 0.5,
     "ครึ่ง": 0.5
   },
+  "relativeIntervalTrailingRelations": {
+    "later": "after"
+  },
   "eventOffsetArticles": [
     "a",
-    "an"
+    "an",
+    "another"
   ],
   "instructionLeadingSeparators": [
     ",",
@@ -901,6 +1378,7 @@
     "-"
   ],
   "instructionStartWords": [
+    "as",
     "avoid",
     "can",
     "could",
@@ -1024,6 +1502,9 @@
     "left",
     "right"
   ],
+  "productSourcePrepositions": [
+    "from"
+  ],
   "productFormModifiers": [
     "new",
     "replacement",
@@ -1031,19 +1512,31 @@
     "old"
   ],
   "bodySiteAttributiveModifiers": [
+    "whole",
+    "entire",
     "dry",
     "clean",
+    "open",
     "hairless",
     "intact",
     "wet",
     "moist"
   ],
   "bodySiteAttributiveModifierI18n": {
+    "whole": {
+      "th": "ทั่วทั้ง"
+    },
+    "entire": {
+      "th": "ทั่วทั้ง"
+    },
     "dry": {
       "th": "แห้ง"
     },
     "clean": {
       "th": "สะอาด"
+    },
+    "open": {
+      "th": "เปิด"
     },
     "hairless": {
       "th": "ไม่มีขน"
@@ -1063,6 +1556,7 @@
     "must"
   ],
   "freeTextDirectiveStarts": [
+    "as",
     "avoid",
     "do",
     "don't",
@@ -1132,6 +1626,8 @@
         "while",
         "awake"
       ],
+      "when": "Wake",
+      "windowEnd": "Before Sleep",
       "text": "while awake",
       "i18n": {
         "th": "ขณะตื่น"
@@ -1143,6 +1639,8 @@
         "awake",
         "only"
       ],
+      "when": "Wake",
+      "windowEnd": "Before Sleep",
       "text": "while awake only",
       "i18n": {
         "th": "เฉพาะขณะตื่น"
@@ -1154,6 +1652,8 @@
         "while",
         "awake"
       ],
+      "when": "Wake",
+      "windowEnd": "Before Sleep",
       "text": "while awake only",
       "i18n": {
         "th": "เฉพาะขณะตื่น"
@@ -1278,6 +1778,41 @@
   ],
   "actionDirectivePrefixes": [
     {
+      "parts": ["ระวัง", "อย่า", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": ["อย่า", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": ["avoid", "do"],
+      "polarity": "negate",
+      "complement": "contact-clause"
+    },
+    {
+      "parts": [
+        "should-not",
+        "จะ"
+      ],
+      "polarity": "negate",
+      "modality": "should"
+    },
+    {
+      "parts": [
+        "อย่า"
+      ],
+      "polarity": "negate"
+    },
+    {
+      "parts": [
+        "never"
+      ],
+      "polarity": "negate"
+    },
+    {
       "parts": [
         "do",
         "not"
@@ -1343,6 +1878,7 @@
       ]
     }
   ],
+  "courseDurationUnits": ["min", "h", "d", "wk", "mo", "a"],
   "instructionDurationUnits": {
     "second": "s",
     "seconds": "s",
@@ -1608,6 +2144,9 @@
     "and",
     "or"
   ],
+  "actionDiscourseConnectors": [
+    "but"
+  ],
   "actionCoordinationConnectorI18n": {
     "and": {
       "th": "และ"
@@ -1722,5 +2261,300 @@
         "th": "สระ"
       }
     }
+  },
+  "clockWindowFrames": [
+    [
+      "from",
+      "to"
+    ],
+    [
+      "from",
+      "until"
+    ],
+    [
+      "between",
+      "and"
+    ],
+    [
+      "ตั้งแต่",
+      "ถึง"
+    ],
+    [
+      "ระหว่าง",
+      "and"
+    ]
+  ],
+  "courseContinuationDurationHeads": [
+    "ต่อ"
+  ],
+  "phaseAdditionLeadSequences": [
+    [
+      "add"
+    ],
+    [
+      "เพิ่ม",
+      "additional"
+    ]
+  ],
+  "openEndedContinuationTokens": [
+    "thereafter",
+    "onward",
+    "onwards"
+  ],
+  "phaseDoseNouns": [
+    "dose",
+    "doses"
+  ],
+  "treatmentPeriodStartLeads": [
+    "from",
+    "starting",
+    "in",
+    "ใน"
+  ],
+  "treatmentPeriodBoundLeads": [
+    "for",
+    "during"
+  ],
+  "treatmentPeriodRestrictors": [
+    "only"
+  ],
+  "treatmentPeriodArticles": [
+    "the"
+  ],
+  "phaseTargetRestrictors": [
+    "only"
+  ],
+  "phaseTargetDeterminers": [
+    "the"
+  ],
+  "phaseTargetLinkers": [
+    "to",
+    "เป็น",
+    "เหลือ"
+  ],
+  "regimenSequenceConnectorPhrases": [
+    [
+      "after",
+      "that"
+    ],
+    [
+      "followed",
+      "by"
+    ],
+    [
+      "subsequently"
+    ],
+    [
+      "afterwards"
+    ],
+    [
+      "thereafter"
+    ],
+    [
+      "next",
+      "week"
+    ],
+    [
+      "ต่อ",
+      "ด้วย"
+    ],
+    [
+      "สัปดาห์",
+      "ถัด",
+      "ไป"
+    ]
+  ],
+  "activityDayAdjuncts": {
+    "negativeNounPrefixes": [
+      "non-"
+    ],
+    "negativeNounTokens": [
+      "non",
+      "ไม่"
+    ],
+    "dayRelativeTokens": [
+      "at"
+    ],
+    "dayTokens": [
+      "day",
+      "days"
+    ],
+    "frames": [
+      {
+        "parts": [
+          "only",
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "except",
+          "on"
+        ],
+        "dayFirst": false,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "except"
+        ],
+        "dayFirst": false,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "only",
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "only"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": false
+      },
+      {
+        "parts": [
+          "ยกเว้น",
+          "in"
+        ],
+        "dayFirst": true,
+        "exclude": true
+      },
+      {
+        "parts": [
+          "ยกเว้น"
+        ],
+        "dayFirst": true,
+        "exclude": true
+      }
+    ]
+  },
+  "doseTargetDaypartClockRanges": {
+    "MORN": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "AFT": {
+      "startHour": 12,
+      "endHour": 18
+    },
+    "EVE": {
+      "startHour": 18,
+      "endHour": 24
+    }
+  },
+  "doseTargetMeridiemClockRanges": {
+    "am": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "a.m.": {
+      "startHour": 0,
+      "endHour": 12
+    },
+    "pm": {
+      "startHour": 12,
+      "endHour": 24
+    },
+    "p.m.": {
+      "startHour": 12,
+      "endHour": 24
+    }
+  },
+  "circumstantialConditionLeads": [
+    [
+      "on",
+      "days",
+      "with"
+    ],
+    [
+      "on",
+      "days",
+      "when"
+    ]
+  ],
+  "calendarMonthDayFrames": {
+    "prefixes": [
+      [
+        "on",
+        "days"
+      ],
+      [
+        "on",
+        "day"
+      ],
+      [
+        "days"
+      ],
+      [
+        "day"
+      ],
+      [
+        "วัน",
+        "ที่"
+      ],
+      [
+        "วันที่"
+      ]
+    ],
+    "suffixes": [
+      [
+        "of",
+        "each",
+        "month"
+      ],
+      [
+        "of",
+        "every",
+        "month"
+      ],
+      [
+        "each",
+        "month"
+      ],
+      [
+        "every",
+        "month"
+      ],
+      [
+        "ของ",
+        "ทุกเดือน"
+      ],
+      [
+        "ทุกเดือน"
+      ]
+    ],
+    "rangeConnectors": [
+      "to",
+      "through",
+      "-",
+      "–"
+    ],
+    "listConnectors": [
+      "and",
+      ",",
+      "&",
+      "และ"
+    ]
   }
 }

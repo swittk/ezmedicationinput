@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseStrengthIntoRatio, parseStrength } from "../src/utils/strength";
+import { parseStrengthIntoRatio, parseStrength, parseStrengthComponents } from "../src/utils/strength";
 
 describe("parseStrength", () => {
     it("returns strengthQuantity for simple amounts", () => {
@@ -75,28 +75,34 @@ describe("parseStrengthIntoRatio", () => {
         expect(res?.denominator?.unit).toBe("mL");
     });
 
-    it("parses complex composite strengths (addition)", () => {
-        const res = parseStrengthIntoRatio("400 mg + 80 mg");
-        expect(res?.numerator?.value).toBe(480);
-        expect(res?.numerator?.unit).toBe("mg");
-        expect(res?.denominator?.value).toBe(1);
-        expect(res?.denominator?.unit).toBe("unit");
+    it("does not combine distinct medication ingredients: parses complex composite strengths (addition)", () => {
+        const input = "400 mg + 80 mg";
+        expect(parseStrengthIntoRatio(input)).toBeNull();
+        const components = parseStrengthComponents(input);
+        expect(components).toHaveLength(2);
+        expect(parseStrength(input).strengthComponents).toEqual(components);
+        expect(parseStrength(input).strengthQuantity).toBeUndefined();
+        expect(parseStrength(input).strengthRatio).toBeUndefined();
     });
 
-    it("parses composite ratio strengths with same denominator", () => {
-        const res = parseStrengthIntoRatio("400 mg/5mL + 80 mg/5mL");
-        expect(res?.numerator?.value).toBe(96);
-        expect(res?.numerator?.unit).toBe("mg");
-        expect(res?.denominator?.value).toBe(1);
-        expect(res?.denominator?.unit).toBe("mL");
+    it("does not combine distinct medication ingredients: parses composite ratio strengths with same denominator", () => {
+        const input = "400 mg/5mL + 80 mg/5mL";
+        expect(parseStrengthIntoRatio(input)).toBeNull();
+        const components = parseStrengthComponents(input);
+        expect(components).toHaveLength(2);
+        expect(parseStrength(input).strengthComponents).toEqual(components);
+        expect(parseStrength(input).strengthQuantity).toBeUndefined();
+        expect(parseStrength(input).strengthRatio).toBeUndefined();
     });
 
-    it("normalizes composite ratio strengths with different denominators", () => {
-        const res = parseStrengthIntoRatio("100 mg / 5 mL + 10 mg / 1 mL");
-        expect(res?.numerator?.value).toBe(30);
-        expect(res?.numerator?.unit).toBe("mg");
-        expect(res?.denominator?.value).toBe(1);
-        expect(res?.denominator?.unit).toBe("mL");
+    it("does not combine distinct medication ingredients: normalizes composite ratio strengths with different denominators", () => {
+        const input = "100 mg / 5 mL + 10 mg / 1 mL";
+        expect(parseStrengthIntoRatio(input)).toBeNull();
+        const components = parseStrengthComponents(input);
+        expect(components).toHaveLength(2);
+        expect(parseStrength(input).strengthComponents).toEqual(components);
+        expect(parseStrength(input).strengthQuantity).toBeUndefined();
+        expect(parseStrength(input).strengthRatio).toBeUndefined();
     });
 
     it("handles various mass units", () => {
@@ -141,18 +147,24 @@ describe("parseStrengthIntoRatio", () => {
         expect(res?.denominator?.value).toBe(1);
     });
 
-    it("handles leading/trailing whitespace in composite parts", () => {
-        const res = parseStrengthIntoRatio(" 400 mg / 5 mL + 80 mg / 5 mL ");
-        expect(res?.numerator?.value).toBe(96);
-        expect(res?.denominator?.value).toBe(1);
+    it("does not combine distinct medication ingredients: handles leading/trailing whitespace in composite parts", () => {
+        const input = " 400 mg / 5 mL + 80 mg / 5 mL ";
+        expect(parseStrengthIntoRatio(input)).toBeNull();
+        const components = parseStrengthComponents(input);
+        expect(components).toHaveLength(2);
+        expect(parseStrength(input).strengthComponents).toEqual(components);
+        expect(parseStrength(input).strengthQuantity).toBeUndefined();
+        expect(parseStrength(input).strengthRatio).toBeUndefined();
     });
 
-    it("handles mixed types (percentage + ratio) - theoretical", () => {
-        const res = parseStrengthIntoRatio("2% + 5 mg/mL");
-        expect(res?.numerator?.value).toBe(25);
-        expect(res?.numerator?.unit).toBe("mg");
-        expect(res?.denominator?.value).toBe(1);
-        expect(res?.denominator?.unit).toBe("mL");
+    it("does not combine distinct medication ingredients: handles mixed types (percentage + ratio) - theoretical", () => {
+        const input = "2% + 5 mg/mL";
+        expect(parseStrengthIntoRatio(input)).toBeNull();
+        const components = parseStrengthComponents(input);
+        expect(components).toHaveLength(2);
+        expect(parseStrength(input).strengthComponents).toEqual(components);
+        expect(parseStrength(input).strengthQuantity).toBeUndefined();
+        expect(parseStrength(input).strengthRatio).toBeUndefined();
     });
 
     it("handles mg/dL specifically", () => {

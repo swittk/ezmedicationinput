@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src/index";
+import { formatSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
 const SNOMED = "http://snomed.info/sct";
-const LOCAL_ACTION = "https://solublelabs.com/fhir/CodeSystem/medication-instruction-action";
 
 describe("Thai formatter human-review follow-up", () => {
   it("keeps mixed WHEN + negated IF safety scope out of PRN", () => {
     const parsed = parseSig("เมื่อนอนไม่หลับ ไม่ควรรับประทานหากมีอาการป่วย", { locale: "th" });
     const graph = parsed.meta.canonical.clauses[0]?.instructionGraph;
-    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
     expect(graph?.actions[0]).toMatchObject({ predicate: { lemma: "take" }, polarity: "negate", modality: "should" });
     expect(graph?.relations).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "when", text: "เมื่อนอนไม่หลับ" }),
@@ -95,14 +95,14 @@ describe("Thai formatter human-review follow-up", () => {
     expect(parsed.longText).toBe("รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง ตอนเช้า และ ตอนเย็น จำนวน 10 ครั้ง.");
   });
 
-  it("keeps patch-cut prohibition internally typed without inventing an external SNOMED mapping", () => {
+  it("keeps patch-cut prohibition negated with its standard action coding", () => {
     const parsed = parseSig("ห้ามตัดแผ่นแปะ", { locale: "th" });
     const action = parsed.meta.canonical.clauses[0]?.instructionGraph?.actions[0];
     expect(action).toMatchObject({ predicate: { lemma: "cut" }, polarity: "negate" });
     expect(action?.predicate.codings).toEqual([
-      expect.objectContaining({ system: LOCAL_ACTION, code: "cut" })
+      expect.objectContaining({ system: SNOMED, code: "360314001" })
     ]);
-    expect(action?.predicate.codings?.some((coding) => coding.system === SNOMED)).toBe(false);
+    expect(action?.predicate.codings?.some((coding) => coding.system?.startsWith("urn:ezmedicationinput:"))).toBe(false);
     expect(parsed.fhir.additionalInstruction).toEqual([{ text: "ห้ามตัดแผ่นแปะ" }]);
   });
 
@@ -211,7 +211,7 @@ describe("Thai formatter human-review follow-up", () => {
     const dosage: FhirDosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       route: { coding: [{ system: SNOMED, code: "26643006", display: "Oral route" }] },
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [{
         text: "ไข้สูง",
         coding: [{ system: SNOMED, code: "386661006", display: "Fever" }]

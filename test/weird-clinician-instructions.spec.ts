@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import cases from "./weird-clinician-cases.json";
-import {
-  TIMING_FREQUENCY_MIN_EXTENSION_URL,
-  formatSig,
-  fromFhirDosage,
-  parseSig,
-  AdviceArgumentRole,
-  type AdviceFrame,
-  type ParseBatchResult
-} from "../src/index";
+import { TIMING_FREQUENCY_MIN_EXTENSION_URL, formatSig, fromFhirDosage, AdviceArgumentRole, type AdviceFrame, type ParseBatchResult } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
 
 interface WeirdCase {
   name: string;
@@ -96,7 +89,7 @@ describe("weird TH/EN clinician instructions", () => {
       if (value.frequency !== undefined) expect(clause?.schedule?.frequency, "frequency").toBe(value.frequency);
       if (value.frequencyMax !== undefined) expect(clause?.schedule?.frequencyMax, "frequencyMax").toBe(value.frequencyMax);
       if (value.when) expect(clause?.schedule?.when, "event timing").toEqual(value.when);
-      if (value.noPrn) expect(result.fhir.asNeededBoolean, "must not become PRN").not.toBe(true);
+      if (value.noPrn) expect(result.fhir.asNeeded, "must not become PRN").not.toBe(true);
       if (value.prnReason) expect(prnText(result).toLowerCase(), "PRN reason").toContain(value.prnReason.toLowerCase());
       if (value.warningContains) expect(additionalText(result).toLowerCase(), "warning text").toContain(value.warningContains.toLowerCase());
       if (value.forbidDose) expect(result.fhir.doseAndRate, "frequency range must not become a dose").toBeUndefined();
@@ -141,12 +134,12 @@ describe("weird TH/EN clinician instructions", () => {
       "หยอดสองตาวันละครั้งก่อนนอน หากมีอาการเคืองตาควรปรึกษาแพทย์",
       { locale: "th" }
     );
-    expect(parsed.fhir.asNeededBoolean).not.toBe(true);
+    expect(parsed.fhir.asNeeded).not.toBe(true);
     expect(parsed.fhir.additionalInstruction?.map((item) => item.text)).toContain(
       "หากมีอาการเคืองตาควรปรึกษาแพทย์"
     );
     const restored = fromFhirDosage(JSON.parse(JSON.stringify(parsed.fhir)), { locale: "th" });
-    expect(restored.fhir.asNeededBoolean).not.toBe(true);
+    expect(restored.fhir.asNeeded).not.toBe(true);
     expect(restored.longText).toContain("ปรึกษาแพทย์");
   });
 });

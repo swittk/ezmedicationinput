@@ -1,21 +1,25 @@
 import { parseHpsgChart } from "./chart";
 import { projectHpsgSignToState } from "./projection";
 import { HpsgGrammar, HpsgLexicalRule, HpsgPhraseRule, HpsgSign } from "./signature";
-import { signFeatureStructure } from "./feature-structure";
+import { combineSignFeatureStructures, signFeatureStructure } from "./feature-structure";
 import { combineSigns } from "./unification";
 import {
   compactIntervalRule,
+  cycleScheduleRule,
+  openEndedScheduleRule,
   cadenceFirstFrequencyRule,
   calendarDateListRule,
   cadenceFirstImplicitSingleDoseRule,
   countAndDurationRule,
   countFrequencyRule,
   dayRangeLexicalRule,
+  monthlyDayOfMonthLexicalRule,
   eventOffsetRule,
   alternateEventCadenceRule,
   quantityFirstActivityTimingRule,
   quantityFirstEventOffsetRule,
   eventTimingPhraseRule,
+  maximumDosePerPeriodRule,
   multiplicativeDoseFrequencyRule,
   separatedFrequencyRangeRule,
   separatedIntervalRule,
@@ -29,12 +33,20 @@ import {
   proceduralActionLexicalRule,
   workflowLexicalRule
 } from "./rules/instruction-rules";
-import { conditionLexicalRule, getConditionFeatures } from "./rules/condition-rules";
+import {
+  calendarExclusionLexicalRule,
+  weekdayComplementReferenceLexicalRule,
+  containsCalendarExclusionCue,
+  conditionLexicalRule,
+  getConditionFeatures,
+  medicationGuardLexicalRule
+} from "./rules/condition-rules";
 import { sourceRangeAttachmentClass } from "./procedural-context";
 import { bareSiteLexicalRule, siteLexicalRule } from "./rules/site-rules";
 import {
   connectorLexicalRule,
   directiveMarkerLexicalRule,
+  phaseAdjustmentLexicalRule,
   doseLexicalRule,
   perTargetCountDoseRule,
   fillerLexicalRule,
@@ -43,6 +55,8 @@ import {
   routeLexicalRule
 } from "./rules/core-rules";
 import { HpsgClauseContext } from "./rule-context";
+import { CALENDAR_COMPLEMENT_DAY_MODIFIERS } from "./lexical-classes";
+import { clinicalQuantityLexicalRule } from "./rules/clinical-quantity-rules";
 
 function withScopeRequirements(
   rule: HpsgLexicalRule<HpsgClauseContext>
@@ -84,7 +98,16 @@ function withScopeRequirements(
           },
           nonlocal: { ...sign.synsem.nonlocal, scopeRequirements: merged }
         };
-        return { ...sign, synsem, fs: signFeatureStructure(sign.type, synsem) };
+        // Lexical constructions may already contain a typed phrase. Rebind
+        // its SYNSEM while retaining its daughters; rebuilding it as a bare
+        // word would erase the grammatical derivation and headed constraints.
+        const left = sign.fs.features.LEFT_DTR;
+        const right = sign.fs.features.RIGHT_DTR;
+        const fs = left?.kind === "node" && right?.kind === "node"
+          ? combineSignFeatureStructures(left, right, sign.type,
+            sign.construction?.headSide, synsem)!
+          : signFeatureStructure(sign.type, synsem);
+        return { ...sign, synsem, fs };
       });
     }
   };
@@ -96,18 +119,34 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
     combine: (_context, left, right) =>
       combineSigns(left, right, context.deps, "hpsg.phrase.unify-adjacent")
   };
+  // Only install clinical-adjunct constructions when lexical surface cues
+  // occur. Ordinary BID/eye/route SIGs pay no extra sign/chart cost.
+  const source = context.state.input;
+  const hasMedicationGuardLead =
+    /\b(?:only\s+if|unless|if)\b|เฉพาะ(?:เมื่อ|หาก)|เว้นแต่|ยกเว้น\s*กรณี|หาก|ถ้า|เมื่อ/iu.test(source);
+  const hasCalendarExclusion = containsCalendarExclusionCue(source);
+  const hasWeekdayComplement = context.tokens.some(token =>
+    CALENDAR_COMPLEMENT_DAY_MODIFIERS.has(token.canonical ?? token.lower));
   return {
     lexicalRules: [
       conditionLexicalRule(),
+      ...(hasMedicationGuardLead ? [medicationGuardLexicalRule()] : []),
+      ...(hasCalendarExclusion ? [calendarExclusionLexicalRule()] : []),
       ...[
+      ...(hasWeekdayComplement ? [weekdayComplementReferenceLexicalRule()] : []),
       directiveMarkerLexicalRule(),
+      phaseAdjustmentLexicalRule(),
       methodLexicalRule(),
       routeLexicalRule(),
       productLexicalRule(),
+      clinicalQuantityLexicalRule(),
+      maximumDosePerPeriodRule(),
       multiplicativeDoseFrequencyRule(),
       perTargetCountDoseRule(),
       doseLexicalRule(),
+      cycleScheduleRule(),
       calendarDateListRule(),
+      openEndedScheduleRule(),
       compactIntervalRule(),
       separatedIntervalRule(),
       cadenceFirstImplicitSingleDoseRule(),
@@ -120,6 +159,7 @@ function buildGrammar(context: HpsgClauseContext): HpsgGrammar<HpsgClauseContext
       quantityFirstEventOffsetRule(),
       eventOffsetRule(),
       eventTimingPhraseRule(),
+      monthlyDayOfMonthLexicalRule(),
       dayRangeLexicalRule(),
       timingLexicalRule(),
       countAndDurationRule(),
@@ -157,6 +197,10 @@ function hasUsefulAnalysis(sign: HpsgSign | undefined): sign is HpsgSign {
   );
 }
 
+function hasClinicalAdjunctAnalysis(sign: HpsgSign): boolean {
+  return Boolean(sign.synsem.cont.clinicalAdjunct);
+}
+
 function semanticFeatureCount(sign: HpsgSign): number {
   const { head, valence } = sign.synsem;
   let count = 0;
@@ -164,10 +208,11 @@ function semanticFeatureCount(sign: HpsgSign): number {
   if (head.route) count += 1;
   if (head.dose) count += 1;
   if (head.schedule) count += 1;
-  if (valence.site) count += 1;
+  if (valence.site) count += valence.site.coordination ? 3 : 1;
   if (valence.prn) count += 1;
   if (valence.instructions?.length) count += 1;
   if (valence.patientInstruction) count += 1;
+  if (sign.synsem.cont.clinicalAdjunct) count += 1;
   return count;
 }
 
@@ -183,7 +228,8 @@ function buildCompatibleSemanticCover(
 ): HpsgSign {
   let cover = best;
   const candidates = signs
-    .filter((sign) => sign !== best && hasUsefulAnalysis(sign))
+    .filter((sign) => sign !== best && !sign.synsem.nonlocal?.scopeRequirements?.length &&
+      (hasUsefulAnalysis(sign) || hasClinicalAdjunctAnalysis(sign)))
     .sort((left, right) => {
       const semanticDelta = semanticFeatureCount(right) - semanticFeatureCount(left);
       if (semanticDelta) return semanticDelta;
@@ -204,10 +250,14 @@ export function parseHpsgClause(context: HpsgClauseContext): HpsgSign | undefine
   const result = parseHpsgChart(context, buildGrammar(context), {
     limit: context.limit
   });
-  if (!hasUsefulAnalysis(result.best)) {
-    return undefined;
-  }
-  const cover = buildCompatibleSemanticCover(context, result.signs, result.best);
+  const best = result.best;
+  // A long clinical adjunct can be the largest chart constituent while an
+  // opaque connector separates its administration head. Complete the same
+  // semantic cover before deciding whether a usable medication was found.
+  if (!best || best.synsem.nonlocal?.scopeRequirements?.length ||
+      (!hasUsefulAnalysis(best) && !hasClinicalAdjunctAnalysis(best))) return undefined;
+  const cover = buildCompatibleSemanticCover(context, result.signs, best);
+  if (!hasUsefulAnalysis(cover)) return undefined;
   if (context.project) {
     projectHpsgSignToState(cover, context.state, context.tokens, context.deps);
   }

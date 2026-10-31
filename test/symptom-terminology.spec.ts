@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  listSymptomDefinitions,
-  parseSig,
-  resolveSymptomDefinition,
-  suggestSig
-} from "../src";
+import { listSymptomDefinitions, resolveSymptomDefinition, suggestSig } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 import { DEFAULT_SYMPTOM_ENTRIES, normalizeSymptomKey } from "../src/symptom-terminology";
 
 const SNOMED = "http://snomed.info/sct";

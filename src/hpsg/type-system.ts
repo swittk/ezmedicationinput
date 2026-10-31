@@ -1,3 +1,5 @@
+import { equalStructuredValues } from "../stable-structure";
+
 export interface HpsgAppropriateFeature {
   valueType: string;
   required?: boolean;
@@ -208,12 +210,6 @@ export function validateFeatureStructure(
   return issues;
 }
 
-function atomValuesEqual(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 export function unifyFeatureStructures(
   left: HpsgFeatureValue,
   right: HpsgFeatureValue,
@@ -240,7 +236,7 @@ export function unifyFeatureStructures(
       return undefined;
     }
     if (a.kind === "atom" || b.kind === "atom") {
-      if (a.kind !== "atom" || b.kind !== "atom" || !atomValuesEqual(a.value, b.value)) {
+      if (a.kind !== "atom" || b.kind !== "atom" || !equalStructuredValues(a.value, b.value)) {
         issues.push({ path, message: "Feature atom values conflict." });
         return undefined;
       }
@@ -273,26 +269,39 @@ export function unifyFeatureStructures(
   return { value, issues };
 }
 
-export function canonicalFeatureStructure(value: HpsgFeatureValue): string {
+/** A structured diagnostic view, with explicit references for reentrant nodes. */
+export type CanonicalFeatureView =
+  | { atom: string; value: unknown }
+  | { ref: number }
+  | { id: number; type: string; features: Record<string, CanonicalFeatureView> };
+
+/** Export an inspectable graph, not a serialized string. Consumers that need a
+ * wire/log format can encode it at their own I/O boundary.
+ * @param value Feature graph to inspect outside the unifier.
+ */
+export function canonicalFeatureStructure(value: HpsgFeatureValue): CanonicalFeatureView {
   const ids = new Map<HpsgFeatureNode, number>();
   let nextId = 1;
-  const encode = (current: HpsgFeatureValue): unknown => {
+  const encode = (current: HpsgFeatureValue): CanonicalFeatureView => {
     if (current.kind === "atom") return { atom: current.type, value: current.value };
     const existing = ids.get(current);
     if (existing) return { ref: existing };
     const id = nextId++;
     ids.set(current, id);
-    const features: Record<string, unknown> = {};
+    const features: Record<string, CanonicalFeatureView> = {};
     for (const key of Object.keys(current.features).sort()) features[key] = encode(current.features[key]);
     return { id, type: current.type, features };
   };
-  return JSON.stringify(encode(value));
+  return encode(value);
 }
 
 
 const SIGN_TYPES = [
   "method-sign", "route-sign", "site-sign", "dose-sign", "schedule-sign",
-  "prn-sign", "instruction-sign", "conditional-sign", "adjustment-sign", "connector-sign"
+  "prn-sign", "instruction-sign", "conditional-sign", "clinical-adjunct-sign",
+  "guard-predicate-sign", "guard-operator-sign", "guard-marker-sign",
+  "adjustment-sign", "connector-sign", "site-relative-marker-sign",
+  "site-predicate-sign"
 ];
 
 export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
@@ -323,9 +332,17 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "head-complement-phrase", parents: ["headed-phrase"] },
   { name: "head-adjunct-phrase", parents: ["headed-phrase"] },
   { name: "head-marker-phrase", parents: ["headed-phrase"] },
+  { name: "site-relative-clause", parents: ["head-marker-phrase"] },
+  { name: "restricted-site-phrase", parents: ["head-adjunct-phrase"] },
+  { name: "recurring-course-phrase", parents: ["head-adjunct-phrase"] },
   { name: "procedure-sequence-phrase", parents: ["phrase-sign"] },
   { name: "conditional-instruction-phrase", parents: ["phrase-sign"] },
+  { name: "guard-predicate-phrase", parents: ["coordination-phrase"] },
+  { name: "guard-coordination-tail", parents: ["head-complement-phrase"] },
+  { name: "guard-negation-phrase", parents: ["head-complement-phrase"] },
+  { name: "medication-guard-phrase", parents: ["head-marker-phrase"] },
   { name: "coordination-phrase", parents: ["phrase-sign"] },
+  { name: "site-coordination-phrase", parents: ["coordination-phrase"] },
   { name: "clause-sign", parents: ["phrase-sign"] },
   { name: "administration-clause", parents: ["clause-sign", "headed-phrase"] },
   ...SIGN_TYPES.map((name) => ({ name, parents: ["word-sign"] })),
@@ -364,9 +381,16 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
     parents: ["top"],
     features: {
       CLAUSE_KIND: { valueType: "string" },
+      REGIMEN_ADJUSTMENT: { valueType: "string" },
       CONDITION: { valueType: "condition-feature" },
+      CLINICAL_ADJUNCT: { valueType: "clinical-adjunct-feature" },
+      GUARD: { valueType: "guard-feature" },
       SCOPED_ADMINISTRATION: { valueType: "scoped-administration-feature" },
-      SCOPE_CLOSED: { valueType: "boolean" }
+      SCOPE_CLOSED: { valueType: "boolean" },
+      COORDINATION_MARKER: { valueType: "coordination-marker-feature" },
+      SITE_RELATIVE_MARKER: { valueType: "site-relative-marker-feature" },
+      SITE_PREDICATE: { valueType: "site-predicate-feature" },
+      SITE_RESTRICTION: { valueType: "site-restriction-feature" }
     }
   },
   { name: "method-feature", parents: ["top"] },
@@ -378,7 +402,13 @@ export const HPSG_TYPE_SYSTEM = new HpsgTypeSystem([
   { name: "instruction-feature", parents: ["top"] },
   { name: "patient-instruction-feature", parents: ["top"] },
   { name: "condition-feature", parents: ["top"] },
+  { name: "clinical-adjunct-feature", parents: ["top"] },
+  { name: "guard-feature", parents: ["top"] },
   { name: "scoped-administration-feature", parents: ["top"] },
+  { name: "coordination-marker-feature", parents: ["top"] },
+  { name: "site-relative-marker-feature", parents: ["top"] },
+  { name: "site-predicate-feature", parents: ["top"] },
+  { name: "site-restriction-feature", parents: ["top"] },
   {
     name: "nonlocal",
     parents: ["top"],

@@ -1,8 +1,302 @@
 {
-  "system": "https://solublelabs.com/fhir/CodeSystem/medication-instruction-concept",
+  "system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept",
   "concepts": [
     {
+      "code": "doctor",
+      "coding": {"system": "http://snomed.info/sct", "code": "158965000", "display": "Medical practitioner"},
+      "role": "object",
+      "display": "doctor",
+      "i18n": { "th": "แพทย์" },
+      "aliases": ["doctor", "physician", "แพทย์"]
+    },
+    {
+      "code": "57368009",
+      "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "57368009", "display": "Contact lenses" },
+      "display": "contact lenses",
+      "i18n": { "th": "คอนแทคเลนส์" },
+      "aliases": ["contact lens", "contact lenses"]
+    },
+    {
+      "code": "household-spoon",
+      "coding": {"system": "http://snomed.info/sct", "code": "303514007", "display": "Spoon"},
+      "role": "object",
+      "display": "household spoon",
+      "i18n": { "th": "ช้อนกินข้าว" },
+      "aliases": ["household spoon", "household spoons", "ช้อนกินข้าว"]
+    },
+    {
+      "code": "bottle-tip",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "bottle-tip", "display": "bottle tip", "i18n": {"th": "ปลายขวด"}},
+      "components": [{"role": "head", "text": "bottle", "coding": {"system": "http://snomed.info/sct", "code": "68276009", "display": "Bottle (physical object)"}}, {"role": "qualifier", "text": "tip"}],
+      "role": "object",
+      "display": "bottle tip",
+      "i18n": { "th": "ปลายขวด" },
+      "aliases": ["bottle tip", "tip of the bottle", "ปลายขวด"]
+    },
+    {
+      "code": "tube-tip",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "tube-tip", "display": "tube tip", "i18n": {"th": "ปลายหลอด"}},
+      "components": [{"role": "head", "text": "tube", "coding": {"system": "http://snomed.info/sct", "code": "83059008", "display": "Tube (physical object)"}}, {"role": "qualifier", "text": "tip"}],
+      "role": "object",
+      "display": "tube tip",
+      "i18n": { "th": "ปลายหลอด" },
+      "aliases": ["tube tip", "tip of the tube", "ปลายหลอด"]
+    },
+    {
+      "code": "medication-dose",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "medication-dose", "display": "medication dose", "i18n": {"th": "ขนาดยาที่ให้"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C25488", "display": "Dose"}],
+      "role": "object",
+      "display": "medication dose",
+      "i18n": { "th": "ขนาดยาที่ให้" },
+      "aliases": [
+        "dose", "doses", "dosage", "drug dose", "medication dose",
+        "ขนาดยา", "ยามื้อนี้"
+      ]
+    },
+    {
+      "code": "broken-skin",
+      "components": [{"role": "head", "text": "broken skin", "coding": {"system": "http://snomed.info/sct", "code": "247442005", "display": "Broken skin (disorder)"}}],
+      "role": "site",
+      "display": "broken skin",
+      "i18n": { "th": "ผิวหนังที่มีแผล" },
+      "aliases": [
+        "broken skin", "damaged skin",
+        "ผิวหนังที่มีแผล", "ผิวหนังมีแผล",
+        "บริเวณผิวหนังที่มีแผล"
+      ]
+    },
+    {
+      "code": "open-wound",
+      "coding": {"system": "http://snomed.info/sct", "code": "59091005", "display": "Open wound"},
+      "role": "site",
+      "display": "open wounds",
+      "i18n": { "th": "แผลเปิด" },
+      "aliases": ["open wound", "open wounds"],
+      "localeAliases": {
+        "th": ["แผลเปิด", "บริเวณแผลเปิด"]
+      }
+    },
+    {
+      "code": "thin-application-manner",
+      "coding": {"system": "http://snomed.info/sct", "code": "420162004", "display": "To be spread thinly"},
+      "role": "manner",
+      "display": "thinly",
+      "i18n": { "th": "บางๆ" },
+      "aliases": ["thinly", "บางๆ", "บาง ๆ"]
+    },
+    {
+      "code": "first-use",
+      "components": [{"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}}, {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
+      "role": "activity",
+      "display": "first use",
+      "i18n": { "th": "การใช้ครั้งแรก" },
+      "aliases": ["first use", "ใช้ครั้งแรก", "การใช้ครั้งแรก"]
+    },
+    {
+      "code": "drinking-activity",
+      "coding": {"system": "http://snomed.info/sct", "code": "30953006", "display": "Drinking"},
+      "role": "activity",
+      "display": "drinking",
+      "i18n": { "th": "การดื่ม" },
+      "aliases": ["drinking", "การดื่ม"]
+    },
+    {
+      "code": "immediacy",
+      "coding": {"system": "http://snomed.info/sct", "code": "88694003", "display": "Immediate"},
+      "role": "time",
+      "display": "immediately",
+      "i18n": { "th": "ทันที" },
+      "aliases": ["immediately", "immediate", "ทันที"]
+    },
+    {
+      "code": "medication-administration",
+      "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"},
+      "role": "activity",
+      "display": "taking medication",
+      "i18n": { "th": "การรับประทานยา" },
+      "aliases": [
+        "taking medication", "taking medicine", "taking", "take medication",
+        "take this medication", "taking this medication", "taking product",
+        "take product", "การกินยา", "การรับประทานยา"
+      ]
+    },
+    {
+      "code": "supply-exhausted",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "supply-exhausted", "display": "all medication is taken", "i18n": {"th": "ยาหมด"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C200475", "display": "Exhausted"}],
+      "role": "result",
+      "display": "all medication is taken",
+      "i18n": { "th": "ยาหมด" },
+      "aliases": [
+        "finished", "used up", "all taken", "supply exhausted",
+        "all medication is taken", "ยาใช้หมด", "ยาหมด", "หมด"
+      ]
+    },
+    {
+      "code": "plenty-of-water",
+      "components": [{"role": "head", "text": "water", "coding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}}, {"role": "amount", "text": "plenty"}],
+      "role": "substance",
+      "display": "plenty of water",
+      "i18n": { "th": "น้ำดื่มจำนวนมาก" },
+      "aliases": [
+        "plenty of water", "lots of water", "ample water",
+        "น้ำมากๆ", "น้ำมาก ๆ", "น้ำเยอะๆ", "น้ำเยอะ ๆ",
+        "น้ำตามมากๆ", "น้ำตามมาก ๆ", "น้ำตามเยอะๆ"
+      ]
+    },
+    {
+      "code": "medication-tablet",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15054000", "display": "Tablet"}],
+      "coding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"},
+      "role": "object",
+      "display": "tablet",
+      "i18n": { "th": "ยาเม็ด" },
+      "aliases": ["ยาเม็ด", "เม็ดยา", "tablet", "tablets"]
+    },
+    {
+      "code": "medication-capsule",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15012000", "display": "Capsule"}],
+      "coding": {"system": "http://snomed.info/sct", "code": "732937005", "display": "Capsule"},
+      "role": "object",
+      "display": "capsule",
+      "i18n": { "th": "ยาแคปซูล" },
+      "aliases": ["ยาแคปซูล", "capsule", "capsules"]
+    },
+    {
+      "code": "whole",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "whole", "display": "whole", "i18n": {"th": "ทั้งเม็ด"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "255503000", "display": "Entire (qualifier value)"}],
+      "role": "manner",
+      "display": "whole",
+      "i18n": { "th": "ทั้งเม็ด" },
+      "aliases": ["ทั้งเม็ด", "ทั้งแคปซูล"]
+    },
+    {
+      "code": "other-medications",
+      "components": [{"role": "head", "text": "medication", "coding": {"system": "http://snomed.info/sct", "code": "763158003", "display": "Medicinal product"}}, {"role": "qualifier", "text": "other", "coding": {"system": "http://snomed.info/sct", "code": "74964007", "display": "Other"}}],
+      "role": "substance",
+      "display": "other medicines",
+      "i18n": { "th": "ยาอื่น" },
+      "aliases": ["other meds", "other medicines", "other medications", "other medicine", "ยาอื่น", "ยาอื่นๆ"]
+    },
+    {
+      "code": "alcohol",
+      "role": "substance",
+      "display": "alcohol",
+      "i18n": { "th": "แอลกอฮอล์" },
+      "aliases": ["alcohol", "แอลกอฮอล์"]
+    },
+    {
+      "code": "alcoholic-beverage",
+      "coding": {"system": "http://snomed.info/sct", "code": "53527002", "display": "Alcoholic beverage"},
+      "role": "substance",
+      "display": "alcoholic beverage",
+      "i18n": { "th": "เครื่องดื่มแอลกอฮอล์" },
+      "aliases": ["alcoholic beverage", "alcoholic beverages", "เครื่องดื่มแอลกอฮอล์"]
+    },
+    {
+      "code": "ethanol",
+      "coding": {"system": "http://snomed.info/sct", "code": "419442005", "display": "Ethanol"},
+      "role": "substance",
+      "display": "ethanol",
+      "i18n": { "th": "เอทานอล" },
+      "aliases": ["ethanol", "เอทานอล"]
+    },
+    {
+      "code": "needle",
+      "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "79068005", "display": "Needle" },
+      "display": "needle",
+      "i18n": { "th": "เข็มฉีดยา" },
+      "aliases": ["needle", "needles", "injection needle", "เข็มฉีดยา"]
+    },
+    {
+      "code": "same-time",
+      "role": "time",
+      "display": "the same time",
+      "i18n": { "th": "เวลาเดิม" },
+      "aliases": ["same time", "the same time", "usual time", "the usual time", "เวลาเดิม"]
+    },
+    {
+      "code": "each-dose",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
+      "role": "time",
+      "display": "each dose",
+      "i18n": { "th": "การให้ยาแต่ละครั้ง" },
+      "aliases": ["each dose", "every dose", "การให้ยาแต่ละครั้ง", "การใช้ยาแต่ละครั้ง"]
+    },
+    {
+      "code": "each-injection",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "injection", "coding": {"system": "http://snomed.info/sct", "code": "740685003", "display": "Inject"}}],
+      "role": "time",
+      "display": "each injection",
+      "i18n": { "th": "การฉีดยาแต่ละครั้ง" },
+      "aliases": ["each injection", "every injection", "การฉีดยาแต่ละครั้ง", "การฉีดแต่ละครั้ง"]
+    },
+    {
+      "code": "each-use",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
+      "role": "time",
+      "display": "each use",
+      "i18n": { "th": "การใช้แต่ละครั้ง" },
+      "aliases": ["each use", "every use", "การใช้แต่ละครั้ง"]
+    },
+    {
+      "code": "syringe",
+      "role": "object",
+      "coding": { "system": "http://snomed.info/sct", "code": "61968008", "display": "Syringe" },
+      "display": "syringe",
+      "i18n": { "th": "กระบอกฉีดยา" },
+      "aliases": ["syringe", "syringes", "กระบอกฉีดยา"]
+    },
+    {
+      "code": "applicator",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30002000", "display": "Applicator"}],
+      "coding": {"system": "http://snomed.info/sct", "code": "408101000", "display": "Applicator"},
+      "role": "object",
+      "display": "applicator",
+      "i18n": { "th": "อุปกรณ์ทายา" },
+      "aliases": ["applicator", "applicators", "อุปกรณ์ทายา"]
+    },
+    {
+      "code": "food",
+      "role": "substance",
+      "coding": { "system": "http://snomed.info/sct", "code": "255620007", "display": "Food" },
+      "display": "food",
+      "i18n": { "th": "อาหาร" },
+      "aliases": ["food", "foods", "meal", "meals", "อาหาร"]
+    },
+    {
+      "code": "drink-product",
+      "coding": {"system": "http://snomed.info/sct", "code": "226465004", "display": "Drinks"},
+      "role": "substance",
+      "display": "drink",
+      "i18n": { "th": "เครื่องดื่ม" },
+      "aliases": ["drink", "drinks", "beverage", "beverages", "เครื่องดื่ม"]
+    },
+    {
+      "code": "administration-site",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "administration-site", "display": "sites", "i18n": {"th": "ตำแหน่ง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C77676", "display": "Application Site"}],
+      "role": "object",
+      "display": "sites",
+      "i18n": { "th": "ตำแหน่ง" },
+      "aliases": ["site", "sites", "injection site", "injection sites", "application site", "application sites", "ตำแหน่ง", "ตำแหน่งฉีด"]
+    },
+    {
+      "code": "each-administration",
+      "components": [{"role": "qualifier", "text": "each", "coding": {"system": "http://snomed.info/sct", "code": "419473009", "display": "Each"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
+      "role": "time",
+      "display": "each time",
+      "i18n": { "th": "ทุกครั้ง" },
+      "aliases": ["each time", "every time", "each administration", "every administration", "ทุกครั้ง"]
+    },
+    {
       "code": "product",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "product", "display": "product", "i18n": {"th": "ผลิตภัณฑ์"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C51980", "display": "Product"}],
       "role": "theme",
       "display": "product",
       "i18n": {
@@ -18,7 +312,9 @@
     },
     {
       "code": "bottle",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30008000", "display": "Bottle"}],
       "role": "container",
+      "coding": { "system": "http://snomed.info/sct", "code": "68276009", "display": "Bottle" },
       "display": "bottle",
       "i18n": {
         "th": "ขวด"
@@ -30,6 +326,8 @@
     },
     {
       "code": "patch",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "15036000", "display": "Patch"}],
+      "coding": {"system": "http://snomed.info/sct", "code": "733005001", "display": "Patch"},
       "role": "object",
       "display": "patch",
       "i18n": {
@@ -37,12 +335,21 @@
       },
       "aliases": [
         "patch",
-        "transdermal patch",
         "แผ่นแปะ"
       ]
     },
     {
+      "code": "transdermal-patch",
+      "coding": {"system": "http://snomed.info/sct", "code": "466056002", "display": "Transdermal medicated patch"},
+      "role": "object",
+      "display": "transdermal patch",
+      "i18n": { "th": "แผ่นแปะยาผ่านผิวหนัง" },
+      "aliases": ["transdermal patch"]
+    },
+    {
       "code": "breath",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "breath", "display": "breath", "i18n": {"th": "หายใจ"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "11891009", "display": "Breath"}],
       "role": "object",
       "display": "breath",
       "i18n": {
@@ -74,6 +381,7 @@
     },
     {
       "code": "clean_water",
+      "components": [{"role": "head", "text": "water", "coding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}}, {"role": "qualifier", "text": "clean"}],
       "role": "substance",
       "display": "clean water",
       "i18n": {
@@ -87,6 +395,7 @@
     },
     {
       "code": "cream",
+      "coding": {"system": "http://snomed.info/sct", "code": "385099005", "display": "Cream"},
       "role": "material",
       "display": "cream",
       "i18n": {
@@ -103,6 +412,7 @@
     },
     {
       "code": "ointment",
+      "coding": {"system": "http://snomed.info/sct", "code": "385101003", "display": "Ointment"},
       "role": "material",
       "display": "ointment",
       "i18n": {
@@ -119,6 +429,7 @@
     },
     {
       "code": "gel",
+      "coding": {"system": "http://snomed.info/sct", "code": "385100002", "display": "Gel"},
       "role": "material",
       "display": "gel",
       "i18n": {
@@ -147,6 +458,7 @@
     },
     {
       "code": "small_amount",
+      "coding": {"system": "http://snomed.info/sct", "code": "769398002", "display": "Small amount"},
       "role": "amount",
       "display": "a small amount",
       "i18n": {
@@ -163,6 +475,8 @@
     },
     {
       "code": "foam",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"foam","display":"foam","i18n":{"th":"ฟอง"}},
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-09462117-n","display":"lather"}],
       "role": "result",
       "display": "foam",
       "i18n": {
@@ -177,6 +491,7 @@
     },
     {
       "code": "eye_drop_administration",
+      "coding": {"system": "http://snomed.info/sct", "code": "225698005", "display": "Instillation of eye drops to eye"},
       "role": "activity",
       "display": "eye drops",
       "i18n": {
@@ -193,6 +508,7 @@
     },
     {
       "code": "exercise",
+      "coding": {"system": "http://snomed.info/sct", "code": "256235009", "display": "Exercise"},
       "role": "activity",
       "display": "exercise",
       "i18n": {
@@ -207,6 +523,7 @@
     },
     {
       "code": "intercourse",
+      "coding": {"system": "http://snomed.info/sct", "code": "364316005", "display": "Sexual intercourse observable"},
       "role": "activity",
       "display": "intercourse",
       "i18n": {
@@ -222,6 +539,8 @@
     },
     {
       "code": "washing",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "washing", "display": "washing", "i18n": {"th": "การล้าง"}},
+      "externalCodings": [{"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C65077", "display": "Wash"}],
       "role": "activity",
       "display": "washing",
       "i18n": {
@@ -240,6 +559,8 @@
     },
     {
       "code": "showering",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "showering", "display": "showering", "i18n": {"th": "การอาบน้ำ"}},
+      "components": [{"role": "head", "text": "washing", "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C65077", "display": "Wash"}}, {"role": "qualifier", "text": "showering"}],
       "role": "activity",
       "display": "showering",
       "i18n": {
@@ -258,6 +579,7 @@
     },
     {
       "code": "bathing",
+      "coding": {"system": "http://snomed.info/sct", "code": "129002005", "display": "Bathing"},
       "role": "activity",
       "display": "bathing",
       "i18n": {
@@ -276,6 +598,7 @@
     },
     {
       "code": "swimming",
+      "coding": {"system": "http://snomed.info/sct", "code": "20461001", "display": "Swimming"},
       "role": "activity",
       "display": "swimming",
       "i18n": {
@@ -288,6 +611,7 @@
     },
     {
       "code": "sweating",
+      "coding": {"system": "http://snomed.info/sct", "code": "415691001", "display": "Sweating"},
       "role": "activity",
       "display": "sweating",
       "i18n": {
@@ -300,6 +624,8 @@
     },
     {
       "code": "going_outdoors",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "going_outdoors", "display": "going outdoors", "i18n": {"th": "ออกกลางแจ้ง"}},
+      "components": [{"role": "qualifier", "text": "outdoors", "coding": {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C53541", "display": "Outdoors"}}],
       "role": "activity",
       "display": "going outdoors",
       "i18n": {
@@ -318,6 +644,8 @@
     },
     {
       "code": "use",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "use", "display": "use", "i18n": {"th": "ใช้"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}],
       "role": "activity",
       "display": "use",
       "i18n": {
@@ -330,6 +658,7 @@
     },
     {
       "code": "morning",
+      "coding": {"system": "http://snomed.info/sct", "code": "73775008", "display": "Morning"},
       "role": "time",
       "display": "the morning",
       "i18n": {
@@ -344,6 +673,7 @@
     },
     {
       "code": "noon",
+      "coding": {"system": "http://snomed.info/sct", "code": "71997007", "display": "Noon"},
       "role": "time",
       "display": "noon",
       "i18n": {
@@ -357,6 +687,7 @@
     },
     {
       "code": "afternoon",
+      "coding": {"system": "http://snomed.info/sct", "code": "422133006", "display": "Afternoon"},
       "role": "time",
       "display": "the afternoon",
       "i18n": {
@@ -371,6 +702,7 @@
     },
     {
       "code": "evening",
+      "coding": {"system": "http://snomed.info/sct", "code": "3157002", "display": "Evening"},
       "role": "time",
       "display": "the evening",
       "i18n": {
@@ -385,6 +717,7 @@
     },
     {
       "code": "night",
+      "coding": {"system": "http://snomed.info/sct", "code": "2546009", "display": "Night time"},
       "role": "time",
       "display": "night",
       "i18n": {
@@ -398,6 +731,8 @@
     },
     {
       "code": "external_intimate_area",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"external_intimate_area","display":"external intimate area","i18n":{"th":"บริเวณภายนอกจุดซ่อนเร้น"}},
+      "externalCodings": [{"system":"http://snomed.info/sct","code":"77142006","display":"External genitalia structure"}],
       "role": "site",
       "display": "external intimate area",
       "i18n": {
@@ -411,6 +746,8 @@
     },
     {
       "code": "nasal_spray",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"nasal_spray","display":"nasal spray","i18n":{"th":"ยาพ่นจมูก"}},
+      "components": [{"role":"qualifier","text":"nasal","coding":{"system":"http://snomed.info/sct","code":"738948007","display":"Nasal"}}],
       "role": "object",
       "display": "nasal spray",
       "i18n": {
@@ -423,6 +760,7 @@
     },
     {
       "code": "spacer",
+      "coding": {"system": "http://snomed.info/sct", "code": "464036000", "display": "Medicine chamber spacer"},
       "role": "object",
       "display": "spacer",
       "i18n": {
@@ -435,6 +773,8 @@
     },
     {
       "code": "inhaler",
+      "externalCodings": [{"system": "http://standardterms.edqm.eu", "code": "30026500", "display": "Inhaler"}],
+      "coding": {"system": "http://snomed.info/sct", "code": "334980009", "display": "Inhaler"},
       "role": "object",
       "display": "inhaler",
       "i18n": {
@@ -447,7 +787,15 @@
     },
     {
       "code": "before_first_use",
+      "components": [{"role": "qualifier", "text": "before", "coding": {"system": "http://snomed.info/sct", "code": "421718005", "display": "Before"}},
+        {"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}},
+        {"role": "head", "text": "use", "coding": {"system": "http://snomed.info/sct", "code": "419385000", "display": "Use"}}],
       "role": "material",
+      "impliedArgument": {
+        "role": "activity",
+        "conceptId": "first-use",
+        "relation": "before"
+      },
       "display": "before first use",
       "i18n": {
         "th": "ก่อนใช้ครั้งแรก"
@@ -459,6 +807,9 @@
     },
     {
       "code": "occlusive_dressing",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "occlusive_dressing", "display": "an occlusive dressing", "i18n": {"th": "แผ่นปิดแบบทึบ"}},
+      "externalCodings": [{"system": "https://www.nlm.nih.gov/mesh", "code": "D009779", "display": "Occlusive Dressings"}],
+      "components": [{"role": "head", "text": "dressing", "coding": {"system": "http://snomed.info/sct", "code": "333453004", "display": "Medical dressing (physical object)"}}, {"role": "qualifier", "text": "occlusive"}],
       "role": "material",
       "display": "an occlusive dressing",
       "i18n": {
@@ -472,6 +823,7 @@
     },
     {
       "code": "new_patch",
+      "components": [{"role": "head", "text": "patch", "coding": {"system": "http://snomed.info/sct", "code": "733005001", "display": "Patch"}}, {"role": "qualifier", "text": "new", "coding": {"system": "http://snomed.info/sct", "code": "7147002", "display": "New"}}],
       "role": "object",
       "display": "new patch",
       "i18n": {
@@ -486,6 +838,7 @@
     },
     {
       "code": "gently",
+      "coding": {"system": "http://snomed.info/sct", "code": "418449005", "display": "Gently"},
       "role": "manner",
       "display": "gently",
       "i18n": {
@@ -503,6 +856,7 @@
     },
     {
       "code": "thoroughly",
+      "coding": {"system": "http://snomed.info/sct", "code": "769407000", "display": "Thoroughly"},
       "role": "manner",
       "display": "thoroughly",
       "i18n": {
@@ -516,6 +870,8 @@
     },
     {
       "code": "clean-result",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"clean-result","display":"clean","i18n":{"th":"สะอาด"}},
+      "externalCodings": [{"system":"https://en-word.net/","version":"2025","code":"oewn-00418932-a","display":"clean"}],
       "role": "result",
       "display": "clean",
       "i18n": {
@@ -529,6 +885,7 @@
     },
     {
       "code": "after-first-administration",
+      "components": [{"role": "qualifier", "text": "initial", "coding": {"system": "http://snomed.info/sct", "code": "884001", "display": "Initial"}}, {"role": "head", "text": "medication administration", "coding": {"system": "http://snomed.info/sct", "code": "18629005", "display": "Administration of medication"}}],
       "role": "time",
       "display": "after the first administration",
       "i18n": {
@@ -544,6 +901,8 @@
     },
     {
       "code": "needed",
+      "coding": {"system": "urn:ezmedicationinput:CodeSystem:medication-instruction-concept", "code": "needed", "display": "needed", "i18n": {"th": "จำเป็น"}},
+      "externalCodings": [{"system": "http://snomed.info/sct", "code": "410525008", "display": "Needed"}, {"system": "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "code": "C64499", "display": "As Needed"}],
       "role": "condition",
       "display": "needed",
       "i18n": {
@@ -557,6 +916,7 @@
     },
     {
       "code": "overnight",
+      "coding": {"system": "http://snomed.info/sct", "code": "255270004", "display": "Overnight"},
       "role": "duration",
       "display": "overnight",
       "i18n": {
@@ -571,6 +931,7 @@
     },
     {
       "code": "application",
+      "coding": {"system": "http://snomed.info/sct", "code": "129425003", "display": "Application - action"},
       "role": "activity",
       "display": "application",
       "i18n": {
@@ -586,6 +947,7 @@
     },
     {
       "code": "bedtime",
+      "coding": {"system": "http://snomed.info/sct", "code": "21029003", "display": "Bedtime"},
       "role": "time",
       "display": "bedtime",
       "i18n": {
@@ -600,6 +962,8 @@
     },
     {
       "code": "absorbed",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"absorbed","display":"absorbed","i18n":{"th":"ซึมหมด"}},
+      "components": [{"role":"head","text":"material absorption","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C71731","display":"Material Absorption"}}],
       "role": "result",
       "display": "absorbed",
       "i18n": {
@@ -619,6 +983,8 @@
     },
     {
       "code": "dissolved",
+      "coding": {"system":"urn:ezmedicationinput:CodeSystem:medication-instruction-concept","code":"dissolved","display":"dissolved","i18n":{"th":"ละลายหมด"}},
+      "components": [{"role":"head","text":"dissolve","coding":{"system":"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl","code":"C64929","display":"Dissolve"}}],
       "role": "result",
       "display": "dissolved",
       "i18n": {
@@ -630,6 +996,88 @@
         "completely dissolved",
         "ละลายหมด",
         "ละลายจนหมด"
+      ]
+    },
+    {
+      "code": "dialysis-procedure",
+      "role": "activity",
+      "display": "dialysis",
+      "i18n": {
+        "th": "การฟอกไต"
+      },
+      "aliases": [
+        "dialysis",
+        "dialysis session",
+        "dialysis sessions"
+      ],
+      "localeAliases": {
+        "th": [
+          "ฟอกไต",
+          "การฟอกไต",
+          "ล้างไต",
+          "การล้างไต"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "108241001",
+          "display": "Dialysis procedure"
+        }
+      ]
+    },
+    {
+      "code": "hemodialysis-procedure",
+      "role": "activity",
+      "display": "hemodialysis",
+      "i18n": {
+        "th": "การฟอกเลือด"
+      },
+      "aliases": [
+        "hemodialysis",
+        "haemodialysis",
+        "hemodialysis session",
+        "haemodialysis session"
+      ],
+      "localeAliases": {
+        "th": [
+          "ฟอกเลือด",
+          "การฟอกเลือด",
+          "ฟอกเลือดด้วยเครื่องไตเทียม",
+          "การฟอกเลือดด้วยเครื่องไตเทียม"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "302497006",
+          "display": "Hemodialysis"
+        }
+      ]
+    },
+    {
+      "code": "peritoneal-dialysis-procedure",
+      "role": "activity",
+      "display": "peritoneal dialysis",
+      "i18n": {
+        "th": "การล้างไตทางช่องท้อง"
+      },
+      "aliases": [
+        "peritoneal dialysis",
+        "peritoneal dialysis session"
+      ],
+      "localeAliases": {
+        "th": [
+          "ล้างไตทางช่องท้อง",
+          "การล้างไตทางช่องท้อง"
+        ]
+      },
+      "externalCodings": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "71192002",
+          "display": "Peritoneal dialysis"
+        }
       ]
     }
   ]

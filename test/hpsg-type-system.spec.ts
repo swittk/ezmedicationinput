@@ -1,4 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { parseMedicationGuard } from "../src/hpsg/constructions";
+import { parseSig as parsePublicSig, getDosageCondition, toFhirR5Dosages, evaluateMedicationCondition } from "../src/index";
+import * as structuredValues from "../src/stable-structure";
+import { parseHpsgChart } from "../src/hpsg/chart";
+import { connectorLexicalRule, productLexicalRule } from "../src/hpsg/rules/core-rules";
+import { parseSig } from "./helpers/r5-parser";
 import {
   HPSG_TYPE_SYSTEM,
   HpsgTypeSystem,
@@ -11,7 +17,69 @@ import {
 import { combineSignFeatureStructures, signFeatureStructure } from "../src/hpsg/feature-structure";
 import { selectHpsgConstruction } from "../src/hpsg/constructions";
 import { lexicalSign } from "../src/hpsg/signature";
-import { tokenize } from "../src/parser";
+import { tokenize, parseClauseState } from "../src/parser";
+import { applyCoordinatedCadenceScopes } from "../src/regimen/coordination-scope";
+import { createBoundaryPlan } from "../src/regimen/planner";
+import { ParserState } from "../src/parser-state";
+import { findMedicationDateListSpans } from "../src/date-interpretation";
+import {
+  calendarExclusionLexicalRule,
+  medicationGuardLexicalRule
+} from "../src/hpsg/rules/condition-rules";
+
+function clinicalRuleContext(input: string) {
+  const tokens = tokenize(input);
+  return {
+    state: new ParserState(input, tokens),
+    tokens,
+    dateSpans: findMedicationDateListSpans(input),
+    limit: tokens.length,
+    clinicalCache: {},
+    deps: {
+      addDayOfWeekList: () => undefined,
+      addWhen: () => undefined,
+      isCompatibleRouteRefinement: () => true,
+      markToken: () => undefined,
+      normalizeSiteText: (text: string) => text,
+      recordEvidence: () => undefined,
+      refreshMethodSurface: () => undefined,
+      setRoute: () => undefined
+    }
+  };
+}
+
+function firstLexicalMatch(
+  rule: ReturnType<typeof medicationGuardLexicalRule>,
+  input: string
+) {
+  const context = clinicalRuleContext(input);
+  for (let index = 0; index < context.limit; index += 1) {
+    const match = rule.match(context, index)[0];
+    if (match) return match;
+  }
+  return undefined;
+}
+
+describe("bounded coordination tokens", () => {
+  it("does not consume a following connector past the constituent boundary", () => {
+    const context = clinicalRuleContext("take 1 tab, and 2 tabs");
+    const comma = context.tokens.findIndex(token => token.original === ",");
+    expect(comma).toBeGreaterThan(0);
+    context.limit = comma + 1;
+    const sign = connectorLexicalRule().match(context, comma)[0];
+    expect(sign?.consumedTokenIndices).toEqual([context.tokens[comma].index]);
+  });
+
+  it("does not reclaim a following connector already consumed by another construction", () => {
+    const context = clinicalRuleContext("take 1 tab, and 2 tabs");
+    const comma = context.tokens.findIndex(token => token.original === ",");
+    const next = context.tokens[comma + 1];
+    expect(next).toBeDefined();
+    context.state.consumed.add(next.index);
+    const sign = connectorLexicalRule().match(context, comma)[0];
+    expect(sign?.consumedTokenIndices).toEqual([context.tokens[comma].index]);
+  });
+});
 
 describe("formal HPSG typed feature structures", () => {
   it("uses a real subtype hierarchy for signs", () => {
@@ -78,7 +146,7 @@ describe("formal HPSG typed feature structures", () => {
     expect(unified?.kind).toBe("node");
     if (!unified || unified.kind !== "node") return;
     expect(unified.features.LEFT).toBe(unified.features.RIGHT);
-    expect(canonicalFeatureStructure(unified)).toContain('"ref"');
+    expect(canonicalFeatureStructure(unified)).toMatchObject({ features: { RIGHT: { ref: 2 } } });
   });
 
   it("types headed phrase constructions with the expected inheritance", () => {
@@ -140,5 +208,260 @@ describe("formal HPSG typed feature structures", () => {
     });
     expect(validateFeatureStructure(fs, HPSG_TYPE_SYSTEM)).toEqual([]);
     expect(fs.features.SYNSEM?.kind).toBe("node");
+  });
+
+  it("owns composed medication guards and lexical calendar exclusions in typed HPSG", () => {
+    expect(HPSG_TYPE_SYSTEM.isSubtype("clinical-adjunct-sign", "word-sign")).toBe(true);
+
+    const guard = firstLexicalMatch(
+      medicationGuardLexicalRule(),
+      "take 1 tab BID only if BP > 160, otherwise hold"
+    );
+    expect(guard?.type).toBe("medication-guard-phrase");
+    expect(guard?.fs.features.HEAD_DTR).toBeDefined();
+    expect(guard?.evidence.some(item => item.rule === "hpsg.cx.guard.head-predicate")).toBe(true);
+    expect(guard?.synsem.cont.clinicalAdjunct?.condition).toMatchObject({
+      kind: "measurement",
+      name: "bp",
+      operation: "gt",
+      value: 160
+    });
+    expect(guard ? validateFeatureStructure(guard.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
+    const diagnosticTypes = (node: unknown): string[] => {
+      if (!node || typeof node !== "object") return [];
+      const record = node as Record<string, unknown>;
+      return [...(typeof record.type === "string" ? [record.type] : []),
+        ...Object.values(record).flatMap(diagnosticTypes)];
+    };
+    expect(diagnosticTypes(guard && canonicalFeatureStructure(guard.fs)))
+      .toContain("clinical-adjunct-feature");
+
+    const exclusion = firstLexicalMatch(
+      calendarExclusionLexicalRule(),
+      "take 1 tab daily except Sundays"
+    );
+    expect(exclusion?.type).toBe("clinical-adjunct-sign");
+    expect(exclusion?.synsem.cont.clinicalAdjunct?.excludedWeekdays).toEqual(["sun"]);
+    expect(exclusion ? validateFeatureStructure(exclusion.fs, HPSG_TYPE_SYSTEM) : []).toEqual([]);
+  });
+});
+
+
+describe("typed lexical provenance independent of production names", () => {
+  it("records lexical categories from typed signs, not diagnostic labels", () => {
+    const tokens = tokenize("1");
+    const dose = lexicalSign({
+      type: "dose-sign", rule: "an.unrelated.diagnostic.label", tokens,
+      synsem: { head: { dose: { value: 1, unit: "tab" } }, valence: {}, cont: {} }
+    });
+    expect(dose.evidence[0].lexicalCategory).toBe("dose");
+    expect(dose.evidence[0].rule).toBe("an.unrelated.diagnostic.label");
+  });
+
+  it("does not claim undefined optional schedule fields as contributed meaning", () => {
+    const sign = lexicalSign({
+      type: "schedule-sign", rule: "custom.schedule.alias", tokens: tokenize("BID"),
+      synsem: {
+        head: { schedule: {
+          frequency: 2, period: 1, periodUnit: "d", timingCode: undefined,
+          boundsStart: undefined
+        } }, valence: {}, cont: {}
+      }
+    });
+    expect(sign.evidence[0].scheduleFields).toEqual(["frequency", "period", "periodUnit"]);
+  });
+
+  it.each([
+    ["instill 1 drop in left eye and 2 drops in right eye twice daily", false],
+    ["instill 1 drop in left eye and 2 drops in right eye twice daily as needed", true]
+  ])("preserves coordination after every diagnostic production label is renamed: %s", (input, prn) => {
+    const plan = createBoundaryPlan(input);
+    expect(plan.segments).toHaveLength(2);
+    const clauses = plan.segments.map(segment => ({
+      state: parseClauseState(segment.text), start: segment.start, end: segment.end
+    }));
+    for (const item of clauses) {
+      const clause = item.state.primaryClause;
+      for (const evidence of clause.evidence) evidence.rule = "renamed-diagnostic-label";
+      for (const evidence of clause.schedule?.evidence ?? []) evidence.rule = "renamed-schedule-label";
+      for (const evidence of clause.prn?.evidence ?? []) evidence.rule = "renamed-prn-label";
+    }
+    const scopes = applyCoordinatedCadenceScopes(clauses, plan, input);
+    expect(scopes.length).toBeGreaterThan(0);
+    expect(clauses.map(item => item.state.primaryClause.dose?.value)).toEqual([1, 2]);
+    expect(clauses.map(item => item.state.primaryClause.site?.text)).toEqual(["left eye", "right eye"]);
+    expect(clauses.map(item => item.state.primaryClause.schedule?.frequency)).toEqual([2, 2]);
+    if (prn) expect(clauses.every(item => item.state.primaryClause.prn?.enabled)).toBe(true);
+  });
+});
+
+
+describe("typed coordination ignores diagnostic prose", () => {
+  it.each(["Unresolved schedule", "incompatible timing", "timing conflict", "some localized warning"])(
+    "retains a licensed shared cadence regardless of warning wording: %s", warning => {
+      const input = "instill 1 drop in left eye and 2 drops in right eye twice daily";
+      const plan = createBoundaryPlan(input);
+      const states = plan.segments.map(segment => ({
+        state: parseClauseState(segment.text), start: segment.start, end: segment.end
+      }));
+      states[1].state.warnings.push(warning);
+      applyCoordinatedCadenceScopes(states, plan, input);
+      expect(states.map(item => item.state.primaryClause.schedule?.frequency)).toEqual([2, 2]);
+      expect(states.map(item => item.state.primaryClause.dose?.value)).toEqual([1, 2]);
+      expect(states[1].state.warnings).toContain(warning);
+    }
+  );
+});
+
+
+describe("HPSG structural equality hygiene", () => {
+  it("unifies equal structured atoms regardless of property order, without serialization", () => {
+    const left = featureAtom({ code: "x", coding: { system: "urn:test", display: "Apply" } }, "json");
+    const right = featureAtom({ coding: { display: "Apply", system: "urn:test" }, code: "x" }, "json");
+    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("grammar must stay structured"); });
+    let result: ReturnType<typeof unifyFeatureStructures>;
+    try {
+      result = unifyFeatureStructures(left, right, HPSG_TYPE_SYSTEM);
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(result!.value).toBeDefined();
+    expect(result!.issues).toEqual([]);
+    expect(unifyFeatureStructures(left, featureAtom({ code: "different" }, "json"), HPSG_TYPE_SYSTEM).value)
+      .toBeUndefined();
+  });
+
+  it("does not serialize ordinary typed clause parsing", () => {
+    const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("grammar must stay structured"); });
+    let state: ReturnType<typeof parseClauseState>;
+    try {
+      state = parseClauseState("instill 1 drop OD QID");
+    } finally {
+      stringify.mockRestore();
+    }
+    expect(state!.primaryClause.dose?.value).toBe(1);
+    expect(state!.primaryClause.schedule?.frequency).toBe(4);
+  });
+
+  it("keeps distinct doses on a hash collision while packing equivalent derivations", () => {
+    const tokens = tokenize("1 tab");
+    const one = lexicalSign({ type: "dose-sign", rule: "test.dose.one", tokens,
+      synsem: { head: { dose: { value: 1, unit: "tab" } }, valence: {}, cont: {} } });
+    const two = lexicalSign({ type: "dose-sign", rule: "test.dose.two", tokens,
+      synsem: { head: { dose: { value: 2, unit: "tab" } }, valence: {}, cont: {} } });
+    const equivalent = lexicalSign({ type: "dose-sign", rule: "test.dose.reordered", tokens, score: 10,
+      synsem: { cont: {}, valence: {}, head: { dose: { unit: "tab", value: 1 } } } });
+    const hash = vi.spyOn(structuredValues, "hashStructuredValue").mockReturnValue(7);
+    let result: ReturnType<typeof parseHpsgChart>;
+    try {
+      result = parseHpsgChart({ tokens }, {
+        lexicalRules: [{ id: "test.doses", type: "dose-sign", match: (_context, start) =>
+          start === 0 ? [one, two, equivalent] : [] }],
+        phraseRules: []
+      });
+    } finally {
+      hash.mockRestore();
+    }
+    expect(result!.signs).toHaveLength(2);
+    expect(result!.signs.map(sign => sign.synsem.head.dose?.value).sort()).toEqual([1, 2]);
+    expect(result!.signs).toContain(equivalent);
+    expect(result!.signs).not.toContain(one);
+  });
+});
+
+
+describe("bounded medication lexical complement ownership", () => {
+  it("returns no product sign at or beyond the source token boundary", () => {
+    const context = clinicalRuleContext("take half tablet");
+    const rule = productLexicalRule();
+    expect(rule.match(context, context.limit)).toEqual([]);
+    expect(rule.match(context, context.limit + 1)).toEqual([]);
+  });
+
+  it.each([
+    "Take 1 tablet at 07:00, 11:00, 15:00 and 19:00; take an extra half tablet at bedtime if symptoms worsen.",
+    "Take 1 tablet at 07:00, 11:00 and 15:00; take an extra tablet at bedtime if symptoms worsen.",
+    "Take 1 tablet at 07:00 and 11:00; take half a tablet at bedtime if needed."
+  ])("does not crash on ordinary Parkinsonian rescue-dose complements: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.input).toBe(input);
+    expect(parsed.fhirNext.renderedInstruction).toBe(input);
+    expect(parsed.items.length).toBeGreaterThan(0);
+  });
+});
+
+
+describe("HPSG medication guard semantic authority", () => {
+  it("composes Boolean predicates and omitted measurement heads as typed daughters", () => {
+    const source = "Take 1 tablet only if systolic BP > 100 mmHg and < 140 or heart rate < 60 bpm.";
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "any", conditions: [
+      { kind: "all", conditions: [
+        { kind: "measurement", name: "systolic bp", operation: "gt", value: 100, unit: "mmHg" },
+        { kind: "measurement", name: "systolic bp", operation: "lt", value: 140, unit: "mmHg" }
+      ] },
+      { kind: "measurement", name: "heart rate", operation: "lt", value: 60, unit: "bpm" }
+    ] });
+    expect(guard.sign.type).toBe("medication-guard-phrase");
+    expect(guard.sign.construction?.kind).toBe("head-marker");
+    expect(guard.sign.fs.features.HEAD_DTR).toBeDefined();
+    expect(guard.sign.fs.features.NON_HEAD_DTR).toBeDefined();
+    expect(guard.sign.evidence.filter(item => item.rule === "hpsg.cx.guard.predicate-coordination")).toHaveLength(2);
+    expect(guard.sign.evidence.some(item => item.rule === "hpsg.cx.guard.head-predicate")).toBe(true);
+    expect(validateFeatureStructure(guard.sign.fs, HPSG_TYPE_SYSTEM)).toEqual([]);
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].evidence.some(item =>
+      item.rule === "hpsg.cx.guard.administration-scope")).toBe(true);
+  });
+
+  it("shares only the nearest explicit head and keeps UNLESS scope over the complete predicate", () => {
+    const guard = parseMedicationGuard("Use 1 tablet unless SBP < 90 or pulse > 100 and < 120.")!;
+    expect(guard.condition).toMatchObject({ kind: "not", condition: { kind: "any", conditions: [
+      { kind: "measurement", name: "sbp", operation: "lt", value: 90 },
+      { kind: "all", conditions: [
+        { kind: "measurement", name: "pulse", operation: "gt", value: 100 },
+        { kind: "measurement", name: "pulse", operation: "lt", value: 120 }
+      ] }
+    ] } });
+    expect(parseMedicationGuard("Take 1 tablet if pain.")).toBeUndefined();
+    expect(parsePublicSig("Take 1 tablet if pain.").fhir[0].asNeeded).toBe(true);
+  });
+});
+
+
+describe("conditional predicate negation is a typed HPSG constituent", () => {
+  it.each([
+    ["Take 1 tablet only if not fasting.", "fasting"],
+    ["Take 1 tablet only if no fever.", "fever"],
+    ["รับประทาน 1 เม็ด เฉพาะเมื่อไม่มีไข้", "ไข้"]
+  ])("preserves the negated state instead of inventing a positive state label: %s", (source, name) => {
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "not", condition: { kind: "state", name, expected: true } });
+    expect(evaluateMedicationCondition(guard.condition, { [name]: true })).toBe(false);
+    expect(evaluateMedicationCondition(guard.condition, { [name]: false })).toBe(true);
+    expect(guard.sign.evidence.some(item => item.rule === "hpsg.cx.guard.negated-predicate")).toBe(true);
+    expect(validateFeatureStructure(guard.sign.fs, HPSG_TYPE_SYSTEM)).toEqual([]);
+    const parsed = parsePublicSig(source);
+    expect(getDosageCondition(toFhirR5Dosages(parsed.fhirNext)[0])).toEqual(guard.condition);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("scopes a negator over its own predicate rather than the coordinated comparison", () => {
+    const source = "Take 1 tablet only if not fasting and systolic BP > 100 mmHg.";
+    const guard = parseMedicationGuard(source)!;
+    expect(guard.condition).toMatchObject({ kind: "all", conditions: [
+      { kind: "not", condition: { kind: "state", name: "fasting" } },
+      { kind: "measurement", name: "systolic bp", operation: "gt", value: 100 }
+    ] });
+    expect(evaluateMedicationCondition(guard.condition, { fasting: false, "systolic bp": 110 })).toBe(true);
+    expect(evaluateMedicationCondition(guard.condition, { fasting: true, "systolic bp": 110 })).toBe(false);
+    expect(evaluateMedicationCondition(guard.condition, { fasting: false, "systolic bp": 90 })).toBe(false);
+  });
+
+  it("keeps lexical no-less-than comparisons intact", () => {
+    const guard = parseMedicationGuard("Take 1 tablet only if SBP no less than 100 mmHg.")!;
+    expect(guard.condition).toMatchObject({ kind: "measurement", name: "sbp", operation: "ge", value: 100 });
+    expect(evaluateMedicationCondition(guard.condition, { sbp: 100 })).toBe(true);
+    expect(evaluateMedicationCondition(guard.condition, { sbp: 99 })).toBe(false);
   });
 });

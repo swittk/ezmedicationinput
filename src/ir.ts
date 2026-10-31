@@ -41,7 +41,8 @@ function cloneCoding(coding?: FhirCoding): FhirCoding | undefined {
   return {
     code: coding.code,
     display: coding.display,
-    system: coding.system
+    system: coding.system,
+    version: coding.version
   };
 }
 
@@ -210,6 +211,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) ||
     schedule.occurrenceCap !== undefined ||
+    Boolean(schedule.maxDosePerPeriod?.length) ||
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||
@@ -232,78 +234,93 @@ export function buildCanonicalSigClauses(
   return internal.clauses;
 }
 
+/**
+ * Convert one segment's relative canonical source ranges into full-SIG ranges.
+ *
+ * Flattened dosage rows may share nested evidence, target, and instruction
+ * frames. Keep the same seen-set across their projections so an aliased source
+ * span moves once for the segment, not once for every projected dosage.
+ *
+ * @param clauses Canonical clauses to rebase.
+ * @param offset Absolute start of the source segment in the full SIG.
+ * @param shiftedSpans Identity set shared by all projections of one segment.
+ */
 export function shiftCanonicalSigClauses(
   clauses: CanonicalSigClause[],
-  offset: number
+  offset: number,
+  shiftedSpans: WeakSet<object> = new WeakSet<object>()
 ): void {
+  const shiftSpan = (span: TextRange | undefined): void => {
+    if (!span || shiftedSpans.has(span)) return;
+    shiftedSpans.add(span);
+    span.start += offset;
+    span.end += offset;
+  };
+  const shiftEvidenceSpans = (evidence: CanonicalEvidence[] | undefined): void => {
+    for (const entry of evidence ?? []) for (const span of entry.spans) shiftSpan(span);
+  };
+  const shiftSiteRestrictions = (
+    restrictions: NonNullable<CanonicalSigClause["site"]>["restrictions"]
+  ): void => {
+    for (const restriction of restrictions ?? []) {
+      shiftSpan(restriction.range);
+      shiftSpan(restriction.markerRange);
+      shiftSpan(restriction.predicate.range);
+    }
+  };
+
   for (const clause of clauses) {
-    if (clause.span) {
-      clause.span = {
-        start: clause.span.start + offset,
-        end: clause.span.end + offset
-      };
-    }
-
-    clause.raw = {
-      ...clause.raw,
-      start: clause.raw.start + offset,
-      end: clause.raw.end + offset
-    };
-
-    for (const leftover of clause.leftovers) {
-      leftover.start += offset;
-      leftover.end += offset;
-    }
-
-    const shiftEvidenceSpans = (evidence: CanonicalEvidence[] | undefined) => {
-      if (!evidence) {
-        return;
-      }
-      for (const entry of evidence) {
-        for (const span of entry.spans) {
-          span.start += offset;
-          span.end += offset;
-        }
-      }
-    };
+    shiftSpan(clause.span);
+    shiftSpan(clause.raw);
+    for (const leftover of clause.leftovers) shiftSpan(leftover);
 
     shiftEvidenceSpans(clause.evidence);
     shiftEvidenceSpans(clause.dose?.evidence);
     shiftEvidenceSpans(clause.route?.evidence);
+    shiftEvidenceSpans(clause.method?.evidence);
     shiftEvidenceSpans(clause.site?.evidence);
     shiftEvidenceSpans(clause.schedule?.evidence);
+    shiftEvidenceSpans(clause.provisionalSchedule?.evidence);
     shiftEvidenceSpans(clause.prn?.evidence);
 
-    if (clause.instructionGraph) {
-      if (clause.instructionGraph.primaryAdministrationSpan) {
-        clause.instructionGraph.primaryAdministrationSpan.start += offset;
-        clause.instructionGraph.primaryAdministrationSpan.end += offset;
-      }
-      for (const action of clause.instructionGraph.actions) {
-        action.span.start += offset;
-        action.span.end += offset;
-        for (const arg of action.args) {
-          if (arg.span) {
-            arg.span.start += offset;
-            arg.span.end += offset;
-          }
-        }
-      }
-      for (const opaque of clause.instructionGraph.opaqueSpans ?? []) {
-        opaque.start += offset;
-        opaque.end += offset;
-      }
-      for (const relation of clause.instructionGraph.relations ?? []) {
-        if (relation.span) {
-          relation.span.start += offset;
-          relation.span.end += offset;
-        }
-      }
+    // All provenance ranges refer to the original clinician instruction.
+    // FHIR rows retain their existing independent clause-local metadata.
+    shiftSpan(clause.clinicalQuantity?.carrierMaterial?.range);
+    shiftSpan(clause.site?.range);
+    shiftSiteRestrictions(clause.site?.restrictions);
+    const adjuncts = clause.clinicalAdjuncts;
+    for (const range of adjuncts?.localRanges ?? []) shiftSpan(range);
+    shiftEvidenceSpans(adjuncts?.evidence);
+    shiftSpan(adjuncts?.treatmentPause?.range);
+
+    const group = clause.administrationTargetGroup;
+    shiftSpan(group?.range);
+    for (const target of group?.targets ?? []) {
+      shiftSpan(target.range);
+      shiftEvidenceSpans(target.evidence);
+      shiftSiteRestrictions(target.restrictions);
     }
 
-    if (clause.additionalInstructions) {
-      for (const instruction of clause.additionalInstructions) {
-        shiftEvidenceSpans(instruction.evidence);
+    for (const scope of clause.instructionScopes ?? []) {
+      shiftSpan(scope.span);
+      shiftSpan(scope.target);
+    }
+
+    const graph = clause.instructionGraph;
+    shiftSpan(graph?.primaryAdministrationSpan);
+    for (const action of graph?.actions ?? []) {
+      shiftSpan(action.span);
+      for (const arg of action.args) shiftSpan(arg.span);
+    }
+    for (const opaque of graph?.opaqueSpans ?? []) shiftSpan(opaque);
+    for (const relation of graph?.relations ?? []) shiftSpan(relation.span);
+
+    for (const instruction of clause.additionalInstructions ?? []) {
+      shiftEvidenceSpans(instruction.evidence);
+      // Actions also referenced in a graph share their frame objects.
+      for (const frame of instruction.frames ?? []) {
+        shiftSpan(frame.span);
+        for (const arg of frame.args) shiftSpan(arg.span);
       }
     }
   }

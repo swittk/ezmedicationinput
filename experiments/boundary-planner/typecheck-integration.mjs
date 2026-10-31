@@ -8,6 +8,11 @@ const mirror=path.join(here,'.generated','typecheck');
 await fs.rm(mirror,{recursive:true,force:true});
 await fs.mkdir(mirror,{recursive:true});
 await fs.cp(path.join(root,'src'),path.join(mirror,'src'),{recursive:true});
+// The historical grammar fixture reads the per-clause R5 shape through a
+// test-only adapter, not the shipping array-returning API.
+const testMirror=path.join(mirror,'test/helpers');
+await fs.mkdir(testMirror,{recursive:true});
+await fs.copyFile(path.join(root,'test/helpers/r5-parser.ts'),path.join(testMirror,'r5-parser.ts'));
 const experimentMirror=path.join(mirror,'experiments/boundary-planner');
 await fs.mkdir(experimentMirror,{recursive:true});
 for(const file of await fs.readdir(here)) {
@@ -17,12 +22,14 @@ for(const file of await fs.readdir(here)) {
 for(const file of ['index.ts','fhir.ts','schedule.ts','hpsg/clause-parser.ts','hpsg/rules/site-rules.ts','date-interpretation.ts','lexer/locales/th.ts']) {
   const original=path.join(root,'src',file);
   const code=candidateTransform(await fs.readFile(original,'utf8'),original);
-  if(code===undefined) throw new Error(`No transform for ${file}`);
-  await fs.writeFile(path.join(mirror,'src',file),code.split(here).join(experimentMirror));
+  // After production promotion the shadow transform intentionally becomes a no-op.
+  if(code!==undefined) {
+    await fs.writeFile(path.join(mirror,'src',file),code.split(here).join(experimentMirror));
+  }
 }
 await fs.writeFile(path.join(mirror,'tsconfig.json'),JSON.stringify({
   extends:path.join(here,'tsconfig.json'),compilerOptions:{rootDir:root,noEmit:true,allowImportingTsExtensions:true},
-  include:[path.join(mirror,'src/**/*.ts'),path.join(experimentMirror,'*.ts')],exclude:[]
+  include:[path.join(mirror,'src/**/*.ts'),path.join(mirror,'test/helpers/*.ts'),path.join(experimentMirror,'*.ts')],exclude:[]
 },null,2));
 const result=spawnSync(path.join(root,'node_modules/.bin/tsc'),['-p',path.join(mirror,'tsconfig.json')],{cwd:root,stdio:'inherit'});
 if(result.error) throw result.error;

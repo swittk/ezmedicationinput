@@ -4,19 +4,20 @@ import {
   WORD_FREQUENCIES,
   normalizeBodySiteKey
 } from "../../maps";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import {
   normalizeSymptomKey,
   resolveSymptomDefinition
 } from "../../symptom-terminology";
 import { LexKind } from "../../lexer/token-types";
 import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
-import { getProceduralFrames } from "../procedural-context";
+import { getProceduralFrames, conditionalAdviceOwnerAt } from "../procedural-context";
 import { Token } from "../../parser-state";
-import { AdvicePolarity, PrnReasonLookupRequest } from "../../types";
+import { AdviceArgumentRole, AdvicePolarity, PrnReasonLookupRequest } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
   EVERY_INTERVAL_TOKENS,
+  FREQUENCY_NUMBER_WORDS,
   mapFrequencyAdverb,
   mapIntervalUnit
 } from "../timing-lexicon";
@@ -57,10 +58,12 @@ import {
   normalizeTokenLower,
   rangeFromTokens,
   splitByLexicalSeparators,
+  startsMedicationGuard,
+  isMedicationGuardMarker,
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, lexicalSign } from "../signature";
-import { isScheduleLead } from "./timing-rules";
+import { isScheduleLead, followingCourseDurationHeaderAt } from "./timing-rules";
 import { productRouteHint } from "./product-route";
 
 function startsDoseComplement(context: HpsgClauseContext, start: number): boolean {
@@ -173,7 +176,7 @@ function canStartPrnReasonAtom(context: HpsgClauseContext, start: number): boole
     }
   }
 
-  const resolvedSite = resolveBodySitePhrase(first.original, context.options?.siteCodeMap, {
+  const resolvedSite = resolveBodySiteLexeme(first.original, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   });
   return Boolean(resolvedSite?.coding || resolvedSite?.definition);
@@ -222,7 +225,7 @@ function startsDosageSiteComplement(context: HpsgClauseContext, start: number): 
     const sourceText = joinTokenText(displayTokens).replace(/[{}]/g, "").trim();
     if (
       sourceText &&
-      resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -278,7 +281,7 @@ function createPrnReasonRequest(
     effectiveRange = { start, end };
   }
   const site = siteText
-    ? resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+    ? resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     })
     : undefined;
@@ -358,7 +361,7 @@ function parseLocatedPrnAtom(
     const siteText = joinTokenText(tokens.slice(index));
     if (
       isLocatedReasonHead(context, normalizedHead) &&
-      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -372,7 +375,7 @@ function parseLocatedPrnAtom(
     const normalizedHead = normalizePredicativeReasonText(headText);
     if (
       isLocatedReasonHead(context, normalizedHead) &&
-      resolveBodySitePhrase(siteText, context.options?.siteCodeMap, {
+      resolveBodySiteLexeme(siteText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       })
     ) {
@@ -382,7 +385,7 @@ function parseLocatedPrnAtom(
 
   if (
     previousLocatedHead &&
-    resolveBodySitePhrase(cleanDirectText, context.options?.siteCodeMap, {
+    resolveBodySiteLexeme(cleanDirectText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     })
   ) {
@@ -427,29 +430,35 @@ function parsePrnReasonAtoms(
   return atoms;
 }
 
-function hasSafetyConditionalActionAfter(
+function conditionalLeadBelongsToSafetyActionBefore(
   context: HpsgClauseContext,
   start: number
 ): boolean {
   const lead = context.tokens[start];
   if (!lead) return false;
-  return getProceduralFrames(context).some((frame) =>
-    frame.span.start >= lead.sourceEnd &&
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
-  );
-}
-
-function conditionalLeadBelongsToSafetyActionBefore(
-  context: HpsgClauseContext,
-  start: number
-): boolean {
+  // A full typed safety/cessation action may contain its own object BEFORE
+  // the "if/when" complement. Use the existing action frames to assign the
+  // conditional to the nearest governing action, not an unrelated drug dose.
+  const preceding = getProceduralFrames(context)
+    .filter(frame => frame.span.end <= lead.sourceStart)
+    .sort((left, right) => right.span.end - left.span.end)[0];
+  if (preceding && medicationInstructionActionIsSafetyScopeTarget(
+    preceding.predicate.lemma, context.options
+  ) && !context.state.input.slice(preceding.span.end, lead.sourceStart).trim()) {
+    return true;
+  }
   const action = context.tokens[start - 1];
   if (!action) return false;
   const actionLower = normalizeTokenLower(action);
-  if (!isMedicationAdministrationMethod(actionLower, context.options) &&
-      !resolveMedicationInstructionAction(actionLower, context.options)) {
+  const definition = resolveMedicationInstructionAction(actionLower, context.options);
+  if (!isMedicationAdministrationMethod(actionLower, context.options) && !definition) {
     return false;
   }
+  // A condition immediately licensed by an explicitly registered safety or
+  // cessation predicate belongs to THAT action, not to the medication dose.
+  // The graph already owns its temporal condition; creating an extra PRN sign
+  // would incorrectly turn a course-stopping instruction into "take PRN".
+  if (medicationInstructionActionIsSafetyScopeTarget(actionLower, context.options)) return true;
   const actionIndex = start - 1;
   return ACTION_DIRECTIVE_PREFIXES.some((prefix) => {
     if (prefix.polarity !== AdvicePolarity.Negate) return false;
@@ -459,19 +468,6 @@ function conditionalLeadBelongsToSafetyActionBefore(
       const token = context.tokens[prefixStart + offset];
       return Boolean(token && normalizeTokenLower(token) === part);
     });
-  });
-}
-
-function hasProceduralInstructionActionAfter(
-  context: HpsgClauseContext,
-  start: number
-): boolean {
-  const lead = context.tokens[start];
-  if (!lead) return false;
-  return getProceduralFrames(context).some((frame) => {
-    if (frame.span.start < lead.sourceEnd) return false;
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
-    return definition?.procedural === true;
   });
 }
 
@@ -726,7 +722,13 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!lead) {
       return [];
     }
+    // A numeric measurement guard belongs to the typed condition grammar.
+    // However an independently licensed symptom-onset PRN must not become a
+    // guard merely because a later, separate occurrence cap contains a
+    // numerical maximum ("when pain, no more than 3 doses daily").
     const contextualLead = matchContextualPrnReasonLead(context, start);
+    if (isMedicationGuardMarker(context, start) &&
+        !hasSymptomOnsetPrnAt(context, start)) return [];
     const leadLower = contextualLead?.canonical ?? normalizeTokenLower(lead);
     let cursor = contextualLead?.next ?? start + 1;
     const tokens = contextualLead ? [...contextualLead.tokens] : [lead];
@@ -737,8 +739,7 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (contextualLead) {
       if (
         previousTokensEndNegatedDirectivePrefix(context, start) ||
-        hasSafetyConditionalActionAfter(context, start) ||
-        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+        conditionalAdviceOwnerAt(context, start)
       ) {
         return [];
       }
@@ -752,9 +753,8 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     } else if (PRN_STANDALONE_REASON_LEADS.has(leadLower)) {
       if (
         previousTokensEndNegatedDirectivePrefix(context, start) ||
-        hasSafetyConditionalActionAfter(context, start) ||
         conditionalLeadBelongsToSafetyActionBefore(context, start) ||
-        (start === 0 && hasProceduralInstructionActionAfter(context, start))
+        conditionalAdviceOwnerAt(context, start)
       ) {
         return [];
       }
@@ -762,7 +762,32 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const nextLower = next && !context.state.consumed.has(next.index)
         ? normalizeTokenLower(next)
         : undefined;
-      if (!nextLower || next?.kind === LexKind.Number || prnReasonBoundary(nextLower, context)) {
+      // A procedural Duration already owns its elapsed-time FOR constituent,
+      // including indefinite/word/numeric quantities. Do not reinterpret the
+      // article ("for a minute") as a medication's PRN reason.
+      const durationOwnedByProcedure = leadLower === "for" &&
+        getProceduralFrames(context).some(frame =>
+          frame.span.start < lead.sourceStart && frame.args.some(arg =>
+            arg.role === AdviceArgumentRole.Duration &&
+            arg.quantity && arg.span &&
+            arg.span.start <= lead.sourceStart &&
+            arg.span.end > lead.sourceEnd
+          )
+        );
+      if (durationOwnedByProcedure) return [];
+      // A complete following-course duration owns its modifier and quantity;
+      // the prefix is not an incomplete PRN reason ("for next").
+      if (followingCourseDurationHeaderAt(context.tokens, start)) return [];
+      // A spelled duration ("for five days") is not a PRN reason.
+      // The timing construction owns both the cardinal and its time unit.
+      const durationUnitToken = context.tokens[start + 2];
+      if (leadLower === "for" &&
+          (next?.kind === LexKind.Number || next?.kind === LexKind.NumberRange ||
+            FREQUENCY_NUMBER_WORDS[nextLower ?? ""] !== undefined) &&
+          durationUnitToken &&
+          mapIntervalUnit(normalizeTokenLower(durationUnitToken))) return [];
+      if (!nextLower || next?.kind === LexKind.Number || next?.kind === LexKind.NumberRange ||
+          prnReasonBoundary(nextLower, context)) {
         return [];
       }
       cursor = start + 1;
@@ -775,6 +800,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!leadIn || context.state.consumed.has(leadIn.index)) {
         break;
       }
+      // A separately licensed guard owns its marker before optional PRN
+      // reason lead-ins are consumed; PRN and the clinical guard both remain.
+      if (startsMedicationGuard(context, cursor)) break;
       const lower = normalizeTokenLower(leadIn);
       const next = context.tokens[cursor + 1];
       const multiword = next ? `${lower} ${normalizeTokenLower(next)}` : lower;
@@ -798,6 +826,9 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         break;
       }
       const lower = normalizeTokenLower(candidate);
+      if (startsMedicationGuard(context, cursor)) {
+        break;
+      }
       if (
         PRN_REASON_COORDINATORS.has(lower) &&
         PRN_BREAKING_COORDINATORS.has(lower) &&
@@ -882,7 +913,10 @@ export function prnLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           },
           cont: { clauseKind: "administration" }
         },
-        score: reasonTokens.length ? 10 + reasonTokens.length : 6
+        // A complete, declared PRN lead is a typed executable modifier even
+        // without an indication. Do not rank it below an opaque free-text
+        // instruction that happens to consume the same words.
+        score: reasonTokens.length ? 10 + reasonTokens.length : 16
       })
     ];
   });

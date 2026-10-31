@@ -1,12 +1,18 @@
 import { FhirRatio, FhirQuantity, MedicationContext } from "../types";
-import { getBaseUnitFactor, getUnitCategory } from "./units";
 import { DEFAULT_UNIT_BY_NORMALIZED_FORM, KNOWN_DOSAGE_FORMS_TO_DOSE } from "../maps";
 import { arrayIncludes } from "./array";
 
 /**
  * High-level strength parser that returns the most appropriate FHIR representation.
  */
-export function parseStrength(strength: string, context?: MedicationContext): { strengthQuantity?: FhirQuantity, strengthRatio?: FhirRatio } {
+export function parseStrength(
+    strength: string, context?: MedicationContext
+): { strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio;
+     strengthComponents?: Array<{ strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio }> } {
+    if (strength.includes("+")) {
+        const strengthComponents = parseStrengthComponents(strength, context);
+        return strengthComponents ? { strengthComponents } : {};
+    }
     const ratio = parseStrengthIntoRatio(strength, context);
     if (!ratio) return {};
 
@@ -18,69 +24,42 @@ export function parseStrength(strength: string, context?: MedicationContext): { 
 }
 
 /**
+ * Retain each ingredient's strength separately. The names of the ingredients
+ * must come from the medication/product record, not from unnamed SIG numbers.
+ *
+ * Use this when parsing combination products: summing 875 mg + 125 mg as one
+ * active-ingredient strength would be clinically misleading.
+ * Returns null if any component cannot be parsed, not a partial ingredient set.
+ */
+export function parseStrengthComponents(
+    strength: string,
+    context?: MedicationContext
+): Array<{ strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio }> | null {
+    const parts = strength.split("+").map(part => part.trim());
+    if (parts.some(part => part.length === 0)) return null;
+    const result: Array<{ strengthQuantity?: FhirQuantity; strengthRatio?: FhirRatio }> = [];
+    for (const part of parts) {
+        const ratio = parseSingleStrengthPart(part, context);
+        if (!ratio || !ratio.numerator || !Number.isFinite(ratio.numerator.value) ||
+            !ratio.numerator.value || ratio.numerator.value <= 0) return null;
+        if (ratio.denominator?.value === 1 &&
+            (ratio.denominator.unit === "unit" || !ratio.denominator.unit)) {
+            result.push({ strengthQuantity: ratio.numerator });
+        } else {
+            result.push({ strengthRatio: ratio });
+        }
+    }
+    return result.length ? result : null;
+}
+
+/**
  * Internal helper to parse a strength string into a FHIR Ratio.
  */
 export function parseStrengthIntoRatio(strength: string, context?: MedicationContext): FhirRatio | null {
-    const parts = strength.split("+").map((p) => p.trim());
-    let totalMgPerMlOrG = 0;
-    let hasVolume = false;
-    let hasWeightDenominator = false;
-
-    let targetNumUnit: string | undefined;
-    let targetDenUnit: string | undefined;
-    let targetDenValue: number | undefined;
-
-    for (const part of parts) {
-        const ratio = parseSingleStrengthPart(part, context);
-        if (!ratio || !ratio.numerator?.value || ratio.numerator.value === 0) continue;
-
-        const nUnit = ratio.numerator.unit;
-        const dUnit = ratio.denominator?.unit || "unit";
-        const dCat = getUnitCategory(dUnit);
-
-        // Save target units from the first part
-        if (!targetNumUnit) targetNumUnit = nUnit;
-        if (!targetDenUnit) targetDenUnit = dUnit;
-        if (targetDenValue === undefined) targetDenValue = ratio.denominator?.value;
-
-        const nValue = ratio.numerator.value;
-        const dValue = ratio.denominator?.value ?? 1;
-
-        const nFactor = getBaseUnitFactor(nUnit);
-        const dFactor = (dCat === "volume" || dCat === "mass") ? getBaseUnitFactor(dUnit) : 1;
-
-        totalMgPerMlOrG += (nValue * nFactor) / (dValue * dFactor);
-        if (dCat === "volume") hasVolume = true;
-        if (dCat === "mass") hasWeightDenominator = true;
-    }
-
-    if (totalMgPerMlOrG === 0) return null;
-
-    const isComposite = parts.length > 1;
-    const resultNumUnit = isComposite ? "mg" : (targetNumUnit || "mg");
-
-    let resultDenUnit = targetDenUnit || "unit";
-    if (isComposite) {
-        if (hasVolume) resultDenUnit = "mL";
-        else if (hasWeightDenominator) resultDenUnit = "g";
-        else resultDenUnit = "unit";
-    }
-
-    const resultDenValue = isComposite ? 1 : (targetDenValue ?? 1);
-
-    const denCat = getUnitCategory(resultDenUnit);
-    const dBaseFactor = (denCat === "volume" || denCat === "mass")
-        ? getBaseUnitFactor(resultDenUnit)
-        : 1;
-    const totalBaseDenominatorValue = resultDenValue * dBaseFactor;
-
-    const totalNumeratorMg = totalMgPerMlOrG * totalBaseDenominatorValue;
-    const finalNumValue = totalNumeratorMg / getBaseUnitFactor(resultNumUnit);
-
-    return {
-        numerator: { value: finalNumValue, unit: resultNumUnit },
-        denominator: { value: resultDenValue, unit: resultDenUnit }
-    };
+    // A single Ratio must describe ONE ingredient. A multi-ingredient
+    // strength belongs in the structured components API, never a summed ratio.
+    if (strength.includes("+")) return null;
+    return parseSingleStrengthPart(strength, context);
 }
 
 function isSolidDosageForm(form: string): boolean {

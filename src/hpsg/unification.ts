@@ -1,6 +1,14 @@
-import { stableStructureKey } from "../stable-structure";
+import { formBodySiteRestriction } from "../body-site-grammar";
+import { composeLocalizedRecords } from "../localization";
+import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
+import { localizeAdviceRelation } from "../relation-terminology";
+import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, coordinationConnectorKind } from "./lexical-classes";
+import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
+import { getUnitCategory } from "../utils/units";
 import {
   HpsgDoseFeature,
+  HpsgClinicalQuantityDimension,
+  HpsgAdministrationTargetFeature,
   HpsgMethodFeature,
   HpsgRouteFeature,
   HpsgScheduleFeature,
@@ -10,16 +18,18 @@ import {
   HpsgPatientInstructionFeature,
   HpsgInstructionFeature,
   HpsgConditionFeature,
+  HpsgClinicalAdjunctFeature,
   HpsgScopedAdministrationFeature,
   HpsgSynsem
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceRelation, BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
   isCompatibleRouteRefinement(current: RouteCode | undefined, next: RouteCode): boolean;
+  sourceText?(start: number, end: number): string;
 }
 
 function sameOptionalScalar<T>(left: T | undefined, right: T | undefined): boolean {
@@ -171,7 +181,79 @@ function mergeSite(
     source: mergeOptionalScalar(left.source, right.source),
     coding: mergeOptionalScalar(left.coding, right.coding),
     spatialRelation: mergeOptionalScalar(left.spatialRelation, right.spatialRelation),
-    lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest)
+    restrictions: appendUniqueStructured(left.restrictions, right.restrictions),
+    lookupRequest: mergeOptionalScalar(left.lookupRequest, right.lookupRequest),
+    administrationTargetCount: mergeOptionalScalar(
+      left.administrationTargetCount,
+      right.administrationTargetCount
+    ),
+    range: left.range ?? right.range,
+    coordination: left.coordination ?? right.coordination
+  };
+}
+
+function atomicSite(site: HpsgSiteFeature): HpsgAdministrationTargetFeature {
+  const { coordination: _coordination, ...target } = site;
+  return target;
+}
+
+function siteTargets(site: HpsgSiteFeature): HpsgAdministrationTargetFeature[] {
+  return site.coordination?.targets.map((target) => ({ ...target })) ?? [atomicSite(site)];
+}
+
+function coordinatedSite(
+  left: HpsgSiteFeature,
+  right: HpsgSiteFeature,
+  marker: "conjunction" | "disjunction",
+  context: HpsgUnificationContext
+): HpsgSiteFeature | undefined {
+  const preferred = preferredAttachment(left, right);
+  if (preferred) return undefined;
+  const leftRange = left.coordination?.range ?? left.range;
+  const rightRange = right.coordination?.range ?? right.range;
+  if (!leftRange || !rightRange) return undefined;
+  const range = {
+    start: Math.min(leftRange.start, rightRange.start),
+    end: Math.max(leftRange.end, rightRange.end)
+  };
+  const prior = left.coordination?.coordination ?? right.coordination?.coordination;
+  const coordination = prior && prior !== marker ? "mixed" : prior ?? marker;
+  const targets: HpsgAdministrationTargetFeature[] = [];
+  for (const target of [...siteTargets(left), ...siteTargets(right)]) {
+    const duplicate = targets.some((candidate) =>
+      candidate.range?.start === target.range?.start &&
+      candidate.range?.end === target.range?.end &&
+      candidate.text === target.text &&
+      sameCoding(candidate.coding, target.coding)
+    );
+    if (!duplicate) targets.push({ ...target });
+  }
+  const sourceText = context.sourceText?.(range.start, range.end) ??
+    targets.map((target) => target.text).filter(Boolean).join(
+      marker === "disjunction" ? " or " : " and "
+    );
+  const connectorKey = marker === "disjunction" ? "or" : "and";
+  const connector = { en: connectorKey, ...ACTION_COORDINATION_CONNECTOR_I18N[connectorKey] };
+  const memberDisplay = (site: HpsgSiteFeature): Record<string, string> => {
+    const display: Record<string, string> = { en: site.text ?? "", ...(site.i18n ?? {}) };
+    for (const locale of Object.keys(connector)) {
+      // An untranslated custom site keeps its own name inside the localized
+      // coordination instead of forcing the whole phrase back to its source.
+      if (!display[locale]) display[locale] = site.text ?? "";
+    }
+    return display;
+  };
+  const i18n = composeLocalizedRecords(
+    [memberDisplay(left), connector, memberDisplay(right)],
+    (members, locale) => joinLocalizedTokens(locale, members)
+  );
+  return {
+    attachmentClass: attachmentClass(left.attachmentClass),
+    text: i18n?.en ?? sourceText,
+    i18n,
+    source: "text",
+    range,
+    coordination: { coordination, sourceText, range, targets }
   };
 }
 
@@ -291,6 +373,21 @@ function mergePatientInstruction(
   return { text: `${left.text}; ${right.text}` };
 }
 
+function mergeCoordinationMarker(
+  left: HpsgSynsem["cont"]["coordinationMarker"],
+  right: HpsgSynsem["cont"]["coordinationMarker"]
+): HpsgSynsem["cont"]["coordinationMarker"] | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return left.coordination === right.coordination ? left : undefined;
+}
+
+function mergeStructuredFeature<T>(left: T | undefined, right: T | undefined): T | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return equalStructuredValues(left, right) ? left : undefined;
+}
+
 function mergeDose(
   left: HpsgDoseFeature | undefined,
   right: HpsgDoseFeature | undefined
@@ -300,7 +397,8 @@ function mergeDose(
   const preferred = preferredAttachment(left, right);
   if (preferred) return preferred;
   const mergedClass = attachmentClass(left.attachmentClass);
-  if (!sameOptionalScalar(left.value, right.value)) {
+  if (!sameOptionalScalar(left.value, right.value) ||
+      !sameOptionalScalar(left.divisionCount, right.divisionCount)) {
     return undefined;
   }
   if (!sameOptionalScalar(left.unit, right.unit)) {
@@ -313,11 +411,34 @@ function mergeDose(
   ) {
     return undefined;
   }
+  let clinicalQuantity = mergeStructuredFeature(left.clinicalQuantity, right.clinicalQuantity);
+  if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) return undefined;
+  let value = mergeOptionalScalar(left.value, right.value);
+  let unit = mergeOptionalScalar(left.unit, right.unit);
+  const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
+  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.status !== "unsupported" &&
+      clinicalQuantity.denominators.some(term => term.dimension === "time")) {
+    const doseUnit = [clinicalQuantity.numerator.unit,
+      ...clinicalQuantity.denominators.filter(term => term.dimension !== "time").map(term => term.unit)
+    ].join("/");
+    value = clinicalQuantity.numerator.value / divisionCount;
+    unit = doseUnit;
+    clinicalQuantity = {
+      ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
+      dividedDoseCount: divisionCount, projectedDose: { value, unit }
+    };
+  } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
+    // Independently supplied volume and rate are compatible arguments of one
+    // administration. Neither may erase the other during feature unification.
+    clinicalQuantity = { ...clinicalQuantity, projectedDose: { value, unit } };
+  }
   return {
     attachmentClass: mergedClass,
-    value: mergeOptionalScalar(left.value, right.value),
+    value,
     range: mergeOptionalScalar(left.range, right.range),
-    unit: mergeOptionalScalar(left.unit, right.unit)
+    unit,
+    clinicalQuantity,
+    divisionCount
   };
 }
 
@@ -338,12 +459,16 @@ function appendUnique<T>(left: T[] | undefined, right: T[] | undefined): T[] | u
 
 function appendUniqueStructured<T>(left: T[] | undefined, right: T[] | undefined): T[] | undefined {
   const result: T[] = [];
-  const seen = new Set<string>();
-  for (const item of [...(left ?? []), ...(right ?? [])]) {
-    const key = stableStructureKey(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
+  const seen = new Map<number, T[]>();
+  for (const items of [left, right]) {
+    for (const item of items ?? []) {
+      const hash = hashStructuredValue(item);
+      const bucket = seen.get(hash);
+      if (bucket?.some(candidate => equalStructuredValues(candidate, item))) continue;
+      if (bucket) bucket.push(item);
+      else seen.set(hash, [item]);
+      result.push(item);
+    }
   }
   return result.length ? result : undefined;
 }
@@ -356,6 +481,21 @@ function sameOccurrenceCap(
   return left.max === right.max && left.period === right.period && left.periodUnit === right.periodUnit;
 }
 
+function sameRepeatCycle(
+  left: HpsgScheduleFeature["repeatCycle"],
+  right: HpsgScheduleFeature["repeatCycle"]
+): boolean {
+  if (!left || !right) return left === right;
+  return left.value === right.value && left.comparator === right.comparator &&
+    left.unit === right.unit && left.system === right.system && left.code === right.code;
+}
+
+function sameEventWindow(
+  left: HpsgScheduleFeature["eventWindow"], right: HpsgScheduleFeature["eventWindow"]
+): boolean {
+  return !left || !right || left.start === right.start && left.end === right.end;
+}
+
 function mergeSchedule(
   left: HpsgScheduleFeature | undefined,
   right: HpsgScheduleFeature | undefined
@@ -366,12 +506,17 @@ function mergeSchedule(
   if (preferred) return preferred;
   const mergedClass = attachmentClass(left.attachmentClass);
   if (
+    (left.cycleDayConstraint && right.cycleDayConstraint &&
+      !equalStructuredValues(left.cycleDayConstraint, right.cycleDayConstraint)) ||
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
+    !sameOptionalScalar(left.timingReference, right.timingReference) ||
+    !sameOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays) ||
     !sameOptionalScalar(left.count, right.count) ||
     !sameOptionalScalar(left.countMax, right.countMax) ||
     !sameOptionalScalar(left.duration, right.duration) ||
     !sameOptionalScalar(left.durationMax, right.durationMax) ||
     !sameOptionalScalar(left.durationUnit, right.durationUnit) ||
+    !sameOptionalScalar(left.administrationOffsetMinutes, right.administrationOffsetMinutes) ||
     !sameOptionalScalar(left.boundsStart, right.boundsStart) ||
     !sameOptionalScalar(left.boundsEnd, right.boundsEnd) ||
     !sameOptionalScalar(left.frequency, right.frequency) ||
@@ -379,21 +524,35 @@ function mergeSchedule(
     !sameOptionalScalar(left.period, right.period) ||
     !sameOptionalScalar(left.periodMax, right.periodMax) ||
     !sameOptionalScalar(left.periodUnit, right.periodUnit) ||
+    (left.clockWindow && right.clockWindow && (
+      left.clockWindow.start !== right.clockWindow.start || left.clockWindow.end !== right.clockWindow.end ||
+      left.clockWindow.endInclusive !== right.clockWindow.endInclusive)) ||
+    !sameOptionalScalar(left.weekdayOrdinal, right.weekdayOrdinal) ||
     !sameOptionalScalar(left.offset, right.offset) ||
     !sameOptionalScalar(left.offsetMin, right.offsetMin) ||
     !sameOptionalScalar(left.offsetMax, right.offsetMax) ||
+    !sameOptionalScalar(left.repeatCount, right.repeatCount) ||
+    (!sameRepeatCycle(left.repeatCycle, right.repeatCycle) && Boolean(left.repeatCycle && right.repeatCycle)) ||
+    !sameEventWindow(left.eventWindow, right.eventWindow) ||
     (!sameOccurrenceCap(left.occurrenceCap, right.occurrenceCap) && Boolean(left.occurrenceCap && right.occurrenceCap))
   ) {
     return undefined;
   }
   return {
     attachmentClass: mergedClass,
+    cycleDayConstraint: left.cycleDayConstraint ?? right.cycleDayConstraint,
+    sourceRanges: appendUniqueStructured(left.sourceRanges, right.sourceRanges),
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
+    timingReference: mergeOptionalScalar(left.timingReference, right.timingReference),
+    treatmentStartOffsetDays: mergeOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays),
     count: mergeOptionalScalar(left.count, right.count),
     countMax: mergeOptionalScalar(left.countMax, right.countMax),
     duration: mergeOptionalScalar(left.duration, right.duration),
     durationMax: mergeOptionalScalar(left.durationMax, right.durationMax),
     durationUnit: mergeOptionalScalar(left.durationUnit, right.durationUnit),
+    administrationOffsetMinutes: mergeOptionalScalar(
+      left.administrationOffsetMinutes, right.administrationOffsetMinutes
+    ),
     boundsStart: mergeOptionalScalar(left.boundsStart, right.boundsStart),
     boundsEnd: mergeOptionalScalar(left.boundsEnd, right.boundsEnd),
     frequency: mergeOptionalScalar(left.frequency, right.frequency),
@@ -401,15 +560,22 @@ function mergeSchedule(
     period: mergeOptionalScalar(left.period, right.period),
     periodMax: mergeOptionalScalar(left.periodMax, right.periodMax),
     periodUnit: mergeOptionalScalar(left.periodUnit, right.periodUnit),
+    clockWindow: left.clockWindow ?? right.clockWindow,
+    weekdayOrdinal: mergeOptionalScalar(left.weekdayOrdinal, right.weekdayOrdinal),
     offset: mergeOptionalScalar(left.offset, right.offset),
     offsetMin: mergeOptionalScalar(left.offsetMin, right.offsetMin),
     offsetMax: mergeOptionalScalar(left.offsetMax, right.offsetMax),
+    repeatCycle: left.repeatCycle ?? right.repeatCycle,
+    repeatCount: mergeOptionalScalar(left.repeatCount, right.repeatCount),
     when: appendUnique(left.when, right.when),
     dayOfWeek: appendUnique(left.dayOfWeek, right.dayOfWeek),
+    dayOfMonth: appendUnique(left.dayOfMonth, right.dayOfMonth),
     timeOfDay: appendUnique(left.timeOfDay, right.timeOfDay),
     calendarEvents: appendUniqueStructured(left.calendarEvents, right.calendarEvents),
     activityTiming: appendUniqueStructured(left.activityTiming, right.activityTiming),
-    occurrenceCap: left.occurrenceCap ?? right.occurrenceCap
+    eventWindow: left.eventWindow ?? right.eventWindow,
+    occurrenceCap: left.occurrenceCap ?? right.occurrenceCap,
+    maxDosePerPeriod: appendUniqueStructured(left.maxDosePerPeriod, right.maxDosePerPeriod)
   };
 }
 
@@ -427,6 +593,35 @@ function mergeCondition(
   if (!left) return right;
   if (!right) return left;
   return sameCondition(left, right) ? left : undefined;
+}
+
+function mergeClinicalAdjunct(
+  left: HpsgClinicalAdjunctFeature | undefined,
+  right: HpsgClinicalAdjunctFeature | undefined
+): HpsgClinicalAdjunctFeature | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  if (left.condition && right.condition &&
+      !equalStructuredValues(left.condition, right.condition)) {
+    return undefined;
+  }
+  if (left.conditionTarget && right.conditionTarget &&
+      !equalStructuredValues(left.conditionTarget, right.conditionTarget)) return undefined;
+  if (left.calendarDayCondition && right.calendarDayCondition &&
+      !equalStructuredValues(left.calendarDayCondition, right.calendarDayCondition)) return undefined;
+  if (left.treatmentPause && right.treatmentPause &&
+      !equalStructuredValues(left.treatmentPause, right.treatmentPause)) return undefined;
+  return {
+    treatmentPause: left.treatmentPause ?? right.treatmentPause,
+    condition: left.condition ?? right.condition,
+    calendarDayCondition: left.calendarDayCondition ?? right.calendarDayCondition,
+    conditionTarget: left.conditionTarget ?? right.conditionTarget,
+    excludedDates: appendUnique(left.excludedDates, right.excludedDates),
+    excludedWeekdays: appendUnique(left.excludedWeekdays, right.excludedWeekdays),
+    unresolved: left.unresolved || right.unresolved ? true : undefined,
+    localRanges: appendUniqueStructured(left.localRanges, right.localRanges) ?? [],
+    evidence: appendUniqueStructured(left.evidence, right.evidence) ?? []
+  };
 }
 
 function mergeScopedAdministrations(
@@ -491,6 +686,14 @@ function scopeSynsem(conditionSign: HpsgSign, targetSign: HpsgSign): HpsgSynsem 
     target.cont.scopedAdministrations
   );
   const scopes = mergeScopedAdministrations(existingScopes, [scoped]);
+  const clinicalAdjunct = mergeClinicalAdjunct(
+    conditionSign.synsem.cont.clinicalAdjunct,
+    target.cont.clinicalAdjunct
+  );
+  if (clinicalAdjunct === undefined &&
+      conditionSign.synsem.cont.clinicalAdjunct && target.cont.clinicalAdjunct) {
+    return undefined;
+  }
   return {
     head: {},
     valence: {
@@ -499,6 +702,7 @@ function scopeSynsem(conditionSign: HpsgSign, targetSign: HpsgSign): HpsgSynsem 
     },
     cont: {
       clauseKind: conditionSign.synsem.cont.clauseKind ?? target.cont.clauseKind,
+      clinicalAdjunct,
       scopedAdministrations: scopes,
       scopeClosed: true
     },
@@ -524,13 +728,53 @@ export function unifySynsem(
   if (route === undefined && left.head.route && right.head.route) {
     return undefined;
   }
-  const dose = mergeDose(left.head.dose, right.head.dose);
+  let dose = mergeDose(left.head.dose, right.head.dose);
   if (dose === undefined && left.head.dose && right.head.dose) {
     return undefined;
   }
-  const schedule = mergeSchedule(left.head.schedule, right.head.schedule);
-  if (schedule === undefined && left.head.schedule && right.head.schedule) {
-    return undefined;
+  let schedule = mergeSchedule(left.head.schedule, right.head.schedule);
+  if (schedule === undefined && left.head.schedule && right.head.schedule) return undefined;
+  // A stated daily total divided into N doses is not N repetitions of the
+  // undivided scalar. The division complement licenses a typed period total,
+  // and the resulting schedule represents the individual administrations.
+  // Ordinary "30 mg daily" has no division complement and stays untouched.
+  // A resolved weight-based dose (mg/kg) also needs this explicit daily-total
+  // projection when "daily" is separate from the unit, not written as "/day".
+  // Preserve its patient-mass denominator and weight requirement; only append
+  // the source-backed daily period. Rates with an existing time denominator
+  // must never be divided here a second time.
+  const quantity = dose?.clinicalQuantity;
+  if (dose?.divisionCount !== undefined &&
+      (!quantity || (quantity.representation === "dose" && quantity.status === "resolved" &&
+        !quantity.denominators.some(term => term.dimension === "time"))) &&
+      dose.value !== undefined && dose.unit &&
+      schedule?.frequency === 1 && schedule.period === 1 && schedule.periodUnit === "d") {
+    const category = getUnitCategory(dose.unit);
+    const dimension: HpsgClinicalQuantityDimension = category === "other"
+      ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
+      : category;
+    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit };
+    dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
+      ...quantity,
+      representation: "dose", status: "resolved",
+      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension },
+      denominators: [...(quantity?.denominators ?? []), { value: 1, unit: "d", dimension: "time" }],
+      dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
+    } };
+    schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
+  }
+  if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
+    const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
+    if (period) {
+      const dividedSchedule = {
+        frequency: dose.clinicalQuantity.dividedDoseCount,
+        period: period.value,
+        periodUnit: period.unit as HpsgScheduleFeature["periodUnit"]
+      };
+      const combined = mergeSchedule(schedule, dividedSchedule);
+      if (!combined && schedule) return undefined;
+      schedule = combined;
+    }
   }
   const site = mergeSite(left.valence.site, right.valence.site, context);
   if (site === undefined && left.valence.site && right.valence.site) {
@@ -540,10 +784,40 @@ export function unifySynsem(
   if (prn === undefined && left.valence.prn && right.valence.prn) {
     return undefined;
   }
+  if (!sameOptionalScalar(left.cont.regimenAdjustment, right.cont.regimenAdjustment)) return undefined;
+  const regimenAdjustment = mergeOptionalScalar(left.cont.regimenAdjustment, right.cont.regimenAdjustment);
   const condition = mergeCondition(left.cont.condition, right.cont.condition);
   if (condition === undefined && left.cont.condition && right.cont.condition) return undefined;
+  const clinicalAdjunct = mergeClinicalAdjunct(
+    left.cont.clinicalAdjunct,
+    right.cont.clinicalAdjunct
+  );
+  if (clinicalAdjunct === undefined &&
+      left.cont.clinicalAdjunct && right.cont.clinicalAdjunct) return undefined;
+  const coordinationMarker = mergeCoordinationMarker(
+    left.cont.coordinationMarker,
+    right.cont.coordinationMarker
+  );
+  if (coordinationMarker === undefined &&
+      left.cont.coordinationMarker && right.cont.coordinationMarker) return undefined;
+  const siteRelativeMarker = left.cont.siteRelativeMarker || right.cont.siteRelativeMarker
+    ? mergeStructuredFeature(left.cont.siteRelativeMarker, right.cont.siteRelativeMarker)
+    : undefined;
+  if (siteRelativeMarker === undefined &&
+      left.cont.siteRelativeMarker && right.cont.siteRelativeMarker) return undefined;
+  const sitePredicate = left.cont.sitePredicate || right.cont.sitePredicate
+    ? mergeStructuredFeature(left.cont.sitePredicate, right.cont.sitePredicate)
+    : undefined;
+  if (sitePredicate === undefined && left.cont.sitePredicate && right.cont.sitePredicate) {
+    return undefined;
+  }
+  const siteRestriction = left.cont.siteRestriction || right.cont.siteRestriction
+    ? mergeStructuredFeature(left.cont.siteRestriction, right.cont.siteRestriction)
+    : undefined;
+  if (siteRestriction === undefined &&
+      left.cont.siteRestriction && right.cont.siteRestriction) return undefined;
 
-  return {
+  const result: HpsgSynsem = {
     head: {
       method,
       route,
@@ -561,12 +835,15 @@ export function unifySynsem(
     },
     cont: {
       clauseKind: left.cont.clauseKind ?? right.cont.clauseKind,
+      regimenAdjustment,
       condition,
+      clinicalAdjunct,
       scopedAdministrations: mergeScopedAdministrations(
         left.cont.scopedAdministrations,
         right.cont.scopedAdministrations
       ),
-      scopeClosed: left.cont.scopeClosed || right.cont.scopeClosed ? true : undefined
+      scopeClosed: left.cont.scopeClosed || right.cont.scopeClosed ? true : undefined,
+      coordinationMarker
     },
     nonlocal: {
       scopeRequirements: mergeScopeRequirements(
@@ -574,6 +851,106 @@ export function unifySynsem(
         right.nonlocal?.scopeRequirements
       )
     }
+  };
+  // Keep absent optional features absent. Otherwise every ordinary chart key
+  // and semantic comparison pays to walk three unused site-relative fields.
+  // This changes representation cost, never which licensed signs can combine.
+  if (siteRelativeMarker) result.cont.siteRelativeMarker = siteRelativeMarker;
+  if (sitePredicate) result.cont.sitePredicate = sitePredicate;
+  if (siteRestriction) result.cont.siteRestriction = siteRestriction;
+  return result;
+}
+
+function withoutSiteRelativeContent(synsem: HpsgSynsem): HpsgSynsem {
+  return {
+    ...synsem,
+    cont: {
+      ...synsem.cont,
+      siteRelativeMarker: undefined,
+      sitePredicate: undefined,
+      siteRestriction: undefined
+    }
+  };
+}
+
+function siteRelativeSynsem(
+  markerSign: HpsgSign,
+  predicateSign: HpsgSign,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const marker = markerSign.synsem.cont.siteRelativeMarker;
+  const predicate = predicateSign.synsem.cont.sitePredicate;
+  if (!marker || !predicate) return undefined;
+  const base = unifySynsem(
+    withoutSiteRelativeContent(markerSign.synsem),
+    withoutSiteRelativeContent(predicateSign.synsem),
+    context
+  );
+  if (!base) return undefined;
+  const range = {
+    start: Math.min(marker.range.start, predicate.range.start),
+    end: Math.max(marker.range.end, predicate.range.end)
+  };
+  return {
+    ...base,
+    cont: {
+      ...base.cont,
+      siteRestriction: formBodySiteRestriction(predicate, marker.range,
+        context.sourceText?.(range.start, range.end))
+    }
+  };
+}
+
+function restrictedSiteSynsem(
+  headSign: HpsgSign,
+  relativeSign: HpsgSign,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const restriction = relativeSign.synsem.cont.siteRestriction;
+  const headSite = headSign.synsem.valence.site;
+  if (!restriction || !headSite) return undefined;
+  const base = unifySynsem(
+    headSign.synsem,
+    withoutSiteRelativeContent(relativeSign.synsem),
+    context
+  );
+  if (!base?.valence.site) return undefined;
+  return {
+    ...base,
+    valence: {
+      ...base.valence,
+      site: {
+        ...base.valence.site,
+        restrictions: appendUniqueStructured(
+          base.valence.site.restrictions,
+          [restriction]
+        )
+      }
+    }
+  };
+}
+
+function siteCoordinationSynsem(
+  left: HpsgSynsem,
+  right: HpsgSynsem,
+  context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const leftSite = left.valence.site;
+  const rightSite = right.valence.site;
+  const marker = left.cont.coordinationMarker ?? right.cont.coordinationMarker;
+  if (!leftSite || !rightSite || !marker) return undefined;
+  const withoutSites = (synsem: HpsgSynsem): HpsgSynsem => ({
+    ...synsem,
+    valence: { ...synsem.valence, site: undefined },
+    cont: { ...synsem.cont, coordinationMarker: undefined }
+  });
+  const base = unifySynsem(withoutSites(left), withoutSites(right), context);
+  const site = coordinatedSite(leftSite, rightSite, marker.coordination, context);
+  if (!base || !site) return undefined;
+  return {
+    ...base,
+    valence: { ...base.valence, site },
+    cont: { ...base.cont, coordinationMarker: undefined }
   };
 }
 
@@ -605,10 +982,123 @@ function refinedDailyCadenceSynsem(
   };
 }
 
+/** A meal relation beside fixed clocks qualifies those same administrations.
+ * Explicit coordination or separate quantified heads retain their event union.
+ * @param clockSign Daughter supplying exact clock anchors.
+ * @param mealSign Daughter supplying a recognized meal-relative modifier.
+ * @param context Existing source ranges, used only for adjacency/coordination.
+ */
+function fixedClockMealAdjunctSynsem(
+  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const clock = clockSign.synsem.head.schedule;
+  const meal = mealSign.synsem.head.schedule;
+  if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
+      meal.timeOfDay?.length || !context.sourceText ||
+      (clockSign.synsem.head.dose && mealSign.synsem.head.dose)) return undefined;
+  const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
+    for (const values of MEAL_TIMING_BY_RELATION.values()) {
+      for (const value of values.values()) if (value === event) return true;
+    }
+    return false;
+  };
+  if (!meal.when.every(isMeal)) return undefined;
+  const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
+    const indices = new Set<number>();
+    for (const item of sign.evidence) {
+      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields) continue;
+      for (const index of item.tokenIndices) indices.add(index);
+    }
+    return sign.tokens.filter(token => indices.has(token.index));
+  };
+  const clocks = tokensFor(clockSign, "timeOfDay"), meals = tokensFor(mealSign, "when");
+  if (!clocks.length || !meals.length) return undefined;
+  // The clock-list constituent can own its introductory comma. That
+  // punctuation must not hide the following coordinator at its outer edge.
+  const clockEdges = clocks.filter(token => token.original !== ",");
+  const mealEdges = meals.filter(token => token.original !== ",");
+  if (!clockEdges.length || !mealEdges.length) return undefined;
+  const firstClock = clockEdges.reduce((a, b) => a.sourceStart < b.sourceStart ? a : b);
+  const lastClock = clockEdges.reduce((a, b) => a.sourceEnd > b.sourceEnd ? a : b);
+  const firstMeal = mealEdges.reduce((a, b) => a.sourceStart < b.sourceStart ? a : b);
+  const lastMeal = mealEdges.reduce((a, b) => a.sourceEnd > b.sourceEnd ? a : b);
+  const linked = (token: typeof firstClock) =>
+    coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown";
+  if (lastClock.sourceEnd <= firstMeal.sourceStart && (linked(lastClock) || linked(firstMeal)) ||
+      lastMeal.sourceEnd <= firstClock.sourceStart && (linked(lastMeal) || linked(firstClock))) return undefined;
+  const clockStart = Math.min(...clocks.map(token => token.sourceStart));
+  const clockEnd = Math.max(...clocks.map(token => token.sourceEnd));
+  const mealStart = Math.min(...meals.map(token => token.sourceStart));
+  const mealEnd = Math.max(...meals.map(token => token.sourceEnd));
+  const bridgeStart = clockEnd <= mealStart ? clockEnd : mealEnd;
+  const bridgeEnd = clockEnd <= mealStart ? mealStart : clockStart;
+  if (bridgeStart > bridgeEnd) return undefined;
+  const gap = context.sourceText(bridgeStart, bridgeEnd);
+  if (!/^[\s,;]*$/u.test(gap)) {
+    // Other schedule daughters can intervene without introducing another
+    // administration: the duration in "at 07:00 for 7 days before meals".
+    // Their existing typed evidence must own every non-separator token.
+    const allowed = new Set<number>();
+    const fields = ["boundsDuration", "duration", "durationMax", "durationUnit", "frequency", "frequencyMax", "period", "periodMax", "periodUnit", "count", "countMax"];
+    for (const sign of [clockSign, mealSign]) {
+      for (const evidence of sign.evidence) {
+        if (!evidence.scheduleFields?.length ||
+            !evidence.scheduleFields.every(field => fields.indexOf(field) >= 0)) continue;
+        for (const index of evidence.tokenIndices) allowed.add(index);
+      }
+    }
+    const bridge = [...clockSign.tokens, ...mealSign.tokens].filter(token =>
+      token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd);
+    if (!bridge.length || bridge.some(token =>
+      coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown" ||
+      (!/^[,;:]$/u.test(token.original) && !allowed.has(token.index)))) return undefined;
+  }
+  const text = context.sourceText(mealStart, mealEnd).trim();
+  if (!text) return undefined;
+  const i18n: Record<string, string> = {};
+  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
+    for (const locale of ["en", "th"]) {
+      const descriptions: string[] = [];
+      for (const event of meal.when) {
+        for (const [relation, values] of MEAL_TIMING_BY_RELATION) {
+          for (const [anchor, value] of values) {
+            if (value !== event) continue;
+            const kind = relation === "before" ? AdviceRelation.Before :
+              relation === "after" ? AdviceRelation.After : AdviceRelation.With;
+            descriptions.push(joinLocalizedTokens(locale, [
+              localizeAdviceRelation(kind, locale), localizedTimeArgument(anchor, locale)
+            ]));
+          }
+        }
+      }
+      if (descriptions.length) i18n[locale] = descriptions.join(", ");
+    }
+  }
+  const instruction: HpsgInstructionFeature = {
+    text: i18n.en ?? text,
+    ...(Object.keys(i18n).length ? { i18n } : {}),
+    evidence: [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
+      spans: [{ start: mealStart, end: mealEnd, text }] }]
+  };
+  return {
+    ...mealSign.synsem,
+    head: { ...mealSign.synsem.head, schedule: {
+      ...meal, when: undefined, offset: undefined, offsetMin: undefined, offsetMax: undefined
+    } },
+    valence: { ...mealSign.synsem.valence,
+      instructions: mergeInstructions(mealSign.synsem.valence.instructions, [instruction]) }
+  };
+}
+
 function scheduleRefinementSynsems(
   left: HpsgSign,
-  right: HpsgSign
+  right: HpsgSign,
+  context: HpsgUnificationContext
 ): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
+  const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
+  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
+  const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);
+  if (qualifiedLeft) return { left: qualifiedLeft, right: right.synsem, refined: true };
   const refinedLeft = refinedDailyCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
   const refinedRight = refinedDailyCadenceSynsem(right, left);
@@ -625,10 +1115,16 @@ export function combineSigns(
   const selectedConstruction = selectHpsgConstruction(left, right);
   if (!selectedConstruction) return undefined;
   const target = selectedConstruction.construction.headSide === "left" ? left : right;
-  const condition = selectedConstruction.construction.headSide === "left" ? right : left;
-  const refinement = scheduleRefinementSynsems(left, right);
+  const nonHead = selectedConstruction.construction.headSide === "left" ? right : left;
+  const refinement = scheduleRefinementSynsems(left, right, context);
   const synsem = selectedConstruction.construction.operation === "scope"
-    ? scopeSynsem(condition, target)
+    ? scopeSynsem(nonHead, target)
+    : selectedConstruction.construction.operation === "form-site-relative"
+      ? siteRelativeSynsem(left, right, context)
+    : selectedConstruction.construction.operation === "restrict-site"
+      ? restrictedSiteSynsem(target, nonHead, context)
+    : selectedConstruction.motherType === "site-coordination-phrase"
+      ? siteCoordinationSynsem(refinement.left, refinement.right, context)
     : unifySynsem(refinement.left, refinement.right, context);
   if (!synsem) return undefined;
   const fs = combineSignFeatureStructures(
@@ -636,7 +1132,11 @@ export function combineSigns(
     right.fs,
     selectedConstruction.motherType,
     selectedConstruction.construction.headSide,
-    selectedConstruction.construction.operation === "scope" || refinement.refined
+    selectedConstruction.construction.operation === "scope" ||
+      selectedConstruction.construction.operation === "form-site-relative" ||
+      selectedConstruction.construction.operation === "restrict-site" ||
+      selectedConstruction.motherType === "site-coordination-phrase" ||
+      refinement.refined
       ? synsem
       : undefined
   );
@@ -667,6 +1167,7 @@ export function combineSigns(
         tokenIndices
       }
     ],
-    score: left.score + right.score + 1
+    score: left.score + right.score +
+      (selectedConstruction.motherType === "site-coordination-phrase" ? 6 : 1)
   };
 }

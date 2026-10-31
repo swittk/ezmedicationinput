@@ -13,9 +13,37 @@ import {
   FhirCoding,
   FhirExtension
 } from "./types";
+import {
+  getPrimitiveTranslations,
+  mergeTranslationPrimitiveElement
+} from "./fhir-translations";
+import relationTerms from "./relation-terminology.json";
+
+/** Reuse declarative relation terminology, compiling only its exact codings
+ * once for FHIR graph projection/import. Grammar uses the same JSON lexicon.
+ */
+const RELATION_CODE_BY_KIND = new Map<AdviceRelation, FhirCoding>();
+const RELATION_KIND_BY_CODE = new Map<string, AdviceRelation>();
+for (const value of relationTerms.adviceRelations as Array<{ relation: string; coding?: FhirCoding }>) {
+  const coding = value.coding;
+  if (coding?.system && coding.code) {
+    const kind = value.relation as AdviceRelation;
+    RELATION_CODE_BY_KIND.set(kind, coding);
+    RELATION_KIND_BY_CODE.set(`${coding.system}|${coding.code}`, kind);
+  }
+}
+
+function getAdviceRelationCoding(relation: AdviceRelation): FhirCoding | undefined {
+  return RELATION_CODE_BY_KIND.get(relation);
+}
+function getAdviceRelationByCoding(coding: FhirCoding | undefined): AdviceRelation | undefined {
+  return coding?.system && coding.code
+    ? RELATION_KIND_BY_CODE.get(`${coding.system}|${coding.code}`)
+    : undefined;
+}
 
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
-  "https://solublelabs.com/fhir/StructureDefinition/medication-instruction-graph";
+  "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
 
 function child(extension: FhirExtension, url: string): FhirExtension | undefined {
   return extension.extension?.find((entry) => entry.url === url);
@@ -41,30 +69,77 @@ function valueDecimal(url: string, value: number | undefined): FhirExtension | u
 function valueBoolean(url: string, value: boolean | undefined): FhirExtension | undefined {
   return value === undefined ? undefined : { url, valueBoolean: value };
 }
-function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension | undefined {
-  if (!value) return undefined;
+/** FHIR Coding has no i18n member. Preserve internal translations as the
+ * standard _display translation primitive, and omit optional undefined
+ * members: strict nested Extension unions validate the in-memory FHIR shape.
+ */
+function wireCoding(value: FhirCoding): FhirCoding {
+  const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
   return {
-    url,
-    valueCoding: {
-      system: value.system,
-      code: value.code,
-      display: value.display,
-      extension: value.extension,
-      _display: value._display,
-      i18n: value.i18n
-    }
+    ...(value.system !== undefined ? { system: value.system } : {}),
+    ...(value.version !== undefined ? { version: value.version } : {}),
+    ...(value.code !== undefined ? { code: value.code } : {}),
+    ...(value.display !== undefined ? { display: value.display } : {}),
+    ...(value.extension?.length ? { extension: value.extension } : {}),
+    ...(displayPrimitive ? { _display: displayPrimitive } : {})
   };
+}
+
+function readCoding(value: FhirCoding | undefined): FhirCoding | undefined {
+  if (!value) return undefined;
+  const translations = getPrimitiveTranslations(value._display);
+  return translations
+    ? { ...value, i18n: { ...(value.i18n ?? {}), ...translations } }
+    : value;
+}
+
+function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension | undefined {
+  return value ? { url, valueCoding: wireCoding(value) } : undefined;
+}
+
+/** Keep the graph's role-specific relation while emitting standard SNOMED
+ * dosing-fragment codes instead of proprietary identifiers when exact.
+ * @param extensions Destination within the existing instruction graph.
+ * @param name Relation child name (relation or kind).
+ * @param relation Resolved typed relation, not a free-text guess.
+ */
+function addRelation(
+  extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined
+): void {
+  if (!relation) return;
+  const coding = getAdviceRelationCoding(relation);
+  if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
+  else add(extensions, valueCode(name, relation));
+}
+
+/** Decode the exact standards mapping; preserve existing local-only and
+ * previously saved valueCode representations without NLP reparsing.
+ * @param extension Encoded action, argument or relation.
+ * @param name Relation child name.
+ */
+function readRelation(extension: FhirExtension, name: string): AdviceRelation | undefined {
+  return getAdviceRelationByCoding(child(extension, `${name}Coding`)?.valueCoding) ??
+    child(extension, name)?.valueCode as AdviceRelation | undefined;
 }
 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
+  addRelation(nested, "relation", argument.relation);
   add(nested, valueString("text", argument.text));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
   add(nested, valueCoding("coding", argument.coding));
   for (const coding of argument.codings ?? []) {
-    nested.push({ url: "argumentCoding", valueCoding: { ...coding } });
+    nested.push({ url: "argumentCoding", valueCoding: wireCoding(coding) });
+  }
+  for (const component of argument.components ?? []) {
+    const parts: FhirExtension[] = [
+      { url: "role", valueCode: component.role },
+      { url: "text", valueString: component.text }
+    ];
+    add(parts, valueCoding("coding", component.coding));
+    nested.push({ url: "component", extension: parts });
   }
   if (argument.span) {
     add(nested, valueInteger("spanStart", argument.span.start));
@@ -99,8 +174,9 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueDecimal("confidence", frame.confidence));
   add(nested, valueCode("force", frame.force));
   add(nested, valueCode("polarity", frame.polarity));
+  add(nested, valueCode("polaritySource", frame.polaritySource));
   add(nested, valueCode("modality", frame.modality));
-  add(nested, valueCode("relation", frame.relation));
+  addRelation(nested, "relation", frame.relation);
   add(nested, valueString("predicateLemma", frame.predicate.lemma));
   add(nested, valueString("predicateDisplay", frame.predicate.display));
   add(nested, valueString("semanticClass", frame.predicate.semanticClass));
@@ -131,7 +207,13 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     }
     nested.push({ url: "predicateRealizerLocale", extension: localized });
   }
-  for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: { ...coding } });
+  for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: wireCoding(coding) });
+  for (const part of frame.predicate.semanticComponents ?? []) {
+    nested.push({ url: "predicateComponent", extension: [
+      { url: "role", valueCode: part.role },
+      { url: "coding", valueCoding: wireCoding(part.coding) }
+    ] });
+  }
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
   add(nested, valueString("sourceText", frame.sourceText));
@@ -151,7 +233,18 @@ export function buildInstructionGraphExtension(
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
-    add(relationNested, valueCode("kind", relation.kind));
+    // Formal before/after codes apply to explicitly linked actions, not
+    // "before food", "after a symptom", or other unlinked textual adjuncts.
+    if ((relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
+        relation.fromActionIndex !== undefined) {
+      add(relationNested, valueCoding("kindCoding", {
+        system: "http://hl7.org/fhir/action-relationship-type",
+        code: relation.kind,
+        display: relation.kind === AdviceRelation.Before ? "Before" : "After"
+      }));
+    } else {
+      addRelation(relationNested, "kind", relation.kind);
+    }
     add(relationNested, valueInteger("fromActionIndex", relation.fromActionIndex));
     add(relationNested, valueInteger("toActionIndex", relation.toActionIndex));
     add(relationNested, valueString("text", relation.text));
@@ -190,13 +283,24 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
   const argument: AdviceArgument = {
     role,
     text,
+    relation: readRelation(extension, "relation"),
     normalized: child(extension, "normalized")?.valueString,
     conceptId: child(extension, "conceptId")?.valueString,
-    coding: child(extension, "coding")?.valueCoding,
+    coding: readCoding(child(extension, "coding")?.valueCoding),
     codings: children(extension, "argumentCoding")
-      .map((entry) => entry.valueCoding)
+      .map((entry) => readCoding(entry.valueCoding))
       .filter((entry): entry is FhirCoding => Boolean(entry))
   };
+  const components: NonNullable<AdviceArgument["components"]> = [];
+  for (const component of children(extension, "component")) {
+    const role = child(component, "role")?.valueCode;
+    const text = child(component, "text")?.valueString;
+    if ((role === "head" || role === "qualifier" || role === "amount") && text !== undefined) {
+      const coding = readCoding(child(component, "coding")?.valueCoding);
+      components.push({ role, text, ...(coding ? { coding } : {}) });
+    }
+  }
+  if (components.length) argument.components = components;
   const spanStart = child(extension, "spanStart")?.valueInteger;
   const spanEnd = child(extension, "spanEnd")?.valueInteger;
   if (spanStart !== undefined && spanEnd !== undefined) argument.span = { start: spanStart, end: spanEnd };
@@ -273,13 +377,24 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
     const translated = child(translation, "text")?.valueString;
     if (locale && translated) predicateI18n[locale] = translated;
   }
+  const semanticComponents: NonNullable<AdviceFrame["predicate"]["semanticComponents"]> = [];
+  for (const part of children(extension, "predicateComponent")) {
+    const role = child(part, "role")?.valueCode;
+    const coding = readCoding(child(part, "coding")?.valueCoding);
+    if ((role === "activity" || role === "technique" || role === "target-state" ||
+      role === "target-site" || role === "target-object" || role === "operation" || role === "orientation" ||
+      role === "mechanism" || role === "situation") && coding?.system && coding.code) {
+      semanticComponents.push({ role, coding });
+    }
+  }
   return {
     force,
     origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
     confidence: child(extension, "confidence")?.valueDecimal,
     polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
+    polaritySource: child(extension, "polaritySource")?.valueCode === "shared" ? "shared" : undefined,
     modality: child(extension, "modality")?.valueCode as AdviceModality | undefined,
-    relation: child(extension, "relation")?.valueCode as AdviceRelation | undefined,
+    relation: readRelation(extension, "relation"),
     predicate: {
       lemma,
       display: child(extension, "predicateDisplay")?.valueString,
@@ -290,8 +405,9 @@ function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined
         ? { locales: localeRealizerConfig }
         : undefined,
       codings: children(extension, "predicateCoding")
-        .map((entry) => entry.valueCoding)
-        .filter((entry): entry is FhirCoding => Boolean(entry))
+        .map((entry) => readCoding(entry.valueCoding))
+        .filter((entry): entry is FhirCoding => Boolean(entry)),
+      ...(semanticComponents.length ? { semanticComponents } : {})
     },
     args,
     span: { start: spanStart, end: spanEnd },
@@ -312,7 +428,10 @@ export function parseInstructionGraphExtension(
   }
   const relations: CanonicalInstructionRelation[] = [];
   for (const entry of children(extension, "graphRelation")) {
-    const kind = child(entry, "kind")?.valueCode as AdviceRelation | undefined;
+    const edgeCoding = child(entry, "kindCoding")?.valueCoding;
+    const kind = edgeCoding?.system === "http://hl7.org/fhir/action-relationship-type" &&
+      (edgeCoding.code === "before" || edgeCoding.code === "after")
+      ? edgeCoding.code as AdviceRelation : readRelation(entry, "kind");
     const toActionIndex = child(entry, "toActionIndex")?.valueInteger;
     if (!kind || toActionIndex === undefined) continue;
     const spanStart = child(entry, "spanStart")?.valueInteger;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, fromFhirDosage, nextDueDoses, parseSig, RouteCode } from "../src";
+import { formatSig, fromFhirDosage, nextDueDoses, RouteCode } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD clinician dogfood grammar", () => {
   it.each([
@@ -56,6 +57,17 @@ describe("OPD clinician dogfood grammar", () => {
     const parsed = parseSig(source);
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.fhir.timing?.repeat?.when).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.eventWindow)
+      .toEqual({ start: "WAKE", end: "HS" });
+    expect(parsed.fhir.timing?.repeat?.extension).toContainEqual(
+      expect.objectContaining({
+        url: expect.stringContaining("urn:ezmedicationinput:StructureDefinition:medication-timing-event-window"),
+        extension: [
+          { url: "start", valueCode: "WAKE" },
+          { url: "end", valueCode: "HS" }
+        ]
+      })
+    );
     expect(parsed.meta.canonical.clauses[0]?.additionalInstructions).toContainEqual(
       expect.objectContaining({ text })
     );
@@ -128,7 +140,7 @@ describe("OPD clinician dogfood grammar", () => {
     );
     expect(parsed.fhir.timing?.repeat?.extension).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        url: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window"
+        url: "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window"
       })
     ]));
     expect(formatSig(parsed.fhir, "long", { locale: "th" })).toContain(thai);

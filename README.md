@@ -5,7 +5,7 @@
 ## Features
 
 - Converts shorthand strings (e.g. `1x3 po pc`, `500 mg po q6h prn pain`) into FHIR-compliant dosage JSON.
-- Parses multi-clause sigs into multiple dosage items (e.g. `OD ... , OS ...`) while preserving a first-item compatibility shape for legacy single-dose consumers.
+- Parses multi-clause sigs into multiple dosage items (e.g. `OD ... , OS ...`), with all dosage rows available in the complete `batch.fhir` array.
 - Emits timing abbreviations (`timing.code`) and repeat structures simultaneously where possible.
 - Maps meal/time blocks to the correct `Timing.repeat.when` **EventTiming** codes and can auto-expand AC/PC/C into specific meals.
 - Outputs SNOMED CT route codings (while providing friendly text) and round-trips known SNOMED routes back into the parser.
@@ -37,12 +37,13 @@ import { parseSig } from "ezmedicationinput";
 
 const batch = parseSig("1x3 po pc", { context: { dosageForm: "tab" } });
 
-// New API
-console.log(batch.count);      // 1
-console.log(batch.items[0].fhir);
+// Individual clause and one FHIR Dosage
+console.log(batch.count);               // 1
+console.log(batch.items[0].fhir);       // Single FHIR dosage
 
-// Legacy compatibility (first parsed item)
-console.log(batch.fhir);
+// Complete batch for multi-dose or phased instructions
+console.log(batch.fhir);                // EzDosage[]: flat R5-compatible rows
+console.log(batch.fhirNext);            // R6-like course and phases
 ```
 
 Example output:
@@ -68,23 +69,25 @@ Example output:
       }
     }
   ],
-  "fhir": { "...": "same as items[0].fhir for compatibility" }
+  "fhir": [{ "doseAndRate": [{ "doseQuantity": { "value": 1, "unit": "tab" } }] }]
 }
 ```
 
-### Multi-clause parsing and legacy compatibility
+### Batch dosage output
 
-`parseSig` / `parseSigAsync` return a **batch** object:
+`parseSig` and `parseSigAsync` return one batch result containing:
 
-- `count`: number of parsed dosage clauses
-- `items`: array of full parse results (one per clause)
-- `meta.segments`: source ranges for each clause
+- `count`: number of parsed dosage clauses.
+- `items[n].fhir`: the dosage for an individual clause.
+- `fhir`: `EzDosage[]` containing all flat R5-compatible dosage rows.
+- `fhirNext`: R6-like course details, including phases and independent dosing schedules.
+- `meta.segments`: source ranges for each clause.
+- `shortText`, `longText`, `warnings`, and `meta`: batch-level display and diagnostics.
 
-For single-dose integrations that haven't migrated yet, the batch also keeps legacy first-item fields:
-
-- `fhir`, `shortText`, `longText`, `warnings`, `meta`, and for linting `result`/`issues`
-
-So existing code that expects one result can continue using first-item compatibility while newer code uses `items[]`.
+Use `items[0].fhir` when displaying or editing a single dosage, and
+`batch.fhir` when processing the complete flat prescription.
+`formatSig` and `fromFhirDosage` accept one dosage; `formatSigBatch`
+accepts an array of dosages.
 
 ### PRN reasons & additional instructions
 
@@ -94,7 +97,7 @@ codes them with SNOMED CT whenever possible.
 ```ts
 const result = parseSig("1 tab po q4h prn headache; do not exceed 6 tabs/day");
 
-result.fhir.asNeededFor;
+result.items[0].fhir.asNeededFor;
 // → [{
 //      text: "headache",
 //      coding: [{
@@ -104,7 +107,7 @@ result.fhir.asNeededFor;
 //      }]
 //    }]
 
-result.fhir.additionalInstruction;
+result.items[0].fhir.additionalInstruction;
 // → [{ text: "Do not exceed 6 tablets daily" }]
 ```
 
@@ -251,7 +254,7 @@ The HPSG chart uses packed semantic state, an indexed agenda, and a compatible s
 
 FHIR cannot represent zero as `Timing.repeat.frequency` because the primitive is positive; a package-owned extension preserves an explicit lower bound of zero while `frequencyMax`, `period`, and `periodUnit` remain standard fields:
 
-`https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min`
+`urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min`
 
 ## Procedural instruction semantics and opaque-span enrichment
 
@@ -343,7 +346,7 @@ import { parseSig } from "ezmedicationinput";
 
 const result = parseSig("apply cream to left arm twice daily");
 
-result.fhir.site?.coding?.[0];
+result.items[0].fhir.site?.coding?.[0];
 // → { system: "http://snomed.info/sct", code: "368208006", display: "Left upper arm structure" }
 ```
 
@@ -353,7 +356,7 @@ and in `ParseResult.meta.normalized.site.spatialRelation`.
 ```ts
 const result = parseSig("apply to area between fingers");
 
-result.fhir.site?.text;
+result.items[0].fhir.site?.text;
 // → "area between fingers"
 
 result.meta.normalized.site?.spatialRelation;

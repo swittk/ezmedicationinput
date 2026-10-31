@@ -621,6 +621,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "302538001", display: "Entire upper arm" },
         text: "arm",
+        i18n: { th: "แขน" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -629,6 +630,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "368208006", display: "Left upper arm structure" },
         text: "left arm",
+        i18n: { th: "แขนซ้าย" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -637,12 +639,14 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "368209003", display: "Right upper arm" },
         text: "right arm",
+        i18n: { th: "แขนขวา" },
         routeHint: RouteCode["Topical route"]
       }
     },
     {
       names: ["both arms", "bilateral arms"],
-      definition: { coding: { code: "69273007", display: "Both arms" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "69273007", display: "Both arms" },
+        text: "both arms", i18n: { th: "แขนทั้งสองข้าง" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["shoulder", "shoulders"],
@@ -658,15 +662,18 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     },
     {
       names: ["forearm"],
-      definition: { coding: { code: "14975008", display: "Forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "14975008", display: "Forearm" },
+        text: "forearm", i18n: { th: "ปลายแขน" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["left forearm"],
-      definition: { coding: { code: "66480008", display: "Left forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "66480008", display: "Left forearm" },
+        text: "left forearm", i18n: { th: "ปลายแขนซ้าย" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["right forearm"],
-      definition: { coding: { code: "64262003", display: "Right forearm" }, routeHint: RouteCode["Topical route"] }
+      definition: { coding: { code: "64262003", display: "Right forearm" },
+        text: "right forearm", i18n: { th: "ปลายแขนขวา" }, routeHint: RouteCode["Topical route"] }
     },
     {
       names: ["elbow"],
@@ -681,10 +688,26 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: { coding: { code: "368149001", display: "Right elbow" }, routeHint: RouteCode["Topical route"] }
     },
     {
+      names: ["both elbows", "bilateral elbows", "ข้อศอกทั้งสองข้าง"],
+      definition: {
+        coding: {
+          system: SNOMED_SYSTEM,
+          code: buildSnomedBodySiteLateralityPostcoordinationCode(
+            "127949000", SNOMED_CT_BILATERAL_QUALIFIER_CODE
+          ),
+          display: "Both elbows"
+        },
+        text: "both elbows",
+        i18n: { th: "ข้อศอกทั้งสองข้าง" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
       names: ["leg", "lower leg", "ขา"],
       definition: {
         coding: { code: "362793004", display: "Entire lower leg, from knee to ankle" },
         text: "leg",
+        i18n: { th: "ขา" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -693,6 +716,7 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "213384005", display: "Entire left lower leg" },
         text: "left leg",
+        i18n: { th: "ขาซ้าย" },
         routeHint: RouteCode["Topical route"]
       }
     },
@@ -701,24 +725,53 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       definition: {
         coding: { code: "213289002", display: "Entire right lower leg" },
         text: "right leg",
+        i18n: { th: "ขาขวา" },
         routeHint: RouteCode["Topical route"]
       }
     },
     {
-      names: ["both legs", "bilateral legs"],
-      definition: { coding: { code: "40927001", display: "Both legs" }, routeHint: RouteCode["Topical route"] }
+      names: ["both legs", "bilateral legs", "legs"],
+      definition: { coding: { code: "40927001", display: "Both legs" },
+        text: "both legs", i18n: { th: "ขาทั้งสองข้าง" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["thigh"],
-      definition: { coding: { code: "68367000", display: "Thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["calf", "น่อง"],
+      definition: { text: "calf", i18n: { th: "น่อง" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["left thigh"],
-      definition: { coding: { code: "61396006", display: "Left thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["left calf", "น่องซ้าย"],
+      definition: { text: "left calf", i18n: { th: "น่องซ้าย" }, routeHint: RouteCode["Topical route"] }
     },
     {
-      names: ["right thigh"],
-      definition: { coding: { code: "11207009", display: "Right thigh" }, routeHint: RouteCode["Topical route"] }
+      names: ["right calf", "น่องขวา"],
+      definition: { text: "right calf", i18n: { th: "น่องขวา" }, routeHint: RouteCode["Topical route"] }
+    },
+    {
+      names: ["thigh", "ต้นขา"],
+      definition: {
+        coding: { code: "68367000", display: "Thigh" },
+        text: "thigh",
+        i18n: { th: "ต้นขา" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["left thigh", "ต้นขาซ้าย"],
+      definition: {
+        coding: { code: "61396006", display: "Left thigh" },
+        text: "left thigh",
+        i18n: { th: "ต้นขาซ้าย" },
+        routeHint: RouteCode["Topical route"]
+      }
+    },
+    {
+      names: ["right thigh", "ต้นขาขวา"],
+      definition: {
+        coding: { code: "11207009", display: "Right thigh" },
+        text: "right thigh",
+        i18n: { th: "ต้นขาขวา" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["knee"],
@@ -1026,10 +1079,11 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["abdomen", "abdominal", "belly"],
+      names: ["abdomen", "abdominal", "belly", "ท้อง", "หน้าท้อง"],
       definition: {
         coding: { code: "302553009", display: "Entire abdomen" },
         text: "abdomen",
+        i18n: { th: "ท้อง" },
         routeHint: RouteCode["Subcutaneous route"]
       }
     },
@@ -1162,6 +1216,15 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
         text: "lesions",
         routeHint: RouteCode["Topical route"],
         i18n: { th: "รอยโรค" }
+      }
+    },
+    {
+      names: ["open wound", "open wounds", "แผลเปิด"],
+      definition: {
+        coding: { system: "http://snomed.info/sct", code: "59091005", display: "Open wound" },
+        text: "open wound",
+        i18n: { th: "แผลเปิด" },
+        routeHint: RouteCode["Topical route"]
       }
     },
     {
@@ -1374,8 +1437,13 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       }
     },
     {
-      names: ["face"],
-      definition: { coding: { code: "89545001", display: "Face" }, routeHint: RouteCode["Topical route"] }
+      names: ["face", "ใบหน้า"],
+      definition: {
+        coding: { code: "89545001", display: "Face" },
+        text: "face",
+        i18n: { th: "ใบหน้า" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: ["eyebrow", "brow"],
@@ -1446,6 +1514,21 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
       names: ["eyelid", "eyelids"],
       definition: { coding: { code: "80243003", display: "Eyelid" }, routeHint: RouteCode["Ophthalmic route"] }
     },
+    // Surface anatomical phrases without a verified specific SNOMED code.
+    // The existing typed inside/outside locative grammar owns administration
+    // relative to this structure; avoid assigning an invented site code.
+    {
+      names: ["lower eyelid", "lower lid"],
+      definition: { text: "lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
+    {
+      names: ["left lower eyelid", "lower left eyelid", "left lower lid"],
+      definition: { text: "left lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
+    {
+      names: ["right lower eyelid", "lower right eyelid", "right lower lid"],
+      definition: { text: "right lower eyelid", internalRouteHint: RouteCode["Ophthalmic route"] }
+    },
     {
       names: ["forehead"],
       definition: { coding: { code: "52795006", display: "Forehead" }, routeHint: RouteCode["Topical route"] }
@@ -1513,6 +1596,21 @@ export const DEFAULT_BODY_SITE_SNOMED_SOURCE: BodySiteSnomedSourceEntry[] = [
     {
       names: ["vein", "veins"],
       definition: { coding: { code: "181367001", display: "Entire vein" }, routeHint: RouteCode["Intravenous route"] }
+    },
+    {
+      // Exact gender-neutral anatomical concept for a clinician's "external
+      // intimate area" site; no inference of male/female structures.
+      names: [
+        "external intimate area",
+        "external-intimate-area",
+        "บริเวณภายนอกจุดซ่อนเร้น"
+      ],
+      definition: {
+        coding: { code: "77142006", display: "External genitalia structure" },
+        text: "external intimate area",
+        i18n: { th: "บริเวณภายนอกจุดซ่อนเร้น" },
+        routeHint: RouteCode["Topical route"]
+      }
     },
     {
       names: [
@@ -1908,11 +2006,140 @@ export const DEFAULT_UNIT_SYNONYMS: Record<string, string> = (() => {
   return map;
 })();
 
+/** Exact measurable units; household spoon volumes follow the existing metric policy. */
+const UCUM_DOSE_UNIT_CODES: Record<string, string> = {
+  kg: "kg", g: "g", mg: "mg", mcg: "ug", ug: "ug", microg: "ug", ng: "ng",
+  L: "L", mL: "mL", dL: "dL", mcL: "uL", uL: "uL", nL: "nL", cm3: "cm3",
+  IU: "[iU]", U: "[iU]", "[iU]": "[iU]", tsp: "5.mL", tbsp: "15.mL",
+  // The source labels retain *what* is measured (product ribbon, BSA, drops).
+  // UCUM conveys only the physical measure, never a calibrated device dose.
+  cm: "cm", "[in_i]": "[in_i]", "%": "%",
+  "cm ribbon": "cm", "inch ribbon": "[in_i]",
+  "cm strip": "cm", "cm line": "cm", "inch line": "[in_i]",
+  "% BSA": "%", "drop/min": "[drp]/min", "[drp]/min": "[drp]/min",
+  s: "s", min: "min", h: "h", d: "d", wk: "wk", mo: "mo", a: "a"
+};
+
+/** EDQM units of presentation, not the distinct container/device identifiers.
+ * Source: https://ig.fhir.de/igs/medication/1.0.6/ValueSet-EDQMUnitOfPresentation.html
+ */
+const EDQM_PRESENTATION_UNIT_CODES: Record<string, string> = {
+  actuation: "15001000", ampule: "15002000", applicatorful: "15004000",
+  bag: "15005000", blister: "15007000", bottle: "15009000", cap: "15012000",
+  cartridge: "15013000", container: "15016000", drop: "15022000", film: "15023000",
+  implant: "15025000", insert: "15027000", jar: "15028000", lozenge: "15029000",
+  pad: "15033000", patch: "15036000", pen: "15037000", pessary: "15039000",
+  sachet: "15045000", stick: "15048000", strip: "15050000", suppository: "15051000",
+  syringe: "15052000", tab: "15054000", tube: "15058000", vial: "15060000",
+  puff: "15061000", swab: "15062000"
+};
+
+const EDQM_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(EDQM_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
+/** EMA SPOR presentation entries without an EDQM mapping in this lexicon.
+ * https://pms.ema.europa.eu/fhir/ig/CodeSystem-200000000014.html
+ */
+const EMA_PRESENTATION_UNIT_CODES: Record<string, string> = {
+  dose: "200000016427", packet: "200000016428", wafer: "200000016444",
+  pellet: "200000016446", spray: "200000016451",
+  canister: "200000022801", ring: "200000022816", troche: "200000022841"
+};
+const EMA_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(EMA_PRESENTATION_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
+
+/** NCI/CDISC dosage-unit definitions (NCIt 26.09d). These are product
+ * presentation quantities, NOT fixed mass/volume conversions.
+ * https://api-evsrest.nci.nih.gov/api/v1/concept/ncit/C71321
+ */
+const NCIT_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
+  FTU: "C71321", capful: "C102405", pump: "C111984", nebule: "C71204",
+  // A respule is a single-dose nebulizer solution container, equivalent to
+  // one nebule for unit-of-presentation counting (not a fixed mL conversion).
+  respule: "C71204",
+  // An ovule is a vaginal pessary presentation, not an ovum/anatomical entity.
+  ovule: "C149756"
+};
+/** Exact SNOMED CT US 2026 product-usage/amount qualifiers. */
+const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
+  dropperful: "421954001", scoop: "415505006", "pea-sized amount": "769392001",
+  enema: "1382282001"
+};
+
+
+/** Resolve standard codes and plain unit labels to the same calculation unit.
+ * @param quantity A dose or limit quantity; its original display remains untouched.
+ */
+export function getDoseQuantityUnit(quantity: { system?: string; code?: string; unit?: string } | undefined): string {
+  if (!quantity) return "";
+  if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
+    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+  }
+  if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
+    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+  }
+  const recognizedUnit = (label: string | undefined): string | undefined => {
+    if (!label) return undefined;
+    if (label === "5.mL") return "tsp";
+    if (label === "15.mL") return "tbsp";
+    const synonym = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()];
+    const canonical = synonym ?? label;
+    // Recognized lexical units retain their canonical label even if no
+    // standard unit code exists; unknown opaque codes still fall through.
+    if (!getStandardDoseUnitCoding(canonical)) return synonym;
+    const measured = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
+    return measured === "5.mL" ? "tsp" :
+      measured === "15.mL" ? "tbsp" : measured;
+  };
+  return recognizedUnit(quantity.code) ?? recognizedUnit(quantity.unit) ??
+    quantity.unit ?? quantity.code ?? "";
+}
+
+/** Resolve a known dosage unit without changing its display or numerical value.
+ * @param unit Canonical unit or supported synonym, including dimensional rates.
+ */
+export function getStandardDoseUnitCoding(unit: string | undefined):
+  { system: string; code: string } | undefined {
+  if (!unit) return undefined;
+  const canonical = DEFAULT_UNIT_SYNONYMS[unit.toLowerCase()] ?? unit;
+  const presentation = EDQM_PRESENTATION_UNIT_CODES[canonical];
+  if (presentation) return { system: "http://standardterms.edqm.eu", code: presentation };
+  const emaPresentation = EMA_PRESENTATION_UNIT_CODES[canonical];
+  if (emaPresentation) return {
+    system: "http://spor.ema.europa.eu/v1/lists/200000000014",
+    code: emaPresentation
+  };
+  const nciDoseUnit = NCIT_PRODUCT_DOSE_UNIT_CODES[canonical];
+  if (nciDoseUnit) return {
+    system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", code: nciDoseUnit
+  };
+  const snomedDoseUnit = SNOMED_PRODUCT_DOSE_UNIT_CODES[canonical];
+  if (snomedDoseUnit) return {
+    system: "http://snomed.info/sct", code: snomedDoseUnit
+  };
+  const measurable = UCUM_DOSE_UNIT_CODES[canonical];
+  if (measurable) return { system: "http://unitsofmeasure.org", code: measurable };
+  if (!unit.includes("/")) return undefined;
+  const terms = unit.split("/");
+  const codes: string[] = [];
+  for (const term of terms) {
+    const normalized = DEFAULT_UNIT_SYNONYMS[term.toLowerCase()] ?? term;
+    const code = UCUM_DOSE_UNIT_CODES[normalized];
+    if (!code) return undefined;
+    codes.push(code);
+  }
+  return { system: "http://unitsofmeasure.org", code: codes.join("/") };
+}
+
 export interface ProductFormHint {
   routeHint?: RouteCode;
 }
 
 export const PRODUCT_FORM_HINTS: Record<string, ProductFormHint> = {
+  "nasal spray": { routeHint: RouteCode["Nasal route"] },
+  inhaler: { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
+  "metered dose inhaler": { routeHint: RouteCode["Respiratory tract route (qualifier value)"] },
   patch: { routeHint: RouteCode["Transdermal route"] },
   cream: { routeHint: RouteCode["Topical route"] },
   ointment: { routeHint: RouteCode["Topical route"] },
@@ -2095,6 +2322,7 @@ export const EVENT_TIMING_TOKENS: Record<string, EventTiming> = {
   waking: EventTiming.Wake,
   stat: EventTiming.Immediate,
   immediate: EventTiming.Immediate,
+  immediately: EventTiming.Immediate,
   now: EventTiming.Immediate
 };
 
@@ -2149,23 +2377,30 @@ export const DISCOURAGED_TOKENS: Record<string, string> = {
 
 export const DAY_OF_WEEK_TOKENS: Record<string, FhirDayOfWeek> = {
   monday: FhirDayOfWeek.Monday,
+  mondays: FhirDayOfWeek.Monday,
   mon: FhirDayOfWeek.Monday,
   mond: FhirDayOfWeek.Monday,
   tuesday: FhirDayOfWeek.Tuesday,
+  tuesdays: FhirDayOfWeek.Tuesday,
   tue: FhirDayOfWeek.Tuesday,
   tues: FhirDayOfWeek.Tuesday,
   wednesday: FhirDayOfWeek.Wednesday,
+  wednesdays: FhirDayOfWeek.Wednesday,
   wed: FhirDayOfWeek.Wednesday,
   weds: FhirDayOfWeek.Wednesday,
   thursday: FhirDayOfWeek.Thursday,
+  thursdays: FhirDayOfWeek.Thursday,
   thu: FhirDayOfWeek.Thursday,
   thur: FhirDayOfWeek.Thursday,
   thurs: FhirDayOfWeek.Thursday,
   friday: FhirDayOfWeek.Friday,
+  fridays: FhirDayOfWeek.Friday,
   fri: FhirDayOfWeek.Friday,
   saturday: FhirDayOfWeek.Saturday,
+  saturdays: FhirDayOfWeek.Saturday,
   sat: FhirDayOfWeek.Saturday,
   sunday: FhirDayOfWeek.Sunday,
+  sundays: FhirDayOfWeek.Sunday,
   sun: FhirDayOfWeek.Sunday,
   จ: FhirDayOfWeek.Monday,
   จัน: FhirDayOfWeek.Monday,

@@ -1,0 +1,91 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "medication-excluded-weekdays",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-excluded-weekdays",
+  "version": "0.1.68-dev",
+  "name": "MedicationExcludedWeekdays",
+  "title": "Excluded weekdays wording",
+  "status": "draft",
+  "experimental": true,
+  "date": "2026-10-16",
+  "publisher": "ezmedicationinput contributors",
+  "description": "Original excluded weekday evidence. R5 Timing.repeat.dayOfWeek already carries the positive allowed weekday set.",
+  "fhirVersion": "5.0.0",
+  "kind": "complex-type",
+  "abstract": false,
+  "context": [
+    {
+      "type": "element",
+      "expression": "Dosage"
+    }
+  ],
+  "type": "Extension",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Extension",
+        "path": "Extension",
+        "short": "Excluded weekdays wording",
+        "definition": "Original excluded weekday evidence. R5 Timing.repeat.dayOfWeek already carries the positive allowed weekday set.",
+        "min": 0,
+        "max": "1"
+      },
+      {
+        "id": "Extension.extension",
+        "path": "Extension.extension",
+        "slicing": {
+          "discriminator": [
+            {
+              "type": "value",
+              "path": "url"
+            }
+          ],
+          "ordered": false,
+          "rules": "open"
+        },
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:day",
+        "path": "Extension.extension",
+        "sliceName": "day",
+        "min": 1,
+        "max": "*"
+      },
+      {
+        "id": "Extension.extension:day.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:day.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "day"
+      },
+      {
+        "id": "Extension.extension:day.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ]
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-excluded-weekdays"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "max": "0"
+      }
+    ]
+  }
+}

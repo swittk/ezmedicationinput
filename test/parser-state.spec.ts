@@ -155,7 +155,7 @@ describe("FHIR parser-state import", () => {
           }
         ]
       },
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [
         {
           text: "dryness",
@@ -391,7 +391,7 @@ describe("FHIR parser-state import", () => {
 
   it("selects the first coded PRN and additional-instruction entries when uncoded entries lead", () => {
     const state = parserStateFromFhir({
-      asNeededBoolean: true,
+      asNeeded: true,
       asNeededFor: [
         {
           text: "itch",

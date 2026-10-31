@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseSig } from "../src/index";
+import { parseSig } from "./helpers/r5-parser";
+import { fromFhirDosage } from "../src/index";
 import {
   buildAdditionalInstructionFramesFromCoding,
   __test__ as adviceTest,
@@ -314,6 +315,13 @@ describe("additional instruction rule inventory", () => {
     );
     expect(frames).toEqual([
       expect.objectContaining({
+        polarity: AdvicePolarity.Affirm,
+        predicate: expect.objectContaining({ lemma: "swallow", semanticClass: "ingest" }),
+        args: expect.arrayContaining([
+          expect.objectContaining({ role: AdviceArgumentRole.Manner, conceptId: "whole" })
+        ])
+      }),
+      expect.objectContaining({
         polarity: AdvicePolarity.Negate,
         predicate: expect.objectContaining({ lemma: "crush" })
       }),
@@ -322,6 +330,25 @@ describe("additional instruction rule inventory", () => {
         predicate: expect.objectContaining({ lemma: "chew" })
       })
     ]);
+  });
+
+  it("reconstructs the full affirmative and negative instructions from an imported swallow-whole code", () => {
+    const reconstructed = fromFhirDosage({
+      text: "Swallow whole; do not crush or chew",
+      additionalInstruction: [{
+        text: "Swallow whole; do not crush or chew",
+        coding: [{ system: SNOMED_SYSTEM, code: "418693002" }]
+      }]
+    });
+    const frames = reconstructed.meta.canonical.clauses[0]?.additionalInstructions?.[0]?.frames ?? [];
+    expect(frames.map(frame => [frame.predicate.lemma, frame.polarity])).toEqual([
+      ["swallow", AdvicePolarity.Affirm],
+      ["crush", AdvicePolarity.Negate],
+      ["chew", AdvicePolarity.Negate]
+    ]);
+    expect(frames[0]?.args).toContainEqual(
+      expect.objectContaining({ role: AdviceArgumentRole.Manner, conceptId: "whole" })
+    );
   });
 
   it("does not over-code swallow-whole advice from a single prohibition", () => {

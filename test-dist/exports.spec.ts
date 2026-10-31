@@ -119,7 +119,7 @@ describe("published package entrypoints", () => {
           prnTriggerPhaseExtensionUrl: mod.PRN_TRIGGER_PHASE_EXTENSION_URL,
           getTimingOccurrenceCapType: typeof mod.getTimingOccurrenceCap,
           occurrenceCapMax: mod.getTimingOccurrenceCap(
-            mod.parseSig("1 tab po q4h prn pain max 3 doses daily").fhir.timing?.repeat
+            mod.parseSig("1 tab po q4h prn pain max 3 doses daily").fhirNext.step[0]?.component[0]?.timing?.repeat
           )?.max,
           longText: actions.map((action) => action.predicate.lemma).join(",")
         }));
@@ -146,10 +146,10 @@ describe("published package entrypoints", () => {
       adviceRelationCount: 17,
       thaiBeforeRelation: "ก่อน",
       nearRelationThai: "ใกล้",
-      timingFrequencyMinExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-frequency-min",
-      timingActivityWindowExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-activity-window",
-      timingOccurrenceCapExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-timing-occurrence-cap",
-      prnTriggerPhaseExtensionUrl: "https://solublelabs.com/fhir/StructureDefinition/medication-prn-trigger-phase",
+      timingFrequencyMinExtensionUrl: "urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min",
+      timingActivityWindowExtensionUrl: "urn:ezmedicationinput:StructureDefinition:medication-timing-activity-window",
+      timingOccurrenceCapExtensionUrl: "urn:ezmedicationinput:StructureDefinition:medication-timing-occurrence-cap",
+      prnTriggerPhaseExtensionUrl: "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase",
       getTimingOccurrenceCapType: "function",
       occurrenceCapMax: 3,
       longText: "shake,rinse"
@@ -163,7 +163,7 @@ describe("published package entrypoints", () => {
         const mod = await import("ezmedicationinput");
         const source = "หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน";
         const parsed = mod.parseSig(source, { locale: "th" });
-        const roundTripText = mod.formatSig(parsed.fhir, "long", {
+        const roundTripText = mod.formatSig(parsed.fhirNext, "long", {
           locale: "th",
           realizationMode: "roundtrip"
         });
@@ -172,13 +172,13 @@ describe("published package entrypoints", () => {
           parseSigType: typeof mod.parseSig,
           formatSigType: typeof mod.formatSig,
           roundTripText,
-          roundTripSiteCode: reparsed.fhir.site?.coding?.[0]?.code,
-          roundTripFrequency: reparsed.fhir.timing?.repeat?.frequency,
+          roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
+          roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
           longText: reparsed.longText
         }));
       `
     );
-    expect(result.roundTripText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.roundTripText).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);
   });

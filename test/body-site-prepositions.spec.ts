@@ -1,11 +1,127 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, parseSig } from "../src";
+import { formatSig, toDosageDetails, toFhirR5Dosages } from "../src";
+import { parseSig } from "./helpers/r5-parser";
 
 const SNOMED = "http://snomed.info/sct";
 const EXTERNAL_GENITALIA = "362207005";
 const VULVA = "45292006";
 
 describe("body-site preposition grammar", () => {
+  it.each([
+    "Apply where it hurts BID",
+    "Apply to where it hurts BID"
+  ])("resolves an exact registered relative site alias without inventing anatomy: %s", source => {
+    const result = parseSig(source);
+    const clause = result.meta.canonical.clauses[0];
+    expect(clause.site?.text).toBe("affected area");
+    expect(clause.site?.coding).toBeUndefined();
+    expect(result.items[0]?.fhir.site?.text).toBe("affected area");
+    expect(result.items[0]?.fhir.timing?.repeat).toMatchObject({
+      frequency: 2, period: 1, periodUnit: "d"
+    });
+    expect(result.meta.leftoverText).toBeUndefined();
+  });
+
+  it("does not treat unregistered relative phrases as anatomical sites", () => {
+    expect(parseSig("Apply where you live BID").meta.canonical.clauses[0]?.site).toBeUndefined();
+    const qualified = parseSig("Apply to skin where it hurts BID").meta.canonical.clauses[0]?.site;
+    expect(qualified?.coding?.code).toBe("181469002");
+    expect(qualified?.restrictions?.[0]?.sourceText).toBe("where it hurts");
+  });
+
+  it("keeps untranslated site restrictions visible in Thai after FHIR round trips", () => {
+    const source = "apply 1 mL to skin where tender";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0]?.site?.restrictions?.[0])
+      .toMatchObject({ sourceText: "where tender", predicate: { form: "raw", text: "tender" } });
+    for (const dosage of [
+      parsed.fhir,
+      toFhirR5Dosages(toDosageDetails([parsed.fhir]))[0]
+    ]) {
+      const thai = formatSig(dosage, "long", { locale: "th" });
+      expect(thai).toContain("where tender");
+      expect(thai).toContain("ผิวหนัง");
+      expect(thai).toContain("1");
+    }
+    expect(formatSig(parsed.fhir, "long")).toContain("where tender");
+  });
+
+  it.each([
+    [
+      "apply 1 mL at 08:00 to arm where irritated",
+      "302538001",
+      "irritated",
+      "state",
+      undefined,
+      "08:00:00"
+    ],
+    [
+      "apply 1 mL to skin where there is redness at 20:00",
+      "181469002",
+      "there is redness",
+      "existential",
+      "redness",
+      "20:00:00"
+    ]
+  ] as const)(
+    "keeps leading or trailing timing outside a site restriction in %s",
+    (source, siteCode, predicateText, form, focusText, timeOfDay) => {
+      const parsed = parseSig(source);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause?.site?.coding?.code).toBe(siteCode);
+      expect(clause?.site?.restrictions).toMatchObject([{
+        relation: "where",
+        predicate: {
+          text: predicateText,
+          form,
+          focusText
+        }
+      }]);
+      expect(clause?.schedule?.timeOfDay).toEqual([timeOfDay]);
+      expect(clause?.schedule?.frequency).toBeUndefined();
+      expect(clause?.prn).toBeUndefined();
+      expect(clause?.clinicalAdjuncts).toBeUndefined();
+      expect(parsed.fhir.timing?.repeat?.timeOfDay).toEqual([timeOfDay]);
+      expect(parsed.fhir.timing?.repeat?.frequency).toBeUndefined();
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(parsed.longText).not.toMatch(/\bat\s*\.$/iu);
+    }
+  );
+
+  it("retains an unknown predicate as typed raw content on a custom coded site", () => {
+    const parsed = parseSig("apply 1 mL to treatment zone where tender", {
+      siteCodeMap: {
+        "treatment zone": {
+          text: "treatment zone",
+          coding: {
+            system: "urn:test:body-site",
+            code: "zone-1",
+            display: "Treatment zone"
+          }
+        }
+      }
+    });
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause?.site).toMatchObject({
+      text: "treatment zone",
+      coding: { system: "urn:test:body-site", code: "zone-1" },
+      restrictions: [{
+        relation: "where",
+        sourceText: "where tender",
+        predicate: { text: "tender", form: "raw" }
+      }]
+    });
+    expect(clause?.schedule).toBeUndefined();
+    expect(clause?.prn).toBeUndefined();
+    expect(clause?.clinicalAdjuncts).toBeUndefined();
+    expect(parsed.fhir.site?.coding?.[0]).toMatchObject({
+      system: "urn:test:body-site",
+      code: "zone-1"
+    });
+    expect(parsed.longText.toLowerCase()).toContain("where tender");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
   it.each([
     "wash at external genital area",
     "wash at the external genital area",

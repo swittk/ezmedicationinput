@@ -1,3 +1,4 @@
+import type { CanonicalEvidence, CanonicalLexicalCategory } from "./types";
 import { parseHpsgClause } from "./hpsg/clause-parser";
 import { findMedicationDateListSpans } from "./date-interpretation";
 import { applyHpsgDefaultConstraints } from "./hpsg/defaults";
@@ -11,7 +12,7 @@ import {
   normalizeBodySiteKey
 } from "./maps";
 import { ParserState, Token } from "./parser-state";
-import { buildInstructionGraph } from "./instruction-graph";
+import { buildInstructionGraph, realizeInstructionAction } from "./instruction-graph";
 import { resolveMedicationAdministrationMethod } from "./hpsg/method-lexicon";
 export {
   applyPrnReasonCoding,
@@ -24,6 +25,7 @@ export {
 import {
   AdvicePolarity,
   BodySiteDefinition,
+  CanonicalScheduleSemanticField,
   CanonicalSigClause,
   EventTiming,
   FhirDayOfWeek,
@@ -73,7 +75,7 @@ export function tokenize(input: string): Token[] {
   return annotateLexTokens(lexInput(input));
 }
 
-function buildCustomSiteHints(
+export function buildCustomSiteHints(
   map: Record<string, BodySiteDefinition> | undefined
 ): Set<string> | undefined {
   if (!map) {
@@ -154,13 +156,15 @@ function recordEvidence(
   state: ParserState,
   rule: string,
   startIndex: number,
-  endIndex: number
+  endIndex: number,
+  scheduleFields?: CanonicalScheduleSemanticField[],
+  lexicalCategory?: CanonicalLexicalCategory
 ): void {
   const clause = state.primaryClause;
   if (!clause.evidence) {
     clause.evidence = [];
   }
-  clause.evidence.push({
+  const evidence: CanonicalEvidence = {
     rule,
     spans: [
       sourceSpan(
@@ -171,7 +175,10 @@ function recordEvidence(
         )
       )
     ]
-  });
+  };
+  if (lexicalCategory) evidence.lexicalCategory = lexicalCategory;
+  if (scheduleFields?.length) evidence.scheduleFields = [...scheduleFields];
+  clause.evidence.push(evidence);
 }
 
 function computeTrimmedInputRange(input: string): TextRange | undefined {
@@ -242,27 +249,22 @@ function cleanupClause(state: ParserState): void {
   const clause = state.primaryClause;
   const schedule = clause.schedule;
   if (schedule) {
-    if (
-      schedule.dayOfWeek &&
-      schedule.dayOfWeek.length > 1 &&
-      schedule.frequency === 1 &&
-      schedule.period === 1 &&
-      schedule.periodUnit === "wk" &&
-      schedule.timingCode === undefined
-    ) {
-      schedule.frequency =
-        schedule.dayOfWeek.length * (schedule.timeOfDay?.length || 1);
-    }
     if (!schedule.dayOfWeek?.length) delete schedule.dayOfWeek;
     if (!schedule.when?.length) delete schedule.when;
     if (!schedule.timeOfDay?.length) delete schedule.timeOfDay;
     if (!schedule.calendarEvents?.length) delete schedule.calendarEvents;
     if (
+      schedule.timingReference === undefined &&
+      schedule.treatmentStartOffsetDays === undefined &&
       schedule.count === undefined &&
       schedule.countMax === undefined &&
       schedule.duration === undefined &&
       schedule.durationMax === undefined &&
       schedule.durationUnit === undefined &&
+      schedule.administrationDuration === undefined &&
+      schedule.administrationDurationMax === undefined &&
+      schedule.administrationDurationUnit === undefined &&
+      schedule.administrationOffsetMinutes === undefined &&
       schedule.boundsStart === undefined &&
       schedule.boundsEnd === undefined &&
       schedule.frequency === undefined &&
@@ -274,7 +276,15 @@ function cleanupClause(state: ParserState): void {
       schedule.offsetMin === undefined &&
       schedule.offsetMax === undefined &&
       !schedule.activityTiming?.length &&
+      schedule.eventWindow === undefined &&
       schedule.occurrenceCap === undefined &&
+      !schedule.maxDosePerPeriod?.length &&
+      !schedule.dayOfMonth?.length &&
+      schedule.weekdayOrdinal === undefined &&
+      schedule.clockWindow === undefined &&
+      schedule.cycleDayConstraint === undefined &&
+      schedule.repeatCycle === undefined &&
+      schedule.repeatCount === undefined &&
       schedule.timingCode === undefined &&
       !schedule.dayOfWeek &&
       !schedule.when &&
@@ -315,19 +325,48 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
   const instructions = clause.additionalInstructions ?? (clause.additionalInstructions = []);
   for (const warning of directives) {
     const sourceText = warning.sourceText.trim();
-    const text = sourceText
-      ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
-      : sourceText;
+    // The shared polarity of a coordinated verb belongs to the COMPOSED
+    // typed directive. Its raw daughter source ("drink ...") has no "not".
+    const sharedNegation = warning.polaritySource === "shared";
+    const composedWording = sharedNegation;
+    const text = composedWording
+      ? realizeInstructionAction(warning, "en")
+      : sourceText
+        ? sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+        : sourceText;
+    const translated = composedWording ? realizeInstructionAction(warning, "th") : undefined;
     const normalized = normalizedSafetyText(text);
     if (!normalized) continue;
-    const alreadyRepresentedByFrame = instructions.some((instruction) =>
+    const representedIndex = instructions.findIndex((instruction) =>
       instruction.frames?.some((frame) =>
-        frame.span.start === warning.span.start &&
-        frame.span.end === warning.span.end &&
-        frame.polarity === warning.polarity
+        frame.predicate.lemma === warning.predicate.lemma &&
+        frame.polarity === warning.polarity &&
+        frame.span.start < warning.span.end &&
+        warning.span.start < frame.span.end
       )
     );
-    if (alreadyRepresentedByFrame) continue;
+    if (representedIndex >= 0) {
+      // A coded combined safety instruction already semantically owns the
+      // daughter action. Keep that compound meaning instead of generating a
+      // redundant "do not chew" directive beside its coded equivalent.
+      const previous = instructions[representedIndex];
+      if (composedWording && !previous.coding?.code) {
+        instructions[representedIndex] = {
+          ...previous, text,
+          i18n: { ...(previous.i18n ?? {}), ...(translated ? { th: translated } : {}) }
+        };
+      } else if (warning.modality && !previous.coding?.code &&
+          normalizedSafetyText(sourceText).length > normalizedSafetyText(previous.text ?? "").length) {
+        // The typed modal owns the fuller source phrase. Preserve its
+        // relation and condition verbatim rather than realizing the partial
+        // daughter ("take with food" instead of "should take with food").
+        instructions[representedIndex] = {
+          ...previous,
+          text: sourceText.charAt(0).toUpperCase() + sourceText.slice(1)
+        };
+      }
+      continue;
+    }
     const overlapIndex = instructions.findIndex((instruction) => {
       const existing = normalizedSafetyText(instruction.text ?? "");
       return Boolean(existing && (existing === normalized || existing.includes(normalized) || normalized.includes(existing)));
@@ -346,16 +385,21 @@ function promoteGraphDirectivesToAdditionalInstructions(clause: CanonicalSigClau
         normalizedSafetyText(existing.text ?? "").length < normalized.length;
       instructions[overlapIndex] = {
         ...existing,
-        ...(shouldUseWarningText ? { text } : {}),
+        ...(shouldUseWarningText || composedWording ? { text } : {}),
+        ...(composedWording && translated ? { i18n: { ...(existing.i18n ?? {}), th: translated } } : {}),
         frames
       };
       continue;
     }
-    instructions.push({ text, frames: [warning] });
+    instructions.push({ text, ...(translated ? { i18n: { th: translated } } : {}), frames: [warning] });
   }
 }
 
-function finalizeClause(state: ParserState, options?: ParseOptions): void {
+function finalizeClause(
+  state: ParserState,
+  options?: ParseOptions,
+  semanticOwnershipRanges?: readonly TextRange[]
+): void {
   const clause = state.primaryClause;
   const range = computeTrimmedInputRange(state.input);
   clause.rawText = state.input;
@@ -365,7 +409,12 @@ function finalizeClause(state: ParserState, options?: ParseOptions): void {
   clause.warnings = state.warnings.length ? state.warnings.slice() : undefined;
   clause.confidence = Math.max(0, Number((1 - Math.min(0.6, clause.leftovers.length * 0.12)).toFixed(2)));
   cleanupClause(state);
-  clause.instructionGraph = buildInstructionGraph(state.input, clause, options);
+  clause.instructionGraph = buildInstructionGraph(
+    state.input,
+    clause,
+    options,
+    semanticOwnershipRanges
+  );
   promoteGraphDirectivesToAdditionalInstructions(clause);
 }
 
@@ -429,32 +478,59 @@ function seedKnownSiteCoding(state: ParserState): void {
   }
 }
 
-export function parseClauseState(input: string, options?: ParseOptions): ParserState {
-  const tokens = tokenize(input);
-  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
-
-  parseHpsgClause({
+function parseTypedClauseSign(
+  state: ParserState,
+  tokens: Token[],
+  options: ParseOptions | undefined,
+  project: boolean
+) {
+  return parseHpsgClause({
     state,
     tokens,
     options,
-    dateSpans: findMedicationDateListSpans(input, options),
+    dateSpans: findMedicationDateListSpans(state.input, options),
     limit: tokens.length,
+    clinicalCache: {},
     deps: {
       addDayOfWeekList,
       addWhen,
       isCompatibleRouteRefinement,
       markToken,
       normalizeSiteText: normalizeBodySiteKey,
+      sourceText: (start, end) => state.input.slice(start, end),
       recordEvidence,
       refreshMethodSurface: (target) => refreshMethodSurface(target, options),
       setRoute
     },
-    project: true
+    project
   });
+}
+
+/** Raw typed analysis for grammar/treebank tests; no canonical or FHIR projection. */
+export function parseClauseSign(input: string, options?: ParseOptions) {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, buildCustomSiteHints(options?.siteCodeMap));
+  return parseTypedClauseSign(state, tokens, options, false);
+}
+
+export function parseClauseState(
+  input: string,
+  options?: ParseOptions,
+  customSiteHints = buildCustomSiteHints(options?.siteCodeMap)
+): ParserState {
+  const tokens = tokenize(input);
+  const state = new ParserState(input, tokens, customSiteHints);
+
+  const sign = parseTypedClauseSign(state, tokens, options, true);
 
   applyHpsgDefaultConstraints(state, tokens, options, { setRoute });
   seedKnownRouteFromSurface(state);
   seedKnownSiteCoding(state);
-  finalizeClause(state, options);
+  const schedule = sign?.synsem.head.schedule;
+  finalizeClause(
+    state,
+    options,
+    schedule?.attachmentClass !== "procedure" ? schedule?.sourceRanges : undefined
+  );
   return state;
 }

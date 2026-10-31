@@ -6,11 +6,11 @@ import {
   WORD_FREQUENCIES,
   normalizeBodySiteKey
 } from "../../maps";
-import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning } from "../../lexer/meaning";
+import { getDayOfWeekMeaning, getPrimarySiteMeaningCandidate, getRouteMeaning, hasDayOfWeekMeaning, hasEventTimingMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
 import { AdviceArgumentRole, RouteCode } from "../../types";
-import { resolveBodySitePhrase } from "../../body-site-grammar";
+import { resolveBodySiteLexeme, resolveBodySiteRestrictionPredicate, type ResolvedBodySitePhrase } from "../../body-site-grammar";
 import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
@@ -32,9 +32,11 @@ import {
 import {
   ACTION_COORDINATION_CONNECTORS,
   ACTION_SEQUENCE_MARKERS,
+  BODY_SITE_BARE_NOMINAL_PREFIXES,
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
+  EVENT_ARTICLE_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
   INSTRUCTION_START_WORDS,
@@ -46,9 +48,11 @@ import {
   SITE_ANCHORS,
   SITE_DISPLAY_FILLERS,
   SITE_MULTIPLICITY_WORDS,
+  SITE_RELATIVE_MARKERS,
   SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR,
   SITE_SELF_DISPLAY_ANCHORS,
-  SITE_TRAILING_INSTRUCTION_WORDS
+  SITE_TRAILING_INSTRUCTION_WORDS,
+  coordinationConnectorKind
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
@@ -63,10 +67,105 @@ import {
   tokensAvailable
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgSign, lexicalSign } from "../signature";
+import { getProceduralFrames } from "../procedural-context";
 import { productRouteHint } from "./product-route";
-import { tokenBelongsToContextualPrnReasonLead } from "./prn-rules";
+import {
+  startsMaximumCountLead,
+  tokenBelongsToContextualPrnReasonLead
+} from "./prn-rules";
+
+/** Shared lexical boundaries for site attachment and site coordination. */
+function temporalRelationStarts(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  return context.dateSpans.some(span =>
+    span.start === token.sourceStart && span.relation !== 'event'
+  );
+}
+
+function scheduleStarts(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token) return false;
+  const lower = normalizeTokenLower(token);
+  return Boolean(
+    temporalRelationStarts(context, index) ||
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
+    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
+    FREQUENCY_TIMES_WORDS.has(lower) ||
+    EVERY_INTERVAL_TOKENS.has(lower) ||
+    mapFrequencyAdverb(lower) ||
+    mapIntervalUnit(lower) ||
+    hasTimingAbbreviationMeaning(token) ||
+    hasEventTimingMeaning(token) ||
+    hasDayOfWeekMeaning(token) ||
+    isClockLikeLower(lower)
+  );
+}
+
+function coordinationLeadsToSchedule(context: HpsgClauseContext, index: number): boolean {
+  const token = context.tokens[index];
+  if (!token || !ACTION_COORDINATION_CONNECTORS.has(normalizeTokenLower(token))) return false;
+  return scheduleStarts(context, index + 1);
+}
 
 const SITE_SCOPE_BOUNDARY_WORDS = new Set(["during", "depending", "according", "not", "as"]);
+
+function siteCoordinatorSpan(context: HpsgClauseContext, index: number): number {
+  const token = context.tokens[index];
+  if (!token) return 0;
+  if (token.original === ",") {
+    const next = context.tokens[index + 1];
+    return next && coordinationConnectorKind(normalizeTokenLower(next)) !== "unknown" ? 2 : 1;
+  }
+  return coordinationConnectorKind(normalizeTokenLower(token)) === "unknown" ? 0 : 1;
+}
+
+function coordinatedRightSiteTokens(
+  context: HpsgClauseContext,
+  index: number
+): Token[] | undefined {
+  const connectorSpan = siteCoordinatorSpan(context, index);
+  if (!connectorSpan) return undefined;
+  const rightStart = index + connectorSpan;
+  let rightTokens: Token[] | undefined;
+  for (let span = 1; span <= 5 && rightStart + span <= context.limit; span += 1) {
+    const tokens = tokensAvailable(context, rightStart, span);
+    if (!tokens) break;
+    const last = tokens[tokens.length - 1];
+    const lower = normalizeTokenLower(last);
+    if (span > 1 && (siteCoordinatorSpan(context, rightStart + span - 1) || siteBoundary(lower, context))) break;
+    const resolved = resolveBodySiteLexeme(joinTokenText(tokens), context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    });
+    if (resolved?.coding || resolved?.definition) rightTokens = tokens;
+  }
+  return rightTokens;
+}
+
+/** A coordinator belongs to a site phrase only when it links two typed site atoms. */
+function startsSiteCoordination(
+  context: HpsgClauseContext,
+  index: number,
+  leftTokens: Token[]
+): boolean {
+  if (!leftTokens.length) return false;
+  const connectorSpan = siteCoordinatorSpan(context, index);
+  if (!connectorSpan) return false;
+  const rightTokens = coordinatedRightSiteTokens(context, index);
+  if (!rightTokens) return false;
+
+  // A coded composite or explicitly counted bilateral site (for example
+  // "left and right eyebrows") is one lexical target. A display-only alias
+  // such as "groin and axilla" still licenses its two coded site daughters.
+  const connectorTokens = context.tokens.slice(index, index + connectorSpan);
+  const whole = resolveBodySiteLexeme(
+    joinTokenText([...leftTokens, ...connectorTokens, ...rightTokens]),
+    context.options?.siteCodeMap,
+    { bodySiteContext: context.options?.context?.bodySiteContext }
+  );
+  return !whole?.coding && !whole?.definition?.administrationTargetCount;
+}
 
 function anchoredModifierLeadsToResolvableSite(
   context: HpsgClauseContext,
@@ -76,7 +175,7 @@ function anchoredModifierLeadsToResolvableSite(
   for (let index = start + 1; index < maxEnd; index += 1) {
     const candidate = context.tokens.slice(index, index + 1)[0];
     if (!candidate || context.state.consumed.has(candidate.index) || isPunctuation(normalizeTokenLower(candidate))) break;
-    const resolved = resolveBodySitePhrase(candidate.original, context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(candidate.original, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext
     });
     if (resolved?.coding || resolved?.definition) return true;
@@ -109,15 +208,19 @@ function coordinationStartsAction(context: HpsgClauseContext, index: number): bo
   return Boolean(
     next &&
     !context.state.consumed.has(next.index) &&
-    resolveMedicationInstructionAction(normalizeTokenLower(next), context.options)
+    (resolveMedicationInstructionAction(normalizeTokenLower(next), context.options) ||
+      // Reuse the typed procedural action inventory for multiword heads
+      // ("and let dissolve", "and lie down"), rather than treating their
+      // auxiliary words as part of the anatomical site.
+      getProceduralFrames(context).some(frame => frame.span.start === next.sourceStart))
   );
 }
 
-function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
+function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMarker = false): boolean {
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
-  const siteLike = Boolean(resolveBodySitePhrase(lower, context.options?.siteCodeMap, {
+  const siteLike = Boolean(resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
     bodySiteContext: context.options?.context?.bodySiteContext
   }));
   const actionLike = resolveMedicationInstructionAction(lower, context.options);
@@ -127,6 +230,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext): boolean {
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
     DURATION_LEAD_TOKENS.has(lower) ||
     SITE_TRAILING_INSTRUCTION_WORDS.has(lower) ||
+    (!allowRelativeMarker && SITE_RELATIVE_MARKERS.has(lower)) ||
     SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
     INSTRUCTION_START_WORDS.has(lower) ||
     Boolean(
@@ -177,6 +281,30 @@ function siteI18nWithSourceText(
   return { ...(definitionI18n ?? {}), [sourceLocale]: sourceText };
 }
 
+/**
+ * A typed internal locative can inherit the route of its anatomical target:
+ * for example, a product placed INSIDE an ocular site uses the ocular route.
+ * External locatives do not inherit that route, and a product-only default
+ * must not erase the more specific licensed internal-site interpretation.
+ */
+function routeHintForSite(resolved: ResolvedBodySitePhrase | undefined): RouteCode | undefined {
+  const direct = resolved?.definition?.routeHint ??
+    DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
+  if (direct) return direct;
+  const features = resolved?.features;
+  if (features?.kind !== "locative" || features.relation !== "inside") return undefined;
+  const target = features.target.kind === "nominal"
+    ? features.target.canonical
+    : features.target.whole.canonical;
+  // A locative nominal carries its grammatical determiner separately from
+  // anatomy. Resolve the anatomical head using the existing lexical article
+  // class, not the entire source phrase ("the left lower eyelid").
+  const words = target.split(" ");
+  const nounStart = BODY_SITE_BARE_NOMINAL_PREFIXES.has(words[0]) ? 1 : 0;
+  const anatomy = DEFAULT_BODY_SITE_SNOMED[words.slice(nounStart).join(" ")];
+  return anatomy?.internalRouteHint ?? anatomy?.routeHint;
+}
+
 function shouldUseSiteRouteHint(sourceText: string, routeHint: RouteCode | undefined): routeHint is RouteCode {
   if (!routeHint || !SITE_ROUTE_HINTS_ALLOWED_IN_GRAMMAR.has(routeHint)) {
     return false;
@@ -196,6 +324,15 @@ function hasSystemicCueBeforeSiteAbbreviation(context: HpsgClauseContext, start:
     if (route) {
       if (OCULAR_ROUTE_CODES.has(route.code)) {
         return false;
+      }
+      const action = route.source === "verb"
+        ? resolveMedicationInstructionAction(normalizeTokenLower(token), context.options)
+        : undefined;
+      // A suppressible administration-verb hint is a default, not explicit
+      // route evidence. Let a typed ocular abbreviation refine generic verbs
+      // such as "apply"; an explicit route or non-ocular dose still wins.
+      if (action?.suppressMethodRouteHint) {
+        continue;
       }
       return true;
     }
@@ -250,6 +387,112 @@ function shouldSuppressEyeSiteAbbreviation(
   );
 }
 
+function siteRelativeMarkerSign(
+  token: Token,
+  lower: string
+): HpsgSign | undefined {
+  // Relation normalization must preserve ambiguity until the selecting
+  // construction is known. Thai `ที่` is commonly normalized to locative
+  // AT, but in a site-relative daughter its original surface licenses WHERE.
+  const marker = SITE_RELATIVE_MARKERS.get(token.lower) ?? SITE_RELATIVE_MARKERS.get(lower);
+  if (!marker) return undefined;
+  return lexicalSign({
+    type: "site-relative-marker-sign",
+    rule: "hpsg.lex.site.relative-marker",
+    tokens: [token],
+    synsem: {
+      head: {},
+      valence: {},
+      cont: {
+        siteRelativeMarker: {
+          relation: marker.relation,
+          range: { start: token.sourceStart, end: token.sourceEnd }
+        }
+      }
+    }
+  });
+}
+
+function sitePredicateEndsBefore(
+  context: HpsgClauseContext,
+  index: number,
+  predicateStart: number
+): boolean {
+  const token = context.tokens[index];
+  if (!token) return true;
+  const lower = normalizeTokenLower(token);
+  if (
+    isPunctuation(lower) ||
+    temporalRelationStarts(context, index) ||
+    coordinationLeadsToSchedule(context, index) ||
+    startsMaximumCountLead(context, index) ||
+    coordinationStartsAction(context, index) ||
+    Boolean(coordinatedRightSiteTokens(context, index)) ||
+    ACTION_SEQUENCE_MARKERS.has(lower) ||
+    (index > predicateStart && siteBoundary(lower, context))
+  ) return true;
+
+  if (!SITE_ANCHORS.has(lower)) return false;
+  for (let cursor = index + 1; cursor < Math.min(context.limit, index + 4); cursor += 1) {
+    const next = context.tokens[cursor];
+    if (!next || context.state.consumed.has(next.index)) return false;
+    const nextLower = normalizeTokenLower(next);
+    if (SITE_DISPLAY_FILLERS.has(nextLower)) continue;
+    return Boolean(
+      isClockLikeLower(nextLower) ||
+      getDayOfWeekMeaning(next) ||
+      sourceRangeOverlapsContextDate(context, next.sourceStart, next.sourceEnd) ||
+      EVENT_TIMING_TOKENS[nextLower] ||
+      TIMING_ABBREVIATIONS[nextLower] ||
+      WORD_FREQUENCIES[nextLower] ||
+      FREQUENCY_SIMPLE_WORDS[nextLower] !== undefined
+    );
+  }
+  return false;
+}
+
+function sitePredicateSign(
+  context: HpsgClauseContext,
+  start: number
+): HpsgSign | undefined {
+  const previous = context.tokens[start - 1];
+  if (!previous || !(
+    SITE_RELATIVE_MARKERS.has(previous.lower) ||
+    SITE_RELATIVE_MARKERS.has(normalizeTokenLower(previous))
+  )) {
+    return undefined;
+  }
+  const predicateTokens: Token[] = [];
+  for (let cursor = start; cursor < context.limit; cursor += 1) {
+    const token = context.tokens[cursor];
+    if (!token || context.state.consumed.has(token.index)) break;
+    if (sitePredicateEndsBefore(context, cursor, start)) break;
+    predicateTokens.push(token);
+  }
+  if (!predicateTokens.length) return undefined;
+
+  const text = joinTokenText(predicateTokens);
+  const range = rangeFromTokens(predicateTokens);
+  if (!range) return undefined;
+
+  return lexicalSign({
+    type: "site-predicate-sign",
+    rule: "hpsg.lex.site.restriction-predicate",
+    tokens: predicateTokens,
+    synsem: {
+      head: {},
+      valence: {},
+      cont: {
+        sitePredicate: resolveBodySiteRestrictionPredicate(text, range)
+      }
+    }
+  });
+}
+
+const NON_SITE_ANCHORED_PARTS = Array.from(
+  NON_SITE_ANCHORED_PHRASES, (surface) => surface.split(" ")
+);
+
 export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.site", (context, start) => {
     const token = tokensAvailable(context, start, 1)?.[0];
@@ -258,6 +501,13 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    const relativeMarker = siteRelativeMarkerSign(token, lower);
+    // Thai ที่ can introduce either a relative site predicate or a plain
+    // administration site. Keep both daughters for the chart to select.
+    if (relativeMarker && !SITE_ANCHORS.has(lower)) return [relativeMarker];
+    if (relativeMarker) signs.push(relativeMarker);
+    const predicate = sitePredicateSign(context, start);
+    if (predicate) return [predicate];
     if (
       tokenBelongsToContextualPrnReasonLead(context, start) ||
       anchorTargetsTypedNonSiteConcept(context, start)
@@ -274,6 +524,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       !(previousRoutePhrase && DEFAULT_ROUTE_SYNONYMS[previousRoutePhrase]) &&
       !shouldSuppressEyeSiteAbbreviation(context, start, lower)
     ) {
+      const resolvedCandidate = resolveBodySiteLexeme(siteCandidate.text, context.options?.siteCodeMap, {
+        bodySiteContext: context.options?.context?.bodySiteContext
+      });
       signs.push(
         lexicalSign({
           type: "site-sign",
@@ -281,7 +534,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           tokens: [token],
           synsem: {
             head: { route: siteCandidate.route ? { code: siteCandidate.route } : undefined },
-            valence: { site: { text: siteCandidate.text, source: "abbreviation" } },
+            valence: {
+              site: {
+                text: siteCandidate.text,
+                i18n: resolvedCandidate?.definition?.i18n,
+                source: "abbreviation",
+                coding: resolvedCandidate?.coding,
+                administrationTargetCount: resolvedCandidate?.definition?.administrationTargetCount,
+                range: { start: token.sourceStart, end: token.sourceEnd }
+              }
+            },
             cont: { clauseKind: "administration" }
           },
           siteTokenIndices: [token.index],
@@ -289,10 +551,28 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       );
     }
-    if (!SITE_ANCHORS.has(lower)) {
+    // Registered anatomical spatial relations (under, below, around, ...)
+    // are also locative heads, not stray leftovers outside site grammar.
+    if (!SITE_ANCHORS.has(lower) && !SITE_SELF_DISPLAY_ANCHORS.has(lower)) {
       return signs;
     }
     const firstAfterAnchor = context.tokens[start + 1];
+    let ordinalCursor = start + 1;
+    const article = context.tokens[ordinalCursor];
+    if (article && normalizeTokenLower(article) === "the") ordinalCursor += 1;
+    const ordinalToken = context.tokens[ordinalCursor];
+    const weekdayToken = context.tokens[ordinalCursor + 1];
+    const ofToken = context.tokens[ordinalCursor + 2];
+    const recurrenceToken = context.tokens[ordinalCursor + 3];
+    const monthToken = context.tokens[ordinalCursor + 4];
+    if (ordinalToken && weekdayToken && ofToken && recurrenceToken && monthToken &&
+        /^(?:first|second|third|fourth|last)$/u.test(normalizeTokenLower(ordinalToken)) &&
+        getDayOfWeekMeaning(weekdayToken)?.length === 1 &&
+        normalizeTokenLower(ofToken) === "of" &&
+        /^(?:each|every)$/u.test(normalizeTokenLower(recurrenceToken)) &&
+        /^months?$/u.test(normalizeTokenLower(monthToken))) {
+      return signs;
+    }
     const secondAfterAnchor = context.tokens[start + 2];
     const firstAfterAnchorLower = firstAfterAnchor && !context.state.consumed.has(firstAfterAnchor.index)
       ? normalizeTokenLower(firstAfterAnchor)
@@ -300,6 +580,21 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const secondAfterAnchorLower = secondAfterAnchor && !context.state.consumed.has(secondAfterAnchor.index)
       ? normalizeTokenLower(secondAfterAnchor)
       : undefined;
+    // Nominal complements permit the same optional determiner as event NPs.
+    // Classify the complete complement before choosing an uncoded site head.
+    let complementStart = start + 1;
+    while (context.tokens[complementStart] &&
+      !context.state.consumed.has(context.tokens[complementStart].index) &&
+      EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(context.tokens[complementStart]))) {
+      complementStart += 1;
+    }
+    if (firstAfterAnchorLower && NON_SITE_ANCHORED_PARTS.some((phrase) =>
+      phrase.every((word, index) => {
+        const candidate = context.tokens[complementStart + index];
+        return candidate && !context.state.consumed.has(candidate.index) &&
+          normalizeTokenLower(candidate) === word;
+      })
+    )) return signs;
     if (
       firstAfterAnchor &&
       sourceRangeOverlapsContextDate(
@@ -334,6 +629,12 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         break;
       }
       const candidateLower = normalizeTokenLower(candidate);
+      if (
+        temporalRelationStarts(context, cursor) ||
+        coordinationLeadsToSchedule(context, cursor) ||
+        startsMaximumCountLead(context, cursor)
+      ) break;
+      if (startsSiteCoordination(context, cursor, displayTokens)) break;
       if (candidate.kind === LexKind.Number) {
         break;
       }
@@ -358,7 +659,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           ? [...displayTokens, next].map((part) => part.original).join(" ")
           : "";
         const continuedSite = continuedText
-          ? resolveBodySitePhrase(continuedText, context.options?.siteCodeMap, {
+          ? resolveBodySiteLexeme(continuedText, context.options?.siteCodeMap, {
               bodySiteContext: context.options?.context?.bodySiteContext
             })
           : undefined;
@@ -397,7 +698,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (NON_SITE_ANCHORED_PHRASES.has(normalizeBodySiteKey(sourceText))) {
       return signs;
     }
-    const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+    const resolved = resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
       bodySiteContext: context.options?.context?.bodySiteContext,
       allowTerminalModifierInheritance: true
     });
@@ -419,8 +720,7 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       range = { start, end };
     }
-    const routeHint = resolved?.definition?.routeHint ??
-      DEFAULT_BODY_SITE_SNOMED[resolved?.canonical ?? ""]?.routeHint;
+    const routeHint = routeHintForSite(resolved);
     const featureScore = resolved
       ? BODY_SITE_FEATURE_SCORE_BONUS.get(resolved.features.kind) ?? 0
       : 0;
@@ -456,7 +756,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 sourceText: range ? context.state.input.slice(range.start, range.end) : sourceText,
                 range,
                 spatialRelation: resolved?.spatialRelation
-              }
+              },
+              administrationTargetCount: resolved?.definition?.administrationTargetCount,
+              range
             }
           },
           cont: { clauseKind: "administration" }
@@ -478,9 +780,9 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const firstLower = normalizeTokenLower(first);
     if (
-      SITE_ANCHORS.has(firstLower) ||
+      (SITE_ANCHORS.has(firstLower) || SITE_SELF_DISPLAY_ANCHORS.has(firstLower)) ||
       isPunctuation(firstLower) ||
-      siteBoundary(firstLower, context)
+      siteBoundary(firstLower, context, true)
     ) {
       return [];
     }
@@ -491,7 +793,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const lowers = tokens.map((token) => normalizeTokenLower(token));
-      if (lowers.some((lower) => !lower || siteBoundary(lower, context))) {
+      if (lowers.some((lower) => !lower || siteBoundary(lower, context, true))) {
         continue;
       }
       const originalText = joinTokenText(tokens);
@@ -503,14 +805,14 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           ? context.state.input.slice(trimmedRange.start, trimmedRange.end)
           : originalText
       ).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
-      const resolved = resolveBodySitePhrase(sourceText, context.options?.siteCodeMap, {
+      const resolved = resolveBodySiteLexeme(sourceText, context.options?.siteCodeMap, {
         bodySiteContext: context.options?.context?.bodySiteContext
       });
       if (!resolved?.coding && !resolved?.definition) {
         continue;
       }
       const displayText = resolved.displayText ?? sourceText;
-      const routeHint = resolved.definition?.routeHint;
+      const routeHint = routeHintForSite(resolved);
       const featureScore = BODY_SITE_FEATURE_SCORE_BONUS.get(resolved.features.kind) ?? 0;
       signs.push(
         lexicalSign({
@@ -528,7 +830,7 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                 text: displayText,
                 i18n: !resolved.coding && resolved.definition?.text === "affected area"
                   ? siteI18nWithSourceText(sourceText, resolved.definition?.i18n, context)
-                  : resolved.definition?.i18n,
+                  : resolved.siteI18n ?? resolved.definition?.i18n,
                 source: "text",
                 coding: resolved.coding,
                 spatialRelation: resolved.spatialRelation,
@@ -542,7 +844,9 @@ export function bareSiteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
                   sourceText,
                   range: trimmedRange ?? rawRange,
                   spatialRelation: resolved.spatialRelation
-                }
+                },
+                administrationTargetCount: resolved.definition?.administrationTargetCount,
+                range: trimmedRange ?? rawRange
               }
             },
             cont: { clauseKind: "administration" }

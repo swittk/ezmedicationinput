@@ -7,6 +7,8 @@ import {
 import { ParserState } from "./parser-state";
 import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
+import { resolveSymptomDefinition } from "./symptom-terminology";
+import { composedCodedWarningActionSources } from "./advice";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
 import { baseLanguageTag } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -15,14 +17,21 @@ import {
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
   instructionGraphRichPrimaryAction,
+  instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
+  instructionGraphEntailsAdviceCoding,
+  instructionGraphCoversTypedWarnings,
+  instructionGraphRealizesWarningText,
+  instructionGraphSourceOwnedByAdvice,
+  instructionGraphFullyOwnsAdvice,
   instructionGraphRepresentsText,
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
-  realizeInstructionGraph
+  realizeInstructionGraph,
+  instructionGraphPostAdministrationDiscourseConnector
 } from "./instruction-graph";
-import { resolveBodySitePhrase } from "./body-site-grammar";
+import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
 import {
   getUniqueAdviceRelationByGrammarFeature,
   getBodySiteRelationRealization,
@@ -30,7 +39,6 @@ import {
   relationHasGrammarFeature,
   relationHasSemanticClass
 } from "./relation-terminology";
-import { resolveEventTimingExpression } from "./event-timing-expression";
 import {
   AdviceArgumentRole,
   AdviceModality,
@@ -98,7 +106,7 @@ const WHEN_TEXT: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "immediately"
 };
 
-const DAY_NAMES: Record<string, string> = {
+export const DAY_NAMES: Record<string, string> = {
   mon: "Monday",
   tue: "Tuesday",
   wed: "Wednesday",
@@ -389,7 +397,26 @@ function describeAlternateEventCadenceEnglish(
   return undefined;
 }
 
+/** Daily recurrence applies to every explicit clock, not one occurrence in total.
+ * Presentation may say "daily at ..." without rewriting the stored frequency.
+ * Explicit ranges and counts other than one retain their authored summary.
+ * @param schedule Typed timing to realize; source text is never inspected.
+ */
+export function hasDailyRecurrenceAcrossClocks(schedule: CanonicalScheduleExpr | undefined): boolean {
+  if (!schedule || schedule.frequencyMax !== undefined || schedule.periodMax !== undefined ||
+      (schedule.period !== undefined && schedule.period !== 1)) return false;
+  const daily = schedule.frequency === 1 && schedule.periodUnit === FhirPeriodUnit.Day ||
+    schedule.timingCode === "QD" &&
+    (schedule.frequency === undefined || schedule.frequency === 1) &&
+    (schedule.periodUnit === undefined || schedule.periodUnit === FhirPeriodUnit.Day);
+  const clocks = schedule.timeOfDay;
+  if (!daily || !clocks || clocks.length < 2) return false;
+  const first = clocks[0].length === 5 ? clocks[0] + ":00" : clocks[0];
+  return clocks.some(clock => (clock.length === 5 ? clock + ":00" : clock) !== first);
+}
+
 function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) return "daily";
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
   const period = schedule?.period;
@@ -465,7 +492,14 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Month && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "once monthly";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
+      }
+      if (frequency === undefined && (schedule?.dayOfMonth?.length ?? 0) > 1) return undefined;
+      if (frequency === 2) return "twice monthly";
+      return frequency !== undefined && frequency !== 1
+        ? `${stripTrailingZero(frequency)} times monthly`
+        : "once monthly";
     }
     if (periodMax && periodMax !== period) {
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
@@ -474,7 +508,13 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Year && period) {
     if (period === 1 && (!periodMax || periodMax === 1)) {
-      return "once yearly";
+      if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
+        return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times yearly`;
+      }
+      if (frequency === 2) return "twice yearly";
+      return frequency !== undefined && frequency !== 1
+        ? `${stripTrailingZero(frequency)} times yearly`
+        : "once yearly";
     }
     if (periodMax && periodMax !== period) {
       return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
@@ -535,6 +575,7 @@ function describeStandaloneOccurrenceCount(
     schedule?.periodMax !== undefined ||
     schedule?.periodUnit !== undefined ||
     schedule?.dayOfWeek?.length ||
+    schedule?.dayOfMonth?.length ||
     schedule?.when?.length ||
     schedule?.timeOfDay?.length ||
     schedule?.duration !== undefined ||
@@ -660,13 +701,17 @@ function formatActivityTimingEnglish(schedule: CanonicalScheduleExpr | undefined
   const result: string[] = [];
   for (const timing of schedule?.activityTiming ?? []) {
     const definition = timing.activity.coding?.code
-      ? getMedicationInstructionConcept(timing.activity.coding.code)
+      ? getMedicationInstructionConcept(timing.activity.coding.code, timing.activity.coding.system)
       : undefined;
     const activity = definition?.display ?? timing.activity.text;
     const relation = timing.relation;
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;
     if (value === undefined) {
       result.push(`${relation} ${activity}`);
+      continue;
+    }
+    if (value === 0 && timing.offset !== undefined) {
+      result.push(`immediately ${relation} ${activity}`);
       continue;
     }
     const quantity = formatEventOffsetQuantityEnglish(value);
@@ -683,6 +728,7 @@ function formatEventOffsetEnglish(
 ): string {
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
+  if (value === 0 && schedule.offset !== undefined) return `immediately ${eventText}`;
   const quantity = formatEventOffsetQuantityEnglish(value);
   if (schedule.offsetMin !== undefined) return `at least ${quantity} ${eventText}`;
   if (schedule.offsetMax !== undefined) return `at most ${quantity} ${eventText}`;
@@ -712,7 +758,7 @@ function collectWhenPhrases(
   return collectLocalizedWhenPhrases(schedule, EN_TIMING_GRAMMAR, options);
 }
 
-function joinWithAnd(parts: string[]): string {
+export function joinWithAnd(parts: string[]): string {
   if (!parts.length) {
     return "";
   }
@@ -814,6 +860,22 @@ function renderSpatialSiteEnglish(
   return `${target} ${realization.surface}`;
 }
 
+function appendSiteRestrictionsEnglish(
+  clause: CanonicalSigClause,
+  sitePhrase: string
+): string {
+  const restrictions = clause.site?.restrictions;
+  if (!restrictions?.length) return sitePhrase;
+  const parts = [sitePhrase];
+  for (const restriction of restrictions) {
+    const relative = realizeBodySiteRestriction(restriction, "en");
+    if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
+      parts.push(relative);
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
 function formatSite(
   clause: CanonicalSigClause,
   grammar: RouteGrammar,
@@ -823,7 +885,7 @@ function formatSite(
   if (!text) {
     const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
     if (spatialSite) {
-      return spatialSite;
+      return appendSiteRestrictionsEnglish(clause, spatialSite);
     }
   }
   if (!text) {
@@ -856,11 +918,11 @@ function formatSite(
     return undefined;
   }
   if (resolvedSite?.features.kind === "locative") {
-    return resolvedSite.englishObjectText;
+    return appendSiteRestrictionsEnglish(clause, resolvedSite.englishObjectText);
   }
   const perTargetNoun = clause.dose ? resolvedSite?.definition?.perTargetText : undefined;
   const noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
-  if (directObject) return noun;
+  if (directObject) return appendSiteRestrictionsEnglish(clause, noun);
   const preferredPreposition = resolvedSite?.preferredPreposition;
   const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
   const sourcePreposition = relationHasSemanticClass(primarySiteRelation, "locative")
@@ -873,7 +935,7 @@ function formatSite(
   if (!preposition) {
     preposition = "at";
   }
-  return `${preposition} ${noun}`.trim();
+  return appendSiteRestrictionsEnglish(clause, `${preposition} ${noun}`.trim());
 }
 
 function formatIsoCalendarDateEnglish(value: string | undefined): string | undefined {
@@ -914,6 +976,20 @@ function describeCalendarEventsEnglish(
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
 }
 
+/** Describe typed month-day selection independently of medication amount.
+ * @param schedule Calendar-day membership from grammar or a structured import.
+ * @returns An English monthly day phrase when a selection is present.
+ */
+function describeDayOfMonth(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const days = schedule?.dayOfMonth ?? [];
+  if (!days.length) return undefined;
+  const sorted = [...days].sort((a, b) => a - b);
+  const contiguous = sorted.every((day, index) => !index || day === sorted[index - 1] + 1);
+  if (sorted.length === 1) return `on day ${sorted[0]} of each month`;
+  return contiguous ? `on days ${sorted[0]}–${sorted[sorted.length - 1]} of each month`
+    : `on days ${sorted.join(" and ")} of each month`;
+}
+
 function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const dayOfWeek = schedule?.dayOfWeek ?? [];
   if (!dayOfWeek.length) {
@@ -922,6 +998,10 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
   const days: string[] = [];
   for (const day of dayOfWeek) {
     days.push(DAY_NAMES[day] ?? day);
+  }
+  if (days.length && schedule?.weekdayOrdinal !== undefined) {
+    const names: Record<number, string> = { [-1]: "last", 1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth" };
+    return `on the ${names[schedule.weekdayOrdinal]} ${joinWithAnd(days)} of each month`;
   }
   return days.length ? `on ${joinWithAnd(days)}` : undefined;
 }
@@ -1051,7 +1131,9 @@ function formatShort(clause: CanonicalSigClause): string {
   } else if (routeText) {
     parts.push(routeText);
   }
-  if (schedule.timingCode) {
+  if (hasDailyRecurrenceAcrossClocks(schedule)) {
+    parts.push("daily");
+  } else if (schedule.timingCode) {
     parts.push(schedule.timingCode);
   } else if (
     schedule.frequency !== undefined &&
@@ -1066,7 +1148,9 @@ function formatShort(clause: CanonicalSigClause): string {
     (!schedule.period || schedule.period === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
-  } else if (schedule.period && schedule.periodUnit) {
+  } else if (schedule.period && schedule.periodUnit &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+        (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
       schedule.periodMax && schedule.periodMax !== schedule.period
@@ -1077,12 +1161,16 @@ function formatShort(clause: CanonicalSigClause): string {
   if (schedule.when?.length) {
     parts.push(schedule.when.join(" "));
   }
+  if (schedule.dayOfMonth?.length) {
+    parts.push(describeDayOfMonth(schedule)!);
+  }
   if (schedule.dayOfWeek?.length) {
     const days: string[] = [];
     for (const day of schedule.dayOfWeek) {
       days.push(day.charAt(0).toUpperCase() + day.slice(1, 3));
     }
-    parts.push(days.join(","));
+    const ordinal = schedule.weekdayOrdinal;
+    parts.push(days.join(",") + (ordinal === undefined ? "" : `(${ordinal === -1 ? "last" : ordinal})`));
   }
   if (schedule.timeOfDay?.length) {
     const times: string[] = [];
@@ -1205,6 +1293,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
   const dayPart = describeDayOfWeek(schedule);
+  const monthDayPart = describeDayOfMonth(schedule);
   const calendarEventPart = describeCalendarEventsEnglish(schedule);
   const calendarBoundsPart = describeCalendarBoundsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
@@ -1253,6 +1342,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   if (dayPart) {
     segments.push(dayPart);
   }
+  if (monthDayPart) {
+    segments.push(monthDayPart);
+  }
   if (calendarBoundsPart) {
     segments.push(calendarBoundsPart);
   }
@@ -1288,16 +1380,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
   const richPrimaryCoversSingleEvent = Boolean(
-    richPrimaryGraphAction && schedule?.when?.length === 1 &&
-    richPrimaryGraphAction.args.some((arg) => {
-      if (arg.role !== AdviceArgumentRole.Time) return false;
-      if (arg.normalized?.toUpperCase() === schedule.when?.[0]) return true;
-      const parts = (arg.normalized ?? arg.text).toLowerCase().split(/\s+/).filter((part) => part && part !== "the");
-      for (let index = 0; index < parts.length; index += 1) {
-        if (resolveEventTimingExpression(parts, index)?.timing === schedule.when?.[0]) return true;
-      }
-      return false;
-    })
+    richPrimaryGraphAction &&
+    instructionGraphActionCoversSingleScheduledEvent(richPrimaryGraphAction, clause)
   );
   const graphRegimenTail: string[] = [];
   if (richPrimaryGraphText) {
@@ -1307,6 +1391,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
+    if (monthDayPart) graphRegimenTail.push(monthDayPart);
     if (calendarBoundsPart) graphRegimenTail.push(calendarBoundsPart);
     if (countPart) graphRegimenTail.push(countPart);
     if (administrationDurationPart) graphRegimenTail.push(administrationDurationPart);
@@ -1324,23 +1409,65 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
   const instructionPhrases: string[] = [];
+  const codedWarningSources: string[] = [];
+  // Keep one source lookup per instruction for this render. All three
+  // consumers below use the same graph and coding, not separate matches.
+  const codedWarningSourcesByInstruction: string[][] = [];
+  for (const instruction of clause.additionalInstructions ?? []) {
+    const sources = composedCodedWarningActionSources(
+      clause.instructionGraph?.actions ?? [], instruction.coding
+    );
+    codedWarningSourcesByInstruction.push(sources);
+    codedWarningSources.push(...sources);
+  }
   const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction) => instruction.coding?.code)
+    clause.additionalInstructions?.some((instruction, index) =>
+      instruction.coding?.code && (
+        codedWarningSourcesByInstruction[index].length > 0 ||
+        !clause.instructionGraph ||
+        !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
+      ))
   );
   const normalizeInstruction = (value: string) => value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
   const graphWarnings = clause.instructionGraph?.actions.filter((action) =>
     action.polarity === AdvicePolarity.Negate
   ) ?? [];
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
-    if (instruction.coding?.code || !instruction.text || !clause.instructionGraph) return false;
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
+    if (!instruction.text || !clause.instructionGraph) return false;
+    if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
+    if (instruction.coding?.code) {
+      return !codedWarningSourcesByInstruction[index].length &&
+        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
+    }
     const normalized = normalizeInstruction(instruction.text);
+    // An uncoded shorthand advice fragment may end before a contiguous
+    // unparsed nominal tail that the typed instruction graph still retains.
+    // Prefer the graph's complete action+opaque source span, not the shorter
+    // additionalInstruction label ("hold on fasting" vs "... fasting days").
+    // This is source ownership only; no FHIR or clinical interpretation.
+    const graphOwnsLongerSource = !instruction.coding?.code &&
+      !(instruction.frames?.length) &&
+      clause.instructionGraph.actions.some((action) => {
+        const actionText = normalizeInstruction(action.sourceText);
+        return Boolean(actionText && normalized.includes(actionText) &&
+          clause.instructionGraph?.opaqueSpans?.some((opaque) =>
+            opaque.start >= action.span.end && opaque.text.trim() &&
+            !clause.instructionGraph?.sourceText
+              .slice(action.span.end, opaque.start).trim()
+          ));
+      });
+    if (graphOwnsLongerSource) return true;
     const representedByWarning = graphWarnings.some((action) => {
       const source = normalizeInstruction(action.sourceText);
       return source === normalized || source.includes(normalized) || normalized.includes(source);
     });
-    return instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
-      representedByWarning || !instruction.frames?.length ||
+    return instructionGraphCoversTypedWarnings(clause.instructionGraph, instruction.frames) ||
+      instructionGraphRealizesWarningText(clause.instructionGraph, instruction.text) ||
+      // Raw source coverage can include unresolved relation/opaque text; it
+      // does not by itself license replacing the complete editable advice.
+      instructionGraphRepresentsText(clause.instructionGraph, instruction.text) && (
+      representedByWarning ||
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
         instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
@@ -1363,14 +1490,26 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       }
     }
   }
+  for (const source of codedWarningSources) {
+    if (additionalSemanticSourceTexts.indexOf(source) === -1) {
+      additionalSemanticSourceTexts.push(source);
+    }
+  }
+  if (clause.instructionGraph) {
+    for (const instruction of additionalForDirectRendering) {
+      for (const ownedSource of instructionGraphSourceOwnedByAdvice(clause.instructionGraph, instruction)) {
+        if (additionalSemanticSourceTexts.indexOf(ownedSource) === -1) {
+          additionalSemanticSourceTexts.push(ownedSource);
+        }
+      }
+    }
+  }
   const allAdditionalRepresentedByGraphWarnings = Boolean(
     graphWarnings.length &&
     additionalTexts.every((text) => {
       const normalized = normalizeInstruction(text);
-      return graphWarnings.some((action) => {
-        const source = normalizeInstruction(action.sourceText);
-        return source === normalized || source.includes(normalized) || normalized.includes(source);
-      });
+      return Boolean(clause.instructionGraph &&
+        instructionGraphRealizesWarningText(clause.instructionGraph, text));
     })
   );
   const positionedRoundTrip = Boolean(roundTrip && positionedGraph);
@@ -1383,7 +1522,9 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
           omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
-          omitSourceTexts: additionalSemanticSourceTexts
+          omitSourceTexts: richPrimaryGraphAction
+            ? [...additionalSemanticSourceTexts, richPrimaryGraphAction.sourceText]
+            : additionalSemanticSourceTexts
         })
       : undefined;
   if (!graphWholeInstruction) {
@@ -1469,12 +1610,22 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const postFlowsFromAdministration = Boolean(
     !roundTrip && postGraphInstruction && primarySpanForFlow && firstPostActionForFlow &&
     firstPostActionForFlow.polarity !== AdvicePolarity.Negate &&
+    // The post-action's source-backed contrast already joins it to the
+    // administration; prefixing a generic temporal THEN reverses the
+    // connector's meaning ("but hold" is not "then but hold").
+    !instructionGraphPostAdministrationDiscourseConnector(clause.instructionGraph!) &&
     noStrongBoundaryForFlow(primarySpanForFlow.end, firstPostActionForFlow.span.start)
   );
 
   const graphOwnsPatientInstruction = Boolean(
-    richPrimaryGraphAction && clause.patientInstruction && clause.instructionGraph &&
-    instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction)
+    clause.patientInstruction && clause.instructionGraph && (
+      richPrimaryGraphAction &&
+      instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
+      !canonicalClauseHasAdministrationSemantics(clause) &&
+      instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
+        text: clause.patientInstruction, frames: []
+      })
+    )
   );
   const patientInstruction = postFlowsFromAdministration
     ? undefined
@@ -1530,7 +1681,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.timeOfDay?.length ||
+    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.offset !== undefined ||
@@ -1538,7 +1690,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
   );
   const graphCanStandAlone = Boolean(
-    !hasExplicitMethod && trailingInstructionText && clause.instructionGraph?.actions.length &&
+    !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
+    clause.instructionGraph?.actions.length &&
     !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
   );
   if (graphCanStandAlone) return trailingInstructionText as string;
@@ -1664,6 +1817,89 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
+  const cycle = clause.schedule?.cycleDayConstraint;
+  if (cycle) {
+    const sourceQualifier = cycle.sourceText.trim();
+    const alreadyRealized = style === "long" && sourceQualifier &&
+      clause.additionalInstructions?.some(instruction => instruction.text?.trim() === sourceQualifier);
+    if (!alreadyRealized) {
+      // The known modifier is the authority after a textless FHIR import.
+      // Realize its retained qualifier without interpreting or executing it.
+      const rendered = formatCanonicalClause({ ...clause,
+        schedule: { ...clause.schedule, cycleDayConstraint: undefined }
+      }, style, localization, options);
+      const thai = localization?.locale.startsWith("th");
+      const details = [
+        ...(cycle.days.length ? [thai ? `วันที่ในรอบ ${cycle.days.join(", ")}` : `cycle days ${cycle.days.join(", ")}`] : []),
+        ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
+        ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
+        ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
+      ];
+      const qualifier = sourceQualifier ||
+        (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
+        (details.length ? ` (${details.join("; ")})` : "");
+      return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
+    }
+  }
+  const clockWindow = clause.schedule?.clockWindow;
+  if (clockWindow) {
+    const schedule = { ...clause.schedule, clockWindow: undefined };
+    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    const start = clockWindow.start.slice(0, 5);
+    const end = clockWindow.end.slice(0, 5);
+    const thai = localization?.locale.startsWith("th");
+    const range = thai ? `เฉพาะช่วงเวลา ${start}–${end} ทุกวัน` :
+      `only between ${start} and ${end} each day`;
+    const boundary = clockWindow.endInclusive ? "" : thai ? " (ไม่รวมเวลาสิ้นสุด)" : " (end excluded)";
+    return `${rendered.replace(/[.。]$/u, "")} ${range}${boundary}.`;
+  }
+  const offset = clause.schedule?.administrationOffsetMinutes;
+  if (offset !== undefined && Number.isFinite(offset)) {
+    const schedule = { ...clause.schedule, administrationOffsetMinutes: undefined };
+    const clocks = schedule.timeOfDay?.map(clock => {
+      const parts = clock.split(":").map(Number);
+      const seconds = parts[0] * 3600 + parts[1] * 60 + (parts[2] ?? 0) + offset * 60;
+      const day = Math.floor(seconds / 86400);
+      const normalized = ((seconds % 86400) + 86400) % 86400;
+      const hour = Math.floor(normalized / 3600);
+      const minute = Math.floor(normalized % 3600 / 60);
+      const second = normalized % 60;
+      return { day, clock: `${hour < 10 ? "0" : ""}${hour}:${minute < 10 ? "0" : ""}${minute}` +
+        (second ? `:${second < 10 ? "0" : ""}${second}` : "") };
+    });
+    const thai = localization?.locale.startsWith("th");
+    const minutes = Math.abs(offset);
+    const offsetNote = offset < 0
+      ? thai ? "เร็วกว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
+        : minutes + " minutes earlier each time"
+      : thai ? "ช้ากว่าเวลาเดิมแต่ละครั้ง " + minutes + " นาที"
+        : minutes + " minutes later each time";
+    if (clocks?.length && !schedule.when?.length && clocks.every(value => Number.isFinite(value.day))) {
+      const sameDayShift = clocks.every(value => value.day === clocks[0].day) ? clocks[0].day : undefined;
+      if (sameDayShift === undefined) {
+        // Mixed-day clocks cannot safely be displayed as an unqualified
+        // same-day list. Retain their original times and state the actual
+        // elapsed offset once, without fabricating an event chronology.
+        const original = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+        return original.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
+      }
+      schedule.timeOfDay = clocks.map(value => value.clock);
+      const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+      if (sameDayShift === 0) return rendered;
+      const note = sameDayShift === 1
+        ? thai ? "ในวันถัดไป" : "the following day"
+        : sameDayShift === -1
+          ? thai ? "ในวันก่อนหน้า" : "the previous day"
+          : sameDayShift < 0
+            ? thai ? "ก่อนรอบต้นทาง " + Math.abs(sameDayShift) + " วัน"
+              : Math.abs(sameDayShift) + " days earlier"
+            : thai ? "หลังรอบต้นทาง " + sameDayShift + " วัน"
+              : sameDayShift + " days later";
+      return rendered.replace(/[.。]$/u, "") + " (" + note + ").";
+    }
+    const rendered = formatCanonicalClause({ ...clause, schedule }, style, localization, options);
+    return rendered.replace(/[.。]$/u, "") + " (" + offsetNote + ").";
+  }
   let shortDefault: string | undefined;
   let longDefault: string | undefined;
 
