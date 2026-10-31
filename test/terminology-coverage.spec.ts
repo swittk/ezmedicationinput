@@ -350,6 +350,29 @@ describe("generic exact external action mappings without optional arguments", ()
   });
 });
 
+
+describe("known plain dose-unit synonyms without standard codings", () => {
+  it.each([
+    ["squeezes", "squeeze"],
+    ["squeeze", "squeeze"],
+    ["applications", "application"],
+    ["application", "application"],
+    ["ribbon", "ribbon"]
+  ])("normalizes familiar %s to %s even without a coded unit", (label, canonical) => {
+    expect(getStandardDoseUnitCoding(canonical)).toBeUndefined();
+    expect(getDoseQuantityUnit({ unit: label })).toBe(canonical);
+    expect(getDoseQuantityUnit({ system: "http://snomed.info/sct",
+      code: "732936001", unit: label })).toBe(canonical);
+  });
+
+  it("does not mistake an unknown opaque code for an established unit", () => {
+    const q = { system: "http://snomed.info/sct", code: "732936001" };
+    expect(getDoseQuantityUnit({ ...q, unit: "unmappedUnit" })).toBe("unmappedUnit");
+    expect(getDoseQuantityUnit({ ...q, unit: "mL" })).toBe("mL");
+    expect(getDoseQuantityUnit(q)).toBe("732936001");
+  });
+});
+
 describe("nebule-compatible respule unit", () => {
   it("codes the single-dose respule as an NCIt nebule, while retaining its quantity label", () => {
     const expected = { system: "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", code: "C71204" };

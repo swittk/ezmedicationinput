@@ -2887,6 +2887,28 @@ describe("clinical execution adversarial source keeps patient intent and dose id
     }
   );
 
+  it.each([
+    ["not less than", "ge", [false, true, true]],
+    ["not below", "ge", [false, true, true]],
+    ["not under", "ge", [false, true, true]],
+    ["not more than", "le", [true, true, false]],
+    ["not greater than", "le", [true, true, false]],
+    ["not above", "le", [true, true, false]],
+    ["not over", "le", [true, true, false]]
+  ] as const)("interprets the full English measurement comparison: SBP %s 100", (wording, operation, expected) => {
+    const source = "Take 1 tablet daily only if SBP " + wording + " 100";
+    const parsed = parseSig(source);
+    expect(parsed.items).toHaveLength(1);
+    const condition = getDosageCondition(parsed.items[0].fhir)!;
+    expect(condition).toMatchObject({ kind: "measurement", name: "sbp", operation, value: 100 });
+    for (const [index, measured] of [90, 100, 110].entries()) {
+      expect(evaluateMedicationCondition(condition, { sbp: measured })).toBe(expected[index]);
+    }
+    const reopened = toFhirR5Dosages(parsed.fhirNext)[0];
+    expect(getDosageCondition(reopened)).toEqual(condition);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
   it.each(["hold", "omit", "skip", "withhold"])(
     "composes a fronted conditional with the withholding action daughter: %s", verb => {
       const source = "Take 1 tablet daily; if pulse below 55, " + verb + " the dose";

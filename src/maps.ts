@@ -2083,8 +2083,11 @@ export function getDoseQuantityUnit(quantity: { system?: string; code?: string; 
     if (!label) return undefined;
     if (label === "5.mL") return "tsp";
     if (label === "15.mL") return "tbsp";
-    const canonical = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()] ?? label;
-    if (!getStandardDoseUnitCoding(canonical)) return undefined;
+    const synonym = DEFAULT_UNIT_SYNONYMS[label.toLowerCase()];
+    const canonical = synonym ?? label;
+    // Recognized lexical units retain their canonical label even if no
+    // standard unit code exists; unknown opaque codes still fall through.
+    if (!getStandardDoseUnitCoding(canonical)) return synonym;
     const measured = UCUM_DOSE_UNIT_CODES[canonical] ?? canonical;
     return measured === "5.mL" ? "tsp" :
       measured === "15.mL" ? "tbsp" : measured;
