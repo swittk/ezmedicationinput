@@ -1,6 +1,6 @@
 {
   "name": "ezmedicationinput",
-  "version": "0.2.0-ez.0",
+  "version": "0.2.0",
   "description": "Parse clinician SIGs into extended R5-style dosages with strict R5 and R6 projections",
   "type": "module",
   "main": "./dist/index.cjs",
