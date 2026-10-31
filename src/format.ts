@@ -1410,17 +1410,20 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : undefined;
   const instructionPhrases: string[] = [];
   const codedWarningSources: string[] = [];
+  // Keep one source lookup per instruction for this render. All three
+  // consumers below use the same graph and coding, not separate matches.
+  const codedWarningSourcesByInstruction: string[][] = [];
   for (const instruction of clause.additionalInstructions ?? []) {
-    codedWarningSources.push(...composedCodedWarningActionSources(
+    const sources = composedCodedWarningActionSources(
       clause.instructionGraph?.actions ?? [], instruction.coding
-    ));
+    );
+    codedWarningSourcesByInstruction.push(sources);
+    codedWarningSources.push(...sources);
   }
   const hasCodedAdditionalInstruction = Boolean(
-    clause.additionalInstructions?.some((instruction) =>
+    clause.additionalInstructions?.some((instruction, index) =>
       instruction.coding?.code && (
-        composedCodedWarningActionSources(
-          clause.instructionGraph?.actions ?? [], instruction.coding
-        ).length > 0 ||
+        codedWarningSourcesByInstruction[index].length > 0 ||
         !clause.instructionGraph ||
         !instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding)
       ))
@@ -1430,13 +1433,12 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     action.polarity === AdvicePolarity.Negate
   ) ?? [];
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
     if (!instruction.text || !clause.instructionGraph) return false;
     if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
     if (instruction.coding?.code) {
-      return !composedCodedWarningActionSources(
-        clause.instructionGraph.actions, instruction.coding
-      ).length && instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
+      return !codedWarningSourcesByInstruction[index].length &&
+        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
     }
     const normalized = normalizeInstruction(instruction.text);
     // An uncoded shorthand advice fragment may end before a contiguous

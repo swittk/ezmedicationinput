@@ -2275,18 +2275,20 @@ function formatLongThai(
   const roundTrip = options?.realizationMode === "roundtrip";
   const positionedGraph = Boolean(clause.instructionGraph?.primaryAdministrationSpan);
   const codedWarningSources: string[] = [];
+  const codedWarningSourcesByInstruction: string[][] = [];
   for (const instruction of clause.additionalInstructions ?? []) {
-    codedWarningSources.push(...composedCodedWarningActionSources(
+    const sources = composedCodedWarningActionSources(
       clause.instructionGraph?.actions ?? [], instruction.coding
-    ));
+    );
+    codedWarningSourcesByInstruction.push(sources);
+    codedWarningSources.push(...sources);
   }
-  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction) => {
+  const graphOwnedAdditional = (clause.additionalInstructions ?? []).filter((instruction, index) => {
     if (!instruction.text || !clause.instructionGraph) return false;
     if (instructionGraphFullyOwnsAdvice(clause.instructionGraph, instruction)) return true;
     if (instruction.coding?.code) {
-      return !composedCodedWarningActionSources(
-        clause.instructionGraph.actions, instruction.coding
-      ).length && instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
+      return !codedWarningSourcesByInstruction[index].length &&
+        instructionGraphEntailsAdviceCoding(clause.instructionGraph, instruction.coding);
     }
     const normalized = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
     const representedByWarning = clause.instructionGraph.actions
