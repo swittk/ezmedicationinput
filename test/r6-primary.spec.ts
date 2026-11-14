@@ -3248,6 +3248,84 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }
   });
 
+  it("keeps R6 day-cycle administration and supply after a New York spring-forward gap", () => {
+    // The 28-day calendar boundary on Mar 14 2027 is a nonexistent 02:30.
+    // A calendar course must not stop; later cycles retain their original
+    // 02:30 anchor rather than drift to 03:30 indefinitely.
+    const start = "2027-02-14T02:30:00-05:00";
+    const relative = (days: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event",
+        code: "treatment-start"
+      }] },
+      offsetDuration: { value: days, unit: "d", code: "d",
+        system: "http://unitsofmeasure.org" }
+    });
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, unit: "d", code: "d" },
+      step: [{
+        start: relative(0), end: relative(1),
+        component: [{
+          timing: { repeat: { frequency: 1, period: 1,
+            periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+        }]
+      }]
+    };
+    const options = { from: start, orderedAt: start,
+      timeZone: "America/New_York", limit: 4 };
+    const expected = [
+      "2027-02-14T08:00:00-05:00",
+      "2027-03-14T08:00:00-04:00",
+      "2027-04-11T08:00:00-04:00",
+      "2027-05-09T08:00:00-04:00"
+    ];
+    for (const input of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...options,
+        durationValue: 85, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
+    }
+  });
+
+  it("keeps calendar cycles past midnight DST gaps and distinguishes elapsed q24h", () => {
+    // Santiago advances from 00:00 straight to 01:00 on Sep 6, 2026.
+    const anchor = "2026-08-09T00:00:00-04:00";
+    const options = { from: anchor, orderedAt: anchor,
+      timeZone: "America/Santiago", limit: 58 };
+    const dosage: EzDosage = {
+      timing: { repeat: { frequency: 28, period: 28,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const due = nextDueDoses(dosage, options);
+    expect(due).toHaveLength(58);
+    expect(due[27]).toBe("2026-09-05T08:00:00-04:00");
+    expect(due[28]).toBe("2026-09-06T08:00:00-03:00");
+    expect(due[56]).toBe("2026-10-04T08:00:00-03:00");
+
+    // FHIR timeOfDay is a wall-clock instruction. By contrast, every 24
+    // elapsed hours is an interval whose local time shifts after spring DST.
+    const newYork = { from: "2026-03-07T08:00:00-05:00",
+      orderedAt: "2026-03-07T08:00:00-05:00",
+      timeZone: "America/New_York", limit: 3 };
+    expect(nextDueDoses({
+      timing: { repeat: { frequency: 1, period: 24,
+        periodUnit: FhirPeriodUnit.Hour } }
+    }, newYork)).toEqual([
+      "2026-03-07T08:00:00-05:00",
+      "2026-03-08T09:00:00-04:00",
+      "2026-03-09T09:00:00-04:00"
+    ]);
+    expect(nextDueDoses({
+      timing: { repeat: { frequency: 1, period: 1,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } }
+    }, newYork)).toEqual([
+      "2026-03-07T08:00:00-05:00",
+      "2026-03-08T08:00:00-04:00",
+      "2026-03-09T08:00:00-04:00"
+    ]);
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

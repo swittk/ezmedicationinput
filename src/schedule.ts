@@ -345,6 +345,26 @@ function makeZonedDate(
   return candidate;
 }
 
+/** Calendar boundaries use the iCalendar DATE-TIME convention for a
+ * nonexistent wall clock: apply the pre-gap offset and advance through the
+ * gap. Do not use this for prescribed dose events; a missing explicit
+ * timeOfDay still has no exact administration instant. */
+function calendarBoundaryDate(
+  timeZone: string, year: number, month: number, day: number,
+  hour: number, minute: number, second: number
+): Date | null {
+  const exact = makeZonedDate(timeZone, year, month, day, hour, minute, second);
+  if (exact) return exact;
+  const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const beforeOffset = getOffset(new Date(wallUtc - 86_400_000), timeZone);
+  const shifted = new Date(wallUtc - beforeOffset * 60_000);
+  const local = getTimeParts(shifted, timeZone);
+  const desiredClock = hour * 3600 + minute * 60 + second;
+  const actualClock = local.hour * 3600 + local.minute * 60 + local.second;
+  return local.year === year && local.month === month &&
+    local.day === day && actualClock > desiredClock ? shifted : null;
+}
+
 /** Convenience wrapper around makeZonedDate for day-level math. */
 function makeZonedDateFromDay(base: Date, timeZone: string, clock: string): Date | null {
   const { year, month, day } = getTimeParts(base, timeZone);
@@ -358,10 +378,8 @@ function makeZonedDateFromDay(base: Date, timeZone: string, clock: string): Date
 /** Returns a Date pinned to the start of the local day. */
 function startOfLocalDay(date: Date, timeZone: string): Date {
   const { year, month, day } = getTimeParts(date, timeZone);
-  const zoned = makeZonedDate(timeZone, year, month, day, 0, 0, 0);
-  if (!zoned) {
-    throw new Error("Unable to resolve start of day for provided date");
-  }
+  const zoned = calendarBoundaryDate(timeZone, year, month, day, 0, 0, 0);
+  if (!zoned) throw new Error("Unable to resolve start of day for provided date");
   return zoned;
 }
 
@@ -369,7 +387,7 @@ function startOfLocalDay(date: Date, timeZone: string): Date {
 function addLocalDays(date: Date, days: number, timeZone: string): Date {
   const { year, month, day } = getTimeParts(date, timeZone);
   const rollover = new Date(Date.UTC(year, month - 1, day + days));
-  const zoned = makeZonedDate(
+  const zoned = calendarBoundaryDate(
     timeZone,
     rollover.getUTCFullYear(),
     rollover.getUTCMonth() + 1,
@@ -388,12 +406,26 @@ function addLocalDays(date: Date, days: number, timeZone: string): Date {
  * prescribed wall clock. Unlike an elapsed q24h interval, a course cycle
  * cannot lose an hour at daylight-saving transitions. */
 function addCalendarDaysAtClock(
-  instant: Date, days: number, timeZone: string
+  instant: Date, days: number, timeZone: string,
+  clock: Pick<TimeParts, "hour" | "minute" | "second">
 ): Date | null {
-  const { year, month, day, hour, minute, second } = getTimeParts(instant, timeZone);
+  const { year, month, day } = getTimeParts(instant, timeZone);
   const rollover = new Date(Date.UTC(year, month - 1, day + days));
-  return makeZonedDate(timeZone, rollover.getUTCFullYear(),
-    rollover.getUTCMonth() + 1, rollover.getUTCDate(), hour, minute, second);
+  const target = [rollover.getUTCFullYear(), rollover.getUTCMonth() + 1, rollover.getUTCDate()] as const;
+  const { hour, minute, second } = clock;
+  return calendarBoundaryDate(
+    timeZone, target[0], target[1], target[2], hour, minute, second
+  );
+}
+
+/** A calendar cycle keeps its original wall clock even after one boundary
+ * falls into a DST gap. The next boundary resumes the prescribed hour. */
+function calendarDayStepper(
+  anchor: Date, days: number, timeZone: string
+): (instant: Date) => Date | null {
+  const { hour, minute, second } = getTimeParts(anchor, timeZone);
+  const clock = { hour, minute, second };
+  return instant => addCalendarDaysAtClock(instant, days, timeZone, clock);
 }
 
 /** Computes the local weekday token (mon..sun). */
@@ -1737,7 +1769,8 @@ function parallelComponentCadenceOrigin(
 
 function durationStepper(
   quantity: FhirQuantity | FhirR6Quantity | undefined,
-  timeZone: string
+  timeZone: string,
+  anchor: Date
 ): ((value: Date) => Date | null) | null {
   const value = quantity?.value;
   const periodUnit = parseBoundsDurationUnit(quantity);
@@ -1748,7 +1781,7 @@ function durationStepper(
   if (Number.isInteger(value) && (periodUnit === FhirPeriodUnit.Day ||
       periodUnit === FhirPeriodUnit.Week)) {
     const days = value * (periodUnit === FhirPeriodUnit.Week ? 7 : 1);
-    return instant => addCalendarDaysAtClock(instant, days, timeZone);
+    return calendarDayStepper(anchor, days, timeZone);
   }
   return createIntervalStepper({ period: value, periodUnit }, timeZone);
 }
@@ -1903,14 +1936,14 @@ function scheduleRepeatedCourse(
   options: NextDueDoseOptions,
   timeZone: string
 ): string[] {
-  const advance = durationStepper(course.repeatCycle, timeZone);
-  if (!advance) return scheduleTreatmentRelativeCourse(
-    { ...course, repeatCycle: undefined },
-    { ...options, orderedAt: options.orderedAt ?? options.from }
-  );
   const from = coerceDate(options.from, "from");
   const anchor = options.orderedAt === undefined
     ? from : coerceDate(options.orderedAt, "orderedAt");
+  const advance = durationStepper(course.repeatCycle, timeZone, anchor);
+  if (!advance) return scheduleTreatmentRelativeCourse(
+    { ...course, repeatCycle: undefined },
+    { ...options, orderedAt: anchor }
+  );
   const limit = Math.floor(options.limit ?? 10);
   if (!Number.isFinite(limit) || limit <= 0) return [];
   const results: string[] = [];
@@ -3112,7 +3145,7 @@ function generateFrequencyPerPeriodSeries(
   const exactDailyClocks = dayCount !== undefined && Number.isInteger(dayCount) &&
     clocks.length > 0 && frequency === dayCount * clocks.length;
   const advanceCycle = exactDailyClocks
-    ? (instant: Date) => addCalendarDaysAtClock(instant, dayCount, timeZone)
+    ? calendarDayStepper(baseTime, dayCount, timeZone)
     : createIntervalStepper({ period, periodUnit }, timeZone);
   if (!advanceCycle) return [];
   const results: string[] = [];
@@ -4347,10 +4380,10 @@ function calculateCourseTotalUnits(
   if (!course.step.length || course.step.every(step => !step.component.length))
     throw new MedicationQuantityCalculationError("missing-regimen",
       "A medication dosage or complete treatment course is required for supply calculation.");
-  const cycleAdvance = durationStepper(course.repeatCycle, zone);
+  const anchor = options.orderedAt === undefined
+    ? queryStart : coerceDate(options.orderedAt, "orderedAt");
+  const cycleAdvance = durationStepper(course.repeatCycle, zone, anchor);
   if (cycleAdvance) {
-    const anchor = options.orderedAt === undefined
-      ? queryStart : coerceDate(options.orderedAt, "orderedAt");
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     const singleCycle = { ...course, repeatCycle: undefined };
     let cycleStart = anchor;

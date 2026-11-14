@@ -4651,3 +4651,51 @@ seven groups of 75 parses, median microseconds: routine 1431.2->1381.3,
 Thai 5931.4->5797.9, ocular taper 5983.3->6019.4. These host timings
 support no meaningful normal-parse slowdown, not a phone speed claim.
 No merge, publication, deployment or new full review request.
+
+
+## 2026-11-14 — PR #13 sixth review: conventional DST calendar boundaries, no invented doses
+
+**Decision gate:** CodeRabbit's spring-forward report was reproduced on a real
+current-R6 repeated course: a 28-day local-calendar cycle anchored at 02:30
+in America/New_York returned no doses and zero supply because March 14, 2027
+has no local 02:30. A daily-clock calendar schedule anchored at midnight in
+America/Santiago also failed during its September 6, 2026 midnight jump.
+Both are genuine temporal correctness defects, not a reason for another
+parser pass or a bespoke medication DST subsystem.
+
+**Established semantics:** FHIR Timing.repeat.timeOfDay expresses a local
+administration clock. iCalendar RFC 5545 section 3.3.5 defines a pre-gap
+UTC-offset interpretation for a nonexistent local DATE-TIME; its recurring
+calendar day/week dates must not turn into elapsed 24-hour intervals. Apply
+that convention only to calendar boundaries (day starts, day increments,
+day/week cycle boundaries), preserving the original cycle wall clock
+across future iterations even when one boundary temporarily shifts to
+03:30. Exact dose-event construction remains strict: an impossible 02:30
+dose time does not silently become an unrelated prescribed clock.
+Elapsed intervals such as every 24 hours still use the existing absolute
+interval stepper.
+
+**Implementation:** The existing timezone/date helpers now share one small
+calendar-boundary resolution function, using the cached Intl-based timezone
+offset and the pre-transition offset only on an actual local-time gap.
+The day/week cycle stepper captures its original clock once per schedule
+instead of reusing the temporary adjusted clock from a gap boundary.
+Both R6 next-dose enumeration and R6 supply use that same clock, and
+the exact-clock calendar frequency generator uses the same stepper.
+No new dependency, extra grammar pass or general-purpose DST rules engine.
+
+Two independent tests in the existing R6 suite assert exact New York
+spring-forward repeated-cycle due dates, 4 tablets in an 85-day horizon
+from native R6, strict R5 and imported R6; Santiago midnight-gap
+calendar continuity; and the distinct q24h elapsed-versus-08:00-local
+FHIR clock behavior. Existing tests cover fall-back clock preservation.
+
+Validation: 44 source suites **3882/3882** passed, ES6 ESM/CJS and TS
+declaration build passed, and packaged exports **4/4** passed. A read-only
+actual downstream R5 dosage converter and in-memory usage-map round trip
+retained ordinary/Thai/staged 1/2/4 dosage rows unchanged.
+Seven alternating warm host median microbenchmarks versus frozen pre-review
+6d8e864 (microseconds): routine 1633.4 -> 1525.7, Thai 6191.9 -> 6101.0,
+multiphase 6355.2 -> 6182.3; no measurable ordinary-parse regression.
+No deployment, package publication, R5 migration, PR merge or new review
+request was authorized.
