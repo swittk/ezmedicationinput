@@ -4,7 +4,7 @@ import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluate
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import {
-  EventTiming, FhirDosage, FhirR6DosageDetails, NextDueDoseOptions,
+  EventTiming, FhirDosage, FhirR6DosageInstruction, NextDueDoseOptions,
   FhirPeriodUnit, FhirDayOfWeek
 } from "../src/types";
 
@@ -1309,7 +1309,7 @@ describe("typed step addition without changing the baseline administrations", ()
       timing: { repeat: { timeOfDay: clocks.map(clock => clock + ":00") } },
       doseAndRate: [{ doseQuantity: { value, unit: "tab" } }]
     });
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),
@@ -1350,7 +1350,7 @@ describe("typed step addition without changing the baseline administrations", ()
 
 describe("typed waking-hours baseline and independent optional bedtime administration", () => {
   it("keeps a separate optional bedtime half-tablet out of the waking-hour base condition", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ component: [
         {
           doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
@@ -1422,7 +1422,7 @@ describe("finite waking and bedtime phase followed by an added noon administrati
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { when: [event] } }
     });
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),
@@ -1477,7 +1477,7 @@ describe("finite waking and bedtime phase followed by an added noon administrati
 
 
 describe("waking-hours overnight shifts", () => {
-  const course: FhirR6DosageDetails = {
+  const course: FhirR6DosageInstruction = {
     step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: {
@@ -1536,7 +1536,7 @@ describe("waking-hours overnight shifts", () => {
   });
 
   it("anchors weekday filtering to the waking date rather than post-midnight clock date", () => {
-    const mondayCourse: FhirR6DosageDetails = {
+    const mondayCourse: FhirR6DosageInstruction = {
       step: [{ component: [{
         ...course.step[0].component[0],
         timing: { repeat: {
@@ -1607,14 +1607,14 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
     }] },
     offsetDuration: { value, unit: "d", system: "http://unitsofmeasure.org", code: "d" }
   });
-  const makeCycle = (start: number, end: number): FhirR6DosageDetails => ({
+  const makeCycle = (start: number, end: number): FhirR6DosageInstruction => ({
     repeatCycle: { value: 14, unit: "d", code: "d" },
     step: [{ start: relative(start), end: relative(end), component: [{
       timing: { repeat: { timeOfDay: ["08:00:00"] } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }]
   });
-  const on = (dosage: FhirR6DosageDetails | FhirDosage[], day: string) =>
+  const on = (dosage: FhirR6DosageInstruction | FhirDosage[], day: string) =>
     nextDueDoses(dosage, {
       orderedAt, from: day + "T00:00:00+07:00",
       timeZone: "Asia/Bangkok", limit: 6
@@ -1818,7 +1818,7 @@ describe("scalar R5 retained-course execution parity", () => {
       }] },
       offsetDuration: { value, unit: "d", code: "d" }
     });
-    const delayed: FhirR6DosageDetails = { step: [{
+    const delayed: FhirR6DosageInstruction = { step: [{
       start: day(14), end: day(21), component: [{
         timing: { repeat: { timeOfDay: ["08:00:00"] } },
         doseAndRate: [{ doseQuantity: { value: 0.5, unit: "tab" } }]

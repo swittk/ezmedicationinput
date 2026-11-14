@@ -11,7 +11,7 @@ import type {
   CanonicalSigClause,
   EzCourseMetadata,
   EzDosage,
-  FhirR6DosageDetails
+  FhirR6DosageInstruction
 } from '../types';
 
 /** Treatment-relative positions retain calendar months as a distinct unit. */
@@ -61,7 +61,7 @@ type ParallelProjection =
       kind: 'resolved';
       dosages: EzDosage[];
       course: EzCourseMetadata;
-      details: FhirR6DosageDetails;
+      details: FhirR6DosageInstruction;
     };
 
 const ZERO: RegimenPosition = { unit: 'd', value: 0 };

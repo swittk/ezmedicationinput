@@ -300,14 +300,14 @@ describe("source-less multi-administration treatment course realization", () => 
     "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"
   ];
   const dayClocks = (
-    dosage: import("../src/types").FhirR6DosageDetails |
+    dosage: import("../src/types").FhirR6DosageInstruction |
       readonly import("../src/types").FhirDosage[], date: string
   ) => nextDueDoses(dosage, {
     orderedAt, from: date + "T00:00:00+07:00",
     timeZone: "Asia/Bangkok", limit: 48
   }).filter(value => value.startsWith(date)).map(value => value.slice(11, 16));
   const supply = (
-    dosage: import("../src/types").FhirR6DosageDetails |
+    dosage: import("../src/types").FhirR6DosageInstruction |
       readonly import("../src/types").FhirDosage[]
   ) => calculateTotalUnits({
     dosage, orderedAt, from: orderedAt, timeZone: "Asia/Bangkok",
@@ -315,7 +315,7 @@ describe("source-less multi-administration treatment course realization", () => 
   }).totalUnits;
 
   it("keeps three independent dated daily dose patterns human-readable and executable", () => {
-    const course: import("../src/types").FhirR6DosageDetails = {
+    const course: import("../src/types").FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),
@@ -379,7 +379,7 @@ describe("source-less multi-administration treatment course realization", () => 
   });
 
   it("exposes a full seven-day no-medication interval between complex schedules", () => {
-    const course: import("../src/types").FhirR6DosageDetails = {
+    const course: import("../src/types").FhirR6DosageInstruction = {
       step: [
         {
           end: relativeDay(7),

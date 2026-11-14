@@ -43,7 +43,7 @@ console.log(batch.items[0].fhir);       // Single FHIR dosage
 
 // Complete batch for multi-dose or phased instructions
 console.log(batch.fhir);                // EzDosage[]: flat R5-compatible rows
-console.log(batch.fhirNext);            // R6-like course and phases
+console.log(batch.fhirNext);            // Current FHIR R6 DosageInstruction
 ```
 
 Example output:
@@ -80,7 +80,7 @@ Example output:
 - `count`: number of parsed dosage clauses.
 - `items[n].fhir`: the dosage for an individual clause.
 - `fhir`: `EzDosage[]` containing all flat R5-compatible dosage rows.
-- `fhirNext`: R6-like course details, including phases and independent dosing schedules.
+- `fhirNext`: native FHIR R6 `DosageInstruction`, with sequential steps and concurrent dosing components.
 - `meta.segments`: source ranges for each clause.
 - `shortText`, `longText`, `warnings`, and `meta`: batch-level display and diagnostics.
 
@@ -88,6 +88,13 @@ Use `items[0].fhir` when displaying or editing a single dosage, and
 `batch.fhir` when processing the complete flat prescription.
 `formatSig` and `fromFhirDosage` accept one dosage; `formatSigBatch`
 accepts an array of dosages.
+
+The R5 array under `fhir` remains the compatibility/editing surface.
+The `fhirNext` object follows **FHIR R6 6.0.0-snapshot1 (November 13, 2026)**:
+`DosageInstruction.step[].component[]` contains R6 `Dosage` values.
+Use `fromFhir(fhirNext)` to import that **current R6** structure.
+Older R6 `DosageDetails` drafts are not supported by the R6 importer.
+The R5 editing/export APIs are unchanged; no downstream storage migration is required.
 
 ### PRN reasons & additional instructions
 

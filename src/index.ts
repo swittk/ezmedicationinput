@@ -1,5 +1,6 @@
 import {
   toDosageDetails, toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages, fromDosageDetails,
+  assertCurrentR6DosageInstruction,
   withDosageEditProvenance, fromR6Dosage,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
@@ -51,9 +52,10 @@ import {
   FhirDosage,
   FhirDayOfWeek,
   FhirQuantity,
+  FhirR6Quantity,
   EzDosage,
   EzDoseAndRate,
-  FhirR6DosageDetails,
+  FhirR6DosageInstruction,
   FormatBatchOptions,
   FormatOptions,
   LintIssue,
@@ -432,7 +434,7 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 }
 
 /** Prefer exact source wording for rich R6 course fields when it is available. */
-function prefersR6CourseSourceForDisplay(course: FhirR6DosageDetails): boolean {
+function prefersR6CourseSourceForDisplay(course: FhirR6DosageInstruction): boolean {
   return Boolean(course.repeatCycle || course.safety ||
     course.step.some(step => step.start || step.end ||
       step.count !== undefined || step.safety ||
@@ -622,7 +624,7 @@ function buildWholeCourseResult(
   segments: ReturnType<typeof parseSigSegments>,
   regimenGraph: RegimenGraph,
   options?: ParseOptions,
-  parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageDetails }
+  parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageInstruction }
 ): ParseBatchResult {
   const dosageItems = results.map(item => item.fhir);
   const typedRepeatCycle = regimenGraph.repeatCycle
@@ -1260,7 +1262,7 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
  * @param quantity Typed FHIR duration, including its original unit and comparator.
  * @returns Whole nonnegative calendar days, or undefined when not exact.
  */
-function exactCourseDays(quantity: FhirQuantity | undefined): number | undefined {
+function exactCourseDays(quantity: FhirQuantity | FhirR6Quantity | undefined): number | undefined {
   if (!quantity || quantity.comparator || quantity.value === undefined ||
       !Number.isFinite(quantity.value) || quantity.value < 0) return undefined;
   const unit = quantity.code ?? quantity.unit;
@@ -1276,7 +1278,7 @@ function exactCourseDays(quantity: FhirQuantity | undefined): number | undefined
  */
 function medicationFreeCourseWindows(
   windows: readonly { start: number | undefined; end: number | undefined }[],
-  repeatCycle: FhirQuantity | undefined
+  repeatCycle: FhirR6Quantity | undefined
 ): Array<{ start: number; end: number }> {
   const ordered: Array<{ start: number; end: number }> = [];
   for (const window of windows) {
@@ -1308,7 +1310,7 @@ function medicationFreeCourseWindows(
  * @param thai Whether the requested realization is Thai.
  * @returns The original amount/comparator with a localized temporal unit.
  */
-function formatCourseTimeQuantity(quantity: FhirQuantity, thai: boolean): string {
+function formatCourseTimeQuantity(quantity: FhirQuantity | FhirR6Quantity, thai: boolean): string {
   const units: Record<string, readonly [string, string, string]> = {
     s: ["second", "seconds", "วินาที"], min: ["minute", "minutes", "นาที"],
     h: ["hour", "hours", "ชั่วโมง"], d: ["day", "days", "วัน"],
@@ -1326,7 +1328,7 @@ function formatCourseTimeQuantity(quantity: FhirQuantity, thai: boolean): string
  * @param count Supplied common step repetition count, when explicitly finite.
  * @returns A visible cycle instruction preserving the supplied count without inventing an end date.
  */
-function formatCourseRepeatCycle(cycle: FhirQuantity, thai: boolean, count?: number): string {
+function formatCourseRepeatCycle(cycle: FhirR6Quantity, thai: boolean, count?: number): string {
   const unit = cycle.code ?? cycle.unit ?? "";
   const interval = formatCourseTimeQuantity(cycle, thai);
   if (cycle.comparator || cycle.value === undefined || !Number.isFinite(cycle.value) ||
@@ -1345,7 +1347,7 @@ function formatCourseRepeatCycle(cycle: FhirQuantity, thai: boolean, count?: num
  * @returns Its finite nonnegative offset, or undefined for another/uncertain event.
  */
 function treatmentStepOffsetQuantity(
-  relative: FhirR6DosageDetails["step"][number]["start"]
+  relative: FhirR6DosageInstruction["step"][number]["start"]
 ): FhirQuantity | undefined {
   if (!relative || relative.contextReference || relative.contextDefinition ||
       relative.contextPath || relative.offsetRange) return undefined;
@@ -1362,7 +1364,7 @@ function treatmentStepOffsetQuantity(
  * @returns Its day offset, leaving month/year boundaries unconverted.
  */
 function treatmentStepOffsetDays(
-  relative: FhirR6DosageDetails["step"][number]["start"]
+  relative: FhirR6DosageInstruction["step"][number]["start"]
 ): number | undefined {
   return exactCourseDays(treatmentStepOffsetQuantity(relative));
 }
@@ -1387,14 +1389,14 @@ function formatCalendarStepWindow(
 }
 
 export function formatSig(
-  input: FhirDosage | FhirR6DosageDetails | readonly EzDosage[],
+  input: FhirDosage | FhirR6DosageInstruction | readonly EzDosage[],
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
   if (Array.isArray(input)) {
     return formatSigBatch(input as EzDosage[], style, options);
   }
-  const oneOrCourse = input as FhirDosage | FhirR6DosageDetails;
+  const oneOrCourse = input as FhirDosage | FhirR6DosageInstruction;
   if ("step" in oneOrCourse) {
     // R6's renderedInstruction is the whole-course instruction. Do not
     // accidentally reduce a taper to a single component or discard its
@@ -1607,14 +1609,15 @@ export function formatParseBatch(
 }
 
 /**
- * Load an R6 DosageDetails without reparsing a generated text instruction.
+ * Load the current R6 DosageInstruction without reparsing a generated text instruction.
  * R5 component lowerings exist solely for per-clause provenance and formatting;
  * the original whole-course R6 object remains the primary FHIR output.
  */
 export function fromFhir(
-  dosageDetails: FhirR6DosageDetails,
+  dosageDetails: FhirR6DosageInstruction,
   options?: FormatOptions
 ): ParseBatchResult {
+  assertCurrentR6DosageInstruction(dosageDetails);
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
     fromFhirDosageInternal(dosage, options)

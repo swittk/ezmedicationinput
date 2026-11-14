@@ -5,7 +5,7 @@ import {
   toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
   EventTiming, FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
-import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageDetails } from "../src";
+import type { CanonicalScheduleExpr, FhirDosage, FhirR6DosageInstruction } from "../src";
 import { canonicalToFhir } from "../src/fhir";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
@@ -918,7 +918,7 @@ describe("dose scheduling runtime guarantees", () => {
   });
 
   it("allows body-site references and dose expressions to carry actual schedule times", () => {
-    const details: FhirR6DosageDetails = {
+    const details: FhirR6DosageInstruction = {
       step: [{ component: [{
         site: { reference: { reference: "BodyStructure/example" } },
         doseAndRate: [{
@@ -1351,7 +1351,7 @@ function executableParkinsonRepresentations(source: string) {
 }
 
 function dueOn(
-  dosage: FhirR6DosageDetails | readonly FhirDosage[],
+  dosage: FhirR6DosageInstruction | readonly FhirDosage[],
   localDate: string
 ): string[] {
   return nextDueDoses(dosage, {
@@ -1361,7 +1361,7 @@ function dueOn(
 }
 
 function totalUnitsOver21Days(
-  dosage: FhirR6DosageDetails | readonly FhirDosage[]
+  dosage: FhirR6DosageInstruction | readonly FhirDosage[]
 ) {
   return calculateTotalUnits({
     dosage,
@@ -1823,7 +1823,7 @@ describe("punctuation and typed treatment-phase sequencing", () => {
       [EventTiming["Before Dinner"]]: -30
     }
   };
-  const dueOn = (regimen: FhirR6DosageDetails | FhirDosage[], date: string) =>
+  const dueOn = (regimen: FhirR6DosageInstruction | FhirDosage[], date: string) =>
     nextDueDoses(regimen, {
       ...clocks, from: date + "T00:00:00+07:00", limit: 20
     }).filter(value => value.startsWith(date)).map(value => value.slice(11, 16));
@@ -1877,11 +1877,11 @@ describe("punctuation and typed treatment-phase sequencing", () => {
 describe("source-targeted clock adjustment within a finite staged regimen", () => {
   const orderedAt = "2026-11-02T00:00:00+07:00";
   const options = { orderedAt, timeZone: "Asia/Bangkok" };
-  const daily = (regimen: FhirR6DosageDetails | FhirDosage[], date: string) =>
+  const daily = (regimen: FhirR6DosageInstruction | FhirDosage[], date: string) =>
     nextDueDoses(regimen, {
       ...options, from: date + "T00:00:00+07:00", limit: 16
     }).filter(time => time.startsWith(date)).map(time => time.slice(11, 16));
-  const perClockDose = (step: FhirR6DosageDetails["step"][number]) =>
+  const perClockDose = (step: FhirR6DosageInstruction["step"][number]) =>
     step.component.flatMap(item =>
       (item.timing?.repeat?.timeOfDay ?? []).map(clock => ({
         time: clock.slice(0, 5), amount: item.doseAndRate?.[0]?.doseQuantity?.value
@@ -1941,7 +1941,7 @@ describe("source-targeted clock adjustment within a finite staged regimen", () =
 describe("source-backed finite pause before medication resumption", () => {
   const orderedAt = "2026-11-02T00:00:00+07:00";
   const options = { orderedAt, timeZone: "Asia/Bangkok" };
-  const due = (course: FhirR6DosageDetails | FhirDosage[], date: string) =>
+  const due = (course: FhirR6DosageInstruction | FhirDosage[], date: string) =>
     nextDueDoses(course, { ...options,
       from: date + "T00:00:00+07:00", limit: 14
     }).filter(time => time.startsWith(date)).map(time => time.slice(11, 16));
@@ -2045,7 +2045,7 @@ describe("real-world lexical phase transition variants", () => {
     ["Thai สัปดาห์ถัดไป", sourceThai + " สัปดาห์ถัดไป " + nextThai],
     ["Thai ในสัปดาห์ที่ 2", sourceThai + " ในสัปดาห์ที่ 2 " + nextThai]
   ] as const;
-  const times = (regimen: FhirR6DosageDetails | FhirDosage[], day: string) =>
+  const times = (regimen: FhirR6DosageInstruction | FhirDosage[], day: string) =>
     nextDueDoses(regimen, {
       timeZone: "Asia/Bangkok", orderedAt: start,
       from: day + "T00:00:00+07:00", limit: 14
@@ -2152,7 +2152,7 @@ describe("fronted week-two additive administration keeps its predecessor schedul
 
 describe("Thai additive and clock-target phase adjustments", () => {
   const base = { timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00" };
-  const clocks = (dosage: FhirR6DosageDetails | FhirDosage[], date: string) => nextDueDoses(dosage, {
+  const clocks = (dosage: FhirR6DosageInstruction | FhirDosage[], date: string) => nextDueDoses(dosage, {
     ...base, from: date + "T00:00:00+07:00", limit: 12
   }).filter(value => value.startsWith(date)).map(value => value.slice(11, 16));
 

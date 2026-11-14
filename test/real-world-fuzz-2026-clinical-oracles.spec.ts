@@ -6,7 +6,7 @@ import {
   getDosageAlternativeChoice, nextDueDoses, parseSig, toFhirR5Dosages,
   formatSig, formatSigBatch
 } from "../src";
-import type { FhirR6DosageDetails } from "../src";
+import type { FhirR6DosageInstruction } from "../src";
 import { cloneStructuredValue } from "../src/stable-structure";
 
 interface FuzzCase { id: string; category: string; input: string }
@@ -601,7 +601,7 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it.each([7, 14])("renders source-less relative day bounds with a start on day %i", secondStart => {
-    const course: FhirR6DosageDetails = { step: [
+    const course: FhirR6DosageInstruction = { step: [
       { end: relative(7), component: [component(1)] },
       { start: relative(secondStart), end: relative(secondStart + 7),
         component: [component(2)] }

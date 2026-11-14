@@ -12,6 +12,7 @@ import {
   EzDoseAndRate,
   FhirPeriodUnit,
   FhirQuantity,
+  FhirR6Quantity,
   FhirTiming,
   FhirTimingRepeat,
   FrequencyFallbackTimes,
@@ -21,7 +22,7 @@ import {
   MedicationContext,
   NextDueDoseConfig,
   NextDueDoseOptions,
-  FhirR6DosageDetails,
+  FhirR6DosageInstruction,
   FhirR6RelativeTime,
   ParseBatchResult,
   RegimenDueTimes,
@@ -568,7 +569,7 @@ function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   };
 }
 
-function parseBoundsDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUnit | undefined {
+function parseBoundsDurationUnit(quantity: FhirQuantity | FhirR6Quantity | undefined): FhirPeriodUnit | undefined {
   const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
   switch (candidate) {
     case "s":
@@ -1723,7 +1724,7 @@ function parallelComponentCadenceOrigin(
 }
 
 function durationStepper(
-  quantity: FhirQuantity | undefined,
+  quantity: FhirQuantity | FhirR6Quantity | undefined,
   timeZone: string
 ): ((value: Date) => Date | null) | null {
   const value = quantity?.value;
@@ -1747,7 +1748,7 @@ function durationStepper(
  * @param timeZone Calendar zone for relative quantities and component bounds.
  */
 function treatmentStepWindow(
-  course: FhirR6DosageDetails, index: number, anchor: Date,
+  course: FhirR6DosageInstruction, index: number, anchor: Date,
   previousEnd: Date, timeZone: string
 ): { start: Date; end: Date | undefined } {
   const step = course.step[index];
@@ -1776,7 +1777,7 @@ function treatmentStepWindow(
  * @param timeZone Calendar zone; month offsets are never approximated as days.
  */
 function repeatedCourseHorizon(
-  course: FhirR6DosageDetails, anchor: Date, nextCycle: Date, timeZone: string
+  course: FhirR6DosageInstruction, anchor: Date, nextCycle: Date, timeZone: string
 ): Date {
   let horizon = nextCycle;
   let previousEnd = anchor;
@@ -1804,12 +1805,12 @@ function repeatedCourseHorizon(
  * @param step Typed course step, with an optional finite repetition count.
  * @param cycleIndex Zero-based cycle, or undefined for non-cyclic execution.
  */
-function stepOccursInCycle(step: FhirR6DosageDetails["step"][number], cycleIndex?: number): boolean {
+function stepOccursInCycle(step: FhirR6DosageInstruction["step"][number], cycleIndex?: number): boolean {
   return cycleIndex === undefined || step.count === undefined || cycleIndex < step.count;
 }
 
 function scheduleTreatmentRelativeCourse(
-  course: FhirR6DosageDetails, options: NextDueDoseOptions,
+  course: FhirR6DosageInstruction, options: NextDueDoseOptions,
   cycleDefaultEnd?: Date, cycleIndex?: number
 ): string[] {
   const timeZone = options.timeZone ?? options.config?.timeZone;
@@ -1879,7 +1880,7 @@ function scheduleTreatmentRelativeCourse(
 }
 
 function scheduleRepeatedCourse(
-  course: FhirR6DosageDetails,
+  course: FhirR6DosageInstruction,
   options: NextDueDoseOptions,
   timeZone: string
 ): string[] {
@@ -1986,12 +1987,12 @@ function selectedAlternativeMembers<T extends Pick<FhirDosage, "modifierExtensio
  * @param options Clinician-selected branch ids.
  */
 function selectedAlternativeCourse(
-  course: FhirR6DosageDetails, options: NextDueDoseOptions
-): FhirR6DosageDetails {
+  course: FhirR6DosageInstruction, options: NextDueDoseOptions
+): FhirR6DosageInstruction {
   // Ordinary courses stay allocation-free; only an explicit modifier needs
   // group selection. Flatten once, not by repeated growing-array copying.
   if (!course.step.some(step => step.component.some(hasAlternativeChoice))) return course;
-  const members: FhirR6DosageDetails["step"][number]["component"] = [];
+  const members: FhirR6DosageInstruction["step"][number]["component"] = [];
   for (const step of course.step) members.push(...step.component);
   // Validate against the WHOLE group, not one component/step at a time.
   selectedAlternativeMembers(members, options);
@@ -2013,7 +2014,7 @@ function selectedAlternativeCourse(
 }
 
 export function nextDueDoses(
-  dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageDetails | ParseBatchResult,
+  dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult,
   options: NextDueDoseOptions
 ): string[] {
   // The most ergonomic call accepts parseSig() directly.
@@ -2032,7 +2033,7 @@ export function nextDueDoses(
       return nextDueDoses(toDosageDetails(dosage), options);
     }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
-      ? selectedAlternativeCourse(dosage as FhirR6DosageDetails, options) : undefined;
+      ? selectedAlternativeCourse(dosage as FhirR6DosageInstruction, options) : undefined;
     if (r6Course) requireExecutableCourseContext(r6Course, "scheduling");
     const zone = options?.timeZone ?? options?.config?.timeZone;
     if (r6Course?.repeatCycle && zone) {
@@ -3515,7 +3516,7 @@ export class MedicationQuantityCalculationError extends Error {
  * @param course Editable course whose context may be missing or contradictory.
  * @param operation The numeric operation reported to the caller.
  */
-function requireExecutableCourseContext(course: FhirR6DosageDetails, operation: "scheduling" | "calculating"): void {
+function requireExecutableCourseContext(course: FhirR6DosageInstruction, operation: "scheduling" | "calculating"): void {
   const issue = getCourseContextIssue(course);
   if (issue) throw new MedicationQuantityCalculationError(issue,
     issue === "conflicting-course-phase"
@@ -4209,7 +4210,7 @@ function calculateTotalUnitsSingle(
  * never by pretending that all stages run through the whole request window.
  */
 function calculateCourseTotalUnits(
-  course: FhirR6DosageDetails, options: TotalUnitsOptions,
+  course: FhirR6DosageInstruction, options: TotalUnitsOptions,
   cycleDefaultEnd?: Date, cycleIndex?: number
 ): TotalUnitsResult {
   course = selectedAlternativeCourse(course, options);
@@ -4413,7 +4414,7 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
   if (!Array.isArray(input) && "items" in input)
     return calculateCourseTotalUnits((input as ParseBatchResult).fhirNext, options);
   if (!Array.isArray(input) && "step" in input)
-    return calculateCourseTotalUnits(input as FhirR6DosageDetails, options);
+    return calculateCourseTotalUnits(input as FhirR6DosageInstruction, options);
   if (Array.isArray(input))
     return calculateCourseTotalUnits(toDosageDetails(input as FhirDosage[]), options);
   const one = input as FhirDosage;

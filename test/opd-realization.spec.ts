@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatSig, fromFhir, fromFhirDosage, getTimingOccurrenceCap, nextDueDoses, parseSig as parseCompleteSig, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "../src";
-import type { FhirDosage, FhirR6DosageDetails } from "../src";
+import type { FhirDosage, FhirR6DosageInstruction } from "../src";
 import { parseSig } from "./helpers/r5-parser";
 
 describe("OPD normalized realization and advanced schedule semantics", () => {
@@ -74,7 +74,7 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
   });
 
   it("keeps a source-less R6 safety course data-preserving with useful display text", () => {
-    const details: FhirR6DosageDetails = {
+    const details: FhirR6DosageInstruction = {
       step: [{ component: [{
         timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],

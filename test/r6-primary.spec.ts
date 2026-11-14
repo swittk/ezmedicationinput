@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import conditionalDoseProfile from "../fhir/r5/medication-conditional-dose.json";
 import renderedInstructionProfile from "../fhir/r5/medication-rendered-instruction.json";
 import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json";
+import r6SnapshotContract from "../fhir/r6/official-snapshot1-20261113-contract.json";
 import {
   parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, formatParseBatch, nextDueDoses, calculateTotalUnits,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageDetails, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FhirR6DosageInstruction, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
@@ -166,7 +167,7 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
   });
 
   it("keeps optional real R6 semantics on normal EZMED dosages", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       renderedInstruction: "Dose guided by weight",
       step: [{
         component: [{
@@ -213,7 +214,7 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
   });
 
   it("retains R6-only approximate safety without illegally lowering it to R5 SimpleQuantity", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       renderedInstruction: "Maximum is approximate and requires review",
       step: [{ component: [{
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
@@ -339,7 +340,7 @@ describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
 
 
 describe("R5 edit versus retained R6 executable expression ownership", () => {
-  const original: FhirR6DosageDetails = {
+  const original: FhirR6DosageInstruction = {
     renderedInstruction: "Adjust the dose by body weight twice daily",
     step: [{ component: [{
       timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
@@ -433,7 +434,7 @@ describe("FHIR R5/R6 coded instruction and source-edit invariants", () => {
       coding: [{ system: "http://snomed.info/sct", code: value, display }],
       text: display
     });
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       renderedInstruction: "Take 1 tablet twice daily; do not stop without doctor approval",
       step: [{ start: { offsetDuration: { value: 0, unit: "d" } }, component: [{
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tablet" } }],
@@ -491,7 +492,7 @@ describe("FHIR R5/R6 coded instruction and source-edit invariants", () => {
 
 describe("R5 expression reconciliation repeat-save invariants", () => {
   it("does not grow the original expression snapshot across repeated R5 edit/save cycles", () => {
-    const formula: FhirR6DosageDetails = {
+    const formula: FhirR6DosageInstruction = {
       renderedInstruction: "Weight-adjusted twice daily",
       step: [{ component: [{
         doseAndRate: [{
@@ -535,7 +536,7 @@ describe("FHIR event-local timing projection invariants", () => {
         } }
       ]
     });
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       renderedInstruction: "Two distinct event windows require clinician review",
       step: [{ component: [{
         doseAndRate: [{ doseQuantity: { value: 5, unit: "U" } }],
@@ -561,7 +562,7 @@ describe("FHIR event-local timing projection invariants", () => {
 
 
 describe("clinician editing R6 BodyStructure reference through an R5 dosage", () => {
-  const original: FhirR6DosageDetails = {
+  const original: FhirR6DosageInstruction = {
     step: [{ component: [{
       site: {
         concept: { text: "right eye" },
@@ -609,7 +610,7 @@ describe("clinician editing R6 BodyStructure reference through an R5 dosage", ()
 });
 
 describe("explicit R6 conditional edit precedence over retained R5 bridges", () => {
-  const original: FhirR6DosageDetails = {
+  const original: FhirR6DosageInstruction = {
     renderedInstruction: "Take one tablet BID only when BP is high",
     step: [{
       component: [{
@@ -731,8 +732,8 @@ describe("Boolean guard follow-up clause boundaries", () => {
 
 
 describe("typed alternative-choice FHIR membership", () => {
-  function alternativeCourse(language: "en" | "th" = "en"): FhirR6DosageDetails {
-    const result: FhirR6DosageDetails = {
+  function alternativeCourse(language: "en" | "th" = "en"): FhirR6DosageInstruction {
+    const result: FhirR6DosageInstruction = {
       renderedInstruction: language === "en"
         ? "Either inhale 2 puffs OR nebulize 2.5 mg, not both"
         : "สูดยา 2 ครั้ง หรือพ่นละอองยา 2.5 มก. เลือกอย่างใดอย่างหนึ่ง",
@@ -781,7 +782,7 @@ describe("typed alternative-choice FHIR membership", () => {
 
   it("supports three alternatives without assuming a binary pair or changing their quantities", () => {
     const original = alternativeCourse();
-    const third: FhirR6DosageDetails["step"][number]["component"][number] = {
+    const third: FhirR6DosageInstruction["step"][number]["component"][number] = {
       id: "third-option", doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }]
     };
     setDosageAlternativeChoice(third, {
@@ -807,7 +808,7 @@ describe("typed alternative-choice FHIR membership", () => {
   });
 
   it("keeps R6-only anatomical references with their alternative branches when both doses are edited and reordered", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       step: [{ component: [
         { site: { reference: { reference: "BodyStructure/left-arm" } },
           doseAndRate: [{ doseQuantity: { value: 5, unit: "U" } }] },
@@ -837,7 +838,7 @@ describe("typed alternative-choice FHIR membership", () => {
   });
 
   it("does not mistake plain concurrent doses or the word OR alone for typed membership", () => {
-    const input: FhirR6DosageDetails = {
+    const input: FhirR6DosageInstruction = {
       renderedInstruction: "Original source may contain OR without a recognized choice construction",
       step: [{ component: [
         { doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }] },
@@ -906,7 +907,7 @@ describe("choice execution over reloaded branch groups", () => {
     timeZone: "Asia/Bangkok", limit: 4
   };
   const component = (value: number, time: string, groupId: string, branchId: string) => {
-    const dosage: FhirR6DosageDetails["step"][number]["component"][number] = {
+    const dosage: FhirR6DosageInstruction["step"][number]["component"][number] = {
       doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: [time] } }
     };
@@ -915,7 +916,7 @@ describe("choice execution over reloaded branch groups", () => {
   };
 
   it("executes every component of one selected branch, not one component nor every alternative", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ component: [
         component(1, "08:00:00", "schedule-choice", "split-dose"),
         component(2, "20:00:00", "schedule-choice", "split-dose"),
@@ -943,7 +944,7 @@ describe("choice execution over reloaded branch groups", () => {
   });
 
   it("resolves independent choice groups separately without leaking a selection across groups", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ component: [
         component(1, "08:00:00", "first", "small"),
         component(2, "12:00:00", "first", "large"),
@@ -1490,7 +1491,7 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it("displays both finite phase windows in source-less EN/TH R6 and strict R5", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         { end: relativeDay(7), component: [tablet(1)] },
         { start: relativeDay(7), end: relativeDay(14), component: [tablet(2)] }
@@ -1507,7 +1508,7 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it("makes a seven-day STOP/RESUME gap explicit rather than joining identical doses", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         { end: relativeDay(7), component: [tablet(1)] },
         { start: relativeDay(14), end: relativeDay(21), component: [tablet(1)] }
@@ -1526,7 +1527,7 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it("does not misrepresent an unknown relative-time context as treatment-day timing", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{
         start: {
           contextDefinition: "dialysis",
@@ -1557,12 +1558,12 @@ describe("source-less repeating and overlapping treatment windows", () => {
   const step = (start: number, end: number, amount: number) => ({
     start: boundary(start), end: boundary(end), component: [tablet(amount)]
   });
-  const variants = (course: FhirR6DosageDetails) => [
+  const variants = (course: FhirR6DosageInstruction) => [
     course, toDosageDetails(toFhirR5Dosages(course)), toFhirR5Dosages(course)
   ];
 
   it("renders the repeat period and medication-free tail of a recurring course in both locales", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 14, unit: "d", code: "d" }, step: [step(0, 7, 1)]
     };
     const before = cloneStructuredValue(course);
@@ -1590,7 +1591,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
 
   it.each([false, true])("does not prescribe a global pause across a continuing parallel component (reordered=%s)", reordered => {
     const stages = [step(0, 21, 1), step(0, 7, 0.5), step(14, 21, 0.5)];
-    const course: FhirR6DosageDetails = { step: reordered ? [stages[1], stages[2], stages[0]] : stages };
+    const course: FhirR6DosageInstruction = { step: reordered ? [stages[1], stages[2], stages[0]] : stages };
     for (const input of variants(course)) {
       expect(formatSig(input, "long", { locale: "en" })).not.toContain("No doses");
       expect(formatSig(input, "long", { locale: "th" })).not.toContain("งดยา");
@@ -1602,7 +1603,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
   });
 
   it("describes only the genuinely uncovered days of a partly overlapped pause", () => {
-    const course: FhirR6DosageDetails = { step: [step(0, 10, 1), step(0, 7, 0.5), step(14, 21, 0.5)] };
+    const course: FhirR6DosageInstruction = { step: [step(0, 10, 1), step(0, 7, 0.5), step(14, 21, 0.5)] };
     for (const input of variants(course)) {
       const text = formatSig(input, "long", { locale: "en" });
       expect(text).toContain("No doses on days 11–14");
@@ -1611,7 +1612,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
   });
 
   it("does not invent a pause when a concurrent component has no finite end", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ start: boundary(0), component: [tablet(1)] }, step(0, 7, 0.5), step(14, 21, 0.5)]
     };
     for (const input of variants(course)) {
@@ -1622,7 +1623,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
     const intervals = [[0, 7], [7, 14], [14, 21], [3, 10], [0, 21], [7, 21]] as const;
     for (const left of intervals) for (const right of intervals) {
       const ranges = [[0, 7], left, right] as const;
-      const course: FhirR6DosageDetails = {
+      const course: FhirR6DosageInstruction = {
         step: [step(0, 7, 1), step(left[0], left[1], 0.5), step(right[0], right[1], 0.25)]
       };
       const end = Math.max(...ranges.map(range => range[1]));
@@ -1645,7 +1646,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
   });
 
   it("preserves week units and leaves nonrepeating courses nonrepeating", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 2, unit: "wk", code: "wk" }, step: [step(0, 7, 1)]
     };
     for (const input of variants(course)) {
@@ -1657,7 +1658,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
   });
 
   it("does not derive a global pause from a stage exceeding its repeat period", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 14, unit: "d", code: "d" }, step: [step(7, 21, 1)]
     };
     for (const input of variants(course)) {
@@ -1684,7 +1685,7 @@ describe("source-less calendar-relative treatment steps", () => {
   });
 
   it("retains exact calendar-month boundaries instead of substituting a fixed day count", () => {
-    const course: FhirR6DosageDetails = { step: [
+    const course: FhirR6DosageInstruction = { step: [
       { end: relative(1, "mo"), component: [tablet(1)] },
       { start: relative(1, "mo"), end: relative(2, "mo"), component: [tablet(0.5)] }
     ] };
@@ -1708,7 +1709,7 @@ describe("source-less calendar-relative treatment steps", () => {
   });
 
   it("keeps year and mixed day/month offsets visible without inventing conversion factors", () => {
-    const courses: FhirR6DosageDetails[] = [
+    const courses: FhirR6DosageInstruction[] = [
       { step: [{ start: relative(1, "a"), end: relative(2, "a"), component: [tablet(1)] }] },
       { step: [{ start: relative(7, "d"), end: relative(1, "mo"), component: [tablet(1)] }] }
     ];
@@ -1788,14 +1789,14 @@ describe("method-only inheritance remains reachable for PRN successors", () => {
 
 describe("native R6 label-only condition text", () => {
   it("does not confuse a source-less condition label with its Boolean or numeric meaning", () => {
-    const cases: Array<{ condition: NonNullable<FhirR6DosageDetails["step"][number]["component"][number]["condition"]>[number]; expected: string }> = [
+    const cases: Array<{ condition: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["condition"]>[number]; expected: string }> = [
       { condition: { code: { coding: [{ code: "problem-presents" }] },
         details: { text: "fasting" }, valueBoolean: false }, expected: "only if not fasting" },
       { condition: { code: { text: "systolic BP" }, operation: "gt",
         valueQuantity: { value: 100, unit: "mmHg" } }, expected: "only if systolic BP > 100 mmHg" }
     ];
     for (const { condition, expected } of cases) {
-      const course: FhirR6DosageDetails = { step: [{ component: [{
+      const course: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         timing: { repeat: { timeOfDay: ["08:00:00"] } }, condition: [condition]
       }] }] };
@@ -1821,7 +1822,7 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
   });
 
   it.each(["en", "th"])("keeps finite phases and a medication-free week in %s, for both styles", locale => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [
         { end: relative(7), component: [tablet(1)] },
         { start: relative(14), end: relative(21), component: [tablet(2)] }
@@ -1841,7 +1842,7 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
   });
 
   it("does not reduce repeating finite courses to an unqualified daily dose", () => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 14, code: "d", unit: "d" },
       step: [{ start: relative(0), end: relative(7), count: 2, component: [tablet(1)] }]
     };
@@ -1856,7 +1857,7 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
 
 describe("parse-batch alternatives keep the selected display language", () => {
   it.each(["en", "th"])("keeps mutually exclusive source-less doses in %s", locale => {
-    const course: FhirR6DosageDetails = {
+    const course: FhirR6DosageInstruction = {
       step: [{ component: [1, 2].map(value => ({
         doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
         timing: { repeat: { timeOfDay: ["08:00:00"] } }
@@ -2230,7 +2231,7 @@ describe("compact row-local R5 course persistence", () => {
   });
 
   it("grows linearly with independent stage metadata instead of copying the course per row", () => {
-    const course = (count: number): FhirR6DosageDetails => ({ step: Array.from({ length: count }, (_, index) => ({
+    const course = (count: number): FhirR6DosageInstruction => ({ step: Array.from({ length: count }, (_, index) => ({
       start: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
         offsetDuration: { value: index, unit: "d", code: "d" } },
       component: [{ timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } },
@@ -2250,7 +2251,7 @@ describe("compact course metadata ownership and editing", () => {
     contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
     offsetDuration: { value, unit: "d", code: "d" }
   });
-  const component = (value = 1): FhirR6DosageDetails["step"][number]["component"][number] => ({
+  const component = (value = 1): FhirR6DosageInstruction["step"][number]["component"][number] => ({
     doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
     timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] } }
   });
@@ -2290,7 +2291,7 @@ describe("compact course metadata ownership and editing", () => {
   });
 
   it("stores course-wide metadata once and requires its owner for numeric execution", () => {
-    const source: FhirR6DosageDetails = {
+    const source: FhirR6DosageInstruction = {
       repeatCycle: { value: 14, unit: "d", code: "d" },
       step: [
         { start: day(0), end: day(3), component: [component()] },
@@ -2310,7 +2311,10 @@ describe("compact course metadata ownership and editing", () => {
     expect(restored.step[1].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
     expect(restored.step[1].start).toEqual(day(7));
     expect(() => formatSig(restored, "long")).not.toThrow();
-    for (const dosage of [surviving, restored, toFhirR5Dosages(restored), fromFhir(restored).fhirNext]) {
+    // A partially deleted R5 draft keeps the missing phase editable, but
+    // cannot masquerade as a valid current R6 DosageInstruction.
+    expect(() => fromFhir(restored)).toThrow(/step\[0\].*component/);
+    for (const dosage of [surviving, restored, toFhirR5Dosages(restored)]) {
       expect(() => nextDueDoses(dosage, options)).toThrow(/complete dosage array/);
       expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 28, durationUnit: "d" })).toThrow(/complete dosage array/);
     }
@@ -2318,7 +2322,7 @@ describe("compact course metadata ownership and editing", () => {
   });
 
   it("does not turn the loss of non-modifier course annotations into an execution block", () => {
-    const source: FhirR6DosageDetails = {
+    const source: FhirR6DosageInstruction = {
       id: "external-course",
       extension: [{ url: "urn:example:author", valueString: "source author" }],
       step: [
@@ -2332,7 +2336,7 @@ describe("compact course metadata ownership and editing", () => {
   });
 
   it("requires a removed predecessor only when the surviving phase has no independent start", () => {
-    const source: FhirR6DosageDetails = { step: [
+    const source: FhirR6DosageInstruction = { step: [
       { id: "initial", component: [{ ...component(), timing: { repeat: {
         frequency: 1, period: 1, periodUnit: "d", boundsDuration: { value: 7, unit: "d" }
       } } }] },
@@ -2344,20 +2348,23 @@ describe("compact course metadata ownership and editing", () => {
     expect(() => calculateTotalUnits({ ...options, dosage: remaining, durationValue: 14, durationUnit: "d" })).toThrow(/complete dosage array/);
   });
 
-  it("preserves an explicit empty initial phase without inventing an administration", () => {
-    const source: FhirR6DosageDetails = { step: [
-      { end: day(7), component: [] },
+  it("preserves an incomplete R5 phase as an editable draft without accepting it as current R6", () => {
+    const source: FhirR6DosageInstruction = { step: [
+      { end: day(7), component: [component(2)] },
       { start: day(7), end: day(14), component: [component()] }
     ] };
-    const rows = toFhirR5Dosages(source);
+    const rows = toFhirR5Dosages(source).slice(1);
     expect(rows).toHaveLength(1);
     expect(rows[0].sequence).toBe(2);
-    expect(toDosageDetails(rows)).toEqual(source);
+    const incomplete = toDosageDetails(rows);
+    expect(incomplete.step[0].component).toEqual([]);
+    expect(incomplete.step[1].component[0]).toMatchObject({ doseAndRate: [{ doseQuantity: { value: 1 } }] });
+    expect(() => fromFhir(incomplete)).toThrow(/step\[0\].*component/);
     expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 21, durationUnit: "d" }).totalUnits).toBe(7);
   });
 
   it("keeps native extended-R5 fields authoritative after JSON persistence and removal", () => {
-    const source: FhirR6DosageDetails = { step: [{ end: day(7), component: [{
+    const source: FhirR6DosageInstruction = { step: [{ end: day(7), component: [{
       ...component(), site: { reference: { reference: "BodyStructure/example" } },
       condition: [{ code: { text: "Only if tolerated" }, text: "Only if tolerated" }],
       doseAndRate: [{ doseExpression: { language: "text/fhirpath", expression: "%patient.weight * 0.5" } }]
@@ -2387,7 +2394,7 @@ describe("compact course metadata ownership and editing", () => {
 
 describe("compact shared metadata conflict preservation", () => {
   it("retains both conflicting shared owners and does not choose a cycle silently", () => {
-    const source: FhirR6DosageDetails = {
+    const source: FhirR6DosageInstruction = {
       repeatCycle: { value: 14, unit: "d" },
       step: [{ component: [
         { timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] },
@@ -2443,7 +2450,7 @@ describe("conflicting executable phase metadata", () => {
     const sources = restored.extension?.filter(extension => extension.url.endsWith("medication-course-reconciliation-source")) ?? [];
     expect(sources.length).toBeGreaterThanOrEqual(2);
     expect(() => formatSig(restored, "long", { locale: "th" })).not.toThrow();
-    const assertConflict = (course: FhirR6DosageDetails) => {
+    const assertConflict = (course: FhirR6DosageInstruction) => {
       expect(() => nextDueDoses(course, options)).toThrow(/conflicting course phase metadata/i);
       expect(() => calculateTotalUnits({ ...options, from: orderedAt, dosage: course, durationValue: 30, durationUnit: "d" }))
         .toThrow(/conflicting course phase metadata/i);
@@ -2712,5 +2719,136 @@ describe("retain coded condition identity while enriching exact observations", (
     }));
     expect(getDosageCondition(toFhirR5Dosages(general.fhirNext)[0]))
       .toMatchObject({ kind: "not", condition: { kind: "measurement", name: "bp" } });
+  });
+});
+
+describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", () => {
+  it("matches the pinned HL7 element hierarchy and emitted R6 wire fieldsets", () => {
+    const profiles = r6SnapshotContract.profiles;
+    expect(r6SnapshotContract.target).toBe("FHIR R6 6.0.0-snapshot1");
+    const field = (name: keyof typeof profiles, path: string) =>
+      profiles[name].elements.find(entry => entry.path === path);
+    expect(field("DosageInstruction", "DosageInstruction.step.component")).toMatchObject({
+      min: 1, max: "*", types: ["Dosage"]
+    });
+    expect(field("DosageInstruction", "DosageInstruction.step")).toMatchObject({
+      types: ["Element"]
+    });
+    expect(field("Dosage", "Dosage.doseAndRate")).toMatchObject({ types: ["Element"] });
+    expect(field("Timing", "Timing.repeat.startOffset")).toMatchObject({ max: "1", types: ["Quantity"] });
+    expect(field("Timing", "Timing.repeat.endOffset")).toMatchObject({ max: "1", types: ["Quantity"] });
+    expect(field("Dosage", "Dosage.sequence")).toBeUndefined();
+
+    const permitted = (name: keyof typeof profiles, parent: string) =>
+      new Set(profiles[name].elements
+        .filter(entry => entry.path.startsWith(parent + ".") &&
+          !entry.path.slice(parent.length + 1).includes("."))
+        .flatMap(entry => {
+          const fieldName = entry.path.slice(parent.length + 1);
+          return fieldName.endsWith("[x]")
+            ? entry.types.map(type => fieldName.slice(0, -3) + type)
+            : [fieldName];
+        }));
+    const assertWireKeys = (value: object, keys: Set<string>) => {
+      for (const key of Object.keys(value)) {
+        expect(keys.has(key), `R6 wire field ${key} is absent from the pinned profile`).toBe(true);
+      }
+    };
+    const parsed = parseSig("1 drop OD q2h for 1 week then qid for 1 month");
+    assertWireKeys(parsed.fhirNext, permitted("DosageInstruction", "DosageInstruction"));
+    for (const step of parsed.fhirNext.step) {
+      assertWireKeys(step, permitted("DosageInstruction", "DosageInstruction.step"));
+      for (const component of step.component) {
+        assertWireKeys(component, permitted("Dosage", "Dosage"));
+        for (const rate of component.doseAndRate ?? [])
+          assertWireKeys(rate, permitted("Dosage", "Dosage.doseAndRate"));
+        if (component.timing?.repeat)
+          assertWireKeys(component.timing.repeat, permitted("Timing", "Timing.repeat"));
+      }
+    }
+  });
+
+  it("uses one DosageInstruction with concurrent components and no obsolete step/backbone fields", () => {
+    const parsed = parseSig("2 tabs morning, 1 tab evening for 1 week, then 2 tabs morning for 1 month");
+    const course = parsed.fhirNext;
+    expect(course.step.map(step => step.component.length)).toEqual([2, 1]);
+    for (const step of course.step) {
+      expect(step).not.toHaveProperty("modifierExtension");
+      for (const component of step.component) {
+        expect(component).not.toHaveProperty("sequence");
+        for (const entry of component.doseAndRate ?? []) expect(entry).not.toHaveProperty("modifierExtension");
+      }
+    }
+    expect(fromFhir(JSON.parse(JSON.stringify(course))).fhirNext).toEqual(course);
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+  });
+
+  it("imports R6-only period offsets and retains them through editable R5 without emitting R6 fields on R5", () => {
+    const course: FhirR6DosageInstruction = {
+      renderedInstruction: "One tablet daily starting day 3, for 21 days in each 28-day cycle.",
+      repeatCycle: { value: 28, unit: "d", code: "d" },
+      step: [{ component: [{
+        timing: { repeat: {
+          frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+          startOffset: { value: 2, unit: "d", code: "d" },
+          endOffset: { value: 5, unit: "d", code: "d" }
+        } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }]
+    };
+    expect(fromFhir(course).fhirNext).toEqual(course);
+    const rows = toFhirR5Dosages(course);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].timing?.repeat).not.toHaveProperty("startOffset");
+    expect(rows[0].timing?.repeat).not.toHaveProperty("endOffset");
+    expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
+    const edited = JSON.parse(JSON.stringify(rows)) as EzDosage[];
+    edited[0].timing!.repeat!.frequency = 20;
+    const adjusted = toDosageDetails(edited);
+    expect(adjusted.step[0].component[0].timing?.repeat).not.toHaveProperty("startOffset");
+    expect(adjusted.step[0].component[0].timing?.repeat).not.toHaveProperty("endOffset");
+  });
+
+  it("keeps R6 Quantity comparators and CodeableReference metadata without leaking them into R5", () => {
+    const course: FhirR6DosageInstruction = {
+      step: [{ component: [{
+        site: { id: "site-one", extension: [{ url: "https://example.org/site-meta", valueString: "retained" }],
+          reference: { identifier: { system: "https://example.org/body", value: "left" },
+            display: "original location" } },
+        doseAndRate: [{
+          doseQuantity: { value: 1, comparator: "~", unit: "tab" },
+          rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" }
+        }]
+      }] }]
+    };
+    expect(fromFhir(course).fhirNext).toEqual(course);
+    const rows = toFhirR5Dosages(course);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(rows[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
+    expect(toDosageDetails(rows)).toEqual(course);
+    const edited = cloneStructuredValue(rows);
+    edited[0].doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
+    const recomposed = toDosageDetails(edited);
+    expect(recomposed.step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toEqual({ value: 2, unit: "tab" });
+    expect(recomposed.step[0].component[0].doseAndRate?.[0].rateQuantity?.comparator).toBe(">=");
+  });
+
+  it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
+    const base = parseSig("1 tab PO qd").fhirNext;
+    const invalid = [
+      { ...base, resourceType: "DosageDetails" },
+      { ...base, step: [{ component: [] }] },
+      { ...base, step: [{ ...base.step[0], modifierExtension: [] }] },
+      { ...base, step: [{ component: [{ ...base.step[0].component[0], sequence: 1 }] }] },
+      { ...base, step: [{ component: [{ ...base.step[0].component[0], doseAndRate: [{ doseQuantity: { value: 1 }, doseExpression: { expression: "1" } }] }] }] },
+      { ...base, step: [{ component: [{ ...base.step[0].component[0], timing: { repeat: { frequency: 1, period: 1, startOffset: { value: 1, unit: "d" } } } }] }] },
+      { ...base, step: [{ component: base.step[0].component, safety: { ifExceeded: "stop" } }] }
+    ];
+    for (const example of invalid) {
+      expect(() => fromFhir(example as FhirR6DosageInstruction)).toThrow(/FHIR R6 DosageInstruction/);
+    }
+    expect(fromFhir({ renderedInstruction: "Directions supplied as text only.", step: [] }).count).toBe(0);
   });
 });

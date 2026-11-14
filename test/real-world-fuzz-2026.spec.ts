@@ -7,7 +7,7 @@ import {
   parseSig,
   toFhirR5Dosages
 } from "../src";
-import type { FhirDosage, FhirR6DosageDetails, ParseBatchResult } from "../src";
+import type { FhirDosage, FhirR6DosageInstruction, ParseBatchResult } from "../src";
 
 interface FuzzCase { id: string; category: string; input: string }
 const cases = casesJson as FuzzCase[];
@@ -18,7 +18,7 @@ const options = {
   timeZone: "Asia/Bangkok",
   limit: 12
 } as const;
-type ScheduleInput = FhirDosage | readonly FhirDosage[] | FhirR6DosageDetails | ParseBatchResult;
+type ScheduleInput = FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult;
 
 function executable(input: ScheduleInput) {
   let next: string[] | string, supply: number | string, kind: string | undefined;

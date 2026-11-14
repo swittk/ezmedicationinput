@@ -3,7 +3,7 @@
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirR6Dosage, FhirR6DosageCondition,
-  FhirR6DosageDetails, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity,
+  FhirR6DosageInstruction, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity,
   MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep
 } from "./types";
 
@@ -34,6 +34,36 @@ const DOSAGE_RETAINED_R5_SEQUENCE_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-retained-r5-sequence";
 const DOSAGE_RETAINED_COURSE_STEP_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-retained-course-step";
+/** An R5-only per-step modifier is not legal on the R6 Element-valued
+ * DosageInstruction.step. Carry it through an ordinary R6 extension instead. */
+const R5_STEP_MODIFIERS_R6_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-step-modifier-extensions";
+/** R6 doseAndRate is Element. Preserve any older R5-local metadata in the
+ * Element.extension slot without emitting illegal modifierExtension keys. */
+const R5_RATE_MODIFIERS_R6_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-dose-and-rate-modifier-extensions";
+
+function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageInstruction["step"][number], "component"> {
+  const { sequence: _sequence, modifierExtension, extension, ...fields } = step;
+  const retained = modifierExtension?.length
+    ? [{ url: R5_STEP_MODIFIERS_R6_URL, extension: modifierExtension }]
+    : [];
+  const extensions = [...(extension ?? []), ...retained];
+  return { ...fields, ...(extensions.length ? { extension: extensions } : {}) };
+}
+
+function r5StepMetadata(step: Omit<FhirR6DosageInstruction["step"][number], "component">):
+  Omit<EzCourseStep, "sequence"> {
+  const { extension, ...fields } = step;
+  const retained = extension?.find(value => value.url === R5_STEP_MODIFIERS_R6_URL);
+  const extensions = extension?.filter(value => value.url !== R5_STEP_MODIFIERS_R6_URL);
+  return {
+    ...fields,
+    ...(extensions?.length ? { extension: extensions } : {}),
+    ...(retained?.extension?.length ? { modifierExtension: retained.extension } : {})
+  };
+}
+
 /** Treatment-relative phase origin for an independent parallel component. */
 export const PARALLEL_COMPONENT_PHASE_ORIGIN_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin";
@@ -525,8 +555,16 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     maxDosePerAdministration: _maxAdministration, maxDosePerLifetime: _maxLifetime,
     condition: ownConditions, safety: ownSafety,
     siteReference, excludedDates,
-    modifierExtension, extension, ...rest
+    doseAndRate, modifierExtension, extension, ...rest
   } = dosage as EzDosage;
+  // Ordinary SIGs have no R5-only rate modifiers. Avoid extra allocations.
+  const r6Rates = doseAndRate?.some(rate => rate.modifierExtension?.length)
+    ? doseAndRate.map(({ modifierExtension: rateModifiers, extension: rateExtension, ...rate }) => {
+      const retained = rateModifiers?.length
+        ? [{ url: R5_RATE_MODIFIERS_R6_URL, extension: rateModifiers }] : [];
+      const extensions = [...(rateExtension ?? []), ...retained];
+      return { ...rate, ...(extensions.length ? { extension: extensions } : {}) };
+    }) : doseAndRate;
   // Presence is semantically different from absence: [] explicitly clears
   // an R6-native condition. It must not fall back to a stale R5 modifier.
   const predicate = ownConditions === undefined ? parseDosageCondition(dosage) : undefined;
@@ -563,6 +601,7 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
   }
   return {
     ...rest,
+    ...(r6Rates ? { doseAndRate: r6Rates } : {}),
     ...(r6Extensions.length ? { extension: r6Extensions } : {}),
     ...(r6Modifiers?.length ? { modifierExtension: r6Modifiers } : {}),
     ...(site || siteReference ? { site: {
@@ -581,7 +620,12 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
  * @param sequence Ordered global course step for its R5 projection.
  */
 export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage {
-  const { site, condition, safety, doseAndRate, ...rest } = dosage;
+  const { site, condition, safety, doseAndRate, timing, ...rest } = dosage;
+  // Timing.repeat.startOffset/endOffset belong exclusively to R6. The
+  // complete original R6 component is retained by the ordinary R5 bridge.
+  const { startOffset: _startOffset, endOffset: _endOffset, ...r5Repeat } =
+    timing?.repeat ?? {};
+  const r5Timing = timing?.repeat ? { ...timing, repeat: r5Repeat } : timing;
   let restoredSequence = sequence;
   const retainedSequence = dosage.extension?.find(extension =>
     extension.url === DOSAGE_RETAINED_R5_SEQUENCE_URL)?.valueDecimal;
@@ -590,10 +634,26 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
   }
   const output: FhirDosage = {
     ...rest,
+    ...(r5Timing ? { timing: r5Timing } : {}),
     sequence: restoredSequence,
     ...(site?.concept ? { site: site.concept } : {}),
     ...(doseAndRate ? { doseAndRate: doseAndRate.map(({ doseExpression: _doseExpr,
-      rateExpression: _rateExpr, ...entry }) => entry) } : {})
+      rateExpression: _rateExpr, extension: rateExtensions,
+      doseQuantity, rateQuantity, ...entry }) => {
+      const old = rateExtensions?.find(item => item.url === R5_RATE_MODIFIERS_R6_URL);
+      const keep = rateExtensions?.filter(item => item.url !== R5_RATE_MODIFIERS_R6_URL);
+      const { comparator: doseComparator, ...simpleDose } = doseQuantity ?? {};
+      const { comparator: rateComparator, ...simpleRate } = rateQuantity ?? {};
+      return {
+        ...entry,
+        // R5 doseAndRate uses SimpleQuantity. R6 comparators remain
+        // intact only in typed retained course metadata.
+        ...(doseQuantity && doseComparator === undefined ? { doseQuantity: simpleDose } : {}),
+        ...(rateQuantity && rateComparator === undefined ? { rateQuantity: simpleRate } : {}),
+        ...(keep?.length ? { extension: keep } : {}),
+        ...(old?.extension?.length ? { modifierExtension: old.extension } : {})
+      };
+    }) } : {})
   };
   for (const limit of safety?.doseLimit ?? []) {
     // R5 maximum-dose fields are not as expressive as R6 safety limits.
@@ -644,9 +704,9 @@ function addWarning(warnings: string[], warning: string): void {
 }
 
 function withReconciliationWarnings(
-  details: FhirR6DosageDetails,
+  details: FhirR6DosageInstruction,
   warnings: readonly string[]
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   if (!warnings.length) return details;
   const existing = new Set((details.extension ?? [])
     .filter(extension => extension.url === DOSAGE_RECONCILIATION_WARNING_URL)
@@ -659,9 +719,9 @@ function withReconciliationWarnings(
 }
 
 function withPreservedSourceExtension(
-  details: FhirR6DosageDetails,
+  details: FhirR6DosageInstruction,
   extension: FhirExtension | undefined
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   if (!extension) return details;
   if (details.extension?.some(value => equalStructuredValues(value, extension))) return details;
   return { ...details, extension: [...(details.extension ?? []), extension] };
@@ -671,9 +731,9 @@ function withPreservedSourceExtension(
  * them at course level avoids recursively embedding a complete course inside
  * every component on subsequent exports. */
 function withReconciliationSources(
-  details: FhirR6DosageDetails,
+  details: FhirR6DosageInstruction,
   sources: readonly FhirExtension[]
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   if (!sources.length) return details;
   const existing = (details.extension ?? []).filter(extension =>
     extension.url === DOSAGE_RECONCILIATION_SOURCE_URL);
@@ -959,7 +1019,7 @@ function retainDoseExpressions(
   }
   if (superseded) {
     addWarning(warnings,
-      "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
+      "Retained R6 dose/rate choices superseded by edited R5 fields were preserved only as inert source provenance.");
   }
   if (retained) {
     addWarning(warnings,
@@ -969,7 +1029,7 @@ function retainDoseExpressions(
 }
 
 function reconcileRetainedCourse(
-  retained: FhirR6DosageDetails,
+  retained: FhirR6DosageInstruction,
   dosages: readonly (FhirDosage | EzDosage)[],
   editedInstruction?: string,
   course?: EzCourseMetadata,
@@ -977,7 +1037,7 @@ function reconcileRetainedCourse(
   initialWarnings: readonly string[] = [],
   retainedSource?: FhirExtension,
   additionalSources: readonly FhirExtension[] = []
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   const warnings = [...initialWarnings];
   const sourceFragments = [...additionalSources];
   const groups = new Map<number, (FhirDosage | EzDosage)[]>();
@@ -1061,7 +1121,7 @@ function reconcileRetainedCourse(
     course?.safety !== undefined && !equivalentProjection(
       retained.safety, course.safety)
   );
-  const steps: FhirR6DosageDetails["step"] = [];
+  const steps: FhirR6DosageInstruction["step"] = [];
   for (const sequence of sequences) {
     const step = retained.step[sequence - 1];
     const live = groups.get(sequence) ?? [];
@@ -1257,7 +1317,7 @@ function reconcileRetainedCourse(
     steps.push({ ...step, ...editedStepFields, component: components });
   }
   const { renderedInstruction: retainedInstruction, ...retainedFields } = retained;
-  const result: FhirR6DosageDetails = {
+  const result: FhirR6DosageInstruction = {
     ...retainedFields,
     ...(course?.id !== undefined ? { id: course.id } : {}),
     ...(course?.extension !== undefined ? { extension: course.extension } : {}),
@@ -1304,7 +1364,7 @@ export function toDosageDetails(
   renderedInstruction?: string,
   course?: EzCourseMetadata,
   options?: { resolvedPhaseSequences?: readonly number[] }
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   if (dosages.some(compactCourseMarker))
     return reconcileCompactCourse(dosages, renderedInstruction, course, options?.resolvedPhaseSequences);
   // Import historical complete-course markers without emitting them again.
@@ -1312,7 +1372,7 @@ export function toDosageDetails(
   // first structurally usable snapshot deterministically; keep malformed or
   // disagreeing copies once as inert course-level source provenance.
   let original: FhirExtension | undefined;
-  let retained: FhirR6DosageDetails | undefined;
+  let retained: FhirR6DosageInstruction | undefined;
   let retainedSource: FhirExtension | undefined;
   const reconciliationSources: FhirExtension[] = [];
   let preserveRetainedMarkers = false;
@@ -1467,7 +1527,7 @@ export function toDosageDetails(
     addWarning(warnings,
       "Course step metadata without a live dosage was retained as an empty stage for clinician correction.");
   }
-  const result: FhirR6DosageDetails = {
+  const result: FhirR6DosageInstruction = {
     ...(course?.renderedInstruction !== undefined
       ? { renderedInstruction: course.renderedInstruction }
       : renderedInstruction !== undefined
@@ -1484,9 +1544,7 @@ export function toDosageDetails(
     step: [...sequenceSet].sort((a, b) => a - b).map(sequence => {
       const step = stepMetadata.get(sequence);
       return {
-        ...(step?.id ? { id: step.id } : {}),
-        ...(step?.extension?.length ? { extension: step.extension } : {}),
-        ...(step?.modifierExtension?.length ? { modifierExtension: step.modifierExtension } : {}),
+        ...r6StepMetadata(step ?? {}),
         ...(step?.start ? { start: step.start } : {}),
         ...(step?.end ? { end: step.end } : {}),
         ...(step?.count !== undefined ? { count: step.count } : {}),
@@ -1505,8 +1563,56 @@ export function toDosageDetails(
   );
 }
 
+/** R6 imports follow the *current* DosageInstruction contract, not historical
+ * drafts. This runs only at the R6 import boundary, never on ordinary SIG
+ * parsing or R5 editing hot paths. Typed extensions and unknown value[x]
+ * payloads remain intact instead of being interpreted as clinical language. */
+export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstruction): void {
+  const fail = (detail: string): never => {
+    throw new TypeError(`FHIR R6 DosageInstruction (6.0.0-snapshot1) expected: ${detail}`);
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+      !Array.isArray(value.step) || "resourceType" in value || "dosage" in value)
+    fail("expected a DosageInstruction datatype with step[]; legacy R6 shapes are unsupported");
+  for (let index = 0; index < value.step.length; index++) {
+    const step = value.step[index];
+    if (!step || !Array.isArray(step.component) || !step.component.length)
+      fail(`step[${index}] must have at least one component`);
+    if ("modifierExtension" in step)
+      fail(`step[${index}] is Element, not BackboneElement`);
+    if (value.step.length === 1 && step.safety !== undefined)
+      fail("single-step dosage must not carry step.safety (dosdet-2)");
+    for (let member = 0; member < step.component.length; member++) {
+      const dosage = step.component[member];
+      if (!dosage || typeof dosage !== "object" ||
+          "sequence" in dosage || "asNeededBoolean" in dosage ||
+          "maxDosePerPeriod" in dosage || "maxDosePerAdministration" in dosage ||
+          "maxDosePerLifetime" in dosage)
+        fail(`step[${index}].component[${member}] contains R5/obsolete R6 dosage fields`);
+      if (dosage.site && ("coding" in dosage.site || "text" in dosage.site))
+        fail(`step[${index}].component[${member}].site must be CodeableReference`);
+      for (const entry of dosage.doseAndRate ?? []) {
+        if ("modifierExtension" in entry)
+          fail(`step[${index}].component[${member}].doseAndRate is Element`);
+        if (Number(entry.doseQuantity !== undefined) + Number(entry.doseRange !== undefined) +
+            Number(entry.doseExpression !== undefined) > 1 ||
+            Number(entry.rateQuantity !== undefined) + Number(entry.rateRange !== undefined) +
+            Number(entry.rateRatio !== undefined) + Number(entry.rateExpression !== undefined) > 1)
+          fail(`step[${index}].component[${member}].doseAndRate has multiple dose[x]/rate[x] choices`);
+      }
+      const repeat = dosage.timing?.repeat;
+      if (repeat?.startOffset || repeat?.endOffset) {
+        if (repeat.frequency === undefined || repeat.frequency <= 1 || repeat.period === undefined)
+          fail(`step[${index}].component[${member}] offsets require frequency > 1 and period (tim-11/12)`);
+        if (repeat.startOffset?.comparator !== undefined || repeat.endOffset?.comparator !== undefined)
+          fail(`step[${index}].component[${member}] offsets require SimpleQuantity`);
+      }
+    }
+  }
+}
+
 /** Import a complete R6 course without replacing EZMED's flat dosage layout. */
-export function fromDosageDetails(details: FhirR6DosageDetails): {
+export function fromDosageDetails(details: FhirR6DosageInstruction): {
   dosages: EzDosage[];
   course: EzCourseMetadata;
 } {
@@ -1515,25 +1621,24 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
   for (let index = 0; index < details.step.length; index++) {
     const step = details.step[index];
     const sequence = index + 1;
-    if (step.id || step.extension?.length || step.modifierExtension?.length ||
+    if (step.id || step.extension?.length ||
         step.start || step.end || step.count !== undefined || step.safety) {
-      metadata.push({
-        sequence,
-        ...(step.id ? { id: step.id } : {}),
-        ...(step.extension?.length ? { extension: step.extension } : {}),
-        ...(step.modifierExtension?.length ? { modifierExtension: step.modifierExtension } : {}),
-        ...(step.start ? { start: step.start } : {}),
-        ...(step.end ? { end: step.end } : {}),
-        ...(step.count !== undefined ? { count: step.count } : {}),
-        ...(step.safety ? { safety: step.safety } : {})
-      });
+      const { component: _components, ...fields } = step;
+      metadata.push({ sequence, ...r5StepMetadata(fields) });
     }
     for (const component of step.component) {
       const r5 = fromR6Dosage(component, sequence);
       const dates = getDosageExcludedDates(r5);
       dosages.push(cloneStructuredValue({
         ...r5,
-        ...(component.doseAndRate ? { doseAndRate: component.doseAndRate } : {}),
+        ...(component.doseAndRate ? { doseAndRate: r5.doseAndRate?.map((entry, index) => {
+          const r6Entry = component.doseAndRate?.[index];
+          return {
+            ...entry,
+            ...(r6Entry?.doseExpression ? { doseExpression: r6Entry.doseExpression } : {}),
+            ...(r6Entry?.rateExpression ? { rateExpression: r6Entry.rateExpression } : {})
+          };
+        }) } : {}),
         ...(component.condition?.length ? { condition: component.condition } : {}),
         ...(component.safety ? { safety: component.safety } : {}),
         ...(component.site?.reference ? { siteReference: component.site.reference } : {}),
@@ -1561,12 +1666,12 @@ export function fromDosageDetails(details: FhirR6DosageDetails): {
 
 /** Flatten R6 steps to R5 Dosage.sequence with explicit modifier extensions. */
 export function toFhirR5Dosages(
-  input: FhirR6DosageDetails | readonly (FhirDosage | EzDosage)[],
+  input: FhirR6DosageInstruction | readonly (FhirDosage | EzDosage)[],
   course?: EzCourseMetadata
 ): FhirDosage[] {
   const details = Array.isArray(input)
     ? toDosageDetails(input, course?.renderedInstruction, course)
-    : input as FhirR6DosageDetails;
+    : input as FhirR6DosageInstruction;
   const result: FhirDosage[] = [];
   for (let index = 0; index < details.step.length; index++) {
     for (const component of details.step[index].component) {
@@ -1587,6 +1692,7 @@ interface ComponentDeltaBaseline {
   safety?: string;
   site?: string;
   doseAndRate?: Array<{ dose?: string; rate?: string }>;
+  timing?: string;
 }
 
 /** Each marker belongs to its live row, never to another component's snapshot. */
@@ -1594,12 +1700,12 @@ interface CompactCourseRow {
   rowIndex: number;
   sequence: number;
   stepCount: number;
-  step?: Omit<FhirR6DosageDetails["step"][number], "component">;
+  step?: Omit<FhirR6DosageInstruction["step"][number], "component">;
   component?: Partial<FhirR6Dosage>;
   baseline?: ComponentDeltaBaseline;
   context?: string;
   contextRequired?: boolean;
-  course?: Omit<FhirR6DosageDetails, "step" | "renderedInstruction">;
+  course?: Omit<FhirR6DosageInstruction, "step" | "renderedInstruction">;
   emptyStep?: EzCourseStep[];
   missingContext?: string[];
 }
@@ -1607,14 +1713,14 @@ interface CompactCourseRow {
 /** Native dose choice, excluding a separately retained R6 expression.
  * @param entry The live editable dose/rate slot.
  */
-function doseChoice(entry: NonNullable<FhirDosage["doseAndRate"]>[number] | undefined) {
+function doseChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined) {
   return { doseQuantity: entry?.doseQuantity, doseRange: entry?.doseRange };
 }
 
 /** Native rate choice, independent of an expression in the dose slot.
  * @param entry The live editable dose/rate slot.
  */
-function rateChoice(entry: NonNullable<FhirDosage["doseAndRate"]>[number] | undefined) {
+function rateChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined) {
   return { rateQuantity: entry?.rateQuantity, rateRange: entry?.rateRange, rateRatio: entry?.rateRatio };
 }
 
@@ -1634,24 +1740,37 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
     component.condition = original.condition;
     baseline.condition = compactProjectionFingerprint(parseDosageCondition(row));
   }
+  if (original.timing?.repeat?.startOffset || original.timing?.repeat?.endOffset) {
+    component.timing = { repeat: {
+      ...(original.timing.repeat.startOffset ? { startOffset: original.timing.repeat.startOffset } : {}),
+      ...(original.timing.repeat.endOffset ? { endOffset: original.timing.repeat.endOffset } : {})
+    } };
+    baseline.timing = compactProjectionFingerprint(row.timing);
+  }
   if (!equalStructuredValues(original.safety, projected.safety)) {
     component.safety = original.safety;
     baseline.safety = compactProjectionFingerprint(toR6Safety(row));
   }
-  if (original.site?.reference && !equalStructuredValues(original.site.reference, projected.site?.reference)) {
-    component.site = { reference: original.site.reference };
-    baseline.site = compactProjectionFingerprint(row.site);
+  if (original.site && !equalStructuredValues(original.site, projected.site)) {
+    component.site = original.site;
+    baseline.site = compactProjectionFingerprint({
+      concept: row.site, reference: (row as EzDosage).siteReference
+    });
   }
-  if (original.doseAndRate?.some((entry, index) =>
-    !equalStructuredValues(entry.doseExpression, projected.doseAndRate?.[index]?.doseExpression) ||
-    !equalStructuredValues(entry.rateExpression, projected.doseAndRate?.[index]?.rateExpression))) {
+  const r6OnlyDose = (entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number]) =>
+    Boolean(entry.doseExpression || entry.doseQuantity?.comparator);
+  const r6OnlyRate = (entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number]) =>
+    Boolean(entry.rateExpression || entry.rateQuantity?.comparator);
+  if (original.doseAndRate?.some(entry => r6OnlyDose(entry) || r6OnlyRate(entry))) {
     component.doseAndRate = original.doseAndRate.map(entry => ({
       ...(entry.doseExpression ? { doseExpression: entry.doseExpression } : {}),
-      ...(entry.rateExpression ? { rateExpression: entry.rateExpression } : {})
+      ...(entry.doseQuantity?.comparator ? { doseQuantity: entry.doseQuantity } : {}),
+      ...(entry.rateExpression ? { rateExpression: entry.rateExpression } : {}),
+      ...(entry.rateQuantity?.comparator ? { rateQuantity: entry.rateQuantity } : {})
     }));
     baseline.doseAndRate = original.doseAndRate.map((entry, index) => ({
-      ...(entry.doseExpression ? { dose: compactProjectionFingerprint(doseChoice(row.doseAndRate?.[index])) } : {}),
-      ...(entry.rateExpression ? { rate: compactProjectionFingerprint(rateChoice(row.doseAndRate?.[index])) } : {})
+      ...(r6OnlyDose(entry) ? { dose: compactProjectionFingerprint(doseChoice(row.doseAndRate?.[index])) } : {}),
+      ...(r6OnlyRate(entry) ? { rate: compactProjectionFingerprint(rateChoice(row.doseAndRate?.[index])) } : {})
     }));
   }
   return Object.keys(component).length ? { component, baseline } : {};
@@ -1664,7 +1783,7 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
  * @param details Typed source course, used only to calculate missing metadata.
  */
 export function attachCourseDetailsExtensions(
-  dosages: (FhirDosage | EzDosage)[], details: FhirR6DosageDetails
+  dosages: (FhirDosage | EzDosage)[], details: FhirR6DosageInstruction
 ): void {
   if (!dosages.length) return;
   // Ordinary R5 prescriptions do not pay for a second projection.
@@ -1672,11 +1791,13 @@ export function attachCourseDetailsExtensions(
     details.extension?.length || details.modifierExtension?.length ||
     details.step.some(step => step.id !== undefined || step.start || step.end ||
       step.count !== undefined || step.safety || step.extension?.length ||
-      step.modifierExtension?.length || !step.component.length ||
+      !step.component.length ||
       step.component.some(component => component.condition !== undefined || component.safety ||
         component.site?.reference ||
         component.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL) ||
-        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression)));
+        component.timing?.repeat?.startOffset || component.timing?.repeat?.endOffset ||
+        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression ||
+          rate.doseQuantity?.comparator || rate.rateQuantity?.comparator)));
   if (!needed) return;
   const { step: steps, renderedInstruction: _instruction, ...course } = details;
   const emptyStep: EzCourseStep[] = [];
@@ -1752,34 +1873,63 @@ function restoreComponentDelta(
       local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
     fresh.condition = delta.condition;
   }
+  if (delta.timing?.repeat?.startOffset || delta.timing?.repeat?.endOffset) {
+    if (local.baseline?.timing === compactProjectionFingerprint(dosage.timing)) {
+      fresh.timing = { ...fresh.timing, repeat: {
+        ...fresh.timing?.repeat,
+        ...(delta.timing.repeat.startOffset ? { startOffset: delta.timing.repeat.startOffset } : {}),
+        ...(delta.timing.repeat.endOffset ? { endOffset: delta.timing.repeat.endOffset } : {})
+      } };
+    } else addWarning(warnings,
+      "Retained R6 period offsets were superseded by an edited R5 timing; original R6 values remain available as source provenance.");
+  }
   if (delta.safety && expanded.safety === undefined) {
     fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
       ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
   }
-  if (delta.site?.reference && !Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
-      local.baseline?.site === compactProjectionFingerprint(dosage.site)) {
-    fresh.site = { ...fresh.site, reference: delta.site.reference };
+  if (delta.site &&
+      !(delta.site.reference && Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
+        expanded.siteReference === undefined) &&
+      local.baseline?.site === compactProjectionFingerprint({
+        concept: dosage.site, reference: expanded.siteReference
+      })) {
+    fresh.site = delta.site;
   }
   if (delta.doseAndRate) {
     const entries = fresh.doseAndRate?.map(entry => ({ ...entry }));
-    let superseded = false;
+    let supersededExpression = false;
+    let supersededQuantity = false;
     delta.doseAndRate.forEach((old, index) => {
       const entry = entries?.[index];
       const baseline = local.baseline?.doseAndRate?.[index];
+      const unchangedDose = entry && baseline?.dose === compactProjectionFingerprint(doseChoice(entry));
+      const unchangedRate = entry && baseline?.rate === compactProjectionFingerprint(rateChoice(entry));
       if (old.doseExpression) {
-        if (entry && baseline?.dose === compactProjectionFingerprint(doseChoice(entry)) &&
-            !Object.prototype.hasOwnProperty.call(entry, "doseExpression")) entry.doseExpression = old.doseExpression;
-        else if (!entry || !equalStructuredValues(entry.doseExpression, old.doseExpression)) superseded = true;
+        if (unchangedDose && !entry.doseExpression) entry.doseExpression = old.doseExpression;
+        else if (!entry || !equalStructuredValues(entry.doseExpression, old.doseExpression))
+          supersededExpression = true;
+      }
+      if (old.doseQuantity?.comparator) {
+        if (unchangedDose && !entry.doseQuantity) entry.doseQuantity = old.doseQuantity;
+        else if (!entry || !equalStructuredValues(entry.doseQuantity, old.doseQuantity))
+          supersededQuantity = true;
       }
       if (old.rateExpression) {
-        if (entry && baseline?.rate === compactProjectionFingerprint(rateChoice(entry)) &&
-            !Object.prototype.hasOwnProperty.call(entry, "rateExpression")) entry.rateExpression = old.rateExpression;
-        else if (!entry || !equalStructuredValues(entry.rateExpression, old.rateExpression)) superseded = true;
+        if (unchangedRate && !entry.rateExpression) entry.rateExpression = old.rateExpression;
+        else if (!entry || !equalStructuredValues(entry.rateExpression, old.rateExpression))
+          supersededExpression = true;
+      }
+      if (old.rateQuantity?.comparator) {
+        if (unchangedRate && !entry.rateQuantity) entry.rateQuantity = old.rateQuantity;
+        else if (!entry || !equalStructuredValues(entry.rateQuantity, old.rateQuantity))
+          supersededQuantity = true;
       }
     });
     if (entries) fresh.doseAndRate = entries;
-    if (superseded) addWarning(warnings,
+    if (supersededExpression) addWarning(warnings,
       "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
+    if (supersededQuantity) addWarning(warnings,
+      "Retained R6 dose/rate Quantity comparators superseded by edited R5 fields were preserved only as inert source provenance.");
   }
   return fresh;
 }
@@ -1802,8 +1952,8 @@ const CONFLICTING_PHASE_CONTEXT = "conflicting-phase";
  * @param step Local phase metadata without dosage components.
  */
 function executablePhaseMetadata(step: NonNullable<CompactCourseRow["step"]>) {
-  const { start, end, count, safety, modifierExtension } = step;
-  return { start, end, count, safety, modifierExtension };
+  const { start, end, count, safety } = step;
+  return { start, end, count, safety };
 }
 
 /** Identify unavailable or contradictory context before numeric execution.
@@ -1811,7 +1961,7 @@ function executablePhaseMetadata(step: NonNullable<CompactCourseRow["step"]>) {
  * @param course Reconstructed course with typed context markers on its components.
  */
 export function getCourseContextIssue(
-  course: FhirR6DosageDetails
+  course: FhirR6DosageInstruction
 ): "missing-course-context" | "conflicting-course-phase" | undefined {
   let missing = false;
   for (const step of course.step) for (const component of step.component) {
@@ -1837,7 +1987,7 @@ export function getCourseContextIssue(
 function reconcileCompactCourse(
   dosages: readonly (FhirDosage | EzDosage)[], renderedInstruction?: string,
   editedCourse?: EzCourseMetadata, resolvedPhaseSequences?: readonly number[]
-): FhirR6DosageDetails {
+): FhirR6DosageInstruction {
   const warnings: string[] = [];
   const sources: FhirExtension[] = [];
   const headers = new Map<string, CompactCourseRow>();
@@ -2000,7 +2150,7 @@ function reconcileCompactCourse(
   const sequences = new Set([...groups.keys(), ...metadata.keys()]);
   for (let sequence = 1; sequence <= stageCount; sequence++) sequences.add(sequence);
   const steps = [...sequences].sort((a, b) => a - b).map(sequence => ({
-    ...metadata.get(sequence)?.step, component: groups.get(sequence) ?? []
+    ...r6StepMetadata(metadata.get(sequence)?.step ?? {}), component: groups.get(sequence) ?? []
   }));
   // A removed predecessor is harmless when the surviving phase has its own
   // treatment-relative start. Otherwise its original elapsed time is unknown.
@@ -2015,7 +2165,7 @@ function reconcileCompactCourse(
     for (const step of steps) step.component = step.component.map(component => withMissingCourseContext(component, [...missing]));
     instructionMatches = false;
   }
-  const result: FhirR6DosageDetails = {
+  const result: FhirR6DosageInstruction = {
     ...header?.course, ...courseEdits,
     ...(explicitInstruction !== undefined ? { renderedInstruction: explicitInstruction }
       : renderedInstruction !== undefined ? { renderedInstruction }
@@ -2133,7 +2283,7 @@ const COMPACT_ROW: BridgeShape = {
   component: { fields: COMPONENT },
   baseline: { fields: {
     condition: { value: "valueString" }, safety: { value: "valueString" },
-    site: { value: "valueString" },
+    site: { value: "valueString" }, timing: { value: "valueString" },
     doseAndRate: { repeated: true, fields: {
       dose: { value: "valueString" }, rate: { value: "valueString" }
     } }
@@ -2296,12 +2446,12 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
  * with the caller for preservation. No string payload is interpreted here.
  * @param node The dosageDetails extension child.
  */
-function decodeCourseDetails(node: FhirExtension): FhirR6DosageDetails | undefined {
+function decodeCourseDetails(node: FhirExtension): FhirR6DosageInstruction | undefined {
   if (!node.extension || node.valueString !== undefined) return undefined;
   const value = decodeFields(node.extension, COURSE);
   if (!Array.isArray(value.step) || !value.step.every(step =>
     step && typeof step === "object" && Array.isArray(step.component))) return undefined;
-  return { ...value, step: value.step } as FhirR6DosageDetails;
+  return { ...value, step: value.step } as FhirR6DosageInstruction;
 }
 
 /** Encode a Boolean predicate with explicit all/any/not child relationships.

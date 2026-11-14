@@ -392,6 +392,17 @@ export interface FhirTimingRepeat extends FhirElement {
   offset?: number;
 }
 
+/** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
+ * These are not R5 Timing fields and must remain confined to the R6 wire type. */
+export interface FhirR6TimingRepeat extends FhirTimingRepeat {
+  startOffset?: FhirSimpleQuantity;
+  endOffset?: FhirSimpleQuantity;
+}
+
+export interface FhirR6Timing extends Omit<FhirTiming, "repeat"> {
+  repeat?: FhirR6TimingRepeat;
+}
+
 export interface FhirTiming extends FhirElement {
   event?: string[];
   /** Primitive metadata corresponding positionally to event. */
@@ -419,6 +430,15 @@ export interface FhirDoseAndRate extends FhirBackboneElement {
   rateQuantity?: FhirSimpleQuantity;
 }
 
+/** Current R6 Dosage.doseAndRate is an Element, unlike R5/R6 Dosage
+ * itself (a BackboneType). No modifierExtension is valid on this child. */
+export type FhirR6DoseAndRate = Omit<EzDoseAndRate,
+  "modifierExtension" | "doseQuantity" | "rateQuantity"> & {
+  /** R6 dose[x]/rate[x] select Quantity (not R5 SimpleQuantity). */
+  doseQuantity?: FhirR6Quantity;
+  rateQuantity?: FhirR6Quantity;
+};
+
 /** R6 additions to the R5 DoseAndRate child object. */
 export interface EzDoseAndRate extends FhirDoseAndRate {
   doseExpression?: FhirExpression;
@@ -445,11 +465,25 @@ export interface FhirR6DosageCondition extends FhirBackboneElement {
   valueBoolean?: boolean;
   valueQuantity?: FhirR6Quantity;
   valueString?: string;
+  /** Current R6 condition value[x] also permits ordinary FHIR scalar,
+   * coded and complex types. Uninterpreted types stay intact on import. */
+  valueInteger?: number;
+  valueDecimal?: number;
+  valueDate?: string;
+  valueDateTime?: string;
+  valueTime?: string;
+  valueCode?: string;
+  valueCoding?: FhirCoding;
+  valueCodeableConcept?: FhirCodeableConcept;
+  valueReference?: FhirReference;
+  valueExpression?: FhirExpression;
+  valueRange?: FhirRange;
+  valuePeriod?: FhirPeriod;
   text?: string;
 }
 
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
-export type FhirR6DoseLimit = FhirBackboneElement & {
+export type FhirR6DoseLimit = FhirElement & {
   scope: "dosage" | "period" | "administration" | "lifetime";
   period?: FhirQuantity;
   text?: string;
@@ -464,24 +498,42 @@ export interface FhirR6DosageSafety extends FhirBackboneElement {
   ifExceeded?: string;
 }
 
-/** FHIR R6 CodeableReference allows either a concept or resource reference. */
-export interface FhirCodeableReference {
+/** R6 Reference carries standard Reference.identifier and Element metadata. */
+export interface FhirReference extends FhirElement {
+  reference?: string;
+  type?: string;
+  identifier?: {
+    id?: string;
+    extension?: FhirExtension[];
+    use?: string;
+    type?: FhirCodeableConcept;
+    system?: string;
+    value?: string;
+    period?: FhirPeriod;
+    assigner?: { reference?: string; type?: string; display?: string };
+  };
+  display?: string;
+}
+
+/** R6 CodeableReference includes its own Element metadata. */
+export interface FhirCodeableReference extends FhirElement {
   concept?: FhirCodeableConcept;
-  reference?: { reference?: string; type?: string; display?: string };
+  reference?: FhirReference;
 }
 
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,
   "sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
-  "maxDosePerLifetime" | "doseAndRate"> {
+  "maxDosePerLifetime" | "doseAndRate" | "timing"> {
+  timing?: FhirR6Timing;
   condition?: FhirR6DosageCondition[];
   site?: FhirCodeableReference;
-  doseAndRate?: EzDoseAndRate[];
+  doseAndRate?: FhirR6DoseAndRate[];
   safety?: FhirR6DosageSafety;
 }
 
 export interface FhirR6RelativeTime extends FhirBackboneElement {
-  contextReference?: { reference?: string };
+  contextReference?: FhirReference;
   contextDefinition?: string;
   contextPath?: string;
   contextCode?: FhirCodeableConcept;
@@ -490,7 +542,7 @@ export interface FhirR6RelativeTime extends FhirBackboneElement {
   text?: string;
 }
 
-export interface FhirR6DosageStep extends FhirBackboneElement {
+export interface FhirR6DosageStep extends FhirElement {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
@@ -498,10 +550,10 @@ export interface FhirR6DosageStep extends FhirBackboneElement {
   safety?: FhirR6DosageSafety;
 }
 
-/** R6's step/component course representation. */
-export interface FhirR6DosageDetails extends FhirBackboneElement {
+/** Official FHIR R6 Snapshot 1 DosageInstruction course container. */
+export interface FhirR6DosageInstruction extends FhirBackboneElement {
   renderedInstruction?: string;
-  repeatCycle?: FhirQuantity;
+  repeatCycle?: FhirR6Quantity;
   step: FhirR6DosageStep[];
   safety?: FhirR6DosageSafety;
 }
@@ -545,7 +597,7 @@ export interface EzDosage extends Omit<FhirDosage, "doseAndRate"> {
 /**
  * Small amount of course-level metadata that does not logically belong to an
  * individual dosage. Each step row addresses the usual R5 Dosage.sequence.
- * The fields under step come directly from FHIR R6 DosageDetails.step.
+ * Step metadata is retained for editable R5 rows; R6 step is an Element.
  */
 export interface EzCourseStep extends FhirBackboneElement {
   /** R5 global sequence corresponding to this R6 step. */
@@ -558,7 +610,7 @@ export interface EzCourseStep extends FhirBackboneElement {
 
 export interface EzCourseMetadata extends FhirBackboneElement {
   renderedInstruction?: string;
-  repeatCycle?: FhirQuantity;
+  repeatCycle?: FhirR6Quantity;
   safety?: FhirR6DosageSafety;
   step?: EzCourseStep[];
 }
@@ -1849,7 +1901,7 @@ export interface ParseBatchResult {
   /** Primary output: COMPLETE flat R5-like dosage array with additive R6 fields. */
   fhir: EzDosage[];
   /** Strict R6 snapshot projection of the same prescription. */
-  fhirNext: FhirR6DosageDetails;
+  fhirNext: FhirR6DosageInstruction;
   /** Optional R6 step/course metadata not owned by a single dose. */
   course?: EzCourseMetadata;
   shortText: string;
@@ -1988,7 +2040,7 @@ export interface TotalUnitsResult {
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
-  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageDetails | ParseBatchResult;
+  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageInstruction | ParseBatchResult;
   /** Required to resolve per-kg administered doses into an actual quantity. */
   patientWeightKg?: number;
   durationValue: number;

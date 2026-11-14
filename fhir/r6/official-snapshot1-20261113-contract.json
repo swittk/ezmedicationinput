@@ -1,0 +1,1019 @@
+{
+  "target": "FHIR R6 6.0.0-snapshot1",
+  "retrievedDate": "2026-11-14",
+  "profiles": {
+    "DosageInstruction": {
+      "url": "http://hl7.org/fhir/StructureDefinition/DosageInstruction",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "dec13eefe85d9735cb63f49ab724733c895a2099297da300d5c0e30e55b72865",
+      "elements": [
+        {
+          "path": "DosageInstruction",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "DosageInstruction.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "DosageInstruction.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageInstruction.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageInstruction.renderedInstruction",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "markdown"
+          ]
+        },
+        {
+          "path": "DosageInstruction.repeatCycle",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Duration"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Element"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.start",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "RelativeTime"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.end",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "RelativeTime"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.count",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "integer"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.component",
+          "min": 1,
+          "max": "*",
+          "types": [
+            "Dosage"
+          ]
+        },
+        {
+          "path": "DosageInstruction.step.safety",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "DosageSafety"
+          ]
+        },
+        {
+          "path": "DosageInstruction.safety",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "DosageSafety"
+          ]
+        }
+      ]
+    },
+    "Dosage": {
+      "url": "http://hl7.org/fhir/StructureDefinition/Dosage",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "7d6db85c5286a090be56df9c5a9c42e3598f957c16a4fc0638d440a4ee2e917b",
+      "elements": [
+        {
+          "path": "Dosage",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "Dosage.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Dosage.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Dosage.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Dosage.condition",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "DosageCondition"
+          ]
+        },
+        {
+          "path": "Dosage.text",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "Dosage.additionalInstruction",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "Dosage.patientInstruction",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "Dosage.timing",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Timing"
+          ]
+        },
+        {
+          "path": "Dosage.asNeeded",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "boolean"
+          ]
+        },
+        {
+          "path": "Dosage.asNeededFor",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "Dosage.site",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableReference"
+          ]
+        },
+        {
+          "path": "Dosage.route",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "Dosage.method",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Element"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate.type",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate.dose[x]",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Range",
+            "Quantity",
+            "Expression"
+          ]
+        },
+        {
+          "path": "Dosage.doseAndRate.rate[x]",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Ratio",
+            "Range",
+            "Quantity",
+            "Expression"
+          ]
+        },
+        {
+          "path": "Dosage.safety",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "DosageSafety"
+          ]
+        }
+      ]
+    },
+    "DosageSafety": {
+      "url": "http://hl7.org/fhir/StructureDefinition/DosageSafety",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "133d8ffd874b148d60ef1d5e571f80bb21d5f0951417514c08256137bd69bbb0",
+      "elements": [
+        {
+          "path": "DosageSafety",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "DosageSafety.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "DosageSafety.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageSafety.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Element"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.value[x]",
+          "min": 1,
+          "max": "1",
+          "types": [
+            "integer",
+            "Quantity",
+            "Expression"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.scope",
+          "min": 1,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.period",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Duration"
+          ]
+        },
+        {
+          "path": "DosageSafety.doseLimit.text",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "DosageSafety.ifExceeded",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        }
+      ]
+    },
+    "RelativeTime": {
+      "url": "http://hl7.org/fhir/StructureDefinition/RelativeTime",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "49469ded60d9ac561a7eada963ed93bb73035ad17b72a60cc7df93688e3b9752",
+      "elements": [
+        {
+          "path": "RelativeTime",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "RelativeTime.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "RelativeTime.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "RelativeTime.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "RelativeTime.contextReference",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Reference"
+          ]
+        },
+        {
+          "path": "RelativeTime.contextDefinition",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "canonical"
+          ]
+        },
+        {
+          "path": "RelativeTime.contextPath",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "RelativeTime.contextCode",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "RelativeTime.offset[x]",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Duration",
+            "Range"
+          ]
+        },
+        {
+          "path": "RelativeTime.text",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        }
+      ]
+    },
+    "Timing": {
+      "url": "http://hl7.org/fhir/StructureDefinition/Timing",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "49909239549e3b39faa02300aa503a3af3115f0d657cd4bd2d6ee3018e7494dd",
+      "elements": [
+        {
+          "path": "Timing",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "Timing.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Timing.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Timing.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Timing.event",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "dateTime"
+          ]
+        },
+        {
+          "path": "Timing.repeat",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Element"
+          ]
+        },
+        {
+          "path": "Timing.repeat.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Timing.repeat.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Timing.repeat.bounds[x]",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Duration",
+            "Range",
+            "Period"
+          ]
+        },
+        {
+          "path": "Timing.repeat.count",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "positiveInt"
+          ]
+        },
+        {
+          "path": "Timing.repeat.countMax",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "positiveInt"
+          ]
+        },
+        {
+          "path": "Timing.repeat.duration",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "decimal"
+          ]
+        },
+        {
+          "path": "Timing.repeat.durationMax",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "decimal"
+          ]
+        },
+        {
+          "path": "Timing.repeat.durationUnit",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "Timing.repeat.frequency",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "positiveInt"
+          ]
+        },
+        {
+          "path": "Timing.repeat.frequencyMax",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "positiveInt"
+          ]
+        },
+        {
+          "path": "Timing.repeat.period",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "decimal"
+          ]
+        },
+        {
+          "path": "Timing.repeat.periodMax",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "decimal"
+          ]
+        },
+        {
+          "path": "Timing.repeat.periodUnit",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "Timing.repeat.startOffset",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Quantity"
+          ]
+        },
+        {
+          "path": "Timing.repeat.endOffset",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Quantity"
+          ]
+        },
+        {
+          "path": "Timing.repeat.dayOfWeek",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "Timing.repeat.timeOfDay",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "time"
+          ]
+        },
+        {
+          "path": "Timing.repeat.when",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "Timing.repeat.offset",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "unsignedInt"
+          ]
+        },
+        {
+          "path": "Timing.code",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        }
+      ]
+    },
+    "DosageCondition": {
+      "url": "http://hl7.org/fhir/StructureDefinition/DosageCondition",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "411454bc91c1c2bf402a31b8aefdf12fa7b888b70be85d5745f4c35be781bd75",
+      "elements": [
+        {
+          "path": "DosageCondition",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "DosageCondition.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "DosageCondition.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageCondition.modifierExtension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "DosageCondition.code",
+          "min": 1,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "DosageCondition.details",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "DosageCondition.operation",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "DosageCondition.value[x]",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "base64Binary",
+            "boolean",
+            "canonical",
+            "code",
+            "date",
+            "dateTime",
+            "decimal",
+            "id",
+            "instant",
+            "integer",
+            "integer64",
+            "markdown",
+            "oid",
+            "positiveInt",
+            "string",
+            "time",
+            "unsignedInt",
+            "uri",
+            "url",
+            "uuid",
+            "Address",
+            "Age",
+            "Annotation",
+            "Attachment",
+            "CodeableConcept",
+            "CodeableReference",
+            "Coding",
+            "ContactPoint",
+            "Count",
+            "Distance",
+            "Duration",
+            "HumanName",
+            "Identifier",
+            "Money",
+            "Period",
+            "Quantity",
+            "Range",
+            "Ratio",
+            "RatioRange",
+            "Reference",
+            "SampledData",
+            "Signature",
+            "Timing",
+            "ContactDetail",
+            "DataRequirement",
+            "Expression",
+            "ParameterDefinition",
+            "RelatedArtifact",
+            "TriggerDefinition",
+            "UsageContext",
+            "Availability",
+            "ExtendedContactDetail",
+            "VirtualServiceDetail",
+            "Dosage",
+            "Meta"
+          ]
+        },
+        {
+          "path": "DosageCondition.text",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        }
+      ]
+    },
+    "CodeableReference": {
+      "url": "http://hl7.org/fhir/StructureDefinition/CodeableReference",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "7b94319f02f49b5d853e30d3b3c8e144d47bcf76038b1b3c7f77208cee9eef7f",
+      "elements": [
+        {
+          "path": "CodeableReference",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "CodeableReference.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "CodeableReference.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "CodeableReference.concept",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "CodeableConcept"
+          ]
+        },
+        {
+          "path": "CodeableReference.reference",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Reference"
+          ]
+        }
+      ]
+    },
+    "Reference": {
+      "url": "http://hl7.org/fhir/StructureDefinition/Reference",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "1b26c4e4bc92139b75ed76b66f94a709502d8391eca583a7cef22d8357b1f1dc",
+      "elements": [
+        {
+          "path": "Reference",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "Reference.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Reference.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Reference.reference",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "Reference.type",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "uri"
+          ]
+        },
+        {
+          "path": "Reference.identifier",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "Identifier"
+          ]
+        },
+        {
+          "path": "Reference.display",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        }
+      ]
+    },
+    "Quantity": {
+      "url": "http://hl7.org/fhir/StructureDefinition/Quantity",
+      "date": "2026-11-13T18:49:42+00:00",
+      "sha256": "3be012927254b210d2e77147486bbeed97c32f02ed86843e4b2b205288afc247",
+      "elements": [
+        {
+          "path": "Quantity",
+          "min": 0,
+          "max": "*",
+          "types": []
+        },
+        {
+          "path": "Quantity.id",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "http://hl7.org/fhirpath/System.String"
+          ]
+        },
+        {
+          "path": "Quantity.extension",
+          "min": 0,
+          "max": "*",
+          "types": [
+            "Extension"
+          ]
+        },
+        {
+          "path": "Quantity.value",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "decimal"
+          ]
+        },
+        {
+          "path": "Quantity.comparator",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        },
+        {
+          "path": "Quantity.unit",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "string"
+          ]
+        },
+        {
+          "path": "Quantity.system",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "uri"
+          ]
+        },
+        {
+          "path": "Quantity.code",
+          "min": 0,
+          "max": "1",
+          "types": [
+            "code"
+          ]
+        }
+      ]
+    }
+  }
+}

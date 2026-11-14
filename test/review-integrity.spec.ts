@@ -7,7 +7,7 @@ import {
   parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
   calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
   getDosageAlternativeChoice,
-  type FhirDosage, type FhirR6DosageDetails, type EzDosage, type FhirExtension
+  type FhirDosage, type FhirR6DosageInstruction, type EzDosage, type FhirExtension
 } from "../src";
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
@@ -63,7 +63,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("preserves ordinary R5 component extensions without inventing a R6 course modifier", () => {
-    const simple: FhirR6DosageDetails = {
+    const simple: FhirR6DosageInstruction = {
       step: [{ component: [{
         extension: [{ url: "urn:test:ordinary-metadata", valueString: "keep" }],
         modifierExtension: [{ url: "urn:test:ordinary-modifier", valueBoolean: true }],
@@ -187,7 +187,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(imported.fhir.modifierExtension).toEqual([modifier]);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
       expect(imported.longText).toContain("1 tablet");
-      const course: FhirR6DosageDetails = {
+      const course: FhirR6DosageInstruction = {
         step: [{ component: [{ ...original }] }]
       };
       const preservedCourse = JSON.parse(JSON.stringify(course));
@@ -589,7 +589,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
 
   it("deletes a component and its local expression without resurrecting either from other rows", () => {
     const original = parseSig(parallel).fhirNext;
-    const edited: FhirR6DosageDetails = JSON.parse(JSON.stringify(original));
+    const edited: FhirR6DosageInstruction = JSON.parse(JSON.stringify(original));
     edited.step[0].component[0].doseAndRate![0].doseExpression = {
       language: "text/fhirpath", expression: "%patient.weight * 0.5"
     };
@@ -636,7 +636,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("matches all unchanged components before positional edits when concurrent rows are swapped", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       renderedInstruction: "One drop in each eye twice daily",
       step: [{ component: [
         {
@@ -684,7 +684,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("retains superseded R6 dose expressions only as inert provenance after a numeric R5 edit", () => {
-    const full: FhirR6DosageDetails = {
+    const full: FhirR6DosageInstruction = {
       renderedInstruction: "Weight-adjusted dose twice daily",
       step: [{ component: [{
         text: "Weight-adjusted dose twice daily",
@@ -728,7 +728,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("preserves exact R6 safety and coded conditions through unrelated R5 edits", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       step: [{ component: [{
         id: "component-id",
         route: { text: "oral" },
@@ -786,7 +786,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("reconciles edited R5 maxima without deleting R6-only safety semantics", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       step: [{ component: [{
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         safety: {
@@ -833,7 +833,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("does not invent a dose when only an unevaluated R6 expression exists", () => {
-    const details: FhirR6DosageDetails = {
+    const details: FhirR6DosageInstruction = {
       step: [{ component: [{
         text: undefined,
         route: { text: "oral" },
@@ -1067,7 +1067,7 @@ describe("FHIR projection structural comparison hygiene", () => {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
       extension: [{ url: "urn:test:unknown", extension: [{ url: "detail", valueString: "retain" }] }]
     };
-    const input: FhirR6DosageDetails = { step: [{ component: [shared, shared] }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [shared, shared] }] };
     const output = toFhirR5Dosages(input);
     output[0].doseAndRate![0].doseQuantity!.value = 2;
     output[0].extension![0].extension![0].valueString = "edited";
@@ -1182,7 +1182,7 @@ describe("structured FHIR extensions without serialization", () => {
   it("parses, exports, imports, edits and formats with JSON.parse/stringify disabled", () => {
     const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("unexpected serialization"); });
     const parse = vi.spyOn(JSON, "parse").mockImplementation(() => { throw new Error("unexpected JSON parsing"); });
-    let course: FhirR6DosageDetails;
+    let course: FhirR6DosageInstruction;
     let formatted: string;
     try {
       const parsed = parseSig("apply 1 mL to scalp where affected twice daily only if BP > 160");
