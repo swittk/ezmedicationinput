@@ -3,7 +3,8 @@
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirR6Dosage, FhirR6DosageCondition,
-  FhirR6DosageInstruction, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
+  FhirR6DosageInstruction, FhirR6DosageInstructionInput, FhirR6DosageSafety,
+  FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
   MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep
 } from "./types";
 
@@ -1586,21 +1587,23 @@ export function toDosageDetails(
  * drafts. This runs only at the R6 import boundary, never on ordinary SIG
  * parsing or R5 editing hot paths. Typed extensions and unknown value[x]
  * payloads remain intact instead of being interpreted as clinical language. */
-export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstruction): string[] {
+export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstructionInput): string[] {
   const warnings: string[] = [];
   const fail = (detail: string): never => {
     throw new TypeError(`FHIR R6 DosageInstruction (6.0.0-snapshot1) expected: ${detail}`);
   };
   if (!value || typeof value !== "object" || Array.isArray(value) ||
-      !Array.isArray(value.step) || "resourceType" in value || "dosage" in value)
-    fail("expected a DosageInstruction datatype with step[]; legacy R6 shapes are unsupported");
-  for (let index = 0; index < value.step.length; index++) {
-    const step = value.step[index];
+      value.step !== undefined && !Array.isArray(value.step) ||
+      "resourceType" in value || "dosage" in value)
+    fail("expected a current DosageInstruction datatype; legacy R6 shapes are unsupported");
+  const steps = value.step ?? [];
+  for (let index = 0; index < steps.length; index++) {
+    const step = steps[index];
     if (!step || !Array.isArray(step.component) || !step.component.length)
       fail(`step[${index}] must have at least one component`);
     if ("modifierExtension" in step)
       fail(`step[${index}] is Element, not BackboneElement`);
-    if (value.step.length === 1 && step.safety !== undefined)
+    if (steps.length === 1 && step.safety !== undefined)
       fail("single-step dosage must not carry step.safety (dosdet-2)");
     for (let member = 0; member < step.component.length; member++) {
       const dosage = step.component[member];
@@ -1937,13 +1940,22 @@ function restoreComponentDelta(
     fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
       ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
   }
-  if (delta.site &&
-      !(delta.site.reference && Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
-        expanded.siteReference === undefined) &&
-      local.baseline?.site === compactProjectionFingerprint({
-        concept: dosage.site, reference: expanded.siteReference
-      })) {
-    fresh.site = delta.site;
+  if (delta.site) {
+    const referenceCleared = delta.site.reference &&
+      Object.prototype.hasOwnProperty.call(expanded, "siteReference") &&
+      expanded.siteReference === undefined;
+    const siteUnchanged = local.baseline?.site === compactProjectionFingerprint({
+      concept: dosage.site, reference: expanded.siteReference
+    });
+    if (!referenceCleared && siteUnchanged) {
+      fresh.site = delta.site;
+    } else if (!equalStructuredValues(fresh.site, delta.site)) {
+      // The live R5 site edit wins. Keep the original wrapper on this row
+      // as typed source provenance, not as a second active anatomical site.
+      superseded = true;
+      addWarning(warnings,
+        "Retained R6 site metadata was superseded by an edited R5 site and preserved only as source provenance.");
+    }
   }
   if (delta.doseAndRate) {
     const current = fresh.doseAndRate;

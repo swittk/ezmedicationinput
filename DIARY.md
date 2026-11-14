@@ -4553,3 +4553,50 @@ staged SIGs. Alternating seven-batch shared-host microbenchmarks against
 immutable pre-review 01e5fdd (microseconds per parse): ordinary 1634->1637,
 Thai 6767.2->6741.4, multiphase 6737.1->6453.2; no meaningful ordinary
 performance regression. No master merge or package publication.
+
+
+## 2026-11-14 — PR #13 fourth CodeRabbit review: optional R6 steps, site-edit provenance, exact clocks
+
+**Decision gate:** All three findings in this round were reproduced and pass
+the existing product contract: present clinical source must remain editable,
+an edited R5 site must not silently erase original R6 metadata, and an
+explicit twice-daily clock must never become a fabricated midnight/noon
+administration. These are supported wire/data cases, not adversarial grammar
+expansion. No HPSG pass, runtime dependency, R5 storage migration, or
+historical R6 compatibility layer was introduced.
+
+- The pinned R6 Snapshot 1 DosageInstruction.step cardinality is 0..*;
+  a text-only wire object can therefore omit step. fromFhir now accepts
+  that proper current-R6 input through a distinct wire-input type and
+  normalizes it once to the existing stable internal step: [] course shape.
+  Legacy R6 shapes are still rejected and ordinary parseSig().fhirNext
+  continues always to provide a step array.
+- Editing the R5 site no longer drops an old concept-only R6 site wrapper
+  with id/extension. Live R5 site corrections remain authoritative; the
+  original R6 source is carried in the existing typed row-local source
+  extension only when superseded. No extra global warning scan.
+- The established frequency-per-calendar-period scheduler formerly discarded
+  explicit clocks when the dosage frequency exceeded the number of days,
+  even without offsets: 42 doses per 21 days at 08:00 and 20:00 came out
+  at 00:00 and 12:00. The existing single candidate loop now recognizes
+  the exact number of declared clocks per day and keeps those times.
+  Nonmatching/unspecified schedules retain the previous distributor.
+  The same correction fixes R6 42-in-28-day active/rest courses with a
+  seven-day endOffset through native R6, strict R5 and imported R6 views.
+
+Clinical oracles are three focused tests in the existing R6 suite: a
+current-R6 text-only import with no step, a live R5 site correction with
+retained original R6 site provenance, and exact 08:00/20:00 timestamps and
+42 tablets per 28-day active/rest cycle through native R6/R5/imported
+representations. The actual downstream R5 dosage converter and
+medication-usage-map reconstruction retained 1/2/4 rows unchanged for
+ordinary, Thai and staged examples.
+
+Validation: 44 source test files 3877/3877 PASS; ES6 ESM/CJS
+bundles and TS declarations PASS; packaged-export tests 4/4 PASS.
+Seven alternating warm batches of 75 parses against immutable pre-review
+8d13721 (microseconds per parse on shared host): ordinary
+1503.3 -> 1526.7 (+1.6%), Thai 6041.1 -> 6267.2 (+3.7%), multi-stage
+6349.7 -> 6572.8 (+3.5%). There is no new ordinary-parse pass; timing
+differences are host-side and not a phone claim. No package publishing,
+application deployment, master merge or new CodeRabbit review request.

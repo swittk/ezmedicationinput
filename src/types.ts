@@ -558,6 +558,11 @@ export interface FhirR6DosageInstruction extends FhirBackboneElement {
   safety?: FhirR6DosageSafety;
 }
 
+/** Current R6 wire inputs may omit the 0..* step field. Internally,
+ * canonical course outputs always supply step[] for stable consumer APIs. */
+export type FhirR6DosageInstructionInput =
+  Omit<FhirR6DosageInstruction, "step"> & { step?: FhirR6DosageStep[] };
+
 export interface FhirDosage extends FhirBackboneElement {
   /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */
   sequence?: number;

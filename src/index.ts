@@ -56,6 +56,7 @@ import {
   EzDosage,
   EzDoseAndRate,
   FhirR6DosageInstruction,
+  FhirR6DosageInstructionInput,
   FormatBatchOptions,
   FormatOptions,
   LintIssue,
@@ -1670,10 +1671,12 @@ export function formatParseBatch(
  * the original whole-course R6 object remains the primary FHIR output.
  */
 export function fromFhir(
-  dosageDetails: FhirR6DosageInstruction,
+  wire: FhirR6DosageInstructionInput,
   options?: FormatOptions
 ): ParseBatchResult {
-  const importWarnings = assertCurrentR6DosageInstruction(dosageDetails);
+  const importWarnings = assertCurrentR6DosageInstruction(wire);
+  const dosageDetails: FhirR6DosageInstruction = wire.step === undefined
+    ? { ...wire, step: [] } : wire as FhirR6DosageInstruction;
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
     fromFhirDosageInternal(dosage, options)

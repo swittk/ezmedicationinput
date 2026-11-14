@@ -3098,6 +3098,73 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
   });
 
+  it("accepts current R6 text-only wire input without a step array", () => {
+    // HL7 Snapshot 1 DosageInstruction.step has cardinality 0..*.
+    const input = { renderedInstruction: "Take as directed" };
+    const result = fromFhir(input);
+    expect(result.count).toBe(0);
+    expect(result.fhir).toEqual([]);
+    expect(result.fhirNext.step).toEqual([]);
+    expect(result.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
+    expect(result.longText).toBe(input.renderedInstruction);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("retains the original concept-only site wrapper when an R5 site is corrected", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      site: {
+        id: "source-left", concept: { text: "left eye" },
+        extension: [{ url: "https://example.org/site-source", valueString: "original" }]
+      },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
+    }] }] };
+    const rows = toFhirR5Dosages(source);
+    rows[0].site = { text: "right eye" };
+    const rebuilt = toDosageDetails(rows);
+    expect(rebuilt.step[0].component[0].site?.concept?.text).toBe("right eye");
+    const retained = rebuilt.extension?.filter(extension =>
+      extension.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(retained).toHaveLength(1);
+    expect(JSON.stringify(retained)).toContain("source-left");
+    expect(JSON.stringify(retained)).toContain("left eye");
+    expect(JSON.stringify(retained)).toContain("site-source");
+    expect(fromFhir(rebuilt).fhirNext.step[0].component[0].site?.concept?.text).toBe("right eye");
+  });
+
+  it("honors explicitly authored twice-daily clocks for 42 doses/21 days in R5 and offset R6", () => {
+    const base = "2026-11-02T00:00:00+07:00";
+    const options = { from: base, orderedAt: base, timeZone: "Asia/Bangkok", limit: 44 };
+    const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    const repeat = {
+      frequency: 42, period: 21, periodUnit: FhirPeriodUnit.Day,
+      timeOfDay: ["08:00:00", "20:00:00"]
+    };
+    const expectedFirst = [
+      "2026-11-02T08:00:00+07:00", "2026-11-02T20:00:00+07:00",
+      "2026-11-03T08:00:00+07:00", "2026-11-03T20:00:00+07:00"
+    ];
+    const standalone: EzDosage = { ...dose, timing: { repeat } };
+    expect(nextDueDoses(standalone, options).slice(0, 4)).toEqual(expectedFirst);
+
+    const offsetCourse: FhirR6DosageInstruction = { step: [{ component: [{
+      ...dose, timing: { repeat: {
+        ...repeat, period: 28, endOffset: { value: 7, unit: "d", code: "d" }
+      } }
+    }] }] };
+    for (const value of [offsetCourse, toFhirR5Dosages(offsetCourse), fromFhir(offsetCourse)]) {
+      const due = nextDueDoses(value, options);
+      expect(due.slice(0, 4)).toEqual(expectedFirst);
+      expect(due[40]).toBe("2026-11-22T08:00:00+07:00");
+      expect(due[41]).toBe("2026-11-22T20:00:00+07:00");
+      expect(due.slice(42, 44)).toEqual([
+        "2026-11-30T08:00:00+07:00", "2026-11-30T20:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({
+        dosage: value, ...options, durationValue: 28, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(42);
+    }
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

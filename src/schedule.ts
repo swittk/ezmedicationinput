@@ -3119,15 +3119,21 @@ function generateFrequencyPerPeriodSeries(
       ? Math.max(1, getLocalDayNumber(cycleEnd, timeZone) - getLocalDayNumber(cycleStart, timeZone))
       : 0;
     const baseClock = toLocalClock(cycleStart, timeZone);
+    // Explicit daily clocks must remain authoritative when a multi-day
+    // frequency is their exact total (e.g. 42 doses/21 days at 08:00/20:00).
+    // Without a matching clock count, retain the existing distributor.
+    const clockedDays = calendarUnit && clocks.length > 0 &&
+      frequency === spanDays * clocks.length;
     for (let index = 0; index < frequency && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
       let shiftedClock = false;
-      if (calendarUnit && frequency <= spanDays) {
+      if (calendarUnit && (frequency <= spanDays || clockedDays)) {
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
         const day = addLocalDays(startOfLocalDay(cycleStart, timeZone),
-          Math.floor(index * spanDays / frequency) + dayShift, timeZone);
+          (clockedDays ? Math.floor(index / clocks.length)
+            : Math.floor(index * spanDays / frequency)) + dayShift, timeZone);
         const clock = typeof entry === "string" ? entry : entry?.time ?? baseClock;
         candidate = makeZonedDateFromDay(day, timeZone, clock);
       } else {
