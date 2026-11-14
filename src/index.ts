@@ -1430,8 +1430,45 @@ export function formatSig(
     for (const [index, step] of oneOrCourse.step.entries()) {
       const { start: startDays, end: endDays } = windows[index];
       const rendered = formatChoiceMembers(step.component, component => {
-        const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
+        const repeat = component.timing?.repeat;
+        const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
+        let display = fromR6Dosage(component, index + 1);
+        // Once R6 offsets restrict the active window, a plain R5 formatter
+        // cannot safely describe the entire period as the dose cadence.
+        // The read-only display copy drops that misleading interpretation.
+        if (hasOffsets && display.timing?.repeat) {
+          const { frequency: _frequency, frequencyMax: _frequencyMax,
+            period: _period, periodMax: _periodMax,
+            periodUnit: _periodUnit, ...rest } = display.timing.repeat;
+          display = { ...display, timing: { ...display.timing, repeat: rest } };
+        }
+        const recognized = formatSig(display, style, options);
         const expressions: string[] = [];
+        if (hasOffsets && repeat) {
+          const period = repeat.period !== undefined && repeat.periodUnit
+            ? formatCourseTimeQuantity({
+              value: repeat.period, code: repeat.periodUnit, unit: repeat.periodUnit
+            }, thai) : undefined;
+          if (period && repeat.frequency !== undefined) expressions.push(
+            thai ? `ให้ยา ${repeat.frequency} ครั้งต่อช่วง ${period}` :
+              `${repeat.frequency} administrations per ${period}`
+          );
+          const periodContext = period
+            ? thai ? ` (รอบละ ${period})` : ` (each period lasts ${period})`
+            : "";
+          if (repeat.startOffset) {
+            const offset = formatCourseTimeQuantity(repeat.startOffset, thai);
+            expressions.push(thai
+              ? `เริ่มให้ยาหลังเริ่มรอบ ${offset}${periodContext}`
+              : `Dosing starts ${offset} after the period begins${periodContext}`);
+          }
+          if (repeat.endOffset) {
+            const offset = formatCourseTimeQuantity(repeat.endOffset, thai);
+            expressions.push(thai
+              ? `งดยาในช่วง ${offset}สุดท้ายของแต่ละรอบ${periodContext}`
+              : `No doses during the final ${offset} of each period${periodContext}`);
+          }
+        }
         for (const amount of component.doseAndRate ?? []) {
           // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
           // Keep their actual amount visible in source-less R6 suggestions,
@@ -1636,7 +1673,7 @@ export function fromFhir(
   dosageDetails: FhirR6DosageInstruction,
   options?: FormatOptions
 ): ParseBatchResult {
-  assertCurrentR6DosageInstruction(dosageDetails);
+  const importWarnings = assertCurrentR6DosageInstruction(dosageDetails);
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
     fromFhirDosageInternal(dosage, options)
@@ -1648,8 +1685,10 @@ export function fromFhir(
     let row = 0;
     for (const step of dosageDetails.step) for (const component of step.component) {
       const item = items[row++];
-      if (!item || !component.doseAndRate?.some(rate =>
-        rate.doseQuantity?.comparator || rate.rateQuantity?.comparator)) continue;
+      if (!item || (!(component.timing?.repeat?.startOffset ||
+          component.timing?.repeat?.endOffset) &&
+          !component.doseAndRate?.some(rate =>
+            rate.doseQuantity?.comparator || rate.rateQuantity?.comparator))) continue;
       const ownCourse: FhirR6DosageInstruction = { step: [{ component: [component] }] };
       item.shortText = formatSig(ownCourse, "short", options);
       item.longText = formatSig(ownCourse, "long", options);
@@ -1659,7 +1698,7 @@ export function fromFhir(
     text: dosageDetails.renderedInstruction ?? ""
   }, options);
   const clauses: CanonicalSigClause[] = [];
-  const warnings = new Set<string>();
+  const warnings = new Set<string>(importWarnings);
   for (const item of items) {
     clauses.push(...item.meta.canonical.clauses);
     for (const warning of item.warnings) warnings.add(warning);

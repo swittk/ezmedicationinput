@@ -4461,3 +4461,52 @@ median microseconds): routine 1447.6 -> 1442.2; Thai 6232.0 -> 6183.4;
 independent-eye taper 6253.3 -> 6392.5. These are shared-host measurements,
 not a universal speed claim. Only documented, supported R6 course execution
 does additional interpretation; ordinary SIG parsing has no extra pass.
+
+
+## 2026-11-14 — PR #13 second CodeRabbit review: editable offset import, per-row provenance, source-less timing display
+
+**Decision gate:** Three new inline findings were reproduced against the current R6
+import/bridge/render paths, and all three are real supported-data defects.
+The earlier site-wrapper follow-up was also valid: its prior regression
+included an unrelated repeat-cycle retention trigger. Only the existing
+R6 boundary/bridge/formatter and existing R6 test suite were changed.
+No HPSG grammar, R5 API, runtime dependency, app schema or migration changed.
+
+- A current-R6 DosageInstruction containing Timing.repeat.startOffset with
+  count=6 and period=28 but no frequency previously failed the entire import
+  because of tim-11/tim-12. This already-readable R6 source shape now imports
+  intact with an editable, location-specific invariant warning. Non-executable
+  period offsets still refuse only numeric scheduling/supply. Actual malformed
+  SimpleQuantity comparator values and obsolete R6 shapes remain rejected by
+  the existing current-R6 structural boundary.
+- Reconciliation previously searched all earlier warning strings for one
+  specific phrase to decide whether to attach an old R6 metadata marker:
+  comparator and offset edits lost original values, and unrelated rows could
+  attach the wrong marker. A local boolean supersession result now owns its
+  source row; the original typed marker is retained as inert course provenance
+  for edited numeric dose/rate and offset values. Existing live R5 edits remain
+  authoritative, with no extra scan of accumulated warnings.
+- Source-less R6 offset courses formerly realized misleading R5 cadence
+  (e.g. one dose every 28 days for a 21-in-28-day course). The existing R6
+  renderer now uses a temporary display-only R5 projection without that
+  misleading full-period recurrence, adds source-backed administration count
+  and localized start/end offset phrases in English and Thai, and supplies the
+  same meaning in imported component previews. Original authored
+  renderedInstruction remains authoritative when present.
+- The prior concept-only CodeableReference regression was strengthened so
+  site.id/extension retention is tested with no repeatCycle or other
+  independent course-retention trigger. Approximate repeatCycle still has its
+  own typed R5 bridge check within the same existing test.
+
+**Validation:** existing R6 suite 205/205 (including three new tests),
+all 44 source suites 3871/3871 PASS, ES6 ESM/CJS + TypeScript declarations
+build PASS, packaged ESM/CJS exports 4/4 PASS; diff check clean.
+The downstream existing dosage adapter and medication usage-map round-trip
+preserved all 1/2/4 dosage rows byte-independent and structurally equal for
+ordinary, Thai and staged cases, with no changed application source.
+Matched host-side alternating medians (seven sets of 75 parses, vs the exact
+a31175b pre-review build) measured routine 1380.4 -> 1400.9 microseconds
+(+1.5%), Thai 5788.3 -> 5861.3 (+1.3%), and independent-eye taper
+6044.3 -> 6041.4 (flat); shared-machine noise prevents claiming universal
+phone performance. Ordinary source SIG parsing receives no extra pass.
+No package publication, merge, or new full CodeRabbit review requested.

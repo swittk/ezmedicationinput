@@ -2845,21 +2845,28 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(recomposed.step[0].component[0].doseAndRate?.[0].rateQuantity?.comparator).toBe(">=");
   });
 
-  it("retains concept-only R6 site wrapper metadata and approximate repeatCycle in R5 extensions", () => {
+  it("retains concept-only R6 site metadata independently of any cycle trigger", () => {
     const course: FhirR6DosageInstruction = {
-      repeatCycle: { value: 28, comparator: "~", code: "d", unit: "d" },
       step: [{ component: [{
         site: { id: "site-concept", concept: { text: "left eye" },
           extension: [{ url: "https://example.org/site-provenance", valueString: "reviewed" }] },
         doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
       }] }]
     };
-    const projected = toFhirR5Dosages(course);
-    expect(projected[0].site?.text).toBe("left eye");
-    expect(projected[0].modifierExtension?.length).toBeGreaterThan(0);
+    // Only site id/extension licenses compact R5 metadata in this first case.
+    const siteOnly = toFhirR5Dosages(course);
+    expect(siteOnly[0].site?.text).toBe("left eye");
+    expect(siteOnly[0].modifierExtension?.length).toBeGreaterThan(0);
+    expect(toDosageDetails(JSON.parse(JSON.stringify(siteOnly)))).toEqual(course);
+
+    // Independently, R6's approximate cycle remains a typed R5 extension.
+    const withCycle: FhirR6DosageInstruction = {
+      ...course, repeatCycle: { value: 28, comparator: "~", code: "d", unit: "d" }
+    };
+    const projected = toFhirR5Dosages(withCycle);
     expect(JSON.stringify(projected)).not.toContain('"comparator":"~"');
     expect(JSON.stringify(projected)).toContain('"valueCode":"~"');
-    expect(toDosageDetails(JSON.parse(JSON.stringify(projected)))).toEqual(course);
+    expect(toDosageDetails(JSON.parse(JSON.stringify(projected)))).toEqual(withCycle);
   });
 
   it("supersedes unchanged imported expressions when the clinician adds numeric dose and rate choices", () => {
@@ -2930,6 +2937,92 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       durationValue: 28, durationUnit: FhirPeriodUnit.Day })).toThrow(/Interlaced R6 offsets/);
   });
 
+  it("imports current R6 offset timing with incomplete tim-11/tim-12 as an editable warning", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: {
+        count: 6, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 8, unit: "d", code: "d" }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const imported = fromFhir(course);
+    expect(imported.fhirNext).toEqual(course);
+    expect(imported.fhir).toHaveLength(1);
+    expect(imported.warnings).toEqual([expect.stringContaining("tim-11/tim-12")]);
+    expect(imported.longText).toContain("Dosing starts 8 days");
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+    const execution = { from: "2026-11-02T00:00:00+07:00",
+      orderedAt: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok", limit: 5 };
+    expect(() => nextDueDoses(imported, execution)).toThrow(/R6 period offsets need/);
+    expect(() => calculateTotalUnits({ dosage: course, ...execution,
+      durationValue: 28, durationUnit: FhirPeriodUnit.Day })).toThrow(/R6 period offsets need/);
+    // Actual invalid SimpleQuantity values still fail the current-R6 type gate.
+    const malformed: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 3, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, comparator: ">" } as never } }
+    }] }] };
+    expect(() => fromFhir(malformed)).toThrow(/SimpleQuantity/);
+  });
+
+  it("keeps superseded R6 source provenance on the edited row, without global warning scans", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [
+      { doseAndRate: [{ doseQuantity: { value: 1, comparator: "~", unit: "tab" } }] },
+      { doseAndRate: [{ doseQuantity: { value: 3, unit: "tab" } }] }
+    ] }] };
+    const rows = toFhirR5Dosages(course);
+    rows[0].doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
+    const restored = toDosageDetails(rows);
+    expect(restored.step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toEqual({ value: 2, unit: "tab" });
+    expect(restored.step[0].component[1]).toEqual(course.step[0].component[1]);
+    const sources = restored.extension?.filter(entry =>
+      entry.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(sources).toHaveLength(1);
+    expect(JSON.stringify(sources[0])).toContain('"valueCode":"~"');
+    expect(JSON.stringify(sources[0])).toContain('"rowIndex","valueInteger":0');
+    expect(JSON.stringify(sources[0])).not.toContain('"rowIndex","valueInteger":1');
+
+    const withOffset: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, code: "d", unit: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const edited = toFhirR5Dosages(withOffset);
+    edited[0].timing!.repeat!.frequency = 20;
+    const changed = toDosageDetails(edited);
+    expect(changed.step[0].component[0].timing?.repeat?.startOffset).toBeUndefined();
+    const offsetSources = changed.extension?.filter(entry =>
+      entry.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(offsetSources).toHaveLength(1);
+    expect(JSON.stringify(offsetSources[0])).toContain('"startOffset"');
+    expect(JSON.stringify(offsetSources[0])).toContain('"value":2');
+    expect(changed.extension).toContainEqual(expect.objectContaining({
+      valueString: expect.stringContaining("original R6 values remain available")
+    }));
+  });
+
+  it("shows source-less R6 active-window offsets in EN/TH instead of false whole-period cadence", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, unit: "d", code: "d" },
+        endOffset: { value: 5, unit: "d", code: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const en = formatSig(course, "long", { locale: "en" });
+    expect(en).toContain("21 administrations per 28 days");
+    expect(en).toContain("Dosing starts 2 days after");
+    expect(en).toContain("No doses during the final 5 days");
+    expect(en).not.toContain("1 tablet every 28 days");
+    const th = formatSig(course, "long", { locale: "th" });
+    expect(th).toContain("ให้ยา 21 ครั้งต่อช่วง 28 วัน");
+    expect(th).toContain("เริ่มให้ยาหลังเริ่มรอบ 2 วัน");
+    expect(th).toContain("งดยาในช่วง 5 วันสุดท้าย");
+    expect(fromFhir(course, { locale: "en" }).items[0].longText).toBe(en);
+    expect(fromFhir(course, { locale: "th" }).items[0].longText).toBe(th);
+    const authored = { ...course, renderedInstruction: "Take as directed by prescriber." };
+    expect(formatSig(authored, "long")).toBe(authored.renderedInstruction);
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [
@@ -2938,7 +3031,6 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       { ...base, step: [{ ...base.step[0], modifierExtension: [] }] },
       { ...base, step: [{ component: [{ ...base.step[0].component[0], sequence: 1 }] }] },
       { ...base, step: [{ component: [{ ...base.step[0].component[0], doseAndRate: [{ doseQuantity: { value: 1 }, doseExpression: { expression: "1" } }] }] }] },
-      { ...base, step: [{ component: [{ ...base.step[0].component[0], timing: { repeat: { frequency: 1, period: 1, startOffset: { value: 1, unit: "d" } } } }] }] },
       { ...base, step: [{ component: base.step[0].component, safety: { ifExceeded: "stop" } }] }
     ];
     for (const example of invalid) {

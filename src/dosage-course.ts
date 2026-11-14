@@ -1586,7 +1586,8 @@ export function toDosageDetails(
  * drafts. This runs only at the R6 import boundary, never on ordinary SIG
  * parsing or R5 editing hot paths. Typed extensions and unknown value[x]
  * payloads remain intact instead of being interpreted as clinical language. */
-export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstruction): void {
+export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstruction): string[] {
+  const warnings: string[] = [];
   const fail = (detail: string): never => {
     throw new TypeError(`FHIR R6 DosageInstruction (6.0.0-snapshot1) expected: ${detail}`);
   };
@@ -1622,12 +1623,13 @@ export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstruction)
       const repeat = dosage.timing?.repeat;
       if (repeat?.startOffset || repeat?.endOffset) {
         if (repeat.frequency === undefined || repeat.frequency <= 1 || repeat.period === undefined)
-          fail(`step[${index}].component[${member}] offsets require frequency > 1 and period (tim-11/12)`);
+          warnings.push(`R6 step[${index}].component[${member}]: Timing.repeat offsets require frequency > 1 and period (tim-11/tim-12); original values retained for editing, but numeric execution may be unsupported.`);
         if (repeat.startOffset?.comparator !== undefined || repeat.endOffset?.comparator !== undefined)
           fail(`step[${index}].component[${member}] offsets require SimpleQuantity`);
       }
     }
   }
+  return warnings;
 }
 
 /** Import a complete R6 course without replacing EZMED's flat dosage layout. */
@@ -1909,10 +1911,11 @@ function localReconciliationSource(marker: FhirExtension): FhirExtension {
  */
 function restoreComponentDelta(
   dosage: FhirDosage | EzDosage, local: CompactCourseRow, warnings: string[]
-): FhirR6Dosage {
+): { dosage: FhirR6Dosage; superseded: boolean } {
   const fresh = toR6Dosage(dosage);
   const delta = local.component;
-  if (!delta && !local.timingOffsets) return fresh;
+  let superseded = false;
+  if (!delta && !local.timingOffsets) return { dosage: fresh, superseded };
   const expanded = dosage as EzDosage;
   if (delta?.condition !== undefined && expanded.condition === undefined &&
       local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
@@ -1923,10 +1926,13 @@ function restoreComponentDelta(
       fresh.timing = { ...fresh.timing, repeat: {
         ...fresh.timing?.repeat, ...local.timingOffsets
       } };
-    } else addWarning(warnings,
-      "Retained R6 period offsets were superseded by an edited R5 timing; original R6 values remain available as source provenance.");
+    } else {
+      addWarning(warnings,
+        "Retained R6 period offsets were superseded by an edited R5 timing; original R6 values remain available as source provenance.");
+      superseded = true;
+    }
   }
-  if (!delta) return fresh;
+  if (!delta) return { dosage: fresh, superseded };
   if (delta.safety && expanded.safety === undefined) {
     fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
       ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
@@ -1998,12 +2004,18 @@ function restoreComponentDelta(
       }
     }
     if (entries) fresh.doseAndRate = entries;
-    if (supersededExpression) addWarning(warnings,
-      "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
-    if (supersededQuantity) addWarning(warnings,
-      "Retained R6 dose/rate Quantity comparators superseded by edited R5 fields were preserved only as inert source provenance.");
+    if (supersededExpression) {
+      addWarning(warnings,
+        "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
+      superseded = true;
+    }
+    if (supersededQuantity) {
+      addWarning(warnings,
+        "Retained R6 dose/rate Quantity comparators superseded by edited R5 fields were preserved only as inert source provenance.");
+      superseded = true;
+    }
   }
-  return fresh;
+  return { dosage: fresh, superseded };
 }
 
 /** Missing shared context remains a typed, editable modifier on the component.
@@ -2210,10 +2222,13 @@ function reconcileCompactCourse(
     const sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
     if (sequence !== requested) addWarning(warnings, "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction.");
     const local = localRows[index];
-    const restored = local ? restoreComponentDelta(dosage, local.value, warnings) : toR6Dosage(dosage);
+    const restored = local ? restoreComponentDelta(dosage, local.value, warnings) : undefined;
+    const liveComponent = restored?.dosage ?? toR6Dosage(dosage);
     const component = local && conflictingPhases.has(local.value.sequence)
-      ? withMissingCourseContext(restored, [CONFLICTING_PHASE_CONTEXT]) : restored;
-    if (warnings.some(value => value.includes("superseded by edited R5 dose fields")) && local)
+      ? withMissingCourseContext(liveComponent, [CONFLICTING_PHASE_CONTEXT]) : liveComponent;
+    // This marker belongs to this row, not any row that happened to precede
+    // a shared warning. Preserve superseded original R6 values once.
+    if (restored?.superseded && local)
       sources.push(localReconciliationSource(local.marker));
     const entries = groups.get(sequence) ?? [];
     entries.push(component); groups.set(sequence, entries);
