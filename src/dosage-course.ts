@@ -3,7 +3,7 @@
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirR6Dosage, FhirR6DosageCondition,
-  FhirR6DosageInstruction, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity,
+  FhirR6DosageInstruction, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
   MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep
 } from "./types";
 
@@ -1721,6 +1721,8 @@ interface CompactCourseRow {
   stepCount: number;
   step?: Omit<FhirR6DosageInstruction["step"][number], "component">;
   component?: Partial<FhirR6Dosage>;
+  /** R6 offsets are typed extension children, never R5 Extension.valueTiming. */
+  timingOffsets?: Pick<FhirR6TimingRepeat, "startOffset" | "endOffset">;
   baseline?: ComponentDeltaBaseline;
   context?: string;
   contextRequired?: boolean;
@@ -1749,9 +1751,9 @@ function rateChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | un
  * @param original Source component.
  * @param row Its independently editable R5 or extended-R5 projection.
  */
-function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
-  component?: Partial<FhirR6Dosage>; baseline?: ComponentDeltaBaseline
-} {
+function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): Pick<
+  CompactCourseRow, "component" | "baseline" | "timingOffsets"
+> {
   const projected = toR6Dosage(row);
   const component: Partial<FhirR6Dosage> = {};
   const baseline: ComponentDeltaBaseline = {};
@@ -1759,13 +1761,16 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
     component.condition = original.condition;
     baseline.condition = compactProjectionFingerprint(parseDosageCondition(row));
   }
-  if (original.timing?.repeat?.startOffset || original.timing?.repeat?.endOffset) {
-    component.timing = { repeat: {
-      ...(original.timing.repeat.startOffset ? { startOffset: original.timing.repeat.startOffset } : {}),
-      ...(original.timing.repeat.endOffset ? { endOffset: original.timing.repeat.endOffset } : {})
-    } };
-    baseline.timing = compactProjectionFingerprint(row.timing);
-  }
+  const timingOffsets = original.timing?.repeat && (
+    original.timing.repeat.startOffset !== undefined ||
+    original.timing.repeat.endOffset !== undefined
+  ) ? {
+    ...(original.timing.repeat.startOffset !== undefined
+      ? { startOffset: original.timing.repeat.startOffset } : {}),
+    ...(original.timing.repeat.endOffset !== undefined
+      ? { endOffset: original.timing.repeat.endOffset } : {})
+  } : undefined;
+  if (timingOffsets) baseline.timing = compactProjectionFingerprint(row.timing);
   if (!equalStructuredValues(original.safety, projected.safety)) {
     component.safety = original.safety;
     baseline.safety = compactProjectionFingerprint(toR6Safety(row));
@@ -1810,7 +1815,10 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
       baseline.doseAndRate = fingerprints;
     }
   }
-  return Object.keys(component).length ? { component, baseline } : {};
+  const hasComponent = Object.keys(component).length > 0;
+  return hasComponent || timingOffsets
+    ? { ...(hasComponent ? { component } : {}), ...(timingOffsets ? { timingOffsets } : {}), baseline }
+    : {};
 }
 
 /** Encode local phase metadata and unrepresentable component fields.
@@ -1830,7 +1838,7 @@ export function attachCourseDetailsExtensions(
       step.count !== undefined || step.safety || step.extension?.length ||
       !step.component.length ||
       step.component.some(component => component.condition !== undefined || component.safety ||
-        component.site?.reference ||
+        component.site?.reference || component.site?.id || component.site?.extension?.length ||
         component.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL) ||
         component.timing?.repeat?.startOffset || component.timing?.repeat?.endOffset ||
         component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression ||
@@ -1862,7 +1870,7 @@ export function attachCourseDetailsExtensions(
             missingContext.push(child.valueString);
         }
       }
-      if (hasStep || delta.component || context || steps.length > 1 || missingContext?.length) {
+      if (hasStep || delta.component || delta.timingOffsets || context || steps.length > 1 || missingContext?.length) {
         const local: CompactCourseRow = {
           rowIndex, sequence: index + 1, stepCount: steps.length,
           ...(hasStep ? { step } : {}), ...delta,
@@ -1904,22 +1912,21 @@ function restoreComponentDelta(
 ): FhirR6Dosage {
   const fresh = toR6Dosage(dosage);
   const delta = local.component;
-  if (!delta) return fresh;
+  if (!delta && !local.timingOffsets) return fresh;
   const expanded = dosage as EzDosage;
-  if (delta.condition !== undefined && expanded.condition === undefined &&
+  if (delta?.condition !== undefined && expanded.condition === undefined &&
       local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
     fresh.condition = delta.condition;
   }
-  if (delta.timing?.repeat?.startOffset || delta.timing?.repeat?.endOffset) {
+  if (local.timingOffsets) {
     if (local.baseline?.timing === compactProjectionFingerprint(dosage.timing)) {
       fresh.timing = { ...fresh.timing, repeat: {
-        ...fresh.timing?.repeat,
-        ...(delta.timing.repeat.startOffset ? { startOffset: delta.timing.repeat.startOffset } : {}),
-        ...(delta.timing.repeat.endOffset ? { endOffset: delta.timing.repeat.endOffset } : {})
+        ...fresh.timing?.repeat, ...local.timingOffsets
       } };
     } else addWarning(warnings,
       "Retained R6 period offsets were superseded by an edited R5 timing; original R6 values remain available as source provenance.");
   }
+  if (!delta) return fresh;
   if (delta.safety && expanded.safety === undefined) {
     fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
       ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
@@ -1953,6 +1960,22 @@ function restoreComponentDelta(
       const unchangedRate = Boolean(entry && baseline?.rate !== undefined &&
         (old.rateExpression || old.rateQuantity?.comparator) &&
         baseline.rate === compactProjectionFingerprint(rateChoice(entry)));
+      // If the R5 editor introduced a numeric choice while retaining the
+      // identical imported expression, the numeric edit supersedes the stale
+      // expression. Independently edited expressions remain untouched.
+      if (entry && !unchangedDose && old.doseExpression &&
+          equalStructuredValues(entry.doseExpression, old.doseExpression) &&
+          (entry.doseQuantity !== undefined || entry.doseRange !== undefined)) {
+        delete entry.doseExpression;
+        supersededExpression = true;
+      }
+      if (entry && !unchangedRate && old.rateExpression &&
+          equalStructuredValues(entry.rateExpression, old.rateExpression) &&
+          (entry.rateQuantity !== undefined || entry.rateRange !== undefined ||
+            entry.rateRatio !== undefined)) {
+        delete entry.rateExpression;
+        supersededExpression = true;
+      }
       if (old.doseExpression) {
         if (unchangedDose && entry && !entry.doseExpression) entry.doseExpression = old.doseExpression;
         else if (!entry || !equalStructuredValues(entry.doseExpression, old.doseExpression))
@@ -2300,11 +2323,11 @@ const COMPONENT: BridgeShape = {
     ...ELEMENT,
     type: { value: "valueCodeableConcept" },
     doseRange: { value: "valueRange" },
-    doseQuantity: { value: "valueQuantity" },
+    doseQuantity: QUANTITY,
     doseExpression: { value: "valueExpression" },
     rateRatio: { value: "valueRatio" },
     rateRange: { value: "valueRange" },
-    rateQuantity: { value: "valueQuantity" },
+    rateQuantity: QUANTITY,
     rateExpression: { value: "valueExpression" }
   } }
 };
@@ -2319,7 +2342,7 @@ const STEP: BridgeShape = {
 const COURSE: BridgeShape = {
   ...ELEMENT,
   renderedInstruction: { value: "valueString" },
-  repeatCycle: { value: "valueQuantity" },
+  repeatCycle: QUANTITY,
   step: { fields: STEP, repeated: true },
   safety: { fields: SAFETY }
 };
@@ -2330,6 +2353,7 @@ const COMPACT_ROW: BridgeShape = {
   stepCount: { value: "valueInteger" },
   step: { fields: STEP },
   component: { fields: COMPONENT },
+  timingOffsets: { fields: { startOffset: QUANTITY, endOffset: QUANTITY } },
   baseline: { fields: {
     condition: { value: "valueString" }, safety: { value: "valueString" },
     site: { value: "valueString" }, timing: { value: "valueString" },

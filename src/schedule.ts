@@ -2013,6 +2013,85 @@ function selectedAlternativeCourse(
   };
 }
 
+/**
+ * Interpret R6 Timing.repeat interlacing offsets for numeric execution only.
+ * The authored R6/R5 course remains untouched and editable. The ordinary
+ * no-offset route returns by reference, without an extra grammar/validation
+ * pass. A single active-window track can use the existing repeat-cycle,
+ * relative-step and per-period schedulers without another cadence algorithm.
+ * Complex overlapping tracks remain non-executable instead of silently
+ * administering outside their explicitly prescribed active window.
+ */
+function executionCourseWithPeriodOffsets(
+  course: FhirR6DosageInstruction
+): FhirR6DosageInstruction {
+  const step = course.step[0];
+  const one = course.step.length === 1 && step?.component.length === 1
+    ? step.component[0] : undefined;
+  const repeat = one?.timing?.repeat;
+  if (!repeat?.startOffset && !repeat?.endOffset) {
+    if (one || !course.step.some(item => item.component.some(component =>
+      component.timing?.repeat?.startOffset || component.timing?.repeat?.endOffset))) {
+      return course;
+    }
+    throw new MedicationQuantityCalculationError("unsupported-r6-period-offset",
+      "Interlaced R6 offsets in multiple components or steps cannot be executed reliably; the complete prescription remains editable.");
+  }
+  const fail = (): never => {
+    throw new MedicationQuantityCalculationError("unsupported-r6-period-offset",
+      "R6 period offsets need a finite day/week cycle with exact active days; the original timing remains available for clinician review.");
+  };
+  if (!one || !repeat || step.start || step.end ||
+      repeat.frequency === undefined || !Number.isInteger(repeat.frequency) ||
+      repeat.frequency <= 1 || repeat.period === undefined ||
+      repeat.frequencyMax !== undefined || repeat.periodMax !== undefined ||
+      repeat.boundsPeriod || repeat.boundsDuration || repeat.boundsRange ||
+      repeat.count !== undefined || repeat.countMax !== undefined) return fail();
+
+  const periodUnit = repeat.periodUnit;
+  const periodDays = periodUnit === FhirPeriodUnit.Day ? repeat.period
+    : periodUnit === FhirPeriodUnit.Week ? repeat.period * 7 : undefined;
+  const offsetDays = (quantity: FhirQuantity | FhirR6Quantity | undefined): number | undefined => {
+    if (!quantity) return 0;
+    const unit = parseBoundsDurationUnit(quantity);
+    if (quantity.comparator || quantity.value === undefined) return undefined;
+    return unit === FhirPeriodUnit.Day ? quantity.value
+      : unit === FhirPeriodUnit.Week ? quantity.value * 7 : undefined;
+  };
+  const startDays = offsetDays(repeat.startOffset);
+  const endDays = offsetDays(repeat.endOffset);
+  const activeDays = periodDays !== undefined && startDays !== undefined &&
+    endDays !== undefined ? periodDays - startDays - endDays : undefined;
+  const cycleDays = course.repeatCycle
+    ? offsetDays(course.repeatCycle) : periodDays;
+  if (periodDays === undefined || startDays === undefined || endDays === undefined ||
+      activeDays === undefined || cycleDays !== periodDays ||
+      !Number.isInteger(periodDays) || !Number.isInteger(startDays) ||
+      !Number.isInteger(endDays) || !Number.isInteger(activeDays) ||
+      activeDays <= 0 || startDays < 0 || endDays < 0) return fail();
+  const relativeDay = (value: number): FhirR6RelativeTime => ({
+    contextCode: { coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start" }] },
+    offsetDuration: { value, unit: "d", code: "d", system: "http://unitsofmeasure.org" }
+  });
+  const { startOffset: _startOffset, endOffset: _endOffset, ...schedule } = repeat;
+  return {
+    ...course,
+    repeatCycle: course.repeatCycle ?? { value: periodDays, unit: "d", code: "d" },
+    step: [{
+      ...step,
+      start: relativeDay(startDays),
+      end: relativeDay(periodDays - endDays),
+      component: [{
+        ...one,
+        timing: { ...one.timing, repeat: {
+          ...schedule, frequency: repeat.frequency, period: activeDays,
+          periodUnit: FhirPeriodUnit.Day
+        } }
+      }]
+    }]
+  };
+}
+
 export function nextDueDoses(
   dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult,
   options: NextDueDoseOptions
@@ -2033,7 +2112,9 @@ export function nextDueDoses(
       return nextDueDoses(toDosageDetails(dosage), options);
     }
     const r6Course = !Array.isArray(dosage) && "step" in dosage
-      ? selectedAlternativeCourse(dosage as FhirR6DosageInstruction, options) : undefined;
+      ? executionCourseWithPeriodOffsets(
+        selectedAlternativeCourse(dosage as FhirR6DosageInstruction, options))
+      : undefined;
     if (r6Course) requireExecutableCourseContext(r6Course, "scheduling");
     const zone = options?.timeZone ?? options?.config?.timeZone;
     if (r6Course?.repeatCycle && zone) {
@@ -4213,7 +4294,7 @@ function calculateCourseTotalUnits(
   course: FhirR6DosageInstruction, options: TotalUnitsOptions,
   cycleDefaultEnd?: Date, cycleIndex?: number
 ): TotalUnitsResult {
-  course = selectedAlternativeCourse(course, options);
+  course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
   requireExecutableCourseContext(course, "calculating");
   const zone = options.timeZone ?? options.config?.timeZone;
   if (!zone)

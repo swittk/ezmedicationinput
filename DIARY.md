@@ -4412,3 +4412,52 @@ Validation: 44 source suites passed 3837/3837; ESM/CJS and TypeScript declaratio
 - Fix: in each existing English/Thai long renderer, compute sources once in additional-instruction order, keep their exact result arrays beside the already-produced combined source list, and reuse by the unchanged instruction index in the entailment and graph-ownership decisions. No global or cross-parse cache, stale data, extra source scan, FHIR changes, dependency, or parser pass. The usual absence of additional instructions still means zero matcher calls.
 - Verification: previous and revised 850-iteration hot-path spot benchmarks are noisy. English "avoid alcohol" 0.094 -> 0.076 ms/format and "may cause drowsiness" 0.037 -> 0.029; some examples were flat or slightly slower within test variation, so no broad speed claim. The number of full matcher calls per coded instruction drops from up to three to one, while Thai drops from two to one. All 748 focused warning/graph/review/OPD tests passed, then the complete 44 test files 3860/3860 passed; ESM/CJS and TypeScript declaration build passed, packaged exports 4/4 passed, and git diff --check was clean.
 - Package preflight only: npm pack --dry-run emitted the expected 0.2.0-ez.0 package (dist CJS/ESM and declarations). Registry latest remains 0.1.67. No merge, publish, bump or Shinebright dependency mutation has been performed in this loop. Keep all changes inside PR #10; unrelated test/__tmp_open_semantic_probe.ts remains untouched.
+
+
+## 2026-11-14 — PR #13 CodeRabbit review: current-R6 meaning with R5-safe persistence
+
+**Product gate:** All six reported findings were confirmed as real on supported
+structured R6 medication data; none warranted a new HPSG pass, safety-refusal
+layer, R5 data migration, historical R6 import compatibility, or dependency.
+The four inline findings and two related outside-diff findings were reviewed
+against AGENTS.md, DIRECTIONALITY.md, and the existing bridge/edit decisions.
+
+- Retained R6 timing-window offsets previously appeared illegally inside R5
+  Extension.valueTiming. They now use named typed R5-valid extension children,
+  with original R6 semantics rehydrated only while the live R5 timing is unchanged.
+- R6 approximate Quantity values (including dose/rate and repeatCycle)
+  previously leaked comparator "~" into R5 Extension.valueQuantity. Reused the
+  existing typed QUANTITY bridge, preserving comparator separately as a coded
+  child and losslessly reconstructing the R6 Quantity; no JSON string payloads.
+- Concept-only CodeableReference wrappers with id/extension now trigger the
+  existing compact R5 retention path even without a reference, preserving the
+  authored site concept and element metadata through save/reload.
+- A numeric R5 dose/rate edit now supersedes an *unchanged* retained R6
+  expression before recomposition; independently edited expressions remain
+  recoverable for human correction. Existing source/reconciliation provenance
+  stays attached rather than being erased to hide conflicts.
+- Source-less R6 imports now display native comparator-bearing dose/rate
+  quantities in both whole-course and component suggestions without creating
+  invalid R5 SimpleQuantity fields. Authored renderedInstruction remains first.
+- Current R6 Timing.repeat offsets execute through an ephemeral derived
+  repeat-cycle/relative-step view for a single finite day/week active-window
+  track. A 21-in-28-day, 2-day-start/5-day-end case gives exactly 21 tablets
+  per cycle and no administrations on off-days through native R6, strict R5,
+  and imported batch scheduling/supply. Interlaced multi-track or unresolved
+  offset units remain importable/displayable/editable but numeric execution
+  explicitly reports unsupported semantics instead of fabricating doses.
+
+**Independent oracles:** reviewed bridge extension shapes and round-trip bytes,
+native R6 and R5 edit precedence, numeric dose/rate replacement, concept-only
+site metadata, source-less display, and execution dates/supply for two cycles.
+The exact downstream dosage converter and in-memory medication usage-map save/
+reload retained 1/2/4 dosage rows unchanged across routine, Thai, and staged
+courses. No application source, persistence schema, or deployment was changed.
+
+**Final gate:** ES6 ESM/CJS and TypeScript declarations build passed; 44 source
+suites **3868/3868**, packaged ESM/CJS exports **4/4**, diff check clean.
+Alternating warm parse microbenchmarks (80 iterations per group, five groups,
+median microseconds): routine 1447.6 -> 1442.2; Thai 6232.0 -> 6183.4;
+independent-eye taper 6253.3 -> 6392.5. These are shared-host measurements,
+not a universal speed claim. Only documented, supported R6 course execution
+does additional interpretation; ordinary SIG parsing has no extra pass.

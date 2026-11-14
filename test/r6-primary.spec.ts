@@ -2801,6 +2801,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(rows).toHaveLength(1);
     expect(rows[0].timing?.repeat).not.toHaveProperty("startOffset");
     expect(rows[0].timing?.repeat).not.toHaveProperty("endOffset");
+    const retained = JSON.stringify(rows[0].modifierExtension);
+    expect(retained).toContain('"timingOffsets"');
+    expect(retained).not.toContain('"valueTiming"');
+    expect(retained).not.toContain('"startOffset":{"value"');
     expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
     const edited = JSON.parse(JSON.stringify(rows)) as EzDosage[];
     edited[0].timing!.repeat!.frequency = 20;
@@ -2826,6 +2830,12 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(rows).toHaveLength(1);
     expect(rows[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
     expect(rows[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
+    expect(JSON.stringify(rows)).not.toContain('"comparator":"~"');
+    expect(JSON.stringify(rows)).toContain('"valueCode":"~"');
+    expect(formatSig(course, "long", { locale: "en" })).toContain("Dose: ~1 tab");
+    expect(fromFhir(course, { locale: "en" }).items[0].longText).toContain("Dose: ~1 tab");
+    expect(formatSig(course, "long", { locale: "en" })).toContain("Rate: >=4 mL/h");
+    expect(fromFhir(course, { locale: "th" }).longText).toContain("~1 tab");
     expect(toDosageDetails(rows)).toEqual(course);
     const edited = cloneStructuredValue(rows);
     edited[0].doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
@@ -2833,6 +2843,91 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(recomposed.step[0].component[0].doseAndRate?.[0].doseQuantity)
       .toEqual({ value: 2, unit: "tab" });
     expect(recomposed.step[0].component[0].doseAndRate?.[0].rateQuantity?.comparator).toBe(">=");
+  });
+
+  it("retains concept-only R6 site wrapper metadata and approximate repeatCycle in R5 extensions", () => {
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, comparator: "~", code: "d", unit: "d" },
+      step: [{ component: [{
+        site: { id: "site-concept", concept: { text: "left eye" },
+          extension: [{ url: "https://example.org/site-provenance", valueString: "reviewed" }] },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
+      }] }]
+    };
+    const projected = toFhirR5Dosages(course);
+    expect(projected[0].site?.text).toBe("left eye");
+    expect(projected[0].modifierExtension?.length).toBeGreaterThan(0);
+    expect(JSON.stringify(projected)).not.toContain('"comparator":"~"');
+    expect(JSON.stringify(projected)).toContain('"valueCode":"~"');
+    expect(toDosageDetails(JSON.parse(JSON.stringify(projected)))).toEqual(course);
+  });
+
+  it("supersedes unchanged imported expressions when the clinician adds numeric dose and rate choices", () => {
+    const imported: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{
+        doseExpression: { language: "text/fhirpath", expression: "%patient.weight*2" },
+        rateExpression: { language: "text/fhirpath", expression: "4*%patient.weight" }
+      }]
+    }] }] };
+    const rows = fromFhir(imported).fhir;
+    rows[0].doseAndRate![0].doseQuantity = { value: 2, unit: "mg" };
+    rows[0].doseAndRate![0].rateQuantity = { value: 4, unit: "mL/h" };
+    const corrected = toDosageDetails(rows);
+    expect(corrected.step[0].component[0].doseAndRate).toEqual([{
+      doseQuantity: { value: 2, unit: "mg" },
+      rateQuantity: { value: 4, unit: "mL/h" }
+    }]);
+    expect(fromFhir(corrected).fhirNext).toEqual(corrected);
+    expect(corrected.extension).toContainEqual(expect.objectContaining({
+      valueString: expect.stringContaining("superseded by edited R5 dose fields")
+    }));
+
+    // A different clinician-edited expression is not the old retained one.
+    // Keep both authored choices available for manual correction, rather than
+    // silently choosing between contradictory edits.
+    const conflicting = fromFhir(imported).fhir;
+    conflicting[0].doseAndRate![0].doseExpression = { expression: "%patient.weight*3" };
+    conflicting[0].doseAndRate![0].doseQuantity = { value: 3, unit: "mg" };
+    const unresolved = toDosageDetails(conflicting);
+    expect(unresolved.step[0].component[0].doseAndRate?.[0]).toMatchObject({
+      doseExpression: { expression: "%patient.weight*3" }, doseQuantity: { value: 3 }
+    });
+    expect(() => fromFhir(unresolved)).toThrow(/multiple dose\[x\]/);
+  });
+
+  it("executes R6 21-in-28 active-window offsets without administering during the rest days", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, code: "d", unit: "d" },
+        endOffset: { value: 5, code: "d", unit: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const anchor = "2026-11-02T00:00:00+07:00";
+    const opts = { from: anchor, orderedAt: anchor, timeZone: "Asia/Bangkok", limit: 22 };
+    const first = "2026-11-04T00:00:00+07:00";
+    const last = "2026-11-24T00:00:00+07:00";
+    const next = "2026-12-02T00:00:00+07:00";
+    for (const input of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      const due = nextDueDoses(input, opts);
+      expect(due).toHaveLength(22);
+      expect(due[0]).toBe(first);
+      expect(due[20]).toBe(last);
+      expect(due[21]).toBe(next);
+      expect(calculateTotalUnits({ dosage: input, ...opts,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+      expect(calculateTotalUnits({ dosage: input, ...opts,
+        durationValue: 56, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(42);
+    }
+    expect(fromFhir(course).fhirNext).toEqual(course);
+    // Multiple interlaced tracks need their own proven shared scheduling
+    // semantics, not a guessed single phase or silently ignored offsets.
+    const multi: FhirR6DosageInstruction = { step: [{ component: [
+      course.step[0].component[0], { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }
+    ] }] };
+    expect(fromFhir(multi).fhirNext).toEqual(multi);
+    expect(() => nextDueDoses(multi, opts)).toThrow(/Interlaced R6 offsets/);
+    expect(() => calculateTotalUnits({ dosage: multi, ...opts,
+      durationValue: 28, durationUnit: FhirPeriodUnit.Day })).toThrow(/Interlaced R6 offsets/);
   });
 
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {

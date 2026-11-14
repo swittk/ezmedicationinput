@@ -1433,6 +1433,25 @@ export function formatSig(
         const recognized = formatSig(fromR6Dosage(component, index + 1), style, options);
         const expressions: string[] = [];
         for (const amount of component.doseAndRate ?? []) {
+          // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
+          // Keep their actual amount visible in source-less R6 suggestions,
+          // without introducing invalid R5 dose/rate choices.
+          if (amount.doseQuantity?.comparator && amount.doseQuantity.value !== undefined) {
+            expressions.push(
+              (thai ? "ขนาดยาต่อครั้ง: " : "Dose: ") +
+              amount.doseQuantity.comparator + amount.doseQuantity.value +
+              (amount.doseQuantity.unit || amount.doseQuantity.code
+                ? " " + (amount.doseQuantity.unit ?? amount.doseQuantity.code) : "")
+            );
+          }
+          if (amount.rateQuantity?.comparator && amount.rateQuantity.value !== undefined) {
+            expressions.push(
+              (thai ? "อัตราการให้ยา: " : "Rate: ") +
+              amount.rateQuantity.comparator + amount.rateQuantity.value +
+              (amount.rateQuantity.unit || amount.rateQuantity.code
+                ? " " + (amount.rateQuantity.unit ?? amount.rateQuantity.code) : "")
+            );
+          }
           if (amount.doseExpression?.expression) {
             expressions.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
           }
@@ -1622,6 +1641,20 @@ export function fromFhir(
   const items = toFhirR5Dosages(dosageDetails).map(dosage =>
     fromFhirDosageInternal(dosage, options)
   );
+  // Imported R6-only approximations have no legal R5 SimpleQuantity slot.
+  // Their editor-row suggestions must retain the amount just as the
+  // whole-course display does. Ordinary R6 imports do no extra rendering.
+  if (!dosageDetails.renderedInstruction) {
+    let row = 0;
+    for (const step of dosageDetails.step) for (const component of step.component) {
+      const item = items[row++];
+      if (!item || !component.doseAndRate?.some(rate =>
+        rate.doseQuantity?.comparator || rate.rateQuantity?.comparator)) continue;
+      const ownCourse: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+      item.shortText = formatSig(ownCourse, "short", options);
+      item.longText = formatSig(ownCourse, "long", options);
+    }
+  }
   const primary = items[0] ?? fromFhirDosage({
     text: dosageDetails.renderedInstruction ?? ""
   }, options);
