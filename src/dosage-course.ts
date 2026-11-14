@@ -1750,6 +1750,22 @@ function rateChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | un
   return { rateQuantity: entry?.rateQuantity, rateRange: entry?.rateRange, rateRatio: entry?.rateRatio };
 }
 
+/** Only the cadence period and frequency govern R6 period-offset
+ * interpretation. Independent clock, weekday, and display edits must not
+ * delete the original active/rest window. Used only for retained R6 offsets. */
+function offsetCadenceFingerprint(
+  timing: FhirDosage["timing"] | FhirR6Dosage["timing"]
+): string {
+  const repeat = timing?.repeat;
+  return compactProjectionFingerprint({
+    frequency: repeat?.frequency,
+    frequencyMax: repeat?.frequencyMax,
+    period: repeat?.period,
+    periodMax: repeat?.periodMax,
+    periodUnit: repeat?.periodUnit
+  });
+}
+
 /** Build only the fields that cannot be reconstructed from this live row.
  * Extended R5 dosages already own native condition/safety/expression fields;
  * strict R5 needs typed deltas for those fields, but never another timing/dose copy.
@@ -1775,7 +1791,7 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): Pic
     ...(original.timing.repeat.endOffset !== undefined
       ? { endOffset: original.timing.repeat.endOffset } : {})
   } : undefined;
-  if (timingOffsets) baseline.timing = compactProjectionFingerprint(row.timing);
+  if (timingOffsets) baseline.timing = offsetCadenceFingerprint(row.timing);
   if (!equalStructuredValues(original.safety, projected.safety)) {
     component.safety = original.safety;
     baseline.safety = compactProjectionFingerprint(toR6Safety(row));
@@ -1925,7 +1941,7 @@ function restoreComponentDelta(
     fresh.condition = delta.condition;
   }
   if (local.timingOffsets) {
-    if (local.baseline?.timing === compactProjectionFingerprint(dosage.timing)) {
+    if (local.baseline?.timing === offsetCadenceFingerprint(dosage.timing)) {
       fresh.timing = { ...fresh.timing, repeat: {
         ...fresh.timing?.repeat, ...local.timingOffsets
       } };

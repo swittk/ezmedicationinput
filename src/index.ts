@@ -1446,13 +1446,30 @@ export function formatSig(
         const recognized = formatSig(display, style, options);
         const expressions: string[] = [];
         if (hasOffsets && repeat) {
-          const period = repeat.period !== undefined && repeat.periodUnit
-            ? formatCourseTimeQuantity({
-              value: repeat.period, code: repeat.periodUnit, unit: repeat.periodUnit
-            }, thai) : undefined;
-          if (period && repeat.frequency !== undefined) expressions.push(
-            thai ? `ให้ยา ${repeat.frequency} ครั้งต่อช่วง ${period}` :
-              `${repeat.frequency} administrations per ${period}`
+          const periodUnit = repeat.periodUnit;
+          const period = periodUnit && repeat.period !== undefined
+            ? repeat.periodMax !== undefined
+              ? `${repeat.period}–${formatCourseTimeQuantity({
+                value: repeat.periodMax, code: periodUnit, unit: periodUnit
+              }, thai)}`
+              : formatCourseTimeQuantity({
+                value: repeat.period, code: periodUnit, unit: periodUnit
+              }, thai)
+            : periodUnit && repeat.periodMax !== undefined
+              ? (thai ? "ไม่เกิน " : "up to ") + formatCourseTimeQuantity({
+                value: repeat.periodMax, code: periodUnit, unit: periodUnit
+              }, thai) : undefined;
+          const frequency = repeat.frequency !== undefined
+            ? repeat.frequencyMax !== undefined
+              ? `${repeat.frequency}–${repeat.frequencyMax}` : String(repeat.frequency)
+            : repeat.frequencyMax !== undefined
+              ? (thai ? "ไม่เกิน " : "up to ") + repeat.frequencyMax : undefined;
+          if (frequency) expressions.push(
+            thai ? `ให้ยา ${frequency} ครั้ง${period ? "ต่อช่วง " + period : ""}` :
+              `${frequency} administrations${period ? " per " + period : ""}`
+          );
+          else if (period && repeat.periodMax !== undefined) expressions.push(
+            thai ? `ช่วงเวลาการให้ยา ${period}` : `Dosing period: ${period}`
           );
           const periodContext = period
             ? thai ? ` (รอบละ ${period})` : ` (each period lasts ${period})`

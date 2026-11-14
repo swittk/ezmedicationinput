@@ -3165,6 +3165,89 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }
   });
 
+  it("keeps R6 active-window offsets when an R5 clinician adds a clock without changing the period", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, code: "d", unit: "d" },
+        endOffset: { value: 5, code: "d", unit: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const rows = toFhirR5Dosages(course);
+    rows[0].timing!.repeat!.timeOfDay = ["08:00:00"];
+    const restored = toDosageDetails(rows);
+    expect(restored.step[0].component[0].timing?.repeat).toEqual({
+      ...course.step[0].component[0].timing!.repeat,
+      timeOfDay: ["08:00:00"]
+    });
+    expect(restored.extension?.some(value =>
+      value.url.includes("medication-course-reconciliation-warning"))).not.toBe(true);
+    // Editing the cadence itself is different: stale offsets must not
+    // silently become executable under a new period.
+    rows[0].timing!.repeat!.period = 21;
+    const changedPeriod = toDosageDetails(rows);
+    expect(changedPeriod.step[0].component[0].timing?.repeat?.startOffset).toBeUndefined();
+    expect(changedPeriod.extension?.some(value =>
+      value.url.includes("medication-course-reconciliation-source"))).toBe(true);
+  });
+
+  it("displays native R6 offset frequency and period maxima as ranges, not exact counts", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 21, frequencyMax: 42,
+        period: 28, periodMax: 30, periodUnit: FhirPeriodUnit.Day,
+        endOffset: { value: 7, code: "d", unit: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const en = formatSig(course, "long", { locale: "en" });
+    const th = formatSig(course, "long", { locale: "th" });
+    expect(en).toContain("21–42 administrations per 28–30 days");
+    expect(en).toContain("No doses during the final 7 days");
+    expect(en).not.toContain("21 administrations per 28 days");
+    expect(th).toContain("21–42 ครั้งต่อช่วง 28–30 วัน");
+    expect(fromFhir(course, { locale: "en" }).items[0].longText).toContain("21–42");
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+  });
+
+  it("keeps authored 08:00/20:00 wall clocks through New York fall DST and later calendar cycles", () => {
+    const from = "2026-10-26T00:00:00-04:00";
+    const options = { from, orderedAt: from, timeZone: "America/New_York", limit: 56 };
+    const component: EzDosage = {
+      timing: { repeat: {
+        frequency: 42, period: 21, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"]
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const regular = nextDueDoses(component, options);
+    expect(regular.slice(0, 2)).toEqual([
+      "2026-10-26T08:00:00-04:00", "2026-10-26T20:00:00-04:00"
+    ]);
+    expect(regular.slice(12, 14)).toEqual([
+      "2026-11-01T08:00:00-05:00", "2026-11-01T20:00:00-05:00"
+    ]);
+    expect(regular.slice(40, 44)).toEqual([
+      "2026-11-15T08:00:00-05:00", "2026-11-15T20:00:00-05:00",
+      "2026-11-16T08:00:00-05:00", "2026-11-16T20:00:00-05:00"
+    ]);
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      ...component,
+      timing: { repeat: { ...component.timing!.repeat!,
+        period: 28, endOffset: { value: 7, unit: "d", code: "d" }
+      } }
+    }] }] };
+    for (const input of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      const due = nextDueDoses(input, options);
+      expect(due.slice(12, 14)).toEqual([
+        "2026-11-01T08:00:00-05:00", "2026-11-01T20:00:00-05:00"
+      ]);
+      expect(due.slice(40, 44)).toEqual([
+        "2026-11-15T08:00:00-05:00", "2026-11-15T20:00:00-05:00",
+        "2026-11-23T08:00:00-05:00", "2026-11-23T20:00:00-05:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...options,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(42);
+    }
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

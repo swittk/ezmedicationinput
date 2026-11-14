@@ -4600,3 +4600,55 @@ Seven alternating warm batches of 75 parses against immutable pre-review
 6349.7 -> 6572.8 (+3.5%). There is no new ordinary-parse pass; timing
 differences are host-side and not a phone claim. No package publishing,
 application deployment, master merge or new CodeRabbit review request.
+
+
+## 2026-11-14 — PR #13 fifth CodeRabbit review: cadence-owned offsets, honest ranges, and DST-safe clocks
+
+Product decision gate: All three new findings were reproduced on current
+supported R6/R5 medication data. They cause either loss of an independently
+authored active/rest window, incorrect clinician-facing dose-range text, or
+wrong scheduled administration times. Each correction is limited to the
+existing typed R5/R6 bridge, source-less R6 renderer or frequency scheduler.
+No new HPSG pass, blanket input guard, runtime dependency, migration,
+legacy-R6 compatibility path or ordinary-parser cost was introduced.
+
+- A 21-in-28-day R6 course with startOffset=2d and endOffset=5d
+  previously lost both offsets after an R5 editor added 08:00 timeOfDay.
+  The old whole-Timing fingerprint mixed independent clock/weekday metadata
+  with the frequency/period defining the offset semantics. The rare
+  retained-offset path now fingerprints only cadence fields
+  (frequency/frequencyMax/period/periodMax/periodUnit); unrelated live R5
+  clocks remain authoritative and offsets stay executable. A real frequency
+  or period edit still supersedes the offsets with row-local source provenance.
+- Source-less R6 period-offset rendering used to erase frequencyMax and
+  periodMax from its temporary R5 display copy but print only the minima,
+  turning an allowed range into a false exact count. The existing formatter
+  now realizes both provided bounds, e.g. 21–42 administrations per 28–30
+  days, localized in English and Thai, and keeps the active/rest text.
+  No FHIR fields are changed by formatting.
+- Exact explicit twice-daily clocks over a 21-day calendar period
+  previously became 00:00/12:00 then 23:00/11:00 when America/New_York
+  fell out of DST on 2026-11-01. The existing calendar frequency generator
+  now advances exact daily-clock day/week cycles by local calendar dates
+  without losing the source clock across DST. The R6 repeat-cycle helper
+  uses the same local-day advancement for integral day/week course cycles,
+  rather than changing the globally shared elapsed-q24h interval stepper.
+  Generic frequency distributions and elapsed timing remain unchanged.
+  The 42-per-21-day non-offset case and 42-in-28-day 7-day-rest R6/R5
+  case yield exact 08:00/20:00 clocks before and after the DST transition
+  and correct next-cycle dates, 42 tablets per active 28-day period.
+
+Independent assertions added only to the existing R6 test file; the three
+regressions reproduce meaningful prior errors and test edits, rendered
+language, exact dates, native R6 and R5 bridge round-trip. Downstream
+Shinebright dosage converter and medication usage-map round-trip was
+read-only verified to keep 1/2/4 clinical dosage rows unchanged in ordinary,
+Thai and staged inputs, without editing application code.
+
+Full validation: **3880/3880 tests in 44 source suites**, ES6 ESM/CJS and
+TypeScript declaration build, **4/4 packaged exports**, git diff --check.
+Alternating warm host microbenchmarks against immutable pre-review ffaa125,
+seven groups of 75 parses, median microseconds: routine 1431.2->1381.3,
+Thai 5931.4->5797.9, ocular taper 5983.3->6019.4. These host timings
+support no meaningful normal-parse slowdown, not a phone speed claim.
+No merge, publication, deployment or new full review request.

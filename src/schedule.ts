@@ -384,6 +384,18 @@ function addLocalDays(date: Date, days: number, timeZone: string): Date {
   return zoned;
 }
 
+/** Advance a *calendar* dose cycle by local days while keeping its
+ * prescribed wall clock. Unlike an elapsed q24h interval, a course cycle
+ * cannot lose an hour at daylight-saving transitions. */
+function addCalendarDaysAtClock(
+  instant: Date, days: number, timeZone: string
+): Date | null {
+  const { year, month, day, hour, minute, second } = getTimeParts(instant, timeZone);
+  const rollover = new Date(Date.UTC(year, month - 1, day + days));
+  return makeZonedDate(timeZone, rollover.getUTCFullYear(),
+    rollover.getUTCMonth() + 1, rollover.getUTCDate(), hour, minute, second);
+}
+
 /** Computes the local weekday token (mon..sun). */
 function getLocalWeekday(date: Date, timeZone: string): string {
   const formatted = getWeekdayFormat(timeZone).format(date);
@@ -1731,6 +1743,13 @@ function durationStepper(
   const periodUnit = parseBoundsDurationUnit(quantity);
   if (quantity?.comparator || value === undefined || !Number.isFinite(value) ||
       value <= 0 || !periodUnit) return null;
+  // Day/week course cycles follow calendar dates, not elapsed 24-hour
+  // intervals. q24h interval scheduling still uses createIntervalStepper.
+  if (Number.isInteger(value) && (periodUnit === FhirPeriodUnit.Day ||
+      periodUnit === FhirPeriodUnit.Week)) {
+    const days = value * (periodUnit === FhirPeriodUnit.Week ? 7 : 1);
+    return instant => addCalendarDaysAtClock(instant, days, timeZone);
+  }
   return createIntervalStepper({ period: value, periodUnit }, timeZone);
 }
 
@@ -3085,7 +3104,16 @@ function generateFrequencyPerPeriodSeries(
   const period = positiveNumber(repeat.period);
   const periodUnit = repeat.periodUnit;
   if (!frequency || !period || !periodUnit || effectiveLimit <= 0) return [];
-  const advanceCycle = createIntervalStepper({ period, periodUnit }, timeZone);
+  // Explicit calendar clocks own the same hour across a DST boundary.
+  // Only exact per-day clock schedules take this branch: ordinary elapsed
+  // intervals and generic frequency distributions keep their old semantics.
+  const dayCount = periodUnit === FhirPeriodUnit.Day ? period :
+    periodUnit === FhirPeriodUnit.Week ? period * 7 : undefined;
+  const exactDailyClocks = dayCount !== undefined && Number.isInteger(dayCount) &&
+    clocks.length > 0 && frequency === dayCount * clocks.length;
+  const advanceCycle = exactDailyClocks
+    ? (instant: Date) => addCalendarDaysAtClock(instant, dayCount, timeZone)
+    : createIntervalStepper({ period, periodUnit }, timeZone);
   if (!advanceCycle) return [];
   const results: string[] = [];
   const seen = new Set<string>();
