@@ -1768,3 +1768,22 @@ describe("dose-times-frequency whitespace preserves the same clinical regimen", 
     }
   );
 });
+
+describe("postposed phase-relation adjuncts", () => {
+  it.each(["afterwards", "thereafter", "subsequently"])(
+    "keeps an existing phase transition and consumes trailing %s without making a fourth step", (adverb) => {
+      const result = parseSig(
+        `2 tabs morning, 1 tab evening, for 1 week, then 2 tabs once morning for 1 month, then 1/2 tab po on monday-friday ${adverb}`,
+        { locale: "th", context: TABLET_CONTEXT }
+      );
+      expect(result.count).toBe(4);
+      expect(result.fhirNext.step.map(step => step.component.length)).toEqual([2, 1, 1]);
+      expect(result.items.map(item => item.fhir.sequence)).toEqual([1, 1, 2, 3]);
+      expect(result.meta.leftoverText).toBeUndefined();
+      expect(result.items[3].longText).toContain("0.5 เม็ด");
+      expect(result.items[3].longText).toContain("วันจันทร์");
+      expect(result.items[3].fhir.timing?.repeat?.dayOfWeek).toEqual(["mon", "tue", "wed", "thu", "fri"]);
+      expect(result.items[3].fhir.timing?.repeat?.when).toEqual(["MORN"]);
+    }
+  );
+});
