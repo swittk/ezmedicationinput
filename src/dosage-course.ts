@@ -2,7 +2,7 @@
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
-  FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirR6Dosage, FhirR6DosageCondition,
+  FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity,
   MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep
 } from "./types";
@@ -48,15 +48,20 @@ function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageInstructi
   const retained = modifierExtension?.length
     ? [{ url: R5_STEP_MODIFIERS_R6_URL, extension: modifierExtension }]
     : [];
-  const extensions = [...(extension ?? []), ...retained];
-  return { ...fields, ...(extensions.length ? { extension: extensions } : {}) };
+  const extensions = retained.length ? [...(extension ?? []), ...retained] : extension;
+  return { ...fields, ...(extensions?.length ? { extension: extensions } : {}) };
 }
 
 function r5StepMetadata(step: Omit<FhirR6DosageInstruction["step"][number], "component">):
   Omit<EzCourseStep, "sequence"> {
   const { extension, ...fields } = step;
-  const retained = extension?.find(value => value.url === R5_STEP_MODIFIERS_R6_URL);
-  const extensions = extension?.filter(value => value.url !== R5_STEP_MODIFIERS_R6_URL);
+  let retained: FhirExtension | undefined;
+  let extensions: FhirExtension[] | undefined;
+  for (const item of extension ?? []) {
+    if (item.url === R5_STEP_MODIFIERS_R6_URL) {
+      if (!retained) retained = item;
+    } else (extensions ??= []).push(item);
+  }
   return {
     ...fields,
     ...(extensions?.length ? { extension: extensions } : {}),
@@ -557,14 +562,20 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     siteReference, excludedDates,
     doseAndRate, modifierExtension, extension, ...rest
   } = dosage as EzDosage;
-  // Ordinary SIGs have no R5-only rate modifiers. Avoid extra allocations.
-  const r6Rates = doseAndRate?.some(rate => rate.modifierExtension?.length)
-    ? doseAndRate.map(({ modifierExtension: rateModifiers, extension: rateExtension, ...rate }) => {
-      const retained = rateModifiers?.length
-        ? [{ url: R5_RATE_MODIFIERS_R6_URL, extension: rateModifiers }] : [];
-      const extensions = [...(rateExtension ?? []), ...retained];
-      return { ...rate, ...(extensions.length ? { extension: extensions } : {}) };
-    }) : doseAndRate;
+  // Ordinary rate objects are reused as-is. Only the first R5-only
+  // modifier starts a copy; subsequent entries are handled in this same pass.
+  let r6Rates = doseAndRate;
+  if (doseAndRate) for (let index = 0; index < doseAndRate.length; index++) {
+    const rate = doseAndRate[index];
+    if (rate.modifierExtension !== undefined) {
+      if (r6Rates === doseAndRate) r6Rates = doseAndRate.slice(0, index);
+      const { modifierExtension: oldModifiers, extension: oldExtensions, ...fields } = rate;
+      const extensions = oldModifiers?.length
+        ? [...(oldExtensions ?? []), { url: R5_RATE_MODIFIERS_R6_URL, extension: oldModifiers }]
+        : oldExtensions;
+      r6Rates!.push({ ...fields, ...(extensions?.length ? { extension: extensions } : {}) });
+    } else if (r6Rates !== doseAndRate) r6Rates!.push(rate);
+  }
   // Presence is semantically different from absence: [] explicitly clears
   // an R6-native condition. It must not fall back to a stale R5 modifier.
   const predicate = ownConditions === undefined ? parseDosageCondition(dosage) : undefined;
@@ -621,11 +632,14 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
  */
 export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage {
   const { site, condition, safety, doseAndRate, timing, ...rest } = dosage;
-  // Timing.repeat.startOffset/endOffset belong exclusively to R6. The
-  // complete original R6 component is retained by the ordinary R5 bridge.
-  const { startOffset: _startOffset, endOffset: _endOffset, ...r5Repeat } =
-    timing?.repeat ?? {};
-  const r5Timing = timing?.repeat ? { ...timing, repeat: r5Repeat } : timing;
+  // Avoid cloning ordinary Timing values. R6-only offsets are stripped only
+  // when present, while their values remain in the editable course bridge.
+  let r5Timing: FhirDosage["timing"] = timing;
+  if (timing?.repeat && (timing.repeat.startOffset !== undefined ||
+      timing.repeat.endOffset !== undefined)) {
+    const { startOffset: _startOffset, endOffset: _endOffset, ...repeat } = timing.repeat;
+    r5Timing = { ...timing, repeat };
+  }
   let restoredSequence = sequence;
   const retainedSequence = dosage.extension?.find(extension =>
     extension.url === DOSAGE_RETAINED_R5_SEQUENCE_URL)?.valueDecimal;
@@ -640,16 +654,21 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
     ...(doseAndRate ? { doseAndRate: doseAndRate.map(({ doseExpression: _doseExpr,
       rateExpression: _rateExpr, extension: rateExtensions,
       doseQuantity, rateQuantity, ...entry }) => {
-      const old = rateExtensions?.find(item => item.url === R5_RATE_MODIFIERS_R6_URL);
-      const keep = rateExtensions?.filter(item => item.url !== R5_RATE_MODIFIERS_R6_URL);
-      const { comparator: doseComparator, ...simpleDose } = doseQuantity ?? {};
-      const { comparator: rateComparator, ...simpleRate } = rateQuantity ?? {};
+      let old: FhirExtension | undefined;
+      let keep: FhirExtension[] | undefined;
+      for (const item of rateExtensions ?? []) {
+        if (item.url === R5_RATE_MODIFIERS_R6_URL) {
+          if (!old) old = item;
+        } else (keep ??= []).push(item);
+      }
       return {
         ...entry,
-        // R5 doseAndRate uses SimpleQuantity. R6 comparators remain
-        // intact only in typed retained course metadata.
-        ...(doseQuantity && doseComparator === undefined ? { doseQuantity: simpleDose } : {}),
-        ...(rateQuantity && rateComparator === undefined ? { rateQuantity: simpleRate } : {}),
+        // The presence check makes these quantities valid R5 SimpleQuantity:
+        // no comparator is copied into the R5 wire object.
+        ...(doseQuantity && doseQuantity.comparator === undefined
+          ? { doseQuantity: doseQuantity as FhirSimpleQuantity } : {}),
+        ...(rateQuantity && rateQuantity.comparator === undefined
+          ? { rateQuantity: rateQuantity as FhirSimpleQuantity } : {}),
         ...(keep?.length ? { extension: keep } : {}),
         ...(old?.extension?.length ? { modifierExtension: old.extension } : {})
       };
@@ -1757,21 +1776,39 @@ function componentDelta(original: FhirR6Dosage, row: FhirDosage | EzDosage): {
       concept: row.site, reference: (row as EzDosage).siteReference
     });
   }
-  const r6OnlyDose = (entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number]) =>
-    Boolean(entry.doseExpression || entry.doseQuantity?.comparator);
-  const r6OnlyRate = (entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number]) =>
-    Boolean(entry.rateExpression || entry.rateQuantity?.comparator);
-  if (original.doseAndRate?.some(entry => r6OnlyDose(entry) || r6OnlyRate(entry))) {
-    component.doseAndRate = original.doseAndRate.map(entry => ({
-      ...(entry.doseExpression ? { doseExpression: entry.doseExpression } : {}),
-      ...(entry.doseQuantity?.comparator ? { doseQuantity: entry.doseQuantity } : {}),
-      ...(entry.rateExpression ? { rateExpression: entry.rateExpression } : {}),
-      ...(entry.rateQuantity?.comparator ? { rateQuantity: entry.rateQuantity } : {})
-    }));
-    baseline.doseAndRate = original.doseAndRate.map((entry, index) => ({
-      ...(r6OnlyDose(entry) ? { dose: compactProjectionFingerprint(doseChoice(row.doseAndRate?.[index])) } : {}),
-      ...(r6OnlyRate(entry) ? { rate: compactProjectionFingerprint(rateChoice(row.doseAndRate?.[index])) } : {})
-    }));
+  if (original.doseAndRate) {
+    let retained: NonNullable<FhirR6Dosage["doseAndRate"]> | undefined;
+    let fingerprints: NonNullable<ComponentDeltaBaseline["doseAndRate"]> | undefined;
+    for (let index = 0; index < original.doseAndRate.length; index++) {
+      const entry = original.doseAndRate[index];
+      const hasDose = Boolean(entry.doseExpression || entry.doseQuantity?.comparator);
+      const hasRate = Boolean(entry.rateExpression || entry.rateQuantity?.comparator);
+      if ((hasDose || hasRate) && !retained) {
+        retained = [];
+        fingerprints = [];
+        // Earlier ordinary slots keep their exact indices without a second
+        // full walk; only R6-specific quantities require source metadata.
+        for (let previous = 0; previous < index; previous++) {
+          retained.push({});
+          fingerprints.push({});
+        }
+      }
+      if (!retained) continue;
+      retained.push({
+        ...(entry.doseExpression ? { doseExpression: entry.doseExpression } : {}),
+        ...(entry.doseQuantity?.comparator ? { doseQuantity: entry.doseQuantity } : {}),
+        ...(entry.rateExpression ? { rateExpression: entry.rateExpression } : {}),
+        ...(entry.rateQuantity?.comparator ? { rateQuantity: entry.rateQuantity } : {})
+      });
+      fingerprints!.push({
+        ...(hasDose ? { dose: compactProjectionFingerprint(doseChoice(row.doseAndRate?.[index])) } : {}),
+        ...(hasRate ? { rate: compactProjectionFingerprint(rateChoice(row.doseAndRate?.[index])) } : {})
+      });
+    }
+    if (retained) {
+      component.doseAndRate = retained;
+      baseline.doseAndRate = fingerprints;
+    }
   }
   return Object.keys(component).length ? { component, baseline } : {};
 }
@@ -1896,35 +1933,47 @@ function restoreComponentDelta(
     fresh.site = delta.site;
   }
   if (delta.doseAndRate) {
-    const entries = fresh.doseAndRate?.map(entry => ({ ...entry }));
+    const current = fresh.doseAndRate;
+    const entries: typeof current = current ? [] : undefined;
     let supersededExpression = false;
     let supersededQuantity = false;
-    delta.doseAndRate.forEach((old, index) => {
-      const entry = entries?.[index];
+    const count = Math.max(current?.length ?? 0, delta.doseAndRate.length);
+    for (let index = 0; index < count; index++) {
+      const original = current?.[index];
+      const entry = original ? { ...original } : undefined;
+      if (entry && entries) entries[index] = entry;
+      const old = delta.doseAndRate[index];
+      if (!old) continue;
       const baseline = local.baseline?.doseAndRate?.[index];
-      const unchangedDose = entry && baseline?.dose === compactProjectionFingerprint(doseChoice(entry));
-      const unchangedRate = entry && baseline?.rate === compactProjectionFingerprint(rateChoice(entry));
+      // Fingerprints are relatively expensive; only calculate a slot when
+      // this precise R6-only choice actually needs restoration.
+      const unchangedDose = Boolean(entry && baseline?.dose !== undefined &&
+        (old.doseExpression || old.doseQuantity?.comparator) &&
+        baseline.dose === compactProjectionFingerprint(doseChoice(entry)));
+      const unchangedRate = Boolean(entry && baseline?.rate !== undefined &&
+        (old.rateExpression || old.rateQuantity?.comparator) &&
+        baseline.rate === compactProjectionFingerprint(rateChoice(entry)));
       if (old.doseExpression) {
-        if (unchangedDose && !entry.doseExpression) entry.doseExpression = old.doseExpression;
+        if (unchangedDose && entry && !entry.doseExpression) entry.doseExpression = old.doseExpression;
         else if (!entry || !equalStructuredValues(entry.doseExpression, old.doseExpression))
           supersededExpression = true;
       }
       if (old.doseQuantity?.comparator) {
-        if (unchangedDose && !entry.doseQuantity) entry.doseQuantity = old.doseQuantity;
+        if (unchangedDose && entry && !entry.doseQuantity) entry.doseQuantity = old.doseQuantity;
         else if (!entry || !equalStructuredValues(entry.doseQuantity, old.doseQuantity))
           supersededQuantity = true;
       }
       if (old.rateExpression) {
-        if (unchangedRate && !entry.rateExpression) entry.rateExpression = old.rateExpression;
+        if (unchangedRate && entry && !entry.rateExpression) entry.rateExpression = old.rateExpression;
         else if (!entry || !equalStructuredValues(entry.rateExpression, old.rateExpression))
           supersededExpression = true;
       }
       if (old.rateQuantity?.comparator) {
-        if (unchangedRate && !entry.rateQuantity) entry.rateQuantity = old.rateQuantity;
+        if (unchangedRate && entry && !entry.rateQuantity) entry.rateQuantity = old.rateQuantity;
         else if (!entry || !equalStructuredValues(entry.rateQuantity, old.rateQuantity))
           supersededQuantity = true;
       }
-    });
+    }
     if (entries) fresh.doseAndRate = entries;
     if (supersededExpression) addWarning(warnings,
       "Retained R6 dose/rate expressions superseded by edited R5 dose fields were preserved only as inert source provenance.");
