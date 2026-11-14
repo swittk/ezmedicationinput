@@ -2296,6 +2296,11 @@
       "additional"
     ]
   ],
+  "trailingPhaseRelationAdverbs": [
+    "afterwards",
+    "thereafter",
+    "subsequently"
+  ],
   "openEndedContinuationTokens": [
     "thereafter",
     "onward",

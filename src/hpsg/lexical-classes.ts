@@ -473,6 +473,7 @@ export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationCon
 /** Closed-class contrast that connects two instructions, not a new action. */
 export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);
 /** Compositional phrasal sequencers; single-token THEN remains the relation lexicon's authority. */
+export const TRAILING_PHASE_RELATION_ADVERBS = setOf(source.trailingPhaseRelationAdverbs);
 export const REGIMEN_SEQUENCE_CONNECTOR_PHRASES: readonly (readonly string[])[] =
   source.regimenSequenceConnectorPhrases
     .map(parts => [...parts])
