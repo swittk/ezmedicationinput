@@ -1357,7 +1357,7 @@ function treatmentStepOffsetQuantity(
     coding.code === "treatment-start")) return undefined;
   const quantity = relative.offsetDuration;
   return quantity && quantity.value !== undefined && Number.isFinite(quantity.value) &&
-    quantity.value >= 0 && !quantity.comparator ? quantity : undefined;
+    quantity.value >= 0 && !quantity.comparator ? quantity as FhirQuantity : undefined;
 }
 
 /** Convert an exact treatment-start boundary into a calendar-day ordinal.
@@ -1505,6 +1505,18 @@ export function formatSig(
               amount.rateQuantity.comparator + amount.rateQuantity.value +
               (amount.rateQuantity.unit || amount.rateQuantity.code
                 ? " " + (amount.rateQuantity.unit ?? amount.rateQuantity.code) : "")
+            );
+          }
+          const numerator = amount.rateRatio?.numerator;
+          if (numerator?.comparator === "~" && numerator.value !== undefined) {
+            const denominator = amount.rateRatio?.denominator;
+            expressions.push(
+              (thai ? "อัตราการให้ยา: " : "Rate: ") + "~" + numerator.value +
+              (numerator.unit || numerator.code ? " " + (numerator.unit ?? numerator.code) : "") +
+              (denominator?.value !== undefined
+                ? " / " + denominator.value +
+                  (denominator.unit || denominator.code
+                    ? " " + (denominator.unit ?? denominator.code) : "") : "")
             );
           }
           if (amount.doseExpression?.expression) {
@@ -1710,7 +1722,8 @@ export function fromFhir(
     if (!item || (!(component.timing?.repeat?.startOffset ||
         component.timing?.repeat?.endOffset) &&
         !component.doseAndRate?.some(rate =>
-          rate.doseQuantity?.comparator || rate.rateQuantity?.comparator))) continue;
+          rate.doseQuantity?.comparator || rate.rateQuantity?.comparator ||
+          rate.rateRatio?.numerator?.comparator === "~"))) continue;
     const source = component.text;
     if (source?.trim()) {
       item.shortText = source;

@@ -141,6 +141,11 @@ export interface FhirRatio extends FhirElement {
   denominator?: FhirSimpleQuantity;
 }
 
+/** R6 Ratio has the same shape as R5, but its numerator Quantity supports "~". */
+export interface FhirR6Ratio extends Omit<FhirRatio, "numerator"> {
+  numerator?: FhirR6Quantity;
+}
+
 /**
  * Follows https://build.fhir.org/valueset-event-timing.html
  * Real-world event relating to the schedule.
@@ -433,10 +438,11 @@ export interface FhirDoseAndRate extends FhirBackboneElement {
 /** Current R6 Dosage.doseAndRate is an Element, unlike R5/R6 Dosage
  * itself (a BackboneType). No modifierExtension is valid on this child. */
 export type FhirR6DoseAndRate = Omit<EzDoseAndRate,
-  "modifierExtension" | "doseQuantity" | "rateQuantity"> & {
+  "modifierExtension" | "doseQuantity" | "rateQuantity" | "rateRatio"> & {
   /** R6 dose[x]/rate[x] select Quantity (not R5 SimpleQuantity). */
   doseQuantity?: FhirR6Quantity;
   rateQuantity?: FhirR6Quantity;
+  rateRatio?: FhirR6Ratio;
 };
 
 /** R6 additions to the R5 DoseAndRate child object. */
@@ -485,7 +491,7 @@ export interface FhirR6DosageCondition extends FhirBackboneElement {
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
 export type FhirR6DoseLimit = FhirElement & {
   scope: "dosage" | "period" | "administration" | "lifetime";
-  period?: FhirQuantity;
+  period?: FhirR6Quantity;
   text?: string;
 } & (
   | { valueQuantity: FhirR6Quantity; valueInteger?: never; valueExpression?: never }
@@ -537,7 +543,7 @@ export interface FhirR6RelativeTime extends FhirBackboneElement {
   contextDefinition?: string;
   contextPath?: string;
   contextCode?: FhirCodeableConcept;
-  offsetDuration?: FhirQuantity;
+  offsetDuration?: FhirR6Quantity;
   offsetRange?: FhirRange;
   text?: string;
 }

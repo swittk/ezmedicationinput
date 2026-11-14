@@ -4699,3 +4699,80 @@ Seven alternating warm host median microbenchmarks versus frozen pre-review
 multiphase 6355.2 -> 6182.3; no measurable ordinary-parse regression.
 No deployment, package publication, R5 migration, PR merge or new review
 request was authorized.
+
+
+## 2026-11-15 — PR #13 seventh CodeRabbit review: FAMILY audit, identity, step-owner, R6 Quantity and calendar boundaries
+
+**Decision gate / review pressure:** Four inline reports were independently
+reproduced, not accepted just because CodeRabbit flagged them. Each affects
+supported structured editing or explicit clinical timing. Previous local
+fixes addressed individual failure modes without checking all consumers of
+the same retained-choice and calendar helpers; this pass audited and repaired
+the shared families. No new parse pass, dependency, speculative patient-safety
+gate, custom date expression language, or fresh review request.
+
+- **R6 dose/rate entry deletion and reordering:** Two R6-only approximate
+  amounts formerly collapsed to empty R5 quantities and were restored by
+  stale array index after one was removed. The R5-readable Element.id and
+  CodeableConcept.type already convey stable entry identities. The compact
+  typed bridge now retains those identities for each relevant source slot,
+  and the rare R6-only reconciliation matches unique IDs/types rather than
+  blindly reattaching the first quantity. Independent dose versus rate
+  change detection remains intact; original discarded values stay in the
+  row-local typed course source. Anonymous, indistinguishable projected
+  entries after deletion are mathematically unidentifiable: deliberately
+  leave them unassigned with original source provenance, NOT a fabricated
+  dose or a gratuitous new identity mechanism. Explicitly push back on any
+  reviewer demand for guaranteed recovery without actual source identity.
+- **Historical full-course source family:** The older retained-expression
+  reconciliation reuses this entry matcher, rather than reviving the wrong
+  expression by index. Its component-level matching no longer assigns
+  unmatched old stages by arbitrary order after a deletion when more than
+  one original is eligible. Existing IDs, choice ownership, exact
+  projections and source retention continue to work. A direct read-only
+  historical marker probe verifies only the correct surviving expression
+  is rehydrated; there is no new legacy import format.
+- **Step modifier ownership:** Merging a newly edited R5 step modifier with
+  its previous R6 wrapper had created two wrapper entries and returned the
+  old value on another round-trip. The existing r6StepMetadata encoder
+  replaces that specific wrapper with the current authoritative modifier,
+  supports explicit clear, and retains unrelated native extensions. No
+  separate metadata repair or new course container.
+- **Nested Quantity comparator family:** R6 Quantity allows "~", including
+  Ratio.numerator; Ratio.denominator is SimpleQuantity. The R6 Ratio type
+  now explicitly supports the numerator while the strict R5 projection
+  removes only the invalid "~" comparator and retains its numeric rate.
+  The existing typed QUANTITY bridge preserves the complete R6 Ratio
+  numerator inside named nested extension children, not invalid R5
+  Extension.valueRatio or JSON string. Unchanged rate ratios restore the
+  approximation; edited numerator/rateExpression supersedes it with
+  original provenance. Source-less R6 item/course previews show the
+  approximate rate. The adjacent R6 Duration / Safety doseLimit.period
+  quantities use the same codec; approximate relative offsets remain
+  importable and editable but do not become invented executable dates.
+- **DST step boundary family:** treatmentRelativeInstant for day/week
+  treatment-relative step starts/ends now delegates to the established
+  RFC 5545-style calendar boundary resolver. The 21-in-28-day active/rest
+  case anchored Feb 21 at 02:30 in New York no longer errors when its
+  March 14 end boundary falls in a spring gap: actual doses stay 08:00,
+  last active dose March 13, next cycle March 21, 21 tablets per 28 days.
+  Nearby month/year calendar advances now reuse the same boundary rule
+  and retain the original wall clock across later cycles. Strict explicit
+  dose clocks and elapsed q24h intervals remain separate.
+
+**Real-oracle checks:** 7 focused additions to the existing R6 test file
+cover deletion and reordering by ID/type, anonymous ambiguity, step
+modifier replacement/clear, approximate Ratio conversion/edits/display,
+DST offset active windows, monthly return to the original clock,
+R6 Duration/Safety comparator codec, and historical expression recovery.
+Focused R6 suite 223/223, all 44 source suites 3889/3889,
+ES6 ESM/CJS + TS declaration build PASS, packaged exports 4/4 PASS.
+The existing downstream strict R5 dosage converter and in-memory usage-map
+round-trip retained 1/2/4 ordinary/Thai/staged dosage rows unchanged.
+
+Paired host-only microbenchmark versus frozen pre-review 7c17914 (seven
+alternating warm 75-parse samples; median microseconds): routine 1578.9
+-> 1604.2 (+1.6%), Thai 6385.8 -> 6293.9 (-1.4%), independent-eye taper
+6215.5 -> 6275.6 (+1.0%). No new ordinary parsing work.
+No application modifications, persistence migration, master merge, package
+publication or full review request were performed.

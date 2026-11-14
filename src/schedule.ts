@@ -1724,7 +1724,8 @@ function treatmentRelativeInstant(
   const unit = duration?.code ?? duration?.unit;
   if (!knownAnchor || relative.contextReference || relative.contextDefinition ||
       relative.contextPath ||
-      quantity === undefined || !Number.isInteger(quantity) || quantity < 0) {
+      duration?.comparator || quantity === undefined ||
+      !Number.isInteger(quantity) || quantity < 0) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }
   switch (unit) {
@@ -1735,7 +1736,7 @@ function treatmentRelativeInstant(
       const days = unit === "wk" ? quantity * 7 : quantity;
       const parts = getTimeParts(orderedAt, timeZone);
       const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
-      const result = makeZonedDate(timeZone, shifted.getUTCFullYear(),
+      const result = calendarBoundaryDate(timeZone, shifted.getUTCFullYear(),
         shifted.getUTCMonth() + 1, shifted.getUTCDate(), parts.hour, parts.minute, parts.second);
       if (!result) throw new Error("Invalid R6 treatment-day offset");
       return result;
@@ -3247,11 +3248,18 @@ function createIntervalStepper(
     const delta = period * 7 * 24 * 60 * 60 * 1000;
     return (value: Date) => new Date(value.getTime() + delta);
   }
-  if (periodUnit === "mo") {
-    return (value: Date) => addCalendarMonths(value, period, timeZone);
-  }
-  if (periodUnit === "a") {
-    return (value: Date) => addCalendarMonths(value, period * 12, timeZone);
+  if (periodUnit === "mo" || periodUnit === "a") {
+    const months = periodUnit === "mo" ? period : period * 12;
+    let clock: Pick<TimeParts, "hour" | "minute" | "second"> | undefined;
+    return (value: Date) => {
+      // Calendar recurrence owns the original wall clock, even when an
+      // intervening cycle boundary has to pass through a DST gap.
+      if (!clock) {
+        const { hour, minute, second } = getTimeParts(value, timeZone);
+        clock = { hour, minute, second };
+      }
+      return addCalendarMonths(value, months, timeZone, clock);
+    };
   }
   return null;
 }
@@ -3264,38 +3272,23 @@ function createIntervalStepper(
  * @param timeZone IANA timezone used for wall-clock preservation.
  * @returns Shifted date preserving local clock and clamped day-of-month.
  */
-function addCalendarMonths(date: Date, months: number, timeZone: string): Date {
+function addCalendarMonths(
+  date: Date, months: number, timeZone: string,
+  originalClock?: Pick<TimeParts, "hour" | "minute" | "second">
+): Date {
   const { year, month, day, hour, minute, second } = getTimeParts(date, timeZone);
+  const clock = originalClock ?? { hour, minute, second };
   const targetMonthIndex = month - 1 + months;
   const targetYear = year + Math.floor(targetMonthIndex / 12);
   const targetMonth = (targetMonthIndex % 12 + 12) % 12;
-  const candidate = makeZonedDate(
-    timeZone,
-    targetYear,
-    targetMonth + 1,
-    1,
-    hour,
-    minute,
-    second
-  );
-  if (!candidate) {
-    throw new Error("Unable to compute candidate month while scheduling");
-  }
   const maxDay = new Date(Date.UTC(targetYear, targetMonth + 1, 0)).getUTCDate();
   const resolvedDay = Math.min(day, maxDay);
-  const final = makeZonedDate(
-    timeZone,
-    targetYear,
-    targetMonth + 1,
-    resolvedDay,
-    hour,
-    minute,
-    second
+  const result = calendarBoundaryDate(
+    timeZone, targetYear, targetMonth + 1, resolvedDay,
+    clock.hour, clock.minute, clock.second
   );
-  if (!final) {
-    throw new Error("Unable to resolve monthly advancement – invalid calendar date");
-  }
-  return final;
+  if (!result) throw new Error("Unable to resolve monthly advancement – invalid calendar date");
+  return result;
 }
 
 /**
