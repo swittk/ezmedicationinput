@@ -1174,11 +1174,12 @@ function reconcileRetainedCourse(
     const live = groups.get(sequence) ?? [];
     const editedStep = metadata.get(sequence);
     const { sequence: _metadataSequence, ...editedStepFields } = editedStep ?? { sequence };
+    const editedR6Step = r6StepMetadata(editedStep ?? {});
     if (!step) {
       structuredChanged = true;
       addWarning(warnings,
         "A live R5 stage has no retained R6 counterpart; its current fields were preserved as a new stage.");
-      steps.push({ ...editedStepFields,
+      steps.push({ ...editedR6Step,
         component: live.map(dosage => toR6Dosage(dosage)) });
       continue;
     }
@@ -1365,7 +1366,13 @@ function reconcileRetainedCourse(
       }
       components.push(fresh);
     }
-    steps.push({ ...step, ...editedStepFields, component: components });
+    steps.push({
+      ...step, ...editedR6Step,
+      // An explicit R5 modifier clear must clear its old R6 wrapper too.
+      ...(editedStep?.modifierExtension !== undefined
+        ? { extension: editedR6Step.extension } : {}),
+      component: components
+    });
   }
   const { renderedInstruction: retainedInstruction, ...retainedFields } = retained;
   const result: FhirR6DosageInstruction = {

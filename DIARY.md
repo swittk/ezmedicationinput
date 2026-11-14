@@ -4856,3 +4856,17 @@ independent-eye taper 5781.5 -> 5816.4 us. These are shared-host
 measurements, not mobile benchmarks; no ordinary parser slowdown.
 No app migration, master merge, package publishing, or new reviewer
 request.
+
+
+### Review follow-up — retained course step modifier ownership
+
+During the standards-adapter push, CodeRabbit flagged a genuine historical
+complete-course reconstruction defect: two step assemblers previously spread
+editable R5 modifierExtension directly onto R6 DosageInstruction.step, which
+is an Element and does not admit modifierExtension. The established
+r6StepMetadata conversion is now used in both existing and newly added
+historical stages; explicit clearing also clears the old R6 wrapper.
+An existing-suite regression covers edit A->B, clear and added stage and
+proves current-R6 import accepts all three. No new compatibility encoding,
+dependency, extra grammar pass, or unrelated migration.
+The final suite count for the new combined commits is 3911/3911.

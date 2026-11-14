@@ -3646,6 +3646,46 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       x.url.includes("medication-course-reconciliation-source"))).toBe(true);
   });
 
+  it("converts historical retained-course edited step modifiers for existing and new stages", () => {
+    const wrap = "urn:ezmedicationinput:StructureDefinition:r5-step-modifier-extensions";
+    const modifier = (name: string) => ({
+      url: "https://example.org/step/" + name, valueString: name
+    });
+    const stepFields: FhirExtension[] = [
+      { url: "extension", extension: [{ url: wrap, extension: [modifier("old")] }] },
+      { url: "component", extension: [{
+        url: "doseAndRate", extension: [{
+          url: "doseQuantity", valueQuantity: { value: 1, unit: "tab" }
+        }]
+      }] }
+    ];
+    const marker: FhirExtension = {
+      url: "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details",
+      extension: [{ url: "dosageDetails", extension: [{
+        url: "step", extension: stepFields
+      }] }]
+    };
+    const original: EzDosage = {
+      sequence: 1, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      modifierExtension: [marker]
+    };
+    for (const [rows, edit, expected] of [
+      [[original], { sequence: 1, modifierExtension: [modifier("new")] }, 1],
+      [[original], { sequence: 1, modifierExtension: [] }, 0],
+      [[original, { ...original, sequence: 2 }],
+        { sequence: 2, modifierExtension: [modifier("new")] }, 1]
+    ] as const) {
+      const details = toDosageDetails(rows, undefined, { step: [edit] });
+      const target = details.step[edit.sequence - 1];
+      expect(target.modifierExtension).toBeUndefined();
+      expect(target.extension?.filter(ext => ext.url === wrap).length ?? 0).toBe(expected);
+      if (expected) expect(target.extension).toContainEqual({
+        url: wrap, extension: [modifier("new")]
+      });
+      expect(fromFhir(details).fhirNext).toEqual(details);
+    }
+  });
+
   it.each([
     ["~5 mg PO QD", "~", "100000000055"],
     ["≈5 mg PO QD", "~", "100000000055"],
