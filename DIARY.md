@@ -4640,10 +4640,9 @@ legacy-R6 compatibility path or ordinary-parser cost was introduced.
 
 Independent assertions added only to the existing R6 test file; the three
 regressions reproduce meaningful prior errors and test edits, rendered
-language, exact dates, native R6 and R5 bridge round-trip. Downstream
-Shinebright dosage converter and medication usage-map round-trip was
-read-only verified to keep 1/2/4 clinical dosage rows unchanged in ordinary,
-Thai and staged inputs, without editing application code.
+language, exact dates, native R6 and R5 bridge round-trip. The existing downstream dosage converter and medication usage-map
+round-trip were verified read-only to keep 1/2/4 clinical dosage rows
+unchanged in ordinary, Thai and staged inputs, without editing application code.
 
 Full validation: **3880/3880 tests in 44 source suites**, ES6 ESM/CJS and
 TypeScript declaration build, **4/4 packaged exports**, git diff --check.
