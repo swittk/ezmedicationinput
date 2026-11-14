@@ -4510,3 +4510,46 @@ a31175b pre-review build) measured routine 1380.4 -> 1400.9 microseconds
 6044.3 -> 6041.4 (flat); shared-machine noise prevents claiming universal
 phone performance. Ordinary source SIG parsing receives no extra pass.
 No package publication, merge, or new full CodeRabbit review requested.
+
+
+## 2026-11-14 — PR #13 third CodeRabbit review: exclusive edit ownership, R6 item display, and weekday offsets
+
+Product gate: All three current findings reproduce on supported typed R6 courses
+and are directionally correct. Kept the changes on the same PR, downstream of
+the established R5 projection, with no additional HPSG pass, dependency,
+migration, or general parse validation. No review requested.
+
+- R5 editing may introduce an authored doseExpression/rateExpression into a
+  row that formerly contained an R6-only comparator Quantity. Its unchanged
+  empty R5 numeric fingerprint previously restored the old Quantity alongside
+  the newly authored expression, creating incompatible R6 dose[x]/rate[x]
+  choices. Restoration now checks the *whole live choice* before reviving a
+  retained numeric Quantity; the old amount remains in that row's typed source
+  provenance. Rates are independent of doses; no global warning scan.
+- An R6 course-level renderedInstruction does not stand in for the source text
+  of each independent dosage component. The R6 importer now realizes an
+  R6-specific component preview even when the course has authored text,
+  unless that component has its own nonblank text (retained verbatim). Plain
+  R5 and ordinary R6 imports skip this extra rendering work.
+- The R6 offset execution transform had converted weekly M/W/F frequency
+  and a two-day end offset into three doses spread through five days,
+  bypassing dayOfWeek. For a weekly, clockless, source-backed weekday schedule,
+  it now preserves the original weekly cadence and delegates to the existing
+  weekday-filtered scheduler, while the relative-step bounds exclude rest
+  days. Other unproven interlaced patterns are still preserved/editable but
+  rejected for numeric execution rather than fabricating dates.
+
+Independent oracles: an R6 approximated dose and rate replaced by new
+expressions now round-trip without conflicting choice fields and retain both
+original values; source-less item rendering with whole-course text and an
+explicit local-text control; Nov 2/4/6 and Nov 9/11/13 Monday/Wednesday/Friday
+due-date equality and 6 tablets/14 days from native R6, R5 bridge and
+imported batch. No new test file.
+
+Validation: 44 source files 3874/3874, ES6 ESM/CJS/TS declarations and four
+packaged-export tests passed. Downstream R5 dosage conversion and in-memory
+storage reconstruction retained 1/2/4 rows exactly for ordinary, Thai and
+staged SIGs. Alternating seven-batch shared-host microbenchmarks against
+immutable pre-review 01e5fdd (microseconds per parse): ordinary 1634->1637,
+Thai 6767.2->6741.4, multiphase 6737.1->6453.2; no meaningful ordinary
+performance regression. No master merge or package publication.

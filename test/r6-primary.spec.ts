@@ -3023,6 +3023,81 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(formatSig(authored, "long")).toBe(authored.renderedInstruction);
   });
 
+  it("does not restore approximate quantities over a clinician's new dose/rate expressions", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{
+        doseQuantity: { value: 1, comparator: "~", unit: "tab" },
+        rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" }
+      }]
+    }] }] };
+    const edited = toFhirR5Dosages(course);
+    edited[0].doseAndRate![0].doseExpression = {
+      language: "text/fhirpath", expression: "%patient.weight"
+    };
+    edited[0].doseAndRate![0].rateExpression = {
+      language: "text/fhirpath", expression: "%patient.weight / 2"
+    };
+    const restored = toDosageDetails(edited);
+    expect(restored.step[0].component[0].doseAndRate).toEqual([{
+      doseExpression: { language: "text/fhirpath", expression: "%patient.weight" },
+      rateExpression: { language: "text/fhirpath", expression: "%patient.weight / 2" }
+    }]);
+    const retained = restored.extension?.filter(extension =>
+      extension.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(retained).toHaveLength(1);
+    expect(JSON.stringify(retained)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(retained)).toContain('"comparator":">="');
+    expect(fromFhir(restored).fhirNext).toEqual(restored);
+  });
+
+  it("renders R6-only component quantities even when the enclosing course has authored wording", () => {
+    const course: FhirR6DosageInstruction = {
+      renderedInstruction: "Follow the clinician's written taper.",
+      step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, comparator: "~", unit: "tab" } }]
+      }] }]
+    };
+    const imported = fromFhir(course);
+    expect(imported.longText).toBe(course.renderedInstruction);
+    expect(imported.items[0].longText).toContain("~1 tab");
+    expect(imported.items[0].shortText).toContain("~1 tab");
+    // A component's own source is authoritative for its individual editor row.
+    const sourced: FhirR6DosageInstruction = {
+      ...course, step: [{ component: [{
+        ...course.step[0].component[0], text: "Approximately one tablet as directed."
+      }] }]
+    };
+    expect(fromFhir(sourced).items[0].longText).toBe("Approximately one tablet as directed.");
+  });
+
+  it("executes offset-trimmed weekly R6 schedules on the authored weekdays, not distributed intervening days", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: {
+        frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Week,
+        dayOfWeek: ["mon", "wed", "fri"],
+        endOffset: { value: 2, unit: "d", code: "d" }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const from = "2026-11-02T08:00:00+07:00";
+    const options = { from, orderedAt: from, timeZone: "Asia/Bangkok", limit: 6 };
+    const expected = [
+      "2026-11-02T08:00:00+07:00",
+      "2026-11-04T08:00:00+07:00",
+      "2026-11-06T08:00:00+07:00",
+      "2026-11-09T08:00:00+07:00",
+      "2026-11-11T08:00:00+07:00",
+      "2026-11-13T08:00:00+07:00"
+    ];
+    for (const value of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      expect(nextDueDoses(value, options)).toEqual(expected);
+      expect(calculateTotalUnits({
+        dosage: value, ...options, durationValue: 14, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(6);
+    }
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

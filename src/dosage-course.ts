@@ -1988,7 +1988,11 @@ function restoreComponentDelta(
           supersededExpression = true;
       }
       if (old.doseQuantity?.comparator) {
-        if (unchangedDose && entry && !entry.doseQuantity) entry.doseQuantity = old.doseQuantity;
+        // A new authored expression owns the live dose choice, even when
+        // there was no R5 numeric quantity to change its fingerprint.
+        // The replaced approximate quantity remains row-local provenance.
+        if (unchangedDose && entry && !entry.doseQuantity && !entry.doseExpression)
+          entry.doseQuantity = old.doseQuantity;
         else if (!entry || !equalStructuredValues(entry.doseQuantity, old.doseQuantity))
           supersededQuantity = true;
       }
@@ -1998,7 +2002,8 @@ function restoreComponentDelta(
           supersededExpression = true;
       }
       if (old.rateQuantity?.comparator) {
-        if (unchangedRate && entry && !entry.rateQuantity) entry.rateQuantity = old.rateQuantity;
+        if (unchangedRate && entry && !entry.rateQuantity && !entry.rateExpression)
+          entry.rateQuantity = old.rateQuantity;
         else if (!entry || !equalStructuredValues(entry.rateQuantity, old.rateQuantity))
           supersededQuantity = true;
       }

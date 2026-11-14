@@ -2074,6 +2074,17 @@ function executionCourseWithPeriodOffsets(
     offsetDuration: { value, unit: "d", code: "d", system: "http://unitsofmeasure.org" }
   });
   const { startOffset: _startOffset, endOffset: _endOffset, ...schedule } = repeat;
+  // The existing weekly day-filtered scheduler owns weekday eligibility.
+  // Replacing its week with a shorter day period would dispatch to the
+  // frequency distributor, which does not apply dayOfWeek restrictions.
+  const weekdayFiltered = Boolean(repeat.dayOfWeek?.length);
+  if (weekdayFiltered && (repeat.periodUnit !== FhirPeriodUnit.Week ||
+      repeat.period !== 1 || repeat.frequency !== repeat.dayOfWeek?.length ||
+      repeat.when?.length || repeat.timeOfDay?.length)) return fail();
+  const cadence = weekdayFiltered ? schedule : {
+    ...schedule, frequency: repeat.frequency, period: activeDays,
+    periodUnit: FhirPeriodUnit.Day
+  };
   return {
     ...course,
     repeatCycle: course.repeatCycle ?? { value: periodDays, unit: "d", code: "d" },
@@ -2083,10 +2094,7 @@ function executionCourseWithPeriodOffsets(
       end: relativeDay(periodDays - endDays),
       component: [{
         ...one,
-        timing: { ...one.timing, repeat: {
-          ...schedule, frequency: repeat.frequency, period: activeDays,
-          periodUnit: FhirPeriodUnit.Day
-        } }
+        timing: { ...one.timing, repeat: cadence }
       }]
     }]
   };

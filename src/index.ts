@@ -1681,18 +1681,25 @@ export function fromFhir(
   // Imported R6-only approximations have no legal R5 SimpleQuantity slot.
   // Their editor-row suggestions must retain the amount just as the
   // whole-course display does. Ordinary R6 imports do no extra rendering.
-  if (!dosageDetails.renderedInstruction) {
-    let row = 0;
-    for (const step of dosageDetails.step) for (const component of step.component) {
-      const item = items[row++];
-      if (!item || (!(component.timing?.repeat?.startOffset ||
-          component.timing?.repeat?.endOffset) &&
-          !component.doseAndRate?.some(rate =>
-            rate.doseQuantity?.comparator || rate.rateQuantity?.comparator))) continue;
-      const ownCourse: FhirR6DosageInstruction = { step: [{ component: [component] }] };
-      item.shortText = formatSig(ownCourse, "short", options);
-      item.longText = formatSig(ownCourse, "long", options);
+  // Whole-course renderedInstruction is not a per-component dosage text.
+  // R6-only quantities or offsets need a complete item preview, even when
+  // the enclosing course has authored wording. Prefer an item's own source.
+  let row = 0;
+  for (const step of dosageDetails.step) for (const component of step.component) {
+    const item = items[row++];
+    if (!item || (!(component.timing?.repeat?.startOffset ||
+        component.timing?.repeat?.endOffset) &&
+        !component.doseAndRate?.some(rate =>
+          rate.doseQuantity?.comparator || rate.rateQuantity?.comparator))) continue;
+    const source = component.text;
+    if (source?.trim()) {
+      item.shortText = source;
+      item.longText = source;
+      continue;
     }
+    const ownCourse: FhirR6DosageInstruction = { step: [{ component: [component] }] };
+    item.shortText = formatSig(ownCourse, "short", options);
+    item.longText = formatSig(ownCourse, "long", options);
   }
   const primary = items[0] ?? fromFhirDosage({
     text: dosageDetails.renderedInstruction ?? ""
