@@ -401,7 +401,8 @@ function mergeDose(
       !sameOptionalScalar(left.divisionCount, right.divisionCount)) {
     return undefined;
   }
-  if (!sameOptionalScalar(left.unit, right.unit)) {
+  if (!sameOptionalScalar(left.unit, right.unit) ||
+      !sameOptionalScalar(left.comparator, right.comparator)) {
     return undefined;
   }
   if (
@@ -437,6 +438,7 @@ function mergeDose(
     value,
     range: mergeOptionalScalar(left.range, right.range),
     unit,
+    comparator: mergeOptionalScalar(left.comparator, right.comparator),
     clinicalQuantity,
     divisionCount
   };

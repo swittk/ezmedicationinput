@@ -627,10 +627,11 @@ function formatDoseShort(dose: CanonicalDoseExpr | undefined): string | undefine
     }
   }
   if (dose.value !== undefined) {
+    const amount = `${dose.comparator ?? ""}${stripTrailingZero(dose.value)}`;
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${dose.unit}`;
+      return `${amount} ${dose.unit}`;
     }
-    return `${stripTrailingZero(dose.value)}`;
+    return amount;
   }
   return undefined;
 }
@@ -663,10 +664,17 @@ function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined
     }
   }
   if (dose.value !== undefined) {
+    const english = dose.comparator === "~" ? "approximately " :
+      dose.comparator === ">=" ? "at least " :
+      dose.comparator === "<=" ? "at most " :
+      dose.comparator === ">" ? "more than " :
+      dose.comparator === "<" ? "less than " :
+      dose.comparator === "ad" ? "sufficient to achieve " : "";
+    const amount = `${english}${stripTrailingZero(dose.value)}`;
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${pluralize(dose.unit, dose.value)}`;
+      return `${amount} ${pluralize(dose.unit, dose.value)}`;
     }
-    return `${stripTrailingZero(dose.value)}`;
+    return amount;
   }
   return undefined;
 }

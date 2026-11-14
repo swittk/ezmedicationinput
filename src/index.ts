@@ -86,6 +86,12 @@ export {
 } from "./fhir";
 export { suggestSig } from "./suggest";
 export {
+  EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+  EMA_QUANTITY_OPERATOR_SYSTEM,
+  FHIR_QUANTITY_COMPARATOR_SYSTEM,
+  getEmaQuantityComparator
+} from "./fhir-quantity-operator";
+export {
   parseInstructionActions,
   realizeInstructionGraph
 } from "./instruction-graph";
@@ -1442,6 +1448,21 @@ export function formatSig(
             period: _period, periodMax: _periodMax,
             periodUnit: _periodUnit, ...rest } = display.timing.repeat;
           display = { ...display, timing: { ...display.timing, repeat: rest } };
+        }
+        // R5 consumers must see the numeric value, but an R6 display must
+        // not first state an exact dose and then its qualified "~" dose.
+        // Suppress only that duplicate in this temporary display projection.
+        if (display.doseAndRate && component.doseAndRate?.some(amount =>
+          amount.doseQuantity?.comparator || amount.rateQuantity?.comparator ||
+          amount.rateRatio?.numerator?.comparator === "~")) {
+          display = { ...display, doseAndRate: display.doseAndRate.map((amount, i) => {
+            const source = component.doseAndRate?.[i];
+            const clean = { ...amount };
+            if (source?.doseQuantity?.comparator) delete clean.doseQuantity;
+            if (source?.rateQuantity?.comparator) delete clean.rateQuantity;
+            if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
+            return clean;
+          }) };
         }
         const recognized = formatSig(display, style, options);
         const expressions: string[] = [];

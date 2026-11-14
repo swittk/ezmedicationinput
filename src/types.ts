@@ -1533,6 +1533,8 @@ export interface CanonicalDoseExpr {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  /** Exact authored Quantity comparator; R5 uses the EMA extension, R6 native. */
+  comparator?: FhirR6Quantity["comparator"];
   evidence?: CanonicalEvidence[];
 }
 

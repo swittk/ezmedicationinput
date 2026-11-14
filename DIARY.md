@@ -4776,3 +4776,83 @@ alternating warm 75-parse samples; median microseconds): routine 1578.9
 6215.5 -> 6275.6 (+1.0%). No new ordinary parsing work.
 No application modifications, persistence migration, master merge, package
 publication or full review request were performed.
+
+
+## 2026-11-15 — Standard EMA Quantity Operator; never discard R5 numeric doses
+
+The prior bridge deleted the entire R6 comparator-bearing doseQuantity or
+rateQuantity when projecting to R5 SimpleQuantity, leaving empty active
+entries in R5. After an ordinary deletion, the remaining R6 entry could
+also be blank. THIS IS AN UNACCEPTABLE DATA-LOSS DEFECT; it supersedes
+the previous diary discussion claiming an anonymous survivor must remain
+blank. FHIR R5 can preserve value/unit/coding, and a published extension
+can preserve the original comparator. Never erase representable clinical
+numeric data merely because its qualifier is not native.
+
+**Existing standards, not a proprietary comparator system:**
+- EMA Comparator Extension:
+  http://ema.europa.eu/fhir/extension/comparator
+  https://pms.ema.europa.eu/fhir/ig/StructureDefinition-comparator.html
+- EMA SPOR Quantity Operator system:
+  http://spor.ema.europa.eu/v1/lists/100000000008
+  https://pms.ema.europa.eu/fhir/ig/CodeSystem-100000000008.html
+  Last updated 2023-08-03; predates R6's approximate comparator.
+- Codes: less than 100000000050, greater than 100000000051,
+  <= 100000000052, >= 100000000053, approximate 100000000055,
+  quantity sufficient 100000165006. DO NOT reinterpret EMA
+  "equivalent to", "average", "range", or "equal to" as "~".
+- R5 general Quantity already has native <, <=, >, >=, ad; R6 adds "~".
+  R5 SimpleQuantity comparator has max=0, but its Element.extension
+  supports the published EMA comparator valueCoding. Ratio.numerator
+  is general Quantity; attach EMA only for the native-R5-missing "~".
+  The HL7 uncertainty/confidenceInterval extensions represent actual
+  uncertainty data, not a license to assume an unspecified tolerance.
+
+**Implementation:** A single typed EMA adapter handles extension
+recognition/mapping, native R6 recovery, and R5 projection for
+doseQuantity, rateQuantity, Ratio.numerator, and all nested bridge
+QUANTITY fields. Numeric values, codes, units, system and existing
+extensions remain active in R5; retained R6 data/qualifiers round-trip.
+No new custom operator code system or comparator URL. The old private
+structured comparator-child encoding is decode-only for earlier saved
+bridge output; newly encoded values use the EMA canonical. An
+externally authored R5 EMA Coding imports correctly into native R6
+without a private course marker. Unknown EMA codes and extensions remain
+unmodified for other systems to interpret.
+
+R5 maximum-dose fields are included in the same family: a comparator-
+bearing R6 safety limit now retains its numeric maximum in the active
+R5 maxDosePerAdministration, maxDosePerLifetime, or maxDosePerPeriod
+fields with the published EMA coding where R5 cannot encode its qualifier.
+The reverse converter recognizes these standard codes in R5 maxima
+(including the Ratio denominator); numeric edits propagate back to
+R6 safety without losing the operator.
+
+The existing HPSG dose lexical rule now recognizes a bounded, typed
+comparative quantity NP (symbolic ~, ≈, <, <=, >, >=, ≤, ≥,
+compact ~5mg/≥2tab, English about/approximately/at least/no more than,
+and Thai ประมาณ/อย่างน้อย/ไม่เกิน, etc.). The typed HPSG dose feature,
+canonical dose, R5 lowering, R6 projection, and EN/TH UI formatting
+propagate one comparator, without a second pass over source text or
+turning temporal phrases like "approximately 3 weeks" into a drug dose.
+The ordinary numeric-dose fast path does not inspect EMA extensions or
+construct comparison candidates.
+
+**Clinical oracles:** the previously blank pair {~10mg,~5mg} is now
+{10mg,5mg} in live R5 with EMA operator codings; deleting the first
+leaves active ~5mg in R6. Two identically valued but differently
+qualified anonymous doses can still be distinguished via their
+standard extension; no guess needed. Dose/rate edits, reordering,
+Ratio, unrelated metadata, external R5 imports, legacy source decode,
+and unknown EMA codes retain their intended semantics. The actual
+compiled downstream R5 usage-map save/reopen path retains 1/2/4
+ordinary/Thai/staged rows and three qualified examples exactly.
+
+Final gate: 44 source suites 3910/3910 PASS, ES6 ESM/CJS/TS build PASS,
+packaged exports 4/4 PASS. Alternating warm host parser medians versus
+immutable 3f159ca (7 paired batches, 70 parses each):
+ordinary 1555.5 -> 1472.2 us; Thai 5652.2 -> 5610.0 us;
+independent-eye taper 5781.5 -> 5816.4 us. These are shared-host
+measurements, not mobile benchmarks; no ordinary parser slowdown.
+No app migration, master merge, package publishing, or new reviewer
+request.

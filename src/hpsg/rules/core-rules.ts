@@ -1077,6 +1077,91 @@ export function perTargetCountDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+/** Authored comparative dose NPs. Only complete number+medication-unit
+ * constituents are licensed; "about 3 weeks" stays temporal, and no
+ * second text-level dose parser runs after HPSG.
+ */
+const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
+  words: readonly string[];
+  comparator: "<" | "<=" | ">" | ">=" | "~";
+}>>();
+for (const [comparator, wordings] of [
+  ["~", [["about"], ["approximately"], ["approx"], ["around"], ["roughly"],
+    ["ประมาณ"], ["ราว"]]],
+  [">=", [["at", "least"], ["no", "less", "than"], ["not", "less", "than"],
+    ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"],
+    ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]]],
+  ["<=", [["at", "most"], ["no", "more", "than"], ["not", "more", "than"],
+    ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"],
+    ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]]],
+  [">", [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]]],
+  ["<", [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]]
+] as const) for (const words of wordings) {
+  const first = words[0];
+  const candidates = DOSE_COMPARATOR_PREFIXES.get(first) ?? [];
+  candidates.push({ words, comparator });
+  DOSE_COMPARATOR_PREFIXES.set(first, candidates);
+}
+
+const DOSE_COMPARATOR_SYMBOLS: Record<string, "<" | "<=" | ">" | ">=" | "~"> = {
+  "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
+};
+
+function comparativeDoseAt(
+  context: HpsgClauseContext, start: number, lower: string
+): HpsgSign | undefined {
+  let comparator: "<" | "<=" | ">" | ">=" | "~" | undefined;
+  let value: number | undefined;
+  let numericIndex: number;
+  let compactUnit: string | undefined;
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-z]+)?$/u);
+  if (glued) {
+    comparator = DOSE_COMPARATOR_SYMBOLS[glued[1]];
+    value = Number(glued[2]);
+    numericIndex = start;
+    if (glued[3]) compactUnit = normalizeUnit(glued[3], context.options);
+    if (glued[3] && !compactUnit) return undefined;
+  } else {
+    const symbolic = DOSE_COMPARATOR_SYMBOLS[lower];
+    const words = DOSE_COMPARATOR_PREFIXES.get(lower);
+    let prefixLength = symbolic ? 1 : 0;
+    comparator = symbolic;
+    if (!comparator && words) for (const candidate of words) {
+      if (candidate.words.every((part, i) => {
+        const token = context.tokens[start + i];
+        return token && normalizeTokenLower(token) === part;
+      })) {
+        if (candidate.words.length > prefixLength) {
+          comparator = candidate.comparator;
+          prefixLength = candidate.words.length;
+        }
+      }
+    }
+    if (!comparator) return undefined;
+    numericIndex = start + prefixLength;
+    const numberToken = context.tokens[numericIndex];
+    if (!numberToken || numberToken.kind !== LexKind.Number ||
+        numberToken.value === undefined) return undefined;
+    value = numberToken.value;
+  }
+  const unit = compactUnit ? undefined : unitAfter(context, numericIndex + 1);
+  if (!compactUnit && !unit || value === undefined || !Number.isFinite(value)) return undefined;
+  const tokens = tokensAvailable(context, start, numericIndex + 1 - start);
+  if (!tokens) return undefined;
+  const attached = unit ? [...tokens, ...unit.tokens] : tokens;
+  return lexicalSign({
+    type: "dose-sign",
+    rule: "hpsg.lex.dose.comparativeQuantity",
+    tokens: attached,
+    synsem: {
+      head: { dose: { value, unit: compactUnit ?? unit?.unit, comparator } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 19 + attached.length
+  });
+}
+
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.dose", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -1100,6 +1185,13 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       token.sourceEnd
     )) {
       return [];
+    }
+    // Avoid even constructing a comparator lexical candidate unless the
+    // first token can license one. Ordinary numeric dose signs stay cheap.
+    if (DOSE_COMPARATOR_PREFIXES.has(lower) ||
+        DOSE_COMPARATOR_SYMBOLS[lower] || /^[~≈<>≥≤]/u.test(lower)) {
+      const comparativeDose = comparativeDoseAt(context, start, lower);
+      if (comparativeDose) return [comparativeDose];
     }
     // A qualitative presentation cannot be converted into a fabricated
     // measured length. Preserve its typed product amount as source-backed

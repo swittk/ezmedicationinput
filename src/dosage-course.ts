@@ -2,6 +2,10 @@
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
+  getEmaQuantityComparator, quantityFromR5, quantityForR5 as generalQuantityForR5,
+  simpleQuantityForR5
+} from "./fhir-quantity-operator";
+import {
   FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction, FhirR6DosageInstructionInput, FhirR6DosageSafety,
   FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
@@ -445,15 +449,17 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
   for (const maximum of dosage.maxDosePerPeriod ?? []) {
     if (!maximum.numerator || !maximum.denominator) continue;
     doseLimit.push({
-      scope: "period", valueQuantity: { ...maximum.numerator },
-      period: { ...maximum.denominator }
+      scope: "period", valueQuantity: quantityFromR5(maximum.numerator)!,
+      period: quantityFromR5(maximum.denominator)
     });
   }
   if (dosage.maxDosePerAdministration) {
-    doseLimit.push({ scope: "administration", valueQuantity: { ...dosage.maxDosePerAdministration } });
+    doseLimit.push({ scope: "administration",
+      valueQuantity: quantityFromR5(dosage.maxDosePerAdministration)! });
   }
   if (dosage.maxDosePerLifetime) {
-    doseLimit.push({ scope: "lifetime", valueQuantity: { ...dosage.maxDosePerLifetime } });
+    doseLimit.push({ scope: "lifetime",
+      valueQuantity: quantityFromR5(dosage.maxDosePerLifetime)! });
   }
   return doseLimit.length ? { doseLimit } : undefined;
 }
@@ -461,12 +467,8 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
 function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
   const quantity = limit.valueQuantity;
   if (!quantity) return false;
-  if (limit.scope === "period") {
-    return Boolean(limit.period) && quantity.comparator !== "~" &&
-      limit.period?.comparator === undefined;
-  }
-  return (limit.scope === "administration" || limit.scope === "lifetime") &&
-    quantity.comparator === undefined;
+  if (limit.scope === "period") return Boolean(limit.period);
+  return limit.scope === "administration" || limit.scope === "lifetime";
 }
 
 /**
@@ -566,18 +568,37 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
     siteReference, excludedDates,
     doseAndRate, modifierExtension, extension, ...rest
   } = dosage as EzDosage;
-  // Ordinary rate objects are reused as-is. Only the first R5-only
-  // modifier starts a copy; subsequent entries are handled in this same pass.
-  let r6Rates = doseAndRate;
+  // Ordinary rate objects are reused as-is. A copied row is needed only
+  // for R5-only modifiers or an established EMA Quantity Operator extension.
+  // Conversion happens in the existing single rate walk, never in parseSig.
+  let r6Rates: FhirR6Dosage["doseAndRate"] = doseAndRate as FhirR6Dosage["doseAndRate"];
   if (doseAndRate) for (let index = 0; index < doseAndRate.length; index++) {
     const rate = doseAndRate[index];
-    if (rate.modifierExtension !== undefined) {
+    // EMA decoding is needed only for explicitly extended quantities.
+    // Ordinary parser-created R5 amounts do not take a comparator scan.
+    const hasComparator = Boolean(
+      rate.doseQuantity?.extension?.length && getEmaQuantityComparator(rate.doseQuantity) ||
+      rate.rateQuantity?.extension?.length && getEmaQuantityComparator(rate.rateQuantity) ||
+      rate.rateRatio?.numerator?.extension?.length &&
+        getEmaQuantityComparator(rate.rateRatio.numerator)
+    );
+    if (rate.modifierExtension !== undefined || hasComparator) {
       if (r6Rates === doseAndRate) r6Rates = doseAndRate.slice(0, index);
-      const { modifierExtension: oldModifiers, extension: oldExtensions, ...fields } = rate;
+      const { modifierExtension: oldModifiers, extension: oldExtensions,
+        doseQuantity, rateQuantity, rateRatio, ...fields } = rate;
       const extensions = oldModifiers?.length
         ? [...(oldExtensions ?? []), { url: R5_RATE_MODIFIERS_R6_URL, extension: oldModifiers }]
         : oldExtensions;
-      r6Rates!.push({ ...fields, ...(extensions?.length ? { extension: extensions } : {}) });
+      r6Rates!.push({
+        ...fields,
+        ...(doseQuantity ? { doseQuantity: quantityFromR5(doseQuantity) } : {}),
+        ...(rateQuantity ? { rateQuantity: quantityFromR5(rateQuantity) } : {}),
+        ...(rateRatio ? { rateRatio: rateRatio.numerator &&
+          getEmaQuantityComparator(rateRatio.numerator) !== undefined
+            ? { ...rateRatio, numerator: quantityFromR5(rateRatio.numerator) }
+            : rateRatio } : {}),
+        ...(extensions?.length ? { extension: extensions } : {})
+      });
     } else if (r6Rates !== doseAndRate) r6Rates!.push(rate);
   }
   // Presence is semantically different from absence: [] explicitly clears
@@ -635,8 +656,7 @@ function ratioForR5(
   ratio: NonNullable<FhirR6Dosage["doseAndRate"]>[number]["rateRatio"]
 ): FhirRatio | undefined {
   if (ratio?.numerator?.comparator !== "~") return ratio as FhirRatio | undefined;
-  const { comparator: _approximate, ...numerator } = ratio.numerator;
-  return { ...ratio, numerator };
+  return { ...ratio, numerator: generalQuantityForR5(ratio.numerator) };
 }
 
 /** Project one R6 component without building course-storage metadata. Used by
@@ -676,43 +696,35 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
         } else (keep ??= []).push(item);
       }
       const ordinaryRatio = ratioForR5(rateRatio);
+      const ordinaryDose = simpleQuantityForR5(doseQuantity);
+      const ordinaryRate = simpleQuantityForR5(rateQuantity);
       return {
         ...entry,
         ...(ordinaryRatio ? { rateRatio: ordinaryRatio } : {}),
-        // The presence check makes these quantities valid R5 SimpleQuantity:
-        // no comparator is copied into the R5 wire object.
-        ...(doseQuantity && doseQuantity.comparator === undefined
-          ? { doseQuantity: doseQuantity as FhirSimpleQuantity } : {}),
-        ...(rateQuantity && rateQuantity.comparator === undefined
-          ? { rateQuantity: rateQuantity as FhirSimpleQuantity } : {}),
+        // Preserve the numeric amount as active R5 data. Only the comparator
+        // is R6-specific, and the compact typed bridge retains it losslessly.
+        ...(ordinaryDose ? { doseQuantity: ordinaryDose } : {}),
+        ...(ordinaryRate ? { rateQuantity: ordinaryRate } : {}),
         ...(keep?.length ? { extension: keep } : {}),
         ...(old?.extension?.length ? { modifierExtension: old.extension } : {})
       };
     }) } : {})
   };
   for (const limit of safety?.doseLimit ?? []) {
-    // R5 maximum-dose fields are not as expressive as R6 safety limits.
-    // If an R6-only comparator cannot be expressed in the corresponding
-    // R5 Quantity/SimpleQuantity, leave it in the retained R6 modifier.
+    // Keep the numeric maxima active in R5. Any comparator forbidden by
+    // SimpleQuantity uses EMA's established Quantity Operator extension;
+    // the original R6 safety object remains independently retained.
     const quantity = limit.valueQuantity;
     if (!quantity) continue;
-    const { comparator, ...simple } = quantity;
-    if (limit.scope === "period" && limit.period && comparator !== "~") {
-      const { comparator: periodComparator, ...period } = limit.period;
-      if (!periodComparator) {
-        output.maxDosePerPeriod = [...(output.maxDosePerPeriod ?? []), {
-          numerator: { ...simple, ...(comparator ? { comparator } : {}) },
-          denominator: period
-        }];
-      }
-    }
-    // A general R6 Quantity comparator cannot be represented in R5 maxima.
-    if (comparator) continue;
-    if (limit.scope === "administration") {
-      output.maxDosePerAdministration = simple;
-    }
-    if (limit.scope === "lifetime") {
-      output.maxDosePerLifetime = simple;
+    if (limit.scope === "period" && limit.period) {
+      output.maxDosePerPeriod = [...(output.maxDosePerPeriod ?? []), {
+        numerator: generalQuantityForR5(quantity)!,
+        denominator: simpleQuantityForR5(limit.period)!
+      }];
+    } else if (limit.scope === "administration") {
+      output.maxDosePerAdministration = simpleQuantityForR5(quantity);
+    } else if (limit.scope === "lifetime") {
+      output.maxDosePerLifetime = simpleQuantityForR5(quantity);
     }
   }
   if (condition?.length === 1) {
@@ -1759,14 +1771,18 @@ interface CompactCourseRow {
  * @param entry The live editable dose/rate slot.
  */
 function doseChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined) {
-  return { doseQuantity: entry?.doseQuantity, doseRange: entry?.doseRange };
+  return { doseQuantity: simpleQuantityForR5(entry?.doseQuantity), doseRange: entry?.doseRange };
 }
 
-/** Native rate choice, independent of an expression in the dose slot.
- * @param entry The live editable dose/rate slot.
+/** R5-native rate choice, independent of an expression in the dose slot.
+ * The checksum compares the same FHIR projection, not its R6-only spelling.
  */
 function rateChoice(entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined) {
-  return { rateQuantity: entry?.rateQuantity, rateRange: entry?.rateRange, rateRatio: entry?.rateRatio };
+  return {
+    rateQuantity: simpleQuantityForR5(entry?.rateQuantity),
+    rateRange: entry?.rateRange,
+    rateRatio: ratioForR5(entry?.rateRatio)
+  };
 }
 
 /** Only the cadence period and frequency govern R6 period-offset
@@ -1984,6 +2000,46 @@ function retainedDoseRateMatches(
     matches.set(liveIndex, oldIndex);
     used.add(oldIndex);
   }
+  // R5 SimpleQuantity retains the exact numeric value and unit even when
+  // the R6 source had "~". That representable data identifies a surviving
+  // anonymous entry after deletion/reordering; do not discard it and guess
+  // from array position. Only uniquely matching evidence is authoritative.
+  const sameNumeric = (old: typeof source[number], current: typeof live[number]): boolean => {
+    if (old.id && old.id !== current.id ||
+        current.id && old.id !== current.id ||
+        !equalStructuredValues(old.type, current.type)) return false;
+    let evidence = false;
+    if (old.doseQuantity?.comparator) {
+      if (!equalStructuredValues(simpleQuantityForR5(old.doseQuantity),
+          simpleQuantityForR5(current.doseQuantity)))
+        return false;
+      evidence = true;
+    }
+    if (old.rateQuantity?.comparator) {
+      if (!equalStructuredValues(simpleQuantityForR5(old.rateQuantity),
+          simpleQuantityForR5(current.rateQuantity)))
+        return false;
+      evidence = true;
+    }
+    if (old.rateRatio?.numerator?.comparator === "~") {
+      if (!equalStructuredValues(ratioForR5(old.rateRatio), ratioForR5(current.rateRatio)))
+        return false;
+      evidence = true;
+    }
+    return evidence;
+  };
+  for (let oldIndex = 0; oldIndex < source.length; oldIndex++) {
+    if (used.has(oldIndex)) continue;
+    const candidates = live.map((entry, index) =>
+      !matches.has(index) && sameNumeric(source[oldIndex], entry) ? index : -1)
+      .filter(index => index >= 0);
+    if (candidates.length !== 1) continue;
+    const liveIndex = candidates[0];
+    if (source.some((entry, index) => index !== oldIndex && !used.has(index) &&
+        sameNumeric(entry, live[liveIndex]))) continue;
+    matches.set(liveIndex, oldIndex);
+    used.add(oldIndex);
+  }
   // Identical cardinality retains the conventional slot ordering for
   // anonymous or duplicate-type entries; explicit identities never fall
   // back to a different slot when deleted or changed.
@@ -2105,13 +2161,23 @@ function restoreComponentDelta(
           supersededExpression = true;
       }
       if (old.doseQuantity?.comparator) {
-        // A new authored expression owns the live dose choice, even when
-        // there was no R5 numeric quantity to change its fingerprint.
-        // The replaced approximate quantity remains row-local provenance.
-        if (unchangedDose && entry && !entry.doseQuantity && !entry.doseExpression)
+        // The numeric R5 SimpleQuantity is active; restore only its retained
+        // qualifier when the value was not edited. A newly authored expression
+        // supersedes the unchanged numeric projection rather than creating
+        // two incompatible live dose[x] choices.
+        if (unchangedDose && !entry.doseExpression &&
+            (entry.doseQuantity === undefined ||
+              equalStructuredValues(simpleQuantityForR5(entry.doseQuantity),
+                simpleQuantityForR5(old.doseQuantity))))
           entry.doseQuantity = old.doseQuantity;
-        else if (!entry || !equalStructuredValues(entry.doseQuantity, old.doseQuantity))
-          supersededQuantity = true;
+        else {
+          if (entry.doseExpression &&
+              equalStructuredValues(simpleQuantityForR5(entry.doseQuantity),
+                simpleQuantityForR5(old.doseQuantity)))
+            delete entry.doseQuantity;
+          if (!equalStructuredValues(entry.doseQuantity, old.doseQuantity))
+            supersededQuantity = true;
+        }
       }
       if (old.rateExpression) {
         if (unchangedRate && entry && !entry.rateExpression) entry.rateExpression = old.rateExpression;
@@ -2119,19 +2185,27 @@ function restoreComponentDelta(
           supersededExpression = true;
       }
       if (old.rateQuantity?.comparator) {
-        if (unchangedRate && entry && !entry.rateQuantity && !entry.rateExpression)
+        if (unchangedRate && !entry.rateExpression &&
+            (entry.rateQuantity === undefined ||
+              equalStructuredValues(simpleQuantityForR5(entry.rateQuantity),
+                simpleQuantityForR5(old.rateQuantity))))
           entry.rateQuantity = old.rateQuantity;
-        else if (!equalStructuredValues(entry.rateQuantity, old.rateQuantity))
-          supersededQuantity = true;
+        else {
+          if (entry.rateExpression &&
+              equalStructuredValues(simpleQuantityForR5(entry.rateQuantity),
+                simpleQuantityForR5(old.rateQuantity)))
+            delete entry.rateQuantity;
+          if (!equalStructuredValues(entry.rateQuantity, old.rateQuantity))
+            supersededQuantity = true;
+        }
       }
       if (old.rateRatio?.numerator?.comparator === "~") {
-        // R5 keeps the ordinary numeric Ratio, not the R6 "~" qualifier.
-        // A new expression/alternative rate supersedes the old numeric
-        // choice; an unchanged R5 ratio regains its approximate numerator.
+        // The general R5 Quantity retains every numeric ratio detail. The
+        // EMA Coding carries "~"; a new expression can replace that choice.
         if (unchangedRate && !entry.rateExpression)
           entry.rateRatio = old.rateRatio;
         else {
-          if (equalStructuredValues(entry.rateRatio, ratioForR5(old.rateRatio)) &&
+          if (equalStructuredValues(ratioForR5(entry.rateRatio), ratioForR5(old.rateRatio)) &&
               (entry.rateExpression || entry.rateQuantity || entry.rateRange))
             delete entry.rateRatio;
           if (!equalStructuredValues(entry.rateRatio, old.rateRatio))
@@ -2617,14 +2691,13 @@ function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
       } else if (field.fields) {
         children.push({ url: key, extension: encodeFields(item as object, field.fields) });
       } else if (field.quantity) {
-        const quantity = item as FhirR6Quantity;
-        if (quantity.comparator === "~") {
-          const { comparator, ...ordinary } = quantity;
-          children.push({ url: key, extension: [
-            { url: "quantity", valueQuantity: cloneStructuredValue(ordinary) },
-            { url: "comparator", valueCode: comparator }
-          ] });
-        } else children.push({ url: key, valueQuantity: cloneStructuredValue(quantity) as FhirExtension["valueQuantity"] });
+        // FHIR R5 Quantity supports <, <=, >, >=, ad natively. R6-only
+        // approximation uses EMA's already-published operator extension,
+        // never a new ad hoc comparator-code field.
+        children.push({
+          url: key,
+          valueQuantity: cloneStructuredValue(generalQuantityForR5(item as FhirR6Quantity))
+        });
       } else if (field.value) {
         children.push({ url: key, [field.value]: cloneStructuredValue(item) });
       }
@@ -2666,11 +2739,14 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
     if (field.extension) value = child.extension?.[0] && cloneStructuredValue(child.extension[0]);
     else if (field.fields) value = child.extension && decodeFields(child.extension, field.fields);
     else if (field.quantity) {
-      value = child.valueQuantity && cloneStructuredValue(child.valueQuantity);
+      value = child.valueQuantity && quantityFromR5(cloneStructuredValue(child.valueQuantity));
       if (!value && child.extension) {
+        // Read previous versions of our bridge without emitting that old
+        // private comparator-child representation on any new export.
         const quantity = child.extension.find(part => part.url === "quantity")?.valueQuantity;
         const comparator = child.extension.find(part => part.url === "comparator")?.valueCode;
-        if (quantity) value = { ...cloneStructuredValue(quantity), ...(comparator ? { comparator } : {}) };
+        if (quantity) value = { ...cloneStructuredValue(quantity),
+          ...(comparator ? { comparator } : {}) };
       }
     } else if (field.value) value = cloneStructuredValue(child[field.value]);
     if (value === undefined) continue;

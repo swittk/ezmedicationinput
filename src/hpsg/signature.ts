@@ -246,6 +246,7 @@ export interface HpsgDoseFeature {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  comparator?: FhirQuantity["comparator"] | "~";
   /**
    * Dimensionally typed clinical quantity contributed by the grammar.  This
    * remains distinct from `value`/`unit`: an infusion rate must never be

@@ -28,6 +28,7 @@ import {
   mergeTranslationPrimitiveElement
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
+import { getEmaQuantityComparator, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
@@ -1389,7 +1390,11 @@ export function canonicalToFhir(
   } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
-        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit)
+        doseQuantity: clause.dose.comparator
+          ? simpleQuantityForR5({
+            ...buildFhirDoseQuantity(clause.dose.value, clause.dose.unit),
+            comparator: clause.dose.comparator
+          }) : buildFhirDoseQuantity(clause.dose.value, clause.dose.unit)
       }
     ];
   }
@@ -1840,9 +1845,12 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       clause.warnings = appendWarning(clause.warnings, extracted.warning);
     }
   } else if (doseAndRate?.doseQuantity?.value !== undefined) {
+    const comparator = getEmaQuantityComparator(doseAndRate.doseQuantity) ??
+      doseAndRate.doseQuantity.comparator;
     clause.dose = {
       value: doseAndRate.doseQuantity.value,
-      unit: doseAndRate.doseQuantity.unit
+      unit: doseAndRate.doseQuantity.unit,
+      ...(comparator ? { comparator } : {})
     };
   }
 
@@ -2179,6 +2187,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     if (dose.unit) {
       state.unit = dose.unit;
     }
+    const comparator = getEmaQuantityComparator(dose) ?? dose.comparator;
+    if (comparator) (state.primaryClause.dose ??= {}).comparator = comparator;
   }
 
   const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);

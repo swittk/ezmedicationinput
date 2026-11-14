@@ -5,7 +5,9 @@ import renderedInstructionProfile from "../fhir/r5/medication-rendered-instructi
 import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json";
 import r6SnapshotContract from "../fhir/r6/official-snapshot1-20261113-contract.json";
 import {
-  parseSig, parseSigAsync, fromFhir, formatSig, formatSigBatch, formatParseBatch, nextDueDoses, calculateTotalUnits,
+  parseSig, parseSigAsync, fromFhir, fromFhirDosage, formatSig, formatSigBatch, formatParseBatch,
+  nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
+  EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FhirR6DosageInstruction, type FhirExtension, type EzDosage, type MedicationCondition,
@@ -213,7 +215,7 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     });
   });
 
-  it("retains R6-only approximate safety without illegally lowering it to R5 SimpleQuantity", () => {
+  it("retains approximate R6 safety as an active R5 numeric maximum with EMA Coding", () => {
     const original: FhirR6DosageInstruction = {
       renderedInstruction: "Maximum is approximate and requires review",
       step: [{ component: [{
@@ -230,11 +232,18 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     };
     const r5 = toFhirR5Dosages(original);
     expect(r5).toHaveLength(1);
-    expect(r5[0].maxDosePerAdministration).toBeUndefined();
+    expect(r5[0].maxDosePerAdministration).toMatchObject({
+      value: 5, unit: "mg", extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM,
+          code: "100000000055" }
+      }]
+    });
+    expect(r5[0].maxDosePerAdministration?.comparator).toBeUndefined();
     expect(r5[0].maxDosePerPeriod?.[0]?.numerator.comparator).toBe("ad");
     expect(toDosageDetails(r5)).toEqual(original);
-    // R5 representation retains non-representable R6 semantics as a
-    // modifier, not as falsely precise maxima.
+    // The numeric maximum stays live in R5 while its original R6 safety
+    // semantics remain retained in the course source.
     expect(r5[0].modifierExtension).toContainEqual(expect.objectContaining({
       url: expect.stringContaining("medication-r6-course-details")
     }));
@@ -2828,10 +2837,22 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(fromFhir(course).fhirNext).toEqual(course);
     const rows = toFhirR5Dosages(course);
     expect(rows).toHaveLength(1);
-    expect(rows[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
-    expect(rows[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
+    expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({
+      value: 1, unit: "tab", extension: [expect.objectContaining({
+        url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008",
+          code: "100000000055" }
+      })]
+    });
+    expect(rows[0].doseAndRate?.[0].rateQuantity).toMatchObject({
+      value: 4, unit: "mL/h", extension: [expect.objectContaining({
+        url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008",
+          code: "100000000053" }
+      })]
+    });
     expect(JSON.stringify(rows)).not.toContain('"comparator":"~"');
-    expect(JSON.stringify(rows)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(rows)).toContain('"100000000055"');
     expect(formatSig(course, "long", { locale: "en" })).toContain("Dose: ~1 tab");
     expect(fromFhir(course, { locale: "en" }).items[0].longText).toContain("Dose: ~1 tab");
     expect(formatSig(course, "long", { locale: "en" })).toContain("Rate: >=4 mL/h");
@@ -2865,7 +2886,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     };
     const projected = toFhirR5Dosages(withCycle);
     expect(JSON.stringify(projected)).not.toContain('"comparator":"~"');
-    expect(JSON.stringify(projected)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(projected)).toContain('"100000000055"');
     expect(toDosageDetails(JSON.parse(JSON.stringify(projected)))).toEqual(withCycle);
   });
 
@@ -2978,7 +2999,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const sources = restored.extension?.filter(entry =>
       entry.url.includes("medication-course-reconciliation-source")) ?? [];
     expect(sources).toHaveLength(1);
-    expect(JSON.stringify(sources[0])).toContain('"valueCode":"~"');
+    expect(JSON.stringify(sources[0])).toContain('"100000000055"');
     expect(JSON.stringify(sources[0])).toContain('"rowIndex","valueInteger":0');
     expect(JSON.stringify(sources[0])).not.toContain('"rowIndex","valueInteger":1');
 
@@ -3045,7 +3066,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const retained = restored.extension?.filter(extension =>
       extension.url.includes("medication-course-reconciliation-source")) ?? [];
     expect(retained).toHaveLength(1);
-    expect(JSON.stringify(retained)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(retained)).toContain('"100000000055"');
     expect(JSON.stringify(retained)).toContain('"comparator":">="');
     expect(fromFhir(restored).fhirNext).toEqual(restored);
   });
@@ -3349,23 +3370,103 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(edited.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(7);
       expect(edited.step[0].component[0].doseAndRate?.[1]).toEqual(entry("calc", 10));
     }
-    // Neither entry carries an identifier or distinguishable type in R5.
-    // Deleting one destroys the evidence needed to assign its R6 amount.
+    // The R5 projection carries the numeric amount even without IDs/types.
+    // Deletion therefore leaves the surviving 5 mg dose identifiable.
     const anonymous: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [
         { doseQuantity: { value: 10, unit: "mg", comparator: "~" } },
         { doseQuantity: { value: 5, unit: "mg", comparator: "~" } }
       ]
     }] }] };
-    const ambiguous = toFhirR5Dosages(anonymous);
-    ambiguous[0].doseAndRate!.shift();
-    const uncertain = toDosageDetails(ambiguous);
-    expect(uncertain.step[0].component[0].doseAndRate).toEqual([{}]);
-    const provenance = uncertain.extension?.filter(ext =>
+    const anonymousRows = toFhirR5Dosages(anonymous);
+    expect(anonymousRows[0].doseAndRate?.map(entry => entry.doseQuantity?.value))
+      .toEqual([10, 5]);
+    anonymousRows[0].doseAndRate!.shift();
+    expect(anonymousRows[0].doseAndRate?.[0].doseQuantity).toMatchObject({
+      value: 5, unit: "mg", extension: [{
+        url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008",
+          code: "100000000055" }
+      }]
+    });
+    const surviving = toDosageDetails(anonymousRows);
+    expect(surviving.step[0].component[0].doseAndRate).toEqual([{
+      doseQuantity: { value: 5, unit: "mg", comparator: "~" }
+    }]);
+    const provenance = surviving.extension?.filter(ext =>
       ext.url.includes("medication-course-reconciliation-source")) ?? [];
     expect(provenance).toHaveLength(1);
     expect(JSON.stringify(provenance[0])).toContain('"value":10');
     expect(JSON.stringify(provenance[0])).toContain('"value":5');
+  });
+
+  it("projects every qualified R6 dose/rate as an active R5 number and retains its qualifier", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [
+        { doseQuantity: { value: 10, comparator: "~", unit: "mg",
+          code: "mg", system: "http://unitsofmeasure.org" } },
+        { doseQuantity: { value: 5, comparator: "<=", unit: "mg" } },
+        { rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" } },
+        { rateQuantity: { value: 2.5, comparator: "~", unit: "mL/h" } }
+      ]
+    }] }] };
+    const rows = toFhirR5Dosages(course);
+    expect(rows[0].doseAndRate?.map(entry =>
+      entry.doseQuantity?.value ?? entry.rateQuantity?.value)).toEqual([10, 5, 4, 2.5]);
+    expect(rows[0].doseAndRate?.map(entry =>
+      (entry.doseQuantity ?? entry.rateQuantity)?.extension?.[0]?.valueCoding?.code))
+      .toEqual(["100000000055", "100000000052",
+        "100000000053", "100000000055"]);
+    expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({
+      code: "mg", system: "http://unitsofmeasure.org"
+    });
+    for (const entry of rows[0].doseAndRate ?? [])
+      expect(JSON.stringify(entry)).not.toContain('"comparator":');
+    expect(JSON.stringify(rows)).toContain('"100000000055"');
+    expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
+    const reordered = toFhirR5Dosages(course);
+    reordered[0].doseAndRate!.reverse();
+    expect(toDosageDetails(reordered).step[0].component[0].doseAndRate).toEqual(
+      [...course.step[0].component[0].doseAndRate!].reverse()
+    );
+    const edited = toFhirR5Dosages(course);
+    edited[0].doseAndRate![0].doseQuantity!.value = 11;
+    const corrected = toDosageDetails(edited);
+    expect(corrected.step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toEqual({ value: 11, unit: "mg", code: "mg",
+        system: "http://unitsofmeasure.org", comparator: "~" });
+    expect(corrected.step[0].component[0].doseAndRate?.[1].doseQuantity?.comparator)
+      .toBe("<=");
+    expect(corrected.step[0].component[0].doseAndRate?.[2].rateQuantity?.comparator)
+      .toBe(">=");
+    expect(corrected.step[0].component[0].doseAndRate?.[3].rateQuantity?.comparator)
+      .toBe("~");
+    expect(corrected.extension?.some(ext =>
+      ext.url.includes("medication-course-reconciliation-source"))).toBe(true);
+  });
+
+  it("keeps the active R5 dose even when equally valued anonymous R6 qualifiers are ambiguous", () => {
+    const original: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [
+        { doseQuantity: { value: 5, unit: "mg", comparator: "~" } },
+        { doseQuantity: { value: 5, unit: "mg", comparator: ">=" } }
+      ]
+    }] }] };
+    const rows = toFhirR5Dosages(original);
+    expect(rows[0].doseAndRate?.map(entry => entry.doseQuantity?.value))
+      .toEqual([5, 5]);
+    rows[0].doseAndRate!.shift();
+    const restored = toDosageDetails(rows);
+    // The published EMA operator coding keeps even identically valued
+    // anonymous entries distinguishable; no guessed qualifier is needed.
+    expect(restored.step[0].component[0].doseAndRate).toEqual([{
+      doseQuantity: { value: 5, unit: "mg", comparator: ">=" }
+    }]);
+    const provenance = restored.extension?.filter(ext =>
+      ext.url.includes("medication-course-reconciliation-source")) ?? [];
+    expect(provenance).toHaveLength(1);
+    expect(JSON.stringify(provenance)).toContain('"100000000055"');
+    expect(JSON.stringify(provenance)).toContain('"comparator":">="');
   });
 
   it("replaces edited step modifiers without stacking old wrappers or deleting other extensions", () => {
@@ -3407,11 +3508,15 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }]
     }] }] };
     const rows = toFhirR5Dosages(course);
-    expect(rows[0].doseAndRate?.[0].rateRatio?.numerator).toEqual({
-      value: 100, unit: "mL"
+    expect(rows[0].doseAndRate?.[0].rateRatio?.numerator).toMatchObject({
+      value: 100, unit: "mL", extension: [{
+        url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008",
+          code: "100000000055" }
+      }]
     });
     expect(JSON.stringify(rows)).not.toContain('"comparator":"~"');
-    expect(JSON.stringify(rows)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(rows)).toContain('"100000000055"');
     expect(JSON.stringify(rows)).not.toContain('"valueRatio"');
     expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
     expect(fromFhir(course).items[0].longText).toContain("Rate: ~100 mL / 90 min");
@@ -3420,7 +3525,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     changed[0].doseAndRate![0].rateRatio!.numerator!.value = 120;
     const numeric = toDosageDetails(changed);
     expect(numeric.step[0].component[0].doseAndRate?.[0].rateRatio?.numerator).toEqual({
-      value: 120, unit: "mL"
+      value: 120, unit: "mL", comparator: "~"
     });
     expect(numeric.extension?.some(ext =>
       ext.url.includes("medication-course-reconciliation-source"))).toBe(true);
@@ -3503,7 +3608,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     };
     const projected = toFhirR5Dosages(course);
     expect(JSON.stringify(projected)).not.toContain('"comparator":"~"');
-    expect(JSON.stringify(projected)).toContain('"valueCode":"~"');
+    expect(JSON.stringify(projected)).toContain('"100000000055"');
     expect(toDosageDetails(JSON.parse(JSON.stringify(projected)))).toEqual(course);
     expect(fromFhir(course).fhirNext).toEqual(course);
     expect(() => nextDueDoses(course, { from: "2027-02-21T08:00:00-05:00",
@@ -3539,6 +3644,144 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }]);
     expect(restored.extension?.some(x =>
       x.url.includes("medication-course-reconciliation-source"))).toBe(true);
+  });
+
+  it.each([
+    ["~5 mg PO QD", "~", "100000000055"],
+    ["≈5 mg PO QD", "~", "100000000055"],
+    ["about 5 mg PO QD", "~", "100000000055"],
+    ["approximately 5 mg PO QD", "~", "100000000055"],
+    ["ประมาณ 5 เม็ด PO QD", "~", "100000000055"],
+    ["≥5 mg PO QD", ">=", "100000000053"],
+    [">=5mg PO QD", ">=", "100000000053"],
+    ["at least 5 mg PO QD", ">=", "100000000053"],
+    ["อย่างน้อย 5 mg PO QD", ">=", "100000000053"],
+    ["≤5 mg PO QD", "<=", "100000000052"],
+    ["no more than 5 mg PO QD", "<=", "100000000052"],
+    ["ไม่เกิน 5 เม็ด PO QD", "<=", "100000000052"],
+    ["<5 mg PO QD", "<", "100000000050"],
+    ["less than 5 mg PO QD", "<", "100000000050"],
+    [">5 mg PO QD", ">", "100000000051"],
+    ["more than 5 mg PO QD", ">", "100000000051"]
+  ] as const)("parses %s into an EMA R5 comparator and native R6 %s", (input, comparator, code) => {
+    const parsed = parseSig(input);
+    const quantity = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
+    expect(quantity?.value).toBe(5);
+    expect(quantity?.comparator).toBeUndefined();
+    expect(quantity?.extension?.[0]).toMatchObject({
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    });
+    expect(getEmaQuantityComparator(quantity)).toBe(comparator);
+    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator)
+      .toBe(comparator);
+    expect(parsed.shortText).toContain(comparator + "5");
+    expect(fromFhirDosage(parsed.fhir[0]).shortText).toContain(comparator + "5");
+    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
+      .component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+  });
+
+  it("imports independently authored EMA Quantity Operators while retaining unfamiliar ones verbatim", () => {
+    const dose = (code: string) => ({
+      value: 5, unit: "mg",
+      extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+      }]
+    });
+    const exact = {
+      doseAndRate: [{ doseQuantity: dose("100000000055") }]
+    };
+    const imported = toDosageDetails([exact]);
+    expect(imported.step[0].component[0].doseAndRate?.[0].doseQuantity).toEqual({
+      value: 5, unit: "mg", comparator: "~"
+    });
+    expect(fromFhirDosage(exact).longText).toContain("approximately 5 mg");
+    const preserved = toFhirR5Dosages(imported)[0].doseAndRate?.[0].doseQuantity;
+    expect(preserved?.extension?.[0]).toEqual(dose("100000000055").extension[0]);
+    expect(preserved?.value).toBe(5);
+
+    // Equivalent, average, range and other EMA concepts are NOT "~".
+    for (const code of ["100000000054", "100000000056", "200000024024", "unknown"]) {
+      const quantity = dose(code);
+      expect(getEmaQuantityComparator(quantity)).toBeUndefined();
+      const source = { doseAndRate: [{ doseQuantity: quantity }] };
+      const next = toDosageDetails([source]);
+      expect(next.step[0].component[0].doseAndRate?.[0].doseQuantity).toEqual(quantity);
+      expect(toFhirR5Dosages(next)[0].doseAndRate?.[0].doseQuantity).toEqual(quantity);
+    }
+    expect(parseSig("approximately 3 weeks").fhir[0].doseAndRate?.[0]?.doseQuantity)
+      .toBeUndefined();
+    expect(parseSig("1 tab PO BID").fhir[0].doseAndRate?.[0]?.doseQuantity?.extension)
+      .toBeUndefined();
+  });
+
+  it("preserves old local bridge-comparator children while emitting only the standard EMA coding", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator: "~" } }]
+    }] }] };
+    const rows = toFhirR5Dosages(course);
+    const component = rows[0].modifierExtension?.[0].extension?.find(child =>
+      child.url === "component");
+    const amount = component?.extension?.find(child => child.url === "doseAndRate")
+      ?.extension?.find(child => child.url === "doseQuantity");
+    expect(amount?.valueQuantity?.extension?.[0].valueCoding?.code).toBe("100000000055");
+    if (!amount) throw new Error("Expected retained R6 quantity");
+    amount.valueQuantity = undefined;
+    amount.extension = [
+      { url: "quantity", valueQuantity: { value: 5, unit: "mg" } },
+      { url: "comparator", valueCode: "~" }
+    ];
+    expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toEqual({ value: 5, unit: "mg", comparator: "~" });
+  });
+
+  it("keeps standard EMA operators active in R5 maximum-dose and period quantities", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      safety: { doseLimit: [
+        { scope: "administration", valueQuantity: {
+          value: 5, unit: "mg", comparator: "~"
+        } },
+        { scope: "lifetime", valueQuantity: {
+          value: 50, unit: "mg", comparator: "<="
+        } },
+        { scope: "period", valueQuantity: {
+          value: 15, unit: "mg", comparator: "~"
+        }, period: { value: 2, unit: "d", comparator: ">=" } }
+      ] }
+    }] }] };
+    const rows = toFhirR5Dosages(source);
+    expect(rows[0].maxDosePerAdministration).toMatchObject({
+      value: 5, extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { code: "100000000055" }
+      }]
+    });
+    expect(rows[0].maxDosePerLifetime).toMatchObject({
+      value: 50, extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { code: "100000000052" }
+      }]
+    });
+    expect(rows[0].maxDosePerPeriod?.[0]).toMatchObject({
+      numerator: { value: 15, extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { code: "100000000055" }
+      }] },
+      denominator: { value: 2, extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { code: "100000000053" }
+      }] }
+    });
+    expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(source);
+    const changed = toFhirR5Dosages(source);
+    changed[0].maxDosePerAdministration!.value = 6;
+    expect(toDosageDetails(changed).step[0].component[0].safety?.doseLimit)
+      .toContainEqual(expect.objectContaining({
+        scope: "administration",
+        valueQuantity: expect.objectContaining({ value: 6, comparator: "~" })
+      }));
   });
 
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {

@@ -571,6 +571,9 @@ export function projectHpsgSignToState(
       if (dose.unit !== undefined) {
         state.unit = dose.unit;
       }
+      if (dose.comparator !== undefined) {
+        (state.primaryClause.dose ??= {}).comparator = dose.comparator;
+      }
     }
   }
 
