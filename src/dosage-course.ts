@@ -1516,6 +1516,40 @@ export function toDosageDetails(
         ? { ...dosage, text: undefined } : dosage)
     : dosages;
   if (retained) {
+    // A valid R6 course can have no steps. Its R5 representation is a
+    // non-administration Dosage.text row carrying the complete typed source,
+    // not an invented active dose. Restore it without manufacturing a step.
+    const carrier = effectiveDosages[0];
+    if (retained.step.length === 0 && effectiveDosages.length === 1 && carrier &&
+        Object.keys(carrier).every(key => {
+          if (key === "text" || key === "modifierExtension") return true;
+          if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
+          const value = (carrier as Record<string, unknown>)[key];
+          // R5 mappers may materialize all optional keys as undefined and
+          // normalize absent repeated fields into []. Neither is a dose or
+          // an instruction. Any actual new field is a live R5 edit.
+          return value === undefined || Array.isArray(value) && value.length === 0;
+        }) &&
+        carrier.modifierExtension?.length === 1 &&
+        carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL) {
+      const instruction = course?.renderedInstruction ?? renderedInstruction ?? carrier.text;
+      const edited = instruction !== retained.renderedInstruction;
+      const updated = {
+        ...retained,
+        ...(edited
+          ? { renderedInstruction: instruction }
+          : {})
+      };
+      if (edited) {
+        addWarning(warnings,
+          "Edited R5 text superseded the original text-only R6 instruction; source preserved.");
+      }
+      return withPreservedSourceExtension(
+        withReconciliationSources(withReconciliationWarnings(updated, warnings),
+          [...reconciliationSources, ...(edited && retainedSource ? [retainedSource] : [])]),
+        instructionSource
+      );
+    }
     // An edited component instruction is not a new whole-course instruction.
     // Keep that component text, but let structured phases drive the summary
     // unless the caller explicitly supplied a complete replacement course SIG.
@@ -1741,6 +1775,19 @@ export function toFhirR5Dosages(
       // course reuses the same nested object across several stages.
       result.push(cloneStructuredValue(fromR6Dosage(component, index + 1)));
     }
+  }
+  // Current R6 allows 0 steps. Preserve nonempty course-only data through
+  // the existing typed full-course marker rather than returning [] and
+  // silently losing a text-only instruction, safety or course metadata.
+  // This row contains no dose/rate or schedule: it is not an administration.
+  if (!result.length && Object.keys(details).some(key => key !== "step")) {
+    return [{
+      ...(details.renderedInstruction !== undefined
+        ? { text: details.renderedInstruction } : {}),
+      modifierExtension: [{ url: DOSAGE_DETAILS_R5_URL, extension: [{
+        url: "dosageDetails", extension: encodeFields(details, COURSE)
+      }] }]
+    }];
   }
   attachCourseDetailsExtensions(result, details);
   // Source text has one non-modifier owner and a compact edit baseline.

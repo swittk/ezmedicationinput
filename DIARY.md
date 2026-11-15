@@ -4870,3 +4870,40 @@ An existing-suite regression covers edit A->B, clear and added stage and
 proves current-R6 import accepts all three. No new compatibility encoding,
 dependency, extra grammar pass, or unrelated migration.
 The final suite count for the new combined commits is 3911/3911.
+
+
+## 2026-11-15 — Whole-PR no-loss spot audit: R6 zero-step text/metadata R5 carrier
+
+The no-loss promise was checked against several independent current-R6
+families rather than relying on the 3911-test suite alone: ordinary one-
+and two-stage dosages, safety maxima, rate Ratio, site and condition,
+R6 step/entry metadata, timing offsets, and the valid 0..* step case.
+A real gap was reproduced: toFhirR5Dosages on a valid R6
+DosageInstruction with no steps previously returned an empty array,
+discarding renderedInstruction and all course-only metadata for R5-only
+consumers. fromFhir().fhir similarly returned [] even when fhirNext
+still retained the original. This was silent loss across the R5
+interop surface and was NOT an acceptable "unrepresentable" case.
+
+The existing typed full-course R5 modifier marker now carries a
+non-administration Dosage.text-only row when there are zero R6 steps
+but nonempty instruction/course fields. This row has NO invented dose,
+rate or schedule. toDosageDetails recognizes a marker-only carrier and
+restores the original zero-step course exactly; an R5 text edit changes
+only the current displayed instruction and retains the original
+complete source marker. Normal R5 mappers may materialize undefined
+optional fields or empty dosage/additionalInstruction arrays: those
+values cannot turn this source carrier into a phantom administration.
+A genuinely added nonempty clinical field, however, does become a live
+edited R6 step and preserves the original source as reconciliation
+provenance. No new extension URL, third-party dependency or grammar
+pass is needed; the preexisting typed course marker codec is reused.
+
+Focused test now also covers source-only id, custom extension and
+safety, text edits, downstream-normalized empty arrays and a real
+new dose. The actual compiled downstream R5 dosage converter and
+usage-map save/reopen preserve source-only text, id, custom extensions
+and a zero-step R6 structure byte-for-byte for this case.
+The branch must never claim that a passing test suite proves
+mathematical absence of all possible future data-loss bugs; the
+product contract remains best-effort preservation of ALL known values.

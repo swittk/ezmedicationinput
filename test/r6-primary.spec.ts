@@ -3119,16 +3119,65 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
   });
 
-  it("accepts current R6 text-only wire input without a step array", () => {
-    // HL7 Snapshot 1 DosageInstruction.step has cardinality 0..*.
+  it("preserves R6 text-only wire input through its usable R5 output", () => {
+    // HL7 Snapshot 1 DosageInstruction.step is 0..*: an instruction is
+    // meaningful even without a structured administration component.
     const input = { renderedInstruction: "Take as directed" };
     const result = fromFhir(input);
-    expect(result.count).toBe(0);
-    expect(result.fhir).toEqual([]);
+    expect(result.count).toBe(1);
+    expect(result.fhir).toHaveLength(1);
+    expect(result.fhir[0].text).toBe(input.renderedInstruction);
+    expect(result.fhir[0].doseAndRate).toBeUndefined();
     expect(result.fhirNext.step).toEqual([]);
     expect(result.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
     expect(result.longText).toBe(input.renderedInstruction);
+    expect(toDosageDetails(result.fhir)).toEqual(result.fhirNext);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("round-trips valid zero-step R6 course-only metadata without inventing an active dose", () => {
+    const source: FhirR6DosageInstruction = {
+      id: "course-note", renderedInstruction: "Call clinic for dose",
+      extension: [{ url: "https://example.org/unknown-course", valueBoolean: false }],
+      safety: { doseLimit: [{ scope: "administration",
+        valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] },
+      step: []
+    };
+    const rows = toFhirR5Dosages(source);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].text).toBe(source.renderedInstruction);
+    expect(rows[0].doseAndRate).toBeUndefined();
+    expect(rows[0].timing).toBeUndefined();
+    expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(source);
+    // Ordinary R5 persistence adapters often write empty arrays for
+    // absent fields. They must not turn a course-only metadata carrier
+    // into a phantom administration stage.
+    const normalized = [{
+      ...rows[0], doseAndRate: [], additionalInstruction: [],
+      sequence: undefined, timing: undefined, asNeeded: undefined,
+      safety: undefined, maxDosePerAdministration: undefined
+    }];
+    expect(toDosageDetails(normalized)).toEqual(source);
+    // Once the clinician adds a real dose, it is an actual new stage,
+    // not an empty metadata carrier. The former R6 source stays retained.
+    const withNewDose = [{
+      ...normalized[0], doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }];
+    const afterAddingDose = toDosageDetails(withNewDose);
+    expect(afterAddingDose.step[0].component[0].doseAndRate?.[0].doseQuantity?.value)
+      .toBe(1);
+    expect(JSON.stringify(afterAddingDose.extension)).toContain("Call clinic for dose");
+    const batch = fromFhir(source);
+    expect(batch.fhir).toHaveLength(1);
+    expect(toDosageDetails(batch.fhir)).toEqual(source);
+    const edited = JSON.parse(JSON.stringify(rows));
+    edited[0].text = "Corrected directions";
+    const afterEdit = toDosageDetails(edited);
+    expect(afterEdit.renderedInstruction).toBe("Corrected directions");
+    expect(afterEdit.step).toEqual([]);
+    expect(afterEdit.safety).toEqual(source.safety);
+    expect(JSON.stringify(afterEdit.extension)).toContain("Call clinic for dose");
+    expect(toFhirR5Dosages({ step: [] })).toEqual([]);
   });
 
   it("retains the original concept-only site wrapper when an R5 site is corrected", () => {
@@ -3837,6 +3886,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     for (const example of invalid) {
       expect(() => fromFhir(example as FhirR6DosageInstruction)).toThrow(/FHIR R6 DosageInstruction/);
     }
-    expect(fromFhir({ renderedInstruction: "Directions supplied as text only.", step: [] }).count).toBe(0);
+    expect(fromFhir({ renderedInstruction: "Directions supplied as text only.", step: [] }).fhir[0].text)
+      .toBe("Directions supplied as text only.");
   });
 });

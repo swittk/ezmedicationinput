@@ -1728,9 +1728,8 @@ export function fromFhir(
   const dosageDetails: FhirR6DosageInstruction = wire.step === undefined
     ? { ...wire, step: [] } : wire as FhirR6DosageInstruction;
   const { dosages, course } = fromDosageDetails(dosageDetails);
-  const items = toFhirR5Dosages(dosageDetails).map(dosage =>
-    fromFhirDosageInternal(dosage, options)
-  );
+  const r5Rows = toFhirR5Dosages(dosageDetails);
+  const items = r5Rows.map(dosage => fromFhirDosageInternal(dosage, options));
   // Imported R6-only approximations have no legal R5 SimpleQuantity slot.
   // Their editor-row suggestions must retain the amount just as the
   // whole-course display does. Ordinary R6 imports do no extra rendering.
@@ -1771,7 +1770,9 @@ export function fromFhir(
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
     items,
-    fhir: dosages,
+    // A valid text-only R6 instruction has zero components but still needs
+    // an editable R5 text row. Do not return [] and lose that instruction.
+    fhir: dosages.length ? dosages : r5Rows,
     fhirNext: dosageDetails,
     course,
     shortText,
