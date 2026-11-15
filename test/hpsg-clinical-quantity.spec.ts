@@ -1539,3 +1539,78 @@ describe("comparative mixed numbers and shared dimensional quantities", () => {
     }
   });
 });
+
+describe("fractional million and attached dimensional rate families", () => {
+  it.each([
+    ["approximately two and a half million units PO daily", 2500000, "U", "~"],
+    ["two and a half million units PO daily", 2500000, "U", undefined],
+    ["~2 and a half million units", 2500000, "U", "~"],
+    [">=2 and three quarters million IU once", 2750000, "IU", ">="],
+    ["approximately two and a half tablets", 2.5, "tab", "~"],
+    ["Take two and a half tablets daily", 2.5, "tab", undefined]
+  ] as const)("does not lose magnitude or comparator in %s",
+    (input, value, unit, comparator) => {
+      const parsed = parsePublicSig(input);
+      const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+      expect(dose).toMatchObject({ value, unit });
+      expect(dose?.comparator).toBe(comparator);
+      const r5 = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
+      expect(r5?.value).toBe(value);
+      expect(getEmaQuantityComparator(r5)).toBe(comparator);
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
+      const savedDose = reopened.step[0].component[0].doseAndRate?.[0].doseQuantity;
+      expect(savedDose?.value).toBe(value);
+      expect(savedDose?.comparator).toBe(comparator);
+      expect(parsed.input).toBe(input);
+    }
+  );
+
+  it.each([
+    ["~", "~"], [">=", ">="], ["≤", "<="]
+  ] as const)("joins attached and separated mass/time denominators without losing %s", (symbol, comparator) => {
+    for (const micro of ["µ", "μ", "u", "mc"]) {
+      const joined = parsePublicSig(`Infuse ${symbol}0.1${micro}g/kg per min`);
+      const separated = parsePublicSig(`Infuse ${symbol}0.1 ${micro}g/kg per min`);
+      const compact = parsePublicSig(`Infuse ${symbol}0.1${micro}g/kg/min`);
+      const doses = [joined, separated, compact].map(result =>
+        result.fhirNext.step[0].component[0].doseAndRate?.[0]);
+      for (const dose of doses) {
+        expect(dose?.rateQuantity).toMatchObject({
+          value: 0.1, unit: "ug/kg/min", comparator
+        });
+        expect(dose?.doseQuantity).toBeUndefined();
+      }
+      expect(doses[0]).toEqual(doses[1]);
+      expect(doses[0]).toEqual(doses[2]);
+      expect(getEmaQuantityComparator(joined.fhir[0].doseAndRate?.[0].rateQuantity))
+        .toBe(comparator);
+    }
+  });
+
+  it.each([
+    ["Infuse approximately 0.1mcg/kg per minute", "~"],
+    ["Infuse approximately 0.1µg/kg per minute", "~"],
+    ["Infuse ~0.1mcg/kg per minute", "~"],
+    ["Infuse 0.1mcg/kg per minute", undefined],
+    ["Infuse 0.1mcg/kg/min", undefined],
+    ["Infuse ~0.1 mcg/kg per minute", "~"]
+  ] as const)("shares the compact and separated per-minute grammar for %s", (text, comparator) => {
+    const parsed = parsePublicSig(text);
+    const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0];
+    expect(dose?.doseQuantity).toBeUndefined();
+    expect(dose?.rateQuantity).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
+    expect(dose?.rateQuantity?.comparator).toBe(comparator);
+    expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].rateQuantity)).toBe(comparator);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.input).toBe(text);
+  });
+
+  it("does not invent a per-minute rate when only a per-kilogram dose was authored", () => {
+    const amount = parsePublicSig("Inject approximately 0.1 µg/kg once");
+    const dose = amount.fhirNext.step[0].component[0].doseAndRate?.[0];
+    expect(dose?.doseQuantity).toMatchObject({
+      value: 0.1, unit: "ug/kg", comparator: "~"
+    });
+    expect(dose?.rateQuantity).toBeUndefined();
+  });
+});

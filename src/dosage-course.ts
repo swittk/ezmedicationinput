@@ -1700,9 +1700,18 @@ export function toDosageDetails(
       const edited = !equalStructuredValues(updated, retained);
       if (edited) addWarning(warnings,
         "Edited R5 text or course metadata superseded the original zero-step R6 source; source preserved.");
+      // A caller may replace course.extension with a fresh annotation.
+      // Historical reconciliation sources are not active annotations:
+      // preserve their existing flat children exactly once BEFORE replacing
+      // the active extension array and flattening the latest source marker.
+      const oldSources: FhirExtension[] = [];
+      if (course?.extension !== undefined) for (const extension of retained.extension ?? []) {
+        if (extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+          oldSources.push(...(extension.extension ?? []));
+      }
       return withPreservedSourceExtension(
         withReconciliationSources(withReconciliationWarnings(updated, warnings),
-          [...reconciliationSources,
+          [...reconciliationSources, ...oldSources,
             ...(edited && retainedSource ? [sourceWithoutNestedHistory(retainedSource)] : [])]),
         instructionSource
       );

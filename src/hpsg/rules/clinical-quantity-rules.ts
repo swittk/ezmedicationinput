@@ -6,6 +6,7 @@ import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   additiveDoseNumberAt,
+  attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
@@ -107,11 +108,13 @@ function additiveFractionDose(
 function compactUnitExpression(
   context: HpsgClauseContext,
   start: number,
-  accepts: (value: string) => boolean
+  accepts: (value: string) => boolean,
+  attachedPrefix = ""
 ): UnitExpression | undefined {
-  let result: UnitExpression | undefined;
-  let compact = "";
-  const maxLength = 5;
+  let compact = attachedPrefix.toLowerCase().replace(/[μµ]/gu, "u");
+  let result: UnitExpression | undefined = compact && accepts(compact)
+    ? { compact, end: start } : undefined;
+  const maxLength = attachedPrefix ? 4 : 5;
   // Five tokens cover compact/spaced mixtures such as `mcg/kg per min` and
   // `mg / kg / day` without a clause-wide scan. Longest match prevents /kg
   // from hiding a real time suffix.
@@ -120,8 +123,10 @@ function compactUnitExpression(
     const separator = token.original === "/" || normalizeTokenLower(token) === "per";
     // Spaced expressions have a strict UNIT separator UNIT shape. Do not
     // absorb a following route or cadence into an unknown suffix.
-    if (length > 1 && length % 2 === 0 && !separator) break;
-    if (length > 1 && length % 2 === 1 && separator) break;
+    const expectsSeparator = attachedPrefix ? length % 2 === 1 : length % 2 === 0;
+    if (length > 1 || attachedPrefix) {
+      if (separator !== expectsSeparator) break;
+    } else if (separator) break;
     compact += separator ? "/" : token.original.replace(/\s+/gu, "");
     const normalized = compact.toLowerCase().replace(/[μµ]/gu, "u");
     if (accepts(normalized)) result = { compact: normalized, end: start + length };
@@ -604,10 +609,13 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
       }
     }
     const numericStart = qualified?.numericIndex ?? phraseStart;
-    const value = qualified?.value ?? (quantityToken.kind === LexKind.Number ? quantityToken.value : undefined);
-    // Compact qualifiers keep the unit in their number token; normalize it
-    // exactly like the spaced unit path before dimensional recognition.
-    const unit = qualified?.rawUnit?.replace(/[μµ]/gu, "u");
+    const attached = !qualified && quantityToken.kind !== LexKind.Number
+      ? attachedNumberUnitAt(normalizeTokenLower(quantityToken)) : undefined;
+    const value = qualified?.value ??
+      (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
+    // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
+    // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
+    const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
     if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
     const comparator = qualified?.comparator;
     const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
@@ -619,9 +627,9 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     const accepts = (candidate: string) =>
       /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
       /^(?:ml|l|mcg|ug|mg|g)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
-    const expression = unit
-      ? accepts(unit) ? { compact: unit, end: numericStart + 1 } : undefined
-      : compactUnitExpression(context, numericStart + 1, accepts);
+    const expression = compactUnitExpression(
+      context, numericStart + 1, accepts, unit ?? ""
+    );
     if (!expression) return [];
     const weight = qualifyClinicalSign(context, phraseStart, numericStart,
       weightQuantity(context, numericStart, value, expression), comparator);

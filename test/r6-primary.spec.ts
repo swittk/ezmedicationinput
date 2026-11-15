@@ -5377,3 +5377,194 @@ describe("adversarial DST calendar-cycle and clockless active-window oracles", (
     ]);
   });
 });
+
+describe("review 17: course history, imported rate ranges and civil-clock caps", () => {
+  const relative = (value: number, unit = "d") => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event",
+      code: "treatment-start"
+    }] },
+    offsetDuration: { value, unit, code: unit }
+  });
+  const daily = (clock: string, boundsDuration?: { value: number; unit: string; code: string }) => ({
+    timing: { repeat: { frequency: 1, period: 1,
+      periodUnit: FhirPeriodUnit.Day, timeOfDay: [clock],
+      ...(boundsDuration ? { boundsDuration } : {}) } },
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+  });
+
+  it("preserves prior flat text-only source when course.extension is explicitly replaced", () => {
+    let course: FhirR6DosageInstruction = {
+      renderedInstruction: "Version A",
+      extension: [{ url: "https://example.org/old-annotation", valueString: "old" }],
+      safety: { doseLimit: [{ scope: "administration",
+        valueQuantity: { value: 5, unit: "mg" } }] },
+      step: []
+    };
+    const texts = ["Version A"];
+    let firstSize = 0;
+    for (let index = 1; index <= 10; index++) {
+      const rows = toFhirR5Dosages(course);
+      rows[0].text = "Version " + index;
+      const annotation = index === 2
+        ? { extension: [{ url: "https://example.org/new-annotation", valueString: "new" }] }
+        : undefined;
+      course = toDosageDetails(JSON.parse(JSON.stringify(rows)), undefined, annotation);
+      expect(course.step).toEqual([]);
+      expect(course.renderedInstruction).toBe("Version " + index);
+      expect(course.safety?.doseLimit?.[0].valueQuantity?.value).toBe(5);
+      const sources = course.extension?.filter(ext => ext.url.includes("reconciliation-source")) ?? [];
+      expect(sources).toHaveLength(index);
+      const rawHistory = JSON.stringify(sources);
+      for (const text of texts) expect(rawHistory).toContain(text);
+      expect(rawHistory).toContain("old-annotation");
+      if (index >= 2) expect(course.extension).toContainEqual({
+        url: "https://example.org/new-annotation", valueString: "new"
+      });
+      const reopened = toDosageDetails(toFhirR5Dosages(course));
+      expect(reopened.renderedInstruction).toBe(course.renderedInstruction);
+      expect(reopened.extension).toEqual(course.extension);
+      const bytes = JSON.stringify(toFhirR5Dosages(course)).length;
+      if (!firstSize) firstSize = bytes;
+      if (index === 10) expect(bytes).toBeLessThan(firstSize * 11);
+      texts.push(course.renderedInstruction!);
+    }
+  });
+
+  it.each([
+    ["en", "Rate range: 50–100 mL/h"],
+    ["th", "ช่วงอัตราการให้ยา: 50–100 mL/h"]
+  ] as const)("renders source-less %s R6 rateRange in whole course and individual item", (locale, expected) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 500, unit: "mL" },
+        rateRange: { low: { value: 50, unit: "mL/h" },
+          high: { value: 100, unit: "mL/h" } } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const parsed = fromFhir(source, { locale });
+    expect(parsed.longText).toContain(expected);
+    expect(parsed.items[0].longText).toContain(expected);
+    expect(parsed.longText).toContain("500");
+    expect(parsed.fhirNext).toEqual(source);
+    const r5 = toFhirR5Dosages(source)[0];
+    expect(formatSig(r5, "long", { locale })).toContain(expected);
+    expect(fromFhirDosage(r5, { locale }).longText).toContain(expected);
+    expect(toDosageDetails([r5])).toEqual(source);
+    source.step[0].component[0].text = "Infuse using the written rate plan";
+    expect(fromFhir(source, { locale }).items[0].longText)
+      .toBe("Infuse using the written rate plan");
+  });
+
+  it("renders one-sided imported rateRange bounds without inventing an exact rate", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 500, unit: "mL" },
+        rateRange: { high: { value: 100, unit: "mL/h" } } }]
+    }] }] };
+    const output = fromFhir(source);
+    expect(output.items[0].longText).toContain("Rate range: <=100 mL/h");
+    expect(output.items[0].longText).not.toContain("Rate: 100");
+    expect(output.fhirNext).toEqual(source);
+  });
+
+  it.each([
+    ["28 d", 28, "d", "2027-02-14T02:30:00-05:00", "2027-04-11"],
+    ["4 wk", 4, "wk", "2027-02-14T02:30:00-05:00", "2027-04-11"],
+    ["1 mo", 1, "mo", "2027-02-14T02:30:00-05:00", "2027-04-14"]
+  ] as const)("inherits original logical clock for native component %s duration caps",
+    (label, n, unit, anchor, boundary) => {
+      const component = daily("03:00:00", { value: n, unit, code: unit });
+      const source: FhirR6DosageInstruction = {
+        repeatCycle: { value: n, unit, code: unit },
+        step: [{ component: [component] }]
+      };
+      const opts = { orderedAt: anchor, from: anchor,
+        timeZone: "America/New_York", limit: 95 };
+      for (const input of [source, toFhirR5Dosages(source), fromFhir(source)]) {
+        const dates = nextDueDoses(input, opts);
+        expect(dates.filter(x => x.startsWith(boundary + "T03:00:00"))).toHaveLength(1);
+        expect(new Set(dates).size).toBe(dates.length);
+        expect(calculateTotalUnits({ dosage: input, ...opts,
+          durationValue: 84, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(84);
+      }
+      expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
+    }
+  );
+
+  it("keeps original-clock ownership for component boundsRange and source-retained duration", () => {
+    const original = "2027-02-14T02:30:00-05:00";
+    for (const bounds of [
+      { boundsRange: { high: { value: 28, unit: "d", code: "d" } } },
+      { boundsDuration: { value: 28, unit: "d", code: "d" } }
+    ]) {
+      const source: FhirR6DosageInstruction = {
+        repeatCycle: { value: 28, unit: "d", code: "d" },
+        step: [{ component: [{ timing: { repeat: {
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["03:00:00"], ...bounds
+        } }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }]
+      };
+      for (const dosage of [source, toFhirR5Dosages(source)]) {
+        const opts = { from: original, orderedAt: original,
+          timeZone: "America/New_York", limit: 86 };
+        const dates = nextDueDoses(dosage, opts);
+        expect(dates.filter(x => x.startsWith("2027-04-11T03:00:00"))).toHaveLength(1);
+        expect(calculateTotalUnits({ dosage, ...opts,
+          durationValue: 84, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(84);
+      }
+    }
+  });
+
+  it("keeps a calendar week at the original civil time, unlike an elapsed 168-hour interval", () => {
+    const from = "2026-10-26T00:00:00-04:00";
+    const opts = { from, orderedAt: from,
+      timeZone: "America/New_York", limit: 5 };
+    const make = (period: number, periodUnit: FhirPeriodUnit) => ({
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period, periodUnit } }
+    });
+    const calendar = [
+      "2026-10-26T00:00:00-04:00",
+      "2026-11-02T00:00:00-05:00",
+      "2026-11-09T00:00:00-05:00",
+      "2026-11-16T00:00:00-05:00",
+      "2026-11-23T00:00:00-05:00"
+    ];
+    const elapsed = [
+      "2026-10-26T00:00:00-04:00",
+      "2026-11-01T23:00:00-05:00",
+      "2026-11-08T23:00:00-05:00",
+      "2026-11-15T23:00:00-05:00",
+      "2026-11-22T23:00:00-05:00"
+    ];
+    for (const dosage of [
+      make(7, FhirPeriodUnit.Day),
+      make(1, FhirPeriodUnit.Week)
+    ]) {
+      expect(nextDueDoses(dosage, opts)).toEqual(calendar);
+      expect(calculateTotalUnits({ dosage, ...opts,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
+    }
+    const q168h = make(168, FhirPeriodUnit.Hour);
+    expect(nextDueDoses(q168h, opts)).toEqual(elapsed);
+    expect(calculateTotalUnits({ dosage: q168h, ...opts,
+      durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(5);
+  });
+
+  it("does not apply parent civil-clock to a new stage begun by elapsed +3h", () => {
+    const source: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, unit: "d", code: "d" },
+      step: [{ start: relative(3, "h"),
+        component: [daily("04:00:00", { value: 28, unit: "d", code: "d" })] }]
+    };
+    const from = "2027-02-14T02:30:00-05:00";
+    for (const dosage of [source, toFhirR5Dosages(source), fromFhir(source)]) {
+      const opts = { from, orderedAt: from, timeZone: "America/New_York", limit: 90 };
+      const dates = nextDueDoses(dosage, opts);
+      expect(dates).toContain("2027-03-14T04:00:00-04:00");
+      expect(dates.filter(x => x.startsWith("2027-04-11T04:00:00"))).toHaveLength(1);
+      expect(new Set(dates).size).toBe(dates.length);
+      expect(calculateTotalUnits({ dosage, ...opts,
+        durationValue: 84, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(83);
+    }
+  });
+});

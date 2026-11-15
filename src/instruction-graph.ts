@@ -4140,7 +4140,16 @@ function frameWithoutSupersededAmount(
         const remaining = (text.slice(0, offset) + " " +
           text.slice(offset + old.text.length)).replace(/^\s*of\s+/i, "").trim();
         if (!remaining) continue;
-        args.push({ ...arg, text: remaining, normalized: remaining, i18n: undefined });
+        const sharesSupersededQuantity = superseded.some(amount =>
+          amount.quantity && arg.quantity &&
+          amount.quantity.value === arg.quantity.value &&
+          amount.quantity.unit === arg.quantity.unit &&
+          amount.quantity.comparator === arg.quantity.comparator &&
+          amount.quantity.range?.low === arg.quantity.range?.low &&
+          amount.quantity.range?.high === arg.quantity.range?.high);
+        args.push({ ...arg,
+          ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
+          text: remaining, normalized: remaining, i18n: undefined });
         continue;
       }
     }
@@ -4179,8 +4188,9 @@ function primaryDoseAmountOwner(
   // The current edited unit or amount is NOT evidence of historic source
   // ownership. A later independent 5 mL drink must not become the owner
   // just because the clinician edited the earlier tablet dose to 3 mL.
-  const methodMatches = amountActions.filter(action => actionMatchesCanonicalMethod(action, clause));
-  if (methodMatches.length === 1) return methodMatches[0];
+  // The current method is editable. It cannot identify which OLD action
+  // owned the originally prescribed quantity; using it would steal an
+  // independent later drink/instillation when the formulation changes.
   const doseDefiners = amountActions.filter(action =>
     getMedicationInstructionAction(action.predicate.lemma)?.definesDose);
   if (doseDefiners.length === 1) return doseDefiners[0];

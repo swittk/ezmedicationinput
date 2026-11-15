@@ -732,8 +732,12 @@ export function additiveDoseNumberAt(
       if (factor !== undefined) { fraction = numeric * factor; cursor++; }
     }
   }
-  return fraction !== undefined && fraction > 0 && fraction < 1
-    ? { value: whole + fraction, numericIndex: cursor } : undefined;
+  if (fraction === undefined || fraction <= 0 || fraction >= 1) return undefined;
+  const amount = whole + fraction;
+  // Both plain and comparator-qualified mixed numbers can be scaled:
+  // 'two and a half million units' is 2,500,000 units, not 0.5 or 2.5.
+  return millionDoseNumberAt(tokens, cursor, limit, amount) ??
+    { value: amount, numericIndex: cursor };
 }
 
 /** A million is a numeric multiplier, never a medication unit.
@@ -748,6 +752,16 @@ export function millionDoseNumberAt(
   return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)
     ? { value: value * 1_000_000, numericIndex: start + 1 }
     : undefined;
+}
+
+/** Numeric source token with an attached unit, e.g. 0.1mcg/kg.
+ * A prefix comparator is optional and remains owned by its outer lexeme.
+ * This is a bounded token form, never a second whole-SIG parser. */
+export function attachedNumberUnitAt(lower: string):
+  { value: number; rawUnit: string } | undefined {
+  if (!/^(?:\d|\.)/u.test(lower)) return undefined;
+  const matched = lower.match(/^((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)$/u);
+  return matched ? { value: Number(matched[1]), rawUnit: matched[2] } : undefined;
 }
 
 /** One bounded quantity-prefix lexeme shared by scalar and dimensional
@@ -789,11 +803,13 @@ export function doseComparatorNumberAt(
   const token = numericIndex < limit ? tokens[numericIndex] : undefined;
   if (!token) return undefined;
   const word = token.canonical ?? token.lower;
+  const attached = token.kind !== LexKind.Number ? attachedNumberUnitAt(word) : undefined;
   let value = token.kind === LexKind.Number ? token.value :
-    DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
+    attached?.value ?? DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
   const embeddedMillion = /^([0-9]+(?:\.[0-9]+)?)m$/u.exec(word);
   if (value === undefined && embeddedMillion) value = Number(embeddedMillion[1]) * 1_000_000;
   if (value === undefined) return undefined;
+  if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
   const million = embeddedMillion
     ? { value, numericIndex }
     : millionDoseNumberAt(tokens, numericIndex, limit, value);

@@ -5636,3 +5636,135 @@ Only read-only independent audits by three completed workers and
 main coordinator's implementation/validation count as completed.
 The fourth general audit timed out without a final report and is
 explicitly excluded from the completed-audit count.
+
+
+## 2026-11-16 — PR #13 whole-calendar contract and seventh CodeRabbit batch
+
+**Decision gate**: inspected complete newest CodeRabbit review body 5913452814,
+all seven inline threads and followups, checked past related review families,
+and reproduced each reported defect against parent 5a96462. All seven are
+supported meaning-preservation issues; none merits defensive hard stops,
+numeric blanking, another whole-SIG parse, or a blanket refusal. Four
+independent read-only Codex auditors were launched (DST, FHIR, clinical
+and cross-family); each hit its execution limit without completing a
+final report. Their partial probes corroborated the baseline defects
+but do NOT constitute four completed approvals. The coordinator did
+all source changes, clinical/date oracles, integration and validation.
+
+**Root DST problem, not an isolated April 11 patch**: Date is a physical
+instant. A source-prescribed local calendar clock is a separate logical
+value; when a spring gap contains 02:30, the resolved instant becomes
+03:30. Re-reading that instant's clock loses the prescribed 02:30,
+and reusing 03:30 for the next cycle causes duplicate/missing
+administrations. The previous review fixed explicit step.start/end
+but overlooked component Timing boundsDuration, boundsRange.high,
+retained anchored-duration modifiers, calendar day/week intervals
+without clocks, and stage-local clocks after elapsed offsets.
+
+The established calendar clock is now a shared internal contract:
+- calendarDayStepper and durationStepper accept optional sourceClock;
+- component cap resolver receives that logical clock for its
+  calendar day/week/month/year upper bound;
+- treatmentStepWindow, repeatedCourseHorizon and
+  scheduleTreatmentRelativeCourse pass it through;
+- calculateCourseTotalUnits threads the SAME source clock into the
+  bound used for supply, not merely the scheduling path;
+- stageCalendarClock distinguishes an independent stage beginning
+  after a real elapsed +3h shift, which obtains its own new clock,
+  from a calendar-relative stage that inherits the original;
+- explicit absolute boundsPeriod.start owns its own clock;
+- createIntervalStepper now uses local calendar stepping for
+  integral FHIR day/week periods, including once weekly, independent
+  of how many administrations occur. Explicitly elapsed q24h/q168h,
+  s/min/h intervals and fractional day/week remain elapsed.
+
+Independent date/count oracles: New York February 14 2027 02:30,
+28-day recurrence with 28-day component cap and daily 03:00 now
+includes April 11 03:00 exactly ONCE and supplies 84 tablets in
+84 days, with R6, R5 and imported forms agreeing. The 4-week and
+monthly boundary/cap variants, boundsRange high, fall-back,
+fixed-zone controls and +3h stage-specific case were checked.
+After a fall-back clock change, once weekly/7d retains its
+original local 00:00, yielding 4 administrations over 28 local
+days; q168h drifts to 23:00 and yields 5. Legitimate concurrent
+components can still have duplicate timestamps; no global dedup
+or forced clipping of intentionally overlapping stages.
+
+**Clinical and import families**:
+1. Zero-step source history: replacing course.extension used to
+   discard older flat reconciliation-source entries. Existing flat
+   children now survive the explicit new annotation, with old course
+   marker stored once minus any embedded history. The known old
+   instruction, annotation and safety stay recoverable over ten
+   successive edits. No exponential nesting or phantom dose.
+2. Comparative mixed million: source-qualified 'two and a half
+   million units' used to lose numeric magnitude/comparator. One
+   bounded additive number head now applies the existing million
+   multiplier AFTER its fraction, both exact and approximate.
+   Known value is 2,500,000 U, never 0.5 or 2.5.
+3. Attached weight-based rates: 'Infuse ~0.1mcg/kg per min' and
+   'Infuse approximately 0.1mcg/kg per minute' share a bounded
+   number+unit lexeme and the existing compound denominator
+   continuation with their spaced counterparts; all yield
+   ug/kg/min rateQuantity (not a scalar ug/kg dose) with correct
+   comparator. Nearby plain compact rates and exact microgram/kg
+   doses remain distinct. No second parser pass.
+4. Source-less imported R5 and R6 rateRange: render original
+   50-100 mL/h range in the course and item views, not just
+   'Use 500 mL'. The one shared R5-compatible renderer supports
+   two-sided and one-sided ranges in EN/TH, and honors explicit
+   component source text. Source course and rateRange stay
+   unchanged, no invented exact rate.
+5. Graph source edit: old typed medication Amount embedded in
+   Object/Theme text had its words removed but retained its
+   quantity; translatedArgument rendered the obsolete quantity.
+   Only mirrors of that exact superseded Amount lose the numeric
+   quantity. The independently authored 100mL mixing Substance,
+   5-min Duration, drug name and later hydration amount remain.
+6. Graph owner: an imported graph lacking a primary span cannot
+   identify original dose ownership using a clinician-EDITED
+   method; doing so erased a later drink amount. The previous
+   source method selection is removed; stable typed dose-definer
+   action ownership or earliest original administration is used,
+   with explicit spans still authoritative. Tested simultaneous
+   method and dose edit while original graph stayed byte-identical.
+
+All these are clinical meaning/data-preservation corrections in
+existing typed grammar, FHIR, and calendar functions. No outside
+consumer code, database schema or service deployment. The
+user explicitly requires best-effort nominal arithmetic with
+>=/<=/~, unchanged here. No new review was requested.
+
+
+Validation AFTER the last calendar and import refactors:
+- npm run build: PASS, ES6 ESM/CJS and TypeScript declarations.
+- npm test: **4,109/4,109** tests across **44/44** existing suites.
+  R6 353/353, HPSG clinical quantity 173/173, instruction graph
+  281/281, scheduling audit 171/171, scheduling core 134/134,
+  FHIR generation roundtrip 91/91, Thai review follow-up 21/21.
+- npm run test:dist: **4/4** packaged-export tests.
+- git diff --check: PASS.
+- Actual downstream read-only consumer adapter:
+  FHIR R5 -> editable dosage -> in-memory save -> reopen -> reverse
+  FHIR -> R6; mixed million ~2,500,000 units, ~0.1 ug/kg/min,
+  source-less 500mL at 50-100mL/h, zero-step original source,
+  and left-eye ordinary dosage retained their tested structured
+  values and renderings. This is not a byte-for-byte identity claim.
+- Independent New York fall 2026 source-clock oracle: calendar 7d
+  and 1wk both give Oct 26 00:00, Nov 2 00:00, Nov 9 00:00,
+  Nov 16 00:00 and 4 supply units over 28 calendar days; explicit
+  elapsed 168h gives Oct 26 00:00, Nov 1 23:00, Nov 8 23:00,
+  Nov 15 23:00 and 5 units. Hourly q24h retains its elapsed
+  semantics. This extra sibling was not named in CodeRabbit's review.
+
+Paired warm host benchmark against immutable 5a96462, seven alternating
+60-parse batches with 35 warmups, median microseconds:
+ordinary 1804.5 -> 1833.3 (+1.6%);
+Thai 6482.0 -> 6483.2 (~0%);
+ocular independent taper 6694.1 -> 6532.0 (-2.4%);
+approximate taper 3106.7 -> 3165.4 (+1.9%);
+mixed million (previously WRONG output) 10168 -> 6910.2 (-32%);
+rich preparation graph 16191 -> 16519.9 (+2.0%).
+Host performance is subject to shared load and is not a mobile
+device benchmark. No sustained common-path regression observed;
+normal SIG code gets no full extra parsing or generalized validation.

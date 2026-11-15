@@ -423,10 +423,12 @@ function addCalendarDaysAtClock(
 /** A calendar cycle keeps its original wall clock even after one boundary
  * falls into a DST gap. The next boundary resumes the prescribed hour. */
 function calendarDayStepper(
-  anchor: Date, days: number, timeZone: string
+  anchor: Date, days: number, timeZone: string,
+  originalClock?: Pick<TimeParts, "hour" | "minute" | "second">
 ): (instant: Date) => Date | null {
-  const { hour, minute, second } = getTimeParts(anchor, timeZone);
-  const clock = { hour, minute, second };
+  // A gap-shifted instant is NOT a new prescribed wall clock. Retain the
+  // logical clock from the original calendar course whenever it exists.
+  const clock = originalClock ?? getTimeParts(anchor, timeZone);
   return instant => addCalendarDaysAtClock(instant, days, timeZone, clock);
 }
 
@@ -715,7 +717,8 @@ function resolveRepeatDurationCapEnd(
     timing?: FhirDosage["timing"] | FhirR6Dosage["timing"];
   },
   anchor: Date,
-  timeZone: string
+  timeZone: string,
+  sourceClock?: TreatmentWallClock
 ): Date | null {
   const repeat = dosage.timing?.repeat;
   const retained = getAnchoredCourseDuration(dosage);
@@ -727,7 +730,11 @@ function resolveRepeatDurationCapEnd(
     // A <=7-day course has a usable upper horizon, unlike a <=7-day
     // recurrence with no single interval. Reuse calendar/elapsed stepping
     // while keeping those two semantic owners explicit and the source intact.
-    const result = durationStepper(quantity, timeZone, durationAnchor, "upper-bound")?.(durationAnchor);
+    const capClock = retained && resolveRepeatBoundsStart(repeat, timeZone)
+      ? undefined : sourceClock;
+    const result = durationStepper(
+      quantity, timeZone, durationAnchor, "upper-bound", capClock
+    )?.(durationAnchor);
     return result && result > durationAnchor ? result : null;
   };
 
@@ -1764,6 +1771,26 @@ function treatmentRelativeInstant(
   }
 }
 
+/** A treatment stage has its own logical calendar clock. Calendar-relative
+ * starts preserve the original prescribed wall clock across a DST gap;
+ * elapsed hour/minute/second offsets establish a NEW stage-local clock.
+ * Never apply a parent course's 02:30 clock to a stage started +3 hours at
+ * 05:30, or that stage's 28-day cap would end three hours too early. */
+function stageCalendarClock(
+  course: FhirR6DosageInstruction, index: number, start: Date,
+  timeZone: string, sourceClock?: TreatmentWallClock
+): TreatmentWallClock | undefined {
+  if (!sourceClock) return undefined;
+  const relative = course.step[index].start ??
+    (index > 0 ? course.step[index - 1].end : undefined);
+  const offset = relative?.offsetDuration ??
+    relative?.offsetRange?.low ?? relative?.offsetRange?.high;
+  const unit = offset?.code ?? offset?.unit;
+  if (unit === FhirPeriodUnit.Second || unit === FhirPeriodUnit.Minute ||
+      unit === FhirPeriodUnit.Hour) return getTimeParts(start, timeZone);
+  return sourceClock;
+}
+
 function parallelComponentCadenceOrigin(
   dosage: FhirDosage,
   treatmentStart: Date,
@@ -1789,7 +1816,8 @@ function durationStepper(
   quantity: FhirQuantity | FhirR6Quantity | undefined,
   timeZone: string,
   anchor: Date,
-  purpose: "recurrence" | "upper-bound" = "recurrence"
+  purpose: "recurrence" | "upper-bound" = "recurrence",
+  sourceClock?: TreatmentWallClock
 ): ((value: Date) => Date | null) | null {
   const value = quantity?.value;
   const periodUnit = parseBoundsDurationUnit(quantity);
@@ -1806,7 +1834,12 @@ function durationStepper(
   if (Number.isInteger(value) && (periodUnit === FhirPeriodUnit.Day ||
       periodUnit === FhirPeriodUnit.Week)) {
     const days = value * (periodUnit === FhirPeriodUnit.Week ? 7 : 1);
-    return calendarDayStepper(anchor, days, timeZone);
+    return calendarDayStepper(anchor, days, timeZone, sourceClock);
+  }
+  if (sourceClock && Number.isInteger(value) &&
+      (periodUnit === FhirPeriodUnit.Month || periodUnit === FhirPeriodUnit.Year)) {
+    const months = value * (periodUnit === FhirPeriodUnit.Year ? 12 : 1);
+    return instant => addCalendarMonths(instant, months, timeZone, sourceClock);
   }
   return createIntervalStepper({ period: value, periodUnit }, timeZone);
 }
@@ -1830,10 +1863,11 @@ function treatmentStepWindow(
 ): { start: Date; end: Date | undefined } {
   const step = course.step[index];
   const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock) : previousEnd;
+  const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
   let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
   if (!end) {
     const componentEnds = step.component.map(component => earlierDate(
-      resolveRepeatDurationCapEnd(component, start, timeZone),
+      resolveRepeatDurationCapEnd(component, start, timeZone, capClock),
       resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
     )).filter((value): value is Date => Boolean(value));
     if (componentEnds.length === step.component.length && componentEnds.length) {
@@ -1866,9 +1900,10 @@ function repeatedCourseHorizon(
       previousEnd = end;
     } else {
       // Independently bounded concurrent components need not share an end.
+      const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
       for (const component of course.step[index].component) {
         const ownEnd = earlierDate(
-          resolveRepeatDurationCapEnd(component, start, timeZone),
+          resolveRepeatDurationCapEnd(component, start, timeZone, capClock),
           resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
         );
         if (ownEnd && ownEnd > horizon) horizon = ownEnd;
@@ -1906,6 +1941,7 @@ function scheduleTreatmentRelativeCourse(
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
     const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone, sourceClock);
+    const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
     for (const component of step.component) {
       const original = flattened[componentIndex++];
       if (!original) throw new Error("R6 course component projection is incomplete");
@@ -1925,7 +1961,7 @@ function scheduleTreatmentRelativeCourse(
           ext.url !== DOSAGE_DETAILS_R5_URL)
       };
       const effectiveEnd = end ?? (cycleDefaultEnd ? earlierDate(
-        resolveRepeatDurationCapEnd(dosage, start, timeZone), absoluteEnd
+        resolveRepeatDurationCapEnd(dosage, start, timeZone, capClock), absoluteEnd
       ) ?? cycleDefaultEnd : undefined);
       if (effectiveEnd && from >= effectiveEnd) continue;
       // A calendar track may begin before the first relative treatment step:
@@ -3172,13 +3208,12 @@ function generateFrequencyPerPeriodSeries(
     periodUnit === FhirPeriodUnit.Week ? period * 7 : undefined;
   const exactDailyClocks = dayCount !== undefined && Number.isInteger(dayCount) &&
     clocks.length > 0 && frequency === dayCount * clocks.length;
-  // A clockless multi-day distribution (21 administrations/21 active days,
-  // 7/21d, 42/21d) is a calendar window, not 21 elapsed 24-hour
-  // intervals. Reserve elapsed arithmetic for true q24h, subday, fractional
-  // and single long-interval dosing. The normal BID/1d path is unchanged.
+  // An integral FHIR day/week period is a CALENDAR interval even with no
+  // specified clock: q7d/once-weekly preserves the source local clock at
+  // DST, just like 7/21d and 42/21d. Only explicit hour/minute/second units
+  // (q24h/q168h), fractional periods and other elapsed definitions drift.
   const clocklessCalendarPeriod = dayCount !== undefined &&
-    Number.isInteger(dayCount) && dayCount > 1 &&
-    clocks.length === 0 && frequency > 1;
+    Number.isInteger(dayCount) && dayCount >= 1 && clocks.length === 0;
   const advanceCycle = exactDailyClocks || clocklessCalendarPeriod
     ? calendarDayStepper(baseTime, dayCount!, timeZone)
     : createIntervalStepper({ period, periodUnit }, timeZone);
@@ -3307,13 +3342,21 @@ function createIntervalStepper(
     const delta = period * multiplier;
     return (value: Date) => new Date(value.getTime() + delta);
   }
-  if (periodUnit === "d") {
-    const delta = period * 24 * 60 * 60 * 1000;
-    return (value: Date) => new Date(value.getTime() + delta);
-  }
-  if (periodUnit === "wk") {
-    const delta = period * 7 * 24 * 60 * 60 * 1000;
-    return (value: Date) => new Date(value.getTime() + delta);
+  if (periodUnit === "d" || periodUnit === "wk") {
+    const days = period * (periodUnit === "wk" ? 7 : 1);
+    if (Number.isInteger(days)) {
+      // A source period in days/weeks is a local calendar recurrence.
+      // This is distinct from explicitly elapsed q24h/q168h, which use
+      // the hour branch above. Capture the original civil clock once:
+      // a spring-gap 02:30->03:30 must not permanently change the series.
+      let sourceClock: Pick<TimeParts, "hour" | "minute" | "second"> | undefined;
+      return instant => {
+        if (!sourceClock) sourceClock = getTimeParts(instant, timeZone);
+        return addCalendarDaysAtClock(instant, days, timeZone, sourceClock);
+      };
+    }
+    const delta = days * 24 * 60 * 60 * 1000;
+    return instant => new Date(instant.getTime() + delta);
   }
   if (periodUnit === "mo" || periodUnit === "a") {
     const months = periodUnit === "mo" ? period : period * 12;
@@ -4490,6 +4533,7 @@ function calculateCourseTotalUnits(
     const start = step.start
       ? treatmentRelativeInstant(step.start, treatmentStart, zone, sourceClock)
       : cursor;
+    const capClock = stageCalendarClock(course, index, start, zone, sourceClock);
     const dosages: FhirDosage[] = [];
     const starts: Date[] = [];
     const ends: Array<Date | null> = [];
@@ -4526,7 +4570,7 @@ function calculateCourseTotalUnits(
       const stageStart = index === 0 && repeat?.boundsPeriod
         ? (calendarStart ?? start) : implicitStart;
       starts.push(calendarStart && calendarStart > stageStart ? calendarStart : stageStart);
-      const bound = earlierDate(resolveRepeatDurationCapEnd(dosage, cadenceOrigin, zone), calendarEnd);
+      const bound = earlierDate(resolveRepeatDurationCapEnd(dosage, cadenceOrigin, zone, capClock), calendarEnd);
       const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone);
       const countEnd = completion ? new Date(completion.end.getTime() + (completion.point ? 1 : 0)) : null;
       const end = earlierDate(bound, countEnd);

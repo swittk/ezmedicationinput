@@ -2288,3 +2288,65 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
     expect(JSON.stringify(graph)).toBe(unchanged);
   });
 });
+
+describe("review 17: original action ownership and source quantity mirrors", () => {
+  it("removes a superseded Theme quantity, not its medication name or independent mixing volume", () => {
+    const source = "Dissolve 2 tablets of amoxicillin in 100 mL water";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    const sourceGraph = JSON.stringify(graph);
+    const original = graph.actions[0];
+    expect(original.args.some(arg => arg.role === AdviceArgumentRole.Theme &&
+      arg.quantity?.value === 2 && arg.text?.includes("amoxicillin"))).toBe(true);
+    expect(original.args.some(arg => arg.role === AdviceArgumentRole.Substance &&
+      arg.quantity?.value === 100)).toBe(true);
+    clause.dose = { value: 3, unit: "tab" };
+    for (const locale of ["en", "th"]) {
+      const realized = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: clause, preferSourceText: true
+      })!;
+      expect(realized).toContain("amoxicillin");
+      expect(realized).not.toContain("2 tablets");
+      expect(realized).not.toContain("2 เม็ด");
+      expect(realized).toContain("100");
+      const formatted = formatCanonicalClause(clause, "long",
+        resolveSigLocalization(locale), { realizationMode: "roundtrip" });
+      expect(formatted).toContain("3");
+      expect(formatted).not.toContain("2 tablets");
+      expect(formatted).toContain("amoxicillin");
+      expect(formatted).toContain("100");
+    }
+    expect(JSON.stringify(graph)).toBe(sourceGraph);
+  });
+
+  it("retains the original dose action when both method and unit are edited on a spanless graph", () => {
+    const source = "Take 1 tablet, then drink 100 mL water";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    expect(graph.actions).toHaveLength(2);
+    const saved = JSON.stringify(graph);
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    const changed = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    clause.dose = changed.dose;
+    clause.method = changed.method;
+    for (const locale of ["en", "th"]) {
+      const display = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: clause, preferSourceText: true
+      })!;
+      expect(display).not.toContain("1 tablet");
+      expect(display).toContain("100");
+      const complete = formatCanonicalClause({
+        ...clause, instructionGraph: graph
+      }, "long", resolveSigLocalization(locale), {
+        realizationMode: "roundtrip"
+      });
+      expect(complete).not.toContain("1 tablet");
+      expect(complete).toContain("5");
+      expect(complete).toContain("100");
+    }
+    expect(JSON.stringify(graph)).toBe(saved);
+    expect(graph.actions[1].args.some(arg =>
+      arg.role === AdviceArgumentRole.Amount && arg.quantity?.value === 100)).toBe(true);
+  });
+});

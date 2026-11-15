@@ -54,6 +54,7 @@ import {
   FhirDayOfWeek,
   FhirQuantity,
   FhirR6Quantity,
+  FhirRange,
   EzDosage,
   EzDoseAndRate,
   FhirR6DosageInstruction,
@@ -1411,6 +1412,44 @@ function formatCalendarStepWindow(
   return end ? (thai ? `จนถึง${point(end)}` : `Until ${point(end)}`) : "";
 }
 
+/** Source-less R6 rateRange remains a range, never a guessed exact rate.
+ * Keep both independently authored endpoints and their unit/EMA operators. */
+function rateRangePreview(range: FhirRange): string | undefined {
+  const low = range.low, high = range.high;
+  const unit = (q: FhirQuantity | undefined) => q?.unit ?? q?.code ?? "";
+  const value = (q: FhirQuantity | undefined) => q?.value === undefined
+    ? undefined : (getQuantityComparator(q) ?? "") + q.value;
+  const lower = value(low), upper = value(high);
+  if (lower === undefined && upper === undefined) return undefined;
+  if (lower !== undefined && upper !== undefined) {
+    const loUnit = unit(low), hiUnit = unit(high);
+    return loUnit === hiUnit
+      ? lower + "–" + upper + (loUnit ? " " + loUnit : "")
+      : lower + (loUnit ? " " + loUnit : "") + " – " +
+        upper + (hiUnit ? " " + hiUnit : "");
+  }
+  return lower !== undefined
+    ? ">=" + lower + (unit(low) ? " " + unit(low) : "")
+    : "<=" + upper + (unit(high) ? " " + unit(high) : "");
+}
+
+/** Same rateRange realization for standalone R5 and projected R6 input.
+ * Ordinary one-entry SIGs exit at the single optional-field check. */
+function appendSourceLessRateRanges(
+  displayed: string, dosage: FhirDosage, thai: boolean
+): string {
+  if (dosage.text?.trim()) return displayed;
+  const entries = dosage.doseAndRate;
+  if (!entries?.length) return displayed;
+  if (entries.length === 1 && !entries[0].rateRange) return displayed;
+  const expressions: string[] = [];
+  for (const entry of entries) {
+    const range = entry.rateRange && rateRangePreview(entry.rateRange);
+    if (range) expressions.push((thai ? "ช่วงอัตราการให้ยา: " : "Rate range: ") + range);
+  }
+  return expressions.length ? joinGeneratedClauses([displayed, ...expressions]) : displayed;
+}
+
 export function formatSig(
   input: FhirDosage | FhirR6DosageInstruction | readonly EzDosage[],
   style: "short" | "long" = "short",
@@ -1650,7 +1689,8 @@ export function formatSig(
     if (displayExcludedWeekdays.length) {
       displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
     }
-    return displayed;
+    return appendSourceLessRateRanges(displayed, dosage,
+      (options?.locale ?? "").toLowerCase().startsWith("th"));
   }
   const quantity = dosage.doseAndRate?.[0];
   // Until rich rate and relative-weight units have dedicated realizers, retain
@@ -1676,7 +1716,8 @@ export function formatSig(
   if (displayExcludedWeekdays.length) {
     displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
   }
-  return displayed;
+  return appendSourceLessRateRanges(displayed, dosage,
+    (options?.locale ?? "").toLowerCase().startsWith("th"));
 }
 
 export function formatSigBatch(
@@ -1760,6 +1801,8 @@ export function fromFhir(
           rate.doseQuantity?.comparator ||
           rate.rateQuantity?.value !== undefined ||
           rate.rateRatio?.numerator?.value !== undefined ||
+          rate.rateRange?.low?.value !== undefined ||
+          rate.rateRange?.high?.value !== undefined ||
           rate.doseExpression || rate.rateExpression))) continue;
     const source = component.text;
     if (source?.trim()) {
@@ -1886,6 +1929,9 @@ function fromFhirDosageInternal(
       shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
       computedLong = appendMedicationExcludedWeekdaysText(computedLong, excludedWeekdays, options);
     }
+    const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
+    shortText = appendSourceLessRateRanges(shortText, dosage, thai);
+    computedLong = appendSourceLessRateRanges(computedLong, dosage, thai);
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];
