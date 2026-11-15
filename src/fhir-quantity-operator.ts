@@ -37,6 +37,18 @@ const comparatorByEmaCode: Record<string, NonNullable<FhirR6Quantity["comparator
   "100000165006": "ad"
 };
 
+/** Published EMA Quantity Operator display labels (CodeSystem version 5.0.0).
+ * When the clinician changes the code, a stale old display must not claim
+ * that the new comparator is still approximate. */
+const emaDisplayByComparator: Record<NonNullable<FhirR6Quantity["comparator"]>, string> = {
+  "<": "less than",
+  "<=": "less than or equal to",
+  ">": "more than",
+  ">=": "more than or equal to",
+  "~": "approximately equal to",
+  ad: "quantity sufficient"
+};
+
 /** Read the published EMA Coding without treating "average", "equivalent"
  * or "range" as invented HL7 comparator semantics. */
 export function getEmaQuantityComparator(
@@ -74,26 +86,43 @@ export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
   if (!comparator) return quantity as FhirSimpleQuantity;
   const { comparator: _r6Comparator, ...numeric } = quantity;
   const existing = numeric.extension ?? [];
-  if (existing.some(ext =>
-    ext.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL &&
-    ext.valueCoding?.system === EMA_QUANTITY_OPERATOR_SYSTEM &&
-    ext.valueCoding.code === emaCodeByComparator[comparator]))
-    return numeric;
-  return {
-    ...numeric,
-    extension: [...existing, {
-      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
-      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: emaCodeByComparator[comparator] }
-    }]
-  };
+  const code = emaCodeByComparator[comparator];
+  let found = false;
+  // An imported extension may carry id, display, or other authored metadata.
+  // If the native comparator was edited, replace its recognized EMA code in
+  // place. Appending a second active operator makes both interpretations fail.
+  const extensions = existing.map(ext => {
+    const coding = ext.valueCoding;
+    if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
+        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
+        !coding.code || !comparatorByEmaCode[coding.code]) return ext;
+    found = true;
+    return coding.code === code ? ext : {
+      ...ext, valueCoding: {
+        ...coding, code,
+        ...(coding.display !== undefined
+          ? { display: emaDisplayByComparator[comparator] } : {})
+      }
+    };
+  });
+  if (!found) extensions.push({
+    url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+    valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+  });
+  return { ...numeric, extension: extensions };
 }
 
 /** A general R5 Quantity supports older native comparators. Its only
  * missing R6 comparator is "~"; use the EMA extension for that case. */
 export function quantityForR5(quantity: FhirR6Quantity | undefined):
   FhirQuantity | undefined {
-  return quantity?.comparator === "~" ? simpleQuantityForR5(quantity)
-    : quantity as FhirQuantity | undefined;
+  if (!quantity?.comparator) return quantity as FhirQuantity | undefined;
+  if (quantity.comparator === "~") return simpleQuantityForR5(quantity);
+  // Ordinary R5 comparisons are native, but imported enriched EMA metadata
+  // must not contradict an edited native comparator.
+  if (!quantity.extension?.length) return quantity as FhirQuantity;
+  const projected = simpleQuantityForR5(quantity);
+  return projected ? { ...projected, comparator: quantity.comparator } : quantity as FhirQuantity;
 }
 
 /** Recover the current R6 native comparator from the published EMA Coding.

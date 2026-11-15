@@ -5025,3 +5025,70 @@ baseline (microseconds): routine 1476.8 -> 1490.5, Thai
 comparator taper 2843.9 -> 2826.1. Shared-machine noise; no
 meaningful performance regression. No package publication, PR
 merge or follow-up review requested.
+
+
+## 2026-11-15 — PR #13 tenth CodeRabbit loop: five real findings, five shared fixes
+
+Decision gate: fetched full latest CodeRabbit review body, all inline
+threads and follow-up comments; this review reported FIVE inline
+findings and ZERO additional out-of-diff findings. All five were
+reproduced against 6a25022 before implementation. All five affect
+supported editing, clinical information display or an ordinary
+clock-based recurrence; accepted on correctness grounds, not simply
+because a reviewer wanted extra defensive machinery.
+
+1. **R6 zero-step edit ownership:** a valid text-only, course-metadata
+   R5 carrier restored safety/id/extensions only from retained source
+   even after the clinician edited its .course fields. The existing
+   carrier branch now accepts the explicit id, extension,
+   modifierExtension, safety and repeatCycle overrides; the old typed
+   marker is retained as inert provenance, and no phantom
+   administration is created. Explicit metadata clearing stays
+   representable.
+2. **Edited condition provenance:** an R5 predicate edit could replace
+   an original rich R6 condition (with unknown CodeableConcept and
+   condition extensions) while the old compact marker disappeared.
+   The same row-local supersession path now retains the original
+   typed marker and warning, without restoring an obsolete active
+   condition or adding global reconciliation scans.
+3. **EMA Quantity Operator edits:** an enriched EMA comparator Coding
+   (id, display, userSelected) could survive R5->R6 import, then native
+   comparator edits appended a conflicting second code. Reconcile
+   recognized Coding.code in place, and update an existing display to
+   the *published* EMA CodeSystem v5.0.0 label for the newly selected
+   code; keep nonsemantic metadata and unrelated unknown extensions.
+   Audit covered both SimpleQuantity dose/rate and nested Ratio
+   numerator / Timing.boundsDuration general Quantity projections.
+   Ordinary quantity serialization remains unchanged.
+4. **Exact R6 infusion-rate previews:** native source-less exact
+   rateQuantity/rateRatio were omitted by a renderer that only listed
+   comparator-bearing rates. Component course and imported editor-row
+   previews now display the known numerical rate (with optional native
+   comparator). No second parsing pass, no invented infusion dose.
+5. **Non-midnight anchored clock cycles:** frequency 42/21 days with
+   explicit 08:00 and 20:00 daily clocks lost the earliest same-day
+   clock before orderedAt, but never scanned the final partial local
+   calendar day. That reduced first-cycle supply to 41 and skipped
+   the final boundary day 08:00. The existing generator scans the
+   trailing partial date of a clocked calendar cycle, respects the
+   actual cycle end/orderedAt limits, and avoids inventing extra
+   cross-midnight shifted clocks. Verified 42 doses per cycle for
+   00:00, 08:00, 14:00, 20:00 and 23:59 UTC starts, and also a
+   spring-DST crossing in America/New_York.
+
+Five independent source tests added to existing R6 suite (260/260).
+Full gate: **3926/3926 source tests across 44 suites**, **4/4
+packaged exports**, ES6 ESM/CJS and TS declarations PASS.
+Real downstream R5 converter and in-memory save/reopen checks preserve
+edited zero-step safety, active replacement condition and source,
+EMA dose/Ratio comparator, and exact rate. Existing adapter adds some
+optional-field normalization, so no unsupported claim of global
+byte-for-byte downstream round trips.
+
+Seven paired warm host 65-parse batches versus immutable 6a25022
+(median microseconds): ordinary 1629.2 -> 1566.9, Thai 6376.4 ->
+6071.8, independent-eye taper 6630.2 -> 6460.2, comparator taper
+2998.8 -> 3055.3. Differences consistent with host noise;
+no evidence of a normal-parser regression. No dependency, new
+general-purpose validator, refusing approximate-dose arithmetic,
+migration or new full review request.

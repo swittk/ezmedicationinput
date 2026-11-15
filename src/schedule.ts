@@ -3194,13 +3194,21 @@ function generateFrequencyPerPeriodSeries(
     // Without a matching clock count, retain the existing distributor.
     const clockedDays = calendarUnit && clocks.length > 0 &&
       frequency === spanDays * clocks.length;
-    for (let index = 0; index < frequency && results.length < effectiveLimit; index++) {
+    // A cycle may begin partway through a local day. The first day's
+    // earlier clocks are excluded, but the following boundary day's
+    // earlier clocks still belong to this cycle. Inspect that final
+    // partial day instead of silently scheduling one dose fewer.
+    const candidates = frequency + (clockedDays ? clocks.length : 0);
+    for (let index = 0; index < candidates && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
       let shiftedClock = false;
       if (calendarUnit && (frequency <= spanDays || clockedDays)) {
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
+        // Cross-midnight shifted clocks are already accounted for by their
+        // source day; an extra shifted anchor could invent a next-cycle dose.
+        if (index >= frequency && shiftedClock) continue;
         const day = addLocalDays(startOfLocalDay(cycleStart, timeZone),
           (clockedDays ? Math.floor(index / clocks.length)
             : Math.floor(index * spanDays / frequency)) + dayShift, timeZone);

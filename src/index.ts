@@ -1522,19 +1522,20 @@ export function formatSig(
                 ? " " + (amount.doseQuantity.unit ?? amount.doseQuantity.code) : "")
             );
           }
-          if (amount.rateQuantity?.comparator && amount.rateQuantity.value !== undefined) {
+          if (amount.rateQuantity?.value !== undefined) {
             expressions.push(
               (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              amount.rateQuantity.comparator + amount.rateQuantity.value +
+              (amount.rateQuantity.comparator ?? "") + amount.rateQuantity.value +
               (amount.rateQuantity.unit || amount.rateQuantity.code
                 ? " " + (amount.rateQuantity.unit ?? amount.rateQuantity.code) : "")
             );
           }
           const numerator = amount.rateRatio?.numerator;
-          if (numerator?.comparator === "~" && numerator.value !== undefined) {
+          if (numerator?.value !== undefined) {
             const denominator = amount.rateRatio?.denominator;
             expressions.push(
-              (thai ? "อัตราการให้ยา: " : "Rate: ") + "~" + numerator.value +
+              (thai ? "อัตราการให้ยา: " : "Rate: ") +
+              (numerator.comparator ?? "") + numerator.value +
               (numerator.unit || numerator.code ? " " + (numerator.unit ?? numerator.code) : "") +
               (denominator?.value !== undefined
                 ? " / " + denominator.value +
@@ -1736,16 +1737,18 @@ export function fromFhir(
   // Their editor-row suggestions must retain the amount just as the
   // whole-course display does. Ordinary R6 imports do no extra rendering.
   // Whole-course renderedInstruction is not a per-component dosage text.
-  // R6-only quantities or offsets need a complete item preview, even when
-  // the enclosing course has authored wording. Prefer an item's own source.
+  // R6-only quantities, rate values and offsets need a complete item
+  // preview, even when the enclosing course has authored wording.
+  // Prefer an item's own source; exact rates are meaningful too.
   let row = 0;
   for (const step of dosageDetails.step) for (const component of step.component) {
     const item = items[row++];
     if (!item || (!(component.timing?.repeat?.startOffset ||
         component.timing?.repeat?.endOffset) &&
         !component.doseAndRate?.some(rate =>
-          rate.doseQuantity?.comparator || rate.rateQuantity?.comparator ||
-          rate.rateRatio?.numerator?.comparator === "~"))) continue;
+          rate.doseQuantity?.comparator ||
+          rate.rateQuantity?.value !== undefined ||
+          rate.rateRatio?.numerator?.value !== undefined))) continue;
     const source = component.text;
     if (source?.trim()) {
       item.shortText = source;

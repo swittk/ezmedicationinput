@@ -659,13 +659,15 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
   };
 }
 
-/** R6 approximate Ratio numerators have no legal R5 comparator code.
- * Keep the representable numeric ratio live and its "~" in typed provenance. */
+/** R6 Ratio numerators are regular Quantity: preserve the numeric rate,
+ * translate "~" into EMA Coding, and reconcile enriched EMA on native edits. */
 function ratioForR5(
   ratio: NonNullable<FhirR6Dosage["doseAndRate"]>[number]["rateRatio"]
 ): FhirRatio | undefined {
-  if (ratio?.numerator?.comparator !== "~") return ratio as FhirRatio | undefined;
-  return { ...ratio, numerator: generalQuantityForR5(ratio.numerator) };
+  if (!ratio?.numerator) return ratio as FhirRatio | undefined;
+  const projected = generalQuantityForR5(ratio.numerator);
+  return projected === ratio.numerator ? ratio as FhirRatio :
+    { ...ratio, numerator: projected };
 }
 
 /** Project one R6 component without building course-storage metadata. Used by
@@ -680,7 +682,9 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
   const needsR5TimingProjection = !!timing?.repeat &&
     (timing.repeat.startOffset !== undefined ||
       timing.repeat.endOffset !== undefined ||
-      timing.repeat.boundsDuration?.comparator === "~");
+      timing.repeat.boundsDuration?.comparator === "~" ||
+      !!(timing.repeat.boundsDuration?.comparator &&
+        timing.repeat.boundsDuration.extension?.length));
   // Only projected branches may carry R6-only fields. The unchanged branch
   // is structurally identical to R5 Timing; avoid copying it for ordinary SIGs.
   let r5Timing: FhirDosage["timing"] = timing as FhirDosage["timing"];
@@ -1551,17 +1555,20 @@ export function toDosageDetails(
         carrier.modifierExtension?.length === 1 &&
         carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL) {
       const instruction = course?.renderedInstruction ?? renderedInstruction ?? carrier.text;
-      const edited = instruction !== retained.renderedInstruction;
-      const updated = {
+      const updated: FhirR6DosageInstruction = {
         ...retained,
-        ...(edited
-          ? { renderedInstruction: instruction }
-          : {})
+        ...(course?.id !== undefined ? { id: course.id } : {}),
+        ...(course?.extension !== undefined ? { extension: course.extension } : {}),
+        ...(course?.modifierExtension !== undefined
+          ? { modifierExtension: course.modifierExtension } : {}),
+        ...(course?.repeatCycle !== undefined ? { repeatCycle: course.repeatCycle } : {}),
+        ...(course?.safety !== undefined ? { safety: course.safety } : {}),
+        ...(instruction !== retained.renderedInstruction
+          ? { renderedInstruction: instruction } : {})
       };
-      if (edited) {
-        addWarning(warnings,
-          "Edited R5 text superseded the original text-only R6 instruction; source preserved.");
-      }
+      const edited = !equalStructuredValues(updated, retained);
+      if (edited) addWarning(warnings,
+        "Edited R5 text or course metadata superseded the original zero-step R6 source; source preserved.");
       return withPreservedSourceExtension(
         withReconciliationSources(withReconciliationWarnings(updated, warnings),
           [...reconciliationSources, ...(edited && retainedSource ? [retainedSource] : [])]),
@@ -2150,9 +2157,17 @@ function restoreComponentDelta(
   let superseded = false;
   if (!delta && !local.timingOffsets) return { dosage: fresh, superseded };
   const expanded = dosage as EzDosage;
-  if (delta?.condition !== undefined && expanded.condition === undefined &&
-      local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
-    fresh.condition = delta.condition;
+  if (delta?.condition !== undefined) {
+    if (expanded.condition === undefined &&
+        local.baseline?.condition === compactProjectionFingerprint(parseDosageCondition(dosage))) {
+      fresh.condition = delta.condition;
+    } else if (!equalStructuredValues(fresh.condition, delta.condition)) {
+      // An R5 predicate edit is authoritative. Keep the original R6
+      // condition, including unfamiliar metadata, as inert row-local source.
+      superseded = true;
+      addWarning(warnings,
+        "Retained R6 condition was superseded by an edited R5 predicate; original condition preserved as source provenance.");
+    }
   }
   if (local.timingOffsets) {
     if (local.baseline?.timing === offsetCadenceFingerprint(dosage.timing)) {
