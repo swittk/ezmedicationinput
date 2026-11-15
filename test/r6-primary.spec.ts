@@ -10,7 +10,7 @@ import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageInstruction, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FhirR6DosageInstruction, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
@@ -3978,6 +3978,162 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       .toBe("~");
     expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity?.extension?.[0].valueCoding?.code)
       .toBe("100000000055");
+  });
+
+  it("preserves an EMA-qualified infusion dose while canonicalizing its clinical rate structure", () => {
+    const approximate = {
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" }
+    };
+    const source: FhirDosage = { doseAndRate: [{
+      doseQuantity: { value: 500, unit: "mL", extension: [approximate] },
+      rateRatio: {
+        numerator: { value: 500, unit: "mL" },
+        denominator: { value: 2, unit: "h" }
+      }
+    }] };
+    const canonical = canonicalFromFhir(source);
+    expect(canonical.dose?.comparator).toBe("~");
+    const rebuilt = canonicalToFhir(canonical);
+    expect(rebuilt.doseAndRate?.[0]?.doseQuantity?.value).toBe(500);
+    expect(getEmaQuantityComparator(rebuilt.doseAndRate?.[0]?.doseQuantity)).toBe("~");
+    expect(rebuilt.doseAndRate?.[0]?.rateRatio?.numerator?.value).toBe(500);
+    expect(rebuilt.doseAndRate?.[0]?.rateRatio?.denominator?.value).toBe(2);
+    expect(canonicalToFhir(canonicalFromFhir({
+      ...source, doseAndRate: [{ ...source.doseAndRate![0],
+        doseQuantity: { value: 500, unit: "mL" } }]
+    })).doseAndRate?.[0]?.doseQuantity?.extension).toBeUndefined();
+  });
+
+  it("preserves period-maximum numerator and denominator operators through canonical FHIR conversion", () => {
+    const coding = (code: string) => [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    }];
+    const source: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "mg" } }],
+      maxDosePerPeriod: [{
+        numerator: { value: 15, unit: "mg", extension: coding("100000000055") },
+        denominator: { value: 1, unit: "d", extension: coding("100000000053") }
+      }]
+    };
+    const canonical = canonicalFromFhir(source);
+    expect(canonical.schedule?.maxDosePerPeriod).toEqual([{
+      amount: 15, unit: "mg", amountComparator: "~",
+      period: 1, periodUnit: FhirPeriodUnit.Day, periodComparator: ">="
+    }]);
+    const rebuilt = canonicalToFhir(canonical);
+    const limit = rebuilt.maxDosePerPeriod?.[0];
+    expect(limit?.numerator?.value).toBe(15);
+    expect(limit?.denominator?.value).toBe(1);
+    expect(getEmaQuantityComparator(limit?.numerator)).toBe("~");
+    expect(getEmaQuantityComparator(limit?.denominator)).toBe(">=");
+  });
+
+  it("inherits an approximate taper dose without turning it exact and clears it on explicit replacement", () => {
+    const inherited = parseSig("approximately 5 mg PO BID then QD");
+    expect(inherited.fhir).toHaveLength(2);
+    for (const dose of inherited.fhir) {
+      expect(dose.doseAndRate?.[0]?.doseQuantity?.value).toBe(5);
+      expect(getEmaQuantityComparator(dose.doseAndRate?.[0]?.doseQuantity)).toBe("~");
+    }
+    for (const step of inherited.fhirNext.step) {
+      expect(step.component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBe("~");
+    }
+    const changed = parseSig("approximately 5 mg PO BID then 5 mg PO QD");
+    expect(changed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBe("~");
+    expect(changed.fhirNext.step[1].component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBeUndefined();
+    const three = parseSig("5 mg PO BID then approximately 7 mg PO QD then QD");
+    expect(three.fhirNext.step.map(step =>
+      step.component[0].doseAndRate?.[0]?.doseQuantity?.comparator)).toEqual([undefined, "~", "~"]);
+  });
+
+  it("displays EMA maximum operators, Thai comparators, and per-target doses without claiming exactness", () => {
+    const coding = (code: string) => [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    }];
+    const source: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 5, unit: "drop",
+        extension: coding("100000000055") } }],
+      site: { text: "right eye" },
+      maxDosePerAdministration: {
+        value: 10, unit: "mg", extension: coding("100000000052")
+      },
+      maxDosePerPeriod: [{
+        numerator: { value: 15, unit: "mg", extension: coding("100000000055") },
+        denominator: { value: 1, unit: "d", extension: coding("100000000053") }
+      }]
+    };
+    const en = fromFhirDosage(source, { locale: "en" });
+    expect(en.longText).toContain("max per administration: <=10 mg");
+    expect(en.longText).toContain("max per period: ~15 mg / >=1 d");
+    const thai = fromFhirDosage(source, { locale: "th" });
+    expect(thai.shortText).toContain("ประมาณ 5 หยด");
+    expect(thai.longText).toContain("ประมาณ 5 หยด");
+    expect(thai.longText).toContain("max per period: ~15 mg / >=1 d");
+    const perNostril = fromFhirDosage({
+      doseAndRate: [{ doseQuantity: {
+        value: 5, unit: "spray", extension: coding("100000000055")
+      } }], site: { text: "each nostril" }
+    }, { locale: "th" });
+    expect(perNostril.longText).toContain("ประมาณ 5 ครั้ง");
+    expect(perNostril.longText).toContain("รูจมูกข้างละ");
+    for (const [code, phrase] of [
+      ["100000000053", "อย่างน้อย 5 หยด"],
+      ["100000000052", "ไม่เกิน 5 หยด"],
+      ["100000000050", "น้อยกว่า 5 หยด"],
+      ["100000000051", "มากกว่า 5 หยด"]
+    ] as const) {
+      const dosage = { doseAndRate: [{ doseQuantity: {
+        value: 5, unit: "drop", extension: coding(code)
+      } }], site: { text: "right eye" } };
+      expect(fromFhirDosage(dosage, { locale: "th" }).longText).toContain(phrase);
+    }
+    const native: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", comparator: "~" } }]
+    }] }] };
+    expect(fromFhir(native).items[0].longText).toContain("~1 tab");
+  });
+
+  it("keeps weekday-filtered weekly supply aligned to dates and R6 period offsets effective", () => {
+    const anchor = "2026-11-02T00:00:00+07:00";
+    const options = { from: anchor, orderedAt: anchor, timeZone: "Asia/Bangkok",
+      limit: 16 };
+    const weekday = { timing: { repeat: {
+      frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Week,
+      dayOfWeek: ["mon", "tue", "thu"] as const,
+      timeOfDay: ["08:00:00"]
+    } }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    const weekly = weekday as FhirDosage;
+    const expected = [
+      "2026-11-02T08:00:00+07:00",
+      "2026-11-03T08:00:00+07:00",
+      "2026-11-05T08:00:00+07:00"
+    ];
+    expect(nextDueDoses(weekly, { ...options, limit: 3 })).toEqual(expected);
+    for (const days of [2, 4, 7]) {
+      expect(calculateTotalUnits({ dosage: weekly, ...options,
+        durationValue: days, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+        .toBe(days === 2 ? 2 : 3);
+    }
+    const offset: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: {
+        frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, unit: "d", code: "d" },
+        endOffset: { value: 5, unit: "d", code: "d" },
+        timeOfDay: ["08:00:00"]
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    for (const input of [offset, toFhirR5Dosages(offset)]) {
+      const due = nextDueDoses(input, options);
+      expect(due[0]).toBe("2026-11-04T08:00:00+07:00");
+      expect(calculateTotalUnits({ dosage: input, ...options,
+        durationValue: 2, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(0);
+      expect(calculateTotalUnits({ dosage: input, ...options,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+    }
   });
 
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {

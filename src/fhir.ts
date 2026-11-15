@@ -28,7 +28,9 @@ import {
   mergeTranslationPrimitiveElement
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
-import { getEmaQuantityComparator, simpleQuantityForR5 } from "./fhir-quantity-operator";
+import {
+  getEmaQuantityComparator, simpleQuantityForR5, quantityForR5
+} from "./fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
 import { joinCanonicalPrnReasonTexts } from "./prn";
@@ -610,11 +612,14 @@ function canonicalDosePeriodMaximums(
         period === undefined || !Number.isFinite(period) || period <= 0 ||
         !rawPeriodUnit ||
         ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(rawPeriodUnit) < 0) continue;
+    const amountComparator = getEmaQuantityComparator(ratio.numerator) ??
+      ratio.numerator?.comparator;
+    const periodComparator = getEmaQuantityComparator(ratio.denominator) ??
+      ratio.denominator?.comparator;
     result.push({
-      amount,
-      unit,
-      period,
-      periodUnit: rawPeriodUnit as FhirPeriodUnit
+      amount, unit, period, periodUnit: rawPeriodUnit as FhirPeriodUnit,
+      ...(amountComparator ? { amountComparator } : {}),
+      ...(periodComparator ? { periodComparator } : {})
     });
   }
   return result.length ? result : undefined;
@@ -1348,15 +1353,23 @@ export function canonicalToFhir(
   }
 
   if (schedule?.maxDosePerPeriod?.length) {
-    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => ({
-      numerator: buildFhirDoseQuantity(maximum.amount, maximum.unit),
-      denominator: {
+    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
+      const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);
+      const denominator = {
         value: maximum.period,
         unit: maximum.periodUnit,
         system: UCUM_SYSTEM,
         code: maximum.periodUnit
-      }
-    }));
+      };
+      return {
+        numerator: maximum.amountComparator
+          ? quantityForR5({ ...numerator, comparator: maximum.amountComparator })!
+          : numerator,
+        denominator: maximum.periodComparator
+          ? simpleQuantityForR5({ ...denominator, comparator: maximum.periodComparator })!
+          : denominator
+      };
+    });
   }
 
   normalizeClockFrequency(repeat);
@@ -2225,11 +2238,20 @@ function projectHpsgClinicalQuantityToFhir(
     }
     return;
   }
+  // A canonical dose may be independently qualified (e.g. EMA ~500 mL).
+  // Clinical-quantity lowering adds rate/infusion structure; it must not
+  // overwrite an unchanged, already-qualified active dose with an exact one.
+  const originalDose = dosage.doseAndRate?.[0]?.doseQuantity;
+  const resolvedDose = (dose: NonNullable<HpsgClinicalQuantityFeature["projectedDose"]>) =>
+    originalDose?.value === dose.value &&
+    (originalDose.unit ?? originalDose.code) === dose.unit
+      ? originalDose
+      : buildFhirDoseQuantity(dose.value, dose.unit);
   if (quantity.representation === "rate-quantity") {
     const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
     dosage.doseAndRate = [{
       ...(quantity.projectedDose ? {
-        doseQuantity: buildFhirDoseQuantity(quantity.projectedDose.value, quantity.projectedDose.unit)
+        doseQuantity: resolvedDose(quantity.projectedDose)
       } : {}),
       rateQuantity: buildFhirDoseQuantity(
         quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
@@ -2241,7 +2263,7 @@ function projectHpsgClinicalQuantityToFhir(
   const duration = quantity.administrationDuration;
   const dose = quantity.projectedDose;
   if (!duration || !dose) return;
-  const doseQuantity = { ...buildFhirDoseQuantity(dose.value, dose.unit),
+  const doseQuantity = { ...resolvedDose(dose),
     ...(dose.system ? { system: dose.system } : {}),
     ...(dose.code ? { code: dose.code } : {}) };
   const rate = quantity.rateNumerator ?? dose;

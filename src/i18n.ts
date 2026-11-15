@@ -888,6 +888,21 @@ function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | 
   return undefined;
 }
 
+/** Display authored comparator meaning for all Thai dose realizations.
+ * Approximation and inequality qualifiers are clinical meaning, not decoration.
+ */
+function thaiDoseComparator(comparator: CanonicalDoseExpr["comparator"]): string {
+  switch (comparator) {
+    case "~": return "ประมาณ ";
+    case ">=": return "อย่างน้อย ";
+    case "<=": return "ไม่เกิน ";
+    case ">": return "มากกว่า ";
+    case "<": return "น้อยกว่า ";
+    case "ad": return "ปริมาณเพียงพอสำหรับ ";
+    default: return "";
+  }
+}
+
 function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | undefined {
   if (!dose) {
     return undefined;
@@ -916,10 +931,11 @@ function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | unde
     }
   }
   if (dose.value !== undefined) {
+    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "short")}`;
+      return `${quantity} ${formatUnitThai(dose.unit, dose.value, "short")}`;
     }
-    return stripTrailingZero(dose.value);
+    return quantity;
   }
   return undefined;
 }
@@ -961,10 +977,11 @@ function formatDoseThaiLong(dose: CanonicalDoseExpr | undefined): string | undef
     }
   }
   if (dose.value !== undefined) {
+    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
     if (dose.unit) {
-      return `ครั้งละ ${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "long")}`;
+      return `ครั้งละ ${quantity} ${formatUnitThai(dose.unit, dose.value, "long")}`;
     }
-    return `ครั้งละ ${stripTrailingZero(dose.value)}`;
+    return `ครั้งละ ${quantity}`;
   }
   return undefined;
 }
@@ -986,9 +1003,10 @@ function formatDoseThaiPerTarget(dose: CanonicalDoseExpr | undefined): string | 
     }
   }
   if (dose.value !== undefined) {
+    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
     return dose.unit
-      ? `${stripTrailingZero(dose.value)} ${dose.unit.toLowerCase() === "spray" ? "ครั้ง" : formatUnitThai(dose.unit, dose.value, "long")}`
-      : stripTrailingZero(dose.value);
+      ? `${quantity} ${dose.unit.toLowerCase() === "spray" ? "ครั้ง" : formatUnitThai(dose.unit, dose.value, "long")}`
+      : quantity;
   }
   return undefined;
 }

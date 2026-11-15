@@ -1594,8 +1594,11 @@ export interface CanonicalOccurrenceCapExpr {
 export interface CanonicalDosePeriodMaximumExpr {
   amount: number;
   unit: string;
+  /** Exact authored Quantity operator, including EMA-coded approximate R5 limits. */
+  amountComparator?: FhirR6Quantity["comparator"];
   period: number;
   periodUnit: FhirPeriodUnit;
+  periodComparator?: FhirR6Quantity["comparator"];
 }
 
 export interface CanonicalActivityTimingExpr {

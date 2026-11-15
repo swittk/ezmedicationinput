@@ -15,6 +15,7 @@ import {
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
+import { getEmaQuantityComparator } from "./fhir-quantity-operator";
 import type { BoundaryPlan } from "./hpsg/signature";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
@@ -308,6 +309,7 @@ interface SegmentCarry {
   routeText?: ParserState["routeText"];
   unit?: string;
   dose?: number;
+  comparator?: NonNullable<CanonicalSigClause["dose"]>["comparator"];
   siteText?: ParserState["siteText"];
   siteI18n?: ParserState["siteI18n"];
   siteSource?: ParserState["siteSource"];
@@ -1808,7 +1810,8 @@ function provisionalFhirDisplay(
   const readableQuantity = (quantity: FhirQuantity | undefined): string | undefined => {
     if (quantity?.value === undefined || !Number.isFinite(quantity.value)) return undefined;
     const unit = quantity.unit ?? quantity.code;
-    return `${quantity.comparator ?? ""}${quantity.value}${unit ? " " + unit : ""}`;
+    const comparator = getEmaQuantityComparator(quantity) ?? quantity.comparator;
+    return `${comparator ?? ""}${quantity.value}${unit ? " " + unit : ""}`;
   };
   const perAdministration = readableQuantity(dosage.maxDosePerAdministration);
   const lifetime = readableQuantity(dosage.maxDosePerLifetime);
@@ -2262,6 +2265,8 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
     internal.unit === carry.unit
   ) {
     internal.dose = carry.dose;
+    if (carry.comparator && internal.primaryClause.dose)
+      internal.primaryClause.dose.comparator = carry.comparator;
   }
 }
 
@@ -2285,6 +2290,9 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
   }
   if (internal.dose !== undefined) {
     carry.dose = internal.dose;
+    // A newly authored exact dose explicitly supersedes the previous
+    // comparator. Only an actually inherited amount inherits its qualifier.
+    carry.comparator = internal.primaryClause.dose?.comparator;
   }
 }
 

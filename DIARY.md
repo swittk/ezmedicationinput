@@ -4949,3 +4949,79 @@ and explicit unresolved execution, and normal 35 mg supply for
 ~5 mg daily. The original review response makes the rejection of
 a blanket approximate-dose refusal explicit. No new review requested;
 no merge, publishing, deployment or downstream application edits.
+
+
+## 2026-11-15 — Out-of-diff CodeRabbit audit: inline resolution alone was insufficient
+
+**Process correction:** Earlier review summaries reported all GitHub inline
+review threads resolved while failing to audit actionable findings embedded
+in CodeRabbit review BODY text outside GitHub's changed-line diff. This was
+a real review-completeness failure. Audit fetched all review-body text,
+issue comments and all inline/follow-up comments, not just GraphQL
+reviewThreads. There were EIGHT outside-diff findings across three
+CodeRabbit review summaries. Their dispositions, independently verified
+against current source and clinical test oracles, follow.
+
+Three earlier out-of-diff findings are ALREADY addressed and did not
+justify another code patch: (1) native R6 comparator-bearing quantities
+show their qualified dose in source-less display, not an empty dose;
+(2) R6 period start/end offsets survive retained R5 course projection
+and prevent early administrations; (3) weekday-filtered frequency
+on Mon/Tue/Thu matches supply enumeration (two doses in a Mon-Tue
+window, three in four days), not a naïve evenly spaced weekly
+distributor. The existing schedule path was re-run with these oracles.
+
+Five newer out-of-diff findings were real and are FIXED at shared paths:
+- FHIR canonical infusion/rate lowering used to overwrite a previously
+  qualified numeric doseQuantity with an exact rebuilt quantity. An
+  unchanged qualified dose now remains authoritative while the typed
+  infusion rate/ratio is added; a genuinely different projected dose
+  does not accidentally inherit stale qualifiers.
+- R5 canonical maxDosePerPeriod had dropped EMA comparator metadata on
+  both numerator and denominator. The canonical maximum now carries
+  these typed comparator fields and regenerates valid native R5
+  Quantity/SimpleQuantity using standard HL7/EMA semantics. No new
+  custom comparator code system or extension.
+- Multi-segment inherited doses copied only numeric value/unit; a
+  carried ~5 mg dose lost its "~" in the next taper phase. Typed
+  SegmentCarry now retains the comparator only while inheriting the
+  actual quantity and clears it when a clinician explicitly authors a
+  new exact quantity. Both normal and three-stage inheritance covered.
+- The source-less maximum-safety preview previously printed EMA-coded
+  approximate/bound quantities as exact. Its single shared quantity
+  renderer now reads native and EMA comparators for per-administration,
+  lifetime, and period numerator/denominator amounts.
+- Thai short, long, and per-target dosage realizations previously
+  dropped comparators. All three use one small localized comparator
+  vocabulary for "~", "<", "<=", ">", ">=", and "ad";
+  ordinary exact quantities retain their established output.
+
+Five new real clinical regressions were added to the existing R6 suite.
+Direct source tests reproduce the reported failures before these fixes,
+and assert the corrected FHIR RoundTrip and localized output; adjacent
+tests check exact dose replacement and the older three timing/display
+families. No new grammar pass, new dependency, mandatory numeric supply
+refusal, or speculative review-only control. The previously rejected
+approximate-dose supply refusal was explicitly withdrawn by CodeRabbit
+in its follow-up; the product retains useful nominal arithmetic.
+Outside-diff findings have no original inline GitHub threads to reply
+to; do NOT create top-level PR comments simply to inflate review
+activity. Future reviews must inspect review-body out-of-diff findings
+before declaring an entire review loop complete.
+
+
+Validation after outside-diff audit: 44 source test suites,
+3921/3921 source tests PASS, packaged ESM/CJS 4/4 PASS, ES6
+ESM/CJS and TypeScript declaration build PASS. A later focused R6
+rerun of 255/255 PASS included an explicit Thai each-nostril
+per-target comparator check. Direct downstream R5 save/reopen probes
+retained the active 500 mL approximate infusion amount and rateRatio,
+the ~15 mg maximum and >=1-day denominator, and a Thai approximate
+5-unit dose; that adapter normalizes some unrelated object fields,
+so do not claim full byte-for-byte identity from that check.
+Paired host median 7x65 parses versus immutable pre-audit c4d051f
+baseline (microseconds): routine 1476.8 -> 1490.5, Thai
+5687.2 -> 5474.3, independent-eye taper 5820.8 -> 5969.8,
+comparator taper 2843.9 -> 2826.1. Shared-machine noise; no
+meaningful performance regression. No package publication, PR
+merge or follow-up review requested.
