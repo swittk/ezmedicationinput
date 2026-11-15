@@ -5530,3 +5530,109 @@ Safety deletion retains its original unknown source attachment,
 the known numeric dose/rate and >=/<=/~ operators survive, and a
 text-only course stays text-only. The consumer may normalize unrelated
 empty fields; these checks do not assert universal byte equivalence.
+
+
+## 2026-11-15 — PR 13 whole-family adversarial audit (six inline findings)
+
+Review surfaces: all inline threads, review bodies, issue comments and
+follow-ups inspected. Four independent read-only adversarial auditors
+launched; FHIR, HPSG/graph and scheduler audits finished and each
+reproduced real defects. The broad fourth timed out without a report
+and is not counted as completed. Only the coordinator modified source,
+tests, Git and public review threads. Independent clinical/date oracles,
+not reviewer assertions or passing old tests, governed acceptance.
+
+FHIR safety: one singular R5 maximum can edit only the actually
+projected LAST R6 administration/lifetime limit. Hidden same-scope
+sibling limits, IDs, unfamiliar metadata and safety-level fields remain
+active. Projection and reconciliation use one source ownership map.
+After edits, the surviving R5-owned singular limit remains LAST within
+its scope, so another save/reopen cannot silently swap which maximum
+the R5 UI edits. Period list members match by unique scope, numeric
+value and period; same-scope fallback requires compatible unit/system
+and same period window. Deleting 5 mg/day and adding 5 mL/30d cannot
+steal the original ID/extension. Ambiguous identical limits keep their
+live numeric values, with ambiguous source metadata inert and editable.
+
+Text-only R6 zero-step carrier: previous complete-course snapshots
+nested every preceding reconciliation source, doubling storage each
+edit (approximately 172 KB after eight edits). Now each previous
+snapshot is source-only and FLAT; earlier history remains at course
+level once, with no phantom administrations. Numeric safety, course ID
+and unfamiliar annotations survive. Twelve sequential edits and
+repeated R5 exports prove linear rather than exponential growth.
+
+Clinical amount: the same bounded HPSG multiplier recognizes 1 million
+units, approximately 1 million units, ~2.4M IU and >=2 million IU as
+known numeric million-scale amounts with correct comparator. Scalar,
+comparative and action-graph source readers share it; ordinary doses
+avoid allocation on the no-multiplier hot path. No second SIG parse,
+new comparator system, numeric blanking or supply refusal.
+
+Graph editing: one typed source-backed Amount owner, shared by
+whole-source replay and per-action realization. Only an obsolete
+primary medication Amount is removed from a temporary display copy.
+Independently quantified mixing volume, materials, waiting duration
+and later administrations remain. A later method-only primary drink
+can inherit a unique earlier dose-defining dissolve, but an earlier
+device-priming count or a later Thai instruction to take another
+tablet must NEVER be stripped as if it were the therapeutic dose.
+Saved graph and original source remain untouched. Existing nasal
+priming, Thai secondary dose and EN/TH semantic roundtrip tests
+caught a first-draft regression; final owner rules passed them without
+changing expectations.
+
+Scheduler: the original logical civil wall clock is passed through
+relative step day/week/month/year boundaries in BOTH scheduling and
+supply. A spring gap-shifted 03:30 intermediate boundary cannot
+rewrite subsequent 02:30 logical cycle starts and duplicate an
+explicit 03:00 administration. 28d, 4wk, 1mo and 1yr cases audited;
+84 calendar days give 84 doses, not 85. No global deduplication
+(it would erase actual concurrent administrations) and no global
+clamping of explicitly overlapping stages. Clockless multi-day
+frequency distributions use local calendar stepping instead of
+24-hour elapsed windows: fall DST 21-in-28 now counts 21, 7/21
+counts 7 and 42/21 counts 42 with valid local clocks. Twice-weekly
+day-0/day-3 slots remain midnight rather than noon, caught by the
+existing suite; true q24h elapsed intervals remain elapsed.
+
+Product contract: preserve numeric best-effort arithmetic, all
+known qualifiers and independently useful source data. No new
+refusal layer, general-purpose defensive validation, dependence,
+consumer migration, deployment, or package publication. Real
+read-only consumer adapter tests covered FHIR -> editable dosage ->
+in-memory save/reopen -> reverse FHIR -> R6, preserving numeric
+million-scale quantities, comparator codes, multiple safety limits,
+zero-step source and phased instructions. This is not a universal
+byte-for-byte equivalence claim.
+
+
+Final gate after correcting regressions against preexisting tests:
+ES6 ESM/CJS + TypeScript declaration build PASS; 44/44 test files,
+**4,081/4,081 source tests PASS**; **4/4 distribution tests PASS**;
+git diff --check PASS. Focused new suites: R6 343/343 and instruction
+graph 279/279; five related files including Thai secondary advice,
+English/Thai cross-language generation and weekly schedule passed
+905/905 before the full final gate. The first full gate deliberately
+FAILED 4 preexisting assertions and was NOT shipped; that exposed
+and led to corrections for Thai secondary tablets, independent nasal
+priming, cross-language semantic round trips, and twice-weekly
+best-effort source clocks. No test expectations were weakened.
+
+Baseline 58af906 vs current patch, paired warm host parser medians:
+first 7x55 batch run (microseconds): ordinary 1533.7 -> 1652.2,
+Thai 5976.4 -> 6246.7, eye taper 6297.8 -> 6361.3,
+qualified infusion 4621.7 -> 4630.9, million-dose
+2507.0 -> 2593.7, rich graph 14955.2 -> 14903.5.
+After removal of common-path million-lexeme placeholder allocation,
+a nine alternating 80-parse batch run measured ordinary
+1597.0 -> 1616.4, Thai 6424.7 -> 6654.9, eye taper
+6268.8 -> 6410.2, comparator taper 3198.8 -> 3067.7.
+Host variation is material; no claim of identical throughput or
+mobile benchmark. Normal SIGs have no additional full-text passes,
+repeat validation layer or new dependency.
+
+Only read-only independent audits by three completed workers and
+main coordinator's implementation/validation count as completed.
+The fourth general audit timed out without a final report and is
+explicitly excluded from the completed-audit count.

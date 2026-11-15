@@ -2202,3 +2202,89 @@ describe("source-owned action amounts remain editable across the whole graph", (
     expect(JSON.stringify(graph)).toBe(original);
   });
 });
+
+describe("adversarial independent graph quantity and dose-owner edits", () => {
+  it.each([
+    ["Dissolve 2 tablets in 100 mL water, wait 5 minutes, then drink",
+      3, "tab", ["100 mL", "5 minutes", "water"], ["2 tablets"]],
+    ["Dissolve 2 tablets in 100 mL solvent",
+      3, "tab", ["100 mL", "solvent"], ["2 tablets"]],
+    ["Swish 10 mL for 5 minutes",
+      11, "mL", ["5 minutes"], ["10 mL"]],
+    ["Take 1 tablet, then drink 5 mL",
+      3, "mL", ["drink 5 mL"], ["1 tablet"]],
+    ["Take 1 tablet, then take 2 tablets",
+      3, "tab", ["take 2 tablets"], ["Take 1 tablet"]]
+  ] as const)("preserves separately quantified arguments after editing the primary amount: %s",
+    (source, amount, unit, retained, removed) => {
+      const parsed = parsePublicSig(source);
+      const clause = parsed.meta.canonical.clauses[0];
+      const graph = clause.instructionGraph?.actions.length
+        ? clause.instructionGraph
+        : { sourceText: source, sourceLocale: "en",
+          actions: parseInstructionActions(source) };
+      const saved = JSON.stringify(graph);
+      clause.dose = { value: amount, unit };
+      for (const locale of ["en", "th"] as const) {
+        const rendered = realizeInstructionGraph(graph, locale, {
+          omitCanonicalAdministration: clause, preferSourceText: true
+        }) ?? "";
+        const long = formatCanonicalClause({ ...clause, instructionGraph: graph },
+          "long", resolveSigLocalization(locale), {
+            realizationMode: "roundtrip"
+          });
+        for (const remove of removed) {
+          expect(rendered.toLowerCase()).not.toContain(remove.toLowerCase());
+          expect(long.toLowerCase()).not.toContain(remove.toLowerCase());
+        }
+        for (const item of retained) if (locale === "en") {
+          expect(rendered.toLowerCase()).toContain(item.toLowerCase());
+          expect(long.toLowerCase()).toContain(item.toLowerCase());
+        }
+        expect(long).toContain(locale === "en" ? String(amount) : String(amount));
+      }
+      expect(JSON.stringify(graph)).toBe(saved);
+      // An independent mixing Substance/Duration never inherits the
+      // changed tablet dose or loses its original numeric quantity.
+      if (source.includes("100 mL")) expect(graph.actions.some(action =>
+        action.args.some(arg => arg.quantity?.value === 100))).toBe(true);
+      if (source.includes("5 minutes")) expect(graph.actions.some(action =>
+        action.args.some(arg => arg.quantity?.value === 5 &&
+          arg.role === AdviceArgumentRole.Duration))).toBe(true);
+    }
+  );
+
+  it("preserves the dose-defining preparation when the primary administration span is a later verb", () => {
+    const source = "Dissolve 2 tablets in 100 mL water, wait 5 minutes, then drink";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    expect(graph.primaryAdministrationSpan).toMatchObject({ start: 57, end: 62 });
+    const original = JSON.stringify(graph);
+    clause.dose = { value: 3, unit: "tab" };
+    for (const locale of ["en", "th"] as const) {
+      const display = formatCanonicalClause(clause, "long",
+        resolveSigLocalization(locale), { realizationMode: "roundtrip" });
+      expect(display).toContain("3");
+      expect(display).not.toContain("2 tablets");
+      expect(display).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+      expect(display).toContain(locale === "en" ? "5 minutes" : "5 นาที");
+    }
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it("does not assign an edited unit to a later independent matching-unit action", () => {
+    const source = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 3 mL").meta.canonical.clauses[0];
+    clause.dose = { value: 3, unit: "mL" };
+    const unchanged = JSON.stringify(graph);
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    });
+    expect(text).not.toContain("1 tablet");
+    expect(text).toContain("drink 5 mL");
+    expect(JSON.stringify(graph)).toBe(unchanged);
+  });
+});

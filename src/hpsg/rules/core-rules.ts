@@ -39,6 +39,7 @@ import {
   DOSE_COMPARATOR_PREFIXES,
   DOSE_COMPARATOR_SYMBOLS,
   doseComparatorNumberAt,
+  millionDoseNumberAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
@@ -1264,6 +1265,23 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
     }
 
+    // Ordinary spelled million and comparator-qualified million share
+    // one numeric multiplier; do not issue a fictitious 1-unit dose when
+    // the actual known amount is 1,000,000 units.
+    if (numerator !== undefined && Number.isFinite(numerator)) {
+      const millions = millionDoseNumberAt(context.tokens, start, context.limit, numerator);
+      if (millions &&
+          tokensAvailable(context, start, millions.numericIndex + 1 - start)) {
+        const unit = unitAfter(context, millions.numericIndex + 1);
+        if (unit) return [lexicalSign({
+          type: "dose-sign", rule: "hpsg.lex.dose.million",
+          tokens: [...context.tokens.slice(start, millions.numericIndex + 1), ...unit.tokens],
+          synsem: { head: { dose: { value: millions.value, unit: unit.unit } },
+            valence: {}, cont: { clauseKind: "administration" } },
+          score: 19 + millions.numericIndex - start + unit.tokens.length
+        })];
+      }
+    }
     const millionMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)m$/);
     if (millionMatch) {
       const unit = unitAfter(context, start + 1);

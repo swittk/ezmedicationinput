@@ -474,6 +474,26 @@ function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
   return limit.scope === "administration" || limit.scope === "lifetime";
 }
 
+/** Exactly the original limit positions emitted by fromR6Dosage's R5
+ * fields. Period maxima are an array; administration/lifetime maxima are
+ * singular, so only the LAST eligible member of those scopes is editable
+ * through the R5 projection. All others remain active R6-only siblings. */
+function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[]): Set<number> {
+  const indices = new Set<number>();
+  let administration: number | undefined;
+  let lifetime: number | undefined;
+  for (let index = 0; index < limits.length; index++) {
+    const limit = limits[index];
+    if (!isR5RepresentableSafetyLimit(limit)) continue;
+    if (limit.scope === "period") indices.add(index);
+    else if (limit.scope === "administration") administration = index;
+    else if (limit.scope === "lifetime") lifetime = index;
+  }
+  if (administration !== undefined) indices.add(administration);
+  if (lifetime !== undefined) indices.add(lifetime);
+  return indices;
+}
+
 /**
  * Apply edits made through R5 maximum-dose fields without discarding safety
  * semantics that R5 cannot carry. Existing backbone metadata stays attached
@@ -490,7 +510,8 @@ function reconcileR5SafetyEdits(
   // Match a uniquely surviving amount + period first; then one remaining
   // member of the same scope (an ordinary numeric edit). Deletions and
   // ambiguous equal-valued rows never inherit arbitrary unknown metadata.
-  const representable = oldLimits.map(limit => isR5RepresentableSafetyLimit(limit));
+  const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits);
+  const representable = oldLimits.map((_, index) => projectedIndices.has(index));
   const signature = (limit: FhirR6DoseLimit) =>
     compactProjectionFingerprint({
       scope: limit.scope, valueQuantity: limit.valueQuantity, period: limit.period
@@ -527,14 +548,29 @@ function reconcileR5SafetyEdits(
     const values = liveByScope.get(limit.scope) ?? [];
     values.push(index); liveByScope.set(limit.scope, values);
   });
+  const sameUnit = (
+    original: FhirR6Quantity | undefined,
+    replacement: FhirR6Quantity | undefined
+  ) => !!original && !!replacement &&
+    original.unit === replacement.unit &&
+    original.code === replacement.code &&
+    original.system === replacement.system;
   for (const [scope, oldIndices] of oldByScope) {
     const liveIndices = liveByScope.get(scope);
     if (oldIndices.length !== 1 || liveIndices?.length !== 1) continue;
-    // With one remaining candidate, even a numeric edit has a unique owner.
+    const original = oldLimits[oldIndices[0]];
+    const candidate = live[liveIndices[0]];
+    // Unmatched cardinality alone is not identity: deleting 5 mg/day and
+    // adding 5 mL/30 days must NOT transfer the old ID or extension.
+    // A numeric edit retains the same units and period window.
+    if (!sameUnit(original.valueQuantity, candidate.valueQuantity) ||
+        (original.period || candidate.period) &&
+        (!sameUnit(original.period, candidate.period) ||
+          original.period?.value !== candidate.period?.value)) continue;
     matched.set(liveIndices[0], oldIndices[0]);
     usedOld.add(oldIndices[0]);
   }
-  const doseLimit: FhirR6DoseLimit[] = live.map((replacement, index) => {
+  const liveLimits: FhirR6DoseLimit[] = live.map((replacement, index) => {
     const oldIndex = matched.get(index);
     if (oldIndex === undefined) return replacement;
     const original = oldLimits[oldIndex];
@@ -545,11 +581,34 @@ function reconcileR5SafetyEdits(
     } = original;
     return { ...metadata, ...replacement } as FhirR6DoseLimit;
   });
-  // Limits not representable in R5 are not deletion candidates: they stay
-  // active alongside live R5 maxima, even after other maxima are removed.
+  // R5 singular maxima own the LAST representable item of their scope.
+  // Hidden R6 siblings must be placed BEFORE the current R5-owned maximum,
+  // or an immediate re-export would expose a different limit and invert
+  // ownership again. Array-valued period limits retain the live R5 order.
+  const hiddenByScope = new Map<string, FhirR6DoseLimit[]>();
+  const remainingHidden: FhirR6DoseLimit[] = [];
   oldLimits.forEach((limit, index) => {
-    if (!representable[index]) doseLimit.push(limit);
+    if (representable[index]) return;
+    if (limit.scope === "administration" || limit.scope === "lifetime") {
+      const hidden = hiddenByScope.get(limit.scope) ?? [];
+      hidden.push(limit); hiddenByScope.set(limit.scope, hidden);
+    } else remainingHidden.push(limit);
   });
+  const lastLive = new Map<string, number>();
+  liveLimits.forEach((limit, index) => {
+    if ((limit.scope === "administration" || limit.scope === "lifetime") &&
+        limit.valueQuantity) lastLive.set(limit.scope, index);
+  });
+  const doseLimit: FhirR6DoseLimit[] = [];
+  liveLimits.forEach((limit, index) => {
+    if (lastLive.get(limit.scope) === index) {
+      doseLimit.push(...(hiddenByScope.get(limit.scope) ?? []));
+      hiddenByScope.delete(limit.scope);
+    }
+    doseLimit.push(limit);
+  });
+  for (const hidden of hiddenByScope.values()) doseLimit.push(...hidden);
+  doseLimit.push(...remainingHidden);
   const { doseLimit: _retainedLimits, ...retainedSafety } = retained;
   if (doseLimit.length) return { ...retainedSafety, doseLimit };
   return Object.keys(retainedSafety).length ? retainedSafety : undefined;
@@ -782,7 +841,11 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
       };
     }) } : {})
   };
-  for (const limit of safety?.doseLimit ?? []) {
+  const limits = safety?.doseLimit ?? [];
+  const owners = limits.length > 1 ? r5ProjectedSafetyLimitIndices(limits) : undefined;
+  for (let index = 0; index < limits.length; index++) {
+    if (owners && !owners.has(index)) continue;
+    const limit = limits[index];
     // Keep the numeric maxima active in R5. Any comparator forbidden by
     // SimpleQuantity uses EMA's established Quantity Operator extension;
     // the original R6 safety object remains independently retained.
@@ -866,6 +929,26 @@ function withReconciliationSources(
   return additions.length
     ? { ...details, extension: [...(details.extension ?? []), ...additions] }
     : details;
+}
+
+/** A text-only course's latest full marker may already embed previous
+ * reconciliation sources. Keep those sources in their existing flat list,
+ * and preserve only the immediate preceding course snapshot as a new item.
+ * This strips solely the nested source-history wrapper at the known course
+ * top level; it retains unknown fields, safety, warnings and other extensions. */
+function sourceWithoutNestedHistory(marker: FhirExtension): FhirExtension {
+  let changed = false;
+  const extensions = marker.extension?.map(item => {
+    if (item.url !== "dosageDetails" || !item.extension) return item;
+    const fields = item.extension.filter(field => {
+      const nestedSource = field.url === "extension" && field.extension?.length === 1 &&
+        field.extension[0].url === DOSAGE_RECONCILIATION_SOURCE_URL;
+      if (nestedSource) changed = true;
+      return !nestedSource;
+    });
+    return fields.length === item.extension.length ? item : { ...item, extension: fields };
+  });
+  return changed ? { ...marker, extension: extensions } : marker;
 }
 
 /** Preserve unmatched step metadata in its original typed extension structure.
@@ -1619,7 +1702,8 @@ export function toDosageDetails(
         "Edited R5 text or course metadata superseded the original zero-step R6 source; source preserved.");
       return withPreservedSourceExtension(
         withReconciliationSources(withReconciliationWarnings(updated, warnings),
-          [...reconciliationSources, ...(edited && retainedSource ? [retainedSource] : [])]),
+          [...reconciliationSources,
+            ...(edited && retainedSource ? [sourceWithoutNestedHistory(retainedSource)] : [])]),
         instructionSource
       );
     }

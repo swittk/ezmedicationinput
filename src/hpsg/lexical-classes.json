@@ -749,7 +749,9 @@
     "full"
   ],
   "millionDoseMultiplierTokens": [
-    "m"
+    "m",
+    "million",
+    "ล้าน"
   ],
   "scheduleUnitSeparatorTokens": [
     "/"

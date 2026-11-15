@@ -4121,7 +4121,11 @@ function frameWithoutSupersededAmount(
     !quantityCoveredByDose(arg, currentDose));
   const args: AdviceArgument[] = [];
   for (const arg of frame.args) {
-    if (arg.quantity && !quantityCoveredByDose(arg, currentDose)) continue;
+    // Only the dose-bearing Amount belongs to the canonical dose. An
+    // independent 100 mL mixing Substance or 5-minute Duration must never
+    // disappear because the tablet amount changed.
+    if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
+        !quantityCoveredByDose(arg, currentDose)) continue;
     if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
       const text = arg.text ?? "";
       const old = superseded.find(amount => {
@@ -4157,19 +4161,33 @@ function primaryDoseAmountOwner(
   const amountActions = graph.actions.filter(action =>
     action.polarity !== AdvicePolarity.Negate &&
     action.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity));
-  const primary = graph.primaryAdministrationSpan;
-  if (primary) return amountActions.find(action =>
-    action.span.start < primary.end && primary.start < action.span.end);
   if (!amountActions.length) return undefined;
-  const sameUnit = amountActions.filter(action => action.args.some(arg =>
-    arg.role === AdviceArgumentRole.Amount && arg.quantity?.unit === clause.dose?.unit));
-  const candidates = sameUnit.length ? sameUnit : amountActions;
-  const methodMatches = candidates.filter(action => actionMatchesCanonicalMethod(action, clause));
+  const primary = graph.primaryAdministrationSpan;
+  if (primary) {
+    const overlapping = amountActions.find(action =>
+      action.span.start < primary.end && primary.start < action.span.end);
+    if (overlapping) return overlapping;
+    // A source-backed primary method can be downstream of the dose-defining
+    // preparation action ('Dissolve 2 tablets, then drink'). Only one
+    // EARLIER explicitly dose-defining preparatory action can supply it.
+    // A device priming amount ('prime 6 sprays') is not the therapeutic dose;
+    // a later 'take another 1 tablet' is a different administration.
+    const earlier = amountActions.filter(action => action.span.end <= primary.start &&
+      getMedicationInstructionAction(action.predicate.lemma)?.definesDose);
+    return earlier.length === 1 ? earlier[0] : undefined;
+  }
+  // The current edited unit or amount is NOT evidence of historic source
+  // ownership. A later independent 5 mL drink must not become the owner
+  // just because the clinician edited the earlier tablet dose to 3 mL.
+  const methodMatches = amountActions.filter(action => actionMatchesCanonicalMethod(action, clause));
   if (methodMatches.length === 1) return methodMatches[0];
-  // Do NOT select by the *edited* numeric value. It may now happen to
-  // equal a later, independently authored taper-stage amount. In a segment
-  // without an explicit primary span/method, source order owns the first
-  // administration; subsequent actions retain their independent amounts.
+  const doseDefiners = amountActions.filter(action =>
+    getMedicationInstructionAction(action.predicate.lemma)?.definesDose);
+  if (doseDefiners.length === 1) return doseDefiners[0];
+  // A missing owner span cannot prove the intended dose from a later
+  // matching number. First source administration wins as a conventional
+  // fallback; all subsequent amounts remain independent.
+  const candidates = doseDefiners.length ? doseDefiners : amountActions;
   return candidates.reduce((first, action) =>
     action.span.start < first.span.start ? action : first);
 }

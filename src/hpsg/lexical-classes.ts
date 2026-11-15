@@ -736,6 +736,20 @@ export function additiveDoseNumberAt(
     ? { value: whole + fraction, numericIndex: cursor } : undefined;
 }
 
+/** A million is a numeric multiplier, never a medication unit.
+ * Shared by exact/comparative scalar and dimensional quantities. Source
+ * position advances past a separately spelled multiplier only when present. */
+export function millionDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, value: number
+): { value: number; numericIndex: number } | undefined {
+  const next = start + 1 < limit ? tokens[start + 1] : undefined;
+  // Most doses have no multiplier. Avoid allocating a placeholder result
+  // for every routine '1 tab' token on the phone parsing hot path.
+  return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)
+    ? { value: value * 1_000_000, numericIndex: start + 1 }
+    : undefined;
+}
+
 /** One bounded quantity-prefix lexeme shared by scalar and dimensional
  * rules. It identifies source tokens; it does not assign a unit or dose. */
 export function doseComparatorNumberAt(
@@ -747,10 +761,16 @@ export function doseComparatorNumberAt(
   const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
   if (glued) {
     const value = Number(glued[2]);
-    const mixed = !glued[3] ? additiveDoseNumberAt(tokens, start, limit, value) : undefined;
+    const compactMillion = glued[3] === "m";
+    const million = compactMillion
+      ? { value: value * 1_000_000, numericIndex: start }
+      : glued[3] ? undefined : millionDoseNumberAt(tokens, start, limit, value);
+    const mixed = !glued[3] && !million
+      ? additiveDoseNumberAt(tokens, start, limit, value) : undefined;
     return { comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]],
-      value: mixed?.value ?? value, numericIndex: mixed?.numericIndex ?? start,
-      ...(glued[3] ? { rawUnit: glued[3] } : {}) };
+      value: million?.value ?? mixed?.value ?? value,
+      numericIndex: million?.numericIndex ?? mixed?.numericIndex ?? start,
+      ...(glued[3] && !compactMillion ? { rawUnit: glued[3] } : {}) };
   }
   let comparator = DOSE_COMPARATOR_SYMBOLS[lower];
   let prefixLength = comparator ? 1 : 0;
@@ -771,7 +791,14 @@ export function doseComparatorNumberAt(
   const word = token.canonical ?? token.lower;
   let value = token.kind === LexKind.Number ? token.value :
     DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
+  const embeddedMillion = /^([0-9]+(?:\.[0-9]+)?)m$/u.exec(word);
+  if (value === undefined && embeddedMillion) value = Number(embeddedMillion[1]) * 1_000_000;
   if (value === undefined) return undefined;
+  const million = embeddedMillion
+    ? { value, numericIndex }
+    : millionDoseNumberAt(tokens, numericIndex, limit, value);
+  if (!embeddedMillion && million)
+    return { comparator, ...million };
   const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value);
   if (mixed) return { comparator, ...mixed };
   // The existing fraction vocabulary also licenses "a quarter" or

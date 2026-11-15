@@ -5132,3 +5132,248 @@ describe("cross-pass preservation and execution family audit", () => {
     }
   });
 });
+
+describe("adversarial clinical preservation and cycle wall-clock audit", () => {
+  const named = (id: string): FhirExtension => ({
+    url: "https://example.org/" + id, valueString: id
+  });
+  const quantityLimit = (
+    scope: "administration" | "lifetime" | "period",
+    value: number, unit: string, id: string, days?: number
+  ) => ({
+    scope, id,
+    valueQuantity: { value, unit },
+    ...(days ? { period: { value: days, unit: "d", code: "d" } } : {}),
+    extension: [named(id)]
+  });
+  const courseWithSafety = (limits: ReturnType<typeof quantityLimit>[]): FhirR6DosageInstruction => ({
+    step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      safety: { ifExceeded: "stop", doseLimit: limits }
+    }] }]
+  });
+  const activeLimits = (course: FhirR6DosageInstruction) =>
+    course.step[0].component[0].safety?.doseLimit ?? [];
+
+  it.each(["administration", "lifetime"] as const)(
+    "keeps unprojected %s R6 limits active after every R5 singular and period edit", scope => {
+      const hidden = quantityLimit(scope, 5, "mg", "hidden-" + scope);
+      const owned = quantityLimit(scope, 0.1, "mg/kg", "owned-" + scope);
+      const period = quantityLimit("period", 40, "mg", "daily", 1);
+      const original = courseWithSafety([hidden, owned, period]);
+      const projection = toFhirR5Dosages(original)[0];
+      expect(scope === "administration"
+        ? projection.maxDosePerAdministration?.value
+        : projection.maxDosePerLifetime?.value).toBe(0.1);
+      for (const [label, edit] of [
+        ["period edit", (row: FhirDosage) => { row.maxDosePerPeriod![0].numerator.value = 50; }],
+        ["scalar edit", (row: FhirDosage) => {
+          if (scope === "administration") row.maxDosePerAdministration!.value = 0.2;
+          else row.maxDosePerLifetime!.value = 0.2;
+        }],
+        ["scalar delete", (row: FhirDosage) => {
+          if (scope === "administration") delete row.maxDosePerAdministration;
+          else delete row.maxDosePerLifetime;
+        }],
+        ["period delete", (row: FhirDosage) => { delete row.maxDosePerPeriod; }]
+      ] as const) {
+        const row = JSON.parse(JSON.stringify(projection)) as FhirDosage;
+        edit(row);
+        const restored = toDosageDetails([row]);
+        const limits = activeLimits(restored);
+        expect(limits, label).toContainEqual(hidden);
+        expect(limits.some(limit => limit.scope === scope &&
+          limit.id === owned.id)).toBe(label !== "scalar delete");
+        const expectedOwner = label === "scalar edit" ? 0.2 : 0.1;
+        if (label !== "scalar delete") expect(limits.find(limit =>
+          limit.id === owned.id)?.valueQuantity?.value).toBe(expectedOwner);
+        expect(restored.step[0].component[0].safety?.ifExceeded).toBe("stop");
+        // Repeated strict export/reopen must not expose the hidden 5-mg
+        // limit as a replacement of the surviving weight-based maximum.
+        const r5 = toFhirR5Dosages(restored);
+        if (label !== "scalar delete") {
+          const scalar = scope === "administration"
+            ? r5[0].maxDosePerAdministration : r5[0].maxDosePerLifetime;
+          expect(scalar?.value).toBe(expectedOwner);
+          expect(scalar?.unit).toBe("mg/kg");
+        }
+        const reopened = toDosageDetails(r5);
+        expect(activeLimits(reopened)).toEqual(limits);
+        expect(JSON.stringify(reopened).includes(hidden.id)).toBe(true);
+      }
+    }
+  );
+
+  it("never moves a deleted period limit's metadata onto a replacement with another unit/window", () => {
+    const a = quantityLimit("period", 5, "mg", "A", 1);
+    const b = quantityLimit("period", 10, "mg", "B", 7);
+    const original = courseWithSafety([a, b]);
+    const rows = toFhirR5Dosages(original);
+    rows[0].maxDosePerPeriod!.shift();
+    rows[0].maxDosePerPeriod!.push({
+      numerator: { value: 5, unit: "mL" },
+      denominator: { value: 30, unit: "d", code: "d" }
+    });
+    const restored = toDosageDetails(rows);
+    const limits = activeLimits(restored);
+    expect(limits).toHaveLength(2);
+    expect(limits[0]).toEqual(b);
+    expect(limits[1].valueQuantity).toEqual({ value: 5, unit: "mL" });
+    expect(limits[1].id).toBeUndefined();
+    expect(limits[1].extension).toBeUndefined();
+    expect(JSON.stringify(restored.extension)).toContain("example.org/A");
+    expect(activeLimits(toDosageDetails(toFhirR5Dosages(restored)))).toEqual(limits);
+  });
+
+  it("keeps zero-step prior instructions as flat bounded provenance, not exponential nested markers", () => {
+    let course: FhirR6DosageInstruction = {
+      id: "text-only", renderedInstruction: "version 0",
+      extension: [named("unknown-clinical-annotation")],
+      safety: { doseLimit: [{ scope: "administration",
+        valueQuantity: { value: 5, unit: "mg" } }] }, step: []
+    };
+    const sizes: number[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const rows = toFhirR5Dosages(course);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate).toBeUndefined();
+      rows[0].text = "version " + i;
+      course = toDosageDetails(rows);
+      expect(course.step).toEqual([]);
+      expect(course.id).toBe("text-only");
+      expect(course.renderedInstruction).toBe("version " + i);
+      expect(course.extension).toContainEqual(named("unknown-clinical-annotation"));
+      expect(course.safety?.doseLimit?.[0].valueQuantity?.value).toBe(5);
+      const originalSources = course.extension?.filter(ext =>
+        ext.url.includes("reconciliation-source")) ?? [];
+      expect(originalSources).toHaveLength(i);
+      for (let previous = 0; previous < i; previous++) {
+        expect(JSON.stringify(originalSources)).toContain("version " + previous);
+      }
+      // Each previous source is one historical snapshot, with no nested
+      // source-history child that would double storage on every save.
+      expect(originalSources.every(source => source.extension?.length === 1 &&
+        !JSON.stringify(source.extension?.[0]).includes(
+          '"url":"urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source"'
+        ))).toBe(true);
+      const next = toFhirR5Dosages(course);
+      sizes.push(JSON.stringify(next).length);
+      expect(toDosageDetails(next).renderedInstruction).toBe("version " + i);
+    }
+    expect(sizes[11]).toBeLessThan(sizes[0] * 13);
+    expect(sizes[11]).toBeLessThan(18000);
+  });
+
+  it.each([
+    ["approximately 1 million units PO daily", 1_000_000, "U", "~"],
+    ["1 million units PO daily", 1_000_000, "U", undefined],
+    ["~1 million units IV once", 1_000_000, "U", "~"],
+    [">=2 million IU daily", 2_000_000, "IU", ">="],
+    ["approximately 2.4M IU IM once", 2_400_000, "IU", "~"],
+    ["~2.4M IU IM once", 2_400_000, "IU", "~"],
+    [">=2.4m IU IM once", 2_400_000, "IU", ">="],
+    ["1m IU IM once", 1_000_000, "IU", undefined],
+    ["approx 2.5 million mg PO once", 2_500_000, "mg", "~"]
+  ] as const)("retains numeric million scaling and comparator for %s",
+    (text, amount, unit, comparator) => {
+      const parsed = parseSig(text);
+      const sourceQuantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+      expect(sourceQuantity?.value).toBe(amount);
+      expect(sourceQuantity?.unit).toBe(unit);
+      expect(sourceQuantity?.comparator).toBe(comparator);
+      const rows = toFhirR5Dosages(parsed.fhirNext);
+      expect(rows[0].doseAndRate?.[0].doseQuantity?.value).toBe(amount);
+      expect(getQuantityComparator(rows[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
+      expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(amount);
+      expect(parsed.input).toBe(text);
+    });
+});
+
+describe("adversarial DST calendar-cycle and clockless active-window oracles", () => {
+  const relative = (value: number, unit = "d") => ({
+    contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] },
+    offsetDuration: { value, unit, code: unit }
+  });
+  const daily = {
+    timing: { repeat: { frequency: 1, period: 1,
+      periodUnit: FhirPeriodUnit.Day, timeOfDay: ["03:00:00"] } },
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+  };
+  const repeated = (
+    amount: number, unit: string
+  ): FhirR6DosageInstruction => ({
+    repeatCycle: { value: amount, unit, code: unit },
+    step: [{ start: relative(0), end: relative(amount, unit),
+      component: [daily] }]
+  });
+  it.each([
+    ["28 days", 28, "d", "2027-02-14T02:30:00-05:00", "2027-04-11"],
+    ["4 weeks", 4, "wk", "2027-02-14T02:30:00-05:00", "2027-04-11"],
+    ["one month", 1, "mo", "2027-02-14T02:30:00-05:00", "2027-04-14"],
+    ["one year", 1, "a", "2026-03-14T02:30:00-04:00", "2027-03-14"]
+  ] as const)(
+    "retains original wall clock through spring gap for %s",
+    (_label, count, unit, anchor, boundary) => {
+      const source = repeated(count, unit);
+      const options = { from: anchor, orderedAt: anchor,
+        timeZone: "America/New_York", limit: unit === "a" ? 730 : 90 };
+      for (const input of [source, toFhirR5Dosages(source), fromFhir(source)]) {
+        const due = nextDueDoses(input, options);
+        expect(due.length).toBeGreaterThan(32);
+        expect(new Set(due).size).toBe(due.length);
+        expect(due.filter(date => date.startsWith(boundary + "T03:00:00"))).toHaveLength(1);
+        for (const date of due) expect(date).toMatch(/T03:00:00[-+]\d\d:\d\d$/);
+        if (unit !== "a") expect(calculateTotalUnits({
+          dosage: input, ...options,
+          durationValue: 84, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(84);
+      }
+      expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
+    }
+  );
+  it.each([7, 21, 42])(
+    "keeps clockless %i-of-28 active-window events on local calendar dates through fall DST",
+    frequency => {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { frequency, period: 28, periodUnit: FhirPeriodUnit.Day,
+          endOffset: { value: 7, unit: "d", code: "d" } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }] };
+      const options = { from: "2026-10-26T00:00:00-04:00",
+        orderedAt: "2026-10-26T00:00:00-04:00",
+        timeZone: "America/New_York", limit: 65 };
+      for (const input of [source, toFhirR5Dosages(source), fromFhir(source)]) {
+        const due = nextDueDoses(input, options);
+        const cycleEnd = Date.parse("2026-11-16T00:00:00-05:00");
+        const first = due.filter(date => Date.parse(date) < cycleEnd);
+        expect(first).toHaveLength(frequency);
+        expect(due[first.length]).toBe("2026-11-23T00:00:00-05:00");
+        expect(new Set(first).size).toBe(frequency);
+        for (const date of first) {
+          expect(Number.isFinite(Date.parse(date))).toBe(true);
+          const hour = date.slice(11, 13);
+          if (frequency === 21 || frequency === 7) expect(hour).toBe("00");
+          else expect(["00", "12"]).toContain(hour);
+        }
+        expect(calculateTotalUnits({ dosage: input, ...options,
+          durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(frequency);
+      }
+    }
+  );
+  it("preserves q24h elapsed intervals even as calendar-day dose windows stay wall-clock aligned", () => {
+    const from = "2026-10-31T08:00:00-04:00";
+    const dosage: FhirDosage = { ...daily,
+      timing: { repeat: { frequency: 1, period: 24, periodUnit: FhirPeriodUnit.Hour } }
+    };
+    const due = nextDueDoses(dosage, {
+      from, orderedAt: from, timeZone: "America/New_York", limit: 3
+    });
+    expect(due).toEqual([
+      "2026-10-31T08:00:00-04:00",
+      "2026-11-01T07:00:00-05:00",
+      "2026-11-02T07:00:00-05:00"
+    ]);
+  });
+});

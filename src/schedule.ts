@@ -1719,10 +1719,16 @@ function withoutOccurrenceCap(dosage: FhirDosage): FhirDosage {
  * event. Unlike Timing.repeat.startOffset, this is an offset from the
  * beginning of the entire treatment. Unsupported anchors are not guessed.
  */
+type TreatmentWallClock = Pick<TimeParts, "hour" | "minute" | "second">;
+
+/** Calendar-relative stages inherit the original treatment wall clock.
+ * A DST gap may shift this cycle's Date but must not redefine later days,
+ * weeks, months or years to the shifted clock. */
 function treatmentRelativeInstant(
   relative: FhirR6RelativeTime,
   orderedAt: Date,
-  timeZone: string
+  timeZone: string,
+  sourceClock?: TreatmentWallClock
 ): Date {
   const codes = relative.contextCode?.coding ?? [];
   const knownAnchor = codes.some(coding =>
@@ -1744,14 +1750,15 @@ function treatmentRelativeInstant(
     case "d": case "wk": {
       const days = unit === "wk" ? quantity * 7 : quantity;
       const parts = getTimeParts(orderedAt, timeZone);
+      const clock = sourceClock ?? parts;
       const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
       const result = calendarBoundaryDate(timeZone, shifted.getUTCFullYear(),
-        shifted.getUTCMonth() + 1, shifted.getUTCDate(), parts.hour, parts.minute, parts.second);
+        shifted.getUTCMonth() + 1, shifted.getUTCDate(), clock.hour, clock.minute, clock.second);
       if (!result) throw new Error("Invalid R6 treatment-day offset");
       return result;
     }
     case "mo": case "a":
-      return addCalendarMonths(orderedAt, quantity * (unit === "a" ? 12 : 1), timeZone);
+      return addCalendarMonths(orderedAt, quantity * (unit === "a" ? 12 : 1), timeZone, sourceClock);
     default:
       throw new Error("Unsupported R6 treatment-start time unit");
   }
@@ -1761,7 +1768,8 @@ function parallelComponentCadenceOrigin(
   dosage: FhirDosage,
   treatmentStart: Date,
   timeZone: string,
-  fallback: Date
+  fallback: Date,
+  sourceClock?: TreatmentWallClock
 ): Date {
   const markers = dosage.modifierExtension?.filter(extension =>
     extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL) ?? [];
@@ -1774,7 +1782,7 @@ function parallelComponentCadenceOrigin(
       coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start" }]
     },
     offsetDuration: markers[0].valueQuantity
-  }, treatmentStart, timeZone);
+  }, treatmentStart, timeZone, sourceClock);
 }
 
 function durationStepper(
@@ -1818,11 +1826,11 @@ function durationStepper(
  */
 function treatmentStepWindow(
   course: FhirR6DosageInstruction, index: number, anchor: Date,
-  previousEnd: Date, timeZone: string
+  previousEnd: Date, timeZone: string, sourceClock?: TreatmentWallClock
 ): { start: Date; end: Date | undefined } {
   const step = course.step[index];
-  const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone) : previousEnd;
-  let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone) : undefined;
+  const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock) : previousEnd;
+  let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
   if (!end) {
     const componentEnds = step.component.map(component => earlierDate(
       resolveRepeatDurationCapEnd(component, start, timeZone),
@@ -1831,7 +1839,7 @@ function treatmentStepWindow(
     if (componentEnds.length === step.component.length && componentEnds.length) {
       end = componentEnds.reduce((latest, value) => value > latest ? value : latest, start);
     } else if (course.step[index + 1]?.start) {
-      end = treatmentRelativeInstant(course.step[index + 1].start!, anchor, timeZone);
+      end = treatmentRelativeInstant(course.step[index + 1].start!, anchor, timeZone, sourceClock);
     }
   }
   if (end && end <= start) throw new Error("R6 treatment step end must be after its start");
@@ -1846,12 +1854,13 @@ function treatmentStepWindow(
  * @param timeZone Calendar zone; month offsets are never approximated as days.
  */
 function repeatedCourseHorizon(
-  course: FhirR6DosageInstruction, anchor: Date, nextCycle: Date, timeZone: string
+  course: FhirR6DosageInstruction, anchor: Date, nextCycle: Date, timeZone: string,
+  sourceClock?: TreatmentWallClock
 ): Date {
   let horizon = nextCycle;
   let previousEnd = anchor;
   for (let index = 0; index < course.step.length; index++) {
-    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone);
+    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone, sourceClock);
     if (end) {
       if (end > horizon) horizon = end;
       previousEnd = end;
@@ -1880,7 +1889,7 @@ function stepOccursInCycle(step: FhirR6DosageInstruction["step"][number], cycleI
 
 function scheduleTreatmentRelativeCourse(
   course: FhirR6DosageInstruction, options: NextDueDoseOptions,
-  cycleDefaultEnd?: Date, cycleIndex?: number
+  cycleDefaultEnd?: Date, cycleIndex?: number, sourceClock?: TreatmentWallClock
 ): string[] {
   const timeZone = options.timeZone ?? options.config?.timeZone;
   if (!timeZone) throw new Error("timeZone is required for relative treatment-step scheduling");
@@ -1896,7 +1905,7 @@ function scheduleTreatmentRelativeCourse(
   let componentIndex = 0;
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
-    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone);
+    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone, sourceClock);
     for (const component of step.component) {
       const original = flattened[componentIndex++];
       if (!original) throw new Error("R6 course component projection is incomplete");
@@ -1928,7 +1937,7 @@ function scheduleTreatmentRelativeCourse(
       // cuts. Otherwise QOD / monthly cadence would restart at every taper.
       const cadenceOrigin = repeat?.boundsPeriod
         ? (absoluteStart ?? anchor)
-        : parallelComponentCadenceOrigin(dosage, anchor, timeZone, start);
+        : parallelComponentCadenceOrigin(dosage, anchor, timeZone, start, sourceClock);
       const candidateTimes = nextDueDoses({
         ...dosage,
         modifierExtension: dosage.modifierExtension?.filter(ext =>
@@ -1956,6 +1965,7 @@ function scheduleRepeatedCourse(
   const from = coerceDate(options.from, "from");
   const anchor = options.orderedAt === undefined
     ? from : coerceDate(options.orderedAt, "orderedAt");
+  const sourceClock = getTimeParts(anchor, timeZone);
   const advance = durationStepper(course.repeatCycle, timeZone, anchor);
   if (!advance) throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
     "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before scheduling.");
@@ -1969,12 +1979,12 @@ function scheduleRepeatedCourse(
   while (guard < maxCycles && course.step.some(step => stepOccursInCycle(step, guard))) {
     const cycleEnd = advance(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
-    const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone);
+    const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock);
     if (horizon > from) {
       const candidates = scheduleTreatmentRelativeCourse(singleCycle, {
         ...options, from: from > cycleStart ? from : cycleStart,
         orderedAt: cycleStart, priorCount: undefined, limit
-      }, cycleEnd, guard);
+      }, cycleEnd, guard, sourceClock);
       results.push(...candidates);
       // Keep multiplicity: two active cycle components at the same instant
       // are two administrations, not duplicate representation artifacts.
@@ -3162,9 +3172,17 @@ function generateFrequencyPerPeriodSeries(
     periodUnit === FhirPeriodUnit.Week ? period * 7 : undefined;
   const exactDailyClocks = dayCount !== undefined && Number.isInteger(dayCount) &&
     clocks.length > 0 && frequency === dayCount * clocks.length;
-  const advanceCycle = exactDailyClocks
-    ? calendarDayStepper(baseTime, dayCount, timeZone)
+  // A clockless multi-day distribution (21 administrations/21 active days,
+  // 7/21d, 42/21d) is a calendar window, not 21 elapsed 24-hour
+  // intervals. Reserve elapsed arithmetic for true q24h, subday, fractional
+  // and single long-interval dosing. The normal BID/1d path is unchanged.
+  const clocklessCalendarPeriod = dayCount !== undefined &&
+    Number.isInteger(dayCount) && dayCount > 1 &&
+    clocks.length === 0 && frequency > 1;
+  const advanceCycle = exactDailyClocks || clocklessCalendarPeriod
+    ? calendarDayStepper(baseTime, dayCount!, timeZone)
     : createIntervalStepper({ period, periodUnit }, timeZone);
+  const implicitClock = clocklessCalendarPeriod ? toLocalClock(baseTime, timeZone) : undefined;
   if (!advanceCycle) return [];
   const results: string[] = [];
   const seen = new Set<string>();
@@ -3197,7 +3215,7 @@ function generateFrequencyPerPeriodSeries(
     const spanDays = calendarUnit
       ? Math.max(1, getLocalDayNumber(cycleEnd, timeZone) - getLocalDayNumber(cycleStart, timeZone))
       : 0;
-    const baseClock = toLocalClock(cycleStart, timeZone);
+    const baseClock = implicitClock ?? toLocalClock(cycleStart, timeZone);
     // Explicit daily clocks must remain authoritative when a multi-day
     // frequency is their exact total (e.g. 42 doses/21 days at 08:00/20:00).
     // Without a matching clock count, retain the existing distributor.
@@ -3211,7 +3229,7 @@ function generateFrequencyPerPeriodSeries(
     for (let index = 0; index < candidates && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
       let shiftedClock = false;
-      if (calendarUnit && (frequency <= spanDays || clockedDays)) {
+      if (calendarUnit && (frequency <= spanDays || clockedDays || clocklessCalendarPeriod)) {
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
@@ -3222,7 +3240,31 @@ function generateFrequencyPerPeriodSeries(
           (clockedDays ? Math.floor(index / clocks.length)
             : Math.floor(index * spanDays / frequency)) + dayShift, timeZone);
         const clock = typeof entry === "string" ? entry : entry?.time ?? baseClock;
-        candidate = makeZonedDateFromDay(day, timeZone, clock);
+        // The inferred original clock survives DST gaps as a valid
+        // calendar boundary, without permanently adopting a gap shift.
+        if (implicitClock) {
+          // Distribute 42/21d into two source-clock-anchored slots per
+          // calendar date. Fractional elapsed Date milliseconds would drift
+          // across DST and even produce invalid fractional ISO offsets.
+          const exactDay = index * spanDays / frequency;
+          // <= one dose/day uses its original whole-day slots (2/week
+          // means day 0 and day 3, not day 3 at noon). Only multiple
+          // administrations per local date need fractional clocks.
+          const fractionalDay = frequency > spanDays
+            ? exactDay - Math.floor(exactDay) : 0;
+          const [hour, minute, second] = clock.split(":").map(Number);
+          const totalSeconds = (hour ?? 0) * 3600 + (minute ?? 0) * 60 +
+            (second ?? 0) + Math.round(fractionalDay * 86400);
+          const shiftedDay = Math.floor(totalSeconds / 86400);
+          const clockSeconds = (totalSeconds % 86400 + 86400) % 86400;
+          const localDay = shiftedDay ? addLocalDays(day, shiftedDay, timeZone) : day;
+          const parts = getTimeParts(localDay, timeZone);
+          candidate = calendarBoundaryDate(timeZone, parts.year, parts.month, parts.day,
+            Math.floor(clockSeconds / 3600),
+            Math.floor(clockSeconds % 3600 / 60), clockSeconds % 60);
+        } else {
+          candidate = makeZonedDateFromDay(day, timeZone, clock);
+        }
       } else {
         candidate = new Date(cycleStart.getTime() +
           Math.floor((cycleEnd.getTime() - cycleStart.getTime()) * index / frequency));
@@ -4389,7 +4431,7 @@ function calculateTotalUnitsSingle(
  */
 function calculateCourseTotalUnits(
   course: FhirR6DosageInstruction, options: TotalUnitsOptions,
-  cycleDefaultEnd?: Date, cycleIndex?: number
+  cycleDefaultEnd?: Date, cycleIndex?: number, sourceClock?: TreatmentWallClock
 ): TotalUnitsResult {
   course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
   requireExecutableCourseContext(course, "calculating");
@@ -4409,6 +4451,7 @@ function calculateCourseTotalUnits(
     throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
       "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before calculating supply.");
   if (cycleAdvance) {
+    const originalClock = getTimeParts(anchor, zone);
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     const singleCycle = { ...course, repeatCycle: undefined };
     let cycleStart = anchor;
@@ -4417,7 +4460,7 @@ function calculateCourseTotalUnits(
         course.step.some(step => stepOccursInCycle(step, guard))) {
       const cycleEnd = cycleAdvance(cycleStart);
       if (!cycleEnd || cycleEnd <= cycleStart) break;
-      const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone);
+      const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock);
       const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;
       if (windowEnd > windowStart) {
@@ -4426,7 +4469,7 @@ function calculateCourseTotalUnits(
           durationValue: (windowEnd.getTime() - windowStart.getTime()) / 1000,
           durationUnit: FhirPeriodUnit.Second, priorCount: undefined,
           roundToMultiple: undefined
-        }, cycleEnd, guard);
+        }, cycleEnd, guard, originalClock);
         entries.push({ total, unit: total.unit });
       }
       cycleStart = cycleEnd;
@@ -4445,7 +4488,7 @@ function calculateCourseTotalUnits(
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
     const start = step.start
-      ? treatmentRelativeInstant(step.start, treatmentStart, zone)
+      ? treatmentRelativeInstant(step.start, treatmentStart, zone, sourceClock)
       : cursor;
     const dosages: FhirDosage[] = [];
     const starts: Date[] = [];
@@ -4475,7 +4518,7 @@ function calculateCourseTotalUnits(
       const implicitStart = successorIntervalStart(dosage, predecessorPoint, start, zone);
       const cadenceOrigin = repeat?.boundsPeriod
         ? (calendarStart ?? treatmentStart)
-        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, implicitStart);
+        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, implicitStart, sourceClock);
       cadenceOrigins.push(cadenceOrigin);
       // Before the first global relative cut, an independent calendar member
       // is allowed to start before orderedAt. Subsequent step cuts still
@@ -4493,9 +4536,9 @@ function calculateCourseTotalUnits(
     }
     const nextStep = course.step[index + 1];
     let stepEnd = step.end
-      ? treatmentRelativeInstant(step.end, treatmentStart, zone) : undefined;
+      ? treatmentRelativeInstant(step.end, treatmentStart, zone, sourceClock) : undefined;
     if (!stepEnd && nextStep?.start)
-      stepEnd = treatmentRelativeInstant(nextStep.start, treatmentStart, zone);
+      stepEnd = treatmentRelativeInstant(nextStep.start, treatmentStart, zone, sourceClock);
     if (!stepEnd && nextStep) {
       if (!ends.length || ends.some(value => !value)) {
         // Keep the current phase through the requested horizon when the text
