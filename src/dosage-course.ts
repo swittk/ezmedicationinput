@@ -484,25 +484,72 @@ function reconcileR5SafetyEdits(
   retained: FhirR6DosageSafety,
   projected: FhirR6DosageSafety | undefined
 ): FhirR6DosageSafety | undefined {
-  const replacements = [...(projected?.doseLimit ?? [])];
-  const doseLimit: FhirR6DoseLimit[] = [];
-  for (const original of retained.doseLimit ?? []) {
-    if (!isR5RepresentableSafetyLimit(original)) {
-      doseLimit.push(original);
-      continue;
-    }
-    const replacementIndex = replacements.findIndex(candidate =>
-      candidate.scope === original.scope);
-    if (replacementIndex < 0) continue;
-    const [replacement] = replacements.splice(replacementIndex, 1);
+  const oldLimits = retained.doseLimit ?? [];
+  const live = projected?.doseLimit ?? [];
+  // A scope is NOT an identity: several per-period limits can coexist.
+  // Match a uniquely surviving amount + period first; then one remaining
+  // member of the same scope (an ordinary numeric edit). Deletions and
+  // ambiguous equal-valued rows never inherit arbitrary unknown metadata.
+  const representable = oldLimits.map(limit => isR5RepresentableSafetyLimit(limit));
+  const signature = (limit: FhirR6DoseLimit) =>
+    compactProjectionFingerprint({
+      scope: limit.scope, valueQuantity: limit.valueQuantity, period: limit.period
+    });
+  const oldKeys = new Map<string, number>();
+  const liveKeys = new Map<string, number>();
+  const indexKeys = (items: readonly FhirR6DoseLimit[], keys: Map<string, number>,
+    allowed?: readonly boolean[]) => {
+    items.forEach((limit, index) => {
+      if (allowed && !allowed[index]) return;
+      const key = signature(limit);
+      keys.set(key, keys.has(key) ? -1 : index);
+    });
+  };
+  indexKeys(oldLimits, oldKeys, representable);
+  indexKeys(live, liveKeys);
+  const matched = new Map<number, number>();
+  const usedOld = new Set<number>();
+  for (const [key, oldIndex] of oldKeys) {
+    const liveIndex = liveKeys.get(key);
+    if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0) continue;
+    matched.set(liveIndex, oldIndex);
+    usedOld.add(oldIndex);
+  }
+  const oldByScope = new Map<string, number[]>();
+  const liveByScope = new Map<string, number[]>();
+  oldLimits.forEach((limit, index) => {
+    if (!representable[index] || usedOld.has(index)) return;
+    const values = oldByScope.get(limit.scope) ?? [];
+    values.push(index); oldByScope.set(limit.scope, values);
+  });
+  live.forEach((limit, index) => {
+    if (matched.has(index)) return;
+    const values = liveByScope.get(limit.scope) ?? [];
+    values.push(index); liveByScope.set(limit.scope, values);
+  });
+  for (const [scope, oldIndices] of oldByScope) {
+    const liveIndices = liveByScope.get(scope);
+    if (oldIndices.length !== 1 || liveIndices?.length !== 1) continue;
+    // With one remaining candidate, even a numeric edit has a unique owner.
+    matched.set(liveIndices[0], oldIndices[0]);
+    usedOld.add(oldIndices[0]);
+  }
+  const doseLimit: FhirR6DoseLimit[] = live.map((replacement, index) => {
+    const oldIndex = matched.get(index);
+    if (oldIndex === undefined) return replacement;
+    const original = oldLimits[oldIndex];
     const {
       scope: _scope, period: _period,
       valueQuantity: _quantity, valueInteger: _integer,
       valueExpression: _expression, ...metadata
     } = original;
-    doseLimit.push({ ...metadata, ...replacement } as FhirR6DoseLimit);
-  }
-  doseLimit.push(...replacements);
+    return { ...metadata, ...replacement } as FhirR6DoseLimit;
+  });
+  // Limits not representable in R5 are not deletion candidates: they stay
+  // active alongside live R5 maxima, even after other maxima are removed.
+  oldLimits.forEach((limit, index) => {
+    if (!representable[index]) doseLimit.push(limit);
+  });
   const { doseLimit: _retainedLimits, ...retainedSafety } = retained;
   if (doseLimit.length) return { ...retainedSafety, doseLimit };
   return Object.keys(retainedSafety).length ? retainedSafety : undefined;
@@ -2182,9 +2229,19 @@ function restoreComponentDelta(
     }
   }
   if (!delta) return { dosage: fresh, superseded };
-  if (delta.safety && expanded.safety === undefined) {
-    fresh.safety = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage))
-      ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
+  if (delta.safety) {
+    if (expanded.safety === undefined) {
+      const unchanged = local.baseline?.safety === compactProjectionFingerprint(toR6Safety(dosage));
+      fresh.safety = unchanged
+        ? delta.safety : reconcileR5SafetyEdits(delta.safety, fresh.safety);
+    }
+    if (!equalStructuredValues(fresh.safety, delta.safety)) {
+      // R5 max-field edits AND explicit typed-safety replacements own their
+      // active result. Keep the prior R6 safety on this row as inert source.
+      superseded = true;
+      addWarning(warnings,
+        "Retained R6 safety was superseded by edited R5 limits or safety fields; original safety retained as source provenance.");
+    }
   }
   if (delta.site) {
     const referenceCleared = delta.site.reference &&

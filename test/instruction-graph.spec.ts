@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
-  instructionGraphRoundTripPrimaryAction } from "../src/instruction-graph";
+  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose
+} from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
@@ -2103,5 +2104,101 @@ describe("qualified quantities keep their meaning in action graph realization", 
     // The old graph remains editable. It is simply not the current dose.
     expect(graph.actions[0].args.find(value =>
       value.role === AdviceArgumentRole.Amount)?.quantity?.value).toBe(1);
+  });
+});
+
+
+describe("source-owned action amounts remain editable across the whole graph", () => {
+  it.each([
+    ["Dissolve 2 tablets in water and drink 5 mL", 3, ["water", "drink 5 mL"], ["2 tablets"]],
+    ["Take 1 tablet of amoxicillin, drink 5 mL", 2, ["amoxicillin", "drink 5 mL"], ["1 tablet"]],
+    ["Take 1 tablet, then take 2 tablets", 2, ["take 2 tablets"], ["Take 1 tablet"]],
+    ["Dissolve 2 tablets in water, stir, then drink", 3, ["water", "stir", "drink"], ["2 tablets"]]
+  ] as const)(
+    "replaces only the primary dose without erasing independent actions: %s",
+    (source, editedDose, retained, removed) => {
+      const graph = { sourceText: source, sourceLocale: "en",
+        actions: parseInstructionActions(source) };
+      expect(graph.actions.length).toBeGreaterThan(1);
+      const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+      clause.dose = { value: editedDose, unit: "tab" };
+      const snapshot = JSON.stringify(graph);
+      expect(instructionGraphSourceConflictsWithDose({ ...clause, instructionGraph: graph })).toBe(true);
+      for (const locale of ["en", "th"]) for (const mode of [false, true]) {
+        const text = realizeInstructionGraph(graph, locale, {
+          omitCanonicalAdministration: clause,
+          preferSourceText: mode, roundtripSafe: mode
+        })!;
+        for (const phrase of retained) {
+          if (locale === "en") expect(text.toLowerCase()).toContain(phrase.toLowerCase());
+          else {
+            // Untranslated medication names remain intact; localized verbs
+            // and independent actions need not retain English wording.
+            if (phrase === "amoxicillin") expect(text).toContain("amoxicillin");
+          }
+        }
+        for (const phrase of removed)
+          expect(text.toLowerCase()).not.toContain(phrase.toLowerCase());
+      }
+      expect(JSON.stringify(graph)).toBe(snapshot);
+      // The later, independently authored amount remains in its source graph.
+      if (source.includes("5 mL")) expect(graph.actions.at(-1)?.args.some(arg =>
+        arg.role === AdviceArgumentRole.Amount && arg.quantity?.value === 5)).toBe(true);
+    }
+  );
+
+  it("does not confuse a later identical-unit amount with an edited primary amount", () => {
+    const source = "Take 1 tablet, then take 2 tablets";
+    const actions = parseInstructionActions(source);
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    clause.dose = { value: 2, unit: "tab" };
+    const graph = { sourceText: source, sourceLocale: "en", actions };
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).not.toContain("Take 1 tablet");
+    expect(text).toContain("take 2 tablets");
+    expect(instructionGraphSourceConflictsWithDose({
+      ...clause, instructionGraph: graph
+    })).toBe(true);
+    // An explicit primary span may instead identify the later action.
+    const last = actions[1];
+    graph.actions = actions;
+    const targeted = { ...graph, primaryAdministrationSpan: { ...last.span } };
+    clause.dose = { value: 3, unit: "tab" };
+    const selected = realizeInstructionGraph(targeted, "en", {
+      omitCanonicalAdministration: clause
+    })!;
+    expect(selected).toContain("Take 1 tablet");
+    expect(selected).not.toContain("take 2 tablets");
+  });
+
+  it("does not treat a later independent dose as a mismatch when the primary is unchanged", () => {
+    const source = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    expect(instructionGraphSourceConflictsWithDose({
+      ...clause, instructionGraph: graph
+    })).toBe(false);
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).toContain("drink 5 mL");
+  });
+
+  it("retains an untranslated drug name without reviving a superseded dose in Thai", () => {
+    const source = "Take 1 tablet of amoxicillin, drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    const original = JSON.stringify(graph);
+    const text = realizeInstructionGraph(graph, "th", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).toContain("amoxicillin");
+    expect(text).not.toContain("1 tablet");
+    expect(text).toContain("5");
+    expect(JSON.stringify(graph)).toBe(original);
   });
 });

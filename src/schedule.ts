@@ -2121,7 +2121,10 @@ function executionCourseWithPeriodOffsets(
   const offsetDays = (quantity: FhirQuantity | FhirR6Quantity | undefined): number | undefined => {
     if (!quantity) return 0;
     const unit = parseBoundsDurationUnit(quantity);
-    if (quantity.comparator || quantity.value === undefined) return undefined;
+    // An approximate offset has a usable nominal day. An inequality does
+    // not identify one start/rest boundary; never silently make it exact.
+    const operator = getQuantityComparator(quantity);
+    if (operator && operator !== "~" || quantity.value === undefined) return undefined;
     return unit === FhirPeriodUnit.Day ? quantity.value
       : unit === FhirPeriodUnit.Week ? quantity.value * 7 : undefined;
   };
@@ -3821,7 +3824,9 @@ function prepareMeasuredDose(dosage: FhirDosage, options: TotalUnitsOptions): Fh
   // expression evaluation or rate conversion. This is also the dominant
   // calculation path for pre-existing callers.
   if (quantity && Number.isFinite(quantity.value) && quantity.value! > 0 &&
-      !quantity.comparator && !/\/kg$/i.test(quantity.code ?? quantity.unit ?? ""))
+      !/\/kg$/i.test(quantity.code ?? quantity.unit ?? ""))
+    // The known numeric amount stays useful even when qualified by <=,
+    // >= or ~. Its original comparator remains in the caller's FHIR data.
     return dosage;
   if (!quantity && (first.rateQuantity || first.rateRatio)) {
     const repeat = dosage.timing?.repeat;
@@ -3865,14 +3870,14 @@ function prepareMeasuredDose(dosage: FhirDosage, options: TotalUnitsOptions): Fh
     const high = first.doseRange.high;
     const low = first.doseRange.low;
     quantity = high?.value !== undefined && Number.isFinite(high.value) &&
-      high.value > 0 && !high.comparator
+      high.value > 0
       ? high
       : low?.value !== undefined && Number.isFinite(low.value) &&
-          low.value > 0 && !low.comparator
+          low.value > 0
         ? low : undefined;
   }
   if (!quantity || quantity.value === undefined || !Number.isFinite(quantity.value) ||
-      quantity.value <= 0 || quantity.comparator) {
+      quantity.value <= 0) {
     throw new MedicationQuantityCalculationError("dose-amount-unresolved",
       "The administered dose is not a single known positive quantity. Provide the applicable dose, range choice, or evaluated expression.");
   }

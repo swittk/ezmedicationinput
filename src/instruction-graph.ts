@@ -3977,7 +3977,9 @@ function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigCl
   return Boolean(left && right && left === right);
 }
 
-function actionMatchesCanonicalMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
+function actionMatchesCanonicalMethod(
+  frame: AdviceFrame, clause: Pick<CanonicalSigClause, "method">
+): boolean {
   const method = clause.method;
   if (!method) return false;
   if (method.coding?.code && frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) {
@@ -4106,17 +4108,78 @@ function primaryActionAmountConflicts(action: AdviceFrame, dose: CanonicalDoseEx
     arg.quantity && !quantityCoveredByDose(arg, dose)));
 }
 
-/** Whole-source replay has the same current-dose ownership as the
- * individual primary-action selectors. It must not bypass an edited amount.
- * This inspects typed graph evidence only; the raw source remains untouched. */
+/** Realize an edited administration without rewriting its saved graph.
+ * Its old Amount may also be embedded in a larger Object ('1 tablet of
+ * amoxicillin'); remove only the source-owned amount, keep the drug name and
+ * the action's independent material/target. No raw-source fallback is valid
+ * after a numeric edit. */
+function frameWithoutSupersededAmount(
+  frame: AdviceFrame, currentDose: CanonicalDoseExpr
+): AdviceFrame {
+  const superseded = frame.args.filter(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity &&
+    !quantityCoveredByDose(arg, currentDose));
+  const args: AdviceArgument[] = [];
+  for (const arg of frame.args) {
+    if (arg.quantity && !quantityCoveredByDose(arg, currentDose)) continue;
+    if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
+      const text = arg.text ?? "";
+      const old = superseded.find(amount => {
+        const label = amount.text ?? "";
+        const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
+        return at >= 0 &&
+          (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
+          (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length]));
+      });
+      if (old?.text) {
+        const offset = text.toLowerCase().indexOf(old.text.toLowerCase());
+        const remaining = (text.slice(0, offset) + " " +
+          text.slice(offset + old.text.length)).replace(/^\s*of\s+/i, "").trim();
+        if (!remaining) continue;
+        args.push({ ...arg, text: remaining, normalized: remaining, i18n: undefined });
+        continue;
+      }
+    }
+    args.push(arg);
+  }
+  return { ...frame, sourceText: "", args };
+}
+
+/** Identify which source-backed Amount belongs to the canonical dose.
+ * An explicit HPSG primary span takes precedence. Imported action graphs
+ * without that span use a matching unit/method, then the first ordered
+ * administration amount. Later independent actions keep their own amounts.
+ * No source text is parsed or changed to make this selection. */
+function primaryDoseAmountOwner(
+  graph: CanonicalInstructionGraph, clause: Pick<CanonicalSigClause, "dose" | "method">
+): AdviceFrame | undefined {
+  if (!clause.dose) return undefined;
+  const amountActions = graph.actions.filter(action =>
+    action.polarity !== AdvicePolarity.Negate &&
+    action.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity));
+  const primary = graph.primaryAdministrationSpan;
+  if (primary) return amountActions.find(action =>
+    action.span.start < primary.end && primary.start < action.span.end);
+  if (!amountActions.length) return undefined;
+  const sameUnit = amountActions.filter(action => action.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity?.unit === clause.dose?.unit));
+  const candidates = sameUnit.length ? sameUnit : amountActions;
+  const methodMatches = candidates.filter(action => actionMatchesCanonicalMethod(action, clause));
+  if (methodMatches.length === 1) return methodMatches[0];
+  // Do NOT select by the *edited* numeric value. It may now happen to
+  // equal a later, independently authored taper-stage amount. In a segment
+  // without an explicit primary span/method, source order owns the first
+  // administration; subsequent actions retain their independent amounts.
+  return candidates.reduce((first, action) =>
+    action.span.start < first.span.start ? action : first);
+}
+
+/** Whole-source replay and action realization have the same amount owner.
+ * Unrelated later-stage Amounts are not evidence the canonical dose changed. */
 export function instructionGraphSourceConflictsWithDose(clause: CanonicalSigClause): boolean {
   const graph = clause.instructionGraph;
-  if (!graph || !clause.dose) return false;
-  const primary = graph.primaryAdministrationSpan;
-  return graph.actions.some(action =>
-    (!primary || action.span.start < primary.end && primary.start < action.span.end) &&
-    primaryActionAmountConflicts(action, clause.dose)
-  );
+  const owner = graph && primaryDoseAmountOwner(graph, clause);
+  return Boolean(owner && primaryActionAmountConflicts(owner, clause.dose));
 }
 
 export function instructionGraphRichPrimaryAction(
@@ -4348,6 +4411,8 @@ export function realizeInstructionGraph(
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
+  const amountOwner = options?.omitCanonicalAdministration
+    ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration) : undefined;
   const primaryAction = primary ? graph.actions.findIndex(frame =>
     frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();
@@ -4423,15 +4488,13 @@ export function realizeInstructionGraph(
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
   for (const sourceFrame of frames) {
     const currentDose = options?.omitCanonicalAdministration?.dose;
-    const editedPrimary = Boolean(currentDose &&
-      (primary ? sourceFrame.span.start < primary.end && primary.start < sourceFrame.span.end
-        : graph.actions.length === 1) && primaryActionAmountConflicts(sourceFrame, currentDose));
-    // The canonical body already displays the current dose. Keep the rich
-    // action's material/target/manner, but do not repeat its superseded amount
-    // as an active instruction. This is a display copy; source/graph stay intact.
-    const frame = editedPrimary ? { ...sourceFrame, args: sourceFrame.args.filter(arg =>
-      arg.role !== AdviceArgumentRole.Amount || !arg.quantity || quantityCoveredByDose(arg, currentDose)
-    ) } : sourceFrame;
+    const editedPrimary = Boolean(currentDose && amountOwner === sourceFrame &&
+      primaryActionAmountConflicts(sourceFrame, currentDose));
+    // The canonical body owns the edited dose. Preserve the original graph
+    // verbatim; a source-free display copy cannot revive its obsolete amount.
+    const frame = editedPrimary && currentDose
+      ? frameWithoutSupersededAmount(sourceFrame, currentDose)
+      : sourceFrame;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(
       definition?.administrationMethod?.code &&

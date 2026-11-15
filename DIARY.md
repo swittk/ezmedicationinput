@@ -5420,3 +5420,113 @@ Nine alternating warm 80-parse batches versus immutable 9adab43
 not a claim about mobile performance. No dependency, extra whole-input
 pass, application edit, migration, merge, deployment, package publishing
 or new full-review request.
+
+
+## 2026-11-15 — PR #13: reviewer findings plus cross-family no-loss audit
+
+Review gate: inspected latest full review BODY (including its one
+out-of-diff dose-supply finding), all 50 review threads, issue
+comments and follow-up comments before coding. Reproduced four inline
+defects, then cross-tested the adjacent clinical families. The
+reviewer's proposed blanket rejection of comparator-qualified supply
+is NOT adopted: numeric medication quantities remain useful for
+best-effort dispensing arithmetic, including ~, <= and >=. The
+original comparator stays in FHIR; an R6 clinical expression
+still requires evaluation rather than inventing a number. Execution
+utilities may report a genuinely indeterminate start/rest offset
+without discarding the editable prescription.
+
+1. **R5 removal/override of R6 safety limits**: the compact row
+   previously treated a removed/changed R5 safety maximum as
+   supersession without setting its row-local provenance owner. In
+   particular a ~5 mg limit with unfamiliar R6 extension vanished
+   after deletion when no text baseline existed. Both flat R5 maximum
+   changes and explicit typed safety overrides now mark an actual
+   original-vs-live difference as superseded; the edited live safety
+   is authoritative, the original source remains inert. Nonrepresentable
+   siblings and the safety-level ifExceeded field remain active.
+2. **Newly discovered in the same family, not in the review**: two
+   R6 per-period limits sharing one 'scope' could transfer metadata
+   from a deleted daily limit to the surviving weekly limit.
+   The previous matcher used scope as identity. The shared reconciler
+   now matches uniquely by scope + actual value/period first and
+   uses a unique remaining same-scope pair only for numeric edits.
+   Distinct limits follow the live R5 order. When two identically
+   valued limits cannot be distinguished after deletion, the known
+   numeric survivor stays ACTIVE but unfamiliar old metadata remains
+   in typed provenance; it is never assigned to an arbitrary limit.
+   Deletion, reorder, edit, ambiguous twins, and repeated R5
+   save/reopen have independent clinical oracles.
+3. **Multi-action graphs with absent primary span**: choose one
+   source-backed Amount owner using a known primary span, then
+   matching unit/method, otherwise the first source-ordered
+   administration. Do not select a later taper action merely because
+   its number happens to equal the clinician's newly edited dose.
+   Whole-source replay and per-action realization use the same
+   owner. Superseded amount and overlapping Object/Theme numeric
+   text are removed from a *temporary display copy*; raw source and
+   original typed graph stay untouched. Disabling fallback for that
+   copy also prevents an untranslated Object from replaying the old
+   source sentence in Thai. Medication name, material/target and
+   independently authored later quantities remain visible. Tests
+   cover primary/no-primary, later matching numbers, different
+   units, source fallback, current amount and EN/TH.
+4. **EMA versus native period offsets**: previously EMA >=2-day
+   startOffset was treated as exact in one route and unresolved in
+   another. Reuse the existing native-first Quantity comparator
+   helper. An approximate ~2-day offset uses its nominal day
+   consistently, matching the established approximate duration
+   policy. An inequality provides no unique active/rest boundary;
+   scheduling/supply report unsupported-offset without editing
+   or losing the underlying course. R5/R6 import and all supported
+   operators have identical tests.
+5. **R5/R6 dose arithmetic**: the reviewer suggested refusing
+   >=/<= dosage calculations. Product decision is the opposite:
+   best-effort arithmetic uses the source number for all authored
+   comparators; no amount is blanked, no new estimate flag or
+   reviewer-driven rejection is added. The known number remains
+   available across single R5, R5 array, native R6, and parse batch.
+   DoseRange endpoints, per-administration rateQuantity/rateRatio,
+   and per-kg arithmetic keep their numeric meaning and source
+   qualifiers. Unknown/evaluated expression choices remain distinct.
+   A 5 mg/day entry yields a nominal 35 mg over seven days in every
+   source representation, independent of its <=/>=/~ qualifier.
+
+Audit method: independent clinical amount and date oracles; 19 net
+test cases in existing R6/graph suites plus full preexisting
+cross-family tests. Actual external consumer adapter exercised as
+FHIR -> editable model -> in-memory saved usage -> reopened model ->
+reverse FHIR -> R6. Deleted-limit source, numeric comparator
+expressions, rates, and zero-step text survived. The consumer adapter
+can normalize unrelated optional fields, so these tests prove the
+clinical data under review, not universal byte-for-byte equivalence.
+No consumer code/schema, new FHIR extension, grammar pass, mandatory
+safety veto, migration, deployment, merge or package publication.
+
+Final, post-refactor validation: ES6 ESM/CJS and TypeScript declaration
+build PASS; **4,053/4,053 tests across all 44 source suites PASS**;
+**4/4 packaged-export tests PASS**; whitespace diff check PASS.
+R6 focused suite **322/322** and instruction graph **272/272**.
+All code changes are in the existing reconciliation/graph/supply
+families; no parser grammar, dependency, global dedup, consumer
+database or package publishing change.
+
+Paired warm host benchmark against immutable 79c9c72 (nine alternating
+70-parse batches): routine 1629.7 -> 1765.7 microseconds (+8.3%),
+Thai 6148.4 -> 6204.6 (+0.9%), independent-eye taper
+7049.5 -> 6914.6 (-1.9%), comparator taper 3229.3 -> 3152.5
+(-2.4%), action graph 3875.3 -> 3786.1 (-2.3%). A follow-up
+eleven-batch 90-parse run during the broader CI process measured:
+routine 1560.5 -> 1523.8 (-2.4%), Thai 6348.4 -> 6258.4
+(-1.4%), rich graph 7452.8 -> 6917.0 (-7.2%). Shared-host
+variation is substantial; there is no consistent common-path
+regression. These are not device/phone measurements. A specialized
+safety edit incurs additional matching only when reconstructing that
+modified row; ordinary SIG parsing incurs no new full-text pass.
+
+External read-only consumer adapter checks: FHIR R5 projection ->
+editable form -> in-memory save -> reopen -> reverse FHIR -> R6.
+Safety deletion retains its original unknown source attachment,
+the known numeric dose/rate and >=/<=/~ operators survive, and a
+text-only course stays text-only. The consumer may normalize unrelated
+empty fields; these checks do not assert universal byte equivalence.

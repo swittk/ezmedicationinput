@@ -4729,6 +4729,215 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }
   });
 
+  it.each(["administration", "lifetime", "period"] as const)(
+    "retains superseded %s safety limits without restoring their deleted active value", scope => {
+      const oldLimit = {
+        scope,
+        ...(scope === "period" ? { period: { value: 1, unit: "d", code: "d" } } : {}),
+        valueQuantity: { value: 5, unit: "mg", comparator: "~" as const },
+        extension: [{ url: "https://example.org/retained-limit", valueString: "original" }]
+      };
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        safety: { doseLimit: [oldLimit] }
+      }] }] };
+      const row = toFhirR5Dosages(source)[0];
+      expect(toDosageDetails([row])).toEqual(source);
+      if (scope === "administration") delete row.maxDosePerAdministration;
+      else if (scope === "lifetime") delete row.maxDosePerLifetime;
+      else delete row.maxDosePerPeriod;
+      const edited = toDosageDetails([row]);
+      expect(edited.step[0].component[0].safety?.doseLimit
+        ?.some(limit => limit.scope === scope)).not.toBe(true);
+      expect(JSON.stringify(edited.extension)).toContain("retained-limit");
+      expect(JSON.stringify(edited.extension)).toContain('"value":5');
+      const reopened = toDosageDetails(toFhirR5Dosages(edited));
+      expect(reopened.step[0].component[0].safety).toEqual(edited.step[0].component[0].safety);
+      expect(JSON.stringify(reopened.extension)).toContain("retained-limit");
+
+      // Explicit typed R6 safety replacement is another editing surface for
+      // the same field: the new limit must be active; the old is source.
+      const override: EzDosage = { ...toFhirR5Dosages(source)[0],
+        safety: { doseLimit: [{ ...oldLimit, valueQuantity: {
+          value: 8, unit: "mg"
+        }, extension: undefined }] } };
+      const current = toDosageDetails([override]);
+      expect(current.step[0].component[0].safety?.doseLimit?.[0].valueQuantity?.value).toBe(8);
+      expect(JSON.stringify(current.extension)).toContain("retained-limit");
+    }
+  );
+
+  it("preserves non-representable safety siblings when a representable limit is deleted", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      safety: {
+        ifExceeded: "stop",
+        doseLimit: [
+          { scope: "administration", valueQuantity: { value: 5, unit: "mg", comparator: "~" },
+            extension: [{ url: "https://example.org/deleted-limit", valueString: "old" }] },
+          { scope: "administration", valueExpression: {
+            expression: "%patient.weight * 2", language: "text/fhirpath"
+          }, extension: [{ url: "https://example.org/expression-limit", valueBoolean: true }] }
+        ]
+      }
+    }] }] };
+    const row = toFhirR5Dosages(source)[0];
+    delete row.maxDosePerAdministration;
+    const edited = toDosageDetails([row]);
+    const safety = edited.step[0].component[0].safety;
+    expect(safety?.ifExceeded).toBe("stop");
+    expect(safety?.doseLimit).toHaveLength(1);
+    expect(safety?.doseLimit?.[0].valueExpression?.expression).toBe("%patient.weight * 2");
+    expect(JSON.stringify(edited.extension)).toContain("deleted-limit");
+    expect(toDosageDetails(toFhirR5Dosages(edited)).step[0].component[0].safety).toEqual(safety);
+  });
+
+  it("never transfers unknown safety-limit metadata to a different surviving period", () => {
+    const limit = (value: number, days: number, tag: string) => ({
+      scope: "period" as const,
+      valueQuantity: { value, unit: "mg" },
+      period: { value: days, unit: "d", code: "d" },
+      extension: [{ url: "https://example.org/limit-" + tag, valueString: tag }]
+    });
+    const a = limit(5, 1, "A"), b = limit(10, 7, "B");
+    const original: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      safety: { doseLimit: [a, b] }
+    }] }] };
+    const r5 = toFhirR5Dosages(original);
+    expect(r5[0].maxDosePerPeriod).toHaveLength(2);
+    const sources = (result: FhirR6DosageInstruction) =>
+      JSON.stringify(result.extension?.filter(ext => ext.url.includes("reconciliation-source")));
+    const live = (rows: FhirDosage[]) =>
+      toDosageDetails(rows).step[0].component[0].safety?.doseLimit ?? [];
+
+    // Deletion: the 10 mg / 7 day limit must retain B, NEVER A.
+    const deleted = JSON.parse(JSON.stringify(r5)) as FhirDosage[];
+    deleted[0].maxDosePerPeriod!.shift();
+    expect(live(deleted)).toEqual([b]);
+    const afterDeletion = toDosageDetails(deleted);
+    expect(sources(afterDeletion)).toContain("limit-A");
+    expect(toDosageDetails(toFhirR5Dosages(afterDeletion))
+      .step[0].component[0].safety?.doseLimit).toEqual([b]);
+
+    // Reordering two same-scope limits does not exchange metadata owners.
+    const reordered = JSON.parse(JSON.stringify(r5)) as FhirDosage[];
+    reordered[0].maxDosePerPeriod!.reverse();
+    expect(live(reordered)).toEqual([b, a]);
+
+    // Editing one numeric maximum leaves the other limit's metadata alone.
+    const edited = JSON.parse(JSON.stringify(r5)) as FhirDosage[];
+    edited[0].maxDosePerPeriod![0].numerator.value = 6;
+    expect(live(edited)).toEqual([{ ...a, valueQuantity: {
+      value: 6, unit: "mg"
+    } }, b]);
+
+    // Two indistinguishable numeric limits: deleting one cannot determine
+    // which unfamiliar extension belonged to the survivor. Keep BOTH old
+    // meanings in source provenance, not on an arbitrarily chosen live limit.
+    const twin: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      safety: { doseLimit: [a, { ...a, extension: b.extension }] }
+    }] }] };
+    const ambiguous = toFhirR5Dosages(twin);
+    ambiguous[0].maxDosePerPeriod!.shift();
+    const survivor = toDosageDetails(ambiguous);
+    const active = survivor.step[0].component[0].safety?.doseLimit?.[0];
+    expect(active?.valueQuantity?.value).toBe(5);
+    expect(active?.extension).toBeUndefined();
+    expect(sources(survivor)).toContain("limit-A");
+    expect(sources(survivor)).toContain("limit-B");
+  });
+
+  it.each(["<", "<=", "~", ">=", ">"] as const)(
+    "keeps nominal %s dose arithmetic identical through all dosage representations", comparator => {
+      const original: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator } }]
+      }] }] };
+      const strict = toFhirR5Dosages(original);
+      const options = { from: "2026-11-02T00:00:00Z",
+        orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC",
+        durationValue: 7, durationUnit: FhirPeriodUnit.Day };
+      for (const dosage of [original, strict, strict[0], fromFhir(original)]) {
+        expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(35);
+      }
+      expect(toDosageDetails(strict)).toEqual(original);
+      expect(original.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+    }
+  );
+
+  it("uses nominal dose/rate/range values without discarding inequality qualifiers", () => {
+    const options = { from: "2026-11-02T00:00:00Z",
+      orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC",
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day };
+    const timing = { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      duration: 2, durationUnit: FhirPeriodUnit.Hour } };
+    for (const entry of [
+      { rateQuantity: { value: 10, unit: "mL/h", comparator: ">=" } },
+      { rateRatio: { numerator: { value: 10, unit: "mL", comparator: "<=" },
+        denominator: { value: 1, unit: "h" } } }
+    ] as const) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        timing, doseAndRate: [entry]
+      }] }] };
+      for (const dosage of [source, toFhirR5Dosages(source)]) {
+        expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(140);
+      }
+      expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
+    }
+    const ranged: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      doseAndRate: [{ doseRange: {
+        low: { value: 5, unit: "mg", comparator: ">=" },
+        high: { value: 8, unit: "mg", comparator: "<=" }
+      } }]
+    }] }] };
+    for (const dosage of [ranged, toFhirR5Dosages(ranged)])
+      expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(56);
+    expect(toDosageDetails(toFhirR5Dosages(ranged))).toEqual(ranged);
+  });
+
+  it("treats EMA-only and native-edited active/rest offsets consistently", () => {
+    const coding = (code: string) => [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    }];
+    const options = { from: "2026-11-02T00:00:00Z",
+      orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC", limit: 30 };
+    for (const [code, native, allowed] of [
+      ["100000000055", "~", true],
+      ["100000000053", ">=", false],
+      ["100000000052", "<=", false],
+      ["100000000051", ">", false],
+      ["100000000050", "<", false]
+    ] as const) {
+      const startOffset = { value: 2, unit: "d", code: "d", extension: coding(code) };
+      for (const offset of [startOffset, { ...startOffset, comparator: native }]) {
+        const course: FhirR6DosageInstruction = { step: [{ component: [{
+          timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+            startOffset: offset, endOffset: { value: 5, unit: "d", code: "d" } } },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+        }] }] };
+        const r5 = toFhirR5Dosages(course);
+        expect(getQuantityComparator(toDosageDetails(r5).step[0]
+          .component[0].timing?.repeat?.startOffset)).toBe(native);
+        for (const dosage of [course, r5, toDosageDetails(r5)]) {
+          if (allowed) {
+            const due = nextDueDoses(dosage, options);
+            expect(due[0]).toBe("2026-11-04T00:00:00+00:00");
+            expect(calculateTotalUnits({ dosage, ...options,
+              durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+          } else {
+            expect(() => nextDueDoses(dosage, options)).toThrow(/offset/);
+            expect(() => calculateTotalUnits({ dosage, ...options,
+              durationValue: 28, durationUnit: FhirPeriodUnit.Day })).toThrow(/offset/);
+          }
+        }
+      }
+    }
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [
