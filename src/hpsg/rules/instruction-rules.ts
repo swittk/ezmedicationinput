@@ -875,6 +875,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
+    // "No more than 100 mL/hr" inside a recognized rate is a quantity,
+    // not free instruction text. Other advice remains an independent sign.
+    if (context.clinicalCache.rateTokenIndices?.has(first.index)) return [];
     const activityDay = registeredActivityDayAt(context, start);
     if (activityDay) return [activityDay];
     const administrationWindow = administrationWindowInstructionAt(context, start);

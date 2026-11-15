@@ -557,6 +557,11 @@ export function projectHpsgSignToState(
       if (clinical.status === "resolved" && clinical.projectedDose) {
         state.dose = clinical.projectedDose.value;
         state.unit = clinical.projectedDose.unit;
+        // The setters above create the resolved scalar dose. Its authored
+        // qualifier belongs to that amount, not just the nonclinical path.
+        const comparator = clinical.projectedDose.comparator ?? dose.comparator;
+        if (comparator !== undefined && state.primaryClause.dose)
+          state.primaryClause.dose.comparator = comparator;
       } else {
         // A rate or unresolved expression is not a scalar medication dose.
         delete state.primaryClause.dose;

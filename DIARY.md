@@ -5092,3 +5092,100 @@ Seven paired warm host 65-parse batches versus immutable 6a25022
 no evidence of a normal-parser regression. No dependency, new
 general-purpose validator, refusing approximate-dose arithmetic,
 migration or new full review request.
+
+
+## 2026-11-15 — Full review-family audit: comparator ownership and dimensional composition
+
+### Review decision and scope
+
+Reviewed the entire latest CodeRabbit body (review 5908801445), all inline
+threads and their follow-ups, all previous out-of-diff review sections,
+and the repository product contract before changing code. Latest code
+findings 4576826676, 4576826680 and 4576826684 were independently
+reproduced. All are ordinary data-meaning defects, not an argument for
+refusal, a new validator or abandoning nominal supply calculation.
+There are no new out-of-diff code findings in that review. Its separate
+PR-template/product-checklist feedback is valid documentation housekeeping;
+the PR description must describe actual current evidence, not the original
+3,865-test snapshot or the ambiguous old "No review requested" sentence.
+
+### Fix shared causes, not just the reported line
+
+- **One comparator ownership rule:** introduced getQuantityComparator for
+  semantic reads: a current native comparator wins; EMA is the fallback
+  only when no native value exists. The extension-only public getter
+  remains extension-only. Canonical maximum numerator/denominator,
+  canonical dose, parser-state import and maximum previews all share
+  the same rule. Existing codecs continue preserving rich/unknown
+  extensions; no patient data is removed to avoid a conflict.
+- **One source qualifier lexeme:** scalar and dimensional quantity rules
+  now share the existing comparator vocabulary and bounded numeric-prefix
+  reader. ASCII, Unicode, English and Thai aliases are not duplicated
+  across quantity families. Ordinary numeric tokens retain their cheap
+  path; there is no second source parse or new scan over the whole SIG.
+- **Typed dimensional ownership:** qualifiers survive HPSG projection,
+  unification, divided doses, and FHIR lowering. This is not limited to
+  the reported resolved-infusion assignment. Full infusions, compact
+  symbol+unit amounts, weight-based amounts/rates, and unresolved daily
+  totals now carry the qualifier on the quantity that actually owns it.
+  Incomplete daily totals remain typed rates, NOT invented scalar doses.
+- **Independent drug/carrier/rate:** an approximate 20 mg drug in an exact
+  500 mL carrier does not make the carrier approximate. A qualified carrier
+  does not replace the recognized drug dose. An independently specified
+  100 mL/h rate does not inherit the dose qualifier. The same ownership
+  applies to structured Ratio numerator/denominator imports; a qualified
+  infusion duration survives canonical regeneration and native display.
+- **Typed rate versus generic prose:** `at no more than 100 mL/hr` must
+  not become an unknown body site or generic advice. Its existing
+  dimensional lexical constituent records source-token ownership in the
+  clause-local cache; generic site/advice fallbacks reuse that fact.
+  There is no fallback keyword blacklist, second rate parser, or global
+  runtime safety pass. Exact rates and unrelated advice keep their
+  existing paths.
+
+### Cross-pass coverage, not a resolved-thread count
+
+The two existing R6/clinical-quantity test files now include parameterized
+independent oracles for all supported native/EMA comparator pairs and
+read paths; symbolic/word and compact/spaced infusion forms; separate
+active/carrier/rate qualifiers; weight-based daily totals, per-dose and
+explicit division; structured infusion duration comparators; and nominal
+supply. Original source text and known numeric amounts stay present.
+
+An additional matrix revisits previously repaired families: zero-step
+source-only courses, course/phase/site/entry/condition metadata, live R5
+edits versus retained source, approximate safety, duration/offset/cycle
+projection, repeated JSON save/reopen without payload growth, weekday
+filters, partial first/last calendar days, active/rest windows, both DST
+transitions, and a yearly boundary that lands in a spring gap. Those
+families require no speculative new runtime changes in this pass; their
+existing full regression suites and the new cross-family cases are used.
+
+Downstream verification uses the REAL paired adapter functions: strict
+FHIR -> internal editable dosage -> in-memory save/reopen -> the adapter's
+reverse FHIR converter -> R6. Do not feed a consumer's domain object
+straight into an API expecting FHIR: its simplified UI rate alias is NOT
+the separately retained raw FHIR rate Quantity. With the correct reverse
+converter, active amounts/operators, carrier rate, inherited taper and
+zero-step source survive. No consumer source or storage was changed.
+
+Performance was compared to immutable pre-review f3cb032 using nine
+alternating warm 100-parse batches, with ordinary/Thai/taper and qualified
+infusion inputs. An initial paired run was +1.8%, +1.8%, -2.2%, -1.8%,
++2.0%; a second run after hot-path cleanup was +1.7%, +5.4%, -0.8%,
+-0.1%, +5.1%. These are noisy shared-host measurements, not mobile
+benchmarks or a claim of zero overhead. No duplicate validation, source
+passes, dependencies, approximate-supply refusal or new result flag.
+
+No additional full review, package publication, merge, deployment or
+consumer migration requested. Reply in each original code thread only.
+
+Final validation on the complete source changes: 3,985/3,985 tests across
+44 source suites PASS; R6 289/289 and dimensional HPSG 143/143 PASS;
+packaged ESM/CJS exports 4/4 PASS; ES6 bundles and TypeScript declarations
+build PASS; git diff --check clean. This adds 59 tests to the existing
+suite files, not new runtime validation. All previous retention/edit,
+locale, schedule, clinical-oracle and source-integrity suites ran too.
+No known reproduced failure remains in the reviewed families. These
+results establish tested coverage, not a proof about all arbitrary FHIR
+objects or all possible prose.

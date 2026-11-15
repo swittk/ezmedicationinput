@@ -15,7 +15,7 @@ import {
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
 import type { EzCourseMetadata } from "./types";
-import { getEmaQuantityComparator } from "./fhir-quantity-operator";
+import { getQuantityComparator } from "./fhir-quantity-operator";
 import type { BoundaryPlan } from "./hpsg/signature";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
 import {
@@ -1538,7 +1538,7 @@ export function formatSig(
               (numerator.comparator ?? "") + numerator.value +
               (numerator.unit || numerator.code ? " " + (numerator.unit ?? numerator.code) : "") +
               (denominator?.value !== undefined
-                ? " / " + denominator.value +
+                ? " / " + (getQuantityComparator(denominator) ?? "") + denominator.value +
                   (denominator.unit || denominator.code
                     ? " " + (denominator.unit ?? denominator.code) : "") : "")
             );
@@ -1813,7 +1813,7 @@ function provisionalFhirDisplay(
   const readableQuantity = (quantity: FhirQuantity | undefined): string | undefined => {
     if (quantity?.value === undefined || !Number.isFinite(quantity.value)) return undefined;
     const unit = quantity.unit ?? quantity.code;
-    const comparator = getEmaQuantityComparator(quantity) ?? quantity.comparator;
+    const comparator = getQuantityComparator(quantity);
     return `${comparator ?? ""}${quantity.value}${unit ? " " + unit : ""}`;
   };
   const perAdministration = readableQuantity(dosage.maxDosePerAdministration);

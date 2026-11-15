@@ -4,6 +4,7 @@ import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import {
   calculateTotalUnits,
+  getEmaQuantityComparator,
   parseInstructionActions,
   getDosageCondition,
   nextDueDoses,
@@ -1340,4 +1341,122 @@ describe("CodeRabbit 2026-10-25 second review: schedule-only semantics", () => {
       reason: "missing-or-unresolved-cycle-anchor"
     });
   });
+});
+
+
+describe("qualified clinical quantity family: source through HPSG and FHIR", () => {
+  const prefixes = [
+    ["", undefined], ["approximately ", "~"], ["about ", "~"],
+    ["~", "~"], ["≈", "~"], [">=", ">="], ["≥", ">="],
+    ["<=", "<="], ["≤", "<="], ["at least ", ">="], ["no more than ", "<="],
+    ["more than ", ">"], ["less than ", "<"]
+  ] as const;
+
+  it.each(prefixes)("preserves '%s' on a full infusion amount and its derived rate", (prefix, comparator) => {
+    for (const separator of [" ", ""]) {
+      // Word prefixes have ordinary spaced units; compact symbol doses
+      // share the same bounded clinical construction, not a new parser.
+      if (separator === "" && prefix.endsWith(" ")) continue;
+      const input = `Infuse ${prefix}500${separator}mL IV over 2 hours once`;
+      const parsed = parsePublicSig(input);
+      const canonical = parsed.meta.canonical.clauses[0];
+      expect(canonical.dose).toMatchObject({ value: 500, unit: "mL" });
+      expect(canonical.dose?.comparator).toBe(comparator);
+      expect(canonical.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h" });
+      const native = parsed.fhirNext.step[0].component[0].doseAndRate![0];
+      expect(native.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+      expect(native.doseQuantity?.comparator).toBe(comparator);
+      expect(native.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
+      expect(native.rateRatio?.numerator?.comparator).toBe(comparator);
+      expect(native.rateRatio?.denominator).toMatchObject({ value: 2, unit: "h" });
+      const r5 = toFhirR5Dosages(parsed.fhirNext);
+      expect(r5[0].doseAndRate?.[0].doseQuantity?.value).toBe(500);
+      expect(getEmaQuantityComparator(r5[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
+      expect(toDosageDetails(JSON.parse(JSON.stringify(r5))).step[0].component[0]
+        .doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+      expect(parsed.input).toBe(input);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["approximately ", "", "~", undefined],
+    ["", "approximately ", undefined, "~"],
+    ["at least ", "no more than ", ">=", "<="],
+    ["~", "<=", "~", "<="],
+    ["", "", undefined, undefined]
+  ] as const)("keeps '%s' drug and '%s' carrier qualifiers independent", (active, carrier, drugOp, carrierOp) => {
+    const input = `Infuse ${active}20 mg in ${carrier}500 mL normal saline over 4 hours once`;
+    const parsed = parsePublicSig(input);
+    const entry = parsed.fhirNext.step[0].component[0].doseAndRate![0];
+    expect(entry.doseQuantity).toMatchObject({ value: 20, unit: "mg" });
+    expect(entry.doseQuantity?.comparator).toBe(drugOp);
+    expect(entry.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
+    expect(entry.rateRatio?.numerator?.comparator).toBe(carrierOp);
+    expect(entry.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.carrierMaterial?.text).toBe("normal saline");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const fromStored = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))));
+    expect(fromStored.step[0].component[0].doseAndRate?.[0]).toEqual(entry);
+  });
+
+  it.each([
+    ["approximately ", "", "~", undefined],
+    ["", "approximately ", undefined, "~"],
+    ["at least ", "no more than ", ">=", "<="],
+    ["~", ">=", "~", ">="],
+    ["", "", undefined, undefined]
+  ] as const)("keeps '%s' dose and '%s' independently stated rate separate", (dose, rate, doseOp, rateOp) => {
+    const parsed = parsePublicSig(`Infuse ${dose}500 mL IV at ${rate}100 mL/hr once`);
+    const entry = parsed.fhirNext.step[0].component[0].doseAndRate![0];
+    expect(entry.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+    expect(entry.doseQuantity?.comparator).toBe(doseOp);
+    expect(entry.rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+    expect(entry.rateQuantity?.comparator).toBe(rateOp);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const numeric = calculateTotalUnits({ dosage: parsed, durationValue: 1,
+      durationUnit: "d", from: "2026-11-01T00:00:00Z", orderedAt: "2026-11-01T00:00:00Z", timeZone: "UTC" });
+    expect(numeric.totalUnits).toBe(500);
+  });
+
+  it.each(["approximately ", "~", ">=", "≤"])("retains %s on unresolved daily amounts and divided doses without inventing a scalar", prefix => {
+    const expected = prefix === ">=" ? ">=" : prefix === "≤" ? "<=" : "~";
+    const incomplete = parsePublicSig(`${prefix}6 mg/kg/day`);
+    expect(incomplete.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(incomplete.meta.canonical.clauses[0].clinicalQuantity?.numerator.comparator).toBe(expected);
+    expect(incomplete.fhir[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
+    const rate = incomplete.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity;
+    expect(rate).toMatchObject({ value: 6, unit: "mg/kg/d", comparator: expected });
+    const divided = parsePublicSig(`${prefix}6 mg/kg/day in 3 divided doses`);
+    expect(divided.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "mg/kg", comparator: expected });
+    expect(divided.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toMatchObject({ value: 2, unit: "mg/kg", comparator: expected });
+    const infusion = parsePublicSig(`Infuse ${prefix}2 mcg/kg/min`);
+    expect(infusion.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(infusion.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity)
+      .toMatchObject({ value: 2, unit: "ug/kg/min", comparator: expected });
+  });
+});
+
+
+describe("qualified infusion duration imported as a Ratio denominator", () => {
+  it.each([["100000000055", "~"], ["100000000053", ">="], ["100000000052", "<="]] as const)(
+    "retains standard EMA code %s in structured duration, R5 output and R6 display", (code, comparator) => {
+      const source: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 500, unit: "mL" },
+        rateRatio: { numerator: { value: 500, unit: "mL" }, denominator: {
+          value: 2, unit: "h", extension: [{ url: "http://ema.europa.eu/fhir/extension/comparator",
+            valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code } }]
+        } }
+      }] };
+      const canonical = canonicalFromFhir(source);
+      expect(canonical.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h", comparator });
+      expect(canonical.dose?.comparator).toBeUndefined();
+      const saved = canonicalToFhir(canonical);
+      expect(saved.doseAndRate?.[0].rateRatio?.denominator?.value).toBe(2);
+      expect(getEmaQuantityComparator(saved.doseAndRate?.[0].rateRatio?.denominator)).toBe(comparator);
+      expect(saved.doseAndRate?.[0].rateRatio?.denominator?.comparator).toBeUndefined();
+      expect(formatSig(toDosageDetails([saved]), "long", { locale: "en" }))
+        .toContain(`Rate: 500 mL / ${comparator}2 h`);
+    }
+  );
 });

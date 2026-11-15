@@ -426,12 +426,18 @@ function mergeDose(
     unit = doseUnit;
     clinicalQuantity = {
       ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
-      dividedDoseCount: divisionCount, projectedDose: { value, unit }
+      dividedDoseCount: divisionCount, projectedDose: {
+        value, unit, ...(clinicalQuantity.numerator.comparator
+          ? { comparator: clinicalQuantity.numerator.comparator } : {})
+      }
     };
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
     // Independently supplied volume and rate are compatible arguments of one
     // administration. Neither may erase the other during feature unification.
-    clinicalQuantity = { ...clinicalQuantity, projectedDose: { value, unit } };
+    const comparator = mergeOptionalScalar(left.comparator, right.comparator);
+    clinicalQuantity = { ...clinicalQuantity, projectedDose: {
+      value, unit, ...(comparator ? { comparator } : {})
+    } };
   }
   return {
     attachmentClass: mergedClass,
@@ -755,7 +761,8 @@ export function unifySynsem(
     const dimension: HpsgClinicalQuantityDimension = category === "other"
       ? (dose.unit === "[iU]" ? "biologic-activity" : "administration-unit")
       : category;
-    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit };
+    const projectedDose = { value: dose.value / dose.divisionCount, unit: dose.unit,
+      ...(dose.comparator ? { comparator: dose.comparator } : {}) };
     dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
       ...quantity,
       representation: "dose", status: "resolved",

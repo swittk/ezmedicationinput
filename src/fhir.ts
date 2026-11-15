@@ -29,7 +29,7 @@ import {
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import {
-  getEmaQuantityComparator, simpleQuantityForR5, quantityForR5
+  getQuantityComparator, simpleQuantityForR5, quantityForR5
 } from "./fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
@@ -347,21 +347,29 @@ function clinicalCarrierQuantityFromFhir(
       !/^(?:mL|L)$/u.test(volumeUnit) ||
       (durationUnit !== "h" && durationUnit !== "min")) return undefined;
   const periodUnit = durationUnit === "h" ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
+  const carrierComparator = getQuantityComparator(carrier);
+  const activeComparator = getQuantityComparator(active);
+  const durationComparator = getQuantityComparator(duration);
   return {
     representation: "dose-with-rate-ratio",
     status: "resolved",
     numerator: {
       value: carrier.value, unit: volumeLabel ?? volumeUnit, dimension: "volume",
-      ...nonRegenerableUnitCoding(carrier)
+      ...nonRegenerableUnitCoding(carrier),
+      ...(carrierComparator ? { comparator: carrierComparator } : {})
     },
-    denominators: [{ value: duration.value, unit: periodUnit, dimension: "time" }],
-    projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active) },
+    denominators: [{ value: duration.value, unit: periodUnit, dimension: "time",
+      ...(durationComparator ? { comparator: durationComparator } : {}) }],
+    projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active),
+      ...(activeComparator ? { comparator: activeComparator } : {}) },
     ...(material || doseLabel !== volumeLabel
       ? { rateNumerator: {
-          value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier)
+          value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier),
+          ...(carrierComparator ? { comparator: carrierComparator } : {})
         } }
       : {}),
-    administrationDuration: { value: duration.value, unit: periodUnit },
+    administrationDuration: { value: duration.value, unit: periodUnit,
+      ...(durationComparator ? { comparator: durationComparator } : {}) },
     ...(material ? { carrierMaterial: material } : {})
   };
 }
@@ -612,10 +620,8 @@ function canonicalDosePeriodMaximums(
         period === undefined || !Number.isFinite(period) || period <= 0 ||
         !rawPeriodUnit ||
         ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(rawPeriodUnit) < 0) continue;
-    const amountComparator = getEmaQuantityComparator(ratio.numerator) ??
-      ratio.numerator?.comparator;
-    const periodComparator = getEmaQuantityComparator(ratio.denominator) ??
-      ratio.denominator?.comparator;
+    const amountComparator = getQuantityComparator(ratio.numerator);
+    const periodComparator = getQuantityComparator(ratio.denominator);
     result.push({
       amount, unit, period, periodUnit: rawPeriodUnit as FhirPeriodUnit,
       ...(amountComparator ? { amountComparator } : {}),
@@ -877,8 +883,12 @@ function getFallbackPrnReasonText(concept: FhirCodeableConcept | undefined): str
  * @param value Authored quantity; coding never changes its magnitude.
  * @param unit Authored/canonical unit label, retained even for local units.
  */
-function buildFhirDoseQuantity(value: number, unit: string | undefined): FhirSimpleQuantity {
-  return { value, unit, ...getStandardDoseUnitCoding(unit) };
+function buildFhirDoseQuantity(
+  value: number, unit: string | undefined,
+  comparator?: NonNullable<CanonicalSigClause["dose"]>["comparator"]
+): FhirSimpleQuantity {
+  const quantity = { value, unit, ...getStandardDoseUnitCoding(unit) };
+  return comparator ? simpleQuantityForR5({ ...quantity, comparator })! : quantity;
 }
 
 function buildFhirDoseRange(range: CanonicalDoseRange, unit: string | undefined): FhirRange | undefined {
@@ -1403,11 +1413,7 @@ export function canonicalToFhir(
   } else if (clause.dose?.value !== undefined) {
     dosage.doseAndRate = [
       {
-        doseQuantity: clause.dose.comparator
-          ? simpleQuantityForR5({
-            ...buildFhirDoseQuantity(clause.dose.value, clause.dose.unit),
-            comparator: clause.dose.comparator
-          }) : buildFhirDoseQuantity(clause.dose.value, clause.dose.unit)
+        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit, clause.dose.comparator)
       }
     ];
   }
@@ -1858,8 +1864,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       clause.warnings = appendWarning(clause.warnings, extracted.warning);
     }
   } else if (doseAndRate?.doseQuantity?.value !== undefined) {
-    const comparator = getEmaQuantityComparator(doseAndRate.doseQuantity) ??
-      doseAndRate.doseQuantity.comparator;
+    const comparator = getQuantityComparator(doseAndRate.doseQuantity);
     clause.dose = {
       value: doseAndRate.doseQuantity.value,
       unit: doseAndRate.doseQuantity.unit,
@@ -2200,7 +2205,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     if (dose.unit) {
       state.unit = dose.unit;
     }
-    const comparator = getEmaQuantityComparator(dose) ?? dose.comparator;
+    const comparator = getQuantityComparator(dose);
     if (comparator) (state.primaryClause.dose ??= {}).comparator = comparator;
   }
 
@@ -2226,7 +2231,7 @@ function projectHpsgClinicalQuantityToFhir(
     if (quantity.dailyTotal && quantity.denominators.some(term => term.dimension === "time")) {
       const unit = [quantity.numerator.unit, ...quantity.denominators.map(term => term.unit)].join("/");
       dosage.doseAndRate = [{
-        rateQuantity: buildFhirDoseQuantity(quantity.numerator.value, unit)
+        rateQuantity: buildFhirDoseQuantity(quantity.numerator.value, unit, quantity.numerator.comparator)
       }];
     }
     return;
@@ -2246,7 +2251,7 @@ function projectHpsgClinicalQuantityToFhir(
     originalDose?.value === dose.value &&
     (originalDose.unit ?? originalDose.code) === dose.unit
       ? originalDose
-      : buildFhirDoseQuantity(dose.value, dose.unit);
+      : buildFhirDoseQuantity(dose.value, dose.unit, dose.comparator);
   if (quantity.representation === "rate-quantity") {
     const unit = [quantity.numerator.unit, ...quantity.denominators.map((term) => term.unit)].join("/");
     dosage.doseAndRate = [{
@@ -2255,7 +2260,7 @@ function projectHpsgClinicalQuantityToFhir(
       } : {}),
       rateQuantity: buildFhirDoseQuantity(
         quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
-        unit
+        unit, quantity.numerator.comparator
       )
     }];
     return;
@@ -2273,13 +2278,8 @@ function projectHpsgClinicalQuantityToFhir(
   dosage.doseAndRate = [{
     doseQuantity,
     rateRatio: {
-      numerator: rateNumerator,
-      denominator: {
-        value: duration.value,
-        unit: duration.unit,
-        system: "http://unitsofmeasure.org",
-        code: duration.unit
-      }
+      numerator: rate.comparator ? quantityForR5({ ...rateNumerator, comparator: rate.comparator })! : rateNumerator,
+      denominator: buildFhirDoseQuantity(duration.value, duration.unit, duration.comparator)
     }
   }];
   if (quantity.carrierMaterial?.text) {

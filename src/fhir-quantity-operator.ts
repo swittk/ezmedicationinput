@@ -67,6 +67,15 @@ export function getEmaQuantityComparator(
   return found;
 }
 
+/** Read the active qualifier. A clinician-edited native Quantity comparator
+ * wins over retained EMA metadata; SimpleQuantity falls back to EMA Coding.
+ * Use this for meaning/display, not the extension-only inspection API. */
+export function getQuantityComparator(
+  quantity: Pick<FhirR6Quantity, "comparator" | "extension"> | undefined
+): FhirR6Quantity["comparator"] {
+  return quantity?.comparator ?? getEmaQuantityComparator(quantity);
+}
+
 function exactGeneratedComparatorExtension(
   ext: FhirExtension, comparator: NonNullable<FhirR6Quantity["comparator"]>
 ): boolean {

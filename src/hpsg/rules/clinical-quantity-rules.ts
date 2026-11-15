@@ -4,6 +4,7 @@ import { normalizeUnit } from "../../unit-lexicon";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
+  doseComparatorNumberAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
@@ -17,6 +18,7 @@ import {
   HpsgDimensionalQuantityTerm,
   HpsgLexicalRule,
   HpsgScheduleFeature,
+  HpsgSign,
   lexicalSign
 } from "../signature";
 
@@ -267,34 +269,43 @@ function clinicalSign(
 function activeDoseInCarrierOverTime(
   context: HpsgClauseContext,
   start: number,
-  value: number
+  value: number,
+  attachedUnit?: string
 ) {
+  const unitShift = attachedUnit ? -1 : 0;
   const activeUnitToken = context.tokens[start + 1];
-  const possibleProduct = context.tokens[start + 2];
-  // The same registered medication object noun inventory that HPSG uses
-  // for product phrases can stand between a dimensional active dose and its
-  // vehicle: "20 mg drug in 500 mL". It is NOT another dose or a blank name.
-  const productShift = possibleProduct && available(context, start + 2) &&
-      MEDICATION_OBJECT_FILLERS.has(normalizeTokenLower(possibleProduct)) ? 1 : 0;
-  const inToken = context.tokens[start + 2 + productShift];
-  const carrierValueToken = context.tokens[start + 3 + productShift];
-  const carrierUnitToken = context.tokens[start + 4 + productShift];
-  if (!activeUnitToken || !inToken || !carrierValueToken || !carrierUnitToken ||
-      !available(context, start + 4 + productShift) ||
-      normalizeTokenLower(inToken) !== "in" ||
-      carrierValueToken.kind !== LexKind.Number ||
-      carrierValueToken.value === undefined || carrierValueToken.value <= 0) return undefined;
-  const activeDose = massTerm(value, normalizeTokenLower(activeUnitToken));
-  const carrier = volumeOrMassTerm(carrierValueToken.value, normalizeTokenLower(carrierUnitToken));
+  const activeUnit = attachedUnit ?? (activeUnitToken && normalizeTokenLower(activeUnitToken));
+  const possibleProduct = context.tokens[start + 2 + unitShift];
+  // Registered product nouns may appear between the active amount and its
+  // carrier. Compact >=20mg owns its unit in the same source token.
+  const productShift = possibleProduct && available(context, start + 2 + unitShift) &&
+    MEDICATION_OBJECT_FILLERS.has(normalizeTokenLower(possibleProduct)) ? 1 : 0;
+  const inToken = context.tokens[start + 2 + unitShift + productShift];
+  const carrierStart = start + 3 + unitShift + productShift;
+  const carrierValueToken = context.tokens[carrierStart];
+  if (!activeUnit || !inToken || !carrierValueToken ||
+      normalizeTokenLower(inToken) !== "in") return undefined;
+  const qualifiedCarrier = carrierValueToken.kind === LexKind.Number ? undefined :
+    doseComparatorNumberAt(context.tokens, carrierStart, context.limit, normalizeTokenLower(carrierValueToken));
+  const carrierNumber = qualifiedCarrier?.value ??
+    (carrierValueToken.kind === LexKind.Number ? carrierValueToken.value : undefined);
+  const carrierUnitStart = (qualifiedCarrier?.numericIndex ?? carrierStart) + 1;
+  const carrierUnitToken = context.tokens[carrierUnitStart];
+  const carrierUnit = qualifiedCarrier?.rawUnit ??
+    (carrierUnitToken && available(context, carrierUnitStart) ? normalizeTokenLower(carrierUnitToken) : undefined);
+  if (carrierNumber === undefined || carrierNumber <= 0 || !carrierUnit) return undefined;
+  const activeDose = massTerm(value, activeUnit);
+  const carrier = volumeOrMassTerm(carrierNumber, carrierUnit);
   if (!activeDose || !carrier || carrier.dimension !== "volume" ||
       !hasAdministrationCue(context, start)) return undefined;
+  if (qualifiedCarrier) carrier.comparator = qualifiedCarrier.comparator;
 
   // The carrier-volume constituent may have a nominal daughter between its
   // unit and the infusion-duration head: "500 mL normal saline over 4 h".
   // This is a bounded lexical NP inside a dimensionally licensed construction,
   // not a dictionary/keyword rule for saline, solution, dextrose, etc.
   // A number or clause separator cannot be silently absorbed as material.
-  let cursor = start + 5 + productShift;
+  let cursor = carrierUnitStart + (qualifiedCarrier?.rawUnit ? 0 : 1);
   const materialStart = cursor;
   while (cursor - materialStart < 3 && available(context, cursor)) {
     const token = context.tokens[cursor];
@@ -325,7 +336,8 @@ function activeDoseInCarrierOverTime(
     numerator: carrier,
     denominators: [{ value: durationValue, unit: durationUnit, dimension: "time" }],
     projectedDose: { value, unit: activeDose.unit },
-    rateNumerator: { value: carrier.value, unit: carrier.unit },
+    rateNumerator: { value: carrier.value, unit: carrier.unit,
+      ...(carrier.comparator ? { comparator: carrier.comparator } : {}) },
     ...(materialEnd > materialStart ? { carrierMaterial: {
       text: context.state.input.slice(
         context.tokens[materialStart].sourceStart,
@@ -355,22 +367,25 @@ function activeDoseInCarrierOverTime(
 function fixedVolumeOverTime(
   context: HpsgClauseContext,
   start: number,
-  value: number
+  value: number,
+  attachedUnit?: string
 ) {
   const unitToken = context.tokens[start + 1];
+  const unit = attachedUnit ?? (unitToken && normalizeTokenLower(unitToken));
+  const unitShift = attachedUnit ? -1 : 0;
   // IV may be written between a volume and its administration duration:
   // "Infuse 500 mL IV over 2 hours". License that exact route phrase as a
   // typed lexical contribution; don't reinterpret arbitrary intervening text.
-  const possibleRouteToken = context.tokens[start + 2];
-  const markedIV = Boolean(possibleRouteToken && available(context, start + 2) &&
+  const possibleRouteToken = context.tokens[start + 2 + unitShift];
+  const markedIV = Boolean(possibleRouteToken && available(context, start + 2 + unitShift) &&
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(possibleRouteToken)));
-  const shift = markedIV ? 1 : 0;
+  const shift = (markedIV ? 1 : 0) + unitShift;
   const overToken = context.tokens[start + 2 + shift];
   const durationToken = context.tokens[start + 3 + shift];
   const durationUnitToken = context.tokens[start + 4 + shift];
-  if (!unitToken || !overToken || !durationToken || !durationUnitToken ||
+  if (!unit || !overToken || !durationToken || !durationUnitToken ||
       !available(context, start + 4 + shift) || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
-  const numerator = volumeOrMassTerm(value, normalizeTokenLower(unitToken));
+  const numerator = volumeOrMassTerm(value, unit);
   const durationValue = clinicalDurationNumber(durationToken);
   const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
   const durationLead = normalizeTokenLower(overToken);
@@ -490,14 +505,15 @@ function fixedRate(
   context: HpsgClauseContext,
   start: number,
   value: number,
-  expression: UnitExpression
+  expression: UnitExpression,
+  phraseStart = start
 ) {
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
-  const cue = context.tokens[start - 1];
-  const hasRateMarker = Boolean(cue && available(context, start - 1) &&
+  const cue = context.tokens[phraseStart - 1];
+  const hasRateMarker = Boolean(cue && available(context, phraseStart - 1) &&
     /^(?:at|@)$/u.test(normalizeTokenLower(cue)));
   // An unmarked rate is valid only inside an explicit infusion/run
   // construction; standalone numeric rates must never be inferred as doses.
@@ -505,7 +521,7 @@ function fixedRate(
       (!hasRateMarker && !hasAdministrationCue(context, start))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
-    ...(hasRateMarker ? [start - 1] : []),
+    ...(hasRateMarker ? [phraseStart - 1] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
   if (duration) indices.push(...duration.indices);
@@ -545,36 +561,94 @@ function dividedDoseCountSign(context: HpsgClauseContext, start: number) {
   });
 }
 
-/**
- * Bounded lexical/construction contribution for safety-critical medication
- * quantities. It never searches the full clause and only accepts explicit
- * dimensional forms; unsupported weight suffixes remain typed unresolved
- * evidence instead of an ordinary dose.
- */
+/** Attach an authored qualifier to the quantity that the numeric head owns.
+ * A drug amount in a carrier does not qualify the carrier's volume/rate;
+ * a standalone rate qualifier does not qualify an independent drug dose. */
+function qualifyClinicalSign(
+  context: HpsgClauseContext, phraseStart: number, numericStart: number,
+  sign: HpsgSign | undefined,
+  comparator: HpsgClinicalQuantityFeature["numerator"]["comparator"]
+): HpsgSign | undefined {
+  if (!comparator) return sign;
+  const dose = sign?.synsem.head.dose;
+  const quantity = dose?.clinicalQuantity;
+  if (!sign || !dose || !quantity) return undefined;
+  const projectedDose = quantity.projectedDose
+    ? { ...quantity.projectedDose, comparator } : undefined;
+  const clinicalQuantity = {
+    ...quantity,
+    // Explicit active-in-carrier quantity has a distinct rateNumerator.
+    // The leading number belongs only to its projected drug dose.
+    numerator: quantity.rateNumerator ? quantity.numerator : { ...quantity.numerator, comparator },
+    ...(projectedDose ? { projectedDose } : {})
+  };
+  const tokens = [...context.tokens.slice(phraseStart, numericStart), ...sign.tokens]
+    .sort((a, b) => a.index - b.index);
+  return lexicalSign({
+    type: "dose-sign", rule: sign.evidence[0].rule,
+    tokens,
+    synsem: { ...sign.synsem, head: {
+      ...sign.synsem.head,
+      dose: { ...dose, ...(projectedDose ? { comparator } : {}), clinicalQuantity }
+    } },
+    warnings: sign.warnings, score: sign.score + numericStart - phraseStart + 2
+  });
+}
+
+/** Bounded dimensional quantity construction; unresolved weight amounts
+ * remain typed rates instead of fabricated scalar administrations. */
 export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.clinicalQuantity", (context, start) => {
     const additive = additiveFractionDose(context, start);
     if (additive) return [additive];
     const division = dividedDoseCountSign(context, start);
     if (division) return [division];
-    const valueToken = context.tokens[start];
-    if (!valueToken || valueToken.kind !== LexKind.Number || valueToken.value === undefined ||
-        valueToken.value <= 0 || !available(context, start + 1)) return [];
-
-    const activeInCarrier = activeDoseInCarrierOverTime(context, start, valueToken.value);
+    const token = context.tokens[start];
+    if (!token || !available(context, start)) return [];
+    let phraseStart = start;
+    let quantityToken = token;
+    const lower = token.kind === LexKind.Number ? "" : normalizeTokenLower(token);
+    let qualified = token.kind === LexKind.Number ? undefined :
+      doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+    // AT is a rate head when its following quantity has a per-time unit.
+    // Start that constituent at AT, before the generic site rule can claim
+    // "at approximately" as an anatomical destination.
+    if (!qualified && (lower === "at" || lower === "@")) {
+      const next = context.tokens[start + 1];
+      if (next && available(context, start + 1)) {
+        phraseStart++;
+        quantityToken = next;
+        qualified = next.kind === LexKind.Number ? undefined :
+          doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
+      }
+    }
+    const numericStart = qualified?.numericIndex ?? phraseStart;
+    const value = qualified?.value ?? (quantityToken.kind === LexKind.Number ? quantityToken.value : undefined);
+    const unit = qualified?.rawUnit;
+    if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
+    const comparator = qualified?.comparator;
+    const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
+      activeDoseInCarrierOverTime(context, numericStart, value, unit), comparator);
     if (activeInCarrier) return [activeInCarrier];
-
-    const over = fixedVolumeOverTime(context, start, valueToken.value);
+    const over = qualifyClinicalSign(context, phraseStart, numericStart,
+      fixedVolumeOverTime(context, numericStart, value, unit), comparator);
     if (over) return [over];
-
-    const expression = compactUnitExpression(context, start + 1, (candidate) =>
+    const accepts = (candidate: string) =>
       /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-      /^(?:ml|l|mcg|ug|mg|g)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate)
-    );
+      /^(?:ml|l|mcg|ug|mg|g)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
+    const expression = unit
+      ? accepts(unit) ? { compact: unit, end: numericStart + 1 } : undefined
+      : compactUnitExpression(context, numericStart + 1, accepts);
     if (!expression) return [];
-    const weight = weightQuantity(context, start, valueToken.value, expression);
+    const weight = qualifyClinicalSign(context, phraseStart, numericStart,
+      weightQuantity(context, numericStart, value, expression), comparator);
     if (weight) return [weight];
-    const rate = fixedRate(context, start, valueToken.value, expression);
+    const rate = qualifyClinicalSign(context, phraseStart, numericStart,
+      fixedRate(context, numericStart, value, expression, phraseStart), comparator);
+    if (rate) {
+      const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+      for (const token of rate.tokens) owned.add(token.index);
+    }
     return rate ? [rate] : [];
   });
 }

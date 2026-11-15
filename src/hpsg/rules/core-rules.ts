@@ -36,6 +36,9 @@ import {
   COORDINATED_NOUN_METHOD_VERBS,
   COUNT_CONNECTOR_WORDS_DATA,
   SUPPLEMENTAL_DOSE_MODIFIERS,
+  DOSE_COMPARATOR_PREFIXES,
+  DOSE_COMPARATOR_SYMBOLS,
+  doseComparatorNumberAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
@@ -1077,73 +1080,14 @@ export function perTargetCountDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
-/** Authored comparative dose NPs. Only complete number+medication-unit
- * constituents are licensed; "about 3 weeks" stays temporal, and no
- * second text-level dose parser runs after HPSG.
- */
-const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
-  words: readonly string[];
-  comparator: "<" | "<=" | ">" | ">=" | "~";
-}>>();
-for (const [comparator, wordings] of [
-  ["~", [["about"], ["approximately"], ["approx"], ["around"], ["roughly"],
-    ["ประมาณ"], ["ราว"]]],
-  [">=", [["at", "least"], ["no", "less", "than"], ["not", "less", "than"],
-    ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"],
-    ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]]],
-  ["<=", [["at", "most"], ["no", "more", "than"], ["not", "more", "than"],
-    ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"],
-    ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]]],
-  [">", [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]]],
-  ["<", [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]]
-] as const) for (const words of wordings) {
-  const first = words[0];
-  const candidates = DOSE_COMPARATOR_PREFIXES.get(first) ?? [];
-  candidates.push({ words, comparator });
-  DOSE_COMPARATOR_PREFIXES.set(first, candidates);
-}
-
-const DOSE_COMPARATOR_SYMBOLS: Record<string, "<" | "<=" | ">" | ">=" | "~"> = {
-  "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
-};
-
 function comparativeDoseAt(
   context: HpsgClauseContext, start: number, lower: string
 ): HpsgSign | undefined {
-  let comparator: "<" | "<=" | ">" | ">=" | "~" | undefined;
-  let value: number | undefined;
-  let numericIndex: number;
-  let compactUnit: string | undefined;
-  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-z]+)?$/u);
-  if (glued) {
-    comparator = DOSE_COMPARATOR_SYMBOLS[glued[1]];
-    value = Number(glued[2]);
-    numericIndex = start;
-    if (glued[3]) compactUnit = normalizeUnit(glued[3], context.options);
-    if (glued[3] && !compactUnit) return undefined;
-  } else {
-    const symbolic = DOSE_COMPARATOR_SYMBOLS[lower];
-    const words = DOSE_COMPARATOR_PREFIXES.get(lower);
-    let prefixLength = symbolic ? 1 : 0;
-    comparator = symbolic;
-    if (!comparator && words) for (const candidate of words) {
-      if (candidate.words.every((part, i) => {
-        const token = context.tokens[start + i];
-        return token && normalizeTokenLower(token) === part;
-      })) {
-        if (candidate.words.length > prefixLength) {
-          comparator = candidate.comparator;
-          prefixLength = candidate.words.length;
-        }
-      }
-    }
-    if (!comparator) return undefined;
-    numericIndex = start + prefixLength;
-    const numberToken = context.tokens[numericIndex];
-    if (!numberToken || numberToken.kind !== LexKind.Number ||
-        numberToken.value === undefined) return undefined;
-    value = numberToken.value;
-  }
+  const qualified = doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+  if (!qualified) return undefined;
+  const { comparator, value, numericIndex, rawUnit } = qualified;
+  const compactUnit = rawUnit ? normalizeUnit(rawUnit, context.options) : undefined;
+  if (rawUnit && !compactUnit) return undefined;
   const unit = compactUnit ? undefined : unitAfter(context, numericIndex + 1);
   if (!compactUnit && !unit || value === undefined || !Number.isFinite(value)) return undefined;
   const tokens = tokensAvailable(context, start, numericIndex + 1 - start);

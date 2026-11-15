@@ -25,6 +25,9 @@ export interface HpsgClauseContext {
   clinicalCache: {
     medicationGuardScanned?: true;
     medicationGuard?: ParsedMedicationGuard;
+    /** Tokens already owned by a dimensional rate constituent. Site/advice
+     * fallbacks reuse this fact instead of treating a qualified rate as prose. */
+    rateTokenIndices?: Set<number>;
   };
   project?: boolean;
 }

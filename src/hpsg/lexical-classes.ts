@@ -675,3 +675,65 @@ export function courseContinuationDurationAt(
   return value !== undefined && Number.isFinite(value) && value > 0 && unit
     ? { end: cursor + 2, value, unit } : undefined;
 }
+
+/** Authored comparative dose NPs. Only complete number+medication-unit
+ * constituents are licensed; "about 3 weeks" stays temporal, and no
+ * second text-level dose parser runs after HPSG.
+ */
+export const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
+  words: readonly string[];
+  comparator: "<" | "<=" | ">" | ">=" | "~";
+}>>();
+for (const [comparator, wordings] of [
+  ["~", [["about"], ["approximately"], ["approx"], ["around"], ["roughly"],
+    ["ประมาณ"], ["ราว"]]],
+  [">=", [["at", "least"], ["no", "less", "than"], ["not", "less", "than"],
+    ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"],
+    ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]]],
+  ["<=", [["at", "most"], ["no", "more", "than"], ["not", "more", "than"],
+    ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"],
+    ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]]],
+  [">", [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]]],
+  ["<", [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]]
+] as const) for (const words of wordings) {
+  const first = words[0];
+  const candidates = DOSE_COMPARATOR_PREFIXES.get(first) ?? [];
+  candidates.push({ words, comparator });
+  DOSE_COMPARATOR_PREFIXES.set(first, candidates);
+}
+
+export const DOSE_COMPARATOR_SYMBOLS: Record<string, "<" | "<=" | ">" | ">=" | "~"> = {
+  "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
+};
+
+/** One bounded quantity-prefix lexeme shared by scalar and dimensional
+ * rules. It identifies source tokens; it does not assign a unit or dose. */
+export function doseComparatorNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, lower: string
+): { comparator: "<" | "<=" | ">" | ">=" | "~";
+  value: number; numericIndex: number; rawUnit?: string } | undefined {
+  if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
+      !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
+  if (glued) return {
+    comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]], value: Number(glued[2]),
+    numericIndex: start, ...(glued[3] ? { rawUnit: glued[3] } : {})
+  };
+  let comparator = DOSE_COMPARATOR_SYMBOLS[lower];
+  let prefixLength = comparator ? 1 : 0;
+  if (!comparator) for (const candidate of DOSE_COMPARATOR_PREFIXES.get(lower) ?? []) {
+    if (candidate.words.length <= prefixLength || start + candidate.words.length >= limit) continue;
+    if (candidate.words.every((part, index) => {
+      const token = tokens[start + index];
+      return token && (token.canonical ?? token.lower) === part;
+    })) {
+      comparator = candidate.comparator;
+      prefixLength = candidate.words.length;
+    }
+  }
+  if (!comparator) return undefined;
+  const numericIndex = start + prefixLength;
+  const token = numericIndex < limit ? tokens[numericIndex] : undefined;
+  if (token?.kind !== LexKind.Number || token.value === undefined) return undefined;
+  return { comparator, value: token.value, numericIndex };
+}

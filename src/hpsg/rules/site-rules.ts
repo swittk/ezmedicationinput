@@ -501,6 +501,9 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    // A licensed "at ~100 mL/hr" rate is not an unknown body site.
+    // Reuse the preceding clinical lexical contribution; no extra scan.
+    if (context.clinicalCache.rateTokenIndices?.has(token.index)) return signs;
     const relativeMarker = siteRelativeMarkerSign(token, lower);
     // Thai ที่ can introduce either a relative site predicate or a plain
     // administration site. Keep both daughters for the chart to select.

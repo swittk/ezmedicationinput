@@ -269,6 +269,8 @@ export type HpsgClinicalQuantityDimension =
 export interface HpsgCodedQuantityTerm {
   value: number;
   unit: string;
+  /** Qualifier on this amount only; active drug and carrier can differ. */
+  comparator?: FhirQuantity["comparator"] | "~";
   system?: string;
   code?: string;
 }
@@ -291,7 +293,8 @@ export interface HpsgClinicalQuantityFeature {
   carrierMaterial?: { text: string; range?: TextRange };
   dailyTotal?: boolean;
   dividedDoseCount?: number;
-  administrationDuration?: { value: number; unit: FhirPeriodUnit };
+  administrationDuration?: { value: number; unit: FhirPeriodUnit;
+    comparator?: FhirQuantity["comparator"] | "~" };
   requiresPatientWeight?: true;
   reviewReason?:
     | "incomplete-weight-based-dose"
