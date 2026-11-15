@@ -732,8 +732,18 @@ export function doseComparatorNumberAt(
     }
   }
   if (!comparator) return undefined;
-  const numericIndex = start + prefixLength;
+  let numericIndex = start + prefixLength;
   const token = numericIndex < limit ? tokens[numericIndex] : undefined;
-  if (token?.kind !== LexKind.Number || token.value === undefined) return undefined;
-  return { comparator, value: token.value, numericIndex };
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  let value = token.kind === LexKind.Number ? token.value :
+    DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
+  if (value === undefined) return undefined;
+  // The existing fraction vocabulary also licenses "a quarter" or
+  // "two thirds". Keep those tokens within the qualified quantity head.
+  const denominator = numericIndex + 1 < limit ? tokens[numericIndex + 1] : undefined;
+  const fraction = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+    denominator.canonical ?? denominator.lower);
+  if (fraction !== undefined) { value *= fraction; numericIndex++; }
+  return { comparator, value, numericIndex };
 }

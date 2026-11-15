@@ -5264,3 +5264,81 @@ Nine alternating warm 80-parse batches against immutable 94974d6
 3455.1 -> 3402.0. No measured common-path slowdown in this host run;
 these are not mobile results. No new full review, publication,
 merge, deployment or downstream migration requested.
+
+
+## 2026-11-15 — PR #13 next loop: words, expressions, calendar caps and stale graph replay
+
+Decision gate: reviewed the three new inline threads and full review
+5909595800, including BOTH out-of-diff findings, prior follow-ups and
+issue comments. All five identify meaningful problems in supported
+SIG/structured editing. No new full review, safety gate or numeric
+refusal was requested/introduced. The reproduced calendar case gave
+TWO copies of March 15 00:30 and TWO tablets in a one-day window;
+the correct expectation is one administration and one tablet.
+
+1. **Number-word qualifiers:** the bounded comparator-number helper
+   accepted digits only, so 'at most one tablet' became an exact
+   1 tablet and the qualifier could disappear. It now reuses the
+   existing DOSE_NUMBER_WORDS, DOSE_FRACTION_WORDS and denominator
+   vocabulary, including 'half' and 'a quarter'. Scalar dose,
+   dimensional/weight-based rate, divided doses and action graph
+   amount readers all share this helper. Unknown nouns/temporal units
+   do not become medication doses. No separate number parser,
+   second source pass or invented terminology.
+2. **Expression-only item previews:** native R6 source-less components
+   now use their existing renderer for both doseExpression and
+   rateExpression. The same expression display helper is shared with
+   the extended-R5 fallback, including references/descriptions, not
+   just inline code. Whole-course text and explicit local source
+   retain their established precedence. Expressions remain editable
+   and unexecuted; no guessed numeric dose or rate is manufactured.
+3. **Calendar duration ownership:** integer day/week component caps
+   formerly used elapsed stepping while repeatCycle used local calendar
+   dates. Spring DST therefore extended the old course into the new
+   one, duplicating doses. resolveRepeatDurationCapEnd now reuses
+   durationStepper for duration bounds, range endpoints and anchored
+   duration modifiers. Integral day/week caps share the cycle rule;
+   fractional caps and q24h/hour intervals keep elapsed semantics.
+   The tests cover native R6, R5 bridge and imported R6, both spring
+   duplicate and fall missing-dose cases. No deduplication patch hides
+   genuine concurrent doses; the incorrect boundary itself is fixed.
+4. **Outside-diff graph replay:** an explicit graph Amount that
+   disagrees with an edited canonical dose must not become the primary
+   source sentence in roundtrip mode. Normalized and roundtrip
+   selectors now share one conflict check; mixed matching/conflicting
+   Amounts cannot bypass it. Regression uses a valid structured graph
+   with explicit primary span, then independently edits comparator,
+   value, unit and range. The original graph/source is unchanged and
+   recoverable; formatting keeps the current dose rather than replaying
+   stale source over it. No attempt to infer a dose from free text.
+5. **Outside-diff temporal operators:** course repeat/offset display and
+   exact-day/gap inference now use the existing native-first/EMA
+   comparator reader. An EMA >=7-day interval is displayed as >=7,
+   not an exact weekly cycle with an invented four-day rest period.
+   Known qualified relative offsets retain their numeric value in the
+   preview rather than being reduced to a blank generic warning.
+   Scheduling's existing duration/RelativeTime decisions use the same
+   operator semantics for native and EMA inputs. Native edits win;
+   approximate repeat/bounds still use the stated nominal value. Dose
+   supply arithmetic and all previous best-effort behavior remain.
+
+Validation: 4015/4015 source tests across 44 suites, R6 305/305 and
+instruction graph 265/265, packaged ESM/CJS 4/4, ES6 and declaration
+build passed. Seventeen net new parameterized cases in the existing
+files contain independent meaning/date/supply oracles. Read-only
+paired downstream adapters preserve numeric word/fraction doses,
+rate operators, graph amounts and unevaluated expression references
+through in-memory save/reopen and reverse FHIR conversion. No consumer
+code/schema, migration, deployment, publication or master merge.
+
+Performance versus immutable d750ccf: seven alternating warm 80-parse
+batches (median microseconds) ordinary 1468.6 -> 1451.1; Thai
+5853.8 -> 5831.6; eye taper 6174.0 -> 6591.0; qualified graph
+3681.1 -> 3787.9. The eye result was repeated in nine alternating
+100-parse batches: 6101.8 -> 5818.0; routine 1414.3 -> 1463.5.
+No consistent regression across the paired host runs; report the
+variation rather than treating noisy shared-host medians as proof
+of mobile performance. No extra full-input parsing or validation pass.
+The retained anchored-course-duration modifier path was independently
+probed across the same spring/fall transitions: no post-cap spring
+dose and the correct final late-night fall dose; numeric oracles 0/1.

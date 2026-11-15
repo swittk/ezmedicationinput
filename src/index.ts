@@ -14,7 +14,7 @@ import {
   scopeTrailingSharedDuration,
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
-import type { EzCourseMetadata } from "./types";
+import type { EzCourseMetadata, FhirExpression } from "./types";
 import { getQuantityComparator } from "./fhir-quantity-operator";
 import type { BoundaryPlan } from "./hpsg/signature";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
@@ -1272,7 +1272,7 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
  * @returns Whole nonnegative calendar days, or undefined when not exact.
  */
 function exactCourseDays(quantity: FhirQuantity | FhirR6Quantity | undefined): number | undefined {
-  if (!quantity || quantity.comparator || quantity.value === undefined ||
+  if (!quantity || getQuantityComparator(quantity) || quantity.value === undefined ||
       !Number.isFinite(quantity.value) || quantity.value < 0) return undefined;
   const unit = quantity.code ?? quantity.unit;
   const days = unit === "d" ? quantity.value : unit === "wk" ? quantity.value * 7 : undefined;
@@ -1314,6 +1314,17 @@ function medicationFreeCourseWindows(
   return gaps;
 }
 
+/** Show an imported expression without evaluating it or inventing a dose.
+ * Referenced/named expressions are usable structured data too. */
+function unevaluatedExpressionText(
+  expression: FhirExpression,
+  kind: "dose" | "rate"
+): string {
+  const detail = expression.expression ?? expression.reference ??
+    expression.description ?? expression.name;
+  return `unevaluated ${kind} expression${detail ? ": " + detail : ""}`;
+}
+
 /** Realize a temporal quantity without approximating calendar months or years.
  * @param quantity Original typed temporal quantity.
  * @param thai Whether the requested realization is Thai.
@@ -1328,7 +1339,7 @@ function formatCourseTimeQuantity(quantity: FhirQuantity | FhirR6Quantity, thai:
   };
   const unit = quantity.code ?? quantity.unit ?? "";
   const label = units[unit]?.[thai ? 2 : quantity.value === 1 ? 0 : 1] ?? quantity.unit ?? unit;
-  return `${quantity.comparator ?? ""}${quantity.value ?? ""} ${label}`.trim();
+  return `${getQuantityComparator(quantity) ?? ""}${quantity.value ?? ""} ${label}`.trim();
 }
 
 /** Render the typed whole-course repetition interval independently of component cadence.
@@ -1340,7 +1351,7 @@ function formatCourseTimeQuantity(quantity: FhirQuantity | FhirR6Quantity, thai:
 function formatCourseRepeatCycle(cycle: FhirR6Quantity, thai: boolean, count?: number): string {
   const unit = cycle.code ?? cycle.unit ?? "";
   const interval = formatCourseTimeQuantity(cycle, thai);
-  if (cycle.comparator || cycle.value === undefined || !Number.isFinite(cycle.value) ||
+  if (getQuantityComparator(cycle) || cycle.value === undefined || !Number.isFinite(cycle.value) ||
       cycle.value <= 0 || !unit) {
     return thai ? `ระยะรอบการใช้ยา: ${interval}.` : `Repeat-cycle interval: ${interval}.`;
   }
@@ -1353,11 +1364,13 @@ function formatCourseRepeatCycle(cycle: FhirR6Quantity, thai: boolean, count?: n
 
 /** Read a typed treatment-start quantity without reinterpreting its calendar unit.
  * @param relative Source R6 boundary and event context.
- * @returns Its finite nonnegative offset, or undefined for another/uncertain event.
+ * @returns The known nonnegative quantity (including its qualifier), or
+ * undefined for another event. exactCourseDays decides whether it licenses
+ * exact day numbering or medication-free windows; display keeps the amount.
  */
 function treatmentStepOffsetQuantity(
   relative: FhirR6DosageInstruction["step"][number]["start"]
-): FhirQuantity | undefined {
+): FhirR6Quantity | undefined {
   if (!relative || relative.contextReference || relative.contextDefinition ||
       relative.contextPath || relative.offsetRange) return undefined;
   if (!relative.contextCode?.coding?.some(coding =>
@@ -1365,7 +1378,7 @@ function treatmentStepOffsetQuantity(
     coding.code === "treatment-start")) return undefined;
   const quantity = relative.offsetDuration;
   return quantity && quantity.value !== undefined && Number.isFinite(quantity.value) &&
-    quantity.value >= 0 && !quantity.comparator ? quantity as FhirQuantity : undefined;
+    quantity.value >= 0 ? quantity : undefined;
 }
 
 /** Convert an exact treatment-start boundary into a calendar-day ordinal.
@@ -1382,12 +1395,12 @@ function treatmentStepOffsetDays(
  * @param start Source-backed onset, including an inherited preceding end if known.
  * @param end Source-backed end of the phase.
  * @param thai Whether the requested realization is Thai.
- * @returns Exact relative calendar wording without a guessed treatment start date.
+ * @returns Source-qualified relative wording without a guessed treatment start date.
  */
 function formatCalendarStepWindow(
-  start: FhirQuantity | undefined, end: FhirQuantity | undefined, thai: boolean
+  start: FhirR6Quantity | undefined, end: FhirR6Quantity | undefined, thai: boolean
 ): string {
-  const point = (quantity: FhirQuantity) => quantity.value === 0
+  const point = (quantity: FhirR6Quantity) => quantity.value === 0 && !getQuantityComparator(quantity)
     ? (thai ? "เริ่มการรักษา" : "treatment start")
     : thai ? `${formatCourseTimeQuantity(quantity, true)}หลังเริ่มการรักษา`
       : `${formatCourseTimeQuantity(quantity, false)} after treatment start`;
@@ -1543,12 +1556,10 @@ export function formatSig(
                     ? " " + (denominator.unit ?? denominator.code) : "") : "")
             );
           }
-          if (amount.doseExpression?.expression) {
-            expressions.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
-          }
-          if (amount.rateExpression?.expression) {
-            expressions.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
-          }
+          if (amount.doseExpression)
+            expressions.push(unevaluatedExpressionText(amount.doseExpression, "dose"));
+          if (amount.rateExpression)
+            expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate"));
         }
         return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
       }, options);
@@ -1733,11 +1744,10 @@ export function fromFhir(
   const { dosages, course } = fromDosageDetails(dosageDetails);
   const r5Rows = toFhirR5Dosages(dosageDetails);
   const items = r5Rows.map(dosage => fromFhirDosageInternal(dosage, options));
-  // Imported R6-only approximations have no legal R5 SimpleQuantity slot.
-  // Their editor-row suggestions must retain the amount just as the
-  // whole-course display does. Ordinary R6 imports do no extra rendering.
+  // A strict R5 projection retains unsupported expression/timing fields
+  // in its typed bridge, but the generic R5 preview cannot realize them.
   // Whole-course renderedInstruction is not a per-component dosage text.
-  // R6-only quantities, rate values and offsets need a complete item
+  // Quantities, rates, offsets and expressions need a complete native item
   // preview, even when the enclosing course has authored wording.
   // Prefer an item's own source; exact rates are meaningful too.
   let row = 0;
@@ -1748,7 +1758,8 @@ export function fromFhir(
         !component.doseAndRate?.some(rate =>
           rate.doseQuantity?.comparator ||
           rate.rateQuantity?.value !== undefined ||
-          rate.rateRatio?.numerator?.value !== undefined))) continue;
+          rate.rateRatio?.numerator?.value !== undefined ||
+          rate.doseExpression || rate.rateExpression))) continue;
     const source = component.text;
     if (source?.trim()) {
       item.shortText = source;
@@ -1826,12 +1837,10 @@ function provisionalFhirDisplay(
     if (numerator && denominator) maximums.push(`max per period: ${numerator} / ${denominator}`);
   }
   for (const amount of (dosage as EzDosage).doseAndRate ?? []) {
-    if (amount.doseExpression?.expression) {
-      maximums.push(`unevaluated dose expression: ${amount.doseExpression.expression}`);
-    }
-    if (amount.rateExpression?.expression) {
-      maximums.push(`unevaluated rate expression: ${amount.rateExpression.expression}`);
-    }
+    if (amount.doseExpression)
+      maximums.push(unevaluatedExpressionText(amount.doseExpression, "dose"));
+    if (amount.rateExpression)
+      maximums.push(unevaluatedExpressionText(amount.rateExpression, "rate"));
   }
   const body = joinGeneratedClauses([recognized, ...maximums].filter(Boolean));
   if (!showIncompleteLabel) return body || "Structured FHIR data is retained";

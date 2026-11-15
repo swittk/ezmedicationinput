@@ -1,3 +1,4 @@
+import { getQuantityComparator } from "./fhir-quantity-operator";
 import { getDoseQuantityUnit } from "./maps";
 import { TREATMENT_START_SYSTEM } from "./regimen/parallel-course";
 import { getCourseContextIssue, getDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays, DOSAGE_CONDITION_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, toFhirR5Dosages, toDosageDetails, DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "./dosage-course";
@@ -723,17 +724,10 @@ function resolveRepeatDurationCapEnd(
     ? resolveRepeatBoundsStart(repeat, timeZone) ?? anchor : anchor;
 
   const advance = (quantity: FhirQuantity | FhirR6Quantity | undefined): Date | null => {
-    const value = quantity?.value;
-    const unit = parseBoundsDurationUnit(quantity);
-    // A stated approximate duration still has a usable nominal length.
-    // Do not discard its active course bound just because it is qualified.
-    if (quantity?.comparator && quantity.comparator !== "~" ||
-        value === undefined || !Number.isFinite(value) ||
-        value <= 0 || !unit) {
-      return null;
-    }
-    const stepper = createIntervalStepper({ period: value, periodUnit: unit }, timeZone);
-    const result = stepper?.(durationAnchor);
+    // Course bounds and repeat cycles own the same calendar duration.
+    // Reuse its nominal/EMA semantics and integral day/week stepping;
+    // fractional bounds and elapsed q24h dosing retain elapsed arithmetic.
+    const result = durationStepper(quantity, timeZone, durationAnchor)?.(durationAnchor);
     return result && result > durationAnchor ? result : null;
   };
 
@@ -1730,7 +1724,7 @@ function treatmentRelativeInstant(
   const unit = duration?.code ?? duration?.unit;
   if (!knownAnchor || relative.contextReference || relative.contextDefinition ||
       relative.contextPath ||
-      duration?.comparator || quantity === undefined ||
+      getQuantityComparator(duration) || quantity === undefined ||
       !Number.isInteger(quantity) || quantity < 0) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }
@@ -1784,7 +1778,8 @@ function durationStepper(
   // Approximate course length has an authored numeric center: run the
   // best-effort recurrence at that value, retaining "~" in the source.
   // An inequality is different: it does not determine one cycle length.
-  if (quantity?.comparator && quantity.comparator !== "~" ||
+  const comparator = getQuantityComparator(quantity);
+  if (comparator && comparator !== "~" ||
       value === undefined || !Number.isFinite(value) ||
       value <= 0 || !periodUnit) return null;
   // Day/week course cycles follow calendar dates, not elapsed 24-hour

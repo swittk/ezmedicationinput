@@ -4099,6 +4099,13 @@ function primaryActionCoveredByCanonicalClause(
   );
 }
 
+/** The normalized and source-preserving primary selectors must honor the
+ * same current dose, while leaving superseded graph/source data untouched. */
+function primaryActionAmountConflicts(action: AdviceFrame, dose: CanonicalDoseExpr | undefined): boolean {
+  return Boolean(dose && action.args.some(arg => arg.role === AdviceArgumentRole.Amount &&
+    arg.quantity && !quantityCoveredByDose(arg, dose)));
+}
+
 export function instructionGraphRichPrimaryAction(
   clause: CanonicalSigClause
 ): AdviceFrame | undefined {
@@ -4145,15 +4152,12 @@ export function instructionGraphRichPrimaryAction(
     // It is still the SAME primary event when the predicate unifies and its
     // source overlaps the HPSG-owned primary span. Reject any conflicting
     // explicit action quantity; do not infer a quantity from wording.
-    const conflictingAmount = Boolean(dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-      !quantityCoveredByDose(arg, dose)
-    ));
+    const conflictingAmount = primaryActionAmountConflicts(action, dose);
     const samePrimaryWithCanonicalDose = Boolean(
       dose && overlapsPrimary && actionMatchesCanonicalMethod(action, clause) &&
       !conflictingAmount
     );
-    return (rich || suppliesMissingHead) &&
+    return !conflictingAmount && (rich || suppliesMissingHead) &&
       (!dose || matchesDose(action) || samePrimaryWithCanonicalDose);
   });
 }
@@ -4176,7 +4180,11 @@ export function instructionGraphRoundTripPrimaryAction(
       ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
         /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
     );
-    return hasLocalRelation || hasRichArgument;
+    // Source wording may be replayed only when its explicit Amount still
+    // agrees with the current canonical dose. Keep the graph unchanged for
+    // editing/provenance; it must not overwrite a clinician's new quantity.
+    const conflictingAmount = primaryActionAmountConflicts(action, clause.dose);
+    return !conflictingAmount && (hasLocalRelation || hasRichArgument);
   });
 }
 

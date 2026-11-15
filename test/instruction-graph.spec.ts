@@ -2,7 +2,9 @@ import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationConditi
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
-import { realizeInstructionAction, instructionGraphRichPrimaryAction } from "../src/instruction-graph";
+import { realizeInstructionAction, instructionGraphRichPrimaryAction,
+  instructionGraphRoundTripPrimaryAction } from "../src/instruction-graph";
+import { formatCanonicalClause } from "../src/format";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
@@ -2064,14 +2066,31 @@ describe("qualified quantities keep their meaning in action graph realization", 
     }
   });
 
-  it("does not match an old exact graph amount to a newly qualified dose", () => {
+  it.each([
+    { comparator: "~" as const }, { comparator: "<=" as const },
+    { value: 2 }, { unit: "g" }, { range: { low: 1, high: 2 } }
+  ])("does not replay a stale graph quantity over the canonical edit %j", (edit) => {
     const parsed = parsePublicSig("squeeze 1 cm ribbon cream onto each spot");
     const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    // A structured saved graph may declare its primary span. Both selectors
+    // must honor canonical editing, regardless of which display mode is used.
+    graph.primaryAdministrationSpan = { ...graph.actions[0].span };
     expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
-    clause.dose!.comparator = "~";
+    expect(instructionGraphRoundTripPrimaryAction(clause)).toBeDefined();
+    const source = JSON.stringify(graph);
+    Object.assign(clause.dose!, edit);
     expect(instructionGraphRichPrimaryAction(clause)).toBeUndefined();
+    expect(instructionGraphRoundTripPrimaryAction(clause)).toBeUndefined();
+    expect(JSON.stringify(graph)).toBe(source);
+    if ("comparator" in edit) {
+      const roundtrip = formatCanonicalClause(clause, "long", {
+        locale: "en", realizationMode: "roundtrip"
+      });
+      expect(roundtrip).toContain(edit.comparator === "~" ? "approximately 1" : "at most 1");
+    }
     // The old graph remains editable. It is simply not the current dose.
-    expect(clause.instructionGraph?.actions[0].args.find(value =>
+    expect(graph.actions[0].args.find(value =>
       value.role === AdviceArgumentRole.Amount)?.quantity?.value).toBe(1);
   });
 });
