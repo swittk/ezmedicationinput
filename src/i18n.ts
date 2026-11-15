@@ -42,6 +42,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  instructionGraphSourceConflictsWithDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
@@ -2059,7 +2060,7 @@ function formatLongThai(
   if (
     options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
-    clause.instructionGraph.sourceText.trim()
+    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }

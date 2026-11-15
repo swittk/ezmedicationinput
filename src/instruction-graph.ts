@@ -4106,6 +4106,19 @@ function primaryActionAmountConflicts(action: AdviceFrame, dose: CanonicalDoseEx
     arg.quantity && !quantityCoveredByDose(arg, dose)));
 }
 
+/** Whole-source replay has the same current-dose ownership as the
+ * individual primary-action selectors. It must not bypass an edited amount.
+ * This inspects typed graph evidence only; the raw source remains untouched. */
+export function instructionGraphSourceConflictsWithDose(clause: CanonicalSigClause): boolean {
+  const graph = clause.instructionGraph;
+  if (!graph || !clause.dose) return false;
+  const primary = graph.primaryAdministrationSpan;
+  return graph.actions.some(action =>
+    (!primary || action.span.start < primary.end && primary.start < action.span.end) &&
+    primaryActionAmountConflicts(action, clause.dose)
+  );
+}
+
 export function instructionGraphRichPrimaryAction(
   clause: CanonicalSigClause
 ): AdviceFrame | undefined {
@@ -4408,7 +4421,17 @@ export function realizeInstructionGraph(
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
-  for (const frame of frames) {
+  for (const sourceFrame of frames) {
+    const currentDose = options?.omitCanonicalAdministration?.dose;
+    const editedPrimary = Boolean(currentDose &&
+      (primary ? sourceFrame.span.start < primary.end && primary.start < sourceFrame.span.end
+        : graph.actions.length === 1) && primaryActionAmountConflicts(sourceFrame, currentDose));
+    // The canonical body already displays the current dose. Keep the rich
+    // action's material/target/manner, but do not repeat its superseded amount
+    // as an active instruction. This is a display copy; source/graph stay intact.
+    const frame = editedPrimary ? { ...sourceFrame, args: sourceFrame.args.filter(arg =>
+      arg.role !== AdviceArgumentRole.Amount || !arg.quantity || quantityCoveredByDose(arg, currentDose)
+    ) } : sourceFrame;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(
       definition?.administrationMethod?.code &&
@@ -4416,7 +4439,7 @@ export function realizeInstructionGraph(
       (frame.span.end <= graph.primaryAdministrationSpan.start ||
        frame.span.start >= graph.primaryAdministrationSpan.end)
     );
-    const sourceFaithful = (
+    const sourceFaithful = !editedPrimary && (
       options?.preferSourceText || secondaryAdministration ||
       frame.polarity === AdvicePolarity.Negate
     ) && frame.polaritySource !== "shared" &&

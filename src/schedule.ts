@@ -724,10 +724,10 @@ function resolveRepeatDurationCapEnd(
     ? resolveRepeatBoundsStart(repeat, timeZone) ?? anchor : anchor;
 
   const advance = (quantity: FhirQuantity | FhirR6Quantity | undefined): Date | null => {
-    // Course bounds and repeat cycles own the same calendar duration.
-    // Reuse its nominal/EMA semantics and integral day/week stepping;
-    // fractional bounds and elapsed q24h dosing retain elapsed arithmetic.
-    const result = durationStepper(quantity, timeZone, durationAnchor)?.(durationAnchor);
+    // A <=7-day course has a usable upper horizon, unlike a <=7-day
+    // recurrence with no single interval. Reuse calendar/elapsed stepping
+    // while keeping those two semantic owners explicit and the source intact.
+    const result = durationStepper(quantity, timeZone, durationAnchor, "upper-bound")?.(durationAnchor);
     return result && result > durationAnchor ? result : null;
   };
 
@@ -1584,7 +1584,10 @@ function executableQuantityCaps(
   if (!limits.length) return [];
   const doseRates = dosage.doseAndRate ?? [];
   const dose = doseRates.length === 1 ? doseRates[0].doseQuantity : undefined;
-  if (!dose || dose.comparator || !dose.value || !Number.isFinite(dose.value) ||
+  const doseOperator = getQuantityComparator(dose);
+  // Approximate amounts deliberately use their authored nominal values.
+  // An inequality does not determine a unique dose-count conversion.
+  if (!dose || doseOperator && doseOperator !== "~" || !dose.value || !Number.isFinite(dose.value) ||
       dose.value <= 0) {
     return [];
   }
@@ -1601,7 +1604,13 @@ function executableQuantityCaps(
     const maximum = numerator?.value;
     const period = denominator?.value;
     const periodUnit = denominator?.code ?? denominator?.unit;
-    if (numerator?.comparator || denominator?.comparator ||
+    const maximumOperator = getQuantityComparator(numerator);
+    const periodOperator = getQuantityComparator(denominator);
+    // EMA and native operators have identical meaning. A qualified window
+    // like >=2 days is not a known two-day rolling ceiling; preserve it
+    // unevaluated, while returning the other known supply information.
+    if (maximumOperator && maximumOperator !== "~" ||
+        periodOperator && periodOperator !== "~" ||
         maximum === undefined || !Number.isFinite(maximum) || maximum < 0 ||
         period === undefined || !Number.isInteger(period) || period <= 0 ||
         !periodUnit ||
@@ -1771,7 +1780,8 @@ function parallelComponentCadenceOrigin(
 function durationStepper(
   quantity: FhirQuantity | FhirR6Quantity | undefined,
   timeZone: string,
-  anchor: Date
+  anchor: Date,
+  purpose: "recurrence" | "upper-bound" = "recurrence"
 ): ((value: Date) => Date | null) | null {
   const value = quantity?.value;
   const periodUnit = parseBoundsDurationUnit(quantity);
@@ -1779,7 +1789,8 @@ function durationStepper(
   // best-effort recurrence at that value, retaining "~" in the source.
   // An inequality is different: it does not determine one cycle length.
   const comparator = getQuantityComparator(quantity);
-  if (comparator && comparator !== "~" ||
+  if (comparator && comparator !== "~" &&
+      !(purpose === "upper-bound" && (comparator === "<" || comparator === "<=")) ||
       value === undefined || !Number.isFinite(value) ||
       value <= 0 || !periodUnit) return null;
   // Day/week course cycles follow calendar dates, not elapsed 24-hour
@@ -4033,8 +4044,9 @@ function calculateTotalUnitsSingle(
   const doseForLimits = dosage.doseAndRate?.[0]?.doseQuantity;
   const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = dosage.maxDosePerLifetime;
+  const lifetimeOperator = getQuantityComparator(lifetime);
   if (lifetime?.value !== undefined && Number.isFinite(lifetime.value) &&
-      lifetime.value >= 0 && !lifetime.comparator) {
+      lifetime.value >= 0 && (!lifetimeOperator || lifetimeOperator === "~")) {
     const lifetimeUnit = getDoseQuantityUnit(lifetime);
     const converted = lifetimeUnit.toLowerCase() === doseUnitForLimits.toLowerCase()
       ? lifetime.value
@@ -4052,8 +4064,9 @@ function calculateTotalUnitsSingle(
   if (dosage.maxDosePerAdministration) {
     const dose = dosage.doseAndRate?.[0]?.doseQuantity;
     const limit = dosage.maxDosePerAdministration;
+    const limitOperator = getQuantityComparator(limit);
     if (!dose?.value || limit.value === undefined || !Number.isFinite(limit.value) ||
-        limit.value < 0 || limit.comparator) {
+        limit.value < 0 || limitOperator && limitOperator !== "~") {
       unevaluatedMaximumDose = true;
     } else {
       const fromUnit = getDoseQuantityUnit(dose);

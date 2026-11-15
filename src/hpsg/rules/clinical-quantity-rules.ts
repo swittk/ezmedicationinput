@@ -5,10 +5,8 @@ import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-con
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
+  additiveDoseNumberAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
-  DOSE_FRACTION_ARTICLES,
-  DOSE_FRACTION_DENOMINATOR_WORDS,
-  DOSE_FRACTION_WORDS,
   DOSE_NUMBER_WORDS,
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS
@@ -82,29 +80,12 @@ function additiveFractionDose(
     return undefined;
   }
   const whole = doseNumberValue(wholeToken);
-  if (whole === undefined || !Number.isInteger(whole) || whole <= 0) return undefined;
-
-  let cursor = start + 2;
-  if (available(context, cursor) &&
-      DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[cursor]))) {
-    cursor += 1;
-  }
-  if (!available(context, cursor)) return undefined;
-
-  const fractionToken = context.tokens[cursor];
-  let fraction = DOSE_FRACTION_WORDS.get(normalizeTokenLower(fractionToken));
-  let fractionEnd = cursor + 1;
-  if (fraction === undefined) {
-    const numerator = doseNumberValue(fractionToken);
-    const denominatorToken = context.tokens[cursor + 1];
-    const denominator = denominatorToken && available(context, cursor + 1)
-      ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(denominatorToken))
-      : undefined;
-    if (numerator === undefined || denominator === undefined) return undefined;
-    fraction = numerator * denominator;
-    fractionEnd += 1;
-  }
-  if (!(fraction > 0 && fraction < 1)) return undefined;
+  if (whole === undefined) return undefined;
+  const mixed = additiveDoseNumberAt(context.tokens, start, context.limit, whole);
+  if (!mixed) return undefined;
+  for (let i = start + 2; i <= mixed.numericIndex; i++)
+    if (!available(context, i)) return undefined;
+  const fractionEnd = mixed.numericIndex + 1;
 
   const unit = directDoseUnitAfter(context, fractionEnd);
   if (!unit) return undefined;
@@ -115,7 +96,7 @@ function additiveFractionDose(
     tokens,
     consumedTokenIndices: tokens.map(token => token.index),
     synsem: {
-      head: { dose: { value: whole + fraction, unit: unit.unit } },
+      head: { dose: { value: mixed.value, unit: unit.unit } },
       valence: {},
       cont: { clauseKind: "administration" }
     },
@@ -624,7 +605,9 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     }
     const numericStart = qualified?.numericIndex ?? phraseStart;
     const value = qualified?.value ?? (quantityToken.kind === LexKind.Number ? quantityToken.value : undefined);
-    const unit = qualified?.rawUnit;
+    // Compact qualifiers keep the unit in their number token; normalize it
+    // exactly like the spaced unit path before dimensional recognition.
+    const unit = qualified?.rawUnit?.replace(/[μµ]/gu, "u");
     if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
     const comparator = qualified?.comparator;
     const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,

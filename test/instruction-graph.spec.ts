@@ -5,6 +5,7 @@ import adviceRulesSource from "../src/advice-rules.json";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
+import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
@@ -2084,10 +2085,20 @@ describe("qualified quantities keep their meaning in action graph realization", 
     expect(instructionGraphRoundTripPrimaryAction(clause)).toBeUndefined();
     expect(JSON.stringify(graph)).toBe(source);
     if ("comparator" in edit) {
-      const roundtrip = formatCanonicalClause(clause, "long", {
-        locale: "en", realizationMode: "roundtrip"
+      const roundtrip = formatCanonicalClause(clause, "long", { locale: "en" }, {
+        realizationMode: "roundtrip"
       });
       expect(roundtrip).toContain(edit.comparator === "~" ? "approximately 1" : "at most 1");
+      expect(roundtrip).toContain("cream");
+      expect(roundtrip).toContain("each spot");
+      expect(roundtrip).not.toContain("Squeeze 1 cm ribbon");
+      const thai = formatCanonicalClause(clause, "long", resolveSigLocalization("th"), {
+        realizationMode: "roundtrip"
+      });
+      expect(thai).toContain(edit.comparator === "~" ? "ประมาณ 1" : "ไม่เกิน 1");
+      expect(thai).toContain("ครีม");
+      expect(thai).not.toContain("บีบครีม 1 ซม.");
+      expect(JSON.stringify(graph)).toBe(source);
     }
     // The old graph remains editable. It is simply not the current dose.
     expect(graph.actions[0].args.find(value =>

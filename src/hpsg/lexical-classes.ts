@@ -706,6 +706,36 @@ export const DOSE_COMPARATOR_SYMBOLS: Record<string, "<" | "<=" | ">" | ">=" | "
   "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
 };
 
+/** Shared WHOLE + connector + optional article + fraction head. The
+ * caller still owns its medication unit; this cannot swallow two independently
+ * unit-bearing coordinated doses. Returns the last number token it owns. */
+export function additiveDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, whole: number
+): { value: number; numericIndex: number } | undefined {
+  const connector = start + 1 < limit ? tokens[start + 1] : undefined;
+  if (!Number.isInteger(whole) || whole <= 0 || !connector ||
+      !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(connector.canonical ?? connector.lower)) return undefined;
+  let cursor = start + 2;
+  const article = cursor < limit ? tokens[cursor] : undefined;
+  if (article && DOSE_FRACTION_ARTICLES.has(article.canonical ?? article.lower)) cursor++;
+  const token = cursor < limit ? tokens[cursor] : undefined;
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  let fraction = DOSE_FRACTION_WORDS.get(word);
+  const numeric = token.kind === LexKind.Number ? token.value : DOSE_NUMBER_WORDS.get(word);
+  if (fraction === undefined && numeric !== undefined) {
+    if (numeric > 0 && numeric < 1) fraction = numeric;
+    else {
+      const denominator = cursor + 1 < limit ? tokens[cursor + 1] : undefined;
+      const factor = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+        denominator.canonical ?? denominator.lower);
+      if (factor !== undefined) { fraction = numeric * factor; cursor++; }
+    }
+  }
+  return fraction !== undefined && fraction > 0 && fraction < 1
+    ? { value: whole + fraction, numericIndex: cursor } : undefined;
+}
+
 /** One bounded quantity-prefix lexeme shared by scalar and dimensional
  * rules. It identifies source tokens; it does not assign a unit or dose. */
 export function doseComparatorNumberAt(
@@ -715,10 +745,13 @@ export function doseComparatorNumberAt(
   if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
       !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
   const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
-  if (glued) return {
-    comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]], value: Number(glued[2]),
-    numericIndex: start, ...(glued[3] ? { rawUnit: glued[3] } : {})
-  };
+  if (glued) {
+    const value = Number(glued[2]);
+    const mixed = !glued[3] ? additiveDoseNumberAt(tokens, start, limit, value) : undefined;
+    return { comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]],
+      value: mixed?.value ?? value, numericIndex: mixed?.numericIndex ?? start,
+      ...(glued[3] ? { rawUnit: glued[3] } : {}) };
+  }
   let comparator = DOSE_COMPARATOR_SYMBOLS[lower];
   let prefixLength = comparator ? 1 : 0;
   if (!comparator) for (const candidate of DOSE_COMPARATOR_PREFIXES.get(lower) ?? []) {
@@ -739,6 +772,8 @@ export function doseComparatorNumberAt(
   let value = token.kind === LexKind.Number ? token.value :
     DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
   if (value === undefined) return undefined;
+  const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value);
+  if (mixed) return { comparator, ...mixed };
   // The existing fraction vocabulary also licenses "a quarter" or
   // "two thirds". Keep those tokens within the qualified quantity head.
   const denominator = numericIndex + 1 < limit ? tokens[numericIndex + 1] : undefined;

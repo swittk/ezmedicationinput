@@ -5342,3 +5342,81 @@ of mobile performance. No extra full-input parsing or validation pass.
 The retained anchored-course-duration modifier path was independently
 probed across the same spring/fall transitions: no post-cap spring
 dose and the correct final late-night fall dose; numeric oracles 0/1.
+
+
+## 2026-11-15 — PR #13 next loop: qualified limits, mixed amounts and real roundtrip testing
+
+Review gate: fetched the six new inline comments, full review 5910608395,
+all review bodies, issue comments and recent follow-ups. The review has
+one additional test nitpick in its body and no separate out-of-diff
+section. All six code concerns were reproduced or their shared missing
+field verified. The cap report is PARTLY accepted: normalize native/EMA
+operator interpretation, but reject refusing or discarding useful
+approximate arithmetic. This clinician-operated parser still uses the
+known nominal amount and keeps every qualifier in its source.
+
+- **Rolling dose caps:** getQuantityComparator is now used for the dose,
+  limit numerator and period, not just native fields. Undefined and '~'
+  still use nominal arithmetic. An inequality such as >=2 days does not
+  determine a single rolling window; retain it unevaluated rather than
+  pretending it is an exact 2-day ceiling. The existing supply result
+  still returns the known amount and its existing unevaluated-limit
+  explanation. No new refusal, numeric blanking or estimate flag. The
+  adjacent lifetime/administration-limit readers use the same operator
+  precedence and nominal approximation policy.
+- **Upper duration bounds:** a <=7-day course DOES provide an upper
+  horizon even though a <=7-day recurrence does not identify a single
+  repeating interval. durationStepper now knows whether its existing
+  caller is resolving an upper bound or recurrence; only bound callers
+  accept '<'/'<=' as a horizon. Calendar day/week behavior, fractional
+  elapsed duration and q24h behavior stay on the same shared stepper.
+  boundsDuration, range endpoints and retained anchored-duration
+  modifiers were verified; lower bounds never invent an upper stop.
+- **Mixed fractional amounts:** qualified number parsing now reuses the
+  same bounded additive-number head as ordinary 'two and a half'.
+  The old duplicated fraction parsing was replaced, not supplemented
+  by another whole-SIG parser. Word/digit, optional article, denominator
+  words and glued >=2 forms retain the operator through scalar,
+  dimensional and action-graph clients. Unit-bearing coordinated doses
+  remain two independent amounts, not a fabricated mixed number.
+- **Microgram spelling:** attached qualified unit strings normalize
+  both Unicode micro symbols just like the separated unit path before
+  dimensional matching. '~0.1µg/kg/min' and '~0.1 µg/kg/min' have the
+  same value/operator/dimension; original input remains unchanged.
+- **Daily-total ownership:** fallback clinicalQuantity.numerator now
+  carries the authored comparator when a daily total is divided. A
+  subsequent feature merge rebuilding the per-dose amount retains it
+  and does not divide twice. Structured unification and public SIG
+  paths verify 30 mg/day -> nominal 15 mg twice daily with '~' intact.
+- **Cycle count:** qualified/unknown cycle intervals keep a known
+  common count in English and Thai previews, without making the
+  interval exact or fabricating an end date. Native/EMA and single-
+  and multi-cycle controls verify count and source preservation.
+- **Actual test-wiring defect:** realizationMode was incorrectly passed
+  as localization. Correcting the fourth argument exposed a real
+  source replay bug despite the primary selectors already refusing the
+  stale quantity. Both EN and TH whole-source fallbacks now respect
+  the same typed primary-dose conflict. Graph realization omits only
+  the superseded amount from a temporary display copy because the
+  canonical body displays the current amount; material/target/manner
+  remain. The stored graph/raw source are never rewritten or deleted.
+  The assertions now test the real roundtrip path, retain rich details,
+  and forbid repeating the old exact amount as an active instruction.
+
+Validation: 4034/4034 source tests across 44 suites; R6 310/310,
+clinical quantity 157/157, instruction graph 265/265; packaged
+ESM/CJS 4/4; ES6 bundle/TypeScript build and diff check passed.
+Nineteen net new cases in existing suites include independent edit,
+operator, horizon and quantity matrices. Read-only paired consumer
+adapters retained mixed-number, Unicode-rate and divided-dose values
+and qualifiers through in-memory save/reopen and reverse FHIR. A
+persisted <=7-day cap still gives seven tablets over a 14-day query.
+These probes assert structured preservation, not universal UI completeness.
+
+Nine alternating warm 80-parse batches versus immutable 9adab43
+(median microseconds): ordinary 1450.7 -> 1462.5; Thai 5774.5 ->
+5736.7; eye taper 5953.3 -> 5908.6; qualified graph 3519.7 ->
+3505.9. No measured common-path slowdown beyond shared-host noise;
+not a claim about mobile performance. No dependency, extra whole-input
+pass, application edit, migration, merge, deployment, package publishing
+or new full-review request.

@@ -1351,12 +1351,13 @@ function formatCourseTimeQuantity(quantity: FhirQuantity | FhirR6Quantity, thai:
 function formatCourseRepeatCycle(cycle: FhirR6Quantity, thai: boolean, count?: number): string {
   const unit = cycle.code ?? cycle.unit ?? "";
   const interval = formatCourseTimeQuantity(cycle, thai);
-  if (getQuantityComparator(cycle) || cycle.value === undefined || !Number.isFinite(cycle.value) ||
-      cycle.value <= 0 || !unit) {
-    return thai ? `ระยะรอบการใช้ยา: ${interval}.` : `Repeat-cycle interval: ${interval}.`;
-  }
   const iterations = count === undefined ? "" : thai ? ` จำนวน ${count} รอบ` :
     ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
+  if (getQuantityComparator(cycle) || cycle.value === undefined || !Number.isFinite(cycle.value) ||
+      cycle.value <= 0 || !unit) {
+    return thai ? `ระยะรอบการใช้ยา: ${interval}${iterations}.` :
+      `Repeat-cycle interval: ${interval}${iterations}.`;
+  }
   return thai
     ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับวันที่ใหม่ในแต่ละรอบ).`
     : `Repeat this schedule every ${interval}${iterations} (days are numbered within each cycle).`;

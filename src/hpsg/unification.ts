@@ -766,7 +766,8 @@ export function unifySynsem(
     dose = { ...dose, value: projectedDose.value, clinicalQuantity: {
       ...quantity,
       representation: "dose", status: "resolved",
-      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension },
+      numerator: quantity?.numerator ?? { value: dose.value, unit: dose.unit, dimension,
+        ...(dose.comparator ? { comparator: dose.comparator } : {}) },
       denominators: [...(quantity?.denominators ?? []), { value: 1, unit: "d", dimension: "time" }],
       dailyTotal: true, dividedDoseCount: dose.divisionCount, projectedDose
     } };

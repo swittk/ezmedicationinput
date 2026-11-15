@@ -1,3 +1,4 @@
+import { unifySynsem } from "../src/hpsg/unification";
 import { describe, expect, it } from "vitest";
 import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
@@ -1459,4 +1460,82 @@ describe("qualified infusion duration imported as a Ratio denominator", () => {
         .toContain(`Rate: 500 mL / ${comparator}2 h`);
     }
   );
+});
+
+
+describe("comparative mixed numbers and shared dimensional quantities", () => {
+  it.each([
+    ["Take at most two and a half tablets at bedtime", 2.5, "<="],
+    ["Take approximately 2 and a quarter tablets daily", 2.25, "~"],
+    ["Take >=2 and three quarters tablets daily", 2.75, ">="],
+    ["Take ≤2 and one half tablets daily", 2.5, "<="],
+    ["Take ~2 and 1/2 tablets daily", 2.5, "~"],
+    ["Take at least one and two thirds tablets daily", 1 + 2 / 3, ">="],
+    ["Dissolve at most two and a half tablets in water", 2.5, "<="],
+    ["squeeze at most two and a half cm ribbon cream onto each spot", 2.5, "<="]
+  ] as const)("retains the qualified mixed number in %s", (text, value, comparator) => {
+    const parsed = parsePublicSig(text);
+    const quantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+    expect(quantity?.value).toBeCloseTo(value);
+    expect(quantity?.comparator).toBe(comparator);
+    expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
+    expect(toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir))).step[0]
+      .component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+    expect(parsed.input).toBe(text);
+  });
+
+  it("keeps unit-bearing coordinated amounts independent of the mixed-number construction", () => {
+    const parsed = parsePublicSig("Take at most two tablets and half a tablet at bedtime");
+    const amounts = parsed.fhirNext.step.flatMap(step => step.component.flatMap(
+      component => component.doseAndRate?.map(value => value.doseQuantity) ?? []));
+    expect(amounts.map(value => value?.value)).toEqual([2, 0.5]);
+    expect(amounts.map(value => value?.comparator)).toEqual(["<=", undefined]);
+    expect(parsePublicSig("Take two and a half tablets daily").fhirNext.step[0]
+      .component[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2.5 });
+  });
+
+  it.each(["µ", "μ", "u", "mc"])("normalizes attached and separated %sg rates with identical ownership", micro => {
+    for (const [prefix, comparator] of [["~", "~"], [">=", ">="], ["≤", "<="]] as const) {
+      for (const suffix of ["/kg/min", "/hr"]) {
+        const joined = parsePublicSig(`Infuse ${prefix}0.1${micro}g${suffix}`);
+        const separated = parsePublicSig(`Infuse ${prefix}0.1 ${micro}g${suffix}`);
+        const a = joined.fhirNext.step[0].component[0].doseAndRate?.[0];
+        const b = separated.fhirNext.step[0].component[0].doseAndRate?.[0];
+        expect(a).toEqual(b);
+        expect(a?.rateQuantity).toMatchObject({ value: 0.1, comparator,
+          unit: suffix === "/hr" ? "ug/h" : "ug/kg/min" });
+        expect(a?.doseQuantity).toBeUndefined();
+        expect(getEmaQuantityComparator(joined.fhir[0].doseAndRate?.[0].rateQuantity)).toBe(comparator);
+      }
+    }
+  });
+
+  it("retains the daily-total qualifier through later feature merges without dividing twice", () => {
+    const context = { normalizeSiteText: (text: string) => text,
+      isCompatibleRouteRefinement: () => true };
+    for (const comparator of ["~", "<=", ">="] as const) {
+      const combined = unifySynsem({ head: { dose: { value: 30, unit: "mg",
+        comparator, divisionCount: 2 } }, valence: {}, cont: {} },
+      { head: { schedule: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        valence: {}, cont: {} }, context)!;
+      expect(combined.head.dose?.clinicalQuantity?.numerator).toMatchObject({ value: 30, comparator });
+      expect(combined.head.dose?.clinicalQuantity?.projectedDose).toMatchObject({ value: 15, comparator });
+      const mergedAgain = unifySynsem(combined, { head: { dose: { divisionCount: 2 } },
+        valence: {}, cont: {} }, context)!;
+      expect(mergedAgain.head.dose?.value).toBe(15);
+      expect(mergedAgain.head.dose?.clinicalQuantity?.numerator).toMatchObject({ value: 30, comparator });
+      expect(mergedAgain.head.dose?.clinicalQuantity?.projectedDose).toMatchObject({ value: 15, comparator });
+    }
+    for (const text of ["approximately 30 mg daily in 2 divided doses",
+      "approximately 30 mg daily in 2 divided doses PO",
+      "approximately 30 mg daily in 2 divided doses with food"]) {
+      const parsed = parsePublicSig(text);
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.numerator)
+        .toMatchObject({ value: 30, comparator: "~" });
+      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)
+        .toMatchObject({ value: 15, comparator: "~" });
+      expect(calculateTotalUnits({ dosage: parsed, from: "2026-11-02T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(30);
+    }
+  });
 });

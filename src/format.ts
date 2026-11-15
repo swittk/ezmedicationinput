@@ -17,6 +17,7 @@ import {
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
   instructionGraphRichPrimaryAction,
+  instructionGraphSourceConflictsWithDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
@@ -1642,7 +1643,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
     roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
-    clause.instructionGraph?.sourceText.trim()
+    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
