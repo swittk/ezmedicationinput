@@ -3873,6 +3873,113 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }));
   });
 
+  it("retains R6 approximate boundsDuration as EMA-coded R5 Quantity and a nominal course bound", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00"], boundsDuration: {
+          value: 7, code: "d", unit: "d", comparator: "~"
+        } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const rows = toFhirR5Dosages(course);
+    expect(rows[0].timing?.repeat?.boundsDuration).toMatchObject({
+      value: 7, code: "d", unit: "d", extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" }
+      }]
+    });
+    expect(rows[0].timing?.repeat?.boundsDuration?.comparator).toBeUndefined();
+    expect(toDosageDetails(rows)).toEqual(course);
+    const opts = { from: "2026-11-01T00:00:00+07:00",
+      orderedAt: "2026-11-01T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 10 };
+    for (const input of [course, rows, fromFhir(course)]) {
+      const doses = nextDueDoses(input, opts);
+      expect(doses).toHaveLength(7);
+      expect(doses[0]).toBe("2026-11-01T08:00:00+07:00");
+      expect(doses[6]).toBe("2026-11-07T08:00:00+07:00");
+      expect(calculateTotalUnits({
+        dosage: input, ...opts, durationValue: 20, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(7);
+    }
+  });
+
+  it("uses the numeric center of an approximate repeatCycle rather than silently deleting recurrence", () => {
+    const relative = (days: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] },
+      offsetDuration: { value: days, unit: "d", code: "d" }
+    });
+    const original: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, code: "d", unit: "d", comparator: "~" },
+      step: [{ start: relative(0), end: relative(21), component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator: "~" } }]
+      }] }]
+    };
+    const opts = { from: "2026-11-01T00:00:00+07:00",
+      orderedAt: "2026-11-01T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 25 };
+    const rows = toFhirR5Dosages(original);
+    expect(toDosageDetails(rows)).toEqual(original);
+    for (const input of [original, rows, fromFhir(original)]) {
+      const due = nextDueDoses(input, opts);
+      expect(due[20]).toBe("2026-11-21T08:00:00+07:00");
+      expect(due[21]).toBe("2026-11-29T08:00:00+07:00");
+      expect(calculateTotalUnits({
+        dosage: input, ...opts, durationValue: 56, durationUnit: FhirPeriodUnit.Day
+      }).totalUnits).toBe(210);
+    }
+    // This is an authored nominal value, not a fabricated exact dosage.
+    expect(original.repeatCycle?.comparator).toBe("~");
+  });
+
+  it("does not silently turn an indeterminate cycle inequality into a one-off course", () => {
+    const relative = (days: number) => ({
+      contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] },
+      offsetDuration: { value: days, unit: "d", code: "d" }
+    });
+    const original: FhirR6DosageInstruction = {
+      repeatCycle: { value: 28, code: "d", unit: "d", comparator: ">=" },
+      step: [{ start: relative(0), end: relative(21), component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }]
+    };
+    const opts = { from: "2026-11-01T00:00:00+07:00",
+      orderedAt: "2026-11-01T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", limit: 25 };
+    for (const input of [original, toFhirR5Dosages(original)]) {
+      expect(() => nextDueDoses(input, opts)).toThrow(/repeatCycle/);
+      expect(() => calculateTotalUnits({
+        dosage: input, ...opts, durationValue: 56, durationUnit: FhirPeriodUnit.Day
+      })).toThrow(/repeatCycle/);
+    }
+    expect(toDosageDetails(toFhirR5Dosages(original))).toEqual(original);
+  });
+
+  it("continues calculating nominal supply from approximate doses without rejecting or erasing amounts", () => {
+    const parsed = parseSig("approximately 5 mg PO QD");
+    const opts = { from: "2026-11-01T00:00:00+07:00",
+      orderedAt: "2026-11-01T00:00:00+07:00",
+      timeZone: "Asia/Bangkok", durationValue: 7,
+      durationUnit: FhirPeriodUnit.Day };
+    for (const input of [parsed, parsed.fhir, parsed.fhirNext]) {
+      const result = calculateTotalUnits({ dosage: input, ...opts });
+      expect(result.totalUnits).toBe(35);
+      expect(result.unit).toBe("mg");
+    }
+    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator)
+      .toBe("~");
+    expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity?.extension?.[0].valueCoding?.code)
+      .toBe("100000000055");
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

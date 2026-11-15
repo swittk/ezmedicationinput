@@ -605,6 +605,14 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
   // an R6-native condition. It must not fall back to a stale R5 modifier.
   const predicate = ownConditions === undefined ? parseDosageCondition(dosage) : undefined;
   const safety = ownSafety ?? toR6Safety(dosage);
+  const timingBound = rest.timing?.repeat?.boundsDuration;
+  // R5 Quantity uses the published EMA comparator Coding for "~".
+  // Convert that one bound only; all ordinary Timing values stay untouched.
+  const r6Timing = timingBound?.extension?.length &&
+    getEmaQuantityComparator(timingBound) && rest.timing?.repeat
+    ? { ...rest.timing, repeat: {
+      ...rest.timing.repeat, boundsDuration: quantityFromR5(timingBound)
+    } } : undefined;
   // A caller may edit the public excludedDates field directly, without
   // updating the older R5 modifier. Rebuild that modifier from the live
   // field (including [] to remove exclusions) before projecting to R6.
@@ -637,6 +645,7 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
   }
   return {
     ...rest,
+    ...(r6Timing ? { timing: r6Timing } : {}),
     ...(r6Rates ? { doseAndRate: r6Rates } : {}),
     ...(r6Extensions.length ? { extension: r6Extensions } : {}),
     ...(r6Modifiers?.length ? { modifierExtension: r6Modifiers } : {}),
@@ -668,11 +677,20 @@ export function fromR6Dosage(dosage: FhirR6Dosage, sequence: number): FhirDosage
   const { site, condition, safety, doseAndRate, timing, ...rest } = dosage;
   // Avoid cloning ordinary Timing values. R6-only offsets are stripped only
   // when present, while their values remain in the editable course bridge.
-  let r5Timing: FhirDosage["timing"] = timing;
-  if (timing?.repeat && (timing.repeat.startOffset !== undefined ||
-      timing.repeat.endOffset !== undefined)) {
-    const { startOffset: _startOffset, endOffset: _endOffset, ...repeat } = timing.repeat;
-    r5Timing = { ...timing, repeat };
+  const needsR5TimingProjection = !!timing?.repeat &&
+    (timing.repeat.startOffset !== undefined ||
+      timing.repeat.endOffset !== undefined ||
+      timing.repeat.boundsDuration?.comparator === "~");
+  // Only projected branches may carry R6-only fields. The unchanged branch
+  // is structurally identical to R5 Timing; avoid copying it for ordinary SIGs.
+  let r5Timing: FhirDosage["timing"] = timing as FhirDosage["timing"];
+  if (needsR5TimingProjection && timing?.repeat) {
+    const { startOffset: _startOffset, endOffset: _endOffset,
+      boundsDuration, ...repeat } = timing.repeat;
+    r5Timing = { ...timing, repeat: {
+      ...repeat,
+      ...(boundsDuration ? { boundsDuration: generalQuantityForR5(boundsDuration) } : {})
+    } };
   }
   let restoredSequence = sequence;
   const retainedSequence = dosage.extension?.find(extension =>

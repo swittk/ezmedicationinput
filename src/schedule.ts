@@ -13,6 +13,7 @@ import {
   FhirPeriodUnit,
   FhirQuantity,
   FhirR6Quantity,
+  FhirR6Dosage,
   FhirTiming,
   FhirTimingRepeat,
   FrequencyFallbackTimes,
@@ -657,7 +658,7 @@ function parseBoundsDurationUnit(quantity: FhirQuantity | FhirR6Quantity | undef
 }
 
 function resolveRepeatBoundsStart(
-  repeat: FhirTimingRepeat | undefined,
+  repeat: Pick<FhirTimingRepeat, "boundsPeriod"> | undefined,
   timeZone: string
 ): Date | null {
   const value = repeat?.boundsPeriod?.start;
@@ -679,7 +680,7 @@ function resolveRepeatBoundsStart(
 }
 
 function resolveRepeatBoundsEndExclusive(
-  repeat: FhirTimingRepeat | undefined,
+  repeat: Pick<FhirTimingRepeat, "boundsPeriod"> | undefined,
   timeZone: string
 ): Date | null {
   const value = repeat?.boundsPeriod?.end;
@@ -709,7 +710,9 @@ function earlierDate(left: Date | null, right: Date | null): Date | null {
 }
 
 function resolveRepeatDurationCapEnd(
-  dosage: Pick<FhirDosage, "timing" | "modifierExtension">,
+  dosage: Pick<FhirDosage, "modifierExtension"> & {
+    timing?: FhirDosage["timing"] | FhirR6Dosage["timing"];
+  },
   anchor: Date,
   timeZone: string
 ): Date | null {
@@ -719,10 +722,13 @@ function resolveRepeatDurationCapEnd(
   const durationAnchor = retained
     ? resolveRepeatBoundsStart(repeat, timeZone) ?? anchor : anchor;
 
-  const advance = (quantity: FhirQuantity | undefined): Date | null => {
+  const advance = (quantity: FhirQuantity | FhirR6Quantity | undefined): Date | null => {
     const value = quantity?.value;
     const unit = parseBoundsDurationUnit(quantity);
-    if (quantity?.comparator || value === undefined || !Number.isFinite(value) ||
+    // A stated approximate duration still has a usable nominal length.
+    // Do not discard its active course bound just because it is qualified.
+    if (quantity?.comparator && quantity.comparator !== "~" ||
+        value === undefined || !Number.isFinite(value) ||
         value <= 0 || !unit) {
       return null;
     }
@@ -1775,7 +1781,11 @@ function durationStepper(
 ): ((value: Date) => Date | null) | null {
   const value = quantity?.value;
   const periodUnit = parseBoundsDurationUnit(quantity);
-  if (quantity?.comparator || value === undefined || !Number.isFinite(value) ||
+  // Approximate course length has an authored numeric center: run the
+  // best-effort recurrence at that value, retaining "~" in the source.
+  // An inequality is different: it does not determine one cycle length.
+  if (quantity?.comparator && quantity.comparator !== "~" ||
+      value === undefined || !Number.isFinite(value) ||
       value <= 0 || !periodUnit) return null;
   // Day/week course cycles follow calendar dates, not elapsed 24-hour
   // intervals. q24h interval scheduling still uses createIntervalStepper.
@@ -1941,10 +1951,8 @@ function scheduleRepeatedCourse(
   const anchor = options.orderedAt === undefined
     ? from : coerceDate(options.orderedAt, "orderedAt");
   const advance = durationStepper(course.repeatCycle, timeZone, anchor);
-  if (!advance) return scheduleTreatmentRelativeCourse(
-    { ...course, repeatCycle: undefined },
-    { ...options, orderedAt: anchor }
-  );
+  if (!advance) throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
+    "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before scheduling.");
   const limit = Math.floor(options.limit ?? 10);
   if (!Number.isFinite(limit) || limit <= 0) return [];
   const results: string[] = [];
@@ -4376,6 +4384,9 @@ function calculateCourseTotalUnits(
   const anchor = options.orderedAt === undefined
     ? queryStart : coerceDate(options.orderedAt, "orderedAt");
   const cycleAdvance = durationStepper(course.repeatCycle, zone, anchor);
+  if (course.repeatCycle && !cycleAdvance)
+    throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
+      "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before calculating supply.");
   if (cycleAdvance) {
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     const singleCycle = { ...course, repeatCycle: undefined };

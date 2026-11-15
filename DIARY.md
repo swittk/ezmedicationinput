@@ -4907,3 +4907,45 @@ and a zero-step R6 structure byte-for-byte for this case.
 The branch must never claim that a passing test suite proves
 mathematical absence of all possible future data-loss bugs; the
 product contract remains best-effort preservation of ALL known values.
+
+
+## 2026-11-15 — PR #13 reviewer loop: use nominal clinical amounts; preserve repeat cycles
+
+Decision: Three reviewer reports. Two identified real adjacent execution/
+FHIR-boundary issues; a blanket refusal to calculate approximate dose
+supply was explicitly REJECTED in the original inline review thread.
+The library is a best-effort clinician tool, not an exact-dose
+validator. A valid numeric ~5 mg daily remains 35 mg nominal supply
+over seven days through native R6, R5 with its established EMA
+comparator Coding and SIG parsing. No new supply result flag, rejection
+or ordinary-parser pass was added. The FHIR source still says "~";
+the numeric projection never deletes the known amount.
+
+R6 Timing.repeat.boundsDuration is general Quantity, allowing "~".
+R5 Quantity has no "~": fromR6Dosage now projects this one field
+through the existing EMA Quantity Operator adapter without changing
+ordinary timing hot paths or removing other time metadata. toR6Dosage
+recovers the native comparator from externally authored EMA Coding.
+The same nominal 7-day duration limits both R6 and strict R5 schedule
+and supply to seven administrations, rather than silently acting as
+unbounded. Other ordinary R5 Duration comparators are unchanged.
+
+A supplied repeatCycle may NEVER be silently deleted and treated
+as though the clinician authored only a one-off course. Approximate
+~28-day cycles retain the numeric 28-day nominal recurrence and all
+original source metadata, including the "~" qualifier, in both
+scheduling and supply arithmetic. Unequal comparators (>=, <=, etc)
+do not identify one interval length; when such a cycle cannot be
+scheduled, the two numeric entry points report a typed unresolved-
+cycle error without discarding the editable source. The underlying
+durationStepper and both callers were audited; the same policy applies
+to native R6 and retained R5. No new date rules engine or arbitrary
+one-off fallback.
+
+Four targeted tests in the existing R6 suite cover native/R5/import
+of EMA boundsDuration, numeric duration caps, nominal ~28-day course
+recurrence through full 56-day supply, inequality-cycle preservation
+and explicit unresolved execution, and normal 35 mg supply for
+~5 mg daily. The original review response makes the rejection of
+a blanket approximate-dose refusal explicit. No new review requested;
+no merge, publishing, deployment or downstream application edits.
