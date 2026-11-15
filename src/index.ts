@@ -1525,7 +1525,7 @@ export function formatSig(
           if (amount.rateQuantity?.value !== undefined) {
             expressions.push(
               (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              (amount.rateQuantity.comparator ?? "") + amount.rateQuantity.value +
+              (getQuantityComparator(amount.rateQuantity) ?? "") + amount.rateQuantity.value +
               (amount.rateQuantity.unit || amount.rateQuantity.code
                 ? " " + (amount.rateQuantity.unit ?? amount.rateQuantity.code) : "")
             );
@@ -1535,7 +1535,7 @@ export function formatSig(
             const denominator = amount.rateRatio?.denominator;
             expressions.push(
               (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              (numerator.comparator ?? "") + numerator.value +
+              (getQuantityComparator(numerator) ?? "") + numerator.value +
               (numerator.unit || numerator.code ? " " + (numerator.unit ?? numerator.code) : "") +
               (denominator?.value !== undefined
                 ? " / " + (getQuantityComparator(denominator) ?? "") + denominator.value +

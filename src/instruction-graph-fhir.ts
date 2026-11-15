@@ -1,3 +1,4 @@
+import { getQuantityComparator, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -151,6 +152,11 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     add(quantity, valueDecimal("low", argument.quantity.range?.low));
     add(quantity, valueDecimal("high", argument.quantity.range?.high));
     add(quantity, valueString("unit", argument.quantity.unit));
+    // Use the published EMA Coding for an operator, not a private graph code.
+    // Exact graph quantities keep their existing wire shape.
+    if (argument.quantity.comparator) quantity.push(
+      ...(simpleQuantityForR5({ comparator: argument.quantity.comparator })?.extension ?? [])
+    );
     nested.push({ url: "quantity", extension: quantity });
   }
   for (const locale of Object.keys(argument.i18n ?? {})) {
@@ -310,11 +316,13 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
     const low = child(quantityExtension, "low")?.valueDecimal;
     const high = child(quantityExtension, "high")?.valueDecimal;
     const unit = child(quantityExtension, "unit")?.valueString;
+    const comparator = getQuantityComparator(quantityExtension);
     if (value !== undefined || low !== undefined || high !== undefined || unit !== undefined) {
       argument.quantity = {
         value,
         range: low !== undefined || high !== undefined ? { low, high } : undefined,
-        unit
+        unit,
+        ...(comparator ? { comparator } : {})
       };
     }
   }

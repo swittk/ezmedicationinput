@@ -878,6 +878,8 @@ export interface AdviceArgument {
     value?: number;
     range?: CanonicalDoseRange;
     unit?: string;
+    /** Authored qualifier follows this amount through graph matching and FHIR. */
+    comparator?: FhirR6Quantity["comparator"];
   };
   span?: TextRange;
 }

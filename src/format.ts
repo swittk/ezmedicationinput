@@ -10,7 +10,7 @@ import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText 
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
 import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
-import { baseLanguageTag } from "./localization";
+import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
   instructionGraphHasNovelNonWarningContent,
@@ -664,12 +664,7 @@ function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined
     }
   }
   if (dose.value !== undefined) {
-    const english = dose.comparator === "~" ? "approximately " :
-      dose.comparator === ">=" ? "at least " :
-      dose.comparator === "<=" ? "at most " :
-      dose.comparator === ">" ? "more than " :
-      dose.comparator === "<" ? "less than " :
-      dose.comparator === "ad" ? "sufficient to achieve " : "";
+    const english = quantityComparatorText(dose.comparator, "en");
     const amount = `${english}${stripTrailingZero(dose.value)}`;
     if (dose.unit) {
       return `${amount} ${pluralize(dose.unit, dose.value)}`;
@@ -1683,7 +1678,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       arg.quantity?.value === clause.dose?.value &&
       arg.quantity?.range?.low === clause.dose?.range?.low &&
       arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
     )
   ));
   const hasAdministrationTiming = Boolean(

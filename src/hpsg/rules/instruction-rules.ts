@@ -16,6 +16,7 @@ import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
+  AdviceArgument,
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
@@ -164,7 +165,7 @@ function frameTokens(context: HpsgClauseContext, frame: AdviceFrame): Token[] {
 function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
-): { value?: number; range?: { low?: number; high?: number }; unit?: string } | undefined {
+): AdviceArgument["quantity"] {
   const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
@@ -172,7 +173,8 @@ function frameDose(
   return {
     value: amount.quantity.value,
     range: amount.quantity.range ? { ...amount.quantity.range } : undefined,
-    unit: amount.quantity.unit
+    unit: amount.quantity.unit,
+    ...(amount.quantity.comparator ? { comparator: amount.quantity.comparator } : {})
   };
 }
 

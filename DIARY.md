@@ -5189,3 +5189,78 @@ locale, schedule, clinical-oracle and source-integrity suites ran too.
 No known reproduced failure remains in the reviewed families. These
 results establish tested coverage, not a proof about all arbitrary FHIR
 objects or all possible prose.
+
+
+## 2026-11-15 — PR #13 next review: step edit ownership and graph quantity qualifiers
+
+Review gate: opened all current inline threads, full review bodies,
+issue comments and follow-ups. Latest review 5908987328 contains four
+inline findings plus ONE outside-diff finding on graph-based Thai
+realization. All five reproduce on 94974d6 and concern supported edits,
+structured imports or ordinary qualified amounts. No speculative
+validation/refusal requirement accepted. The outside-diff suggestion to
+bypass the graph for qualified doses is not the chosen implementation:
+fix the graph's missing typed field instead of losing richer action
+arguments merely to hide the symptom.
+
+- Step native extensions and R5-only modifiers are separate editable
+  fields. In historical retained-course reconstruction, convert the
+  saved step to its R5 editable fields, merge the partial edit, then
+  project back once. An explicitly empty extension array is a clear,
+  not an absent override. The same bug existed in compact row metadata:
+  clearing native extensions could also delete an unrelated modifier
+  wrapper. The compact edit merge now follows the same ownership rule
+  and preserves its previous typed source. Modifier-only edits retain
+  native metadata; native-only clears retain modifiers; clearing both
+  clears both. Unchanged/no-op fields do not invent extra history.
+- A 500 mL active dose and an independently qualified <=500 mL carrier
+  numerator do not become the same quantity just because value and unit
+  label match. The canonical infusion reconstruction retains an
+  independent rateNumerator when operators or unit coding differ.
+  No guessed comparator propagates between drug and carrier.
+- Source-less R6 rateQuantity/rateRatio previews use the shared
+  native-first Quantity comparator reader. EMA-only quantities retain
+  their qualifier, and a clinician's native edit still wins. Both
+  course summaries and imported item previews use this rule.
+- The graph's AdviceArgument.quantity now carries the original
+  comparator through source extraction, dose attachment/promotion,
+  HPSG projection, equality/coverage matching, localized realization and
+  FHIR save/reopen. Standard EMA Coding carries it in the existing
+  quantity extension container; no new comparator code system or URL.
+  Old exact graph amounts cannot replace newly qualified canonical
+  doses. EN/TH quantity prefixes now share one localized helper rather
+  than maintaining a third vocabulary in the graph renderer.
+- The source amount reader reuses the already-established bounded
+  comparator lexeme. AT in 'at most 2 tablets' belongs to that quantity,
+  not the following location/material. This is handled inside the
+  existing argument relation walk, without another full-SIG pass.
+  Exact amounts and unrelated action material/destination text remain
+  unchanged. Rich qualified graph sentences keep their actual
+  material and target rather than falling back to a poorer dose label.
+
+Independent oracles added to the two existing R6/instruction-graph
+suites cover historical AND compact step edits/clears, modifiers and
+unrelated metadata, all 49 active/carrier operator pairs, independent
+unit coding, EMA-only/native-edited rate previews in EN/TH, and qualified
+rich action statements using English words, ASCII symbols and Unicode-
+compatible structured operators. Graph codec and actual reverse FHIR
+adapter save/reopen checks preserve the active qualifier, numeric dose,
+rich graph arguments and original source. No application code, database,
+scheduler arithmetic, approximate-supply policy or runtime dependency
+changed. Replies belong only in the original inline threads; the
+outside-diff finding has no inline thread, so its disposition is here.
+
+Final gate on the complete changes: 3,998/3,998 source tests across
+44 suites PASS; packaged ESM/CJS 4/4 PASS; ES6 bundles and TypeScript
+build PASS. R6 292/292 and instruction-graph 261/261. Thirteen added
+cases in the existing files include parameterized/looped independent
+operator and metadata edit matrices, not thirteen new runtime checks.
+Real paired downstream adapters retained qualified graph amounts,
+carrier/dose data and source text through in-memory save/reopen.
+
+Nine alternating warm 80-parse batches against immutable 94974d6
+(median microseconds): ordinary 1628.5 -> 1563.0; Thai 5924.9 ->
+5921.8; independent-eye taper 6137.6 -> 6138.2; qualified graph
+3455.1 -> 3402.0. No measured common-path slowdown in this host run;
+these are not mobile results. No new full review, publication,
+merge, deployment or downstream migration requested.

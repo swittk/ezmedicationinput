@@ -57,7 +57,10 @@ function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageInstructi
   const native = extension?.filter(item => item.url !== R5_STEP_MODIFIERS_R6_URL) ?? [];
   const extensions = modifiers?.length
     ? [...native, { url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers }] : native;
-  return { ...fields, ...(extensions.length ? { extension: extensions } : {}) };
+  // Empty arrays are explicit edits, not missing metadata. Omitting them
+  // here lets the retained step bring a cleared extension back to life.
+  return { ...fields, ...(extensions.length || extension !== undefined ||
+    modifierExtension !== undefined ? { extension: extensions } : {}) };
 }
 
 function r5StepMetadata(step: Omit<FhirR6DosageInstruction["step"][number], "component">):
@@ -1195,8 +1198,13 @@ function reconcileRetainedCourse(
     const step = retained.step[sequence - 1];
     const live = groups.get(sequence) ?? [];
     const editedStep = metadata.get(sequence);
-    const { sequence: _metadataSequence, ...editedStepFields } = editedStep ?? { sequence };
-    const editedR6Step = r6StepMetadata(editedStep ?? {});
+    const { component: _retainedComponents, ...retainedStepFields } = step ?? { component: [] };
+    // A course edit is partial: merge it with the retained R5 fields before
+    // moving modifiers back into their R6 wrapper. Native extensions and
+    // modifiers have independent owners; clearing one must not erase the other.
+    const editedR6Step = editedStep
+      ? r6StepMetadata({ ...r5StepMetadata(retainedStepFields), ...editedStep })
+      : retainedStepFields;
     if (!step) {
       structuredChanged = true;
       addWarning(warnings,
@@ -1205,9 +1213,8 @@ function reconcileRetainedCourse(
         component: live.map(dosage => toR6Dosage(dosage)) });
       continue;
     }
-    const { component: _retainedComponents, ...retainedStepFields } = step;
     if (editedStep && !equivalentProjection(
-      retainedStepFields, editedStepFields)) {
+      retainedStepFields, editedR6Step)) {
       structuredChanged = true;
     }
     const componentCountChanged = live.length !== step.component.length;
@@ -1388,13 +1395,7 @@ function reconcileRetainedCourse(
       }
       components.push(fresh);
     }
-    steps.push({
-      ...step, ...editedR6Step,
-      // An explicit R5 modifier clear must clear its old R6 wrapper too.
-      ...(editedStep?.modifierExtension !== undefined
-        ? { extension: editedR6Step.extension } : {}),
-      component: components
-    });
+    steps.push({ ...editedR6Step, component: components });
   }
   const { renderedInstruction: retainedInstruction, ...retainedFields } = retained;
   const result: FhirR6DosageInstruction = {
@@ -2489,8 +2490,14 @@ function reconcileCompactCourse(
       continue;
     }
     editedSequences.add(sequence);
-    const merged = { ...metadata.get(sequence)?.step, ...fields };
-    if (!equivalentProjection(metadata.get(sequence)?.step ?? {}, merged)) metadataEdited = true;
+    const previous = metadata.get(sequence);
+    // Compact rows keep R6 wrappers; edit fields are R5. Split their owners
+    // before merging so clearing native extensions does not clear modifiers.
+    const merged = r6StepMetadata({ ...r5StepMetadata(previous?.step ?? {}), ...fields });
+    if (!equivalentProjection(previous?.step ?? {}, merged)) {
+      metadataEdited = true;
+      if (previous?.marker) sources.push(localReconciliationSource(previous.marker));
+    }
     metadata.set(sequence, { step: merged, rowIndex: -1 });
   }
   const instructionMarker = dosages.map(dosage => dosage.extension?.find(isRenderedInstructionMarker)).find(Boolean);

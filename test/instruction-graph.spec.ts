@@ -2,7 +2,7 @@ import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationConditi
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
-import { realizeInstructionAction } from "../src/instruction-graph";
+import { realizeInstructionAction, instructionGraphRichPrimaryAction } from "../src/instruction-graph";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
@@ -2010,5 +2010,68 @@ describe("standard coded oromucosal swish-and-spit technique", () => {
       const route = parsePublicSig(source).fhir[0]?.route;
       expect(route?.coding?.some(coding => coding.code === "SWISHSPIT")).not.toBe(true);
     }
+  });
+});
+
+
+describe("qualified quantities keep their meaning in action graph realization", () => {
+  it.each([
+    ["approximately ", "~", "approximately ", "ประมาณ "],
+    ["at least ", ">=", "at least ", "อย่างน้อย "],
+    ["at most ", "<=", "at most ", "ไม่เกิน "],
+    ["more than ", ">", "more than ", "มากกว่า "],
+    ["less than ", "<", "less than ", "น้อยกว่า "],
+    ["~", "~", "approximately ", "ประมาณ "],
+    [">=", ">=", "at least ", "อย่างน้อย "],
+    ["<=", "<=", "at most ", "ไม่เกิน "]
+  ] as const)("retains %s on the primary rich amount through source, graph and FHIR", (prefix, comparator, en, th) => {
+    const source = `squeeze ${prefix}1 cm ribbon cream onto each spot`;
+    for (const [locale, expected] of [["en", en], ["th", th]] as const) {
+      const parsed = parsePublicSig(source, { locale });
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toMatchObject({ value: 1, unit: "cm ribbon", comparator });
+      const graph = clause.instructionGraph!;
+      const action = graph.actions.find(value => value.predicate.lemma === "squeeze")!;
+      const quantity = action.args.find(value => value.role === AdviceArgumentRole.Amount)?.quantity;
+      expect(quantity).toMatchObject({ value: 1, unit: "cm ribbon", comparator });
+      expect(parsed.longText).toContain(`${expected}1`);
+      expect(parsed.longText).toContain(locale === "th" ? "ครีม" : "cream");
+      expect(parsed.longText).toContain(locale === "th" ? "จุดที่มีอาการ" : "spot");
+      expect(clause.rawText).toBe(source);
+      const extension = buildInstructionGraphExtension(graph)!;
+      expect(JSON.stringify(extension)).toContain("http://ema.europa.eu/fhir/extension/comparator");
+      const restored = parseInstructionGraphExtension([JSON.parse(JSON.stringify(extension))])!;
+      expect(restored.actions.find(value => value.predicate.lemma === "squeeze")?.args
+        .find(value => value.role === AdviceArgumentRole.Amount)?.quantity?.comparator).toBe(comparator);
+      expect(realizeInstructionAction(restored.actions.find(value => value.predicate.lemma === "squeeze")!, locale))
+        .toContain(`${expected}1`);
+      expect(fromFhirDosage(parsed.fhir[0], { locale }).longText).toContain(`${expected}1`);
+    }
+  });
+
+  it("retains qualifiers on dose-defining action arguments and does not confuse AT MOST with a location", () => {
+    for (const [prefix, comparator, expected] of [
+      ["approximately ", "~", "ประมาณ "],
+      ["at most ", "<=", "ไม่เกิน "],
+      [">=", ">=", "อย่างน้อย "]
+    ] as const) {
+      const source = `Dissolve ${prefix}2 tablets in water`;
+      const parsed = parsePublicSig(source, { locale: "th" });
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab", comparator });
+      expect(parsed.longText).toContain(`${expected}2`);
+      expect(parsed.longText).toContain("น้ำ");
+      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+    }
+  });
+
+  it("does not match an old exact graph amount to a newly qualified dose", () => {
+    const parsed = parsePublicSig("squeeze 1 cm ribbon cream onto each spot");
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
+    clause.dose!.comparator = "~";
+    expect(instructionGraphRichPrimaryAction(clause)).toBeUndefined();
+    // The old graph remains editable. It is simply not the current dose.
+    expect(clause.instructionGraph?.actions[0].args.find(value =>
+      value.role === AdviceArgumentRole.Amount)?.quantity?.value).toBe(1);
   });
 });

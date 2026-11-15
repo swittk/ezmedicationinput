@@ -1,3 +1,5 @@
+import type { FhirR6Quantity } from "./types";
+
 export type I18nRecord = Record<string, string>;
 
 export function normalizeLocaleTag(locale: string | undefined): string | undefined {
@@ -116,4 +118,22 @@ export function composeLocalizedRecords(
     if (composed) output[locale] = composed;
   }
   return Object.keys(output).length ? output : undefined;
+}
+
+/** Spoken quantity operator shared by medication and action-graph renderers.
+ * No qualifier means no prefix; amounts must not become exact when the
+ * instruction graph supplies a richer sentence than the ordinary dose body. */
+export function quantityComparatorText(
+  comparator: FhirR6Quantity["comparator"], locale: string
+): string {
+  if (!comparator) return "";
+  const thai = baseLanguageTag(locale) === "th";
+  switch (comparator) {
+    case "~": return thai ? "ประมาณ " : "approximately ";
+    case ">=": return thai ? "อย่างน้อย " : "at least ";
+    case "<=": return thai ? "ไม่เกิน " : "at most ";
+    case ">": return thai ? "มากกว่า " : "more than ";
+    case "<": return thai ? "น้อยกว่า " : "less than ";
+    case "ad": return thai ? "ปริมาณเพียงพอสำหรับ " : "sufficient to achieve ";
+  }
 }

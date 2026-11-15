@@ -4314,6 +4314,113 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }
   });
 
+  it("keeps native step extensions and modifiers independently editable in retained R5 stages", () => {
+    const wrap = "urn:ezmedicationinput:StructureDefinition:r5-step-modifier-extensions";
+    const native = { url: "https://example.org/native-step", valueString: "native" };
+    const oldModifier = { url: "https://example.org/old-modifier", valueString: "old" };
+    const replacement = { url: "https://example.org/new-modifier", valueString: "new" };
+    for (const hasModifier of [false, true]) {
+      const originalExtensions: FhirExtension[] = [native, ...(hasModifier
+        ? [{ url: wrap, extension: [oldModifier] }] : [])];
+      const original: FhirR6DosageInstruction = { step: [{
+        id: "original-step", extension: originalExtensions,
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+      }] };
+      // Historical storage uses one typed child per retained extension.
+      const marker: FhirExtension = {
+        url: "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details",
+        extension: [{ url: "dosageDetails", extension: [{ url: "step", extension: [
+          { url: "id", valueString: "original-step" },
+          ...originalExtensions.map(extension => ({ url: "extension", extension: [extension] })),
+          { url: "component", extension: [{ url: "doseAndRate", extension: [{
+            url: "doseQuantity", valueQuantity: { value: 1, unit: "tab" }
+          }] }] }
+        ] }] }]
+      };
+      const historical: EzDosage[] = [{ sequence: 1,
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], modifierExtension: [marker] }];
+      expect(toDosageDetails(historical)).toEqual(original);
+      for (const inputRows of [historical, toFhirR5Dosages(original)])
+      for (const [edit, keepNative, expectedModifier] of [
+        [{ sequence: 1, id: "edited-step" }, true, hasModifier ? oldModifier : undefined],
+        [{ sequence: 1, extension: [] }, false, hasModifier ? oldModifier : undefined],
+        [{ sequence: 1, modifierExtension: [replacement] }, true, replacement],
+        [{ sequence: 1, modifierExtension: [] }, true, undefined],
+        [{ sequence: 1, extension: [], modifierExtension: [] }, false, undefined]
+      ] as const) {
+        const edited = toDosageDetails(inputRows, undefined, { step: [edit] });
+        const extensions = edited.step[0].extension ?? [];
+        expect(extensions.some(value => value.url === native.url)).toBe(keepNative);
+        expect(extensions.find(value => value.url === wrap)?.extension)
+          .toEqual(expectedModifier ? [expectedModifier] : undefined);
+        expect(edited.step[0].id).toBe("id" in edit ? edit.id : "original-step");
+        // Clearing an already absent modifier is a no-op, not a reason
+        // to create history. Actual edits retain the original source.
+        if (hasModifier || "id" in edit || "extension" in edit || expectedModifier)
+          expect(JSON.stringify(edited.extension)).toContain("native-step");
+        const reopened = toDosageDetails(toFhirR5Dosages(edited));
+        expect(reopened.step[0].extension ?? []).toEqual(extensions);
+        expect(fromFhir(edited).fhirNext.step[0]).toEqual(edited.step[0]);
+      }
+    }
+  });
+
+  it("does not make independently qualified carrier rates inherit an equal-valued drug dose", () => {
+    const operators = [undefined, "~", "<", "<=", ">", ">=", "ad"] as const;
+    for (const doseComparator of operators) for (const rateComparator of operators) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{
+        doseQuantity: { value: 500, unit: "mL", ...(doseComparator ? { comparator: doseComparator } : {}) },
+        rateRatio: { numerator: { value: 500, unit: "mL",
+          ...(rateComparator ? { comparator: rateComparator } : {}) },
+          denominator: { value: 2, unit: "h" } }
+      }] }] }] };
+      const row = toFhirR5Dosages(source)[0];
+      const rebuilt = canonicalToFhir(canonicalFromFhir(row));
+      const back = toDosageDetails([rebuilt]).step[0].component[0].doseAndRate![0];
+      expect(back.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+      expect(back.doseQuantity?.comparator).toBe(doseComparator);
+      expect(back.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
+      expect(back.rateRatio?.numerator?.comparator).toBe(rateComparator);
+      expect(back.rateRatio?.denominator?.value).toBe(2);
+    }
+    // Equal labels do not make independently authored unit coding identical.
+    const coded: FhirDosage = { doseAndRate: [{
+      doseQuantity: { value: 500, unit: "mL", code: "mL", system: "urn:example:active" },
+      rateRatio: { numerator: { value: 500, unit: "mL", code: "mL", system: "urn:example:carrier" },
+        denominator: { value: 2, unit: "h" } }
+    }] };
+    const rebuilt = canonicalToFhir(canonicalFromFhir(coded));
+    expect(rebuilt.doseAndRate?.[0].doseQuantity?.system).toBe("urn:example:active");
+    expect(rebuilt.doseAndRate?.[0].rateRatio?.numerator?.system).toBe("urn:example:carrier");
+  });
+
+  it("shows EMA-only and native-edited R6 rate operators in both item and course previews", () => {
+    const codes = [["~", "100000000055"], [">=", "100000000053"],
+      ["<=", "100000000052"], [">", "100000000051"], ["<", "100000000050"]] as const;
+    const qualifier = (code: string) => [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    }];
+    for (const [operator, code] of codes) for (const native of [false, true]) {
+      const expectedOperator = native ? "<" : operator;
+      const amount = { value: 100, unit: "mL/h", extension: qualifier(code),
+        ...(native ? { comparator: "<" as const } : {}) };
+      for (const [rate, expected] of [
+        [{ rateQuantity: amount }, `${expectedOperator}100 mL/h`],
+        [{ rateRatio: { numerator: { ...amount, unit: "mL" },
+          denominator: { value: 2, unit: "h", extension: qualifier("100000000053") } } },
+          `${expectedOperator}100 mL / >=2 h`]
+      ] as const) {
+        const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [rate] }] }] };
+        for (const locale of ["en", "th"]) {
+          expect(formatSig(source, "long", { locale })).toContain(expected);
+          expect(fromFhir(source, { locale }).items[0].longText).toContain(expected);
+        }
+        expect(fromFhir(source).fhirNext).toEqual(source);
+      }
+    }
+  });
+
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;
     const invalid = [

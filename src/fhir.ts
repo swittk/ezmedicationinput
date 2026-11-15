@@ -362,7 +362,8 @@ function clinicalCarrierQuantityFromFhir(
       ...(durationComparator ? { comparator: durationComparator } : {}) }],
     projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active),
       ...(activeComparator ? { comparator: activeComparator } : {}) },
-    ...(material || doseLabel !== volumeLabel
+    ...(material || doseLabel !== volumeLabel || activeComparator !== carrierComparator ||
+        active.system !== carrier.system || active.code !== carrier.code
       ? { rateNumerator: {
           value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier),
           ...(carrierComparator ? { comparator: carrierComparator } : {})

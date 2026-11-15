@@ -1,3 +1,4 @@
+import { quantityComparatorText } from "./localization";
 import { hasDailyRecurrenceAcrossClocks } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
@@ -888,21 +889,6 @@ function grammarFromRouteTextThai(text: string | undefined): ThaiRouteGrammar | 
   return undefined;
 }
 
-/** Display authored comparator meaning for all Thai dose realizations.
- * Approximation and inequality qualifiers are clinical meaning, not decoration.
- */
-function thaiDoseComparator(comparator: CanonicalDoseExpr["comparator"]): string {
-  switch (comparator) {
-    case "~": return "ประมาณ ";
-    case ">=": return "อย่างน้อย ";
-    case "<=": return "ไม่เกิน ";
-    case ">": return "มากกว่า ";
-    case "<": return "น้อยกว่า ";
-    case "ad": return "ปริมาณเพียงพอสำหรับ ";
-    default: return "";
-  }
-}
-
 function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | undefined {
   if (!dose) {
     return undefined;
@@ -931,7 +917,7 @@ function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | unde
     }
   }
   if (dose.value !== undefined) {
-    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     if (dose.unit) {
       return `${quantity} ${formatUnitThai(dose.unit, dose.value, "short")}`;
     }
@@ -977,7 +963,7 @@ function formatDoseThaiLong(dose: CanonicalDoseExpr | undefined): string | undef
     }
   }
   if (dose.value !== undefined) {
-    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     if (dose.unit) {
       return `ครั้งละ ${quantity} ${formatUnitThai(dose.unit, dose.value, "long")}`;
     }
@@ -1003,7 +989,7 @@ function formatDoseThaiPerTarget(dose: CanonicalDoseExpr | undefined): string | 
     }
   }
   if (dose.value !== undefined) {
-    const quantity = thaiDoseComparator(dose.comparator) + stripTrailingZero(dose.value);
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     return dose.unit
       ? `${quantity} ${dose.unit.toLowerCase() === "spray" ? "ครั้ง" : formatUnitThai(dose.unit, dose.value, "long")}`
       : quantity;
@@ -2490,7 +2476,8 @@ function formatLongThai(
       arg.quantity?.value === clause.dose?.value &&
       arg.quantity?.range?.low === clause.dose?.range?.low &&
       arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
     )
   ));
   const hasAdministrationTiming = Boolean(

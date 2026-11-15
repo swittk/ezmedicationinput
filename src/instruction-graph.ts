@@ -1,4 +1,4 @@
-import { courseContinuationDurationAt } from "./hpsg/lexical-classes";
+import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
   resolveAdviceMannerModifier,
@@ -20,7 +20,7 @@ import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue } from "./localization";
+import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
 import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
@@ -671,8 +671,14 @@ function actionArgumentRelation(
 
 function relationIndex(parts: Lexeme[], start: number, endExclusive: number): number {
   for (let index = start; index < endExclusive; index += 1) {
+    const lower = key(parts[index]);
+    // AT in "at most 2 tablets" belongs to the amount, not the location.
+    // Reuse the bounded quantity lexeme inside this existing relation walk.
+    const quantity = DOSE_COMPARATOR_PREFIXES.has(lower)
+      ? doseComparatorNumberAt(parts, index, endExclusive, lower) : undefined;
+    if (quantity) { index = quantity.numericIndex; continue; }
     if (
-      Boolean(actionArgumentRelation(key(parts.slice(index, index + 1)[0]))) &&
+      Boolean(actionArgumentRelation(lower)) &&
       !tokenBelongsToBodySiteRelationPhrase(parts, index, start, endExclusive)
     ) return index;
   }
@@ -773,25 +779,33 @@ function parseQuantityArgument(
   offset: number,
   options?: ParseOptions
 ): AdviceArgument | undefined {
-  for (let index = start; index + 1 < endExclusive; index += 1) {
+  for (let index = start; index < endExclusive; index += 1) {
     const valueToken = parts[index];
     if (!valueToken) continue;
-    const modifier = parts[index + 1];
+    // Reuse the same bounded qualifier lexeme as scalar/infusion HPSG.
+    // The graph keeps the original source span, not an exact-dose rewrite.
+    const qualified = valueToken.kind === "NUMBER" ? undefined :
+      doseComparatorNumberAt(parts, index, endExclusive, key(valueToken));
+    const numberIndex = qualified?.numericIndex ?? index;
+    const modifier = parts[numberIndex + 1];
     const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
-      ? index + 2 : index + 1;
-    const unitMatch = instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
+      ? numberIndex + 2 : numberIndex + 1;
+    const compactUnit = qualified?.rawUnit ? normalizeUnit(qualified.rawUnit, options) : undefined;
+    const unitMatch = qualified?.rawUnit
+      ? compactUnit ? { unit: compactUnit, endExclusive: numberIndex + 1 } : undefined
+      : instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
     if (!unitMatch) continue;
     const unitToken = parts[unitMatch.endExclusive - 1];
     if (!unitToken) continue;
     const unit = unitMatch.unit;
     const wordValue = INSTRUCTION_NUMBER_WORDS[key(valueToken)];
-    if ((valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
-      const value = valueToken.kind === "NUMBER" ? valueToken.value : wordValue;
+    if (qualified || (valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
+      const value = qualified?.value ?? (valueToken.kind === "NUMBER" ? valueToken.value : wordValue);
       return {
         role: AdviceArgumentRole.Amount,
         text: sourceFor(parts, index, unitMatch.endExclusive, input),
         normalized: unit,
-        quantity: { value, unit },
+        quantity: { value, unit, ...(qualified ? { comparator: qualified.comparator } : {}) },
         span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
       };
     }
@@ -2589,7 +2603,7 @@ function doseSourceRange(clause: CanonicalSigClause): TextRange | undefined {
 function amountText(dose: CanonicalDoseExpr, source: string): string {
   if (source.trim()) return source.trim();
   if (dose.range) return `${dose.range.low ?? ""}-${dose.range.high ?? ""} ${dose.unit ?? ""}`.trim();
-  return `${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
+  return `${dose.comparator ?? ""}${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
 }
 
 function attachDoseToNearestAction(
@@ -2622,7 +2636,8 @@ function attachDoseToNearestAction(
     quantity: {
       value: clause.dose.value,
       range: clause.dose.range ? { ...clause.dose.range } : undefined,
-      unit: clause.dose.unit
+      unit: clause.dose.unit,
+      ...(clause.dose.comparator ? { comparator: clause.dose.comparator } : {})
     },
     span: range
   });
@@ -2802,6 +2817,7 @@ function sourceBackedTimeExtension(
       normalizedInstructionSurface(next.text ?? next.normalized ?? "") === surface &&
       next.quantity?.value === arg.quantity?.value &&
       next.quantity?.unit === arg.quantity?.unit &&
+      next.quantity?.comparator === arg.quantity?.comparator &&
       next.quantity?.range?.low === arg.quantity?.range?.low &&
       next.quantity?.range?.high === arg.quantity?.range?.high
     );
@@ -3088,6 +3104,7 @@ function promoteDoseFromDefiningAction(
   const same = candidates.every((candidate) =>
     candidate.value === first.value &&
     candidate.unit === first.unit &&
+    candidate.comparator === first.comparator &&
     candidate.range?.low === first.range?.low &&
     candidate.range?.high === first.range?.high
   );
@@ -3095,7 +3112,8 @@ function promoteDoseFromDefiningAction(
   clause.dose = {
     value: first.value,
     range: first.range ? { ...first.range } : undefined,
-    unit: first.unit
+    unit: first.unit,
+    ...(first.comparator ? { comparator: first.comparator } : {})
   };
 }
 
@@ -3411,10 +3429,11 @@ function translatedQuantity(
   const unit = localizedLabels
     ? (singular ? localizedLabels.one : localizedLabels.other)
     : (quantity.unit ?? "");
+  const qualifier = quantityComparatorText(quantity.comparator, locale);
   if (quantity.range) {
-    return `${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
+    return `${qualifier}${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
   }
-  return `${quantity.value ?? ""} ${unit}`.trim();
+  return `${qualifier}${quantity.value ?? ""} ${unit}`.trim();
 }
 
 function translatedArgument(arg: AdviceArgument, locale: string): string {
@@ -3816,6 +3835,7 @@ export function instructionGraphCoversTypedWarnings(
           (!arg.quantity || Boolean(candidate.quantity &&
             arg.quantity.value === candidate.quantity.value &&
             arg.quantity.unit === candidate.quantity.unit &&
+            arg.quantity.comparator === candidate.quantity.comparator &&
             arg.quantity.range?.low === candidate.quantity.range?.low &&
             arg.quantity.range?.high === candidate.quantity.range?.high))
         )
@@ -3945,7 +3965,8 @@ function quantityCoveredByDose(arg: AdviceArgument, dose: CanonicalDoseExpr | un
   return arg.quantity.value === dose.value &&
     arg.quantity.range?.low === dose.range?.low &&
     arg.quantity.range?.high === dose.range?.high &&
-    arg.quantity.unit === dose.unit;
+    arg.quantity.unit === dose.unit &&
+    arg.quantity.comparator === dose.comparator;
 }
 
 function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigClause): boolean {
@@ -4087,11 +4108,7 @@ export function instructionGraphRichPrimaryAction(
   const dose = clause.dose;
   const matchesDose = (action: AdviceFrame): boolean => Boolean(
     dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === dose.value &&
-      arg.quantity?.range?.low === dose.range?.low &&
-      arg.quantity?.range?.high === dose.range?.high &&
-      arg.quantity?.unit === dose.unit
+      arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, dose)
     )
   );
   return graph.actions.find((action) => {
