@@ -2472,3 +2472,28 @@ describe("November 16 explicit primary action owner", () => {
     expect(JSON.stringify(graph)).toBe(snapshot);
   });
 });
+
+
+describe("November 16 rich amountless primary remains dose-editable", () => {
+  it("retains an edited canonical dose beside an amountless rich Drink action in EN/TH", () => {
+    const source = "Dissolve 2 tablets in water, then drink slowly";
+    const actions = parseInstructionActions(source);
+    const drink = actions.find(action => action.predicate.lemma === "drink")!;
+    drink.args = [{ role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" }];
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...drink.span } };
+    const clause = parsePublicSig("Drink 2 tablets").meta.canonical.clauses[0];
+    clause.dose = { value: 3, unit: "tab" };
+    clause.instructionGraph = graph;
+    expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
+    const original = JSON.stringify(graph);
+    for (const locale of ["en", "th"] as const) {
+      const text = formatCanonicalClause(clause, "long", resolveSigLocalization(locale));
+      expect(text).toContain("3");
+      if (locale === "en") expect(text.toLowerCase()).toContain("slowly");
+      else expect(text).toContain("เม็ด");
+      expect(text).not.toContain("2 tablets");
+    }
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+});

@@ -1686,3 +1686,26 @@ describe("adversarial compact infusion carriers and leading-decimal rates", () =
     }
   );
 });
+
+
+describe("November 16 qualified glued tablet fractions", () => {
+  it.each([
+    ["≤1/2 tablet", 0.5, "<="],
+    [">=3/4 tab", 0.75, ">="],
+    ["~1/2 tab", 0.5, "~"],
+    ["≤0.5 tablet", 0.5, "<="],
+    ["≤ 1/2 tablet", 0.5, "<="]
+  ] as const)("%s retains its comparator and clinical numeric dose", (sig, value, comparator) => {
+    const parsed = parsePublicSig(sig, { context: { dosageForm: "tablet" } });
+    const dose = parsed.meta.canonical.clauses[0]?.dose;
+    expect(dose?.value).toBe(value);
+    expect(dose?.comparator).toBe(comparator);
+    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value).toBe(value);
+  });
+  it.each(["≤1/0 tablet", "≥2/0 tablet"])("never produces a non-finite dose: %s", sig => {
+    const parsed = parsePublicSig(sig, { context: { dosageForm: "tablet" } });
+    expect(parsed.meta.canonical.clauses[0]?.dose?.value).not.toBe(Infinity);
+    expect(parsed.meta.canonical.clauses[0]?.dose?.value).not.toBe(NaN);
+    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value).not.toBe(Infinity);
+  });
+});

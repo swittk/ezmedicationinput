@@ -1899,7 +1899,7 @@ function durationStepper(
 function treatmentStepWindow(
   course: FhirR6DosageInstruction, index: number, anchor: Date,
   previousEnd: Date, timeZone: string, sourceClock?: TreatmentWallClock,
-  predecessorClock?: TreatmentWallClock
+  predecessorClock?: TreatmentWallClock, options?: NextDueDoseOptions
 ): { start: Date; end: Date | undefined } {
   const step = course.step[index];
   const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock) : previousEnd;
@@ -1910,10 +1910,25 @@ function treatmentStepWindow(
     const componentEnds = step.component.map(component => {
       const cadence = parallelComponentCadence(component, anchor, timeZone,
         start, sourceClock, capClock);
-      return earlierDate(
+      let finiteEnd = earlierDate(
         resolveRepeatDurationCapEnd(component, cadence.origin, timeZone, cadence.capClock),
         resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
       );
+      const repeat = component.timing?.repeat;
+      // An implicit phase boundary can be established by an authored count,
+      // not just a calendar duration. Only resolve count-bearing components:
+      // ordinary relative steps retain their existing zero-extra-work path.
+      if (repeat?.count !== undefined || arrayIncludes(repeat?.when ?? [], EventTiming.Immediate)) {
+        const row = toFhirR5Dosages({ step: [{ component: [component] }] })[0];
+        const completion = finiteAdministrationCompletion(row, cadence.origin,
+          options ?? { from: cadence.origin.toISOString(), orderedAt: cadence.origin.toISOString(),
+            timeZone }, timeZone);
+        if (completion) {
+          const exclusive = new Date(completion.end.getTime() + (completion.point ? 1 : 0));
+          finiteEnd = earlierDate(finiteEnd, exclusive);
+        }
+      }
+      return finiteEnd;
     }).filter((value): value is Date => Boolean(value));
     if (componentEnds.length === step.component.length && componentEnds.length) {
       end = componentEnds.reduce((latest, value) => value > latest ? value : latest, start);
@@ -1934,14 +1949,14 @@ function treatmentStepWindow(
  */
 function repeatedCourseHorizon(
   course: FhirR6DosageInstruction, anchor: Date, nextCycle: Date, timeZone: string,
-  sourceClock?: TreatmentWallClock
+  sourceClock?: TreatmentWallClock, options?: NextDueDoseOptions
 ): Date {
   let horizon = nextCycle;
   let previousEnd = anchor;
   let predecessorClock = sourceClock;
   for (let index = 0; index < course.step.length; index++) {
     const { start, end } = treatmentStepWindow(course, index, anchor,
-      previousEnd, timeZone, sourceClock, predecessorClock);
+      previousEnd, timeZone, sourceClock, predecessorClock, options);
     const capClock = stageCalendarClock(course, index, start, timeZone,
       sourceClock, predecessorClock);
     if (end) {
@@ -1993,7 +2008,7 @@ function scheduleTreatmentRelativeCourse(
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
     const { start, end } = treatmentStepWindow(course, index, anchor,
-      previousEnd, timeZone, sourceClock, predecessorClock);
+      previousEnd, timeZone, sourceClock, predecessorClock, options);
     const capClock = stageCalendarClock(course, index, start, timeZone,
       sourceClock, predecessorClock);
     for (const component of step.component) {
@@ -2095,7 +2110,7 @@ function scheduleRepeatedCourse(
     const cycleEnd = advance(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
     const sourceClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, timeZone);
-    const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock);
+    const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock, options);
     if (horizon > from) {
       const candidates = scheduleTreatmentRelativeCourse(singleCycle, {
         ...options, from: from > cycleStart ? from : cycleStart,
@@ -4595,7 +4610,7 @@ function calculateCourseTotalUnits(
       const cycleEnd = cycleAdvance(cycleStart);
       if (!cycleEnd || cycleEnd <= cycleStart) break;
       const originalClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, zone);
-      const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock);
+      const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock, options);
       const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;
       if (windowEnd > windowStart) {
@@ -4908,8 +4923,12 @@ function finiteAdministrationCompletion(
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
-  const local = dosage.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)
-    ? { ...dosage, modifierExtension: dosage.modifierExtension.filter(extension => extension.url !== DOSAGE_DETAILS_R5_URL) }
+  const local = dosage.modifierExtension?.some(extension =>
+    extension.url === DOSAGE_DETAILS_R5_URL ||
+    extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)
+    ? { ...dosage, modifierExtension: dosage.modifierExtension.filter(extension =>
+      extension.url !== DOSAGE_DETAILS_R5_URL &&
+      extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) }
     : dosage;
   const due = nextDueDoses(local, { ...options, from: start, orderedAt: start, limit: count });
   if (due.length !== count) return undefined;

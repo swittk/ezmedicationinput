@@ -1575,12 +1575,15 @@ export function formatSig(
                 ? " " + (amount.doseQuantity.unit ?? amount.doseQuantity.code) : "")
             );
           }
-          if (amount.rateQuantity?.value !== undefined) {
+          if (amount.rateQuantity && (amount.rateQuantity.value !== undefined ||
+              amount.rateQuantity.unit || amount.rateQuantity.code)) {
+            const rate = amount.rateQuantity;
+            const unit = rate.unit ?? rate.code;
             expressions.push(
               (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              (getQuantityComparator(amount.rateQuantity) ?? "") + amount.rateQuantity.value +
-              (amount.rateQuantity.unit || amount.rateQuantity.code
-                ? " " + (amount.rateQuantity.unit ?? amount.rateQuantity.code) : "")
+              (rate.value === undefined ? (thai ? "ไม่ระบุค่า" : "unspecified")
+                : (getQuantityComparator(rate) ?? "") + rate.value) +
+              (unit ? " " + unit : "")
             );
           }
           const numerator = amount.rateRatio?.numerator;
@@ -1806,6 +1809,7 @@ export function fromFhir(
         !component.doseAndRate?.some(rate =>
           rate.doseQuantity?.comparator ||
           rate.rateQuantity?.value !== undefined ||
+          Boolean(rate.rateQuantity?.unit || rate.rateQuantity?.code) ||
           rate.rateRatio?.numerator?.value !== undefined ||
           Boolean(rate.rateRatio?.numerator?.unit || rate.rateRatio?.numerator?.code ||
             rate.rateRatio?.denominator?.unit || rate.rateRatio?.denominator?.code) ||

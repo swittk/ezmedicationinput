@@ -691,7 +691,7 @@ function toR6Dosage(dosage: FhirDosage | EzDosage): FhirR6Dosage {
       rate.rateRatio?.numerator?.extension?.length &&
         getEmaQuantityComparator(rate.rateRatio.numerator)
     );
-    if (rate.modifierExtension !== undefined || hasComparator) {
+    if (Object.prototype.hasOwnProperty.call(rate, "modifierExtension") || hasComparator) {
       if (r6Rates === doseAndRate) r6Rates = doseAndRate.slice(0, index);
       const { modifierExtension: oldModifiers, extension: oldExtensions,
         doseQuantity, rateQuantity, rateRatio, ...fields } = rate;

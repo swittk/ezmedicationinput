@@ -6124,3 +6124,28 @@ describe("November 16 PR #13: SimpleQuantity offset and duration display familie
     }
   });
 });
+
+
+describe("November 16 next review: partial R6 amounts and undefined R5 modifiers", () => {
+  it("removes a present-but-undefined rate modifier when projecting editable R5 to R6", () => {
+    const row: FhirDosage = { doseAndRate: [{
+      doseQuantity: { value: 1, unit: "tab" },
+      modifierExtension: undefined
+    }] };
+    const course = toDosageDetails([row]);
+    expect(course.step[0].component[0].doseAndRate?.[0]).not.toHaveProperty("modifierExtension");
+    expect(fromFhir(course).fhirNext).toEqual(course);
+    expect(row.doseAndRate?.[0]).toHaveProperty("modifierExtension");
+  });
+
+  it.each(["en", "th"] as const)("shows a known rate unit without inventing its value in %s", locale => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ rateQuantity: { unit: "mL/h" } }]
+    }] }] };
+    const text = locale === "th" ? "อัตราการให้ยา: ไม่ระบุค่า mL/h"
+      : "Rate: unspecified mL/h";
+    expect(formatSig(course, "long", { locale })).toContain(text);
+    expect(fromFhir(course, { locale }).items[0].longText).toContain(text);
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+  });
+});

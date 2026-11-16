@@ -6205,3 +6205,93 @@ The differences reverse across runs, consistent with shared-host
 measurement jitter, NOT evidence of a repeatable throughput loss
 or a device benchmark. No app edits, migration, dependency,
 publication or merged branch; no review re-requested.
+
+
+## 2026-11-16 — PR #13 new review: six real source-preservation / phase-execution findings
+
+Review gate: read complete current CodeRabbit review 5916542328 (07:45 UTC),
+all five new inline threads 4583129120, 4583129125, 4583129136,
+4583129144, 4583129151, and its one outside-diff finding at schedule.ts:
+finiteAdministrationCompletion. Independently reproduced the supported
+failure cases on parent 97d2d23 before changing code. Evaluated each
+against AGENTS, DIRECTIONALITY and historical diaries. All six are real,
+narrow defects; no speculative hard stops, second parser, R6 legacy
+compatibility, or application migration.
+
+1. A valid editable R5 doseAndRate row can carry an own
+   modifierExtension:undefined. R5->R6 previously reused that unchanged
+   entry; current-R6 importer then rejected the forbidden key via 'in'.
+   The existing one-pass R6 rate transformation now strips any PRESENT
+   modifierExtension key, even when its value is undefined. Routine
+   rate entries without that property still reuse their original array
+   without an additional walk or allocation.
+
+2. Comparator-qualified slash fractions glued into one token (e.g.
+   ≤1/2 tablet, >=3/4 tab, ~1/2 tab) failed the established bounded
+   numeric lexeme. Extended ONLY its existing numeric branch to read
+   num/den from a glued token. A zero denominator yields no numeric
+   suggestion, never infinity/NaN. Spaced fractions and decimals keep
+   their prior successful results. No extra grammar pass, validator or
+   late string replacement.
+
+3. A current R6 rateQuantity with known unit/code but no value
+   disappeared from both the native course preview and the imported
+   per-item preview. Both use the existing R6 display branch to say
+   'Rate: unspecified mL/h' (Thai: ไม่ระบุค่า mL/h), rather than
+   inventing a rate number. Known numeric qualifiers and rate ratios
+   are unchanged.
+
+4. A rich primary Drink action with Manner but no own Amount could
+   replace an edited numeric canonical administration, omitting the
+   clinician's current 3-tablet dose entirely. Both EN/TH long
+   realization now call one typed display-only helper: inject the
+   current canonical dose as an Amount on a temporary frame ONLY if
+   the selected rich primary has no quantity. The saved instruction
+   graph, source spans, preparation material, other independent actions
+   and numeric owner provenance remain unchanged. Cases with an
+   already-owned Amount retain their existing realization. No added
+   source reparse.
+
+5. Implicit relative stage ends considered component duration/date
+   but overlooked a known repeat.count. One counted loading dose
+   therefore stopped a two-stage +3h-origin course before maintenance
+   could be scheduled. The shared treatmentStepWindow now consults
+   the existing finiteAdministrationCompletion ONLY for authored
+   count/immediate components, takes the earliest known cap, and
+   transitions only if ALL members have finite completion. Point
+   completion is made exclusive by one millisecond, retaining the
+   final loading dose. Repeated-course horizon uses the same window
+   and supplied clock/context, rather than a separate transition
+   algorithm. Ordinary non-count stages do no extra completion work.
+
+6. finiteAdministrationCompletion previously removed the course
+   retention marker but left PARALLEL_COMPONENT_PHASE_ORIGIN on the
+   already-origin-resolved execution copy. nextDueDoses reopened the
+   source-local offset a second time, potentially moving a loading
+   dose and undercounting supply. It now removes BOTH local execution
+   markers without mutating source rows. Scheduling and supply
+   agree: Nov 2 08:00 loading + Nov 2 and 3 20:00 maintenance means
+   exactly THREE tablets. R6, strict R5 and parsed-batch representations
+   agree. Related normal/DST, concurrent multi-member, repeated-cycle
+   and no-marker tests remain passing.
+
+Dedicated regressions live in four EXISTING families: R6 bridge,
+typed HPSG clinical quantities, rich instruction graph, and schedule
+families, with direct failed oracles recorded before the changes.
+Validation: npm run build PASS (ES6 ESM/CJS, declarations);
+npm test **4188/4188 in 44/44 suites**; npm run test:dist **4/4**;
+git diff --check PASS. Read-only Shinebright adapter:
+R5 -> editable DosageType -> in-memory persisted medication usage ->
+reopened dosage preserves 1/2/4 rows and sequences exactly; consumer
+source/database untouched.
+
+Paired warm HPSERVER medians against immutable pre-review 97d2d23,
+seven alternating batches: ordinary SIG 1663.8->1653.0 us (-0.6%),
+Thai SIG 6125.1->6214.8 us (+1.5%), ocular taper
+6841.5->6895.8 us (+0.8%), glued fraction 842.7->859.8 us
+(+2.0%, earlier baseline omitted clinically meaningful dose),
+ordinary R6 scheduling 648.0->627.5 us (-3.2%).
+Shared-host timing noise limits interpretation: no consistent
+hot-path regression, no new whole-SIG pass or repeated routine
+array scan. No package publication, master merge, review
+re-request, agents or Shinebright migration.

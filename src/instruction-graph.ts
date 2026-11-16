@@ -3733,6 +3733,27 @@ export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): str
   return realizeAction(frame, locale);
 }
 
+/** A rich source action can carry its own Manner/Time but no Amount because a
+ * preceding preparatory verb supplied the original quantity. When the
+ * clinician edits the canonical dose, never let that amountless rich action
+ * replace the numeric administration text without the CURRENT dose.
+ * This is a display-only frame copy, not an edit of source graph/provenance. */
+export function realizeRichPrimaryWithCanonicalDose(
+  frame: AdviceFrame, dose: CanonicalDoseExpr | undefined, locale: string
+): string {
+  if (!dose || frame.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+    (dose.value === undefined && !dose.range)) return realizeAction(frame, locale);
+  const { value, range, unit, comparator } = dose;
+  return realizeAction({
+    ...frame, sourceText: "",
+    args: [...frame.args, {
+      role: AdviceArgumentRole.Amount,
+      text: "", quantity: { value, range, unit, comparator }
+    }]
+  }, locale);
+}
+
 function normalizedInstructionSurface(value: string): string {
   return value.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
 }

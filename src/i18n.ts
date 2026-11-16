@@ -42,6 +42,7 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
@@ -2236,7 +2237,7 @@ function formatLongThai(
     ? instructionGraphRoundTripPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeInstructionAction(richPrimaryGraphAction, "th")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause.dose, "th")
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

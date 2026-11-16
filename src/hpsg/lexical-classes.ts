@@ -761,9 +761,13 @@ export function doseComparatorNumberAt(
   value: number; numericIndex: number; rawUnit?: string } | undefined {
   if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
       !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
-  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+\/\d+|\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
   if (glued) {
-    const value = Number(glued[2]);
+    const slash = glued[2].indexOf("/");
+    const value = slash < 0 ? Number(glued[2]) :
+      Number(glued[2].slice(0, slash)) / Number(glued[2].slice(slash + 1));
+    // Never turn '≤1/0' into an infinite dose or numeric advice.
+    if (!Number.isFinite(value)) return undefined;
     const compactMillion = glued[3] === "m";
     const million = compactMillion
       ? { value: value * 1_000_000, numericIndex: start }

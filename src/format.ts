@@ -17,6 +17,7 @@ import {
   instructionGraphPrimaryAdministrationModality,
   instructionGraphPrimarySiteRelation,
   instructionGraphRichPrimaryAction,
+  realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
@@ -1380,7 +1381,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? instructionGraphRichPrimaryAction(clause)
     : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeInstructionAction(richPrimaryGraphAction, "en")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause.dose, "en")
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

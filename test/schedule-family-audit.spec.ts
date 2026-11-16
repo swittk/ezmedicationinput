@@ -2602,3 +2602,35 @@ describe("November 16 PR #13: elapsed parallel component origin owns its calenda
     expect(calculateTotalUnits({ dosage: course, ...options }).totalUnits).toBe(1);
   });
 });
+
+
+describe("November 16 finite-count parallel loading stage", () => {
+  const marker = "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin";
+  it("transitions to the maintenance stage after the finite +3h loading dose", () => {
+    const course: FhirR6DosageInstruction = { step: [
+      { component: [{
+        modifierExtension: [{ url: marker, valueQuantity: { value: 3, unit: "h", code: "h" } }],
+        timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] },
+      { component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["20:00:00"], boundsDuration: { value: 2, unit: "d", code: "d" } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }
+    ] };
+    const opts = { orderedAt: "2026-11-02T02:30:00-05:00",
+      from: "2026-11-02T02:30:00-05:00", timeZone: "America/New_York",
+      limit: 10, durationValue: 2, durationUnit: FhirPeriodUnit.Day };
+    const expected = [
+      "2026-11-02T08:00:00-05:00",
+      "2026-11-02T20:00:00-05:00",
+      "2026-11-03T20:00:00-05:00"
+    ];
+    for (const data of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      expect(nextDueDoses(data, opts)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: data, ...opts }).totalUnits).toBe(3);
+    }
+  });
+});
