@@ -63,11 +63,23 @@ export interface CanonicalConcept {
  * represent several differently qualified or expression-based limits without
  * demoting the extras into an active compatibility extension. */
 export interface CanonicalDoseLimit {
-  scope?: string;
+  scope: "dosage" | "period" | "administration" | "lifetime";
   amount?: CanonicalMeasure;
+  count?: number;
   expression?: CanonicalExpression;
   period?: CanonicalMeasure;
+  text?: string;
+  /** External-only metadata, not a second executable limit. */
   provenance?: Record<string, unknown>;
+}
+/** Understood clinical safety policy, not a bag of arbitrary restrictions.
+ * Unrecognized FHIR annotations remain ONLY in external source provenance.
+ * Dose limits at step/course scope reuse the same typed limit shape. */
+export interface CanonicalSafety {
+  ifExceeded?: string;
+  limits?: CanonicalDoseLimit[];
+  maximaDeclared?: boolean;
+  requiresReview?: boolean;
 }
 export interface CanonicalAmount {
   quantity?: CanonicalMeasure;
@@ -123,15 +135,38 @@ export interface CanonicalTiming {
 /** A boundary's anchor is interpreted once at import. A foreign/unknown event
  * remains available for editing, never guessed to be treatment start. */
 export interface CanonicalBoundary {
-  anchor: "treatment-start" | "unresolved";
+  /** Non-treatment anchors are valid clinical references, but MUST NOT be
+   * executed as treatment-relative dates without a supplied resolver. */
+  anchor: "treatment-start" | "coded-event" | "resource-reference" |
+    "definition" | "path" | "unresolved";
+  contextCode?: CanonicalConcept;
+  contextReference?: CanonicalReference;
+  contextDefinition?: string;
+  contextPath?: string;
   description?: string;
   displacement?: CanonicalMeasure;
   displacementRange?: CanonicalRange;
+  /** Uninterpreted external metadata, not an executable anchor. */
   provenance?: Record<string, unknown>;
 }
 export interface CanonicalChoice {
   groupId: string;
   branchId: string;
+}
+/** Known external resource identity semantics. Extra foreign Reference
+ * annotations are opaque source metadata, not additional clinical fields. */
+export interface CanonicalReference {
+  reference?: string;
+  type?: string;
+  identifier?: {
+    system?: string;
+    value?: string;
+    use?: string;
+    type?: CanonicalConcept;
+    period?: { start?: string; end?: string };
+  };
+  display?: string;
+  id?: string;
 }
 export interface CanonicalAdministration {
   kind: "administration";
@@ -144,7 +179,7 @@ export interface CanonicalAdministration {
   asNeeded?: boolean;
   targetCount?: number;
   target?: CanonicalConcept;
-  siteReference?: unknown;
+  siteReference?: CanonicalReference;
   route?: CanonicalConcept;
   method?: CanonicalConcept;
   text?: string;
@@ -155,8 +190,8 @@ export interface CanonicalAdministration {
   excludedDates?: string[];
   excludedWeekdays?: Weekday[];
   limits?: CanonicalDoseLimit[];
-  /** Rich/unexecuted constraints remain a distinct source of uncertainty. */
-  constraints?: Record<string, unknown>;
+  /** Understood safety policy; opaque source metadata lives in provenance. */
+  safety?: CanonicalSafety;
   choice?: CanonicalChoice;
   choiceIssue?: boolean;
   phaseOrigin?: CanonicalMeasure;
@@ -173,7 +208,7 @@ export interface CanonicalStage {
   start?: CanonicalBoundary;
   end?: CanonicalBoundary;
   count?: number;
-  constraints?: Record<string, unknown>;
+  safety?: CanonicalSafety;
   provenance?: Record<string, unknown>;
 }
 export interface CanonicalCourse {
@@ -181,7 +216,7 @@ export interface CanonicalCourse {
   stages: CanonicalStage[];
   instruction?: string;
   cycleInterval?: CanonicalMeasure;
-  constraints?: Record<string, unknown>;
+  safety?: CanonicalSafety;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   provenance?: { format: "r6" | "syntax"; data: Record<string, unknown> };
 }

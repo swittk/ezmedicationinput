@@ -10,6 +10,16 @@ export const dateTimeFormatCache = new Map<string, Intl.DateTimeFormat>();
 /** Separate cache for weekday formatting to avoid rebuilding formatters. */
 export const weekdayFormatCache = new Map<string, Intl.DateTimeFormat>();
 
+/** An instant and time zone determine the same civil clock for the lifetime
+ * of a process's ICU time-zone database. Cache that expensive Intl expansion
+ * once; neither external FHIR objects nor scheduling calls are mutated.
+ *
+ * Bounded FIFO (not an unbounded memo table): after 8192 distinct instants,
+ * evict the oldest. An immutable-by-contract TimeParts value is reused
+ * directly, with no defensive clone or JSON serialization. */
+const TIME_PARTS_CACHE_LIMIT = 8192;
+const timePartsCache = new Map<string, TimeParts>();
+
 export interface TimeParts {
   year: number;
   month: number;
@@ -127,6 +137,12 @@ export function getWeekdayFormat(timeZone: string): Intl.DateTimeFormat {
  * zone.
  */
 export function getTimeParts(date: Date, timeZone: string): TimeParts {
+  const instant = date.getTime();
+  const key = Number.isFinite(instant) ? timeZone + ":" + instant : undefined;
+  if (key !== undefined) {
+    const cached = timePartsCache.get(key);
+    if (cached !== undefined) return cached;
+  }
   const formatter = getDateTimeFormat(timeZone);
   const parts: Partial<TimeParts> = {};
   const rawParts = formatToParts(formatter, date);
@@ -180,7 +196,13 @@ export function getTimeParts(date: Date, timeZone: string): TimeParts {
   ) {
     throw new Error("Unable to resolve time parts for provided date");
   }
-  return parts as TimeParts;
+  const result = parts as TimeParts;
+  if (key !== undefined) {
+    if (timePartsCache.size >= TIME_PARTS_CACHE_LIMIT)
+      timePartsCache.delete(timePartsCache.keys().next().value!);
+    timePartsCache.set(key, result);
+  }
+  return result;
 }
 
 /** Calculates the time-zone offset in minutes for a given instant. */

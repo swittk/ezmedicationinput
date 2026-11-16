@@ -199,6 +199,20 @@ function resolveContextStrengthRatio(
     (context.strength ? parseStrengthIntoRatio(context.strength, context) ?? undefined : undefined)
   );
 }
+/** Unit conversion requires an actual concentration with both measured
+ * endpoints. FHIR's optional Ratio fields are not a valid strength bridge
+ * until those numeric/unit facts exist; no unchecked casts or unit guesses. */
+function measuredStrengthRatio(
+  context?: CanonicalSupplyOptions["context"]
+): { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } } | undefined {
+  const ratio = resolveContextStrengthRatio(context);
+  const numerator = ratio?.numerator, denominator = ratio?.denominator;
+  return numerator?.value !== undefined && numerator.unit &&
+    denominator?.value !== undefined && denominator.unit
+    ? { numerator: { value: numerator.value, unit: numerator.unit },
+        denominator: { value: denominator.value, unit: denominator.unit } }
+    : undefined;
+}
 function estimateIngredientQuantity(
   quantity: EstimatedQuantity,
   context?: CanonicalSupplyOptions["context"]
@@ -3976,7 +3990,7 @@ function sumCourseUnits(
         quantity,
         unit,
         commonUnit,
-        resolveContextStrengthRatio(options.context) as any
+        measuredStrengthRatio(options.context)
       );
       if (translated === null)
         throw new MedicationQuantityCalculationError(
@@ -4141,7 +4155,7 @@ function calculateTotalUnitsSingle(
   const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
   let unevaluatedMaximumDose = false;
   let lifetimeMaximum: number | undefined;
-  const strength = resolveContextStrengthRatio(context) as any;
+  const strength = measuredStrengthRatio(context);
   const doseForLimits = dosage.amounts?.[0]?.quantity;
   const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = singleNumericLimit(dosage, "lifetime");
@@ -4202,7 +4216,7 @@ function calculateTotalUnitsSingle(
     for (const limit of dosage.limits ?? []) if (limit.scope === "period") suppliedPeriodLimits++;
     if (executableQuantityCaps(dosage, context).length < suppliedPeriodLimits) unevaluatedMaximumDose = true;
   }
-  const hasPartialR6Safety = Boolean((dosage as CanonicalAdministration).constraints);
+  const hasPartialR6Safety = Boolean((dosage as CanonicalAdministration).safety);
   const unresolvedOneTimeActivity = Boolean(
     dosage.schedule?.recurrence &&
       isSingleAdministrationRepeat(dosage.schedule.recurrence) &&
@@ -4508,7 +4522,7 @@ function calculateTotalUnitsSingle(
       result.totalContainerQuantity = { value: totalUnits, unit: containerUnit };
     } else if (containerUnit && doseUnit && containerUnit !== doseUnit) {
       const strength = resolveContextStrengthRatio(context);
-      const converted = convertValue(totalUnits, doseUnit, containerUnit, strength as any);
+      const converted = convertValue(totalUnits, doseUnit, containerUnit, measuredStrengthRatio(context));
       if (converted !== null) {
         effectiveUnits = converted;
       } else {
@@ -4689,10 +4703,10 @@ function calculateCourseTotalUnits(
     );
   if (assumptions.length) result.explanation = [result.explanation, ...assumptions].filter(Boolean).join(" ");
   const hasPartialSafety =
-    Boolean(course.constraints) ||
+    Boolean(course.safety) ||
     course.stages.some(
       (step) =>
-        Boolean(step.constraints) || step.administrations.some((component) => Boolean(component.constraints))
+        Boolean(step.safety) || step.administrations.some((component) => Boolean(component.safety))
     );
   if (!hasPartialSafety) return result;
   const note = "R6 safety details that are not numeric calendar limits were retained but not evaluated.";

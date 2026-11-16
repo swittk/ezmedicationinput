@@ -138,9 +138,10 @@ const supply = calculateTotalUnits({
 const reopened = importCanonicalCourse(fhir);
 ```
 
-Use one working representation per edit operation. Editing a native course does
-not mutate a previously returned `fhir`/`fhirNext` object; call
-`projectCanonicalCourse` to produce updated projections. Conversely, an edited
+Use one working representation per edit operation. Outputs are immutable
+by caller contract. Do not mutate parser, canonical or FHIR return values;
+EZMED does not deep-clone or freeze them defensively. Explicit edits create
+new course versions, which can be projected again to R5 or R6. Conversely, an edited
 external R5/R6 object must be passed to its importer/execution boundary, not to
 an older parsed batch whose canonical course still describes the prior input.
 

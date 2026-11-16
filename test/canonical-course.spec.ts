@@ -113,10 +113,15 @@ describe("native editable course and sibling projections", () => {
   });
   it("native numeric and recurrence edits are independent of the source and govern BOTH projections and execution", () => {
     const original = cloneStructuredValue(source);
-    const native = courseFromR6(original, true);
-    const a = native.stages[0].administrations[0];
-    a.amounts![0].quantity!.value = 2;
-    a.schedule!.recurrence!.clocks![0] = "09:00:00";
+    const imported = courseFromR6(original, true);
+    // Imported/projected values are immutable BY CONTRACT. Only the explicit
+    // edit API promises a new course without changing its input; no defensive
+    // copies are required on ordinary imports or execution.
+    const native = editCanonicalCourse(imported, draft => {
+      const a = draft.stages[0].administrations[0];
+      a.amounts![0].quantity!.value = 2;
+      a.schedule!.recurrence!.clocks![0] = "09:00:00";
+    });
     expect(original).toEqual(source);
     const r6 = courseToR6(native),
       r5 = courseToR5(native);
@@ -339,6 +344,50 @@ describe("native ownership of source-encoded semantics", () => {
     expect(out.step[0].component[0].site?.id).toBe("site-wrapper");
     expect(calculateTotalUnits({ ...options, dosage: native }).totalUnits).toBe(6);
     expect(calculateTotalUnits({ ...options, dosage: out }).totalUnits).toBe(6);
+  });
+});
+
+describe("typed external boundary anchors", () => {
+  it("retains resource/event/path anchors as understood references but never guesses treatment-start execution", () => {
+    const forms = [
+      { contextReference: { reference: "Observation/anchor" }, anchor: "resource-reference" },
+      { contextDefinition: "https://example.org/StructureDefinition/visit", anchor: "definition" },
+      { contextPath: "%patient.startDate", anchor: "path" },
+      { contextCode: { coding: [{ system: "urn:events", code: "trigger" }] }, anchor: "coded-event" }
+    ] as const;
+    for (const form of forms) {
+      const { anchor, ...relative } = form;
+      const input: FhirR6DosageInstruction = {
+        step: [{ start: { ...relative, offsetDuration: { value: 2, unit: "d", code: "d" } },
+          component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+            timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } } }] }]
+      };
+      const native = courseFromR6(input);
+      expect(native.stages[0].start?.anchor).toBe(anchor);
+      expect(courseToR6(native)).toEqual(input);
+      expect(() => nextDueDoses(native, options)).toThrow();
+    }
+  });
+});
+
+describe("typed native safety and coding ownership", () => {
+  it("retains parsed clinical period maxima while FHIR R5/R6 projections add complete standardized unit coding", () => {
+    const parsed = parseSig("Take 2 tabs QID max 2 tabs/day");
+    const native = parsed.meta.canonical.course!;
+    const administration = native.stages[0].administrations[0];
+    expect(administration.safety?.maximaDeclared).toBe(true);
+    expect(administration.limits).toEqual([{
+      scope: "period",
+      amount: { value: 2, unit: "tab" },
+      period: { value: 1, unit: "d" }
+    }]);
+    const r6 = projectCanonicalCourse(native).fhirNext.step[0].component[0].safety!;
+    expect(r6.doseLimit?.[0].valueQuantity).toMatchObject({
+      value: 2, unit: "tab", system: "http://standardterms.edqm.eu", code: "15054000"
+    });
+    expect(r6.doseLimit?.[0].period).toMatchObject({
+      value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d"
+    });
   });
 });
 

@@ -6583,3 +6583,57 @@ Final gate: npm run build PASS (ES6 ESM/CJS, TypeScript declarations), all
 The source reference branch remains clean at 4867c30. This work belongs on a
 separate stacked PR with base feat/current-r6-dosageinstruction-20261114;
 no master merge, publication, app migration, delegation or extra review request.
+
+
+## 2026-11-17 — PR #14 typed/performance audit (NOT merge-ready)
+
+Compared exact PR #14 against origin/master 7d62823 and stacked PR #13
+4867c30, not an unrelated app. Initial large regressions: +10% complex
+ocular parsing, +12–20% R5 scalar execution, +137% native R6 import,
+and +160–176% localized native R6 rendering. Existing architecture
+was directionally better, but R5 export still invoked full native-to-R6
+projection before lowering to R5, violating the agreed sibling adapters.
+
+Local accepted fixes (not pushed):
+- Typed CanonicalSafety with required limit scope, exclusive
+  quantity/integer/expression choices, and ifExceeded/review semantics.
+  Typed CanonicalReference and typed non-treatment RelativeTime anchors
+  (reference, code, canonical definition, path), preserved without
+  inventing dates. Opaque source provenance stays inert.
+- Correct native R6 safety-limit EDQM/UCUM coding; existing author
+  coding takes precedence. Removed three unchecked unit-strength casts
+  in execution using fully specified measured ratios.
+- No defensive whole-course or per-row clone on ordinary imports.
+  One pass constructs both strict and editable R5 output, with a
+  separate strict array allocated only for genuinely differing R6-only
+  fields; shared per-import typed clauses render the individual and
+  whole-course text without rebuilding them. Marker normalization does
+  not alter the augmented R5 source provenance.
+- Rejected cross-call WeakMap caching of R6 source objects/compiled
+  clauses after reproducing stale clinical content when callers edited
+  then reimported external FHIR objects. All original tests retained.
+- Bounded per-timezone/instant civil-time cache (8192 entries) reduces
+  repeated Intl formatting without defensive copies/JSON. Civil-clock
+  scheduling and DST tests passed; warm R5 scalar and staged work
+  improved roughly 70–80% versus main.
+
+Validation after typed anchor changes: build and TypeScript PASS,
+all 4,222 source tests in 45 suites PASS, packaged exports 4/4 PASS,
+and 200 realistic samples compared with PR #13 in R5/R6/short/long:
+ZERO output differences. The final allocation-only improvement will
+be revalidated before a local checkpoint.
+
+Performance remains BLOCKED in independent domains. In repeated
+paired warm tests vs main, localized R6 formatting remains ~+160–209%,
+complex R6 import ~+15–36%; some parser cases including complex
+ocular/staged directions exceed +4%. R5 scalar execution is ~77%
+faster warm due to timezone cache; that does not waive the slower
+domains. Host jitter requires repeated borderline measurements.
+Do NOT merge or claim compliance with the >4% hard gate.
+
+Critical remaining architecture work: a truly direct
+CanonicalCourse-to-R5 serializer, without constructing a full R6
+course, while retaining all existing typed lossless extension and
+edit-reconciliation semantics. There is NO acceptable simple-only
+shortcut hiding an R6 fallback. No code pushed to remote PR #14,
+no extra CodeRabbit review, no unrelated app edits.

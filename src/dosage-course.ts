@@ -1903,11 +1903,15 @@ export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstructionI
 /** Build the editable R5 boundary payload once. Batch assembly may already
  * own its final edit-provenance step; keeping that operation separate avoids
  * computing and attaching identical row fingerprints twice on every parse. */
-export function projectEditableR5Course(details: FhirR6DosageInstruction): {
+export function projectEditableR5Course(details: FhirR6DosageInstruction, strictPreview = false): {
   dosages: EzDosage[];
   course: EzCourseMetadata;
+  strictDosages?: FhirDosage[];
 } {
   const dosages: EzDosage[] = [];
+  // Strict rows are usually identical to extended rows. Allocate an
+  // independent array only if an actual R6-only field needs a different row.
+  let strictRows: FhirDosage[] | undefined;
   const metadata: NonNullable<EzCourseMetadata["step"]> = [];
   for (let index = 0; index < details.step.length; index++) {
     const step = details.step[index];
@@ -1920,26 +1924,43 @@ export function projectEditableR5Course(details: FhirR6DosageInstruction): {
     for (const component of step.component) {
       const r5 = fromR6Dosage(component, sequence);
       const dates = getDosageExcludedDates(r5);
-      dosages.push(cloneStructuredValue({
+      const expressions = component.doseAndRate?.some(entry =>
+        entry.doseExpression || entry.rateExpression);
+      const hasExtras = Boolean(expressions || component.condition?.length ||
+        component.safety || component.site?.reference || dates.length);
+      if (strictPreview && hasExtras && !strictRows) strictRows = dosages.slice();
+      strictRows?.push(r5);
+      // The published immutable-by-contract API does not need a deep clone.
+      // Ordinary rows share their just-projected R5 object between outputs.
+      dosages.push(hasExtras ? {
         ...r5,
-        ...(component.doseAndRate ? { doseAndRate: r5.doseAndRate?.map((entry, index) => {
-          const r6Entry = component.doseAndRate?.[index];
+        ...(expressions ? { doseAndRate: r5.doseAndRate?.map((entry, index) => {
+          const source = component.doseAndRate?.[index];
           return {
             ...entry,
-            ...(r6Entry?.doseExpression ? { doseExpression: r6Entry.doseExpression } : {}),
-            ...(r6Entry?.rateExpression ? { rateExpression: r6Entry.rateExpression } : {})
+            ...(source?.doseExpression ? { doseExpression: source.doseExpression } : {}),
+            ...(source?.rateExpression ? { rateExpression: source.rateExpression } : {})
           };
         }) } : {}),
         ...(component.condition?.length ? { condition: component.condition } : {}),
         ...(component.safety ? { safety: component.safety } : {}),
         ...(component.site?.reference ? { siteReference: component.site.reference } : {}),
         ...(dates.length ? { excludedDates: dates } : {})
-      }));
+      } : r5);
     }
   }
-  attachCourseDetailsExtensions(dosages, details);
+  // The strict and extended preview may carry different baselines for R6-only
+  // safety/expressions. Do not redundantly encode the course for ordinary
+  // components with no such extras.
+  if (strictRows) {
+    attachCourseDetailsExtensions(strictRows, details);
+    attachCourseDetailsExtensions(dosages, details);
+  } else {
+    attachCourseDetailsExtensions(dosages, details);
+  }
   return {
     dosages,
+    ...(strictPreview ? { strictDosages: strictRows ?? dosages } : {}),
     course: {
       ...(details.id ? { id: details.id } : {}),
       ...(details.extension?.length ? { extension: details.extension } : {}),

@@ -312,3 +312,24 @@ If learned behavior is added later, it should be:
 - optional
 - deterministic in integration behavior
 - scoped to ambiguity resolution, not full semantic generation
+
+
+## 2026-11-17 — Native model review and hard merge gates
+
+- Understood clinical concepts require explicit typed fields. Known safety
+  scopes, limits and exclusive quantity/count/expression choices, site
+  references, and event anchors are now typed. Truly unknown wire metadata
+  remains opaque provenance only, never executable clinical data.
+- Outputs are immutable **by caller contract**, not by defensive copying or
+  freezing. The explicit edit API creates a new course. Do not cache an
+  externally supplied wire input across imports: reimporting a changed input
+  must read its current contents, per existing editable-input tests.
+- Performance acceptance: no reproducible >4% slowdown in ANY parser,
+  import, formatter, scheduling or supply domain versus origin/master;
+  target faster in every domain, with no aggregate-median waiver.
+- BLOCKER: the native-to-R5 adapter still constructs R6 first. The required
+  architecture is independent native-to-R5 and native-to-R6 adapters, both
+  retaining full clinical meaning and existing R5 lossless edit metadata.
+  A simple-only direct path hiding a fallback through R6 is not completion.
+- Keep original PR #13 and published PR #14 unchanged until all code,
+  clinical, performance and direct-adapter gates are fulfilled.

@@ -204,7 +204,7 @@ export function administrationFromClause(
     delayMinutes: s?.administrationOffsetMinutes,
     cycleDays: s?.cycleDayConstraint,
     anchoredLength,
-    ...(s?.maxDosePerPeriod?.length ? { constraints: { limits: s.maxDosePerPeriod } } : {}),
+    ...(s?.maxDosePerPeriod?.length ? { safety: { maximaDeclared: true } } : {}),
     limits: s?.maxDosePerPeriod?.map((limit) => ({
       scope: "period",
       amount: quantity(limit.amount, limit.unit, limit.amountComparator),

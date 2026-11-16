@@ -12,6 +12,9 @@ import type {
   EzDosage,
   FhirR6Dosage,
   FhirR6DosageInstruction,
+  FhirR6DoseLimit,
+  FhirR6DosageSafety,
+  FhirR6DosageStep,
   CanonicalSigClause,
   FhirR6RelativeTime,
   FhirTiming,
@@ -30,6 +33,8 @@ import type {
   CanonicalRange,
   CanonicalRatio,
   CanonicalAdministration,
+  CanonicalSafety,
+  CanonicalDoseLimit,
   CanonicalCourse,
   CanonicalStage,
   CanonicalTiming,
@@ -85,7 +90,7 @@ import {
   CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
 } from "../fhir";
 import { getQuantityComparator, simpleQuantityForR5 } from "../fhir-quantity-operator";
-import { equalStructuredValues, cloneStructuredValue } from "../stable-structure";
+import { equalStructuredValues } from "../stable-structure";
 import { clauseForAdministration } from "../canonical/compile";
 import { getStandardDoseUnitCoding } from "../maps";
 import type { FhirProjectionOptions } from "../fhir";
@@ -175,17 +180,90 @@ function timing(t: FhirTiming | FhirR6Timing | undefined): CanonicalTiming | und
 export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoundary | undefined {
   if (!b) return undefined;
   const recognized =
-    !b.contextReference &&
-    !b.contextDefinition &&
-    !b.contextPath &&
+    !b.contextReference && !b.contextDefinition && !b.contextPath &&
     b.contextCode?.coding?.some((c) => c.system === TREATMENT_START_SYSTEM && c.code === "treatment-start");
+  const anchor = recognized ? "treatment-start" : b.contextReference
+    ? "resource-reference" : b.contextDefinition ? "definition"
+    : b.contextPath ? "path" : b.contextCode ? "coded-event" : "unresolved";
   return {
-    anchor: recognized ? "treatment-start" : "unresolved",
+    anchor,
+    ...(b.contextReference ? { contextReference: b.contextReference } : {}),
+    ...(b.contextDefinition ? { contextDefinition: b.contextDefinition } : {}),
+    ...(b.contextPath ? { contextPath: b.contextPath } : {}),
+    ...(b.contextCode && !recognized ? { contextCode: b.contextCode } : {}),
     description: b.text,
     displacement: measure(b.offsetDuration),
     displacementRange: rangeFromFhir(b.offsetRange),
     provenance: record(b),
   };
+}
+/** Every understood safety rule is typed. Unknown element metadata stays
+ * only on the retained external source object, never in an executable bag. */
+function safetyFromR6(
+  safety: FhirR6DosageSafety | undefined, includeLimits = false
+): CanonicalSafety | undefined {
+  if (!safety) return undefined;
+  return {
+    ...(safety.ifExceeded !== undefined ? { ifExceeded: safety.ifExceeded } : {}),
+    ...(includeLimits && safety.doseLimit ? { limits: safety.doseLimit.map(limit => ({
+      scope: limit.scope,
+      amount: measure(limit.valueQuantity),
+      count: limit.valueInteger,
+      expression: limit.valueExpression,
+      period: measure(limit.period),
+      text: limit.text,
+      provenance: record(limit)
+    })) } : {}),
+    ...(safety.ifExceeded || safety.doseLimit?.some(limit =>
+      limit.valueInteger !== undefined || limit.valueExpression !== undefined)
+      ? { requiresReview: true } : {})
+  };
+}
+
+/** Wire safety output owns coding/retained external metadata; clinical facts
+ * own the live ifExceeded and limits. No generic internal safety fields leak. */
+function safetyToR6(
+  policy: CanonicalSafety | undefined,
+  source: FhirR6DosageSafety | undefined,
+  limits?: CanonicalDoseLimit[]
+): FhirR6DosageSafety | undefined {
+  if (!policy && limits === undefined) return undefined;
+  const output: FhirR6DosageSafety = { ...source };
+  if (policy) {
+    if (policy.ifExceeded === undefined) delete output.ifExceeded;
+    else output.ifExceeded = policy.ifExceeded;
+  }
+  const known = limits ?? policy?.limits;
+  if (known !== undefined) {
+    output.doseLimit = known.map(limit => {
+      const saved = limit.provenance as FhirR6DoseLimit | undefined;
+      // R6 value[x] is an exclusive choice: never resurrect a stale source
+      // valueQuantity when an integer/expression was explicitly edited.
+      const { valueQuantity: _oldQuantity, valueInteger: _oldCount,
+        valueExpression: _oldExpression, ...metadata } = saved ?? {};
+      const period = limit.period ? simpleQuantityForR5({
+        ...limit.period,
+        ...(!limit.period.system && !limit.period.code && isCalendarUnit(limit.period.unit)
+          ? { system: "http://unitsofmeasure.org", code: limit.period.unit } : {})
+      }) : undefined;
+      const common = { ...metadata, scope: limit.scope, ...(period ? { period } : {}),
+        ...(limit.text !== undefined ? { text: limit.text } : {}) };
+      const amount = limit.amount;
+      if (amount) return {
+        ...common, valueQuantity: {
+          ...amount, ...getStandardDoseUnitCoding(amount.unit),
+          ...(amount.system ? { system: amount.system } : {}),
+          ...(amount.code ? { code: amount.code } : {})
+        }
+      } satisfies FhirR6DoseLimit;
+      if (limit.count !== undefined)
+        return { ...common, valueInteger: limit.count } satisfies FhirR6DoseLimit;
+      if (limit.expression)
+        return { ...common, valueExpression: limit.expression } satisfies FhirR6DoseLimit;
+      throw new TypeError("An authored safety limit must contain a numeric, count, or expression value");
+    });
+  }
+  return output;
 }
 function amount(a: NonNullable<FhirR6Dosage["doseAndRate"]>[number]): CanonicalAmount {
   return {
@@ -259,20 +337,20 @@ function baseAdministration(
       ? {
           limits: [
             ...(maximums.maxDosePerPeriod ?? []).map((limit) => ({
-              scope: "period",
+              scope: "period" as const,
               amount: measure(limit.numerator),
               period: measure(limit.denominator),
             })),
             ...(maximums.maxDosePerAdministration
-              ? [{ scope: "administration", amount: measure(maximums.maxDosePerAdministration) }]
+              ? [{ scope: "administration" as const, amount: measure(maximums.maxDosePerAdministration) }]
               : []),
             ...(maximums.maxDosePerLifetime
-              ? [{ scope: "lifetime", amount: measure(maximums.maxDosePerLifetime) }]
+              ? [{ scope: "lifetime" as const, amount: measure(maximums.maxDosePerLifetime) }]
               : []),
           ],
         }
       : {}),
-    constraints: input.safety ? record(input.safety) : undefined,
+    safety: safetyFromR6(input.safety),
     choice,
     choiceIssue: !choice && raw.modifierExtension?.some((e) => e.url === DOSAGE_ALTERNATIVE_CHOICE_URL),
     phaseOrigin,
@@ -290,13 +368,14 @@ function baseAdministration(
 export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): CanonicalAdministration {
   const result = baseAdministration(raw, "r6", sourceContext);
   if (raw.safety) {
-    const { doseLimit, ...annotations } = raw.safety;
-    result.constraints = record(annotations);
-    result.limits = doseLimit?.map((limit) => ({
+    result.safety = safetyFromR6(raw.safety);
+    result.limits = raw.safety.doseLimit?.map((limit) => ({
       scope: limit.scope,
       amount: measure(limit.valueQuantity),
+      count: limit.valueInteger,
       expression: limit.valueExpression,
       period: measure(limit.period),
+      text: limit.text,
       provenance: record(limit),
     }));
   }
@@ -310,8 +389,7 @@ export function administrationFromR5(
 }
 export function courseFromR6(
   raw: FhirR6DosageInstruction,
-  sourceContext = false,
-  editable = sourceContext
+  sourceContext = false
 ): CanonicalCourse {
   const stages: CanonicalStage[] = [];
   for (const step of raw.step) {
@@ -323,7 +401,7 @@ export function courseFromR6(
       start: boundaryFromR6(step.start),
       end: boundaryFromR6(step.end),
       count: step.count,
-      constraints: step.safety ? record(step.safety) : undefined,
+      safety: safetyFromR6(step.safety, true),
       provenance: record(step),
     });
   }
@@ -332,14 +410,13 @@ export function courseFromR6(
     stages,
     instruction: raw.renderedInstruction,
     cycleInterval: measure(raw.repeatCycle),
-    constraints: raw.safety ? record(raw.safety) : undefined,
+    safety: safetyFromR6(raw.safety, true),
     contextIssue: getCourseContextIssue(raw),
     provenance: { format: "r6", data: record(raw) },
   };
-  // Editable/public imports must not share mutable clinical fields with the
-  // archived external source. Transient execution imports are read-only and
-  // avoid this ownership copy; the kernel never mutates their input.
-  return editable ? cloneStructuredValue(course) : course;
+  // No defensive copy. Re-reading an externally changed FHIR input should
+  // still observe its current fields, while ordinary callers leave it alone.
+  return course;
 }
 /** Reconciliation is solely an R5 import concern, never part of native
  * course execution. A simple scalar needs no course reconstruction. */
@@ -373,7 +450,7 @@ export function inputToCanonical(
       // Whole-course accounting conservatively reports persisted dosage
       // maxima as constraints; a standalone scalar retains its historical
       // exact single-row accounting contract.
-      if (!a.constraints && a.limits?.length) a.constraints = { limits: true };
+      if (!a.safety && a.limits?.length) a.safety = { maximaDeclared: true };
       return a;
     });
   }
@@ -397,11 +474,19 @@ function boundaryToR6(b: CanonicalBoundary | undefined): FhirR6RelativeTime | un
     delete output.contextReference;
     delete output.contextDefinition;
     delete output.contextPath;
+    delete output.contextCode;
     if (b.anchor === "treatment-start")
       output.contextCode = {
-        coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }],
+        coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }]
       };
-    else delete output.contextCode;
+  }
+  // Understood external anchor types stay typed, including in native edits.
+  // These are preserved but not considered executable without an event/source resolver.
+  if (b.anchor !== "treatment-start") {
+    assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
+    assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
+    assign(output, "contextPath", b.anchor === "path" ? b.contextPath : undefined);
+    assign(output, "contextCode", b.anchor === "coded-event" ? b.contextCode : undefined);
   }
   assign(output, "text", b.description);
   assign(output, "offsetDuration", b.displacement);
@@ -706,26 +791,16 @@ export function administrationToR6(
       ...(a.phaseOrigin ? [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: a.phaseOrigin }] : []),
     ];
   }
-  // Known limits are native clinical entries, not R5 shadow maxima. The
-  // untouched source annotations/IDs remain independent of each live choice.
-  if (a.limits || a.constraints) {
-    const safety: Record<string, unknown> = { ...a.constraints };
-    delete safety.limits; // Parser evidence is not an interchange Safety field.
-    if (a.limits)
-      safety.doseLimit = a.limits.map((limit) => {
-        const out = { ...limit.provenance };
-        assign(out, "scope", limit.scope);
-        assign(out, "valueQuantity", limit.amount);
-        assign(out, "valueExpression", limit.expression);
-        assign(out, "period", simpleQuantityForR5(limit.period));
-        return out;
-      });
-    else delete safety.doseLimit;
-    output.safety = safety;
-  } else delete output.safety;
+  // No understood safety concept is serialized through a generic bag.
+  // Unknown external annotations survive via the original wire provenance.
+  assign(output, "safety", safetyToR6(a.safety, source?.safety, a.limits));
   return output as FhirR6Dosage;
 }
 const same = equalStructuredValues;
+function isCalendarUnit(unit: string | undefined): unit is "s" | "min" | "h" | "d" | "wk" | "mo" | "a" {
+  return unit === "s" || unit === "min" || unit === "h" || unit === "d" ||
+    unit === "wk" || unit === "mo" || unit === "a";
+}
 function serializeDuration(q: CanonicalMeasure): FhirR6Quantity {
   const units: Record<string, [string, string]> = {
     s: ["second", "seconds"],
@@ -767,19 +842,23 @@ function projectCourseToR6(
   const out = { ...course.provenance?.data };
   assign(out, "renderedInstruction", course.instruction);
   assign(out, "repeatCycle", course.cycleInterval);
-  assign(out, "safety", course.constraints);
+  const rawData = course.provenance?.data;
+  const rawCourse = course.provenance?.format === "r6" && Array.isArray(rawData?.step)
+    ? rawData as Record<string, unknown> & FhirR6DosageInstruction : undefined;
+  assign(out, "safety", safetyToR6(course.safety, rawCourse?.safety));
   out.step = course.stages.map((stage) => {
     const value = { ...stage.provenance };
     assign(value, "start", boundaryToR6(stage.start));
     assign(value, "end", boundaryToR6(stage.end));
     assign(value, "count", stage.count);
-    assign(value, "safety", stage.constraints);
+    assign(value, "safety", safetyToR6(stage.safety,
+      (stage.provenance as FhirR6DosageStep | undefined)?.safety));
     value.component = stage.administrations.map((a) =>
       administrationToR6(a, options, freshlyCompiled ? a.syntax : undefined)
     );
     return value;
   });
-  return out as unknown as FhirR6DosageInstruction;
+  return { ...out, step: out.step as FhirR6DosageStep[] };
 }
 /** Ordinary native export must derive source-annotation views from current
  * native fields because callers may have edited them. */
@@ -838,9 +917,9 @@ export function importCanonicalCourse(
   input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult | CanonicalCourse
 ): CanonicalCourse {
   if (!Array.isArray(input)) {
-    if ("kind" in input && input.kind === "course") return cloneStructuredValue(input);
+    if ("kind" in input && input.kind === "course") return input;
     if ("items" in input && input.meta.canonical.course)
-      return cloneStructuredValue(input.meta.canonical.course);
+      return input.meta.canonical.course;
     if ("step" in input) return courseFromR6(input, true);
     if ("items" in input) return courseFromR6(input.fhirNext, true);
   }

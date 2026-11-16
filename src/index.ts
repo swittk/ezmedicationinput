@@ -496,25 +496,39 @@ function cloneDefinedExtensionValue<T>(value: T): T {
  * cheap presence checks for these known semantic markers.
  * @param rows New FHIR dosage rows owned by the bridge.
  */
-function normalizeEmittedSemanticMarkers(rows: FhirDosage[]): FhirDosage[] {
-  for (const row of rows) {
-    if (row.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
-      row.modifierExtension = row.modifierExtension.map(extension =>
+function normalizeEmittedSemanticMarkers(rows: FhirDosage[], keepExtendedSource = false): FhirDosage[] {
+  let output = rows;
+  for (let index = 0; index < rows.length; index++) {
+    const source = rows[index];
+    const course = source.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL);
+    const activity = source.timing?.repeat?.extension?.some(extension =>
+      extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL);
+    if (!course && !activity) continue;
+    // Only known emitted markers need JSON-normalized copies. The extended
+    // preview may retain its original source annotations, so detach just
+    // those rows rather than deep-cloning an entire returned course.
+    if (keepExtendedSource) {
+      if (output === rows) output = rows.slice();
+      output[index] = { ...source };
+    }
+    const row = output[index];
+    if (course) {
+      row.modifierExtension = row.modifierExtension?.map(extension =>
         extension.url === DOSAGE_DETAILS_R5_URL
           ? cloneDefinedExtensionValue(extension) : extension
       );
     }
     const repeat = row.timing?.repeat;
-    if (repeat?.extension?.some(extension => extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL)) {
+    if (activity && repeat) {
       row.timing = { ...row.timing, repeat: {
         ...repeat,
-        extension: repeat.extension.map(extension =>
+        extension: repeat.extension?.map(extension =>
           extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL
             ? cloneDefinedExtensionValue(extension) : extension)
       } };
     }
   }
-  return rows;
+  return output;
 }
 
 /** The public strict R5 converter must carry the same in-memory FHIR contract
@@ -1056,7 +1070,7 @@ export function formatSig(
   if ("step" in oneOrCourse) {
     const source = unchangedR6SourceDisplay(oneOrCourse, options);
     if (source !== undefined) return source;
-    return formatCanonicalCourse(courseFromR6(oneOrCourse, true, false), style, options);
+    return formatCanonicalCourse(courseFromR6(oneOrCourse, true), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
@@ -1185,18 +1199,37 @@ export function fromFhir(
   const importWarnings = assertCurrentR6DosageInstruction(wire);
   const dosageDetails: FhirR6DosageInstruction = wire.step === undefined
     ? { ...wire, step: [] } : wire as FhirR6DosageInstruction;
-  const { dosages, course } = fromDosageDetails(dosageDetails);
+  // R5 is a public output only. Project its strict component view and
+  // extended editable view in ONE component traversal; do not separately
+  // lower this entire R6 course into R5 twice just to format native items.
+  const projection = projectEditableR5Course(dosageDetails, true);
+  const course = projection.course;
+  const strict = projection.strictDosages ?? projection.dosages;
+  const normalizedStrict = strict.length
+    ? normalizeEmittedSemanticMarkers(strict, projection.dosages === strict)
+    : strict;
+  const r5Rows = normalizedStrict.length
+    ? (dosageDetails.renderedInstruction === undefined
+      ? normalizedStrict
+      : withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction))
+    : toFhirR5Dosages(dosageDetails); // zero-component text/safety carrier only
+  const dosages = projection.dosages === normalizedStrict
+    ? r5Rows
+    : dosageDetails.renderedInstruction === undefined
+      ? projection.dosages
+      : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction);
   const native = courseFromR6(dosageDetails, true);
-  const r5Rows = toFhirR5Dosages(dosageDetails);
+  const compiled = new Map<CanonicalAdministration, CanonicalSigClause>();
   const items: ParseResult[] = [];
   let row = 0;
   for (const stage of native.stages) for (const administration of stage.administrations) {
     const clause = clauseForAdministration(administration);
+    compiled.set(administration, clause);
     const projection = r5Rows[row++];
     items.push({
       fhir: projection,
-      shortText: formatCanonicalAdministration(administration, "short", options),
-      longText: formatCanonicalAdministration(administration, "long", options),
+      shortText: formatCanonicalAdministration(administration, "short", options, compiled),
+      longText: formatCanonicalAdministration(administration, "long", options, compiled),
       warnings: clause.warnings ?? [],
       meta: { consumedTokens: [],
         normalized: buildNormalizedMetaFromClause(clause, projection, options),
@@ -1223,8 +1256,8 @@ export function fromFhir(
     for (const warning of item.warnings) warnings.add(warning);
   }
   // Importing structured R6 data is best-effort and data-preserving.
-  const shortText = formatCanonicalCourse(native, "short", options);
-  const longText = formatCanonicalCourse(native, "long", options);
+  const shortText = formatCanonicalCourse(native, "short", options, compiled);
+  const longText = formatCanonicalCourse(native, "long", options, compiled);
   return {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,

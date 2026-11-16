@@ -2,7 +2,7 @@
  * and the existing grammar renderer, never FHIR rows or persistence markers.
  * Display stays separate from executable interpretation: unknown expressions
  * and boundaries remain visible without inventing values or event dates. */
-import type { FormatOptions, MedicationCondition, FhirDayOfWeek } from "../types";
+import type { FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause } from "../types";
 import type {
   CanonicalCourse,
   CanonicalAdministration,
@@ -300,17 +300,17 @@ export function rateRangePreview(range: CanonicalRange): string | undefined {
 export function prefersSourceInstruction(course: CanonicalCourse): boolean {
   return Boolean(
     course.cycleInterval ||
-      course.constraints ||
+      course.safety ||
       course.stages.some(
         (step) =>
           step.start ||
           step.end ||
           step.count !== undefined ||
-          step.constraints ||
+          step.safety ||
           step.administrations.some(
             (component) =>
               component.predicate ||
-              component.constraints ||
+              component.safety ||
               component.siteReference ||
               component.amounts?.some((rate) => rate.expression || rate.rateExpression)
           )
@@ -362,7 +362,8 @@ function formatCanonicalChoices(
 function formatCanonicalBase(
   a: CanonicalAdministration,
   style: "short" | "long",
-  options?: FormatOptions
+  options?: FormatOptions,
+  compiled?: CanonicalSigClause
 ): string {
   const primary = a.amounts?.[0];
   const maxima = Boolean(a.limits?.length);
@@ -374,12 +375,15 @@ function formatCanonicalBase(
     primary?.rateExpression ||
     primary?.quantity?.unit?.includes("/kg") ||
     a.predicate ||
-    a.constraints ||
+    a.safety ||
     a.siteReference ||
     a.excludedDates?.length ||
     a.excludedWeekdays?.length;
   if (a.text?.trim() && (maxima || rich)) return a.text;
-  const clause = clauseForAdministration(a);
+  // A structured import already built this exact scoped clause for item
+  // metadata. Reuse it for both item and whole-course EN/TH previews instead
+  // of reconstructing the same dose/timing from native fields five times.
+  const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(
     clause,
     style,
@@ -419,7 +423,8 @@ function formatCanonicalBase(
 export function formatCanonicalAdministration(
   a: CanonicalAdministration,
   style: "short" | "long" = "long",
-  options?: FormatOptions
+  options?: FormatOptions,
+  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
 ): string {
   // A component's authored source is distinct from a course-wide instruction.
   if (
@@ -432,13 +437,14 @@ export function formatCanonicalAdministration(
       ))
   )
     return a.text;
-  return formatCanonicalCourse({ kind: "course", stages: [{ administrations: [a] }] }, style, options);
+  return formatCanonicalCourse({ kind: "course", stages: [{ administrations: [a] }] }, style, options, compiled);
 }
 
 export function formatCanonicalCourse(
   oneOrCourse: CanonicalCourse,
   style: "short" | "long" = "long",
-  options?: FormatOptions
+  options?: FormatOptions,
+  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
 ): string {
   // R6's renderedInstruction is the whole-course instruction. Do not
   // accidentally reduce a taper to a single component or discard its
@@ -521,7 +527,8 @@ export function formatCanonicalCourse(
             }),
           };
         }
-        const recognized = formatCanonicalBase(display, style, options);
+        const recognized = formatCanonicalBase(display, style, options,
+          display === component ? compiled?.get(component) : undefined);
         const expressions: string[] = [];
         if (hasOffsets && repeat) {
           const periodUnit = repeat.periodUnit;

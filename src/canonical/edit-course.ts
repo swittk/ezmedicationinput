@@ -37,7 +37,7 @@ export function editCanonicalCourse(
   let changed =
     draft.stages.length !== source.stages.length ||
     !equalStructuredValues(draft.cycleInterval, source.cycleInterval) ||
-    !equalStructuredValues(draft.constraints, source.constraints);
+    !equalStructuredValues(draft.safety, source.safety);
   for (let i = 0; i < draft.stages.length; i++) {
     const stage = draft.stages[i],
       before = stages.get(stage);
