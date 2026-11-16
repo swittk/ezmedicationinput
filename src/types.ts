@@ -1871,6 +1871,9 @@ export interface ParseResult {
     normalized: ParseNormalizedMeta;
     canonical: {
       clauses: CanonicalSigClause[];
+      /** Native clinical meaning, independent of either public FHIR projection. */
+      administration?: import("./canonical/course").CanonicalAdministration;
+      course?: import("./canonical/course").CanonicalCourse;
     };
     siteLookups?: Array<{
       request: SiteCodeLookupRequest;
@@ -1938,6 +1941,9 @@ export interface ParseBatchResult {
     normalized: ParseNormalizedMeta;
     canonical: {
       clauses: CanonicalSigClause[];
+      /** Native clinical meaning, independent of either public FHIR projection. */
+      administration?: import("./canonical/course").CanonicalAdministration;
+      course?: import("./canonical/course").CanonicalCourse;
     };
     siteLookups?: Array<{
       request: SiteCodeLookupRequest;

@@ -1,0 +1,235 @@
+/**
+ * EZMED's clinical course normal form.
+ *
+ * Grammar owns CanonicalSigClause and CanonicalParallelRegimen; this module
+ * completes that canonical model with course-wide meaning used by execution
+ * and by BOTH interchange adapters. It does not extend a FHIR datatype and
+ * contains no extension URLs or version-specific sequence/retention markers.
+ *
+ * Unknown external fields stay in provenance and are never executed. The
+ * syntax clauses are read-only evidence, not a second editable dosage truth.
+ * A caller editing clinical fields creates the next authoritative course;
+ * adapters serialize those fields and preserve unrelated source metadata.
+ */
+import type {
+  CanonicalSigClause,
+  CanonicalActivityTimingExpr,
+  CanonicalCycleDayConstraint,
+  CanonicalOccurrenceCapExpr,
+  CanonicalEventWindowExpr,
+  MedicationCondition,
+  NextDueDoseOptions,
+  TotalUnitsOptions,
+} from "../types";
+export { FhirPeriodUnit as DurationUnit, EventTiming as TimingEvent } from "../types";
+import type {
+  FhirPeriodUnit as DurationUnit,
+  EventTiming as TimingEvent,
+  FhirDayOfWeek as Weekday,
+} from "../types";
+
+/** Shared clinical measurements are not a wire-format Quantity. Additional
+ * coding metadata is preserved for exact export, but execution uses only the
+ * explicitly known numeric value, unit and operator. */
+export interface CanonicalMeasure {
+  value?: number;
+  unit?: string;
+  system?: string;
+  code?: string;
+  comparator?: "<" | "<=" | ">=" | ">" | "~" | "ad";
+  id?: string;
+}
+export interface CanonicalRange {
+  low?: CanonicalMeasure;
+  high?: CanonicalMeasure;
+}
+export interface CanonicalRatio {
+  numerator?: CanonicalMeasure;
+  denominator?: CanonicalMeasure;
+}
+export interface CanonicalExpression {
+  name?: string;
+  expression?: string;
+  language?: string;
+  description?: string;
+  reference?: string;
+}
+export interface CanonicalConcept {
+  text?: string;
+  coding?: Array<{ system?: string; code?: string; display?: string; version?: string }>;
+}
+/** One clinical quantity limit retains its scope, independent value choice,
+ * period and source identity. Unlike R5's three maximum fields, this list can
+ * represent several differently qualified or expression-based limits without
+ * demoting the extras into an active compatibility extension. */
+export interface CanonicalDoseLimit {
+  scope?: string;
+  amount?: CanonicalMeasure;
+  expression?: CanonicalExpression;
+  period?: CanonicalMeasure;
+  provenance?: Record<string, unknown>;
+}
+export interface CanonicalAmount {
+  quantity?: CanonicalMeasure;
+  range?: CanonicalRange;
+  expression?: CanonicalExpression;
+  rate?: CanonicalMeasure;
+  rateRange?: CanonicalRange;
+  rateRatio?: CanonicalRatio;
+  rateExpression?: CanonicalExpression;
+  role?: CanonicalConcept;
+  provenance?: Record<string, unknown>;
+}
+
+/** Recurrence and course length are separate meanings. Optional fields retain
+ * partial structured input rather than guessing a missing rate or count. */
+export interface CanonicalRecurrence {
+  count?: number;
+  countMax?: number;
+  frequency?: number;
+  frequencyMax?: number;
+  period?: number;
+  periodMax?: number;
+  periodUnit?: DurationUnit;
+  occurrenceDuration?: number;
+  occurrenceDurationMax?: number;
+  occurrenceDurationUnit?: DurationUnit;
+  courseLength?: CanonicalMeasure;
+  courseLengthRange?: CanonicalRange;
+  calendarWindow?: { start?: string; end?: string };
+  dayOfWeek?: Weekday[];
+  clocks?: string[];
+  anchors?: TimingEvent[];
+  offset?: number;
+  offsetMin?: number;
+  offsetMax?: number;
+  monthDays?: number[];
+  weekdayOrdinal?: number;
+  activityTiming?: CanonicalActivityTimingExpr[];
+  occurrenceCap?: CanonicalOccurrenceCapExpr;
+  clockWindow?: { start: string; end: string; endInclusive: boolean };
+  eventWindow?: CanonicalEventWindowExpr;
+  startOffset?: CanonicalMeasure;
+  endOffset?: CanonicalMeasure;
+  provenance?: Record<string, unknown>;
+}
+export interface CanonicalTiming {
+  recurrence?: CanonicalRecurrence;
+  explicitEvents?: string[];
+  code?: CanonicalConcept;
+  provenance?: Record<string, unknown>;
+}
+
+/** A boundary's anchor is interpreted once at import. A foreign/unknown event
+ * remains available for editing, never guessed to be treatment start. */
+export interface CanonicalBoundary {
+  anchor: "treatment-start" | "unresolved";
+  description?: string;
+  displacement?: CanonicalMeasure;
+  displacementRange?: CanonicalRange;
+  provenance?: Record<string, unknown>;
+}
+export interface CanonicalChoice {
+  groupId: string;
+  branchId: string;
+}
+export interface CanonicalAdministration {
+  kind: "administration";
+  schedule?: CanonicalTiming;
+  amounts?: CanonicalAmount[];
+  stageOrdinal?: number;
+  /** Typed parser member identity, independent of external dose sequence. */
+  sourceMember?: number;
+  onsetDays?: number;
+  asNeeded?: boolean;
+  targetCount?: number;
+  target?: CanonicalConcept;
+  siteReference?: unknown;
+  route?: CanonicalConcept;
+  method?: CanonicalConcept;
+  text?: string;
+  patientInstruction?: string;
+  additionalInstructions?: CanonicalConcept[];
+  predicate?: MedicationCondition;
+  calendarPredicate?: MedicationCondition;
+  excludedDates?: string[];
+  excludedWeekdays?: Weekday[];
+  limits?: CanonicalDoseLimit[];
+  /** Rich/unexecuted constraints remain a distinct source of uncertainty. */
+  constraints?: Record<string, unknown>;
+  choice?: CanonicalChoice;
+  choiceIssue?: boolean;
+  phaseOrigin?: CanonicalMeasure;
+  phaseOriginIssue?: boolean;
+  delayMinutes?: number;
+  anchoredLength?: { quantity?: CanonicalMeasure; range?: CanonicalRange };
+  cycleDays?: CanonicalCycleDayConstraint;
+  contextIssue?: "conflicting-course-phase" | "missing-course-context";
+  syntax?: CanonicalSigClause;
+  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown> };
+}
+export interface CanonicalStage {
+  administrations: CanonicalAdministration[];
+  start?: CanonicalBoundary;
+  end?: CanonicalBoundary;
+  count?: number;
+  constraints?: Record<string, unknown>;
+  provenance?: Record<string, unknown>;
+}
+export interface CanonicalCourse {
+  kind: "course";
+  stages: CanonicalStage[];
+  instruction?: string;
+  cycleInterval?: CanonicalMeasure;
+  constraints?: Record<string, unknown>;
+  contextIssue?: "conflicting-course-phase" | "missing-course-context";
+  provenance?: { format: "r6" | "syntax"; data: Record<string, unknown> };
+}
+export type CanonicalScheduleInput =
+  | CanonicalCourse
+  | CanonicalAdministration
+  | readonly CanonicalAdministration[];
+export type CanonicalSupplyOptions = Omit<TotalUnitsOptions, "dosage"> & { dosage: CanonicalScheduleInput };
+export type CanonicalExecutionOptions = NextDueDoseOptions;
+export interface CanonicalRegimenDueTimes {
+  dosageIndex: number;
+  stageOrdinal: number;
+  phaseStart: string;
+  timestamps: string[];
+}
+
+/** These direct semantic accessors intentionally know nothing about FHIR
+ * extensions. Wire readers normalize at the boundary, once per input. */
+export const measureOperator = (q: CanonicalMeasure | undefined) => q?.comparator;
+export const administrationCondition = (a: CanonicalAdministration) => a.predicate;
+export const administrationCalendarCondition = (a: CanonicalAdministration) => a.calendarPredicate;
+export const administrationExcludedDates = (a: CanonicalAdministration) => a.excludedDates ?? [];
+export const administrationExcludedWeekdays = (a: CanonicalAdministration) => a.excludedWeekdays ?? [];
+export const administrationChoice = (a: CanonicalAdministration) => a.choice;
+export const courseContextIssue = (c: CanonicalCourse) => c.contextIssue;
+export const recurrenceOffset = (r: CanonicalRecurrence | undefined) => r?.offset;
+export const recurrenceActivities = (r: CanonicalRecurrence | undefined) => r?.activityTiming;
+export const administrationDelay = (a: CanonicalAdministration) => a.delayMinutes;
+export const anchoredDuration = (a: Pick<CanonicalAdministration, "anchoredLength">) => a.anchoredLength;
+export const recurrenceMonthDays = (r: CanonicalRecurrence | undefined) => r?.monthDays;
+export const recurrenceCap = (r: CanonicalRecurrence | undefined) => r?.occurrenceCap;
+export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDays;
+export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
+export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
+
+/** Choose the last fully numeric source constraint where the clinical API
+ * expects a single bound; other choices remain retained and explicitly
+ * unevaluated. Period constraints are consumed independently by the engine. */
+export function singleNumericLimit(
+  a: CanonicalAdministration,
+  scope: "administration" | "lifetime"
+): CanonicalMeasure | undefined {
+  let value: CanonicalMeasure | undefined;
+  for (const limit of a.limits ?? []) {
+    if (limit.scope === scope && limit.amount && !limit.period && !limit.expression) value = limit.amount;
+  }
+  return value;
+}
+export function hasPeriodLimits(a: CanonicalAdministration): boolean {
+  return a.limits?.some((limit) => limit.scope === "period") ?? false;
+}

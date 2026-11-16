@@ -98,7 +98,7 @@ export function getCycleDayConstraint(dosage: FhirDosage): CanonicalCycleDayCons
 /** Preserve the source-decided cycle restriction as a genuine dosage modifier.
  * @param constraint Recognized cycle ordinals and the unresolved calendar dependency.
  */
-function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): FhirExtension {
+export function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): FhirExtension {
   return {
     url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
     extension: [
@@ -275,7 +275,7 @@ export function buildInfusionCarrierMaterialStructureDefinition() {
  * terminology identity. This describes the volume-owned material and never
  * changes dose/rate scheduling or converts a vehicle into the active drug.
  */
-function infusionCarrierMaterialExtension(
+export function infusionCarrierMaterialExtension(
   material: NonNullable<HpsgClinicalQuantityFeature["carrierMaterial"]>
 ): FhirExtension {
   return {
@@ -1159,14 +1159,15 @@ function appendWarning(warnings: string[] | undefined, warning: string | undefin
   return warnings;
 }
 
-export function canonicalToFhir(
-  clause: CanonicalSigClause,
-  textOverride?: string,
-  options?: FhirProjectionOptions
-): FhirDosage {
-  const dosage: FhirDosage = options?.sequence !== undefined
-    ? { sequence: options.sequence }
-    : {};
+/** Shared FHIR terminology/source serializer for BOTH output versions.
+ * This serializes coded context only; no course, dose or scheduling semantics
+ * are read back from this interchange object. R5/R6 adapters own their own
+ * quantity and timing choices around the same exact clinical code payload. */
+export function serializeCanonicalContext(
+  clause: CanonicalSigClause, options?: FhirProjectionOptions
+): Pick<FhirDosage, "extension" | "route" | "site" | "method" |
+  "additionalInstruction" | "asNeeded" | "asNeededFor" | "patientInstruction"> {
+  const dosage: FhirDosage = {};
   const instructionGraphExtension = buildInstructionGraphExtension(clause.instructionGraph);
   if (instructionGraphExtension) {
     dosage.extension = [instructionGraphExtension];
@@ -1207,244 +1208,6 @@ export function canonicalToFhir(
       action.polarity !== AdvicePolarity.Negate &&
       !action.args.some(arg =>
         arg.conceptId === "medication-tablet" || arg.conceptId === "medication-capsule"));
-  const repeat: FhirTimingRepeat = {};
-  let hasRepeat = false;
-  const schedule = clause.schedule;
-  if (schedule?.administrationOffsetMinutes !== undefined) {
-    dosage.modifierExtension = [{
-      url: ADMINISTRATION_OFFSET_EXTENSION_URL,
-      valueQuantity: { value: schedule.administrationOffsetMinutes, unit: "min", code: "min", system: "http://unitsofmeasure.org" }
-    }];
-  }
-
-  if (schedule?.calendarEvents?.length) {
-    dosage.timing = {
-      ...(dosage.timing ?? {}),
-      event: schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate),
-      _event: schedule.calendarEvents.map(calendarEventPrimitive)
-    };
-  }
-  if (schedule?.boundsStart || schedule?.boundsEnd) {
-    repeat.boundsPeriod = {
-      ...(schedule.boundsStart ? { start: schedule.boundsStart } : {}),
-      ...(schedule.boundsEnd ? { end: schedule.boundsEnd } : {})
-    };
-    hasRepeat = true;
-  }
-
-  if (schedule?.frequency !== undefined && schedule.frequency > 0) {
-    repeat.frequency = schedule.frequency;
-    hasRepeat = true;
-  } else if (schedule?.frequency === 0) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      { url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }
-    ];
-    hasRepeat = true;
-  }
-  if (schedule?.count !== undefined) {
-    repeat.count = schedule.count;
-    hasRepeat = true;
-  }
-  if (schedule?.countMax !== undefined) {
-    repeat.count = repeat.count ?? 1;
-    repeat.countMax = schedule.countMax;
-    hasRepeat = true;
-  }
-  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit) {
-    repeat.duration = schedule.administrationDuration;
-    repeat.durationUnit = schedule.administrationDurationUnit;
-    if (schedule.administrationDurationMax !== undefined) {
-      repeat.durationMax = schedule.administrationDurationMax;
-    }
-    hasRepeat = true;
-  }
-  // Timing permits one bounds[x]. Keep absolute bounds in boundsPeriod and
-  // retain the authored duration/range as a typed modifier for exact execution
-  // and editing, including partial days that have no date-only endpoint.
-  if (schedule?.duration !== undefined && schedule.durationUnit) {
-    const ranged = schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration ||
-        schedule.durationMaxComparator !== undefined);
-    const duration = ranged ? undefined : buildFhirDurationQuantity(
-      schedule.duration, schedule.durationUnit, schedule.durationComparator);
-    const range = ranged ? buildFhirBoundsRange(
-      schedule.duration, schedule.durationMax!, schedule.durationUnit,
-      schedule.durationComparator, schedule.durationMaxComparator) : undefined;
-    if (repeat.boundsPeriod) {
-      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
-        url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
-        ...(range ? { valueRange: range } : { valueQuantity: duration! })
-      }];
-    } else if (range) {
-      repeat.boundsRange = range;
-    } else {
-      repeat.boundsDuration = duration;
-    }
-    hasRepeat = true;
-  }
-  if (schedule?.frequencyMax !== undefined) {
-    repeat.frequencyMax = schedule.frequencyMax;
-    hasRepeat = true;
-  }
-  if (schedule?.period !== undefined && schedule.periodUnit) {
-    repeat.period = schedule.period;
-    repeat.periodUnit = schedule.periodUnit;
-    hasRepeat = true;
-  }
-  if (schedule?.periodMax !== undefined) {
-    repeat.periodMax = schedule.periodMax;
-    hasRepeat = true;
-  }
-  if (schedule?.offset !== undefined) {
-    if (Number.isInteger(schedule.offset)) {
-      repeat.offset = schedule.offset;
-    } else {
-      repeat.extension = [
-        ...(repeat.extension ?? []),
-        timingOffsetExtension(TIMING_OFFSET_EXACT_EXTENSION_URL, schedule.offset)
-      ];
-    }
-    hasRepeat = true;
-  }
-  if (schedule?.offsetMin !== undefined) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      timingOffsetExtension(TIMING_OFFSET_MIN_EXTENSION_URL, schedule.offsetMin)
-    ];
-    hasRepeat = true;
-  }
-  if (schedule?.offsetMax !== undefined) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      timingOffsetExtension(TIMING_OFFSET_MAX_EXTENSION_URL, schedule.offsetMax)
-    ];
-    hasRepeat = true;
-  }
-  if (schedule?.dayOfWeek?.length) {
-    repeat.dayOfWeek = [...schedule.dayOfWeek];
-    hasRepeat = true;
-  }
-  if (schedule?.dayOfMonth?.length) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      ...schedule.dayOfMonth.map(day => ({
-        url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day
-      }))
-    ];
-    hasRepeat = true;
-  }
-
-  if (schedule?.when?.length) {
-    repeat.when = [...schedule.when];
-    hasRepeat = true;
-  }
-  if (schedule?.timeOfDay?.length) {
-    repeat.timeOfDay = [...schedule.timeOfDay];
-    hasRepeat = true;
-  }
-  if (schedule?.clockWindow) {
-    repeat.extension = [...(repeat.extension ?? []), {
-      url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
-        { url: "start", valueTime: schedule.clockWindow.start },
-        { url: "end", valueTime: schedule.clockWindow.end },
-        { url: "endInclusive", valueBoolean: schedule.clockWindow.endInclusive }
-      ]
-    }];
-    hasRepeat = true;
-  }
-  if (schedule?.weekdayOrdinal !== undefined) {
-    repeat.extension = [...(repeat.extension ?? []), {
-      url: TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, valueInteger: schedule.weekdayOrdinal
-    }];
-    hasRepeat = true;
-  }
-  if (schedule?.eventWindow) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      { url: TIMING_EVENT_WINDOW_EXTENSION_URL, extension: [
-        { url: "start", valueCode: schedule.eventWindow.start },
-        { url: "end", valueCode: schedule.eventWindow.end }
-      ] }
-    ];
-    hasRepeat = true;
-  }
-  if (schedule?.activityTiming?.length) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      ...schedule.activityTiming.map((item) => buildActivityTimingExtension(item, options))
-    ];
-    hasRepeat = true;
-  }
-  if (schedule?.occurrenceCap) {
-    repeat.extension = [
-      ...(repeat.extension ?? []),
-      buildOccurrenceCapExtension(schedule.occurrenceCap)
-    ];
-    hasRepeat = true;
-  }
-
-  if (schedule?.maxDosePerPeriod?.length) {
-    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
-      const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);
-      const denominator = {
-        value: maximum.period,
-        unit: maximum.periodUnit,
-        system: UCUM_SYSTEM,
-        code: maximum.periodUnit
-      };
-      return {
-        numerator: maximum.amountComparator
-          ? quantityForR5({ ...numerator, comparator: maximum.amountComparator })!
-          : numerator,
-        denominator: maximum.periodComparator
-          ? simpleQuantityForR5({ ...denominator, comparator: maximum.periodComparator })!
-          : denominator
-      };
-    });
-  }
-
-  normalizeClockFrequency(repeat);
-  if (hasRepeat) {
-    dosage.timing = {
-      ...(dosage.timing ?? {}),
-      repeat
-    };
-  }
-
-  if (schedule?.timingCode) {
-    dosage.timing = dosage.timing ?? {};
-    const normalizedCode = schedule.timingCode.toUpperCase();
-    // A CodeableConcept.text preserves supported local wording without
-    // falsely attaching an HL7 standard identity to non-standard codes.
-    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
-      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
-          text: schedule.timingCode }
-      : { text: schedule.timingCode };
-  }
-
-  if (clause.dose?.range) {
-    const doseRange = buildFhirDoseRange(clause.dose.range, clause.dose.unit);
-    if (doseRange) {
-      dosage.doseAndRate = [
-        {
-          doseRange
-        }
-      ];
-    }
-  } else if (clause.dose?.value !== undefined) {
-    dosage.doseAndRate = [
-      {
-        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit, clause.dose.comparator)
-      }
-    ];
-  }
-
-  // HPSG produces the dimensional meaning; FHIR simply lowers that typed
-  // value. Safety checks must never reparse and overwrite clinical dosage.
-  if (clause.clinicalQuantity)
-    projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
-
   if (clause.route?.code || clause.route?.text) {
     const routeCode = clause.route?.code;
     const coding = routeCode ? ROUTE_SNOMED[routeCode] : undefined;
@@ -1652,6 +1415,267 @@ export function canonicalToFhir(
     }
   }
 
+  if (clause.patientInstruction) dosage.patientInstruction = clause.patientInstruction;
+  return dosage;
+}
+
+/** Shared wire Timing/source metadata serializer. This projects the already
+ * scoped canonical schedule; it never parses or interprets external dosage.
+ * R5 and current-R6 adapters independently choose their Quantity encodings. */
+export function serializeCanonicalSchedule(
+  schedule: CanonicalSigClause["schedule"], options?: FhirProjectionOptions
+): Pick<FhirDosage, "timing" | "modifierExtension"> {
+  const dosage: FhirDosage = {};
+  const repeat: FhirTimingRepeat = {};
+  let hasRepeat = false;
+  if (schedule?.administrationOffsetMinutes !== undefined) {
+    dosage.modifierExtension = [{
+      url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { value: schedule.administrationOffsetMinutes, unit: "min", code: "min", system: "http://unitsofmeasure.org" }
+    }];
+  }
+
+  if (schedule?.calendarEvents?.length) {
+    dosage.timing = {
+      ...(dosage.timing ?? {}),
+      event: schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate),
+      _event: schedule.calendarEvents.map(calendarEventPrimitive)
+    };
+  }
+  if (schedule?.boundsStart || schedule?.boundsEnd) {
+    repeat.boundsPeriod = {
+      ...(schedule.boundsStart ? { start: schedule.boundsStart } : {}),
+      ...(schedule.boundsEnd ? { end: schedule.boundsEnd } : {})
+    };
+    hasRepeat = true;
+  }
+
+  if (schedule?.frequency !== undefined && schedule.frequency > 0) {
+    repeat.frequency = schedule.frequency;
+    hasRepeat = true;
+  } else if (schedule?.frequency === 0) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.count !== undefined) {
+    repeat.count = schedule.count;
+    hasRepeat = true;
+  }
+  if (schedule?.countMax !== undefined) {
+    repeat.count = repeat.count ?? 1;
+    repeat.countMax = schedule.countMax;
+    hasRepeat = true;
+  }
+  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+    repeat.duration = schedule.administrationDuration;
+    repeat.durationUnit = schedule.administrationDurationUnit;
+    if (schedule.administrationDurationMax !== undefined) {
+      repeat.durationMax = schedule.administrationDurationMax;
+    }
+    hasRepeat = true;
+  }
+  // Timing permits one bounds[x]. Keep absolute bounds in boundsPeriod and
+  // retain the authored duration/range as a typed modifier for exact execution
+  // and editing, including partial days that have no date-only endpoint.
+  if (schedule?.duration !== undefined && schedule.durationUnit) {
+    const ranged = schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration ||
+        schedule.durationMaxComparator !== undefined);
+    const duration = ranged ? undefined : buildFhirDurationQuantity(
+      schedule.duration, schedule.durationUnit, schedule.durationComparator);
+    const range = ranged ? buildFhirBoundsRange(
+      schedule.duration, schedule.durationMax!, schedule.durationUnit,
+      schedule.durationComparator, schedule.durationMaxComparator) : undefined;
+    if (repeat.boundsPeriod) {
+      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
+        url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+        ...(range ? { valueRange: range } : { valueQuantity: duration! })
+      }];
+    } else if (range) {
+      repeat.boundsRange = range;
+    } else {
+      repeat.boundsDuration = duration;
+    }
+    hasRepeat = true;
+  }
+  if (schedule?.frequencyMax !== undefined) {
+    repeat.frequencyMax = schedule.frequencyMax;
+    hasRepeat = true;
+  }
+  if (schedule?.period !== undefined && schedule.periodUnit) {
+    repeat.period = schedule.period;
+    repeat.periodUnit = schedule.periodUnit;
+    hasRepeat = true;
+  }
+  if (schedule?.periodMax !== undefined) {
+    repeat.periodMax = schedule.periodMax;
+    hasRepeat = true;
+  }
+  if (schedule?.offset !== undefined) {
+    if (Number.isInteger(schedule.offset)) {
+      repeat.offset = schedule.offset;
+    } else {
+      repeat.extension = [
+        ...(repeat.extension ?? []),
+        timingOffsetExtension(TIMING_OFFSET_EXACT_EXTENSION_URL, schedule.offset)
+      ];
+    }
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMin !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      timingOffsetExtension(TIMING_OFFSET_MIN_EXTENSION_URL, schedule.offsetMin)
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.offsetMax !== undefined) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      timingOffsetExtension(TIMING_OFFSET_MAX_EXTENSION_URL, schedule.offsetMax)
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.dayOfWeek?.length) {
+    repeat.dayOfWeek = [...schedule.dayOfWeek];
+    hasRepeat = true;
+  }
+  if (schedule?.dayOfMonth?.length) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      ...schedule.dayOfMonth.map(day => ({
+        url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: day
+      }))
+    ];
+    hasRepeat = true;
+  }
+
+  if (schedule?.when?.length) {
+    repeat.when = [...schedule.when];
+    hasRepeat = true;
+  }
+  if (schedule?.timeOfDay?.length) {
+    repeat.timeOfDay = [...schedule.timeOfDay];
+    hasRepeat = true;
+  }
+  if (schedule?.clockWindow) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueTime: schedule.clockWindow.start },
+        { url: "end", valueTime: schedule.clockWindow.end },
+        { url: "endInclusive", valueBoolean: schedule.clockWindow.endInclusive }
+      ]
+    }];
+    hasRepeat = true;
+  }
+  if (schedule?.weekdayOrdinal !== undefined) {
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, valueInteger: schedule.weekdayOrdinal
+    }];
+    hasRepeat = true;
+  }
+  if (schedule?.eventWindow) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      { url: TIMING_EVENT_WINDOW_EXTENSION_URL, extension: [
+        { url: "start", valueCode: schedule.eventWindow.start },
+        { url: "end", valueCode: schedule.eventWindow.end }
+      ] }
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.activityTiming?.length) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      ...schedule.activityTiming.map((item) => buildActivityTimingExtension(item, options))
+    ];
+    hasRepeat = true;
+  }
+  if (schedule?.occurrenceCap) {
+    repeat.extension = [
+      ...(repeat.extension ?? []),
+      buildOccurrenceCapExtension(schedule.occurrenceCap)
+    ];
+    hasRepeat = true;
+  }
+
+  normalizeClockFrequency(repeat);
+  if (hasRepeat) {
+    dosage.timing = {
+      ...(dosage.timing ?? {}),
+      repeat
+    };
+  }
+
+  if (schedule?.timingCode) {
+    dosage.timing = dosage.timing ?? {};
+    const normalizedCode = schedule.timingCode.toUpperCase();
+    // A CodeableConcept.text preserves supported local wording without
+    // falsely attaching an HL7 standard identity to non-standard codes.
+    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
+      ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
+          text: schedule.timingCode }
+      : { text: schedule.timingCode };
+  }
+
+  return dosage;
+}
+
+export function canonicalToFhir(
+  clause: CanonicalSigClause,
+  textOverride?: string,
+  options?: FhirProjectionOptions
+): FhirDosage {
+  const dosage: FhirDosage = { ...serializeCanonicalContext(clause, options),
+    ...(options?.sequence !== undefined ? { sequence: options.sequence } : {})
+  };
+  const schedule = clause.schedule;
+  Object.assign(dosage, serializeCanonicalSchedule(schedule, options));
+  if (schedule?.maxDosePerPeriod?.length) {
+    dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
+      const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);
+      const denominator = {
+        value: maximum.period,
+        unit: maximum.periodUnit,
+        system: UCUM_SYSTEM,
+        code: maximum.periodUnit
+      };
+      return {
+        numerator: maximum.amountComparator
+          ? quantityForR5({ ...numerator, comparator: maximum.amountComparator })!
+          : numerator,
+        denominator: maximum.periodComparator
+          ? simpleQuantityForR5({ ...denominator, comparator: maximum.periodComparator })!
+          : denominator
+      };
+    });
+  }
+
+  if (clause.dose?.range) {
+    const doseRange = buildFhirDoseRange(clause.dose.range, clause.dose.unit);
+    if (doseRange) {
+      dosage.doseAndRate = [
+        {
+          doseRange
+        }
+      ];
+    }
+  } else if (clause.dose?.value !== undefined) {
+    dosage.doseAndRate = [
+      {
+        doseQuantity: buildFhirDoseQuantity(clause.dose.value, clause.dose.unit, clause.dose.comparator)
+      }
+    ];
+  }
+
+  // HPSG produces the dimensional meaning; FHIR simply lowers that typed
+  // value. Safety checks must never reparse and overwrite clinical dosage.
+  if (clause.clinicalQuantity)
+    projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
+
   // The HPSG clinical scope is already resolved in CanonicalSigClause.
   // FHIR projects it exactly once; it must never decide which daughter
   // receives an administration condition or calendar exclusion.
@@ -1713,10 +1737,15 @@ function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clini
   };
 }
 
-export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
+/** Decode common coded source annotations for either FHIR version.
+ * No dose, rate, Timing, course, or compatibility marker is interpreted here.
+ * Native-course import supplies an R6 CodeableReference's concept explicitly. */
+export function deserializeCanonicalContext(
+  dosage: Pick<FhirDosage, "text" | "route" | "site" | "method" | "extension" |
+    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction">
+): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
-  clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   clause.instructionGraph = parseInstructionGraphExtension(dosage.extension);
   let routeCode: RouteCode | undefined;
 
@@ -1779,6 +1808,83 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     };
   }
 
+  const prnReasons = dosage.asNeededFor?.length
+    ? dosage.asNeededFor.map((concept) => {
+      const coding = concept.coding?.find((code) => Boolean(code.code));
+      const defaultDef = coding?.code
+        ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
+        : undefined;
+      const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
+      return {
+        text: getFallbackPrnReasonText(concept),
+        i18n: i18n.text,
+        spatialRelation: parseBodySiteSpatialRelationExtension(concept),
+        triggerPhase: parsePrnTriggerPhase(concept),
+        coding: coding?.code
+          ? {
+            code: coding.code,
+            display: coding.display,
+            system: coding.system,
+            extension: cloneExtensions(coding.extension),
+            _display: clonePrimitiveElement(coding._display),
+            i18n: i18n.display
+          }
+          : undefined
+      };
+    })
+    : undefined;
+  const primaryReason = prnReasons?.[0];
+  const asNeeded = dosage.asNeeded ??
+    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
+  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
+    clause.prn = {
+      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
+      reason:
+        prnReasons?.length === 1
+          ? primaryReason
+          : prnReasons?.length
+            ? { text: joinCanonicalPrnReasonTexts(prnReasons) }
+            : undefined,
+      reasons: prnReasons?.length ? prnReasons : undefined
+    };
+  }
+
+  if (dosage.additionalInstruction?.length) {
+    clause.additionalInstructions = [];
+    for (const instruction of dosage.additionalInstruction) {
+      const coding = instruction.coding?.find((code) => Boolean(code.code));
+      clause.additionalInstructions.push({
+        text: instruction.text,
+        i18n: codeableConceptTranslationI18n(instruction, coding).text,
+        coding: coding?.code
+          ? {
+            code: coding.code,
+            display: coding.display,
+            system: coding.system
+          }
+          : undefined,
+        frames: coding?.code
+          ? buildAdditionalInstructionFramesFromCoding(
+            coding.system ?? SNOMED_SYSTEM,
+            coding.code,
+            instruction.text ?? coding.display ?? "",
+            clause.raw
+          )
+          : undefined
+      });
+    }
+  }
+
+  if (dosage.patientInstruction) {
+    clause.patientInstruction = dosage.patientInstruction;
+  }
+
+  return clause;
+}
+
+export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
+  const clause = deserializeCanonicalContext(dosage);
+  clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const repeat = dosage.timing?.repeat;
   const timingCode = timingCodeFromFhir(dosage);
   const frequencyMinExtension = repeat?.extension?.find(
@@ -1899,76 +2005,6 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
   if (carrierQuantity) clause.clinicalQuantity = carrierQuantity;
 
-  const prnReasons = dosage.asNeededFor?.length
-    ? dosage.asNeededFor.map((concept) => {
-      const coding = concept.coding?.find((code) => Boolean(code.code));
-      const defaultDef = coding?.code
-        ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
-        : undefined;
-      const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
-      return {
-        text: getFallbackPrnReasonText(concept),
-        i18n: i18n.text,
-        spatialRelation: parseBodySiteSpatialRelationExtension(concept),
-        triggerPhase: parsePrnTriggerPhase(concept),
-        coding: coding?.code
-          ? {
-            code: coding.code,
-            display: coding.display,
-            system: coding.system,
-            extension: cloneExtensions(coding.extension),
-            _display: clonePrimitiveElement(coding._display),
-            i18n: i18n.display
-          }
-          : undefined
-      };
-    })
-    : undefined;
-  const primaryReason = prnReasons?.[0];
-  const asNeeded = dosage.asNeeded ??
-    (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
-  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
-    clause.prn = {
-      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
-      reason:
-        prnReasons?.length === 1
-          ? primaryReason
-          : prnReasons?.length
-            ? { text: joinCanonicalPrnReasonTexts(prnReasons) }
-            : undefined,
-      reasons: prnReasons?.length ? prnReasons : undefined
-    };
-  }
-
-  if (dosage.additionalInstruction?.length) {
-    clause.additionalInstructions = [];
-    for (const instruction of dosage.additionalInstruction) {
-      const coding = instruction.coding?.find((code) => Boolean(code.code));
-      clause.additionalInstructions.push({
-        text: instruction.text,
-        i18n: codeableConceptTranslationI18n(instruction, coding).text,
-        coding: coding?.code
-          ? {
-            code: coding.code,
-            display: coding.display,
-            system: coding.system
-          }
-          : undefined,
-        frames: coding?.code
-          ? buildAdditionalInstructionFramesFromCoding(
-            coding.system ?? SNOMED_SYSTEM,
-            coding.code,
-            instruction.text ?? coding.display ?? "",
-            clause.raw
-          )
-          : undefined
-      });
-    }
-  }
-
-  if (dosage.patientInstruction) {
-    clause.patientInstruction = dosage.patientInstruction;
-  }
 
   return clause;
 }

@@ -379,7 +379,7 @@ function describe(condition: MedicationCondition): string {
   }
 }
 
-function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
+export function conditionToR6(condition: MedicationCondition): FhirR6DosageCondition {
   if (condition.kind === "measurement") {
     return {
       // Keep the existing explicit condition-kind code AND add any exact
@@ -1900,7 +1900,10 @@ export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstructionI
 }
 
 /** Import a complete R6 course without replacing EZMED's flat dosage layout. */
-export function fromDosageDetails(details: FhirR6DosageInstruction): {
+/** Build the editable R5 boundary payload once. Batch assembly may already
+ * own its final edit-provenance step; keeping that operation separate avoids
+ * computing and attaching identical row fingerprints twice on every parse. */
+export function projectEditableR5Course(details: FhirR6DosageInstruction): {
   dosages: EzDosage[];
   course: EzCourseMetadata;
 } {
@@ -1935,10 +1938,8 @@ export function fromDosageDetails(details: FhirR6DosageInstruction): {
     }
   }
   attachCourseDetailsExtensions(dosages, details);
-  const editable = details.renderedInstruction === undefined ? dosages
-    : withDosageEditProvenance(dosages, details.renderedInstruction);
   return {
-    dosages: editable,
+    dosages,
     course: {
       ...(details.id ? { id: details.id } : {}),
       ...(details.extension?.length ? { extension: details.extension } : {}),
@@ -1949,6 +1950,18 @@ export function fromDosageDetails(details: FhirR6DosageInstruction): {
       ...(details.safety ? { safety: details.safety } : {}),
       ...(metadata.length ? { step: metadata } : {})
     }
+  };
+}
+
+/** Import the complete native R6 course into the established editable R5
+ * interchange contract. New internal course paths do not use this function. */
+export function fromDosageDetails(details: FhirR6DosageInstruction): {
+  dosages: EzDosage[]; course: EzCourseMetadata;
+} {
+  const projected = projectEditableR5Course(details);
+  return details.renderedInstruction === undefined ? projected : {
+    ...projected,
+    dosages: withDosageEditProvenance(projected.dosages, details.renderedInstruction)
   };
 }
 

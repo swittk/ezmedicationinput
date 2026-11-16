@@ -1,9 +1,8 @@
-import {
-  PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
-  toDosageDetails,
-  attachCourseDetailsExtensions
-} from '../dosage-course';
-import { canonicalToFhir, type FhirProjectionOptions } from '../fhir';
+import { fromDosageDetails } from '../dosage-course';
+import { type FhirProjectionOptions } from '../fhir';
+import { courseFromParallel } from '../canonical/compile';
+import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
+import type { CanonicalCourse } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, type RegimenGraph } from './regimen';
@@ -62,6 +61,7 @@ type ParallelProjection =
       dosages: EzDosage[];
       course: EzCourseMetadata;
       details: FhirR6DosageInstruction;
+      canonical: CanonicalCourse;
     };
 
 const ZERO: RegimenPosition = { unit: 'd', value: 0 };
@@ -388,42 +388,9 @@ export function projectParallelRegimen(
   options?: FhirProjectionOptions
 ): ParallelProjection {
   if (regimen.kind !== 'resolved') return regimen;
-  const dosages: EzDosage[] = [];
-  const stepMetadata: NonNullable<EzCourseMetadata['step']> = [];
-  for (const stage of regimen.stages) {
-    for (const component of stage.components) {
-      const projected = canonicalToFhir(
-        component.clause,
-        clauseTexts[component.member],
-        { ...options, sequence: stage.sequence }
-      ) as EzDosage;
-      const phaseOrigin = component.phaseOrigin;
-      dosages.push(phaseOrigin ? {
-        ...projected,
-        modifierExtension: [
-          ...(projected.modifierExtension ?? []).filter(extension =>
-            extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL),
-          {
-            url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
-            valueQuantity: {
-              value: phaseOrigin.value,
-              unit: phaseOrigin.unit,
-              system: 'http://unitsofmeasure.org',
-              code: phaseOrigin.unit
-            }
-          }
-        ]
-      } : projected);
-    }
-    stepMetadata.push({
-      sequence: stage.sequence,
-      ...(stage.sequence > 1 ? { start: relativeTime(stage.start) } : {}),
-      ...(stage.end ? { end: relativeTime(stage.end) } : {})
-    });
-  }
-
-  const course: EzCourseMetadata = { renderedInstruction, step: stepMetadata };
-  const details = toDosageDetails(dosages, renderedInstruction, course);
-  attachCourseDetailsExtensions(dosages, details);
-  return { kind: 'resolved', dosages, course, details };
+  const canonical = courseFromParallel(regimen, clauseTexts, renderedInstruction);
+  const details = projectFreshlyCompiledCourseToR6(canonical, options);
+  // These are public interchange projections, not the course's working state.
+  const { dosages, course } = fromDosageDetails(details);
+  return { kind: 'resolved', dosages, course, details, canonical };
 }

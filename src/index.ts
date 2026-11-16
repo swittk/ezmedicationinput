@@ -1,20 +1,46 @@
+import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
+  joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
+  appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
+  rateRangePreview } from "./canonical/format-course";
+import { administrationFromClause, courseFromAdministrations, courseFromParallel, clauseForAdministration } from "./canonical/compile";
+import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay } from "./adapters/canonical-course";
+import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
+import { cloneStructuredValue } from "./stable-structure";
+/** Native editing/projection API. Existing .fhir / .fhirNext fields retain
+ * their established versions; canonical is the internal source of meaning. */
+export type { CanonicalCourse, CanonicalStage, CanonicalAdministration,
+  CanonicalRecurrence, CanonicalTiming, CanonicalBoundary, CanonicalAmount,
+  CanonicalDoseLimit, CanonicalMeasure, CanonicalRange, CanonicalRatio,
+  CanonicalScheduleInput, CanonicalSupplyOptions } from "./canonical/course";
+export { editCanonicalCourse } from "./canonical/edit-course";
+export { importCanonicalCourse } from "./adapters/canonical-course";
+export { formatCanonicalCourse, formatCanonicalAdministration } from "./canonical/format-course";
+export function projectCanonicalCourse(course: CanonicalCourse, options?: ParseOptions): {
+  fhir: FhirDosage[]; fhirNext: FhirR6DosageInstruction
+} {
+  const fhirNext = courseToR6(course, {
+    bodySitePostcoordination: options?.bodySitePostcoordination,
+    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+  });
+  return { fhir: toFhirR5DosagesInternal(fhirNext), fhirNext };
+}
+
 import {
-  toDosageDetails, toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages, fromDosageDetails,
+  toDosageDetails, toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages, fromDosageDetails, projectEditableR5Course,
   assertCurrentR6DosageInstruction,
-  withDosageEditProvenance, fromR6Dosage,
+  withDosageEditProvenance,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import {
-  buildCanonicalParallelRegimen, projectParallelRegimen, relativeTime
+  buildCanonicalParallelRegimen
 } from "./regimen/parallel-course";
 import {
   applyCoordinatedCadenceScopes, composeCoordinatedTimingAnchors,
   scopeTrailingSharedDuration,
   scopeTrailingSharedNegativeInstructions, scopeMedicationConditionTargets
 } from "./regimen/coordination-scope";
-import type { EzCourseMetadata, FhirExpression } from "./types";
 import { getQuantityComparator } from "./fhir-quantity-operator";
 import type { BoundaryPlan } from "./hpsg/signature";
 import { createBoundaryPlan, takeBoundaryParsedState } from "./regimen/planner";
@@ -26,10 +52,10 @@ import {
   administrationTargetProjections,
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
-import { DAY_NAMES, formatCanonicalClause, joinWithAnd } from "./format";
-import { canonicalFromFhir, canonicalToFhir, ADMINISTRATION_OFFSET_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { formatCanonicalClause } from "./format";
+import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
-import { DAY_NAMES_THAI, joinWithAndThai, resolveSigLocalization } from "./i18n";
+import { resolveSigLocalization } from "./i18n";
 import { ParserState } from "./parser-state";
 import {
   applyPrnReasonCoding,
@@ -51,12 +77,8 @@ import {
 import {
   BodySiteCode,
   FhirDosage,
-  FhirDayOfWeek,
   FhirQuantity,
-  FhirR6Quantity,
-  FhirRange,
   EzDosage,
-  EzDoseAndRate,
   FhirR6DosageInstruction,
   FhirR6DosageInstructionInput,
   FormatBatchOptions,
@@ -68,7 +90,6 @@ import {
   ParseBatchSegmentMeta,
   ParseOptions,
   ParseResult,
-  MedicationCondition,
   CanonicalSigClause,
   CanonicalSiteExpr,
   TextRange
@@ -197,7 +218,7 @@ export {
 export * from "./types";
 export { nextDueDoses, calculateTotalUnits, MedicationQuantityCalculationError } from "./schedule";
 export {
-  toDosageDetails, toEzDosages, fromDosageDetails,
+  toDosageDetails, toEzDosages, fromDosageDetails, projectEditableR5Course,
   getDosageCondition, setDosageCondition,
   getDosageExcludedDates, setDosageExcludedDates,
   getDosageExcludedWeekdays, setDosageExcludedWeekdays,
@@ -444,15 +465,6 @@ function collectCanonicalClauses(results: ParseResult[]): ParseResult["meta"]["c
 }
 
 /** Prefer exact source wording for rich R6 course fields when it is available. */
-function prefersR6CourseSourceForDisplay(course: FhirR6DosageInstruction): boolean {
-  return Boolean(course.repeatCycle || course.safety ||
-    course.step.some(step => step.start || step.end ||
-      step.count !== undefined || step.safety ||
-      step.component.some(component => component.condition?.length ||
-        component.safety || component.site?.reference ||
-        component.doseAndRate?.some(rate => rate.doseExpression || rate.rateExpression))));
-}
-
 /** R5 maximum-dose fields have no lossless canonical text realizer yet. */
 function hasMaximumDoseForDisplay(dosage: FhirDosage): boolean {
   return Boolean(
@@ -460,115 +472,6 @@ function hasMaximumDoseForDisplay(dosage: FhirDosage): boolean {
     dosage.maxDosePerAdministration ||
     dosage.maxDosePerLifetime
   );
-}
-
-function joinGeneratedClauses(clauses: string[]): string {
-  return clauses.map((clause, index) =>
-    index < clauses.length - 1 ? clause.replace(/\.\s*$/u, "") : clause
-  ).join("; ");
-}
-
-/**
- * Lower existing typed administration delays into R6 step starts only when
- * every component of that step shares the same source-backed offset.
- * Incompatible individual component offsets stay at their existing R5
- * dosage extensions; they must never shift unrelated parallel administrations.
- */
-function typedAdministrationOffsetSteps(
-  results: readonly ParseResult[]
-): NonNullable<EzCourseMetadata["step"]> | undefined {
-  if (!results.some(item =>
-    item.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes !== undefined
-  )) return undefined;
-
-  const sequenceOffsets = new Map<number, Array<number | undefined>>();
-  const anchoredSequences = new Set<number>();
-  for (const item of results) {
-    const sequence = item.fhir.sequence ?? 1;
-    const offsets = sequenceOffsets.get(sequence) ?? [];
-    offsets.push(item.meta.canonical.clauses[0]?.schedule?.administrationOffsetMinutes);
-    sequenceOffsets.set(sequence, offsets);
-    if (item.fhir.timing?.repeat?.timeOfDay?.length ||
-        item.fhir.timing?.repeat?.when?.length) anchoredSequences.add(sequence);
-  }
-  const steps: NonNullable<EzCourseMetadata["step"]> = [];
-  for (const [sequence, offsets] of sequenceOffsets) {
-    const minutes = offsets[0];
-    if (minutes === undefined || minutes <= 0 || !Number.isFinite(minutes) ||
-        !offsets.every(offset => offset === minutes) ||
-        anchoredSequences.has(sequence)) continue;
-    // Absolute clock/event anchors stay on their component: shifting a whole
-    // course start instead would discard the dose-local time modifier.
-    const unit = minutes % 1440 === 0 ? "d" : minutes % 60 === 0 ? "h" : "min";
-    const value = unit === "d" ? minutes / 1440 : unit === "h" ? minutes / 60 : minutes;
-    steps.push({ sequence, start: relativeTime({ value, unit }) });
-  }
-  return steps.length ? steps : undefined;
-}
-
-/**
- * A source-typed relative phase onset can include a deliberate interval
- * with NO medication (for example, an explicit STOP for seven days before
- * resuming). Project that onset only when every component in the phase
- * agrees; neither the wire layer nor the scheduler interprets free text.
- */
-function typedRelativePhaseStartSteps(
-  results: readonly ParseResult[]
-): NonNullable<EzCourseMetadata["step"]> | undefined {
-  if (!results.some(item =>
-    item.meta.canonical.clauses[0]?.schedule?.treatmentStartOffsetDays !== undefined
-  )) return undefined;
-  const bySequence = new Map<number, Array<number | undefined>>();
-  for (const item of results) {
-    const sequence = item.fhir.sequence ?? 1;
-    const offsets = bySequence.get(sequence) ?? [];
-    offsets.push(item.meta.canonical.clauses[0]?.schedule?.treatmentStartOffsetDays);
-    bySequence.set(sequence, offsets);
-  }
-  const steps: NonNullable<EzCourseMetadata["step"]> = [];
-  for (const [sequence, offsets] of bySequence) {
-    const days = offsets[0];
-    if (sequence < 2 || days === undefined || !Number.isFinite(days) ||
-        days <= 0 || !offsets.every(offset => offset === days)) continue;
-    steps.push({ sequence, start: relativeTime({ value: days, unit: "d" }) });
-  }
-  return steps.length ? steps : undefined;
-}
-
-/**
- * A parallel set of independently dosed administrations may share one
- * treatment-course end. Project an R6 step end only when every typed daughter
- * in the same initial step owns the exact same finite course duration.
- * Heterogeneous bounds remain local to their respective R5 components.
- */
-function typedSharedCourseEndSteps(
-  results: readonly ParseResult[]
-): NonNullable<EzCourseMetadata["step"]> | undefined {
-  if (results.length < 2) return undefined;
-  const groups = new Map<number, ParseResult[]>();
-  for (const item of results) {
-    const sequence = item.fhir.sequence ?? 1;
-    const members = groups.get(sequence) ?? [];
-    members.push(item);
-    groups.set(sequence, members);
-  }
-  const steps: NonNullable<EzCourseMetadata["step"]> = [];
-  for (const [sequence, members] of groups) {
-    // Later phases have independent relative starts; they are represented
-    // by the existing typed parallel-regimen projection, not this simple end.
-    if (sequence !== 1 || members.length < 2) continue;
-    const schedule = members[0].meta.canonical.clauses[0]?.schedule;
-    const duration = schedule?.duration;
-    const unit = schedule?.durationUnit;
-    if (duration === undefined || duration <= 0 || !Number.isFinite(duration) ||
-        !unit || !members.every(member => {
-          const own = member.meta.canonical.clauses[0]?.schedule;
-          return own?.duration === duration && own.durationUnit === unit &&
-            own.boundsStart === undefined && own.boundsEnd === undefined;
-        })) continue;
-    steps.push({ sequence, end: relativeTime({ value: duration, unit }) });
-  }
-  return steps.length ? steps : undefined;
 }
 
 /** Detach a structured R5 modifier marker without emitting non-JSON optional
@@ -634,74 +537,29 @@ function buildWholeCourseResult(
   segments: ReturnType<typeof parseSigSegments>,
   regimenGraph: RegimenGraph,
   options?: ParseOptions,
-  parallel?: { dosages: EzDosage[]; course: EzCourseMetadata; details: FhirR6DosageInstruction }
+  parallel?: { canonical: CanonicalCourse }
 ): ParseBatchResult {
-  const dosageItems = results.map(item => item.fhir);
-  const typedRepeatCycle = regimenGraph.repeatCycle
-    ? { ...regimenGraph.repeatCycle }
-    : undefined;
-  const delayedSteps = parallel ? undefined : typedAdministrationOffsetSteps(results);
-  const relativeStarts = parallel ? undefined : typedRelativePhaseStartSteps(results);
-  const sharedCourseEnds = parallel ? undefined : typedSharedCourseEndSteps(results);
-  const typedSteps: NonNullable<EzCourseMetadata["step"]> = delayedSteps?.slice() ?? [];
-  const loweredSequences = new Set((delayedSteps ?? []).map(step => step.sequence));
-  for (const relative of relativeStarts ?? []) {
-    const step = typedSteps.find(item => item.sequence === relative.sequence);
-    if (step) {
-      // Step start owns the course/phase onset. Preserve a distinct dose-local
-      // delay on the component instead of overwriting its timing or applying it twice.
-      step.start = relative.start;
-      loweredSequences.delete(relative.sequence);
-    } else typedSteps.push(relative);
+  const typedRepeatCycle = regimenGraph.repeatCycle ? { ...regimenGraph.repeatCycle } : undefined;
+  // Parallel courses already own complete native administrations. Do not
+  // compile a second standalone dosage model for each raw diagnostic item.
+  const administrations = parallel ? [] : results.map(item => item.meta.canonical.administration!);
+  const canonical = parallel?.canonical ?? courseFromAdministrations(
+    administrations, input, typedRepeatCycle, regimenGraph.repeatCount);
+  if (parallel) {
+    if (typedRepeatCycle) canonical.cycleInterval = typedRepeatCycle;
+    if (regimenGraph.repeatCount !== undefined && canonical.stages[0])
+      canonical.stages[0].count = regimenGraph.repeatCount;
   }
-  for (const shared of sharedCourseEnds ?? []) {
-    const step = typedSteps.find(item => item.sequence === shared.sequence);
-    if (step) step.end = shared.end;
-    else typedSteps.push(shared);
-  }
-  if (typedRepeatCycle && regimenGraph.repeatCount !== undefined) {
-    const first = typedSteps.find(step => step.sequence === 1);
-    if (first) first.count = regimenGraph.repeatCount;
-    else typedSteps.push({ sequence: 1, count: regimenGraph.repeatCount });
-  }
-  const typedCourse: EzCourseMetadata | undefined =
-    typedRepeatCycle || typedSteps.length
-      ? {
-        ...(typedRepeatCycle ? { repeatCycle: typedRepeatCycle } : {}),
-        ...(typedSteps.length ? { step: typedSteps } : {})
-      }
-      : undefined;
-  // R6 step.start now owns a shared typed delay. Keeping the same modifier
-  // on its component would apply the delay again during relative scheduling.
-  // Non-lowered, independently offset components preserve their modifier.
-  const courseDosages = loweredSequences.size
-    ? dosageItems.map(row => loweredSequences.has(row.sequence ?? 1) ? {
-      ...row,
-      modifierExtension: row.modifierExtension?.filter(extension =>
-        extension.url !== ADMINISTRATION_OFFSET_EXTENSION_URL)
-    } : row)
-    : dosageItems;
-  const fhirNext = parallel?.details
-    ? {
-      ...parallel.details,
-      ...(typedRepeatCycle ? { repeatCycle: typedRepeatCycle } : {}),
-      ...(regimenGraph.repeatCount !== undefined
-        ? {
-          step: parallel.details.step.map((step, index) =>
-            index === 0 ? { ...step, count: regimenGraph.repeatCount } : step)
-        }
-        : {})
-    }
-    : toDosageDetails(
-      courseDosages,
-      input,
-      typedCourse
-    );
-  // A recurring-cycle course is projected as one R6 object and flattened by
-  // the established R6->R5 bridge. No source text is reparsed or injected.
-  const projectedFhir = typedRepeatCycle || typedSteps.length
-    ? fromDosageDetails(fhirNext).dosages
-    : parallel?.dosages ?? toEzDosages(dosageItems);
+  const fhirNext = projectFreshlyCompiledCourseToR6(canonical, {
+    bodySitePostcoordination: options?.bodySitePostcoordination,
+    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+  });
+  // The established editable R5 persistence contract is an OUTPUT adapter.
+  // Neither canonical course construction nor native execution consumes it.
+  const typedSteps = !parallel && canonical.stages.some(stage => stage.start || stage.end || stage.count !== undefined);
+  const courseProjection = typedRepeatCycle || typedSteps || parallel
+    ? projectEditableR5Course(fhirNext) : undefined;
+  const projectedFhir = courseProjection?.dosages ?? toEzDosages(results.map(item => item.fhir));
   // The same JSON-compatible structural bridge serves both public routes:
   // parser FHIR rows and callers using strict toFhirR5Dosages directly.
   const fhir = withDosageEditProvenance(normalizeEmittedSemanticMarkers(projectedFhir), input);
@@ -717,36 +575,17 @@ function buildWholeCourseResult(
   }
   // Realize ordinary multi-clause courses afresh. Rich R6 courses prefer the
   // exact source wording when available, while their structured data remains primary.
-  const displayCourse = results.length > 1 && !prefersR6CourseSourceForDisplay(fhirNext)
-    ? { ...fhirNext, renderedInstruction: undefined }
-    : fhirNext;
+  const displayCourse = results.length > 1 && !prefersSourceInstruction(canonical)
+    ? { ...canonical, instruction: undefined } : canonical;
   return {
     input,
     count: results.length,
     items: results,
     fhir,
     fhirNext,
-    ...(parallel ? {
-      course: typedRepeatCycle
-        ? {
-          ...parallel.course,
-          repeatCycle: typedRepeatCycle,
-          ...(regimenGraph.repeatCount !== undefined
-            ? {
-              step: [
-                ...(parallel.course.step ?? []).filter(step => step.sequence !== 1),
-                {
-                  ...(parallel.course.step?.find(step => step.sequence === 1) ?? { sequence: 1 }),
-                  count: regimenGraph.repeatCount
-                }
-              ].sort((left, right) => left.sequence - right.sequence)
-            }
-            : {})
-        }
-        : parallel.course
-    } : {}),
-    shortText: results.length === 1 ? primary.shortText : formatSig(displayCourse, "short", options),
-    longText: results.length === 1 ? primary.longText : formatSig(displayCourse, "long", options),
+    ...(parallel ? { course: courseProjection!.course } : {}),
+    shortText: results.length === 1 ? primary.shortText : formatCanonicalCourse(displayCourse, "short", options),
+    longText: results.length === 1 ? primary.longText : formatCanonicalCourse(displayCourse, "long", options),
     warnings: [...warnings],
     meta: {
       ...primary.meta,
@@ -755,7 +594,8 @@ function buildWholeCourseResult(
       canonical: {
         clauses: results.length
           ? collectCanonicalClauses(results)
-          : primary.meta.canonical.clauses
+          : primary.meta.canonical.clauses,
+        course: canonical
       },
       segments: toSegmentMeta(segments)
     }
@@ -914,9 +754,19 @@ function composeParsedStates(
  * @param results Source-rebased, independently editable administration results.
  * @param plan The production typed boundary/regimen relations.
  */
-function applyRegimenAlternativeMembership(results: readonly ParseResult[], plan: BoundaryPlan): void {
+function applyRegimenAlternativeMembership(
+  results: readonly ParseResult[], plan: BoundaryPlan, parallel?: CanonicalCourse
+): void {
   const edges = plan.relations.filter(edge => edge.kind === "alternative");
   if (!edges.length) return;
+  const nativeMembers = new Map<number, CanonicalAdministration[]>();
+  if (parallel) for (const stage of parallel.stages) for (const administration of stage.administrations) {
+    const index = administration.sourceMember;
+    if (index === undefined) continue;
+    let members = nativeMembers.get(index);
+    if (!members) nativeMembers.set(index, members = []);
+    members.push(administration);
+  }
   const parent = new Map<number, number>();
   const root = (index: number): number => {
     let current = index;
@@ -941,14 +791,14 @@ function applyRegimenAlternativeMembership(results: readonly ParseResult[], plan
     for (const member of ordered[group]) {
       const segment = plan.segments[member];
       if (!segment) continue;
-      for (const result of results) {
+      for (let index = 0; index < results.length; index++) {
+        const result = results[index];
         const raw = result.meta.canonical.clauses[0]?.raw;
         if (!raw || raw.start < segment.start || raw.start >= segment.end) continue;
-        setDosageAlternativeChoice(result.fhir, {
-          groupId: `choice-${group + 1}`,
-          branchId: `branch-${member + 1}`,
-          selectionBehavior: "exactly-one"
-        });
+        const choice = { groupId: `choice-${group + 1}`, branchId: `branch-${member + 1}` };
+        if (result.meta.canonical.administration) result.meta.canonical.administration.choice = choice;
+        for (const administration of nativeMembers.get(index) ?? []) administration.choice = choice;
+        setDosageAlternativeChoice(result.fhir, { ...choice, selectionBehavior: "exactly-one" });
       }
     }
   }
@@ -972,21 +822,19 @@ function finishParsedBatch(
   const projectedBatches: ParseResult[][] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
-    const projected = buildParseResults(outputStates[index], options, phaseSequences[index]);
+    const projected = buildParseResults(outputStates[index], options, phaseSequences[index],
+      canonicalParallel.kind !== "resolved");
     projectedBatches.push(projected);
     rawResults.push(...projected);
   }
 
-  // Canonical parallel components share their segment-local graph frames with
-  // these projections. Serialize FHIR before rebasing in-memory source spans,
-  // otherwise sourceText stays local while its embedded spans turn absolute.
+  // Complete native clinical meaning before any course-level projection.
+  // Diagnostic spans are independently cloned/rebased below. In particular,
+  // do not serialize R6/R5 here and then serialize them a second time in the
+  // whole-course result builder.
   const parallel = canonicalParallel.kind === "resolved"
-    ? projectParallelRegimen(
-      canonicalParallel, rawResults.map(result => result.longText), input, {
-        bodySitePostcoordination: options?.bodySitePostcoordination,
-        includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
-      }
-    )
+    ? { kind: "resolved" as const, canonical: courseFromParallel(
+      canonicalParallel, rawResults.map(result => result.longText), input) }
     : canonicalParallel;
   for (let index = 0; index < projectedBatches.length; index += 1) {
     const shiftedSpans = new WeakSet<object>();
@@ -996,7 +844,8 @@ function finishParsedBatch(
   }
 
   const results = rawResults;
-  applyRegimenAlternativeMembership(results, boundaryPlan);
+  applyRegimenAlternativeMembership(results, boundaryPlan,
+    parallel.kind === "resolved" ? parallel.canonical : undefined);
   const primary = resolvePrimaryParseResult(results, input, options);
   return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
     parallel.kind === "resolved" ? parallel : undefined);
@@ -1130,101 +979,6 @@ export async function parseSigAsync(
 }
 
 
-function medicationConditionBody(
-  condition: MedicationCondition,
-  locale?: string
-): string {
-  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
-  switch (condition.kind) {
-    case "measurement": {
-      // Imported FHIR often supplies only the concept label as text. It is
-      // not a realization of a comparator, value, or negated Boolean state.
-      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
-        return condition.text.trim();
-      }
-      const operator = {
-        gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!="
-      }[condition.operation];
-      return condition.name + " " + operator + " " + condition.value +
-        (condition.unit ? " " + condition.unit : "");
-    }
-    case "state":
-      // Imported FHIR often supplies only the concept label as text. It is
-      // not a realization of a comparator, value, or negated Boolean state.
-      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
-        return condition.text.trim();
-      }
-      return condition.expected
-        ? condition.name
-        : (thai ? "ไม่ " : "not ") + condition.name;
-    case "text":
-      return condition.text;
-    case "not":
-      return (thai ? "ไม่ " : "not ") + "(" +
-        medicationConditionBody(condition.condition, locale) + ")";
-    case "all":
-    case "any":
-      return condition.conditions.map(value => {
-        const body = medicationConditionBody(value, locale);
-        // Mixed Boolean daughters retain the exact tree grouping. Only the
-        // outer NOT uses "unless"; an inner NOT must remain explicit here.
-        return (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind
-          ? "(" + body + ")" : body;
-      }).join(condition.kind === "all" ? (thai ? " และ " : " and ") :
-        (thai ? " หรือ " : " or "));
-  }
-}
-
-function appendMedicationExcludedDatesText(
-  text: string,
-  dates: readonly string[],
-  options?: FormatOptions
-): string {
-  if (!dates.length) return text;
-  const thai = (options?.locale ?? "").toLowerCase().indexOf("th") === 0;
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  const lead = thai ? "ยกเว้นวันที่" : "except";
-  const separator = thai ? " และ " : " and ";
-  return (trimmed ? trimmed + " " : "") + lead + " " +
-    dates.join(separator) + ".";
-}
-
-/** Realize a typed weekday exclusion when no source-written instruction exists.
- * Reuse the ordinary localizers rather than introducing a competing day lexicon.
- */
-function appendMedicationExcludedWeekdaysText(
-  text: string,
-  days: readonly FhirDayOfWeek[],
-  options?: FormatOptions
-): string {
-  if (!days.length) return text;
-  const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
-  const labels = [...new Set(days)].map(day =>
-    (thai ? DAY_NAMES_THAI[day] : DAY_NAMES[day]) ?? day
-  );
-  const readable = thai ? joinWithAndThai(labels) : joinWithAnd(labels);
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") +
-    (thai ? "ยกเว้น" : "except ") + readable + ".";
-}
-
-function appendMedicationConditionText(
-  text: string,
-  condition: MedicationCondition,
-  options?: FormatOptions
-): string {
-  const locale = options?.locale;
-  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
-  const body = condition.kind === "not"
-    ? medicationConditionBody(condition.condition, locale)
-    : medicationConditionBody(condition, locale);
-  const lead = condition.kind === "not"
-    ? (thai ? "เว้นแต่" : "unless")
-    : (thai ? "เฉพาะเมื่อ" : "only if");
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + lead + " " + body + ".";
-}
-
 /** Render same-step concurrent members and typed alternative branches distinctly.
  * @param members Editable R5 or R6 components carrying native modifier extensions.
  * @param render A component realizer; never a semantic parser.
@@ -1268,172 +1022,6 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
   return parts.join(separator);
 }
 
-/** Resolve exact day/week quantities without converting clock-time units to calendar days.
- * @param quantity Typed FHIR duration, including its original unit and comparator.
- * @returns Whole nonnegative calendar days, or undefined when not exact.
- */
-function exactCourseDays(quantity: FhirQuantity | FhirR6Quantity | undefined): number | undefined {
-  if (!quantity || getQuantityComparator(quantity) || quantity.value === undefined ||
-      !Number.isFinite(quantity.value) || quantity.value < 0) return undefined;
-  const unit = quantity.code ?? quantity.unit;
-  const days = unit === "d" ? quantity.value : unit === "wk" ? quantity.value * 7 : undefined;
-  return days !== undefined && Number.isInteger(days) ? days : undefined;
-}
-
-/** Find gaps in the union of all typed course windows, not between adjacent rows.
- * An open-ended or unresolved parallel stage cannot license a global withholding instruction.
- * @param windows Resolved treatment-day windows for every nonempty step.
- * @param repeatCycle Original whole-course period, when the schedule repeats.
- * @returns Half-open calendar-day intervals where the entire course has no medication.
- */
-function medicationFreeCourseWindows(
-  windows: readonly { start: number | undefined; end: number | undefined }[],
-  repeatCycle: FhirR6Quantity | undefined
-): Array<{ start: number; end: number }> {
-  const ordered: Array<{ start: number; end: number }> = [];
-  for (const window of windows) {
-    if (window.start === undefined ||
-        (window.end !== undefined && window.end <= window.start)) return [];
-    ordered.push({ start: window.start, end: window.end ?? Infinity });
-  }
-  if (!ordered.length) return [];
-  const cycleDays = exactCourseDays(repeatCycle);
-  // A stage extending into another cycle can cover its apparent gap. Show
-  // the exact stage and repeat period, but never assert a global pause there.
-  if (repeatCycle && (cycleDays === undefined || cycleDays <= 0 ||
-      ordered.some(window => window.end > cycleDays))) return [];
-  ordered.sort((left, right) => left.start - right.start);
-  const gaps: Array<{ start: number; end: number }> = [];
-  let coveredUntil = 0;
-  for (const window of ordered) {
-    if (window.start > coveredUntil) gaps.push({ start: coveredUntil, end: window.start });
-    coveredUntil = Math.max(coveredUntil, window.end);
-  }
-  if (cycleDays !== undefined && cycleDays > coveredUntil) {
-    gaps.push({ start: coveredUntil, end: cycleDays });
-  }
-  return gaps;
-}
-
-/** Show an imported expression without evaluating it or inventing a dose.
- * Referenced/named expressions are usable structured data too. */
-function unevaluatedExpressionText(
-  expression: FhirExpression,
-  kind: "dose" | "rate"
-): string {
-  const detail = expression.expression ?? expression.reference ??
-    expression.description ?? expression.name;
-  return `unevaluated ${kind} expression${detail ? ": " + detail : ""}`;
-}
-
-/** Realize a temporal quantity without approximating calendar months or years.
- * @param quantity Original typed temporal quantity.
- * @param thai Whether the requested realization is Thai.
- * @returns The original amount/comparator with a localized temporal unit.
- */
-function formatCourseTimeQuantity(quantity: FhirQuantity | FhirR6Quantity, thai: boolean): string {
-  const units: Record<string, readonly [string, string, string]> = {
-    s: ["second", "seconds", "วินาที"], min: ["minute", "minutes", "นาที"],
-    h: ["hour", "hours", "ชั่วโมง"], d: ["day", "days", "วัน"],
-    wk: ["week", "weeks", "สัปดาห์"], mo: ["month", "months", "เดือน"],
-    a: ["year", "years", "ปี"]
-  };
-  const unit = quantity.code ?? quantity.unit ?? "";
-  const label = units[unit]?.[thai ? 2 : quantity.value === 1 ? 0 : 1] ?? quantity.unit ?? unit;
-  return `${getQuantityComparator(quantity) ?? ""}${quantity.value ?? ""} ${label}`.trim();
-}
-
-/** Render the typed whole-course repetition interval independently of component cadence.
- * @param cycle Original R6 repeatCycle quantity; unknown units remain verbatim.
- * @param thai Whether the requested realization is Thai.
- * @param count Supplied common step repetition count, when explicitly finite.
- * @returns A visible cycle instruction preserving the supplied count without inventing an end date.
- */
-function formatCourseRepeatCycle(cycle: FhirR6Quantity, thai: boolean, count?: number): string {
-  const unit = cycle.code ?? cycle.unit ?? "";
-  const interval = formatCourseTimeQuantity(cycle, thai);
-  const iterations = count === undefined ? "" : thai ? ` จำนวน ${count} รอบ` :
-    ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
-  if (getQuantityComparator(cycle) || cycle.value === undefined || !Number.isFinite(cycle.value) ||
-      cycle.value <= 0 || !unit) {
-    return thai ? `ระยะรอบการใช้ยา: ${interval}${iterations}.` :
-      `Repeat-cycle interval: ${interval}${iterations}.`;
-  }
-  return thai
-    ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับวันที่ใหม่ในแต่ละรอบ).`
-    : `Repeat this schedule every ${interval}${iterations} (days are numbered within each cycle).`;
-}
-
-/** Read a typed treatment-start quantity without reinterpreting its calendar unit.
- * @param relative Source R6 boundary and event context.
- * @returns The known nonnegative quantity (including its qualifier), or
- * undefined for another event. exactCourseDays decides whether it licenses
- * exact day numbering or medication-free windows; display keeps the amount.
- */
-function treatmentStepOffsetQuantity(
-  relative: FhirR6DosageInstruction["step"][number]["start"]
-): FhirR6Quantity | undefined {
-  if (!relative || relative.contextReference || relative.contextDefinition ||
-      relative.contextPath || relative.offsetRange) return undefined;
-  if (!relative.contextCode?.coding?.some(coding =>
-    coding.system === "http://hl7.org/fhir/evidence-variable-event" &&
-    coding.code === "treatment-start")) return undefined;
-  const quantity = relative.offsetDuration;
-  return quantity && quantity.value !== undefined && Number.isFinite(quantity.value) &&
-    quantity.value >= 0 ? quantity : undefined;
-}
-
-/** Convert an exact treatment-start boundary into a calendar-day ordinal.
- * @param relative Source R6 step boundary.
- * @returns Its day offset, leaving month/year boundaries unconverted.
- */
-function treatmentStepOffsetDays(
-  relative: FhirR6DosageInstruction["step"][number]["start"]
-): number | undefined {
-  return exactCourseDays(treatmentStepOffsetQuantity(relative));
-}
-
-/** Format a calendar-valued step when day ordinals cannot faithfully represent it.
- * @param start Source-backed onset, including an inherited preceding end if known.
- * @param end Source-backed end of the phase.
- * @param thai Whether the requested realization is Thai.
- * @returns Source-qualified relative wording without a guessed treatment start date.
- */
-function formatCalendarStepWindow(
-  start: FhirR6Quantity | undefined, end: FhirR6Quantity | undefined, thai: boolean
-): string {
-  const point = (quantity: FhirR6Quantity) => quantity.value === 0 && !getQuantityComparator(quantity)
-    ? (thai ? "เริ่มการรักษา" : "treatment start")
-    : thai ? `${formatCourseTimeQuantity(quantity, true)}หลังเริ่มการรักษา`
-      : `${formatCourseTimeQuantity(quantity, false)} after treatment start`;
-  if (start && end) return thai ? `ตั้งแต่${point(start)}จนถึง${point(end)}` :
-    `From ${point(start)} until ${point(end)}`;
-  if (start) return thai ? `ตั้งแต่${point(start)}เป็นต้นไป` : `From ${point(start)} onward`;
-  return end ? (thai ? `จนถึง${point(end)}` : `Until ${point(end)}`) : "";
-}
-
-/** Source-less R6 rateRange remains a range, never a guessed exact rate.
- * Keep both independently authored endpoints and their unit/EMA operators. */
-function rateRangePreview(range: FhirRange): string | undefined {
-  const low = range.low, high = range.high;
-  const unit = (q: FhirQuantity | undefined) => q?.unit ?? q?.code ?? "";
-  const lowComparator = getQuantityComparator(low);
-  const highComparator = getQuantityComparator(high);
-  const lower = low?.value === undefined ? undefined : (lowComparator ?? "") + low.value;
-  const upper = high?.value === undefined ? undefined : (highComparator ?? "") + high.value;
-  if (lower === undefined && upper === undefined) return undefined;
-  if (lower !== undefined && upper !== undefined) {
-    const loUnit = unit(low), hiUnit = unit(high);
-    return loUnit === hiUnit
-      ? lower + "–" + upper + (loUnit ? " " + loUnit : "")
-      : lower + (loUnit ? " " + loUnit : "") + " – " +
-        upper + (hiUnit ? " " + hiUnit : "");
-  }
-  return lower !== undefined
-    ? (lowComparator ? "" : ">=") + lower + (unit(low) ? " " + unit(low) : "")
-    : (highComparator ? "" : "<=") + upper + (unit(high) ? " " + unit(high) : "");
-}
-
 /** Append structured rate ranges ONLY to a freshly computed preview.
  * Authored text is selected by the CALLER, not inferred here from the
  * presence of Dosage.text (which may be unused during structured editing).
@@ -1446,227 +1034,29 @@ function appendSourceLessRateRanges(
   if (entries.length === 1 && !entries[0].rateRange) return displayed;
   const expressions: string[] = [];
   for (const entry of entries) {
-    const range = entry.rateRange && rateRangePreview(entry.rateRange);
+    const range = entry.rateRange && rateRangePreview(rangeFromFhir(entry.rateRange)!);
     if (range) expressions.push((thai ? "ช่วงอัตราการให้ยา: " : "Rate range: ") + range);
   }
   return expressions.length ? joinGeneratedClauses([displayed, ...expressions]) : displayed;
 }
 
 export function formatSig(
-  input: FhirDosage | FhirR6DosageInstruction | readonly EzDosage[],
+  input: FhirDosage | FhirR6DosageInstruction | readonly EzDosage[] | CanonicalCourse | CanonicalAdministration,
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
   if (Array.isArray(input)) {
     return formatSigBatch(input as EzDosage[], style, options);
   }
+  if ("kind" in input && input.kind === "course")
+    return formatCanonicalCourse(input, style, options);
+  if ("kind" in input && input.kind === "administration")
+    return formatCanonicalAdministration(input, style, options);
   const oneOrCourse = input as FhirDosage | FhirR6DosageInstruction;
   if ("step" in oneOrCourse) {
-    // R6's renderedInstruction is the whole-course instruction. Do not
-    // accidentally reduce a taper to a single component or discard its
-    // boolean conditions in an English/Thai realization attempt. For an
-    // ordinary R5-compatible course, explicit format options request a fresh
-    // realization instead of the potentially stale saved display string.
-    const prefersCourseSource = prefersR6CourseSourceForDisplay(oneOrCourse);
-    if (oneOrCourse.renderedInstruction &&
-        (options === undefined || options.realizationMode === "roundtrip" ||
-         oneOrCourse.step.length === 0 || prefersCourseSource)) {
-      // An explicitly requested round trip preserves the *original* source
-      // surface, not a normalized paraphrase. Edited R5 inputs have their
-      // stale source invalidated by the R5->R6 reconciliation first.
-      return oneOrCourse.renderedInstruction;
-    }
-    if (oneOrCourse.step.length === 0) return "";
-    // Rendering needs each component's projection, not a persisted copy of
-    // the whole course plus edit markers on every component.
-    const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
-    const stages: string[] = [];
-    const firstRepeatCount = oneOrCourse.step[0]?.count;
-    const courseRepeatCount = firstRepeatCount !== undefined &&
-      oneOrCourse.step.every(step => step.count === firstRepeatCount) ? firstRepeatCount : undefined;
-    let priorEndDays: number | undefined;
-    const windows = oneOrCourse.step.map((step, index) => {
-      const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
-      const end = treatmentStepOffsetDays(step.end);
-      priorEndDays = end;
-      return { start, end };
-    });
-    for (const [index, step] of oneOrCourse.step.entries()) {
-      const { start: startDays, end: endDays } = windows[index];
-      const rendered = formatChoiceMembers(step.component, component => {
-        const repeat = component.timing?.repeat;
-        const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
-        let display = fromR6Dosage(component, index + 1);
-        // Once R6 offsets restrict the active window, a plain R5 formatter
-        // cannot safely describe the entire period as the dose cadence.
-        // The read-only display copy drops that misleading interpretation.
-        if (hasOffsets && display.timing?.repeat) {
-          const { frequency: _frequency, frequencyMax: _frequencyMax,
-            period: _period, periodMax: _periodMax,
-            periodUnit: _periodUnit, ...rest } = display.timing.repeat;
-          display = { ...display, timing: { ...display.timing, repeat: rest } };
-        }
-        // R5 consumers must see the numeric value, but an R6 display must
-        // not first state an exact dose and then its qualified "~" dose.
-        // Suppress only that duplicate in this temporary display projection.
-        if (display.doseAndRate && component.doseAndRate?.some(amount =>
-          amount.doseQuantity?.comparator || amount.rateQuantity?.comparator ||
-          amount.rateRatio?.numerator?.comparator === "~")) {
-          display = { ...display, doseAndRate: display.doseAndRate.map((amount, i) => {
-            const source = component.doseAndRate?.[i];
-            const clean = { ...amount };
-            if (source?.doseQuantity?.comparator) delete clean.doseQuantity;
-            if (source?.rateQuantity?.comparator) delete clean.rateQuantity;
-            if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
-            return clean;
-          }) };
-        }
-        const recognized = formatSig(display, style, options);
-        const expressions: string[] = [];
-        if (hasOffsets && repeat) {
-          const periodUnit = repeat.periodUnit;
-          const period = periodUnit && repeat.period !== undefined
-            ? repeat.periodMax !== undefined
-              ? `${repeat.period}–${formatCourseTimeQuantity({
-                value: repeat.periodMax, code: periodUnit, unit: periodUnit
-              }, thai)}`
-              : formatCourseTimeQuantity({
-                value: repeat.period, code: periodUnit, unit: periodUnit
-              }, thai)
-            : periodUnit && repeat.periodMax !== undefined
-              ? (thai ? "ไม่เกิน " : "up to ") + formatCourseTimeQuantity({
-                value: repeat.periodMax, code: periodUnit, unit: periodUnit
-              }, thai) : undefined;
-          const frequency = repeat.frequency !== undefined
-            ? repeat.frequencyMax !== undefined
-              ? `${repeat.frequency}–${repeat.frequencyMax}` : String(repeat.frequency)
-            : repeat.frequencyMax !== undefined
-              ? (thai ? "ไม่เกิน " : "up to ") + repeat.frequencyMax : undefined;
-          if (frequency) expressions.push(
-            thai ? `ให้ยา ${frequency} ครั้ง${period ? "ต่อช่วง " + period : ""}` :
-              `${frequency} administrations${period ? " per " + period : ""}`
-          );
-          else if (period && repeat.periodMax !== undefined) expressions.push(
-            thai ? `ช่วงเวลาการให้ยา ${period}` : `Dosing period: ${period}`
-          );
-          const periodContext = period
-            ? thai ? ` (รอบละ ${period})` : ` (each period lasts ${period})`
-            : "";
-          if (repeat.startOffset) {
-            const offset = formatCourseTimeQuantity(repeat.startOffset, thai);
-            expressions.push(thai
-              ? `เริ่มให้ยาหลังเริ่มรอบ ${offset}${periodContext}`
-              : `Dosing starts ${offset} after the period begins${periodContext}`);
-          }
-          if (repeat.endOffset) {
-            const offset = formatCourseTimeQuantity(repeat.endOffset, thai);
-            expressions.push(thai
-              ? `งดยาในช่วง ${offset}สุดท้ายของแต่ละรอบ${periodContext}`
-              : `No doses during the final ${offset} of each period${periodContext}`);
-          }
-        }
-        for (const amount of component.doseAndRate ?? []) {
-          // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
-          // Keep their actual amount visible in source-less R6 suggestions,
-          // without introducing invalid R5 dose/rate choices.
-          if (amount.doseQuantity?.comparator && amount.doseQuantity.value !== undefined) {
-            expressions.push(
-              (thai ? "ขนาดยาต่อครั้ง: " : "Dose: ") +
-              amount.doseQuantity.comparator + amount.doseQuantity.value +
-              (amount.doseQuantity.unit || amount.doseQuantity.code
-                ? " " + (amount.doseQuantity.unit ?? amount.doseQuantity.code) : "")
-            );
-          }
-          if (amount.rateQuantity && (amount.rateQuantity.value !== undefined ||
-              amount.rateQuantity.unit || amount.rateQuantity.code)) {
-            const rate = amount.rateQuantity;
-            const unit = rate.unit ?? rate.code;
-            expressions.push(
-              (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              (rate.value === undefined ? (thai ? "ไม่ระบุค่า" : "unspecified")
-                : (getQuantityComparator(rate) ?? "") + rate.value) +
-              (unit ? " " + unit : "")
-            );
-          }
-          const numerator = amount.rateRatio?.numerator;
-          const denominator = amount.rateRatio?.denominator;
-          const numeratorUnit = numerator?.unit ?? numerator?.code;
-          const denominatorUnit = denominator?.unit ?? denominator?.code;
-          const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
-          const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
-          if (hasNumerator || hasDenominator) {
-            const unspecified = thai ? "ไม่ระบุค่า" : "unspecified";
-            const numeratorValue = numerator?.value === undefined
-              ? unspecified : (getQuantityComparator(numerator) ?? "") + numerator.value;
-            const denominatorValue = denominator?.value === undefined
-              ? unspecified : (getQuantityComparator(denominator) ?? "") + denominator.value;
-            expressions.push(
-              (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              numeratorValue + (numeratorUnit ? " " + numeratorUnit : "") +
-              (hasDenominator ? " / " + denominatorValue +
-                (denominatorUnit ? " " + denominatorUnit : "") : "")
-            );
-          }
-          if (amount.doseExpression)
-            expressions.push(unevaluatedExpressionText(amount.doseExpression, "dose"));
-          if (amount.rateExpression)
-            expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate"));
-        }
-        return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
-      }, options);
-      if (!rendered.trim()) continue;
-      let timing = "";
-      if (step.start || step.end) {
-        if ((step.start && startDays === undefined) ||
-            (step.end && endDays === undefined) ||
-            (startDays !== undefined && endDays !== undefined &&
-              endDays <= startDays)) {
-          // Unsupported event anchors must stay visible instead of becoming
-          // an unconditional dose when the original source text is absent.
-          const startQuantity = step.start ? treatmentStepOffsetQuantity(step.start) :
-            index === 0 ? { value: 0, unit: "d" } :
-              treatmentStepOffsetQuantity(oneOrCourse.step[index - 1].end);
-          const endQuantity = treatmentStepOffsetQuantity(step.end);
-          if ((!step.start || startQuantity) && (!step.end || endQuantity) &&
-              !(startDays !== undefined && endDays !== undefined && endDays <= startDays)) {
-            timing = formatCalendarStepWindow(startQuantity, endQuantity, thai);
-          } else {
-            const source = [step.start?.text, step.end?.text]
-              .filter((value): value is string => Boolean(value?.trim())).join("; ");
-            timing = source ? (thai ? `ต้องตรวจสอบช่วงเวลา: ${source}` : `Timing requires review: ${source}`) :
-              (thai ? "ต้องตรวจสอบช่วงเวลาการใช้ยา" : "Stage timing requires review");
-          }
-        } else if (endDays !== undefined && startDays !== undefined) {
-          timing = thai ? `วันที่ ${startDays + 1}–${endDays}` :
-            `Days ${startDays + 1}–${endDays}`;
-        } else if (startDays !== undefined) {
-          timing = thai ? `ตั้งแต่วันที่ ${startDays + 1} เป็นต้นไป` :
-            `From day ${startDays + 1} onward`;
-        } else if (endDays !== undefined) {
-          timing = thai ? `ถึงวันที่ ${endDays}` : `Through day ${endDays}`;
-        }
-      }
-      const stageCount = oneOrCourse.repeatCycle && courseRepeatCount === undefined &&
-        step.count !== undefined ? (thai ? `จำนวน ${step.count} รอบ` :
-          `for ${step.count} ${step.count === 1 ? "cycle" : "cycles"}`) : "";
-      const heading = [timing, stageCount].filter(Boolean).join("; ");
-      stages.push(heading ? `${heading}: ${rendered}` : rendered);
-    }
-    const hasTimedStages = oneOrCourse.step.some(step => step.start || step.end);
-    if (hasTimedStages) {
-      const pauses = medicationFreeCourseWindows(
-        windows.filter((_, index) => oneOrCourse.step[index].component.length > 0),
-        oneOrCourse.repeatCycle
-      );
-      for (const pause of pauses) {
-        stages.push(thai ? `งดยาในวันที่ ${pause.start + 1}–${pause.end}.` :
-          `No doses on days ${pause.start + 1}–${pause.end}.`);
-      }
-    }
-    if (oneOrCourse.repeatCycle) {
-      stages.push(formatCourseRepeatCycle(oneOrCourse.repeatCycle, thai, courseRepeatCount));
-    }
-    return stages.join(hasTimedStages || oneOrCourse.repeatCycle ? " " : thai ? " จากนั้น " : " then ");
+    const source = unchangedR6SourceDisplay(oneOrCourse, options);
+    if (source !== undefined) return source;
+    return formatCanonicalCourse(courseFromR6(oneOrCourse, true, false), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
@@ -1784,8 +1174,9 @@ export function formatParseBatch(
 
 /**
  * Load the current R6 DosageInstruction without reparsing a generated text instruction.
- * R5 component lowerings exist solely for per-clause provenance and formatting;
- * the original whole-course R6 object remains the primary FHIR output.
+ * Native components are imported into the same clinical course the parser
+ * produces. R5 component rows are OUTPUT projections only, never interpreted
+ * or formatted back into native semantics.
  */
 export function fromFhir(
   wire: FhirR6DosageInstructionInput,
@@ -1795,39 +1186,32 @@ export function fromFhir(
   const dosageDetails: FhirR6DosageInstruction = wire.step === undefined
     ? { ...wire, step: [] } : wire as FhirR6DosageInstruction;
   const { dosages, course } = fromDosageDetails(dosageDetails);
+  const native = courseFromR6(dosageDetails, true);
   const r5Rows = toFhirR5Dosages(dosageDetails);
-  const items = r5Rows.map(dosage => fromFhirDosageInternal(dosage, options));
-  // A strict R5 projection retains unsupported expression/timing fields
-  // in its typed bridge, but the generic R5 preview cannot realize them.
-  // Whole-course renderedInstruction is not a per-component dosage text.
-  // Quantities, rates, offsets and expressions need a complete native item
-  // preview, even when the enclosing course has authored wording.
-  // Prefer an item's own source; exact rates are meaningful too.
+  const items: ParseResult[] = [];
   let row = 0;
-  for (const step of dosageDetails.step) for (const component of step.component) {
-    const item = items[row++];
-    if (!item || (!(component.timing?.repeat?.startOffset ||
-        component.timing?.repeat?.endOffset) &&
-        !component.doseAndRate?.some(rate =>
-          rate.doseQuantity?.comparator ||
-          rate.rateQuantity?.value !== undefined ||
-          Boolean(rate.rateQuantity?.unit || rate.rateQuantity?.code) ||
-          rate.rateRatio?.numerator?.value !== undefined ||
-          Boolean(rate.rateRatio?.numerator?.unit || rate.rateRatio?.numerator?.code ||
-            rate.rateRatio?.denominator?.unit || rate.rateRatio?.denominator?.code) ||
-          rate.rateRatio?.denominator?.value !== undefined ||
-          rate.rateRange?.low?.value !== undefined ||
-          rate.rateRange?.high?.value !== undefined ||
-          rate.doseExpression || rate.rateExpression))) continue;
-    const source = component.text;
-    if (source?.trim()) {
-      item.shortText = source;
-      item.longText = source;
-      continue;
-    }
-    const ownCourse: FhirR6DosageInstruction = { step: [{ component: [component] }] };
-    item.shortText = formatSig(ownCourse, "short", options);
-    item.longText = formatSig(ownCourse, "long", options);
+  for (const stage of native.stages) for (const administration of stage.administrations) {
+    const clause = clauseForAdministration(administration);
+    const projection = r5Rows[row++];
+    items.push({
+      fhir: projection,
+      shortText: formatCanonicalAdministration(administration, "short", options),
+      longText: formatCanonicalAdministration(administration, "long", options),
+      warnings: clause.warnings ?? [],
+      meta: { consumedTokens: [],
+        normalized: buildNormalizedMetaFromClause(clause, projection, options),
+        canonical: { clauses: [clause], administration }
+      }
+    });
+  }
+  // A text-only instruction has no administration but keeps the existing
+  // public editable carrier row. Its display comes from native source text,
+  // never from reparsing the exported R5 carrier.
+  if (!items.length && r5Rows.length) {
+    const text = native.instruction ?? "";
+    const clause = createEmptyCanonicalClause(text);
+    items.push({ fhir: r5Rows[0], shortText: text, longText: text, warnings: [],
+      meta: { consumedTokens: [], normalized: {}, canonical: { clauses: [clause] } } });
   }
   const primary = items[0] ?? fromFhirDosage({
     text: dosageDetails.renderedInstruction ?? ""
@@ -1839,8 +1223,8 @@ export function fromFhir(
     for (const warning of item.warnings) warnings.add(warning);
   }
   // Importing structured R6 data is best-effort and data-preserving.
-  const shortText = formatSig(dosageDetails, "short", options);
-  const longText = formatSig(dosageDetails, "long", options);
+  const shortText = formatCanonicalCourse(native, "short", options);
+  const longText = formatCanonicalCourse(native, "long", options);
   return {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
@@ -1855,7 +1239,7 @@ export function fromFhir(
     warnings: [...warnings],
     meta: {
       ...primary.meta,
-      canonical: { clauses },
+      canonical: { clauses, course: native },
       // An imported FHIR object has no original per-clause character positions.
       segments: []
     }
@@ -2118,7 +1502,8 @@ function buildParseResult(
   state: ReturnType<typeof parseClauseState>,
   options?: ParseOptions,
   projectedTarget?: CanonicalSiteExpr,
-  sequence?: number
+  sequence?: number,
+  compileStandaloneAdministration = true
 ): ParseResult {
   const canonicalClauses = projectAdministrationTargetClauses(
     state.clauses,
@@ -2205,6 +1590,8 @@ function buildParseResult(
       longText = appendMedicationExcludedWeekdaysText(longText, excludedWeekdays, options);
     }
   }
+  const administration = compileStandaloneAdministration
+    ? administrationFromClause(clause, longText, sequence) : undefined;
   const fhir = canonicalToFhir(clause, longText, {
     sequence,
     bodySitePostcoordination: options?.bodySitePostcoordination,
@@ -2272,7 +1659,8 @@ function buildParseResult(
       leftoverText: leftoverParts.length ? leftoverParts.join(" ") : undefined,
       normalized: buildNormalizedMetaFromClause(clause, fhir, options),
       canonical: {
-        clauses: canonicalClauses
+        clauses: canonicalClauses,
+        administration
       },
       siteLookups,
       prnReasonLookups
@@ -2283,10 +1671,11 @@ function buildParseResult(
 function buildParseResults(
   state: ReturnType<typeof parseClauseState>,
   options?: ParseOptions,
-  sequence?: number
+  sequence?: number,
+  compileStandaloneAdministration = true
 ): ParseResult[] {
   return administrationTargetProjections(state.clauses).map((target) =>
-    buildParseResult(state, options, target, sequence)
+    buildParseResult(state, options, target, sequence, compileStandaloneAdministration)
   );
 }
 
@@ -2395,6 +1784,14 @@ function rebaseParseResult(
     for (const lookup of result.meta.prnReasonLookups) {
       rebaseRequest(lookup.request);
     }
+  }
+  if (offset !== 0) {
+    // Public diagnostic ranges are document-relative; the canonical source
+    // grammar remains segment-local. Clone the diagnostic view, not the
+    // semantic course or serialized FHIR, so repeated exports remain stable.
+    result.meta.canonical.clauses = cloneStructuredValue(result.meta.canonical.clauses);
+    if (result.meta.normalized.instructionGraph)
+      result.meta.normalized.instructionGraph = result.meta.canonical.clauses[0]?.instructionGraph;
   }
   shiftCanonicalSigClauses(result.meta.canonical.clauses, offset, shiftedSpans);
 }

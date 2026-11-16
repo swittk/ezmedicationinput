@@ -6488,3 +6488,98 @@ common SIG parsing gained no new pass or whole-input array walk.
 No full CodeRabbit review was re-requested, no PR merge, package
 publication, application/schema change, or change to the public R5
 and R6 format contract.
+
+
+## 2026-11-16 — Native canonical-course refactor (separate branch from PR #13)
+
+Owner explicitly requested branching from the completed R6 compatibility work
+and replacing the R5-centered INTERNAL model, not another review patch and not
+a downstream application migration. Started refactor/canonical-course-20261116
+at exact PR #13 commit 4867c30; the original branch/worktree is unchanged.
+
+**Clinical authority and boundaries**
+- Kept the existing typed HPSG grammar, CanonicalSigClause, regimen graph,
+  lexical ownership and independent-phase construction. Added a native course
+  completion of those structures, not another parser or a parallel R5-shaped
+  dosage hierarchy. No native course/admin extends a FHIR datatype.
+- Native stages own administrations. Recurrence, explicit/relative windows,
+  amounts, rates, conditions, exclusions, phase origins, alternatives, target
+  multiplicity, and scoped quantity-limit choices are explicit clinical fields.
+  Standard unit/event/code enums remain shared clinical vocabulary. Imported
+  unknown fields and original syntax are separate retained source evidence.
+- parseSig builds native meaning BEFORE course projections and exposes it as
+  meta.canonical.course. R6 emission reads that native course directly, rather
+  than reconstructing phases from .fhir and Dosage.sequence. Parallel courses
+  compile their full administrations once, not an unused second standalone
+  model for every diagnostic segment. Diagnostic span rebasing is isolated
+  from original source evidence used by subsequent edits/projections.
+- Current R6 imports normalize directly to the same native course. Component
+  and whole-course formatting consume native clinical facts, not temporary
+  R5 Dosages. The returned old R5 rows are output-only compatibility artifacts.
+- schedule.ts is now a thin public normalization facade. Removed the entire
+  former FHIR-shaped execution implementation from that file and the second
+  flat-course scheduleRegimen phase traversal. execution/engine.ts has NO FHIR
+  conversion/marker imports; execution/calendar.ts has no medication/parser
+  types. Both R5/R6 inputs converge on the same native execution path once.
+- A single resolved administration-window contract owns recurrenceOrigin,
+  eligibleFrom, endExclusive, completionPoint, countEligibilityStart and cap
+  clock. Treatment scheduling, repeat horizon and supply consume the SAME
+  resolver. Preserved efficient scalar/arithmetic counting paths and existing
+  civil-clock semantics; did not replace them with a speculative scheduler.
+- Native limits are one scoped list, including expressions and source IDs,
+  instead of a clinical model built around R5's three max-dose fields.
+- adapters/canonical-course.ts owns imports and output projection. The existing
+  lossless R5 edit/retention bridge remains ONLY for actual R5 interchange.
+  Removing it would discard real persisted client data; it is not a dependency
+  of native compile/format/execute. No obsolete R6 draft compatibility added.
+
+**Editing and public contracts**
+- Existing .fhir remains R5, .fhirNext remains current R6; prior public conversion
+  and parsing outputs remain covered by all historical tests.
+- Added importCanonicalCourse, editCanonicalCourse, projectCanonicalCourse and
+  native formatting APIs. Existing nextDueDoses/calculateTotalUnits accept native
+  courses directly as well as their existing inputs.
+- Editable imports detach known live facts from retained source. Explicit native
+  edit callbacks create a new course; changing clinical facts clears unchanged
+  stale generated text while preserving deliberately authored replacements.
+  Moving/deleting members keeps identity-bound source evidence with each member.
+- Tested native dose/time, laterality, route/method, target multiplicity, timing
+  offset, month-day membership, delay removal, condition, and limit edits through
+  BOTH exports and execution. Unknown course/component/site/limit metadata and
+  code versions survive; removed live reference/limit fields do not reappear
+  from source provenance. No JSON parse/stringify serialization in core code.
+- README and DIRECTIONALITY describe one working authority and the actual module
+  boundaries, including reimporting externally edited projections rather than
+  executing a stale previously parsed native course.
+
+**Regression and performance work**
+- No historical test was weakened or rewritten. Added 15 independent native
+  architecture/edit clinical oracles in test/canonical-course.spec.ts.
+- Early migration gates found real adapter gaps: SimpleQuantity EMA offset
+  normalization; R5 phase-origin import; infusion-carrier/cycle metadata; source
+  maximum-supply status; and text-only carrier cardinality. Fixed each at its
+  appropriate adapter/native ownership boundary and reran the established corpus.
+- The final gate also caught a fresh-annotation optimization replaying an
+  administration delay already promoted to a stage. Fresh source annotation
+  reuse now excludes transformed delay ownership; public edited projections
+  always derive their annotation view from current native facts.
+- Measured against an immutable built worktree at 4867c30. Initial independent
+  taper parsing was ~27% slower because parallel projections were produced twice
+  and source views were unnecessarily rebuilt/copied; removed those duplicate
+  passes. Also restored the literal-source R6 formatting fast path so returning
+  an authored instruction does not normalize a whole editable course.
+- Final paired warm seven-batch medians (microseconds/operation): ordinary parse
+  1399.9 -> 1411.5 (+0.8%); Thai parallel parse 5478.8 -> 5488.2 (+0.2%);
+  independent ocular taper 5898.7 -> 6173.2 (+4.7%, +0.275ms); routine R6
+  scheduling 606.2 -> 572.3 (-5.6%); staged R6 scheduling 2887.6 -> 2765.8
+  (-4.2%); staged native scheduling 2827.2 -> 2634.7 (-6.8%); staged R6 supply
+  2828.9 -> 2743.0 (-3.0%); staged native supply 2853.2 -> 2661.4 (-6.7%);
+  authored R6 formatting ~0.3us both. These are shared-host measurements, not
+  device guarantees. The remaining complex-parse cost is reported explicitly;
+  do not claim the refactor makes every operation faster or is zero-cost.
+
+Final gate: npm run build PASS (ES6 ESM/CJS, TypeScript declarations), all
+**4220/4220 source tests in 45/45 suites**, test:dist **4/4**, diff check PASS.
+The source reference branch remains clean at 4867c30. This work belongs on a
+separate stacked PR with base feat/current-r6-dosageinstruction-20261114;
+no master merge, publication, app migration, delegation or extra review request.

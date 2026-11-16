@@ -57,6 +57,47 @@ Reasoning:
 - the current clause language is narrow enough that a local grammar is maintainable
 - suggestions can still be derived later from grammar productions without committing the package to a larger parser toolkit today
 
+## Native course authority (2026-11-16)
+
+The canonical clause/regimen pipeline now continues into a complete native
+clinical course **before** either public FHIR projection. The parser remains
+one typed HPSG pass; this is not a second grammar or a competing parser IR.
+
+- `canonical/course.ts` defines the version-neutral clinical facts. No native
+  course or administration extends `FhirDosage` or `DosageInstruction`.
+- `canonical/compile.ts` composes existing scoped clauses and parallel regimen
+  phases. Syntax/source spans are evidence, not another editable dosage truth.
+- `canonical/edit-course.ts` owns explicit native edits and source/generated
+  text invalidation. It copies only when an edit is requested, never per query.
+- `canonical/format-course.ts` renders native facts without R5 lowering.
+- `execution/engine.ts` consumes native facts only. Its resolved administration
+  windows separately own recurrence origin, first eligibility, exclusive end,
+  completion point, and civil cap clock. Scheduling, repeat-cycle horizon, and
+  supply use that same phase resolution, not three interpretations of a Date.
+- `execution/calendar.ts` owns the existing timezone/DST/calendar primitives;
+  it knows no medication, FHIR, or parser representation.
+- `adapters/canonical-course.ts` imports R5/current R6 and exports them. Only
+  R5-boundary operations invoke `dosage-course.ts` persistence reconciliation.
+- `schedule.ts` is the public input-normalization facade; the old FHIR-shaped
+  execution implementation and alternate flat-course phase traversal are gone.
+
+`parseSig().meta.canonical.course` is the internal authority; `.fhir` stays R5
+and `.fhirNext` stays the current R6 export. `fromFhir` imports current R6
+straight into native meaning and formats that meaning; the returned R5 rows
+are outputs only. Existing R5 callers remain supported and do not migrate.
+
+Known clinical changes must override retained external data on export. Unknown
+source fields stay separate as provenance and must not silently execute. Native
+constraints use an owned list of scope/value/period limits, not the three
+R5 maximum-dose fields. Standard clinical codes/units can remain shared enums;
+sharing a stable code vocabulary is not permission to use a FHIR wire object
+as the internal course model.
+
+Do not add wire-extension decoding, R5/R6 conversion, or a second phase-boundary
+implementation to native compilation, formatting, or execution. Architecture
+and native-edit tests enforce those boundaries in addition to the established
+clinical regression corpus.
+
 ## Target Pipeline
 
 ### 1. Surface Scan
