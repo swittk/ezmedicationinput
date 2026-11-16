@@ -2009,6 +2009,25 @@ function scheduleTreatmentRelativeCourse(
     .slice(0, limit);
 }
 
+/** One clock-ownership decision for both repeated-course scheduling
+ * and supply. Integral calendar day/week/month/year cycles keep the
+ * source-prescribed local clock through DST. An elapsed cycle (e.g.
+ * 24 hours, 168 hours, or fractional day/week) starts its own stage
+ * at that cycle's actual wall time. Do not reuse the old course clock
+ * after an elapsed cycle crosses a DST transition. */
+function repeatedCycleWallClock(
+  cycle: FhirR6Quantity | undefined, firstClock: TreatmentWallClock,
+  cycleStart: Date, timeZone: string
+): TreatmentWallClock {
+  const unit = parseBoundsDurationUnit(cycle);
+  const calendarCycle = Number.isInteger(cycle?.value) &&
+    (unit === FhirPeriodUnit.Day || unit === FhirPeriodUnit.Week ||
+      unit === FhirPeriodUnit.Month || unit === FhirPeriodUnit.Year);
+  // Common calendar recurrences reuse the source clock object, rather than
+  // repeatedly computing time-zone parts for every cycle.
+  return calendarCycle ? firstClock : getTimeParts(cycleStart, timeZone);
+}
+
 function scheduleRepeatedCourse(
   course: FhirR6DosageInstruction,
   options: NextDueDoseOptions,
@@ -2017,8 +2036,8 @@ function scheduleRepeatedCourse(
   const from = coerceDate(options.from, "from");
   const anchor = options.orderedAt === undefined
     ? from : coerceDate(options.orderedAt, "orderedAt");
-  const sourceClock = getTimeParts(anchor, timeZone);
   const advance = durationStepper(course.repeatCycle, timeZone, anchor);
+  const firstClock = getTimeParts(anchor, timeZone);
   if (!advance) throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
     "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before scheduling.");
   const limit = Math.floor(options.limit ?? 10);
@@ -2031,6 +2050,7 @@ function scheduleRepeatedCourse(
   while (guard < maxCycles && course.step.some(step => stepOccursInCycle(step, guard))) {
     const cycleEnd = advance(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
+    const sourceClock = repeatedCycleWallClock(course.repeatCycle, firstClock, cycleStart, timeZone);
     const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock);
     if (horizon > from) {
       const candidates = scheduleTreatmentRelativeCourse(singleCycle, {
@@ -4510,7 +4530,7 @@ function calculateCourseTotalUnits(
     throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
       "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before calculating supply.");
   if (cycleAdvance) {
-    const originalClock = getTimeParts(anchor, zone);
+    const firstClock = getTimeParts(anchor, zone);
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     const singleCycle = { ...course, repeatCycle: undefined };
     let cycleStart = anchor;
@@ -4519,6 +4539,7 @@ function calculateCourseTotalUnits(
         course.step.some(step => stepOccursInCycle(step, guard))) {
       const cycleEnd = cycleAdvance(cycleStart);
       if (!cycleEnd || cycleEnd <= cycleStart) break;
+      const originalClock = repeatedCycleWallClock(course.repeatCycle, firstClock, cycleStart, zone);
       const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock);
       const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;

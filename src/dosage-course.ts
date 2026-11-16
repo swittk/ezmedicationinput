@@ -2366,7 +2366,19 @@ function restoreComponentDelta(
       concept: dosage.site, reference: expanded.siteReference
     });
     if (!referenceCleared && siteUnchanged) {
-      fresh.site = delta.site;
+      // The fingerprint intentionally ignores Coding.version. Retain the
+      // original R6 CodeableReference wrapper and its reference, but keep
+      // the current R5 concept authoritative (including validator-added
+      // coding versions). Replacing the whole wrapper discarded live data.
+      fresh.site = {
+        ...delta.site,
+        ...(fresh.site?.concept ? { concept: {
+          ...delta.site.concept, ...fresh.site.concept
+        } } : {}),
+        ...(fresh.site?.reference ? { reference: {
+          ...delta.site.reference, ...fresh.site.reference
+        } } : {})
+      };
     } else if (!equalStructuredValues(fresh.site, delta.site)) {
       // The live R5 site edit wins. Keep the original wrapper on this row
       // as typed source provenance, not as a second active anatomical site.

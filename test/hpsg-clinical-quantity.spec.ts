@@ -1614,3 +1614,27 @@ describe("fractional million and attached dimensional rate families", () => {
     expect(dose?.rateQuantity).toBeUndefined();
   });
 });
+
+
+describe("compact million multiplier stays distinct from an attached medication unit", () => {
+  it.each([
+    ["approximately 2.4M IU IM once", 2400000, "~"],
+    ["~2.4M IU IM once", 2400000, "~"],
+    [">=2.4m IU IM once", 2400000, ">="],
+    ["≤2.4M IU IM once", 2400000, "<="],
+    ["2.4M IU IM once", 2400000, undefined],
+    ["approximately 2.4 million IU IM once", 2400000, "~"]
+  ] as const)("keeps the authored numeric million and comparator for %s",
+    (text, value, comparator) => {
+      const parsed = parsePublicSig(text);
+      const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+      expect(dose).toMatchObject({ value, unit: "IU" });
+      expect(dose?.comparator).toBe(comparator);
+      const r5 = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
+      expect(r5).toMatchObject({ value, unit: "IU" });
+      expect(getEmaQuantityComparator(r5)).toBe(comparator);
+      expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
+        .component[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value, unit: "IU" });
+      expect(parsed.input).toBe(text);
+    });
+});

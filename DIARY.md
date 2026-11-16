@@ -5872,3 +5872,82 @@ No consistent slowdown across paired shared-host runs;
 this is not mobile-device performance evidence.
 No dependency, hot-path extra parse, runtime safety veto,
 publication, migration, merge or deployment.
+
+
+## 2026-11-16 — PR #13: coding versions and elapsed repeat-cycle clocks
+
+Decision gate: inspected complete review 5914112412, all 69 inline
+threads, issue comments and followups. Two new inline cases reproduced
+on dd9092d. A duplicate out-of-diff compact-million claim was tested
+but is NOT a current public-API failure: parseSig already produces
+2,400,000 IU with the authored ~ or >= (including compact 2.4M,
+2.4m, and spelled-out 2.4 million). Although the helper can recognize
+an intermediate unit candidate called m, the clinical grammar owns
+the full compact-million quantity before suggestion and FHIR export.
+Added public-API regression oracles rather than rewriting a functioning
+hot parser path on an unproven suggestion.
+
+Site coding metadata: the compact R6 reconstructor compared a
+fingerprint deliberately ignoring Coding.version, then restored the
+ENTIRE old CodeableReference and discarded a new validator-supplied
+R5 Coding.version. The unchanged semantic site now retains the
+original R6 wrapper ID, native extensions and BodyStructure reference,
+while the current live R5 CodeableConcept (including coding versions)
+wins. Reopened strict R5 preserves both. Real edits to an anatomical
+site and explicit reference clears still supersede the old site.
+Adjacent route/method versions are independently checked. No new
+parser pass, dependencies or common-path validation.
+
+Elapsed DST: R6 repeatCycle=24h is a fixed elapsed interval. Its
+second New York cycle begins March 14 2027 at 03:30 EDT after the
+spring transition, but the previous code reused the original
+March 13 02:30 logical clock for the second component 1d cap.
+It incorrectly excluded March 15 at 03:00, yielding 2 rather than
+3 tablets over a three-day query. Both R5 and R6 reproduced it.
+One repeatedCycleWallClock helper now defines the contract used
+by scheduleRepeatedCourse and calculateCourseTotalUnits: integral
+d/wk/mo/a cycles reuse the first prescribed CIVIL clock, while
+elapsed h/min/s and fractional cycles derive a fresh local clock
+from each actual cycle start. The common calendar cycle clock is
+computed ONCE, avoiding a per-cycle timezone conversion. Prior
+explicit/implicit stage, boundsDuration, month/week, q24h, fall DST
+and parallel multiplicity behavior is preserved. No global dose
+dedup or artificial cap clamp.
+
+Both inline findings are real R6 interoperability/execution bugs;
+the body-only compact-million observation is already handled by
+the clinical grammar, without a demonstrated current defect.
+Known numeric values, original source, and editable clinical
+meaning are retained. No consumer schema change or deployment.
+
+
+Final verification for this review after the last code and test edits:
+- npm run build: PASS (ES6 ESM/CJS + TypeScript declarations).
+- npm test: **4,130/4,130**, 44 source suites; focused R6
+  **362/362**, HPSG clinical quantities **179/179**,
+  schedule-family **171/171**, plus all earlier graph and
+  clinical/scheduler families.
+- npm run test:dist: **4/4** packaged export tests.
+- git diff --check: PASS.
+- Read-only real consumer adapter: R5 FHIR -> editable model ->
+  in-memory persisted usage -> reopened editable model ->
+  reverse FHIR -> R6. The validator-added 2026 Coding.version,
+  original CodeableReference ID/native extension and
+  BodyStructure/OD reference all survived. No consumer schema
+  change or dependent application edit.
+- The compact million public parser independently returned
+  2,400,000 IU with native comparator ~ for the original
+  CodeRabbit sentence; it is a STALE duplicate, not a newly
+  reproduced regression.
+
+Paired warm host parser benchmarks against immutable dd9092d
+(seven alternating 65-parse batches, median microseconds):
+ordinary 1779.8 -> 1768.6 (-0.6%),
+Thai 6444.0 -> 6219.3 (-3.5%),
+ocular taper 6633.8 -> 6758.8 (+1.9%),
+comparator 3288.9 -> 3132.0 (-4.8%),
+compact million 2375.1 -> 2431.0 (+2.4%),
+rich graph 16599.9 -> 15840.2 (-4.6%).
+Host noise and warm-cache differences matter; this is NOT a
+mobile benchmark. No consistent common-path slowdown was found,
+and neither fix adds a whole-SIG parse or a general runtime gate.

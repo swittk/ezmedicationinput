@@ -5757,3 +5757,111 @@ describe("review 18: empty stages, course header provenance, and inherited civil
     }
   });
 });
+
+
+describe("review 19: live site coding and elapsed repeat-cycle clock ownership", () => {
+  const sourceSite: FhirR6DosageInstruction = { step: [{ component: [{
+    site: {
+      id: "original-site",
+      extension: [{ url: "https://example.org/site-wrapper", valueString: "source" }],
+      concept: { text: "right eye", coding: [{
+        system: "http://snomed.info/sct", code: "right-eye",
+        display: "Right eye", version: "2024-legacy"
+      }] },
+      reference: { reference: "BodyStructure/OD", display: "Right eye" }
+    },
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
+  }] }] };
+
+  it("preserves validator-added Coding.version while restoring the R6 site wrapper and reference", () => {
+    for (const version of ["2026.11", "2028.05", "2024-legacy"]) {
+      const rows = toFhirR5Dosages(sourceSite);
+      rows[0].site!.coding![0].version = version;
+      const before = JSON.stringify(rows);
+      const restored = toDosageDetails(rows);
+      const site = restored.step[0].component[0].site!;
+      expect(site.id).toBe("original-site");
+      expect(site.extension).toEqual(sourceSite.step[0].component[0].site!.extension);
+      expect(site.reference).toEqual(sourceSite.step[0].component[0].site!.reference);
+      expect(site.concept?.coding?.[0].version).toBe(version);
+      expect(site.concept?.text).toBe("right eye");
+      expect(JSON.stringify(rows)).toBe(before);
+      const reopened = toDosageDetails(toFhirR5Dosages(restored));
+      expect(reopened.step[0].component[0].site).toEqual(site);
+      expect(reopened.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    }
+  });
+
+  it("keeps unrelated route and method coding versions when a site wrapper is restored", () => {
+    const original: FhirR6DosageInstruction = {
+      step: [{ component: [{
+        ...sourceSite.step[0].component[0],
+        route: { coding: [{ system: "https://example.org/route", code: "ocular" }] },
+        method: { coding: [{ system: "https://example.org/method", code: "instill" }] }
+      }] }]
+    };
+    const rows = toFhirR5Dosages(original);
+    rows[0].site!.coding![0].version = "site-new";
+    rows[0].route!.coding![0].version = "route-new";
+    rows[0].method!.coding![0].version = "method-new";
+    const out = toDosageDetails(rows).step[0].component[0];
+    expect(out.site?.concept?.coding?.[0].version).toBe("site-new");
+    expect(out.route?.coding?.[0].version).toBe("route-new");
+    expect(out.method?.coding?.[0].version).toBe("method-new");
+    expect(out.site?.id).toBe("original-site");
+    expect(toDosageDetails(toFhirR5Dosages({ step: [{ component: [out] }] }))
+      .step[0].component[0]).toEqual(out);
+  });
+
+  const elapsedCourse: FhirR6DosageInstruction = {
+    repeatCycle: { value: 24, unit: "h", code: "h" },
+    step: [{ component: [{
+      timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["03:00:00"], boundsDuration: { value: 1, unit: "d", code: "d" }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }]
+  };
+
+  it("gives each elapsed 24-hour cycle a new actual wall clock across spring DST", () => {
+    const options = {
+      orderedAt: "2027-03-13T02:30:00-05:00",
+      from: "2027-03-13T02:30:00-05:00",
+      timeZone: "America/New_York", limit: 7
+    };
+    const expected = [
+      "2027-03-13T03:00:00-05:00",
+      "2027-03-14T03:00:00-04:00",
+      "2027-03-15T03:00:00-04:00",
+      "2027-03-16T03:00:00-04:00",
+      "2027-03-17T03:00:00-04:00",
+      "2027-03-18T03:00:00-04:00",
+      "2027-03-19T03:00:00-04:00"
+    ];
+    for (const dosage of [
+      elapsedCourse, toFhirR5Dosages(elapsedCourse), fromFhir(elapsedCourse)
+    ]) {
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
+    }
+  });
+
+  it("retains source local clock for calendar cycles while elapsed cycles step from the new instant", () => {
+    const source: FhirR6DosageInstruction = {
+      ...elapsedCourse,
+      repeatCycle: { value: 1, unit: "d", code: "d" }
+    };
+    const start = "2027-03-13T02:30:00-05:00";
+    const options = { from: start, orderedAt: start,
+      timeZone: "America/New_York", limit: 12 };
+    for (const dosage of [source, toFhirR5Dosages(source)]) {
+      const dates = nextDueDoses(dosage, options);
+      expect(dates.filter(date => date.startsWith("2027-03-15T03:00:00"))).toHaveLength(1);
+      expect(new Set(dates).size).toBe(dates.length);
+      expect(calculateTotalUnits({ dosage, ...options,
+        durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(7);
+    }
+  });
+});
