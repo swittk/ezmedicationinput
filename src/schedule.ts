@@ -940,6 +940,15 @@ function repeatOccurrenceCap(repeat: FhirTimingRepeat): number | undefined {
   return raw === undefined ? undefined : Math.max(0, Math.floor(raw));
 }
 
+/** A declared exact count can end an implicit stage; countMax alone is only
+ * a ceiling on possible administrations, not proof that N were completed. */
+function hasDefiniteAdministrationCount(
+  repeat: FhirTimingRepeat | undefined
+): repeat is FhirTimingRepeat & { count: number } {
+  return repeat?.count !== undefined &&
+    (repeat.countMax === undefined || repeat.countMax === repeat.count);
+}
+
 function isSingleAdministrationRepeat(repeat: FhirTimingRepeat): boolean {
   return (
     repeatOccurrenceCap(repeat) === 1 &&
@@ -2101,8 +2110,11 @@ function scheduleTreatmentRelativeCourse(
         modifierExtension: dosage.modifierExtension?.filter(ext =>
           ext.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL)
       }, {
-        ...options, from: effectiveFrom, orderedAt: cadence.origin, limit
-      });
+        ...options, from: effectiveFrom, orderedAt: cadence.origin, limit,
+        ...(eligibleStart > cadence.origin &&
+          hasDefiniteAdministrationCount(dosage.timing?.repeat)
+          ? { countEligibilityStart: eligibleStart } : {})
+      } as PhaseCountOptions);
       for (const time of candidateTimes) {
         if (effectiveEnd && Date.parse(time) >= effectiveEnd.getTime()) break;
         doses.push(time);
@@ -2360,6 +2372,10 @@ function executionCourseWithPeriodOffsets(
   };
 }
 
+/** Internal phase execution must distinguish recurrence origin from first
+ * eligible administration. This never becomes public options or FHIR state. */
+type PhaseCountOptions = NextDueDoseOptions & { countEligibilityStart?: Date };
+
 export function nextDueDoses(
   dosage: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult,
   options: NextDueDoseOptions
@@ -2424,6 +2440,44 @@ export function nextDueDoses(
     extension.url === DOSAGE_DETAILS_R5_URL ||
     extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)) {
     return nextDueDoses(toDosageDetails([one]), options);
+  }
+  // The successor's cadence can be anchored to its predecessor's last
+  // administration, even though that point belongs to the PREVIOUS phase.
+  // Enumerate the first N actual eligible administrations once with the count
+  // removed, using the ordinary conditional/capped clock implementation.
+  // Late queries filter that same N rather than consuming the old origin.
+  const eligibleAt = (options as PhaseCountOptions).countEligibilityStart;
+  const repeatForCount = one.timing?.repeat;
+  // countMax is a maximum allowance, not a finite authored sequence of
+  // administrations. Only a definite count can define a successor's phase
+  // completion and eligibility-owned count.
+  const finiteCount = hasDefiniteAdministrationCount(repeatForCount)
+    ? repeatOccurrenceCap(repeatForCount) : undefined;
+  if (eligibleAt && finiteCount !== undefined && !one.asNeeded) {
+    const requestedLimit = options.limit ?? 10;
+    if (!Number.isFinite(requestedLimit) || requestedLimit <= 0) return [];
+    if (options.priorCount !== undefined &&
+        (!Number.isFinite(options.priorCount) || options.priorCount < 0))
+      throw new Error("Invalid priorCount supplied to nextDueDoses");
+    const available = Math.max(0, finiteCount - Math.floor(options.priorCount ?? 0));
+    if (!available) return [];
+    const capped = Math.min(available, 10_000);
+    const uncapped: FhirDosage = {
+      ...one,
+      timing: { ...one.timing, repeat: {
+        ...repeatForCount, count: undefined, countMax: undefined
+      } }
+    };
+    const candidates = nextDueDoses(uncapped, {
+      ...options, countEligibilityStart: undefined, priorCount: undefined,
+      from: eligibleAt, limit: capped
+    } as PhaseCountOptions);
+    if (available > capped && candidates.length === capped)
+      throw new MedicationQuantityCalculationError("schedule-horizon-too-dense",
+        "A counted successor exceeds 10,000 eligible administrations; shorten the clinically verified window.");
+    const requestedFrom = coerceDate(options.from, "from");
+    return candidates.filter(iso => Date.parse(iso) >= requestedFrom.getTime())
+      .slice(0, Math.floor(requestedLimit));
   }
   const choice = executionChoice(one);
   if (choice) {
@@ -4387,7 +4441,9 @@ function calculateTotalUnitsSingle(
 
   const needsFilteredEnumeration = conditional || excludedDates.length || excludedWeekdays.length ||
     !!dosage.maxDosePerPeriod?.length || !!getTimingOccurrenceCap(repeat) ||
-    isWakingHoursInterval(repeat);
+    isWakingHoursInterval(repeat) ||
+    Boolean((options as PhaseCountOptions).countEligibilityStart &&
+      hasDefiniteAdministrationCount(repeat));
   let count: number;
   if (endDay <= countFrom) {
     count = 0;
@@ -4812,8 +4868,11 @@ function calculateCourseTotalUnits(
       const calculated = calculateTotalUnitsSingle({
         ...options, dosage: bounded,
         from: begin > queryStart ? begin : queryStart,
-        orderedAt: cadenceOrigin, roundToMultiple: undefined
-      });
+        orderedAt: cadenceOrigin, roundToMultiple: undefined,
+        ...(begin > cadenceOrigin &&
+          hasDefiniteAdministrationCount(dosage.timing?.repeat)
+          ? { countEligibilityStart: begin } : {})
+      } as TotalUnitsOptions & PhaseCountOptions & { dosage: FhirDosage });
       entries.push({
         total: calculated,
         unit: measured.doseAndRate?.[0]?.doseQuantity?.unit ??
@@ -4990,8 +5049,9 @@ function finiteAdministrationCompletion(
       extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) }
     : dosage;
   const due = nextDueDoses(local, {
-    ...options, from: eligibleFrom, orderedAt: start, limit: count
-  });
+    ...options, from: eligibleFrom, orderedAt: start, limit: count,
+    ...(eligibleFrom > start ? { countEligibilityStart: eligibleFrom } : {})
+  } as PhaseCountOptions);
   if (due.length !== count) return undefined;
   const last = new Date(due[due.length - 1]);
   if (repeat.duration && repeat.durationUnit) {

@@ -154,9 +154,13 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
       // One object can be both the named theme and the parsed dose.
       // Keep its localized amount ("1 tablet", not raw "1 tab").
+      // c.amount already uses the typed quantity when numeric, or the
+      // preserved argument source when a partial comparator has no number.
+      // Calling translateQuantity here bypasses that shared ownership and
+      // can fabricate an invalid 'at most mg' material amount.
       const coextensiveAmount = themeArg && amountArg?.quantity &&
         themeArg.text.trim() === amountArg.text.trim()
-        ? c.translateQuantity(amountArg.quantity) : undefined;
+        ? c.amount : undefined;
       // "ยา 1 เม็ด" also owns its amount, though the theme includes a noun.
       // Neither form licenses another tablet-sized amount on plain water.
       const amountAlreadyInTheme = Boolean(coextensiveAmount ||
@@ -312,9 +316,13 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
+      // c.amount already uses the typed quantity when numeric, or the
+      // preserved argument source when a partial comparator has no number.
+      // Calling translateQuantity here bypasses that shared ownership and
+      // can fabricate an invalid 'at most mg' material amount.
       const coextensiveAmount = themeArg && amountArg?.quantity &&
         themeArg.text.trim() === amountArg.text.trim()
-        ? c.translateQuantity(amountArg.quantity) : undefined;
+        ? c.amount : undefined;
       const amountAlreadyInTheme = Boolean(coextensiveAmount ||
         (themeArg?.quantity && amountArg?.quantity &&
           themeArg.quantity.value === amountArg.quantity.value &&

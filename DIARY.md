@@ -6374,3 +6374,117 @@ supply 364.4 -> 350.1 (-3.9%). Differences run both directions;
 there is no repeatable/common-path slowdown established by this
 comparison. Counted phase execution performs necessary finite
 completion work; ordinary SIG parsing has no new pass.
+
+
+## 2026-11-16 — PR #13 latest CodeRabbit: bounded editable stages, owned rate text, and eligible finite counts
+
+Reviewed CodeRabbit 5918707403 (10:46 UTC, 17:46 Bangkok),
+its five unresolved inline findings and one outside-diff low-value nit,
+against AGENTS.md, DIRECTIONALITY.md and the preceding phase-clock and
+R5/R6 semantic-preservation diaries. All five inline findings were
+independently reproduced on prior PR HEAD e134fcb, including a zero-
+stage index that exhausted a Vitest worker's heap. No new schema,
+independent parser, Shinebright change or R6-legacy compatibility
+mechanism was authorized.
+
+- **Explicit empty stages / unbounded stage synthesis:** A R5 carrier
+  for a zero-component R6 course trusted an arbitrary course.step
+  ordinal (1e9 and 1e21 are Number.isInteger), appending one invented
+  stage per ordinal. Edits now only address an existing slot or append
+  its next adjacent slot. Malformed/gapped edits remain inert typed
+  source provenance, as in the existing invalid/duplicate path.
+  Family audit found a SECOND allocation vector: compact row stepCount
+  was also used to generate every intervening ordinal unboundedly.
+  Reconcilers now reconstruct observed stage positions and genuinely
+  missing predecessors (required for relative course meaning), with a
+  bounded fill up to 10,000 for any persisted count or stage ordinal.
+  Excessive values stay recoverable in source provenance. Critically,
+  deleting phase 1 of a 3-step course still keeps empty step 1 and
+  survivors at their proper indices; the initial naive removal of all
+  ordinal fill was caught by four existing full-suite tests and
+  corrected BEFORE delivery.
+
+- **One-sided rateRange qualifier and computed-vs-authored display:**
+  A source low endpoint with its own EMA operator (e.g. '>50 mL/h')
+  must not acquire a second default '>='. The same independently
+  typed comparator rule applies to upper endpoints. Read each EMA
+  operator only once; supply the default >= / <= only when absent.
+  A separate preview bug arose because the rate appender inferred
+  that dosage.text was the returned display. The caller sometimes
+  produced a NEW canonical preview while retaining an unrelated
+  original text field. Authored-text authority now lives at the
+  caller; only an actually computed preview receives rateRange text.
+  Explicit source display still returns the authored instruction.
+
+- **Incomplete graph quantities:** A comparator-only editable amount
+  ({comparator:'<=',unit:'mg'}) was emitted as 'at most mg' without any
+  numeric quantity. The graph translator now realizes numerical
+  amount only when value or a known range endpoint exists. An
+  adjacent root-family problem existed in both EN/TH mix-substance
+  realizers, which directly called translateQuantity and thereby
+  BYPASSED the source-aware argument translator. Those use the
+  shared localized c.amount source/quantity decision for coextensive
+  theme-and-amount arguments. Original source graph and partial
+  Quantity are not mutated or discarded; no second lookup pass.
+
+- **Counted implicit successors / cadence origin vs eligibility:**
+  A prior loading step had already administered at the daily 08:00
+  cadence origin; the successor must start AFTER that point, but
+  must not move its calendar cadence origin to +1ms. Ordinary
+  derived history counted the excluded previous-step origin against
+  the successor's repeat.count, so repeat.count=2 produced one
+  maintenance tablet or none on later from-queries and prevented
+  the subsequent stage from executing. A private, typed execution
+  boundary countEligibilityStart (NOT public FHIR or EZMED API)
+  separates the first eligible administration from cadence origin.
+  For definite count-limited successors ONLY, the existing
+  conditional/capped scheduler enumerates the first N eligible
+  administrations once on an execution-only copy without count,
+  and later from-queries filter that stable set. The SAME rule is
+  propagated through relative scheduling, finite-completion
+  discovery and numeric supply, avoiding a second cadence algorithm.
+  The definite-count predicate is centralized and explicitly does
+  NOT treat countMax (an upper allowance) as completed administrations.
+  A first full-suite run found that earlier broad countMax
+  interpretation had broken an established parallel dose cap;
+  that was corrected and the full suite rerun green.
+
+- **Rejected review nitpick:** The review suggested deleting an
+  unreachable embeddedMillion numeric assignment from the existing
+  lexical class. Public '≤2.4m IU', '≤ 2.4m IU', '<2.4m units',
+  spaced English 'less than 2.4m IU' and unqualified 2.4m/million
+  inputs already yield 2,400,000 appropriate units and operators.
+  There is no demonstrated user-visible defect from this line,
+  and cleanup is unrelated to R6; no extra lexer code churn or
+  assertion-only tests were added merely to satisfy the nit.
+
+Added focused regression oracles to EXISTING test/r6-primary,
+test/instruction-graph and test/schedule-family-audit:
+zero-stage sparse edits, actual next-stage append, no enormous
+course reconstruction; both one-sided rate endpoints with and
+without authored EMA operators; structured R5 text with a
+computed rate preview; locale-preserving comparator-only
+preparatory amounts without graph mutation; three-step
+count=1 loading + count=2 maintenance + day-4 final phase,
+query starting midway, R6/R5/imported equality and supply totals.
+Verified existing compact missing predecessors and countMax cap
+families explicitly after the initial broad source-family audit.
+
+Verification: npm run build PASS (ES6, ESM/CJS, TypeScript declarations).
+Complete source suite **4205/4205 tests, 44/44 suites PASS** and
+npm run test:dist **4/4 PASS**, diff check clean. After a small
+consolidation of the identical finite-count predicate across the
+four execution consumers, TypeScript and all 22 focused/relevant
+tests were rerun green. Baseline is exact e134fcb, warm paired
+seven-batch HPSERVER medians, microseconds per operation:
+ordinary parser 1667.4 -> 1623.6 (-2.6%),
+Thai parser 6201.0 -> 6061.3 (-2.3%),
+ophthalmic taper 6403.7 -> 6170.8 (-3.6%),
+ordinary R6 schedule 712.8 -> 700.3 (-1.7%),
+ordinary R6 supply 405.6 -> 420.7 (+3.7%).
+Shared-host noise does not establish any consistent performance loss;
+common SIG parsing gained no new pass or whole-input array walk.
+
+No full CodeRabbit review was re-requested, no PR merge, package
+publication, application/schema change, or change to the public R5
+and R6 format contract.

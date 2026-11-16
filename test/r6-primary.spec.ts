@@ -6149,3 +6149,84 @@ describe("November 16 next review: partial R6 amounts and undefined R5 modifiers
     expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
   });
 });
+
+
+describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
+  const textOnly: FhirR6DosageInstruction = {
+    renderedInstruction: "Original course heading", step: [{ id: "first", component: [] }]
+  };
+  it("never inserts phantom stages for an out-of-order explicit course.step", () => {
+    const saved = toFhirR5Dosages(textOnly);
+    const rebuilt = toDosageDetails(saved, undefined, {
+      step: [{ sequence: 3, id: "new-stage" }]
+    });
+    expect(rebuilt.step).toHaveLength(1);
+    expect(rebuilt.step[0].id).toBe("first");
+    expect(JSON.stringify(rebuilt.extension)).toContain("new-stage");
+    expect(JSON.stringify(rebuilt.extension)).toContain("3");
+  });
+  it("keeps extreme out-of-range indices as inert source without allocating stages", () => {
+    const saved = toFhirR5Dosages(textOnly);
+    for (const sequence of [1_000_000_000, 1e21]) {
+      const rebuilt = toDosageDetails(saved, undefined, {
+        step: [{ sequence, id: "unassignable" }]
+      });
+      expect(rebuilt.step).toHaveLength(1);
+      expect(rebuilt.step[0].id).toBe("first");
+      expect(JSON.stringify(rebuilt.extension)).toContain("unassignable");
+    }
+  });
+  it("does not synthesize compact R5 stages from an extreme stepCount hint", () => {
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 7, unit: "d", code: "d" },
+      step: [{ component: [{ doseAndRate: [{
+        doseQuantity: { value: 1, unit: "tab" }
+      }] }] }]
+    };
+    const rows = toFhirR5Dosages(course);
+    const row = rows[0].modifierExtension?.find(ext =>
+      ext.extension?.some(child => child.url === "stepCount"));
+    expect(row).toBeDefined();
+    const count = row!.extension!.find(child => child.url === "stepCount")!;
+    count.valueInteger = 1_000_000_000;
+    const restored = toDosageDetails(rows);
+    expect(restored.step).toHaveLength(1);
+    expect(restored.step[0].component).toHaveLength(1);
+    expect(restored.repeatCycle?.value).toBe(7);
+  });
+
+  it("allows an adjacent second stage without inventing gaps", () => {
+    const rebuilt = toDosageDetails(toFhirR5Dosages(textOnly), undefined, {
+      step: [{ sequence: 2, id: "second" }]
+    });
+    expect(rebuilt.step.map(step => step.id)).toEqual(["first", "second"]);
+  });
+});
+
+describe("review 2026-11-16 19h: rateRange surface provenance", () => {
+  it.each([
+    [{ low: { value: 50, unit: "mL/h", extension: [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000051" }
+    }] } }, ">50 mL/h"],
+    [{ high: { value: 20, unit: "mL/h", extension: [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" }
+    }] } }, "<20 mL/h"],
+    [{ low: { value: 40, unit: "mL/h" } }, ">=40 mL/h"],
+    [{ high: { value: 60, unit: "mL/h" } }, "<=60 mL/h"]
+  ] as const)("renders one-sided rateRanges with exactly one qualifier", (range, expected) => {
+    const dosage: FhirDosage = {
+      text: "Infuse as instructed.",
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" },
+        rateRange: range }]
+    };
+    // The edited preview is built from structured fields, not the text property.
+    const imported = fromFhirDosage(dosage, { locale: "en" });
+    expect(imported.shortText).toContain(expected);
+    expect(imported.longText).toContain(expected);
+    expect(imported.fhir).toEqual(dosage);
+    // An explicit format request may deliberately return the authored source.
+    expect(formatSig(dosage, "long")).toBe("Infuse as instructed.");
+  });
+});

@@ -1694,13 +1694,18 @@ export function toDosageDetails(
       const editedSequences = new Set<number>();
       for (const item of course?.step ?? []) {
         const { sequence, ...fields } = item;
-        if (!Number.isInteger(sequence) || sequence < 1 || editedSequences.has(sequence)) {
+        // Empty-stage metadata is an address into the existing ordered
+        // course, not a request to synthesize missing clinical stages. The
+        // only legal addition is one adjacent slot; all other indices remain
+        // recoverable as inert edit provenance, never a huge allocation.
+        if (!Number.isSafeInteger(sequence) || sequence < 1 ||
+            sequence > emptySteps.length + 1 || editedSequences.has(sequence)) {
           reconciliationSources.push(retainedCourseStepSource(item));
           addWarning(warnings, "Invalid or duplicate empty-stage metadata remained recoverable as source provenance.");
           continue;
         }
         editedSequences.add(sequence);
-        while (emptySteps.length < sequence) emptySteps.push({ component: [] });
+        if (sequence === emptySteps.length + 1) emptySteps.push({ component: [] });
         const { component: _oldComponents, ...prior } = emptySteps[sequence - 1];
         emptySteps[sequence - 1] = {
           ...r6StepMetadata({ ...r5StepMetadata(prior), ...fields }), component: []
@@ -2779,9 +2784,25 @@ function reconcileCompactCourse(
     const entries = groups.get(sequence) ?? [];
     entries.push(component); groups.set(sequence, entries);
   });
-  const stageCount = Math.max(0, ...localRows.map(local => local?.value.stepCount ?? 0));
+  // A missing predecessor is a real, editable empty stage: surviving
+  // sequence-2 rows must NOT silently become sequence 1. But an arbitrary
+  // persisted stepCount is not permission to allocate billions of stages.
+  // Fill only the observed stage range (including retained explicit empty
+  // steps), bounded to 10,000 stages. Preserve the original marker as inert
+  // provenance when a malformed index exceeds that representable limit.
   const sequences = new Set([...groups.keys(), ...metadata.keys()]);
-  for (let sequence = 1; sequence <= stageCount; sequence++) sequences.add(sequence);
+  const stageCount = Math.max(0, ...localRows.map(local => local?.value.stepCount ?? 0));
+  const observedLast = Math.max(0, ...sequences);
+  const fillCount = Math.min(stageCount, observedLast, 10_000);
+  for (let sequence = 1; sequence <= fillCount; sequence++) sequences.add(sequence);
+  if (stageCount > 10_000 || observedLast > 10_000) {
+    for (const local of localRows) {
+      if (local && (local.value.stepCount > 10_000 || local.value.sequence > 10_000))
+        sources.push(localReconciliationSource(local.marker));
+    }
+    addWarning(warnings,
+      "An excessive retained course stage index was kept as source provenance rather than allocating empty stages.");
+  }
   const steps = [...sequences].sort((a, b) => a - b).map(sequence => ({
     ...r6StepMetadata(metadata.get(sequence)?.step ?? {}), component: groups.get(sequence) ?? []
   }));

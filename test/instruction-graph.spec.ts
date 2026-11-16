@@ -2497,3 +2497,20 @@ describe("November 16 rich amountless primary remains dose-editable", () => {
     expect(JSON.stringify(graph)).toBe(original);
   });
 });
+
+
+describe("review 2026-11-16 19h: incomplete graph quantities do not invent amounts", () => {
+  it.each(["en", "th"] as const)(
+    "uses recognizable source argument text for a comparator-only quantity in %s", locale => {
+      const graph = parseInstructionActions("Dissolve 2 tablets in water, then drink slowly");
+      const frame = graph.find(a => a.predicate.lemma === "dissolve")!;
+      const amount = frame.args.find(a => a.role === AdviceArgumentRole.Amount)!;
+      amount.quantity = { comparator: "<=", unit: "mg" };
+      const original = JSON.stringify(frame);
+      const realized = realizeInstructionAction(frame, locale);
+      expect(realized).not.toMatch(/(?:<=|≤)\s*mg/u);
+      expect(realized).toMatch(/2|สอง/u);
+      expect(JSON.stringify(frame)).toBe(original);
+    }
+  );
+});

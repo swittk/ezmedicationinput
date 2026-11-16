@@ -3423,6 +3423,11 @@ function translatedQuantity(
   quantity: NonNullable<AdviceArgument["quantity"]>,
   locale: string
 ): string {
+  // Amounts without any numeric bound remain editable facts, not an
+  // administration quantity. Realizers must fall back to source argument
+  // text, rather than producing 'at most mg' without a number.
+  if (quantity.value === undefined && quantity.range?.low === undefined &&
+      quantity.range?.high === undefined) return "";
   const singular = quantity.value === 1 && !quantity.range;
   const labels = quantity.unit ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(quantity.unit) : undefined;
   const localizedLabels = labels ? localizedConfig(labels.locales, locale, "en") : undefined;
@@ -3437,7 +3442,12 @@ function translatedQuantity(
 }
 
 function translatedArgument(arg: AdviceArgument, locale: string): string {
-  if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  // A comparator alone does not identify a numeric administration amount.
+  // Keep the original source argument for review instead of displaying
+  // a fabricated valueless "at most mg" quantity.
+  if (arg.quantity && (arg.quantity.value !== undefined ||
+      arg.quantity.range?.low !== undefined || arg.quantity.range?.high !== undefined))
+    return translatedQuantity(arg.quantity, locale);
   const looseQuantity = (arg.text ?? arg.normalized ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s+(.+)$/u);
   if (looseQuantity) {
     const unit = normalizeUnit(looseQuantity[2]);

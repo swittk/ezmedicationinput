@@ -1417,9 +1417,10 @@ function formatCalendarStepWindow(
 function rateRangePreview(range: FhirRange): string | undefined {
   const low = range.low, high = range.high;
   const unit = (q: FhirQuantity | undefined) => q?.unit ?? q?.code ?? "";
-  const value = (q: FhirQuantity | undefined) => q?.value === undefined
-    ? undefined : (getQuantityComparator(q) ?? "") + q.value;
-  const lower = value(low), upper = value(high);
+  const lowComparator = getQuantityComparator(low);
+  const highComparator = getQuantityComparator(high);
+  const lower = low?.value === undefined ? undefined : (lowComparator ?? "") + low.value;
+  const upper = high?.value === undefined ? undefined : (highComparator ?? "") + high.value;
   if (lower === undefined && upper === undefined) return undefined;
   if (lower !== undefined && upper !== undefined) {
     const loUnit = unit(low), hiUnit = unit(high);
@@ -1429,16 +1430,17 @@ function rateRangePreview(range: FhirRange): string | undefined {
         upper + (hiUnit ? " " + hiUnit : "");
   }
   return lower !== undefined
-    ? ">=" + lower + (unit(low) ? " " + unit(low) : "")
-    : "<=" + upper + (unit(high) ? " " + unit(high) : "");
+    ? (lowComparator ? "" : ">=") + lower + (unit(low) ? " " + unit(low) : "")
+    : (highComparator ? "" : "<=") + upper + (unit(high) ? " " + unit(high) : "");
 }
 
-/** Same rateRange realization for standalone R5 and projected R6 input.
+/** Append structured rate ranges ONLY to a freshly computed preview.
+ * Authored text is selected by the CALLER, not inferred here from the
+ * presence of Dosage.text (which may be unused during structured editing).
  * Ordinary one-entry SIGs exit at the single optional-field check. */
 function appendSourceLessRateRanges(
   displayed: string, dosage: FhirDosage, thai: boolean
 ): string {
-  if (dosage.text?.trim()) return displayed;
   const entries = dosage.doseAndRate;
   if (!entries?.length) return displayed;
   if (entries.length === 1 && !entries[0].rateRange) return displayed;

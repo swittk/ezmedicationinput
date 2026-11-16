@@ -2763,3 +2763,51 @@ describe("count-vs-calendar predecessor clock ownership across DST", () => {
     expect(calculateTotalUnits({ dosage: course, ...start }).totalUnits).toBe(2);
   });
 });
+
+
+describe("review 2026-11-16 19h: count belongs to eligible successor administrations", () => {
+  const orderedAt = "2026-11-02T00:00:00-05:00";
+  const marker = PARALLEL_COMPONENT_PHASE_ORIGIN_URL;
+  const course: FhirR6DosageInstruction = {
+    step: [
+      { component: [{
+        modifierExtension: [{ url: marker, valueQuantity: { value: 8, code: "h", unit: "h" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          count: 1, timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] },
+      { component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          count: 2, timeOfDay: ["08:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] },
+      { component: [{
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          boundsDuration: { value: 1, unit: "d", code: "d" },
+          timeOfDay: ["20:00:00"] } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+      }] }
+    ]
+  };
+  const opts = { from: orderedAt, orderedAt, timeZone: "America/New_York",
+    limit: 10, durationValue: 4, durationUnit: FhirPeriodUnit.Day };
+  const expected = [
+    "2026-11-02T08:00:00-05:00",
+    "2026-11-03T08:00:00-05:00",
+    "2026-11-04T08:00:00-05:00",
+    "2026-11-04T20:00:00-05:00"
+  ];
+  it("counts the two maintenance administrations, not the excluded loading dose", () => {
+    for (const input of [course, toFhirR5Dosages(course), fromFhir(course)]) {
+      expect(nextDueDoses(input, opts)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...opts }).totalUnits).toBe(4);
+    }
+  });
+  it("a later from query only subtracts genuinely administered eligible doses", () => {
+    const later = { ...opts, from: "2026-11-04T00:00:00-05:00" };
+    for (const input of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(input, later)).toEqual(expected.slice(2));
+      expect(calculateTotalUnits({ dosage: input, ...later }).totalUnits).toBe(2);
+    }
+  });
+});
