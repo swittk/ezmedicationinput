@@ -317,7 +317,8 @@ function parseArgumentExtension(extension: FhirExtension): AdviceArgument | unde
     const high = child(quantityExtension, "high")?.valueDecimal;
     const unit = child(quantityExtension, "unit")?.valueString;
     const comparator = getQuantityComparator(quantityExtension);
-    if (value !== undefined || low !== undefined || high !== undefined || unit !== undefined) {
+    if (value !== undefined || low !== undefined || high !== undefined ||
+        unit !== undefined || comparator !== undefined) {
       argument.quantity = {
         value,
         range: low !== undefined || high !== undefined ? { low, high } : undefined,

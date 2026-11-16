@@ -5768,3 +5768,107 @@ rich preparation graph 16191 -> 16519.9 (+2.0%).
 Host performance is subject to shared load and is not a mobile
 device benchmark. No sustained common-path regression observed;
 normal SIG code gets no full extra parsing or generalized validation.
+
+
+## 2026-11-16 — PR #13 review: course edits, comparator-only graph data, implicit stage clocks
+
+Review gate: inspected every current inline thread, the full CodeRabbit
+review body 5913840185 (submitted 2026-11-16 00:45 UTC), issue comments,
+older review discussions, and related edit/round-trip families. The new
+review has FOUR actionable inline findings and ONE low-priority vocabulary
+layout comment. No additional out-of-diff code defect was reported. The
+four inline issues were reproduced against parent 3529684. A nonrepeating
+two-stage UTC example from the timing comment already worked; the same
+supported example in a repeating R6 course omitted its implicit successor's
+second-day dose, so the underlying repeated-stage issue was real.
+
+**Clinical/data-preservation findings and fixes**:
+- A text-only course projected to one non-administration R5 carrier
+  ignored explicit course.step edits and returned early with empty step[].
+  The carrier now merges the new typed step metadata (id, start/end,
+  count, safety, extensions) into empty-component R6 stages without
+  inventing a dose or timing. The same branch recognizes existing
+  all-empty-component courses on reopen. Stage-only R6 courses, even
+  without a whole-course text field, export one non-administration R5
+  marker. Incomplete RelativeTime offsets remain editable, not inferred.
+  No common-path overhead for ordinary dosages.
+- Compact nonempty-course headers with no renderedInstruction could have
+  their course.safety or other top-level metadata replaced without
+  retaining the original unfamiliar safety extension. Header edits now
+  snapshot the original typed header as inert source, retaining unknown
+  data and prior flat sources while the replacement remains live. Ten
+  successive numeric safety/annotation edits preserve the historical
+  metadata linearly rather than recursively nesting it. Ordinary
+  unchanged headers do not generate a source.
+- The instruction-graph FHIR bridge correctly encoded partial
+  Quantity comparators via the established EMA operator extension but
+  its decoder discarded a Quantity with no value, range or unit.
+  Its presence predicate now includes any recognized comparator; no
+  numeric value is invented and original source text is unchanged.
+  Tests independently exercise <, <=, >, >=, ~ and unit+comparator
+  partial quantities through JSON save/reopen.
+- CodeRabbit's vocabulary placement nitpick aligns with this repository's
+  typed-lexicon architecture: English/Thai comparator phrase and symbol
+  tables now live in lexical-classes.json beside other clinical lexicons.
+  Existing one-time prefix-map initialization retains the same lookups,
+  without another per-parse pass, dependency, or runtime validation layer.
+
+**DST ownership**:
+The previous calendar-day/month/sourceClock work preserved the original
+clock across explicit relative stage boundaries but missed a stage with
+no explicit start/end: its start came from the predecessor's DERIVED end.
+For repeated courses, stageCalendarClock was erroneously returning the
+parent 02:30 clock instead of the predecessor's logically established
+05:30 clock after a source +3-hour stage offset. Scheduling, horizon
+resolution and supply now carry predecessorClock consistently through
+each step. A new explicit elapsed stage still owns its new civil clock;
+calendar-relative successor boundaries keep the prior logical clock
+rather than adopting a DST-gap-shifted physical timestamp. No global
+timestamp deduplication, artificial reset, blanket refusal or q24h
+behavior change.
+
+Independent oracles: the nonrepeating stage example already returned
+November 3 and 4 at 04:00; the repeated seven-day R6 course previously
+returned only November 3 from its first cycle. It now schedules
+November 3 and 4, November 10 and 11 and supplies four nominal tablets
+over fourteen days, identically through R5 and R6 imports.
+Spring-transition and prior 28d/4wk/month/year/clockless/window
+regressions remain part of the full suite.
+
+Classification: course-level metadata loss and partial-quantity bridge
+are new R6/data-compatibility concerns; repeated-stage clock ownership
+is a defect in the shared calendar scheduling abstraction. Vocabulary
+placement is maintainability, not a clinical correctness failure.
+All changes preserve the clinician-operated, best-effort parser contract
+and are confined to existing typed course/graph/lexical/schedule families.
+No new generic safety veto, second SIG parser, consumer schema change,
+migration, publication or deployment.
+
+
+Final validation after integration:
+- npm run build: PASS; ES6 ESM/CJS and TypeScript declarations.
+- npm test: **4,120/4,120 source tests** across 44/44 suites.
+  Focused R6 358/358, instruction graph 287/287,
+  schedule-family 171/171; earlier clinical, Thai,
+  FHIR roundtrip and DST regressions remain green.
+- npm run test:dist: **4/4** packaged-export tests.
+- git diff --check: PASS.
+- Read-only downstream consumer adapter:
+  FHIR R5 → editable model → in-memory saved usage → reopened
+  model → reverse FHIR → R6. A text-only course with
+  incomplete stage metadata remains one non-administration
+  row after reopening. Course.safety replacement retains
+  unknown historical metadata, while the edited 8 mg limit
+  stays active. No consumer code/schema changed.
+
+Paired warm-host benchmark against immutable 3529684
+(seven alternating 55-parse batches, median microseconds):
+ordinary 1641.3→1607.8, Thai 6252.9→6509.1,
+eye taper 6777.6→6758.4, comparator 3334.6→3280.4,
+mixed million 7254.3→7539.1, rich graph 17112.8→16728.8.
+Second nine-batch 75-parse run: Thai 6443.7→6265.2,
+mixed million 6763.4→6875.4, ordinary 1504.5→1519.5.
+No consistent slowdown across paired shared-host runs;
+this is not mobile-device performance evidence.
+No dependency, hot-path extra parse, runtime safety veto,
+publication, migration, merge or deployment.

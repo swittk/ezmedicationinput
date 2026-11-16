@@ -1778,13 +1778,19 @@ function treatmentRelativeInstant(
  * 05:30, or that stage's 28-day cap would end three hours too early. */
 function stageCalendarClock(
   course: FhirR6DosageInstruction, index: number, start: Date,
-  timeZone: string, sourceClock?: TreatmentWallClock
+  timeZone: string, sourceClock?: TreatmentWallClock,
+  predecessorClock?: TreatmentWallClock
 ): TreatmentWallClock | undefined {
   if (!sourceClock) return undefined;
   const relative = course.step[index].start ??
     (index > 0 ? course.step[index - 1].end : undefined);
-  const offset = relative?.offsetDuration ??
-    relative?.offsetRange?.low ?? relative?.offsetRange?.high;
+  if (!relative) {
+    // An implicit successor inherits the predecessor's logical clock, not
+    // the original course's clock or a gap-shifted physical timestamp.
+    return predecessorClock ?? sourceClock;
+  }
+  const offset = relative.offsetDuration ??
+    relative.offsetRange?.low ?? relative.offsetRange?.high;
   const unit = offset?.code ?? offset?.unit;
   if (unit === FhirPeriodUnit.Second || unit === FhirPeriodUnit.Minute ||
       unit === FhirPeriodUnit.Hour) return getTimeParts(start, timeZone);
@@ -1859,11 +1865,13 @@ function durationStepper(
  */
 function treatmentStepWindow(
   course: FhirR6DosageInstruction, index: number, anchor: Date,
-  previousEnd: Date, timeZone: string, sourceClock?: TreatmentWallClock
+  previousEnd: Date, timeZone: string, sourceClock?: TreatmentWallClock,
+  predecessorClock?: TreatmentWallClock
 ): { start: Date; end: Date | undefined } {
   const step = course.step[index];
   const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock) : previousEnd;
-  const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
+  const capClock = stageCalendarClock(course, index, start, timeZone,
+    sourceClock, predecessorClock);
   let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
   if (!end) {
     const componentEnds = step.component.map(component => earlierDate(
@@ -1893,14 +1901,17 @@ function repeatedCourseHorizon(
 ): Date {
   let horizon = nextCycle;
   let previousEnd = anchor;
+  let predecessorClock = sourceClock;
   for (let index = 0; index < course.step.length; index++) {
-    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone, sourceClock);
+    const { start, end } = treatmentStepWindow(course, index, anchor,
+      previousEnd, timeZone, sourceClock, predecessorClock);
+    const capClock = stageCalendarClock(course, index, start, timeZone,
+      sourceClock, predecessorClock);
     if (end) {
       if (end > horizon) horizon = end;
       previousEnd = end;
     } else {
       // Independently bounded concurrent components need not share an end.
-      const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
       for (const component of course.step[index].component) {
         const ownEnd = earlierDate(
           resolveRepeatDurationCapEnd(component, start, timeZone, capClock),
@@ -1910,6 +1921,7 @@ function repeatedCourseHorizon(
       }
       if (index + 1 < course.step.length) break;
     }
+    predecessorClock = capClock;
   }
   return horizon;
 }
@@ -1937,11 +1949,14 @@ function scheduleTreatmentRelativeCourse(
   const flattened = toFhirR5Dosages(course);
   const doses: string[] = [];
   let previousEnd = anchor;
+  let predecessorClock = sourceClock;
   let componentIndex = 0;
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
-    const { start, end } = treatmentStepWindow(course, index, anchor, previousEnd, timeZone, sourceClock);
-    const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock);
+    const { start, end } = treatmentStepWindow(course, index, anchor,
+      previousEnd, timeZone, sourceClock, predecessorClock);
+    const capClock = stageCalendarClock(course, index, start, timeZone,
+      sourceClock, predecessorClock);
     for (const component of step.component) {
       const original = flattened[componentIndex++];
       if (!original) throw new Error("R6 course component projection is incomplete");
@@ -1988,6 +2003,7 @@ function scheduleTreatmentRelativeCourse(
     }
     if (end) previousEnd = end;
     else if (index + 1 < course.step.length) break;
+    predecessorClock = capClock;
   }
   return doses.sort((left, right) => Date.parse(left) - Date.parse(right))
     .slice(0, limit);
@@ -4528,12 +4544,14 @@ function calculateCourseTotalUnits(
   let assumedOpenTransition = false;
   let cursor = treatmentStart, dosageIndex = 0;
   let predecessorPoint: Date | undefined;
+  let predecessorClock = sourceClock;
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
     const start = step.start
       ? treatmentRelativeInstant(step.start, treatmentStart, zone, sourceClock)
       : cursor;
-    const capClock = stageCalendarClock(course, index, start, zone, sourceClock);
+    const capClock = stageCalendarClock(course, index, start, zone,
+      sourceClock, predecessorClock);
     const dosages: FhirDosage[] = [];
     const starts: Date[] = [];
     const ends: Array<Date | null> = [];
@@ -4653,6 +4671,7 @@ function calculateCourseTotalUnits(
       predecessorPoint = point;
       cursor = point ?? stepEnd;
     }
+    predecessorClock = capClock;
   }
   const result = sumCourseUnits(entries, options);
   const assumptions: string[] = [];

@@ -1673,7 +1673,8 @@ export function toDosageDetails(
     // non-administration Dosage.text row carrying the complete typed source,
     // not an invented active dose. Restore it without manufacturing a step.
     const carrier = effectiveDosages[0];
-    if (retained.step.length === 0 && effectiveDosages.length === 1 && carrier &&
+    if (retained.step.every(step => !step.component.length) &&
+        effectiveDosages.length === 1 && carrier &&
         Object.keys(carrier).every(key => {
           if (key === "text" || key === "modifierExtension") return true;
           if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
@@ -1686,6 +1687,25 @@ export function toDosageDetails(
         carrier.modifierExtension?.length === 1 &&
         carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL) {
       const instruction = course?.renderedInstruction ?? renderedInstruction ?? carrier.text;
+      // Even an incomplete clinician-authored stage is live editable data.
+      // This carrier has no administration: merge its explicit stage edits
+      // without treating the carrier's Dosage.text as an active component.
+      const emptySteps = retained.step.map(step => ({ ...step, component: [] as FhirR6Dosage[] }));
+      const editedSequences = new Set<number>();
+      for (const item of course?.step ?? []) {
+        const { sequence, ...fields } = item;
+        if (!Number.isInteger(sequence) || sequence < 1 || editedSequences.has(sequence)) {
+          reconciliationSources.push(retainedCourseStepSource(item));
+          addWarning(warnings, "Invalid or duplicate empty-stage metadata remained recoverable as source provenance.");
+          continue;
+        }
+        editedSequences.add(sequence);
+        while (emptySteps.length < sequence) emptySteps.push({ component: [] });
+        const { component: _oldComponents, ...prior } = emptySteps[sequence - 1];
+        emptySteps[sequence - 1] = {
+          ...r6StepMetadata({ ...r5StepMetadata(prior), ...fields }), component: []
+        };
+      }
       const updated: FhirR6DosageInstruction = {
         ...retained,
         ...(course?.id !== undefined ? { id: course.id } : {}),
@@ -1695,7 +1715,8 @@ export function toDosageDetails(
         ...(course?.repeatCycle !== undefined ? { repeatCycle: course.repeatCycle } : {}),
         ...(course?.safety !== undefined ? { safety: course.safety } : {}),
         ...(instruction !== retained.renderedInstruction
-          ? { renderedInstruction: instruction } : {})
+          ? { renderedInstruction: instruction } : {}),
+        step: emptySteps
       };
       const edited = !equalStructuredValues(updated, retained);
       if (edited) addWarning(warnings,
@@ -1946,7 +1967,8 @@ export function toFhirR5Dosages(
   // the existing typed full-course marker rather than returning [] and
   // silently losing a text-only instruction, safety or course metadata.
   // This row contains no dose/rate or schedule: it is not an administration.
-  if (!result.length && Object.keys(details).some(key => key !== "step")) {
+  if (!result.length && (details.step.length > 0 ||
+      Object.keys(details).some(key => key !== "step"))) {
     return [{
       ...(details.renderedInstruction !== undefined
         ? { text: details.renderedInstruction } : {}),
@@ -2678,8 +2700,29 @@ function reconcileCompactCourse(
     return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
-  if (editedCourse && !equivalentProjection(header?.course ?? {}, { ...header?.course, ...courseEdits }))
+  if (editedCourse && !equivalentProjection(header?.course ?? {}, { ...header?.course, ...courseEdits })) {
     instructionMatches = false;
+    if (header?.course) {
+      // The shared R6 course header is a separate editable owner from each
+      // R5 row. A course.safety replacement must retain its original unknown
+      // metadata, even when no renderedInstruction baseline was ever stored.
+      // Never recursively embed already-flat reconciliation history.
+      const priorExtensions = header.course.extension;
+      const original = {
+        ...header.course,
+        ...(priorExtensions ? { extension: priorExtensions.filter(item =>
+          item.url !== DOSAGE_RECONCILIATION_SOURCE_URL) } : {})
+      };
+      sources.push({ url: DOSAGE_DETAILS_R5_URL,
+        extension: encodeFields({ course: original }, COMPACT_ROW) });
+      if (courseEdits.extension !== undefined) for (const item of priorExtensions ?? []) {
+        if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+          sources.push(...(item.extension ?? []));
+      }
+      addWarning(warnings,
+        "Edited course metadata superseded the retained course header; its original fields remain source provenance.");
+    }
+  }
   const groups = new Map<number, FhirR6Dosage[]>();
   live.forEach((dosage, index) => {
     const requested = dosage.sequence ?? 1;

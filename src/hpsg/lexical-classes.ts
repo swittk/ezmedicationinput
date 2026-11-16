@@ -680,31 +680,20 @@ export function courseContinuationDurationAt(
  * constituents are licensed; "about 3 weeks" stays temporal, and no
  * second text-level dose parser runs after HPSG.
  */
+type DoseComparator = "<" | "<=" | ">" | ">=" | "~";
 export const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
   words: readonly string[];
-  comparator: "<" | "<=" | ">" | ">=" | "~";
+  comparator: DoseComparator;
 }>>();
-for (const [comparator, wordings] of [
-  ["~", [["about"], ["approximately"], ["approx"], ["around"], ["roughly"],
-    ["ประมาณ"], ["ราว"]]],
-  [">=", [["at", "least"], ["no", "less", "than"], ["not", "less", "than"],
-    ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"],
-    ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]]],
-  ["<=", [["at", "most"], ["no", "more", "than"], ["not", "more", "than"],
-    ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"],
-    ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]]],
-  [">", [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]]],
-  ["<", [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]]
-] as const) for (const words of wordings) {
-  const first = words[0];
-  const candidates = DOSE_COMPARATOR_PREFIXES.get(first) ?? [];
-  candidates.push({ words, comparator });
-  DOSE_COMPARATOR_PREFIXES.set(first, candidates);
+for (const comparator of Object.keys(source.doseComparatorWordings) as DoseComparator[]) {
+  for (const words of source.doseComparatorWordings[comparator]) {
+    const candidates = DOSE_COMPARATOR_PREFIXES.get(words[0]) ?? [];
+    candidates.push({ words, comparator });
+    DOSE_COMPARATOR_PREFIXES.set(words[0], candidates);
+  }
 }
-
-export const DOSE_COMPARATOR_SYMBOLS: Record<string, "<" | "<=" | ">" | ">=" | "~"> = {
-  "~": "~", "≈": "~", ">=": ">=", "≥": ">=", "<=": "<=", "≤": "<=", ">": ">", "<": "<"
-};
+export const DOSE_COMPARATOR_SYMBOLS =
+  source.doseComparatorSymbols as Record<string, DoseComparator>;
 
 /** Shared WHOLE + connector + optional article + fraction head. The
  * caller still owns its medication unit; this cannot swallow two independently

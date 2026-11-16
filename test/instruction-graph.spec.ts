@@ -2350,3 +2350,45 @@ describe("review 17: original action ownership and source quantity mirrors", () 
       arg.role === AdviceArgumentRole.Amount && arg.quantity?.value === 100)).toBe(true);
   });
 });
+
+
+describe("review 18: comparator-only graph quantities remain editable", () => {
+  it.each(["~", "<", "<=", ">", ">="] as const)(
+    "round-trips a partial source-backed %s Quantity without inventing a number",
+    comparator => {
+      const parsed = parsePublicSig("Dissolve 2 tablets in water, then drink");
+      const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+      const action = graph.actions.find(value => value.predicate.lemma === "dissolve")!;
+      const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+      const sourceText = graph.sourceText;
+      const text = amount.text;
+      amount.quantity = { comparator };
+      const encoded = buildInstructionGraphExtension(graph)!;
+      const reimported = parseInstructionGraphExtension([encoded])!;
+      const restored = reimported.actions.find(value =>
+        value.predicate.lemma === "dissolve")!.args.find(arg =>
+        arg.role === AdviceArgumentRole.Amount)!;
+      expect(restored.quantity).toEqual({ comparator });
+      expect(restored.quantity?.value).toBeUndefined();
+      expect(restored.text).toBe(text);
+      expect(reimported.sourceText).toBe(sourceText);
+      expect(parseInstructionGraphExtension([JSON.parse(JSON.stringify(encoded))])
+        ?.actions.find(value => value.predicate.lemma === "dissolve")
+        ?.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+        .toEqual({ comparator });
+    }
+  );
+
+  it("does not drop a known qualifier when an amount has a partial unit but no value", () => {
+    const graph = parsePublicSig("Dissolve 2 tablets in water, then drink")
+      .meta.canonical.clauses[0].instructionGraph!;
+    const amount = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+    amount.quantity = { unit: "mg", comparator: "~" };
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    expect(restored.actions[0].args.find(arg =>
+      arg.role === AdviceArgumentRole.Amount)?.quantity).toEqual({
+        unit: "mg", comparator: "~"
+      });
+    expect(restored.sourceText).toBe(graph.sourceText);
+  });
+});
