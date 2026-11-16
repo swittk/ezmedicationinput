@@ -6128,3 +6128,80 @@ Shared-host noise and different amounts of work on formerly incorrect
 output mean these are not mobile benchmarks or proof of a common-path
 regression. No master merge, publication, new CodeRabbit review,
 agent delegation or consumer deployment.
+
+
+## 2026-11-16 — PR #13 next review: SimpleQuantity offsets, component-local calendar caps, qualified duration display
+
+Decision gate: independently inspected CodeRabbit review 5916013403,
+both inline threads 4582734497 and 4582734506, its outside-diff
+duration-rendering finding, the last R6 family audits, and the
+existing source-code contract. Reproduced all three on parent
+1ba3c6a BEFORE editing. These are supported meaning-preservation
+and execution bugs, not reasons to add a late natural-language
+repair pass, another FHIR schema, broad runtime refusal, or consumer
+migration.
+
+1. R6 Timing.repeat.startOffset/endOffset are **SimpleQuantity**.
+   An imported offset with a valid EMA approximate-comparator Extension
+   and no native comparator previously round-tripped through the generic
+   QUANTITY bridge, which promoted the EMA extension to a native "~".
+   The resulting R6 import then rejected a course that had been valid
+   before R5 save/reopen. The existing explicit typed bridge field now
+   uses valueQuantity for BOTH offsets, preserving their SimpleQuantity
+   payload and authored EMA extension verbatim. No new codec, backwards
+   R6 draft support, lossy conversion, or parser pass. Other legitimate
+   R6 Quantity fields retain their separate existing comparator codec.
+
+2. A parallel component's authored phase-origin marker is a source of
+   BOTH the administration lower bound and the calendar duration-cap
+   clock. The old R6 scheduler also used the generic flat route when
+   a *single* step contained only a component marker, losing the phase
+   origin entirely. A +3h component anchored at 02:30 wrongly offered
+   the preceding same-day 04:00 administration; its one-calendar-day cap
+   was incorrectly taken from the parent 02:30 clock and excluded the
+   correct next-day 04:00 dose. A shared component-cadence resolver now
+   discovers the marker once, distinguishes elapsed h/min/s phase clocks
+   from inherited calendar-relative clocks, and is reused by treatment
+   step bounds, repeated-course horizon, relative schedule realization,
+   and supply calculations. Explicit component origins clamp eligibility
+   on or after the component start; independent components keep their
+   own cap; repeating cycle tails are not forcibly clipped. R5 scalar
+   and array views bearing a component marker route through the same
+   R6 course execution without changing normal R5 rows or Shinebright.
+   No extra whole-SIG parse, per-cycle generalized validation or global
+   deduplication was added.
+
+3. The previously introduced typed CanonicalScheduleExpr
+   durationComparator/durationMaxComparator fields survived FHIR
+   serialization but were omitted by human-readable English and Thai
+   short/long duration renderers. Formatting now preserves qualifiers
+   on single boundsDuration and independent low/high boundsRange
+   values (>=, <=, ~), while leaving unqualified wording unchanged.
+   This fixes textless FHIR imports that otherwise could display an
+   exact "7 days" next to an approximate/bounded actual FHIR duration.
+
+Regression oracles were added to the EXISTING R6 and schedule-family
+suites. They cover R6-EMA-offset -> strict R5 JSON save -> R6
+roundtrip -> current-R6 reimport; both startOffset and endOffset;
+qualified duration and independent range ends in EN/TH long and
+short; component +3h start at 02:30 with next-day 04:00 and 1d cap,
+normal NY winter and spring DST, native R6 / strict R5 array /
+strict R5 scalar / imported parsed batch; concurrent components
+with unlike 1d/3d caps; two-day repeating cycles; and no-marker
+control. Ordinary saved R5 editable dosages and the actual
+read-only Shinebright usage-map conversion/reopen retained one,
+two, and four dosage rows with exact unchanged sequences.
+
+Verification: npm run build PASS (ES6, ESM/CJS and declarations);
+npm test **4176/4176**, **44/44** source suites; npm run test:dist
+**4/4**; git diff --check PASS.
+Paired warm host comparisons against exact pre-review 1ba3c6a,
+7 batches: ordinary SIG 1261 -> 1258.1 us, Thai SIG
+5075.4 -> 5314.6 us, ocular taper 5499.3 -> 5666.6 us,
+and ordinary R6 schedule 791.2 -> 727.8 us. Second
+independent 9-batch run: Thai 5418.1 -> 5403.4 us, ocular
+5399.1 -> 5346.5 us, ordinary 1372.4 -> 1413.9 us.
+The differences reverse across runs, consistent with shared-host
+measurement jitter, NOT evidence of a repeatable throughput loss
+or a device benchmark. No app edits, migration, dependency,
+publication or merged branch; no review re-requested.

@@ -1765,10 +1765,10 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
   if (schedule.duration === undefined || !schedule.durationUnit) {
     return undefined;
   }
-  const base = stripTrailingZero(schedule.duration);
-  const qualifier =
-    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
-      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
+  const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  const qualifier = schedule.durationMax !== undefined &&
+    (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)
+      ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
       : base;
   return `x${qualifier}${schedule.durationUnit}`;
 }
@@ -1809,10 +1809,12 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
         return unit;
     }
   };
-  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-    return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ถึง ${stripTrailingZero(schedule.durationMax)} ${label()}`;
+  const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)) {
+    return `เป็นเวลา ${lower} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label()}`;
   }
-  return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
+  return `เป็นเวลา ${lower} ${label()}`;
 }
 
 function describeAdministrationDurationThai(

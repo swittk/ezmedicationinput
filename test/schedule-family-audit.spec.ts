@@ -11,6 +11,7 @@ import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
+import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
 
 const start = "2024-01-01T00:00:00Z";
 const due = {
@@ -2524,5 +2525,80 @@ describe("Thai daypart punctuation composes one shared meal relation", () => {
       expect(calculateTotalUnits({ dosage, ...options,
         durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(14);
     }
+  });
+});
+
+
+describe("November 16 PR #13: elapsed parallel component origin owns its calendar cap", () => {
+  it.each([
+    ["normal day", "2026-11-02T02:30:00-05:00", "2026-11-03T04:00:00-05:00"],
+    ["spring DST gap", "2027-03-13T02:30:00-05:00", "2027-03-14T04:00:00-04:00"]
+  ])("%s includes a next-day 04:00 dose after the +3h phase and before its 1d cap", (_, orderedAt, expected) => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+        valueQuantity: { value: 3, unit: "h", code: "h" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["04:00:00"],
+        boundsDuration: { value: 1, unit: "d", code: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const options = { from: orderedAt, orderedAt, timeZone: "America/New_York",
+      limit: 10, durationValue: 3, durationUnit: FhirPeriodUnit.Day };
+    const r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(course))) as FhirDosage[];
+    expect(toDosageDetails(r5)).toEqual(course);
+    for (const data of [course, r5, r5[0], fromFhir(course)]) {
+      expect(nextDueDoses(data, options)).toEqual([expected]);
+      expect(calculateTotalUnits({ dosage: data, ...options }).totalUnits).toBe(1);
+    }
+  });
+
+  it("keeps distinct concurrent component caps and repeated-cycle origins independent", () => {
+    const marker = { modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+      valueQuantity: { value: 3, unit: "h", code: "h" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["04:00:00"], boundsDuration: { value: 1, unit: "d", code: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    const independent = {
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["06:00:00"], boundsDuration: { value: 3, unit: "d", code: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    };
+    const concurrent: FhirR6DosageInstruction = {
+      step: [{ component: [marker, independent] }]
+    };
+    const repeating: FhirR6DosageInstruction = {
+      repeatCycle: { value: 2, code: "d", unit: "d" },
+      step: [{ component: [marker] }]
+    };
+    const opts = { orderedAt: "2026-11-02T02:30:00-05:00",
+      from: "2026-11-02T02:30:00-05:00", timeZone: "America/New_York",
+      limit: 10, durationValue: 6, durationUnit: FhirPeriodUnit.Day };
+    for (const datum of [concurrent, toFhirR5Dosages(concurrent)]) {
+      expect(nextDueDoses(datum, opts).slice(0, 4)).toEqual([
+        "2026-11-02T06:00:00-05:00", "2026-11-03T04:00:00-05:00",
+        "2026-11-03T06:00:00-05:00", "2026-11-04T06:00:00-05:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: datum, ...opts }).totalUnits).toBe(4);
+    }
+    for (const datum of [repeating, toFhirR5Dosages(repeating)]) {
+      expect(nextDueDoses(datum, { ...opts, limit: 3 })).toEqual([
+        "2026-11-03T04:00:00-05:00", "2026-11-05T04:00:00-05:00",
+        "2026-11-07T04:00:00-05:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: datum, ...opts }).totalUnits).toBe(3);
+    }
+  });
+
+  it("does not shift a component without an explicit phase-origin marker", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["04:00:00"], boundsDuration: { value: 1, unit: "d", code: "d" } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const options = { from: "2026-11-02T02:30:00-05:00",
+      orderedAt: "2026-11-02T02:30:00-05:00", timeZone: "America/New_York",
+      limit: 10, durationValue: 3, durationUnit: FhirPeriodUnit.Day };
+    expect(nextDueDoses(course, options)).toEqual(["2026-11-02T04:00:00-05:00"]);
+    expect(calculateTotalUnits({ dosage: course, ...options }).totalUnits).toBe(1);
   });
 });

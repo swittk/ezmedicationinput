@@ -6064,3 +6064,63 @@ describe("November 16 current R6 review: partial rate ratio display", () => {
     expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
   });
 });
+
+
+describe("November 16 PR #13: SimpleQuantity offset and duration display families", () => {
+  const emaApprox = { url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+    valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" } };
+
+  it("keeps EMA-qualified R6 SimpleQuantity offsets valid through strict R5 persistence and reimport", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 0.25, code: "d", unit: "d", extension: [emaApprox] },
+        endOffset: { value: 0.1, code: "d", unit: "d", extension: [emaApprox] }
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const unchanged = JSON.stringify(course);
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(course))) as FhirDosage[];
+    const rebuilt = toDosageDetails(saved);
+    const offsets = rebuilt.step[0].component[0].timing?.repeat;
+    expect(offsets?.startOffset).toEqual(course.step[0].component[0].timing?.repeat?.startOffset);
+    expect(offsets?.endOffset).toEqual(course.step[0].component[0].timing?.repeat?.endOffset);
+    expect(offsets?.startOffset).not.toHaveProperty("comparator");
+    expect(offsets?.endOffset).not.toHaveProperty("comparator");
+    expect(fromFhir(rebuilt).fhirNext).toEqual(course);
+    expect(JSON.stringify(course)).toBe(unchanged);
+  });
+
+  it.each([">=", "~", "<="] as const)("renders %s course duration honestly in short and long EN/TH formats", comparator => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        boundsDuration: { value: 7, code: "d", unit: "d", comparator } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const row = toFhirR5Dosages(course)[0];
+    for (const locale of ["en", "th"]) {
+      const short = formatSig(row, "short", { locale });
+      const long = formatSig(row, "long", { locale });
+      expect(short).toContain(`x${comparator}7d`);
+      expect(long).toContain(`${comparator}7`);
+    }
+    expect(getQuantityComparator(canonicalToFhir(canonicalFromFhir(row))
+      .timing?.repeat?.boundsDuration)).toBe(comparator);
+  });
+
+  it("renders independent low/high boundsRange comparators in both language outputs", () => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { boundsRange: {
+        low: { value: 3, unit: "d", code: "d", comparator: ">=" },
+        high: { value: 7, unit: "d", code: "d", comparator: "<=" }
+      } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const row = toFhirR5Dosages(course)[0];
+    for (const locale of ["en", "th"]) {
+      expect(formatSig(row, "short", { locale })).toContain("x>=3-<=7d");
+      const long = formatSig(row, "long", { locale });
+      expect(long).toContain(">=3");
+      expect(long).toContain("<=7");
+    }
+  });
+});

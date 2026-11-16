@@ -2918,7 +2918,13 @@ const COMPACT_ROW: BridgeShape = {
   stepCount: { value: "valueInteger" },
   step: { fields: STEP },
   component: { fields: COMPONENT },
-  timingOffsets: { fields: { startOffset: QUANTITY, endOffset: QUANTITY } },
+  // R6 Timing offsets are SimpleQuantity, not Quantity: their EMA
+  // extension is legal but must never be promoted to a native comparator.
+  // The existing valueQuantity codec copies that typed value unchanged.
+  timingOffsets: { fields: {
+    startOffset: { value: "valueQuantity" },
+    endOffset: { value: "valueQuantity" }
+  } },
   baseline: { fields: {
     condition: { value: "valueString" }, safety: { value: "valueString" },
     site: { value: "valueString" }, timing: { value: "valueString" },

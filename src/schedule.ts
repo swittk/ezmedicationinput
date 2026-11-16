@@ -1797,25 +1797,43 @@ function stageCalendarClock(
   return sourceClock;
 }
 
-function parallelComponentCadenceOrigin(
-  dosage: FhirDosage,
+/** Each component phase marker owns BOTH its cadence start and the civil
+ * clock used by its calendar duration cap. Elapsed offsets create a fresh
+ * local wall clock; calendar offsets inherit the prescribed source clock.
+ * Without a marker the caller's established stage clock is unchanged.
+ * Discover the marker once instead of filtering the extension array. */
+function parallelComponentCadence(
+  dosage: Pick<FhirDosage, "modifierExtension">,
   treatmentStart: Date,
   timeZone: string,
   fallback: Date,
-  sourceClock?: TreatmentWallClock
-): Date {
-  const markers = dosage.modifierExtension?.filter(extension =>
-    extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL) ?? [];
-  if (!markers.length) return fallback;
-  if (markers.length !== 1 || !markers[0].valueQuantity) {
-    throw new Error("Parallel component phase origin is malformed or conflicting");
+  sourceClock?: TreatmentWallClock,
+  stageClock?: TreatmentWallClock
+): { origin: Date; capClock?: TreatmentWallClock; hasPhaseOrigin: boolean } {
+  let marker: NonNullable<FhirDosage["modifierExtension"]>[number] | undefined;
+  for (const extension of dosage.modifierExtension ?? []) {
+    if (extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) continue;
+    if (marker) throw new Error("Parallel component phase origin is malformed or conflicting");
+    marker = extension;
   }
-  return treatmentRelativeInstant({
+  if (!marker) return { origin: fallback, capClock: stageClock, hasPhaseOrigin: false };
+  if (!marker.valueQuantity)
+    throw new Error("Parallel component phase origin is malformed or conflicting");
+  const origin = treatmentRelativeInstant({
     contextCode: {
       coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start" }]
     },
-    offsetDuration: markers[0].valueQuantity
+    offsetDuration: marker.valueQuantity
   }, treatmentStart, timeZone, sourceClock);
+  const unit = marker.valueQuantity.code ?? marker.valueQuantity.unit;
+  const elapsed = unit === FhirPeriodUnit.Second || unit === FhirPeriodUnit.Minute ||
+    unit === FhirPeriodUnit.Hour;
+  return {
+    origin,
+    capClock: elapsed ? getTimeParts(origin, timeZone)
+      : stageClock ?? sourceClock ?? getTimeParts(treatmentStart, timeZone),
+    hasPhaseOrigin: true
+  };
 }
 
 /** A calendar recurrence is defined by its NORMALIZED whole local-day
@@ -1889,10 +1907,14 @@ function treatmentStepWindow(
     sourceClock, predecessorClock);
   let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
   if (!end) {
-    const componentEnds = step.component.map(component => earlierDate(
-      resolveRepeatDurationCapEnd(component, start, timeZone, capClock),
-      resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
-    )).filter((value): value is Date => Boolean(value));
+    const componentEnds = step.component.map(component => {
+      const cadence = parallelComponentCadence(component, anchor, timeZone,
+        start, sourceClock, capClock);
+      return earlierDate(
+        resolveRepeatDurationCapEnd(component, cadence.origin, timeZone, cadence.capClock),
+        resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
+      );
+    }).filter((value): value is Date => Boolean(value));
     if (componentEnds.length === step.component.length && componentEnds.length) {
       end = componentEnds.reduce((latest, value) => value > latest ? value : latest, start);
     } else if (course.step[index + 1]?.start) {
@@ -1928,8 +1950,10 @@ function repeatedCourseHorizon(
     } else {
       // Independently bounded concurrent components need not share an end.
       for (const component of course.step[index].component) {
+        const cadence = parallelComponentCadence(component, anchor, timeZone,
+          start, sourceClock, capClock);
         const ownEnd = earlierDate(
-          resolveRepeatDurationCapEnd(component, start, timeZone, capClock),
+          resolveRepeatDurationCapEnd(component, cadence.origin, timeZone, cadence.capClock),
           resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
         );
         if (ownEnd && ownEnd > horizon) horizon = ownEnd;
@@ -1990,26 +2014,33 @@ function scheduleTreatmentRelativeCourse(
         modifierExtension: original.modifierExtension?.filter(ext =>
           ext.url !== DOSAGE_DETAILS_R5_URL)
       };
-      const effectiveEnd = end ?? (cycleDefaultEnd ? earlierDate(
-        resolveRepeatDurationCapEnd(dosage, start, timeZone, capClock), absoluteEnd
-      ) ?? cycleDefaultEnd : undefined);
-      if (effectiveEnd && from >= effectiveEnd) continue;
-      // A calendar track may begin before the first relative treatment step:
-      // its absolute start is independent of orderedAt. Later global steps
-      // must still clip it at their own start to avoid duplicate doses.
-      const stageStart = index === 0 && repeat?.boundsPeriod ? from : start;
-      const effectiveFrom = from > stageStart ? from : stageStart;
       // A calendar track keeps its own recurrence origin across global step
       // cuts. Otherwise QOD / monthly cadence would restart at every taper.
-      const cadenceOrigin = repeat?.boundsPeriod
-        ? (absoluteStart ?? anchor)
-        : parallelComponentCadenceOrigin(dosage, anchor, timeZone, start, sourceClock);
+      const cadence = repeat?.boundsPeriod
+        ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
+        : parallelComponentCadence(dosage, anchor, timeZone, start, sourceClock, capClock);
+      const componentCap = resolveRepeatDurationCapEnd(
+        dosage, cadence.origin, timeZone, cadence.capClock);
+      // A finite component may stop earlier than its containing step.
+      // Preserve the established repeating-course allowance for a bounded
+      // tail past the next cycle when no explicit step end exists.
+      const fallbackEnd = end ?? (cycleDefaultEnd
+        ? earlierDate(componentCap, absoluteEnd) ?? cycleDefaultEnd : undefined);
+      const effectiveEnd = earlierDate(
+        earlierDate(fallbackEnd ?? null, componentCap), absoluteEnd) ?? undefined;
+      if (effectiveEnd && from >= effectiveEnd) continue;
+      // An independent calendar track may start before orderedAt, but a
+      // component with an explicit +3h phase origin cannot dose before 05:30.
+      const stageStart = index === 0 && repeat?.boundsPeriod ? from : start;
+      const activeStart = cadence.hasPhaseOrigin && cadence.origin > stageStart
+        ? cadence.origin : stageStart;
+      const effectiveFrom = from > activeStart ? from : activeStart;
       const candidateTimes = nextDueDoses({
         ...dosage,
         modifierExtension: dosage.modifierExtension?.filter(ext =>
           ext.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL)
       }, {
-        ...options, from: effectiveFrom, orderedAt: cadenceOrigin, limit
+        ...options, from: effectiveFrom, orderedAt: cadence.origin, limit
       });
       for (const time of candidateTimes) {
         if (effectiveEnd && Date.parse(time) >= effectiveEnd.getTime()) break;
@@ -2278,7 +2309,9 @@ export function nextDueDoses(
   }
   if (Array.isArray(dosage) || (dosage && "step" in dosage)) {
     if (Array.isArray(dosage) && dosage.some((item: FhirDosage) =>
-      item.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL))) {
+      item.modifierExtension?.some(extension =>
+        extension.url === DOSAGE_DETAILS_R5_URL ||
+        extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))) {
       // This is a strict R5 projection of a course with extra semantics.
       // Restore its original step boundaries rather than executing a flat
       // representation that cannot express those relative starts.
@@ -2293,7 +2326,12 @@ export function nextDueDoses(
     if (r6Course?.repeatCycle && zone) {
       return scheduleRepeatedCourse(r6Course, options, zone);
     }
-    if (r6Course && r6Course.step.some(step => step.start || step.end)) {
+    // A component-local origin is independently source-relative even when
+    // the containing R6 step has no explicit start or end. Flattening this
+    // course would discard its phase origin and admit pre-phase doses.
+    if (r6Course && r6Course.step.some(step => step.start || step.end ||
+      step.component.some(component => component.modifierExtension?.some(ext =>
+        ext.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)))) {
       return scheduleTreatmentRelativeCourse(r6Course, options);
     }
     const items = Array.isArray(dosage) ? selectedAlternativeMembers(dosage, options) :
@@ -2318,7 +2356,9 @@ export function nextDueDoses(
   const one = dosage as FhirDosage;
   // A scalar wire row carries its own phase metadata. Shared cycle context,
   // when required, must accompany that row before enumerating administrations.
-  if (one.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
+  if (one.modifierExtension?.some(extension =>
+    extension.url === DOSAGE_DETAILS_R5_URL ||
+    extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)) {
     return nextDueDoses(toDosageDetails([one]), options);
   }
   const choice = executionChoice(one);
@@ -4614,17 +4654,23 @@ function calculateCourseTotalUnits(
       // may have started BEFORE the stage cut. Keep their original cadence
       // anchored to the stated date rather than resetting it each time.
       const implicitStart = successorIntervalStart(dosage, predecessorPoint, start, zone);
-      const cadenceOrigin = repeat?.boundsPeriod
-        ? (calendarStart ?? treatmentStart)
-        : parallelComponentCadenceOrigin(dosage, treatmentStart, zone, implicitStart, sourceClock);
+      const cadence = repeat?.boundsPeriod
+        ? { origin: calendarStart ?? treatmentStart, capClock, hasPhaseOrigin: false }
+        : parallelComponentCadence(dosage, treatmentStart, zone,
+          implicitStart, sourceClock, capClock);
+      const cadenceOrigin = cadence.origin;
       cadenceOrigins.push(cadenceOrigin);
       // Before the first global relative cut, an independent calendar member
       // is allowed to start before orderedAt. Subsequent step cuts still
       // intersect the calendar window with the global step.
       const stageStart = index === 0 && repeat?.boundsPeriod
         ? (calendarStart ?? start) : implicitStart;
-      starts.push(calendarStart && calendarStart > stageStart ? calendarStart : stageStart);
-      const bound = earlierDate(resolveRepeatDurationCapEnd(dosage, cadenceOrigin, zone, capClock), calendarEnd);
+      const windowStart = calendarStart && calendarStart > stageStart
+        ? calendarStart : stageStart;
+      starts.push(cadence.hasPhaseOrigin && cadenceOrigin > windowStart
+        ? cadenceOrigin : windowStart);
+      const bound = earlierDate(resolveRepeatDurationCapEnd(
+        dosage, cadenceOrigin, zone, cadence.capClock), calendarEnd);
       const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone);
       const countEnd = completion ? new Date(completion.end.getTime() + (completion.point ? 1 : 0)) : null;
       const end = earlierDate(bound, countEnd);
@@ -4741,7 +4787,9 @@ export function calculateTotalUnits(options: TotalUnitsOptions): TotalUnitsResul
   if (Array.isArray(input))
     return calculateCourseTotalUnits(toDosageDetails(input as FhirDosage[]), options);
   const one = input as FhirDosage;
-  if (one.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL)) {
+  if (one.modifierExtension?.some(extension =>
+    extension.url === DOSAGE_DETAILS_R5_URL ||
+    extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)) {
     return calculateCourseTotalUnits(toDosageDetails([one]), options);
   }
   const choice = executionChoice(one);

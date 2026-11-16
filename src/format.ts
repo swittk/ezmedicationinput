@@ -1014,10 +1014,10 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
   if (schedule.duration === undefined || !schedule.durationUnit) {
     return undefined;
   }
-  const base = stripTrailingZero(schedule.duration);
-  const qualifier =
-    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
-      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
+  const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  const qualifier = schedule.durationMax !== undefined &&
+    (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)
+      ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
       : base;
   return `x${qualifier}${schedule.durationUnit}`;
 }
@@ -1058,10 +1058,12 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
         return value === 1 ? "unit" : "units";
     }
   };
-  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-    return `for ${stripTrailingZero(schedule.duration)} to ${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
+  const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)) {
+    return `for ${lower} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
   }
-  return `for ${stripTrailingZero(schedule.duration)} ${label(schedule.duration)}`;
+  return `for ${lower} ${label(schedule.duration)}`;
 }
 
 function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
