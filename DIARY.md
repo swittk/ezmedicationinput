@@ -6060,3 +6060,71 @@ ordinary 1439.5 -> 1402.7 (-2.6%), Thai 5529.7 ->
 parser slowdown, no extra whole-input parser pass, not a phone
 benchmark. Calendar classification executes once per repeated
 course, not per schedule cycle.
+
+
+## 2026-11-16 — PR #13 next review: selected primary owner, duration qualifiers, partial rate denominators
+
+Review gate: inspected CodeRabbit review body 5915364373 (05:19 UTC)
+and its one inline thread 4582229653, plus two outside-diff observations.
+All three were independently reproduced on the live PR parent 89837ad
+BEFORE implementation. These are real supported clinical-meaning
+preservation bugs, not invitations to a second parser, whole-SIG
+validation, new dependency, stricter failure policy, consumer
+migration or unnecessary test family.
+
+1. Source-owned primary action: when a graph has two Take actions and
+   explicitly selects the SECOND (2 tablets) as its canonical
+   primaryAdministrationSpan, the graph renderer still required it to
+   be the FIRST method match and repeated it beside the canonical
+   text. primaryDoseAmountOwner was already correct. Pass the selected
+   owner to the existing omission gate only when a source-primary span
+   exists. Without an explicit span, preserve the historical first
+   method-match fallback using a single scan (no filter+clone+sort
+   per candidate). Keep independent earlier administrations, and
+   preserve graph/source immutability and the prior amount-owner rule.
+
+2. BoundsDuration qualifier: R6 ~7 days was faithfully lowered to
+   the existing EMA-encoded R5 Quantity, but canonicalFromFhir and
+   parserStateFromFhir threw away the comparator while extracting
+   duration/unit. Introduce typed, independent canonical duration
+   lower/upper qualifier fields; extract using the existing shared
+   comparator reader and lower with the existing quantityForR5 and
+   simpleQuantityForR5 codecs, never native R5 SimpleQuantity "~".
+   This same ownership hole affected BOTH boundsRange.low and .high
+   as well as anchored boundsDuration alongside boundsPeriod.
+   Update the compile-time complete HPSG course-bounds feature inventory
+   so coordinated instructions inherit a bound's qualifier with its
+   duration, rather than copying only the numeric amount. No new pass
+   on natural-language parsing.
+
+3. Partial rate ratio: for a known 100 mL numerator and known hour
+   denominator UNIT but no denominator value, R6 source-less display
+   dropped '/h' entirely. The same renderer and native imported-item
+   preview now emit '100 mL / unspecified h' (Thai: corresponding
+   ไม่ระบุค่า h), without inventing a denominator of one. Exact,
+   qualified, and unit-only numerator controls preserve their known
+   values; only the R6 display/preview branch changes.
+
+Regressions were placed in the existing R6 and graph suites, with
+explicitly reproduced failures before the code changes. Family tests
+cover independent low/high EMA comparators, anchored duration with
+absolute start, native R6 item and whole-course partial rates in
+EN/TH, explicit later primary omission plus full canonical format.
+No Shinebright source/storage change. Read-only consumer smoke:
+strict R5 -> existing editable converter -> in-memory medication
+usage-map save/reopen preserved original one/two/four dosage rows and
+sequences (ordinary, Thai and staged instructions).
+
+Verification for this revision: ES6 ESM/CJS and declarations build
+PASS; all 44 source suites **4167/4167 PASS**; packaged ESM/CJS
+exports **4/4 PASS**; git diff --check PASS. This loop uses the
+exact 89837ad prior PR commit for the performance baseline. Paired
+warm seven-batch medians, 60 parses per batch, microseconds/parse:
+ordinary 1591.5 -> 1622.9 (+2.0%), Thai 6841.9 -> 6907.8
+(+1.0%), ocular taper 7614.8 -> 7313.7 (-4.0%), qualified
+rate 3902.4 -> 3881.1 (-0.5%), partial R6 rate display 35.5
+-> 38.0 (+2.5 microseconds to display the previously missing data).
+Shared-host noise and different amounts of work on formerly incorrect
+output mean these are not mobile benchmarks or proof of a common-path
+regression. No master merge, publication, new CodeRabbit review,
+agent delegation or consumer deployment.

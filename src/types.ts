@@ -1680,6 +1680,11 @@ export interface CanonicalScheduleExpr {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  /** Typed qualifiers for the beginning/end of the prescribed duration.
+   * They are independent for FHIR boundsRange, and R5 approximation uses
+   * EMA Quantity Operator instead of an unsupported native "~". */
+  durationComparator?: FhirR6Quantity["comparator"];
+  durationMaxComparator?: FhirR6Quantity["comparator"];
   /** Earliest calendar date/time on which this schedule becomes active. */
   boundsStart?: string;
   /** Latest inclusive calendar date/time on which this schedule remains active. */

@@ -4084,14 +4084,28 @@ export function instructionGraphActionCoversSingleScheduledEvent(
 function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  selectedOwner?: AdviceFrame
 ): boolean {
   if (!actionMatchesCanonicalMethod(frame, clause)) return false;
-  const matching = actions
-    .filter((candidate) => candidate.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(candidate, clause))
-    .slice()
-    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
-  if (!matching.length || matching[0] !== frame) return false;
+  if (selectedOwner) {
+    // An explicit primary source span owns the canonical dose, even when a
+    // different earlier administration happens to use the same verb.
+    if (frame !== selectedOwner) return false;
+  } else {
+    // Without a selected source owner, retain the historical first-matching
+    // method behavior. A single scan avoids sorting/cloning the actions.
+    let first: AdviceFrame | undefined;
+    for (const candidate of actions) {
+      if (candidate.polarity === AdvicePolarity.Negate ||
+          !actionMatchesCanonicalMethod(candidate, clause)) continue;
+      if (!first || candidate.span.start < first.span.start ||
+          (candidate.span.start === first.span.start && candidate.span.end < first.span.end)) {
+        first = candidate;
+      }
+    }
+    if (first !== frame) return false;
+  }
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
     (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
@@ -4487,7 +4501,8 @@ export function realizeInstructionGraph(
       // keep their separate meaning and original temporal relationship.
       (!frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
         amountOwner === frame) &&
-      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
+      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
+        primary ? amountOwner : undefined)) {
       return false;
     }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);

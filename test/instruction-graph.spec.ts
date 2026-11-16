@@ -2448,3 +2448,27 @@ describe("review 20: edited canonical administration cannot steal an independent
     expect(JSON.stringify(graph)).toContain("drink 5 mL");
   });
 });
+
+
+describe("November 16 explicit primary action owner", () => {
+  it("omits the selected second administration with unchanged canonical dose", () => {
+    const source = "Take 1 tablet, then take 2 tablets";
+    const actions = parseInstructionActions(source);
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...actions[1].span } };
+    const snapshot = JSON.stringify(graph);
+    for (const preferSourceText of [false, true]) {
+      const text = realizeInstructionGraph(graph, "en", {
+        omitCanonicalAdministration: clause, preferSourceText
+      }) ?? "";
+      expect(text).toContain("Take 1 tablet");
+      expect(text.toLowerCase()).not.toContain("take 2 tablets");
+    }
+    const whole = formatCanonicalClause({ ...clause, instructionGraph: graph },
+      "long", resolveSigLocalization("en"), { realizationMode: "roundtrip" });
+    expect(whole.toLowerCase().match(/take 2 tablets/g)).toHaveLength(1);
+    expect(whole.toLowerCase()).toContain("take 1 tablet");
+    expect(JSON.stringify(graph)).toBe(snapshot);
+  });
+});

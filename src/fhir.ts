@@ -61,6 +61,7 @@ import {
   FhirPrimitiveElement,
   FhirQuantity,
   FhirSimpleQuantity,
+  FhirR6Quantity,
   FhirRange,
   FhirTimingRepeat,
   RouteCode,
@@ -994,23 +995,30 @@ function calendarEventFromFhir(
   };
 }
 
-function buildFhirDurationQuantity(value: number, unit: FhirPeriodUnit): FhirSimpleQuantity {
-  return {
+function buildFhirDurationQuantity(
+  value: number,
+  unit: FhirPeriodUnit,
+  comparator?: FhirR6Quantity["comparator"]
+): FhirQuantity {
+  const quantity = {
     value,
     unit: describeDurationUnit(unit, value),
     system: UCUM_SYSTEM,
     code: unit
   };
+  return comparator ? quantityForR5({ ...quantity, comparator })! : quantity;
 }
 
 function buildFhirBoundsRange(
-  low: number,
-  high: number,
-  unit: FhirPeriodUnit
+  low: number, high: number, unit: FhirPeriodUnit,
+  lowComparator?: FhirR6Quantity["comparator"],
+  highComparator?: FhirR6Quantity["comparator"]
 ): FhirRange {
   return {
-    low: buildFhirDurationQuantity(low, unit),
-    high: buildFhirDurationQuantity(high, unit)
+    low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
+      ...(lowComparator ? { comparator: lowComparator } : {}) })!,
+    high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, unit),
+      ...(highComparator ? { comparator: highComparator } : {}) })!
   };
 }
 
@@ -1059,7 +1067,9 @@ function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUn
 
 function extractCanonicalTimingBounds(
   dosage: FhirDosage
-): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; warning?: string } {
+): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit;
+  durationComparator?: FhirR6Quantity["comparator"];
+  durationMaxComparator?: FhirR6Quantity["comparator"]; warning?: string } {
   const repeat = dosage.timing?.repeat;
   const retained = getAnchoredCourseDuration(dosage);
   const boundsDuration = repeat?.boundsDuration ?? retained?.valueQuantity;
@@ -1069,9 +1079,11 @@ function extractCanonicalTimingBounds(
     if (!durationUnit) {
       return {};
     }
+    const comparator = getQuantityComparator(boundsDuration);
     return {
       duration: boundsDuration.value,
-      durationUnit
+      durationUnit,
+      ...(comparator ? { durationComparator: comparator } : {})
     };
   }
 
@@ -1093,10 +1105,14 @@ function extractCanonicalTimingBounds(
     warning = `FHIR timing boundsRange low/high units differ (${lowUnit} vs ${highUnit}); preserved numeric bounds using ${durationUnit}.`;
   }
 
+  const lowComparator = getQuantityComparator(low);
+  const highComparator = getQuantityComparator(high);
   return {
     duration: low?.value,
     durationMax: high?.value,
     durationUnit,
+    ...(lowComparator ? { durationComparator: lowComparator } : {}),
+    ...(highComparator ? { durationMaxComparator: highComparator } : {}),
     warning
   };
 }
@@ -1247,9 +1263,14 @@ export function canonicalToFhir(
   // retain the authored duration/range as a typed modifier for exact execution
   // and editing, including partial days that have no date-only endpoint.
   if (schedule?.duration !== undefined && schedule.durationUnit) {
-    const ranged = schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration;
-    const duration = ranged ? undefined : buildFhirDurationQuantity(schedule.duration, schedule.durationUnit);
-    const range = ranged ? buildFhirBoundsRange(schedule.duration, schedule.durationMax!, schedule.durationUnit) : undefined;
+    const ranged = schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration ||
+        schedule.durationMaxComparator !== undefined);
+    const duration = ranged ? undefined : buildFhirDurationQuantity(
+      schedule.duration, schedule.durationUnit, schedule.durationComparator);
+    const range = ranged ? buildFhirBoundsRange(
+      schedule.duration, schedule.durationMax!, schedule.durationUnit,
+      schedule.durationComparator, schedule.durationMaxComparator) : undefined;
     if (repeat.boundsPeriod) {
       dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
         url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
@@ -1824,6 +1845,8 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
+      durationComparator: timingBounds.durationComparator,
+      durationMaxComparator: timingBounds.durationMaxComparator,
       boundsStart: repeat?.boundsPeriod?.start,
       boundsEnd: repeat?.boundsPeriod?.end,
       administrationDuration: repeat?.duration,
@@ -1971,6 +1994,15 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
+  if (timingBounds.durationComparator || timingBounds.durationMaxComparator) {
+    state.primaryClause.schedule = {
+      ...state.primaryClause.schedule,
+      ...(timingBounds.durationComparator
+        ? { durationComparator: timingBounds.durationComparator } : {}),
+      ...(timingBounds.durationMaxComparator
+        ? { durationMaxComparator: timingBounds.durationMaxComparator } : {})
+    };
+  }
   if (dosage.timing?.repeat?.boundsPeriod?.start || dosage.timing?.repeat?.boundsPeriod?.end) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),

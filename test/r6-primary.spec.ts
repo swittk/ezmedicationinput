@@ -5984,3 +5984,83 @@ describe("review 20: typed expression identity and normalized calendar equivalen
     }
   );
 });
+
+
+describe("November 16 current R6 review: canonical duration qualifier ownership", () => {
+  it.each(["~", ">=", "<="] as const)("keeps %s boundsDuration through canonical and parser-state R5 projection", comparator => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { boundsDuration: { value: 7, unit: "d", code: "d", comparator } } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const r5 = toFhirR5Dosages(source)[0];
+    for (const rebuilt of [
+      canonicalToFhir(canonicalFromFhir(r5)),
+      parserStateToFhir(parserStateFromFhir(r5))
+    ]) {
+      expect(rebuilt.timing?.repeat?.boundsDuration?.value).toBe(7);
+      expect(getQuantityComparator(rebuilt.timing?.repeat?.boundsDuration)).toBe(comparator);
+    }
+    expect(canonicalFromFhir(r5).schedule?.duration).toBe(7);
+  });
+
+  it("keeps qualified course duration alongside absolute boundsPeriod", () => {
+    const source: FhirDosage = {
+      timing: { repeat: { boundsPeriod: { start: "2026-11-02" } } },
+      modifierExtension: [{
+        url: "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration",
+        valueQuantity: quantityForR5({ value: 7, unit: "d", code: "d", comparator: "~" })
+      }]
+    };
+    for (const rebuilt of [
+      canonicalToFhir(canonicalFromFhir(source)),
+      parserStateToFhir(parserStateFromFhir(source))
+    ]) {
+      expect(rebuilt.timing?.repeat?.boundsPeriod?.start).toBe("2026-11-02");
+      const retained = rebuilt.modifierExtension?.find(x =>
+        x.url.endsWith("medication-anchored-course-duration"))?.valueQuantity;
+      expect(retained?.value).toBe(7);
+      expect(getQuantityComparator(retained)).toBe("~");
+    }
+  });
+
+  it("retains independently qualified low/high ranged bounds, including anchored boundsPeriod", () => {
+    const input: FhirDosage = { timing: { repeat: { boundsRange: {
+      low: { value: 3, unit: "d", code: "d", extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000053" }
+      }] },
+      high: { value: 7, unit: "d", code: "d", extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000052" }
+      }] }
+    } } } };
+    for (const restored of [canonicalToFhir(canonicalFromFhir(input)), parserStateToFhir(parserStateFromFhir(input))]) {
+      expect(getQuantityComparator(restored.timing?.repeat?.boundsRange?.low)).toBe(">=");
+      expect(getQuantityComparator(restored.timing?.repeat?.boundsRange?.high)).toBe("<=");
+      expect(restored.timing?.repeat?.boundsRange?.low?.value).toBe(3);
+      expect(restored.timing?.repeat?.boundsRange?.high?.value).toBe(7);
+    }
+  });
+});
+
+
+describe("November 16 current R6 review: partial rate ratio display", () => {
+  it.each([
+    [{ numerator: { value: 100, unit: "mL" }, denominator: { unit: "h" } },
+      "Rate: 100 mL / unspecified h", "อัตราการให้ยา: 100 mL / ไม่ระบุค่า h"],
+    [{ numerator: { value: 100, comparator: "~" as const, unit: "mL" },
+       denominator: { value: 2, comparator: ">=" as const, unit: "h" } },
+      "Rate: ~100 mL / >=2 h", "อัตราการให้ยา: ~100 mL / >=2 h"],
+    [{ numerator: { unit: "mL" }, denominator: { value: 2, unit: "h" } },
+      "Rate: unspecified mL / 2 h", "อัตราการให้ยา: ไม่ระบุค่า mL / 2 h"]
+  ])("shows known rate numerator/denominator without inventing partial values", (ratio, english, thai) => {
+    const course: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ rateRatio: ratio }]
+    }] }] };
+    for (const [locale, expected] of [["en", english], ["th", thai]] as const) {
+      expect(formatSig(course, "long", { locale })).toContain(expected);
+      expect(fromFhir(course, { locale }).items[0].longText).toContain(expected);
+    }
+    expect(toDosageDetails(toFhirR5Dosages(course))).toEqual(course);
+  });
+});

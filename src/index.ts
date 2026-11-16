@@ -1584,16 +1584,22 @@ export function formatSig(
             );
           }
           const numerator = amount.rateRatio?.numerator;
-          if (numerator?.value !== undefined) {
-            const denominator = amount.rateRatio?.denominator;
+          const denominator = amount.rateRatio?.denominator;
+          const numeratorUnit = numerator?.unit ?? numerator?.code;
+          const denominatorUnit = denominator?.unit ?? denominator?.code;
+          const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
+          const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
+          if (hasNumerator || hasDenominator) {
+            const unspecified = thai ? "ไม่ระบุค่า" : "unspecified";
+            const numeratorValue = numerator?.value === undefined
+              ? unspecified : (getQuantityComparator(numerator) ?? "") + numerator.value;
+            const denominatorValue = denominator?.value === undefined
+              ? unspecified : (getQuantityComparator(denominator) ?? "") + denominator.value;
             expressions.push(
               (thai ? "อัตราการให้ยา: " : "Rate: ") +
-              (getQuantityComparator(numerator) ?? "") + numerator.value +
-              (numerator.unit || numerator.code ? " " + (numerator.unit ?? numerator.code) : "") +
-              (denominator?.value !== undefined
-                ? " / " + (getQuantityComparator(denominator) ?? "") + denominator.value +
-                  (denominator.unit || denominator.code
-                    ? " " + (denominator.unit ?? denominator.code) : "") : "")
+              numeratorValue + (numeratorUnit ? " " + numeratorUnit : "") +
+              (hasDenominator ? " / " + denominatorValue +
+                (denominatorUnit ? " " + denominatorUnit : "") : "")
             );
           }
           if (amount.doseExpression)
@@ -1801,6 +1807,9 @@ export function fromFhir(
           rate.doseQuantity?.comparator ||
           rate.rateQuantity?.value !== undefined ||
           rate.rateRatio?.numerator?.value !== undefined ||
+          Boolean(rate.rateRatio?.numerator?.unit || rate.rateRatio?.numerator?.code ||
+            rate.rateRatio?.denominator?.unit || rate.rateRatio?.denominator?.code) ||
+          rate.rateRatio?.denominator?.value !== undefined ||
           rate.rateRange?.low?.value !== undefined ||
           rate.rateRange?.high?.value !== undefined ||
           rate.doseExpression || rate.rateExpression))) continue;
