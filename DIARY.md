@@ -6295,3 +6295,82 @@ Shared-host timing noise limits interpretation: no consistent
 hot-path regression, no new whole-SIG pass or repeated routine
 array scan. No package publication, master merge, review
 re-request, agents or Shinebright migration.
+
+
+## 2026-11-16 — PR #13 review: point-vs-boundary clock ownership for implicit successors
+
+Review gate: reviewed CodeRabbit review 5917390142 (09:02 UTC),
+two unresolved threads 4583742010 / 4583742018, AGENTS.md,
+DIRECTIONALITY.md and existing calendar/DST/phase-origination
+decisions. Independently reproduced BOTH before editing the latest
+PR parent dccc528. The common defect was a single internal Date
+being used interchangeably for three distinct meanings:
+(1) the last administration's actual time (08:00),
+(2) the exclusive end of its already-administered phase (08:00:00.001),
+and (3) the implicit successor's cadence origin and local calendar
+clock. The +1 ms fence leaked into dose times and even a fractional
+timezone offset, while a weekly course rooted at midnight incorrectly
+carried the midnight civil clock into a successor that actually
+started after an 08:00 counted completion.
+
+Core fix: treatmentStepWindow now returns a typed start/end-exclusive/
+completionPoint representation. It derives a step end with ONE
+component pass, only enumerates finite-count/immediate components when
+necessary, and retains the actual point separately from the clipping
+boundary. Repeated-course horizon and relative course scheduling
+carry that same completion point forward; stages without an explicit
+start use the true point as their logical origin, but the exclusive
+boundary only for eligibility. The next civil-day duration cap adopts
+the point's own local wall clock. By contrast, genuine calendar-
+duration transitions continue inheriting the original prescribed
+clock. For unanchored q8h successors, the existing
+successorIntervalStart helper now receives the actual point, chooses
+16:00 after an 08:00 dose (not 08:00:00.001), and uses the resulting
+interval start as both recurrence origin and cap anchor. That helper
+accepts only its required R5/R6 timing input; no forced R5 flattening
+or new FHIR adapter is involved.
+
+The supply path uses its existing per-component count/cap logic but
+now follows the same distinct point/eligibility/clock semantics:
+only AFTER the completed point is eligible, cadence is still derived
+from the unshifted point, and a new elapsed interval starts its own
+local cap clock. It neither replays the previous dose nor invents
+midnight cutoffs. No new routine parsing pass, extra per-stage
+full-array scan, generic safety veto, or application/schema change.
+
+Independent regression oracles were first red and became green:
+- Seven-day repeatCycle starting midnight with +8h loading dose
+  ending at 08:00, then maintenance 07:00 and boundsDuration 1d;
+  Nov 3 07:00 is inside the next phase's cap and supply counts 2
+  administrations in that cycle. Strict R5 and current R6 agree.
+- An implicit q8h successor begins 16:00 after the last 08:00
+  loading administration, followed by midnight and 08:00 next day;
+  no fractional-millisecond recurrence timestamps, no duplicate
+  loading dose; four total tablets across the two-day horizon.
+- A next step that also says 08:00 clips the already-completed
+  08:00 administration rather than replaying it; the next day's
+  08:00 is eligible. Supply and schedule agree.
+- Spring New York DST: the counted 08:00 EST completion establishes
+  an 08:00 local calendar cap on the following EDT day; 07:00 EDT
+  maintenance is included. A later from-query does not re-anchor
+  the prescribed treatment.
+- A non-counted calendar-duration boundary deliberately continues
+  inheriting its original civil clock across DST.
+
+Verified package semantics: TypeScript declarations and ES6/CJS+ESM
+build PASS; npm test **4193/4193 source tests, 44/44 suites**;
+npm run test:dist **4/4**; git diff --check PASS.
+Focused R6/schedule/family suites 697/697 before the two extra DST
+tests; both DST tests passed independently and in the full suite.
+No Shinebright source/test/DB changes, package publication, master
+merge, or review re-request.
+
+Alternating seven-batch, warmed HPSERVER median microseconds versus
+immutable dccc528 (shared host; numbers NOT a hardware benchmark):
+ordinary SIG 1398.6 -> 1450.7 (+3.7%), Thai SIG 5900.7 -> 5638.0
+(-4.5%), independent ocular taper 6148.8 -> 6160.2 (+0.2%),
+ordinary R6 scheduling 293.2 -> 299.2 (+2.0%), ordinary R6
+supply 364.4 -> 350.1 (-3.9%). Differences run both directions;
+there is no repeatable/common-path slowdown established by this
+comparison. Counted phase execution performs necessary finite
+completion work; ordinary SIG parsing has no new pass.

@@ -1888,56 +1888,88 @@ function durationStepper(
  * site-specific components. All absolute boundaries derive from orderedAt;
  * querying halfway through a treatment cannot reset the course clock.
  */
-/** Resolve the source-typed window shared by relative execution and cycle
- * overlap discovery. A repeat period is not a substitute for an explicit end.
- * @param course Non-repeating typed course.
- * @param index Step whose independent or sequential window is being resolved.
- * @param anchor Treatment/cycle start in the caller's calendar zone.
- * @param previousEnd End of the preceding step when no explicit start exists.
- * @param timeZone Calendar zone for relative quantities and component bounds.
- */
+/** A stage's final point and its exclusive clipping boundary are distinct.
+ * The point determines an implicit successor's cadence/civil clock; the
+ * exclusive boundary only prevents scheduling the same dose twice. */
+interface TreatmentStepWindow {
+  start: Date;
+  end?: Date;
+  completionPoint?: Date;
+}
+
+/** One typed phase-boundary computation shared by repeated-course discovery
+ * and scheduling. Only count-bearing members enumerate administrations.
+ * A truly unbounded member never licenses a guessed successor stage.
+ * The preceding point is kept separately from its +1ms exclusive bound. */
 function treatmentStepWindow(
   course: FhirR6DosageInstruction, index: number, anchor: Date,
   previousEnd: Date, timeZone: string, sourceClock?: TreatmentWallClock,
-  predecessorClock?: TreatmentWallClock, options?: NextDueDoseOptions
-): { start: Date; end: Date | undefined } {
+  predecessorClock?: TreatmentWallClock, options?: NextDueDoseOptions,
+  predecessorPoint?: Date
+): TreatmentStepWindow {
   const step = course.step[index];
-  const start = step.start ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock) : previousEnd;
+  const start = step.start
+    ? treatmentRelativeInstant(step.start, anchor, timeZone, sourceClock)
+    : predecessorPoint ?? previousEnd;
   const capClock = stageCalendarClock(course, index, start, timeZone,
     sourceClock, predecessorClock);
-  let end = step.end ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
+  let end = step.end
+    ? treatmentRelativeInstant(step.end, anchor, timeZone, sourceClock) : undefined;
+  let completionPoint: Date | undefined;
   if (!end) {
-    const componentEnds = step.component.map(component => {
+    let allFinite = step.component.length > 0;
+    let latest: { end: Date; point?: Date } | undefined;
+    for (const component of step.component) {
+      const repeat = component.timing?.repeat;
+      const implicitStart = step.start ? start
+        : successorIntervalStart(component, predecessorPoint, start, timeZone);
+      const componentClock = implicitStart > start
+        ? getTimeParts(implicitStart, timeZone) : capClock;
       const cadence = parallelComponentCadence(component, anchor, timeZone,
-        start, sourceClock, capClock);
+        implicitStart, sourceClock, componentClock);
       let finiteEnd = earlierDate(
         resolveRepeatDurationCapEnd(component, cadence.origin, timeZone, cadence.capClock),
-        resolveRepeatBoundsEndExclusive(component.timing?.repeat, timeZone)
+        resolveRepeatBoundsEndExclusive(repeat, timeZone)
       );
-      const repeat = component.timing?.repeat;
-      // An implicit phase boundary can be established by an authored count,
-      // not just a calendar duration. Only resolve count-bearing components:
-      // ordinary relative steps retain their existing zero-extra-work path.
-      if (repeat?.count !== undefined || arrayIncludes(repeat?.when ?? [], EventTiming.Immediate)) {
+      let point: Date | undefined;
+      // The same underlying finite completion drives nextDue and supply.
+      if (repeat?.count !== undefined ||
+          arrayIncludes(repeat?.when ?? [], EventTiming.Immediate)) {
         const row = toFhirR5Dosages({ step: [{ component: [component] }] })[0];
+        const from = predecessorPoint && !step.start && previousEnd > cadence.origin
+          ? previousEnd : cadence.origin;
         const completion = finiteAdministrationCompletion(row, cadence.origin,
           options ?? { from: cadence.origin.toISOString(), orderedAt: cadence.origin.toISOString(),
-            timeZone }, timeZone);
+            timeZone }, timeZone, from);
         if (completion) {
-          const exclusive = new Date(completion.end.getTime() + (completion.point ? 1 : 0));
-          finiteEnd = earlierDate(finiteEnd, exclusive);
+          const exclusive = completion.point
+            ? new Date(completion.end.getTime() + 1) : completion.end;
+          if (!finiteEnd || exclusive <= finiteEnd) {
+            finiteEnd = exclusive;
+            if (completion.point) point = completion.end;
+          }
         }
       }
-      return finiteEnd;
-    }).filter((value): value is Date => Boolean(value));
-    if (componentEnds.length === step.component.length && componentEnds.length) {
-      end = componentEnds.reduce((latest, value) => value > latest ? value : latest, start);
+      if (!finiteEnd) {
+        allFinite = false;
+        continue;
+      }
+      if (!latest || finiteEnd > latest.end) latest = { end: finiteEnd, point };
+      else if (finiteEnd.getTime() === latest.end.getTime() && !point) {
+        // Equal-duration independent members do not establish a unique
+        // completion-point owner; keep the clipping boundary only.
+        latest.point = undefined;
+      }
+    }
+    if (allFinite && latest) {
+      end = latest.end;
+      completionPoint = latest.point;
     } else if (course.step[index + 1]?.start) {
       end = treatmentRelativeInstant(course.step[index + 1].start!, anchor, timeZone, sourceClock);
     }
   }
   if (end && end <= start) throw new Error("R6 treatment step end must be after its start");
-  return { start, end };
+  return { start, end, completionPoint };
 }
 
 /** Latest finite source bound in one cycle, retaining a prior cycle's tail.
@@ -1953,15 +1985,17 @@ function repeatedCourseHorizon(
 ): Date {
   let horizon = nextCycle;
   let previousEnd = anchor;
+  let predecessorPoint: Date | undefined;
   let predecessorClock = sourceClock;
   for (let index = 0; index < course.step.length; index++) {
-    const { start, end } = treatmentStepWindow(course, index, anchor,
-      previousEnd, timeZone, sourceClock, predecessorClock, options);
+    const { start, end, completionPoint } = treatmentStepWindow(course, index, anchor,
+      previousEnd, timeZone, sourceClock, predecessorClock, options, predecessorPoint);
     const capClock = stageCalendarClock(course, index, start, timeZone,
       sourceClock, predecessorClock);
     if (end) {
       if (end > horizon) horizon = end;
       previousEnd = end;
+      predecessorPoint = completionPoint;
     } else {
       // Independently bounded concurrent components need not share an end.
       for (const component of course.step[index].component) {
@@ -1975,7 +2009,8 @@ function repeatedCourseHorizon(
       }
       if (index + 1 < course.step.length) break;
     }
-    predecessorClock = capClock;
+    predecessorClock = completionPoint
+      ? getTimeParts(completionPoint, timeZone) : capClock;
   }
   return horizon;
 }
@@ -2003,12 +2038,13 @@ function scheduleTreatmentRelativeCourse(
   const flattened = toFhirR5Dosages(course);
   const doses: string[] = [];
   let previousEnd = anchor;
+  let predecessorPoint: Date | undefined;
   let predecessorClock = sourceClock;
   let componentIndex = 0;
   for (let index = 0; index < course.step.length; index++) {
     const step = course.step[index];
-    const { start, end } = treatmentStepWindow(course, index, anchor,
-      previousEnd, timeZone, sourceClock, predecessorClock, options);
+    const { start, end, completionPoint } = treatmentStepWindow(course, index, anchor,
+      previousEnd, timeZone, sourceClock, predecessorClock, options, predecessorPoint);
     const capClock = stageCalendarClock(course, index, start, timeZone,
       sourceClock, predecessorClock);
     for (const component of step.component) {
@@ -2031,9 +2067,14 @@ function scheduleTreatmentRelativeCourse(
       };
       // A calendar track keeps its own recurrence origin across global step
       // cuts. Otherwise QOD / monthly cadence would restart at every taper.
+      const implicitStart = step.start ? start :
+        successorIntervalStart(dosage, predecessorPoint, start, timeZone);
+      const componentClock = implicitStart > start
+        ? getTimeParts(implicitStart, timeZone) : capClock;
       const cadence = repeat?.boundsPeriod
         ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
-        : parallelComponentCadence(dosage, anchor, timeZone, start, sourceClock, capClock);
+        : parallelComponentCadence(dosage, anchor, timeZone,
+          implicitStart, sourceClock, componentClock);
       const componentCap = resolveRepeatDurationCapEnd(
         dosage, cadence.origin, timeZone, cadence.capClock);
       // A finite component may stop earlier than its containing step.
@@ -2046,10 +2087,15 @@ function scheduleTreatmentRelativeCourse(
       if (effectiveEnd && from >= effectiveEnd) continue;
       // An independent calendar track may start before orderedAt, but a
       // component with an explicit +3h phase origin cannot dose before 05:30.
-      const stageStart = index === 0 && repeat?.boundsPeriod ? from : start;
+      const stageStart = index === 0 && repeat?.boundsPeriod ? from : implicitStart;
       const activeStart = cadence.hasPhaseOrigin && cadence.origin > stageStart
         ? cadence.origin : stageStart;
-      const effectiveFrom = from > activeStart ? from : activeStart;
+      // The predecessor's final dose is an actual cadence point, but the
+      // next phase cannot administer at that same instant. Clip eligibility
+      // after it without shifting the successor's recurrence origin.
+      const eligibleStart = predecessorPoint && !step.start && previousEnd > activeStart
+        ? previousEnd : activeStart;
+      const effectiveFrom = from > eligibleStart ? from : eligibleStart;
       const candidateTimes = nextDueDoses({
         ...dosage,
         modifierExtension: dosage.modifierExtension?.filter(ext =>
@@ -2062,9 +2108,12 @@ function scheduleTreatmentRelativeCourse(
         doses.push(time);
       }
     }
-    if (end) previousEnd = end;
-    else if (index + 1 < course.step.length) break;
-    predecessorClock = capClock;
+    if (end) {
+      previousEnd = end;
+      predecessorPoint = completionPoint;
+    } else if (index + 1 < course.step.length) break;
+    predecessorClock = completionPoint
+      ? getTimeParts(completionPoint, timeZone) : capClock;
   }
   return doses.sort((left, right) => Date.parse(left) - Date.parse(right))
     .slice(0, limit);
@@ -4668,11 +4717,14 @@ function calculateCourseTotalUnits(
       // This stage clips administration times, but absolute-bound members
       // may have started BEFORE the stage cut. Keep their original cadence
       // anchored to the stated date rather than resetting it each time.
-      const implicitStart = successorIntervalStart(dosage, predecessorPoint, start, zone);
+      const implicitStart = step.start ? start
+        : successorIntervalStart(dosage, predecessorPoint, start, zone);
+      const componentClock = implicitStart > start
+        ? getTimeParts(implicitStart, zone) : capClock;
       const cadence = repeat?.boundsPeriod
         ? { origin: calendarStart ?? treatmentStart, capClock, hasPhaseOrigin: false }
         : parallelComponentCadence(dosage, treatmentStart, zone,
-          implicitStart, sourceClock, capClock);
+          implicitStart, sourceClock, componentClock);
       const cadenceOrigin = cadence.origin;
       cadenceOrigins.push(cadenceOrigin);
       // Before the first global relative cut, an independent calendar member
@@ -4682,11 +4734,16 @@ function calculateCourseTotalUnits(
         ? (calendarStart ?? start) : implicitStart;
       const windowStart = calendarStart && calendarStart > stageStart
         ? calendarStart : stageStart;
-      starts.push(cadence.hasPhaseOrigin && cadenceOrigin > windowStart
-        ? cadenceOrigin : windowStart);
+      const originStart = cadence.hasPhaseOrigin && cadenceOrigin > windowStart
+        ? cadenceOrigin : windowStart;
+      const successorBoundary = predecessorPoint && !step.start
+        ? new Date(predecessorPoint.getTime() + 1) : undefined;
+      starts.push(successorBoundary && successorBoundary > originStart
+        ? successorBoundary : originStart);
       const bound = earlierDate(resolveRepeatDurationCapEnd(
         dosage, cadenceOrigin, zone, cadence.capClock), calendarEnd);
-      const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone);
+      const completion = finiteAdministrationCompletion(dosage, cadenceOrigin, options, zone,
+        starts[starts.length - 1]);
       const countEnd = completion ? new Date(completion.end.getTime() + (completion.point ? 1 : 0)) : null;
       const end = earlierDate(bound, countEnd);
       ends.push(end);
@@ -4768,7 +4825,7 @@ function calculateCourseTotalUnits(
       predecessorPoint = point;
       cursor = point ?? stepEnd;
     }
-    predecessorClock = capClock;
+    predecessorClock = predecessorPoint ? getTimeParts(predecessorPoint, zone) : capClock;
   }
   const result = sumCourseUnits(entries, options);
   const assumptions: string[] = [];
@@ -4895,7 +4952,8 @@ function clockCadenceEligible(day: Date, anchor: Date, repeat: FhirTimingRepeat,
  */
 /** An unanchored interval successor starts one interval after a point event. */
 function successorIntervalStart(
-  dosage: FhirDosage, predecessorPoint: Date | undefined, fallback: Date, zone: string
+  dosage: { timing?: FhirDosage["timing"] | FhirR6Dosage["timing"] },
+  predecessorPoint: Date | undefined, fallback: Date, zone: string
 ): Date {
   const repeat = dosage.timing?.repeat;
   if (predecessorPoint && repeat?.period && repeat.periodUnit &&
@@ -4913,7 +4971,8 @@ function finiteAdministrationCompletion(
   dosage: FhirDosage,
   start: Date,
   options: NextDueDoseOptions,
-  zone: string
+  zone: string,
+  eligibleFrom: Date = start
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.timing?.repeat;
   if (!repeat) return undefined;
@@ -4930,7 +4989,9 @@ function finiteAdministrationCompletion(
       extension.url !== DOSAGE_DETAILS_R5_URL &&
       extension.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) }
     : dosage;
-  const due = nextDueDoses(local, { ...options, from: start, orderedAt: start, limit: count });
+  const due = nextDueDoses(local, {
+    ...options, from: eligibleFrom, orderedAt: start, limit: count
+  });
   if (due.length !== count) return undefined;
   const last = new Date(due[due.length - 1]);
   if (repeat.duration && repeat.durationUnit) {
