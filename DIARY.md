@@ -5951,3 +5951,112 @@ rich graph 16599.9 -> 15840.2 (-4.6%).
 Host noise and warm-cache differences matter; this is NOT a
 mobile benchmark. No consistent common-path slowdown was found,
 and neither fix adds a whole-SIG parse or a general runtime gate.
+
+
+## 2026-11-16 — PR #13 review: typed entries, quarter-year DST, decimals, graph ownership
+
+Review gate: inspected the full CodeRabbit review body 5914883267
+(04:01 UTC), four new inline findings, one outside-diff graph finding,
+prior review comments and product contract. Independent public-API
+reproductions were run BEFORE coding. Preserve known clinical
+meaning, numeric best-effort and source, without new refusal layers.
+
+1. Type-only R6 expression plus a FIRST R5 Element.id (REAL R6 bridge):
+   the unique retained doseExpression/rateExpression disappeared after
+   an editor inserted a new ID without changing the typed rate or dose.
+   Exact ID could no longer match, and type key changed to id key.
+   Source and live slots now match by a unique unmatched type only when
+   original has NO id and current has an added id. Existing conflicting
+   IDs remain distinct. DoseChoice and rateChoice fingerprints exclude
+   Element.id, so an ID-only edit restores expression but a real numeric
+   edit supersedes it. Ambiguous duplicate types retain old expressions
+   only in recoverable source, not as an arbitrary live numeric choice.
+
+2. Plain compact carrier (NOT reproducibly broken at public API):
+   reviewer proposed a new internal path for Infuse 20mg in 500mL
+   over 4 hours. The actual lexer already splits both compact amounts
+   into NUMBER and UNIT tokens. Public parseSig correctly retains
+   20mg active dose, independently qualified 500mL carrier and 4h
+   duration, including normal saline material. A trial redundant
+   attached-carrier fallback was REVERTED, rather than imposing
+   pointless hot-path work. Family regression tests preserve the
+   independently verified semantics through strict R5 and R6.
+
+3. Leading-dot numeric rate (REAL, likely older core lexer/HPSG bug):
+   normalizeTokenLower stripped initial decimal punctuation in
+   .1mcg/kg/min, silently suggesting 1 instead of 0.1 mcg/kg/min.
+   Use raw lowercase source token for the existing bounded
+   attachedNumberUnitAt reader; only trailing punctuation is removed.
+   Also discovered the lexer split a decimal after comparator symbols
+   (e.g. ~.1, >=.1) into a sentence separator, independently losing
+   the operator and changing the amount by 10x. The ONE surface
+   character boundary now keeps the decimal after recognized
+   comparators. Plain/approximate/ASCII/Unicode/per-min and sentence
+   controls assert 0.1 with original qualifier. No extra parser pass.
+
+4. Fractional-year calendar repeat (REAL, shared scheduler):
+   0.25 year means three calendar months, but clock classification
+   required the SOURCE value to be an integer while the actual
+   createIntervalStepper advanced three calendar months. Spring DST
+   then shifted one cycle's logical source clock and duplicated the
+   June boundary. A shared normalizedCalendarInterval checks whole
+   local days or whole local months AFTER unit conversion. Calendar
+   source clock, R6 duration caps and supply use the SAME predicate,
+   comparing 0.25 a and 3 mo, plus 0.5 a and 6 mo. Explicit elapsed
+   q24h/q168h and fractional nonintegral periods remain elapsed.
+   Classification is computed once per repeat course, not per cycle.
+
+5. Edited method matching a later independent action (REAL out of
+   diff; original source graph): Take 1 tablet then drink 5mL,
+   when edited to canonical Drink 5mL, erroneously removed the later
+   independent Drink action. Matching CURRENT method/dose never
+   establishes historic primary ownership. Existing
+   primaryDoseAmountOwner now gates omission of typed Amount actions:
+   a later independent administration remains present even when it
+   happens to match edited fields. Truly source-owned primary actions
+   still omit, while superseded prior amount is not replayed.
+   Explicit primary-span, EN/TH, source and graph immutability
+   regressions are added.
+
+All five review items passed the actual clinical requirement, harm,
+typed-model directionality, cheapness and independent numeric/date
+test gate. The reviewed parser is clinician-operated: known numeric
+amounts remain available for best-effort supply. There is no new
+hard refusal, broad validator, second SIG parser, private FHIR code,
+consumer schema change, global dedup, merge, publication or deployment.
+This loop explicitly distinguishes previously existing decimal lexer
+failures from the R6 bridge's identity and graph bugs.
+
+
+Final verification AFTER rejecting the redundant carrier fallback and adding
+the duplicate-type ambiguity control:
+- npm run build: PASS, ES6 ESM/CJS + TypeScript declarations.
+- npm test: **4,158/4,158 source tests**, all **44/44 suites**;
+  R6 368/368, HPSG clinical quantity 192/192, instruction graph
+  289/289, lexer 23/23, schedule-family 171/171.
+- npm run test:dist: **4/4** packaged-export tests.
+- git diff --check: PASS.
+- Read-only consumer adapter smoke checks:
+  FHIR R5 -> editable dosage -> in-memory usage save/reopen ->
+  reverse FHIR -> R6 preserved the type-only expression after
+  a clinician-assigned ID, the 0.1 ug/kg/min rate with authored
+  approximation, and the independent 20mg drug/approximately
+  500mL carrier / 4h infusion. No application or schema edits.
+- Additional independent source-vs-intended-meaning probes confirmed
+  ordinary .1mg, ~.1mg, .1mL, ~.1mL, and oral tablets retain
+  value 0.1 after the lexer change.
+
+Paired warm benchmark against immutable b6fee57, nine alternating
+65-parse batches, median microseconds:
+ordinary 1506.9 -> 1535.6 (+1.9%), Thai 5669.9 -> 5574
+(-1.7%), independent-eye taper 5835.6 -> 6139.9 (+5.2%),
+infusion carrier 7911.7 -> 7854.5 (-0.7%),
+leading decimal 1890.7 -> 1365.0 (-27.8%, prior result WRONG),
+rich procedural graph 4388.2 -> 4378.5 (-0.2%).
+The first ocular result was repeated with nine alternating
+85-parse batches: eye taper 5830.1 -> 5862.4 (+0.6%),
+ordinary 1439.5 -> 1402.7 (-2.6%), Thai 5529.7 ->
+5456.3 (-1.3%). Shared-host jitter is material. No consistent
+parser slowdown, no extra whole-input parser pass, not a phone
+benchmark. Calendar classification executes once per repeated
+course, not per schedule cycle.

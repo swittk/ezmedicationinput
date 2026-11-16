@@ -4481,6 +4481,12 @@ export function realizeInstructionGraph(
     // rendered. In particular, it cannot erase one half of a prohibition.
     if (frameSource && omittedSources.indexOf(frameSource) >= 0) return false;
     if (options?.omitCanonicalAdministration &&
+      // A later, independent action may now happen to match the clinician's
+      // EDITED method and dose. Only the source-backed amount owner may be
+      // removed as the canonical administration; other quantified actions
+      // keep their separate meaning and original temporal relationship.
+      (!frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+        amountOwner === frame) &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
       return false;
     }

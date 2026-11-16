@@ -1818,6 +1818,26 @@ function parallelComponentCadenceOrigin(
   }, treatmentStart, timeZone, sourceClock);
 }
 
+/** A calendar recurrence is defined by its NORMALIZED whole local-day
+ * or local-month interval, not by whether the input number is an integer.
+ * Thus 0.25 year and 3 months share a civil clock, while 24 hours and
+ * fractional days remain elapsed durations. Scheduling, caps and supply
+ * must all use this exact same classification. */
+function normalizedCalendarInterval(
+  value: number | undefined, unit: FhirPeriodUnit | undefined
+): { days?: number; months?: number } | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return undefined;
+  if (unit === FhirPeriodUnit.Day || unit === FhirPeriodUnit.Week) {
+    const days = value * (unit === FhirPeriodUnit.Week ? 7 : 1);
+    return Number.isInteger(days) ? { days } : undefined;
+  }
+  if (unit === FhirPeriodUnit.Month || unit === FhirPeriodUnit.Year) {
+    const months = value * (unit === FhirPeriodUnit.Year ? 12 : 1);
+    return Number.isInteger(months) ? { months } : undefined;
+  }
+  return undefined;
+}
+
 function durationStepper(
   quantity: FhirQuantity | FhirR6Quantity | undefined,
   timeZone: string,
@@ -1837,16 +1857,11 @@ function durationStepper(
       value <= 0 || !periodUnit) return null;
   // Day/week course cycles follow calendar dates, not elapsed 24-hour
   // intervals. q24h interval scheduling still uses createIntervalStepper.
-  if (Number.isInteger(value) && (periodUnit === FhirPeriodUnit.Day ||
-      periodUnit === FhirPeriodUnit.Week)) {
-    const days = value * (periodUnit === FhirPeriodUnit.Week ? 7 : 1);
-    return calendarDayStepper(anchor, days, timeZone, sourceClock);
-  }
-  if (sourceClock && Number.isInteger(value) &&
-      (periodUnit === FhirPeriodUnit.Month || periodUnit === FhirPeriodUnit.Year)) {
-    const months = value * (periodUnit === FhirPeriodUnit.Year ? 12 : 1);
-    return instant => addCalendarMonths(instant, months, timeZone, sourceClock);
-  }
+  const calendar = normalizedCalendarInterval(value, periodUnit);
+  if (calendar?.days !== undefined)
+    return calendarDayStepper(anchor, calendar.days, timeZone, sourceClock);
+  if (sourceClock && calendar?.months !== undefined)
+    return instant => addCalendarMonths(instant, calendar.months!, timeZone, sourceClock);
   return createIntervalStepper({ period: value, periodUnit }, timeZone);
 }
 
@@ -2016,15 +2031,11 @@ function scheduleTreatmentRelativeCourse(
  * at that cycle's actual wall time. Do not reuse the old course clock
  * after an elapsed cycle crosses a DST transition. */
 function repeatedCycleWallClock(
-  cycle: FhirR6Quantity | undefined, firstClock: TreatmentWallClock,
+  calendarCycle: boolean, firstClock: TreatmentWallClock,
   cycleStart: Date, timeZone: string
 ): TreatmentWallClock {
-  const unit = parseBoundsDurationUnit(cycle);
-  const calendarCycle = Number.isInteger(cycle?.value) &&
-    (unit === FhirPeriodUnit.Day || unit === FhirPeriodUnit.Week ||
-      unit === FhirPeriodUnit.Month || unit === FhirPeriodUnit.Year);
-  // Common calendar recurrences reuse the source clock object, rather than
-  // repeatedly computing time-zone parts for every cycle.
+  // Calendar classification is computed once per course; only elapsed
+  // cycles require a fresh time-zone lookup at each actual cycle start.
   return calendarCycle ? firstClock : getTimeParts(cycleStart, timeZone);
 }
 
@@ -2038,6 +2049,8 @@ function scheduleRepeatedCourse(
     ? from : coerceDate(options.orderedAt, "orderedAt");
   const advance = durationStepper(course.repeatCycle, timeZone, anchor);
   const firstClock = getTimeParts(anchor, timeZone);
+  const calendarCycle = !!normalizedCalendarInterval(
+    course.repeatCycle?.value, parseBoundsDurationUnit(course.repeatCycle));
   if (!advance) throw new MedicationQuantityCalculationError("repeat-cycle-unresolved",
     "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before scheduling.");
   const limit = Math.floor(options.limit ?? 10);
@@ -2050,7 +2063,7 @@ function scheduleRepeatedCourse(
   while (guard < maxCycles && course.step.some(step => stepOccursInCycle(step, guard))) {
     const cycleEnd = advance(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
-    const sourceClock = repeatedCycleWallClock(course.repeatCycle, firstClock, cycleStart, timeZone);
+    const sourceClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, timeZone);
     const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, timeZone, sourceClock);
     if (horizon > from) {
       const candidates = scheduleTreatmentRelativeCourse(singleCycle, {
@@ -4531,6 +4544,8 @@ function calculateCourseTotalUnits(
       "The supplied repeatCycle does not define a usable numeric interval. Original recurrence is preserved; correct its unit or choose a duration before calculating supply.");
   if (cycleAdvance) {
     const firstClock = getTimeParts(anchor, zone);
+    const calendarCycle = !!normalizedCalendarInterval(
+      course.repeatCycle?.value, parseBoundsDurationUnit(course.repeatCycle));
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     const singleCycle = { ...course, repeatCycle: undefined };
     let cycleStart = anchor;
@@ -4539,7 +4554,7 @@ function calculateCourseTotalUnits(
         course.step.some(step => stepOccursInCycle(step, guard))) {
       const cycleEnd = cycleAdvance(cycleStart);
       if (!cycleEnd || cycleEnd <= cycleStart) break;
-      const originalClock = repeatedCycleWallClock(course.repeatCycle, firstClock, cycleStart, zone);
+      const originalClock = repeatedCycleWallClock(calendarCycle, firstClock, cycleStart, zone);
       const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock);
       const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;

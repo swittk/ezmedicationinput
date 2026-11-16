@@ -1638,3 +1638,51 @@ describe("compact million multiplier stays distinct from an attached medication 
       expect(parsed.input).toBe(text);
     });
 });
+
+describe("adversarial compact infusion carriers and leading-decimal rates", () => {
+  it.each([
+    ["Infuse 20mg in 500mL over 4 hours", false, false, undefined],
+    ["Infuse 20 mg in 500 mL over 4 hours", false, false, undefined],
+    ["Infuse 20mg in approximately 500mL over 4 hours", true, false, undefined],
+    ["Infuse approximately 20mg in 500mL over 4 hours", false, true, undefined],
+    ["Infuse 20mg in 500mL normal saline over 4 hours", false, false, "normal saline"]
+  ] as const)("keeps independently authored active and attached carrier amounts: %s",
+    (input, approximateCarrier, approximateDrug, carrierMaterial) => {
+      const parsed = parsePublicSig(input);
+      const amount = parsed.fhirNext.step[0].component[0].doseAndRate![0];
+      expect(amount.doseQuantity).toMatchObject({ value: 20, unit: "mg" });
+      expect(amount.doseQuantity?.comparator).toBe(approximateDrug ? "~" : undefined);
+      expect(amount.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
+      expect(amount.rateRatio?.numerator?.comparator).toBe(approximateCarrier ? "~" : undefined);
+      expect(amount.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
+      if (carrierMaterial) expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.carrierMaterial?.text)
+        .toBe(carrierMaterial);
+      const recovered = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))));
+      expect(recovered.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(20);
+      expect(recovered.step[0].component[0].doseAndRate?.[0].rateRatio?.numerator?.value).toBe(500);
+      expect(parsed.input).toBe(input);
+    }
+  );
+
+  it.each([
+    ["Infuse .1mcg/kg/min", undefined],
+    ["Infuse ~.1mcg/kg/min", "~"],
+    ["Infuse ≈.1mcg/kg/min", "~"],
+    ["Infuse >=.1mcg/kg/min", ">="],
+    ["Infuse <=.1mcg/kg/min", "<="],
+    ["Infuse approximately .1mcg/kg/min", "~"],
+    ["Infuse .1mcg/kg per min", undefined],
+    ["Infuse .1mcg/kg/min.", undefined]
+  ] as const)("preserves a leading decimal and a source comparator in %s",
+    (input, comparator) => {
+      const parsed = parsePublicSig(input);
+      const rate = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity;
+      expect(rate).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
+      expect(rate?.comparator).toBe(comparator);
+      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
+      expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].rateQuantity))
+        .toBe(comparator);
+      expect(parsed.input).toBe(input);
+    }
+  );
+});

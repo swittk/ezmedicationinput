@@ -218,3 +218,26 @@ describe("semantic annotations", () => {
   });
 
 });
+
+describe("comparator-prefixed leading decimal source tokenization", () => {
+  it.each(["~", "≈", ">=", "<=", "≥", "≤"] as const)(
+    "does not split the decimal point after %s in a compact dose rate", operator => {
+      const text = "Infuse " + operator + ".1mcg/kg/min";
+      const tokens = lexInput(text);
+      expect(tokens.map(token => token.original)).toEqual([
+        "Infuse", operator + ".1mcg/kg/min"
+      ]);
+      expect(tokens[1].sourceStart).toBe(7);
+      expect(tokens[1].sourceEnd).toBe(text.length);
+      expect(tokens.every(token => token.original !== ".")).toBe(true);
+    }
+  );
+
+  it("still separates ordinary sentence punctuation after leading-decimal rates", () => {
+    const text = "Infuse .1mcg/kg/min. Monitor BP.";
+    const tokens = lexInput(text);
+    expect(tokens[1].original).toBe(".1mcg/kg/min");
+    expect(tokens[2].original).toBe(".");
+    expect(tokens.slice(3).some(token => token.lower === "monitor")).toBe(true);
+  });
+});

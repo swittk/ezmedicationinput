@@ -2242,6 +2242,33 @@ function retainedDoseRateMatches(
     matches.set(liveIndex, oldIndex);
     used.add(oldIndex);
   }
+  // A clinician may give a formerly type-only slot its first Element.id.
+  // Existing source IDs MUST still match by ID, not by type; only one
+  // unmatched original type-only slot and one unmatched live typed slot
+  // can establish this new identity. Baseline dose/rate fingerprints below
+  // deliberately exclude Element.id, so an ID-only edit cannot erase R6
+  // expressions or comparators.
+  const typeOf = (entry: typeof source[number]): string | undefined =>
+    entry.type ? compactProjectionFingerprint(entry.type) : undefined;
+  const oldTypes = new Map<string, number>();
+  const liveTypes = new Map<string, number>();
+  for (let index = 0; index < source.length; index++) {
+    if (used.has(index)) continue;
+    const type = typeOf(source[index]);
+    if (type) oldTypes.set(type, oldTypes.has(type) ? -1 : index);
+  }
+  for (let index = 0; index < live.length; index++) {
+    if (matches.has(index)) continue;
+    const type = typeOf(live[index]);
+    if (type) liveTypes.set(type, liveTypes.has(type) ? -1 : index);
+  }
+  for (const [type, oldIndex] of oldTypes) {
+    const liveIndex = liveTypes.get(type);
+    if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0 ||
+        source[oldIndex].id || !live[liveIndex].id) continue;
+    matches.set(liveIndex, oldIndex);
+    used.add(oldIndex);
+  }
   // R5 SimpleQuantity retains the exact numeric value and unit even when
   // the R6 source had "~". That representable data identifies a surviving
   // anonymous entry after deletion/reordering; do not discard it and guess

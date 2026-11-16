@@ -2392,3 +2392,59 @@ describe("review 18: comparator-only graph quantities remain editable", () => {
     expect(restored.sourceText).toBe(graph.sourceText);
   });
 });
+
+describe("review 20: edited canonical administration cannot steal an independent action", () => {
+  it("retains a later source-backed Drink 5 mL when a prior Take 1 tablet is edited to Drink 5 mL", () => {
+    const original = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: original, sourceLocale: "en",
+      actions: parseInstructionActions(original) };
+    const unchanged = JSON.stringify(graph);
+    const edited = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    expect(edited.dose).toMatchObject({ value: 5, unit: "mL" });
+    for (const locale of ["en", "th"]) {
+      const display = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: edited, preferSourceText: true
+      })!;
+      expect(display).toContain("5");
+      if (locale === "en") expect(display).toContain("drink 5 mL");
+      else expect(display).toContain("ดื่ม");
+      expect(display).not.toContain("1 tablet");
+      const whole = formatCanonicalClause({
+        ...edited, instructionGraph: graph
+      }, "long", resolveSigLocalization(locale), {
+        realizationMode: "roundtrip"
+      });
+      expect(whole).toContain("5");
+      expect(whole).not.toContain("1 tablet");
+    }
+    expect(JSON.stringify(graph)).toBe(unchanged);
+    expect(graph.actions[1].args.some(arg => arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === 5 && arg.quantity?.unit === "mL")).toBe(true);
+  });
+
+  it("still omits the true original canonical primary, not an unrelated later dose", () => {
+    const original = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: original, sourceLocale: "en",
+      actions: parseInstructionActions(original) };
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).not.toContain("Take 1 tablet");
+    expect(text).toContain("drink 5 mL");
+
+    // An explicit source primary span can identify that the Drink action
+    // really was the canonical administration. In that case, only THAT
+    // source-backed action is eligible for omission.
+    const targeted = {
+      ...graph, primaryAdministrationSpan: { ...graph.actions[1].span }
+    };
+    const drink = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    const realized = realizeInstructionGraph(targeted, "en", {
+      omitCanonicalAdministration: drink, preferSourceText: true
+    })!;
+    expect(realized).toContain("Take 1 tablet");
+    expect(realized).not.toContain("drink 5 mL");
+    expect(JSON.stringify(graph)).toContain("drink 5 mL");
+  });
+});

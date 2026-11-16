@@ -609,8 +609,11 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
       }
     }
     const numericStart = qualified?.numericIndex ?? phraseStart;
+    // The general lower-case normalizer strips leading punctuation, but a
+    // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
+    // trailing sentence punctuation only; never turn .1 into 1.
     const attached = !qualified && quantityToken.kind !== LexKind.Number
-      ? attachedNumberUnitAt(normalizeTokenLower(quantityToken)) : undefined;
+      ? attachedNumberUnitAt(quantityToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
     const value = qualified?.value ??
       (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
     // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact

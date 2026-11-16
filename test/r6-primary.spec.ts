@@ -5865,3 +5865,122 @@ describe("review 19: live site coding and elapsed repeat-cycle clock ownership",
     }
   });
 });
+
+describe("review 20: typed expression identity and normalized calendar equivalence", () => {
+  const type = { coding: [{
+    system: "http://snomed.info/sct", code: "12345", display: "Dose kind"
+  }] };
+  const expr = { language: "text/fhirpath", expression: "%patient.weight * 2" };
+
+  it.each(["doseExpression", "rateExpression"] as const)(
+    "preserves type-only %s when a clinician assigns its first Element.id",
+    choice => {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ type, [choice]: expr }]
+      }] }] };
+      const rows = toFhirR5Dosages(source);
+      expect(rows[0].doseAndRate?.[0][choice]).toBeUndefined();
+      rows[0].doseAndRate![0].id = "new-clinician-entry";
+      const output = toDosageDetails(rows);
+      expect(output.step[0].component[0].doseAndRate?.[0]).toMatchObject({
+        id: "new-clinician-entry", type, [choice]: expr
+      });
+      expect(toDosageDetails(toFhirR5Dosages(output)).step).toEqual(output.step);
+      // The inverse edit (changing an existing ID) is NOT a legitimate type
+      // identity match; a different id may represent a different entry.
+      const existing: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ id: "original-entry", type, [choice]: expr }]
+      }] }] };
+      const changed = toFhirR5Dosages(existing);
+      changed[0].doseAndRate![0].id = "different-entry";
+      expect(toDosageDetails(changed).step[0].component[0].doseAndRate?.[0][choice])
+        .toBeUndefined();
+    }
+  );
+
+  it("keeps distinct expression identities in a typed multiple-entry component", () => {
+    const typeB = { coding: [{
+      system: "http://snomed.info/sct", code: "67890", display: "Rate kind"
+    }] };
+    const rate = { language: "text/fhirpath", expression: "%patient.weight / 2" };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ type, doseExpression: expr },
+        { type: typeB, rateExpression: rate }]
+    }] }] };
+    const rows = toFhirR5Dosages(source);
+    rows[0].doseAndRate![0].id = "new-dose-id";
+    rows[0].doseAndRate![1].id = "new-rate-id";
+    const result = toDosageDetails(rows).step[0].component[0].doseAndRate!;
+    expect(result[0]).toMatchObject({ id: "new-dose-id", type, doseExpression: expr });
+    expect(result[1]).toMatchObject({ id: "new-rate-id", type: typeB, rateExpression: rate });
+    // A numeric edit still supersedes an expression regardless of the new ID.
+    const edited = toFhirR5Dosages(source);
+    edited[0].doseAndRate![0].id = "new-dose-id";
+    edited[0].doseAndRate![0].doseQuantity = { value: 7, unit: "mg" };
+    expect(toDosageDetails(edited).step[0].component[0].doseAndRate?.[0])
+      .toMatchObject({ id: "new-dose-id", doseQuantity: { value: 7, unit: "mg" } });
+    expect(toDosageDetails(edited).step[0].component[0].doseAndRate?.[0].doseExpression)
+      .toBeUndefined();
+  });
+
+  it("does not guess an identity for duplicate-type source expressions after a new ID", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [
+        { type, doseExpression: { language: "text/fhirpath", expression: "%patient.weight * 2" } },
+        { type, doseExpression: { language: "text/fhirpath", expression: "%patient.weight * 3" } }
+      ]
+    }] }] };
+    const rows = toFhirR5Dosages(source);
+    rows[0].doseAndRate![0].id = "new-entry";
+    const reconciled = toDosageDetails(rows);
+    const active = reconciled.step[0].component[0].doseAndRate!;
+    expect(active[0].id).toBe("new-entry");
+    // Two indistinguishable old types provide no unique identity. An
+    // unknown expression must not be arbitrarily assigned to a new ID.
+    expect(active[0].doseExpression).toBeUndefined();
+    expect(active[1].doseExpression?.expression).toBe("%patient.weight * 3");
+    expect(JSON.stringify(reconciled.extension)).toContain("%patient.weight * 2");
+    expect(toDosageDetails(toFhirR5Dosages(reconciled)).step).toEqual(reconciled.step);
+  });
+
+  it.each([
+    [0.25, "a", 3, "mo"],
+    [0.5, "a", 6, "mo"]
+  ] as const)(
+    "normalizes calendar %s %s to %s %s for cycle clock ownership",
+    (value, unit, equivalent, unitB) => {
+      const original: FhirR6DosageInstruction = { repeatCycle: { value, unit, code: unit },
+        step: [{ component: [{
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+            timeOfDay: ["03:00:00"], boundsDuration: {
+              value: equivalent, unit: unitB, code: unitB
+            } } },
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+        }] }] };
+      const alternate: FhirR6DosageInstruction = {
+        ...original, repeatCycle: { value: equivalent, unit: unitB, code: unitB }
+      };
+      const opts = { from: "2026-12-14T02:30:00-05:00",
+        orderedAt: "2026-12-14T02:30:00-05:00", timeZone: "America/New_York",
+        limit: 400 };
+      const expected = nextDueDoses(alternate, opts);
+      const amount = calculateTotalUnits({ dosage: alternate, ...opts,
+        durationValue: 390, durationUnit: FhirPeriodUnit.Day }).totalUnits;
+      for (const source of [original, alternate]) {
+        for (const dosage of [source, toFhirR5Dosages(source), fromFhir(source)]) {
+          const actual = nextDueDoses(dosage, opts);
+          expect(actual).toEqual(expected);
+          expect(new Set(actual).size).toBe(actual.length);
+          expect(calculateTotalUnits({ dosage, ...opts,
+            durationValue: 390, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+            .toBe(amount);
+        }
+        expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
+      }
+      if (equivalent === 3) {
+        expect(expected.filter(time =>
+          time.startsWith("2027-06-14T03:00:00"))).toHaveLength(1);
+      }
+    }
+  );
+});
