@@ -9,7 +9,7 @@ import {
   simpleQuantityForR5
 } from "./fhir-quantity-operator";
 import {
-  FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
+  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction,
   FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety,
   FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
@@ -1013,6 +1013,151 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
   }
   updateProjectionFingerprint(state,"}");
   return finishProjectionFingerprint(state);
+}
+
+/** A verified *source-replay proof*, not a cached clinical interpretation.
+ *
+ * The first encounter checks the existing persisted, full-row edit fingerprint.
+ * Later calls over the SAME object need not recursively hash the large,
+ * unchanged provenance graph. Shallow FHIR ownership changes and live dosage
+ * amount values still invalidate the proof; in particular a clinician editing
+ * doseQuantity.value on a previously formatted R5 row cannot replay an old
+ * HPSG-owned instruction.
+ *
+ * The externally supplied object/provenance graph is immutable by caller
+ * contract. Mutating an internal nested graph extension in place is a caller
+ * footgun; adding deep defensive rescans to every format invocation would
+ * violate the project's throughput contract.
+ */
+interface SourceDoseObservation {
+  original: FhirDoseAndRate;
+  dose?: FhirSimpleQuantity;
+  doseValue?: number;
+  doseUnit?: string;
+  doseCode?: string;
+  rate?: FhirSimpleQuantity;
+  rateValue?: number;
+  rateUnit?: string;
+  rateCode?: string;
+  range?: FhirDoseAndRate["doseRange"];
+  rangeLow?: number;
+  rangeHigh?: number;
+  ratio?: FhirRatio;
+  ratioNumerator?: number;
+  ratioDenominator?: number;
+}
+interface SourceReplayProof {
+  matches: boolean;
+  top: Array<[string, unknown]>;
+  amounts: SourceDoseObservation[];
+  repeat?: FhirTimingRepeat;
+  frequency?: number;
+  period?: number;
+  count?: number;
+  timeOfDayCount?: number;
+  firstClock?: string;
+}
+const SOURCE_REPLAY_PROOFS = new WeakMap<FhirDosage | EzDosage, SourceReplayProof>();
+
+function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): SourceReplayProof {
+  const raw = dosage as Record<string, unknown>;
+  const top: SourceReplayProof["top"] = [];
+  for (const key of Object.keys(dosage)) top.push([key, raw[key]]);
+  const amounts: SourceDoseObservation[] = [];
+  for (const original of dosage.doseAndRate ?? []) {
+    const dose = original.doseQuantity,
+      rate = original.rateQuantity;
+    amounts.push({
+      original,
+      dose,
+      doseValue: dose?.value,
+      doseUnit: dose?.unit,
+      doseCode: dose?.code,
+      rate,
+      rateValue: rate?.value,
+      rateUnit: rate?.unit,
+      rateCode: rate?.code,
+      range: original.doseRange,
+      rangeLow: original.doseRange?.low?.value,
+      rangeHigh: original.doseRange?.high?.value,
+      ratio: original.rateRatio,
+      ratioNumerator: original.rateRatio?.numerator?.value,
+      ratioDenominator: original.rateRatio?.denominator?.value,
+    });
+  }
+  const repeat = dosage.timing?.repeat;
+  return {
+    matches,
+    top,
+    amounts,
+    repeat,
+    frequency: repeat?.frequency,
+    period: repeat?.period,
+    count: repeat?.count,
+    timeOfDayCount: repeat?.timeOfDay?.length,
+    firstClock: repeat?.timeOfDay?.[0],
+  };
+}
+function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplayProof): boolean {
+  const raw = dosage as Record<string, unknown>;
+  let ownCount = 0;
+  for (const key in raw) if (Object.prototype.hasOwnProperty.call(raw, key)) ownCount++;
+  if (ownCount !== proof.top.length) return false;
+  for (const [key, value] of proof.top) if (raw[key] !== value) return false;
+  const rows = dosage.doseAndRate;
+  if ((rows?.length ?? 0) !== proof.amounts.length) return false;
+  for (let index = 0; index < proof.amounts.length; index++) {
+    const prior = proof.amounts[index],
+      row = rows![index];
+    if (
+      row !== prior.original ||
+      row.doseQuantity !== prior.dose ||
+      row.doseQuantity?.value !== prior.doseValue ||
+      row.doseQuantity?.unit !== prior.doseUnit ||
+      row.doseQuantity?.code !== prior.doseCode ||
+      row.rateQuantity !== prior.rate ||
+      row.rateQuantity?.value !== prior.rateValue ||
+      row.rateQuantity?.unit !== prior.rateUnit ||
+      row.rateQuantity?.code !== prior.rateCode ||
+      row.doseRange !== prior.range ||
+      row.doseRange?.low?.value !== prior.rangeLow ||
+      row.doseRange?.high?.value !== prior.rangeHigh ||
+      row.rateRatio !== prior.ratio ||
+      row.rateRatio?.numerator?.value !== prior.ratioNumerator ||
+      row.rateRatio?.denominator?.value !== prior.ratioDenominator
+    )
+      return false;
+  }
+  const repeat = dosage.timing?.repeat;
+  return (
+    repeat === proof.repeat &&
+    repeat?.frequency === proof.frequency &&
+    repeat?.period === proof.period &&
+    repeat?.count === proof.count &&
+    repeat?.timeOfDay?.length === proof.timeOfDayCount &&
+    repeat?.timeOfDay?.[0] === proof.firstClock
+  );
+}
+
+/** Verify a saved editable R5 row's source clinical authority at most once
+ * for an unchanged object. No always-on full graph hash or normalized render. */
+export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boolean {
+  const cached = SOURCE_REPLAY_PROOFS.get(dosage);
+  if (cached && unchangedReplayProof(dosage, cached)) return cached.matches;
+  for (const marker of dosage.extension ?? []) {
+    if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
+    for (const row of marker.extension ?? []) {
+      if (row.url !== "row") continue;
+      for (const field of row.extension ?? [])
+        if (field.url === "projectionFingerprint") {
+          const matches = field.valueString === dosageProjectionFingerprint(dosage);
+          SOURCE_REPLAY_PROOFS.set(dosage, capturedReplayProof(dosage, matches));
+          return matches;
+        }
+      return false;
+    }
+  }
+  return false;
 }
 
 export function dosageTextFingerprint(dosage: FhirDosage | EzDosage): string {

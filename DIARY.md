@@ -6946,3 +6946,134 @@ with no defensive reconciliation, output freeze or new
 API compatibility promise. No extra CodeRabbit full review
 requested; all discussion belongs to the existing original
 PR #14 review threads.
+
+
+## 2026-11-17 — PR #14 second CodeRabbit pass: five new threads, final source evidence and overlap speed
+
+The follow-up review of commit 784b8b5 produced 5 fresh unresolved
+threads. Four substantive clinical defects were fixed at the actual
+source-ownership boundary, plus a stronger, realistic regression oracle.
+No duplicate full review was requested. The completed code was verified
+in the local worktree before any PR update.
+
+1. Overlapping cycle timelines must be resolved in real timestamp order.
+   An earlier source cycle can contain an event later than another cycle's
+   earlier administration. The capped-only overlapping path now generates
+   UNCOMMITTED opportunities and consumes them through a stable min-heap.
+   A per-stage/component ledger applies rolling quantity and occurrence
+   caps in chronological order with per-cycle actual accepted-dose quota.
+   Numeric supply consumes the SAME accepted-event stream as nextDueDoses,
+   rather than restarting caps at a cycle boundary or double-summing
+   overlapping windows.
+2. Conditional count=1 administrations retain their single-dose identity
+   when eligibility is evaluated. Removing count from an otherwise
+   clockless one-time dose would incorrectly eliminate its event.
+3. Roundtrip source replay is forbidden when a newly added typed dose is
+   absent from the original source graph. English/Thai preserve authored
+   numbers where verified, but a newly introduced dose reaches canonical
+   realization. Inferred default doses are an independent typed decision,
+   not fabricated source evidence.
+4. Source-provenance verification for R5 never executes another complete
+   normalized render on every format call. Fresh parsed HPSG rows carry
+   explicit source ownership, persisted top-level R5 rows carry their
+   existing projection fingerprint, and the formatter caches ONLY the
+   verification result with a small structural/typed-quantity observation
+   to detect subsequent dose edits. It does not cache the clinical model
+   or make immutable external source graphs defensively mutable. Marker-
+   less intermediate per-item previews are not silently granted a saved
+   source-replay privilege.
+5. A query BETWEEN valid rolling-limit administrations checks historical
+   cap consumption. The November 13 query correctly skips to November 14
+   and its one-day supply is zero, not one.
+
+The original basic concurrency fix was correct but initially added a
+full phase-horizon calculation even to obviously nonoverlapping capped
+courses, causing +14.1% scheduler latency against the earlier PR head.
+A typed, sound one-stage non-overlap proof now bypasses that work without
+allocating a second schedule or reparsing clinical text. A 15-round
+paired run with calibrated per-test timing measured:
+- nonoverlapping rolling nextDue: 517.697 -> 492.315 us (-4.9%);
+- nonoverlapping rolling supply: 1345.856 -> 1276.049 us (-5.2%);
+- overlapping rolling nextDue: 660.015 -> 663.205 us (+0.5% versus an
+  INCORRECT former schedule);
+- overlapping rolling supply: 1664.714 -> 733.317 us (-55.9%), with the
+  correct chronology and quantity.
+
+The first R5 roundtrip fix used an extra full normalized realization
+to decide whether to trust an unchanged HPSG dose. That had a severe
+hot-path regression: unchanged copy +162%, edited source +521%, and
+added-dose source +581% versus the earlier, often incorrect shortcut.
+Removing the extra render and caching proof of the existing R5 source
+fingerprint fixed ordinary source replay: same-fixture paired roundtrip
+formatting was 87.86 -> 86.85 us (-1.6%) versus previous PR head
+and 141.46 -> 89.25 us (-39.0%) versus master.
+External R5 dose changes after a previously verified render invalidate
+that proof, and changing it back revalidates it.
+
+Two diagnostic cases that CORRECT prior broken behavior remain slower
+than the prior incorrect source-shortcut: edited HPSG quantity about
+171 us vs 89 us; newly added quantity about 78 us vs 36 us. Against
+master these corrected paths measured about +17% and +31%.
+These numbers are disclosed and NOT misrepresented as a green
+like-for-like performance comparison: their prior output silently
+omitted the edited/new clinical quantity and performed less work.
+Both correct paths are under 0.2 ms per render and roundtrip-parse
+their numeric doses. The unchanged, comparable clinical path is
+faster. The strict no-regression gate remains applicable to all
+meaningfully equivalent prior workloads.
+
+Before the final source-only provenance optimization: source suite
+4268/4268, 46 suites; packaged ESM/CJS 4/4; 200 samples of
+R5/R6/short/long comparison versus prior PR 13 had zero differences.
+After the subsequent proof-cache test: source suite 4269/4269,
+packaged 4/4, 200 samples still zero differences. The final
+typed non-overlap dispatch received another 10/10 focused tests
+and paired real-workflow performance validation; final complete
+suite and packaged parity follow prior to pushing.
+
+No user-authored Github comments, no fresh review request, no external
+format-to-format intermediate, and no unrelated app edits.
+
+
+### Final verification on the overlapping-cycle and source-proof checkpoint
+
+The final worktree (including type-only nonoverlap fast dispatch, verified
+R5 source replay and subsequent in-place dose-edit recheck) completed:
+- npm run build: TypeScript + ESM/CJS PASS.
+- npm test: 4,269/4,269 tests, 46/46 suites PASS.
+- npm run test:dist: 4/4 packaged exports PASS.
+- 200-case R5 / current R6 / short & long rendered output differential
+  versus previously accepted PR13: 0 mismatches.
+- All 15 latest CodeRabbit focused tests and independent late-query
+  repeated-course/conditional singleton oracles PASS.
+- Full legacy/comparable API benchmark vs built master: 179 scenarios,
+  174 first-pass green, five tiny utility cases above 4% on one
+  shorter run. All five repeated separately with 41 alternating
+  rounds and 105ms sample windows and ALL passed:
+    SNOMED finding-site parser -3.0%;
+    SNOMED topographical modifier +1.3%;
+    alternate-choice StructureDefinition builder +1.9%;
+    listSymptomDefinitions -0.9%;
+    listMedicationDateResolvers -0.9%.
+  No reproducible >4% slowdown across the 179 comparable domain
+  fixtures; the first-run flags were retained in the JSON report.
+- Independently sampled specialised recurring-course performance
+  against earlier PR head 784b8b5:
+    ordinary capped nextDue -4.9%, ordinary capped supply -5.2%,
+    overlapping nextDue +0.5% despite corrected chronology,
+    overlapping supply -55.9% with correct quantities.
+- Three additional source-roundtrip benchmarks were added so future
+  reviews cannot silently hide changed-dose costs. The clinically
+  equivalent UNCHANGED R5 replay improved 1.6% vs previous PR,
+  approximately 39% vs master. Two cases corrected formerly
+  WRONG source-replay shortcuts: edited and newly added dose now
+  actually appear in EN/TH output. Their measured runtime is slower
+  than the old incorrect/no-render shortcut (about 171us vs 89us and
+  78us vs 36us respectively). This is expressly NOT described as
+  an equivalent-workload speedup; both output and cost differences
+  are disclosed. No regex string splicing or data-loss shortcut was
+  substituted for canonical clinical realization.
+- Original 16-thread CodeRabbit review remains settled with two
+  explicitly rejected internal/debug API hardening suggestions.
+  Five latest clinical/coverage findings are now implemented and
+  source-tested; do not request another full review or merge.

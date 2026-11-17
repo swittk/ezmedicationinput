@@ -66,6 +66,7 @@ import type {
   NextDueDoseOptions,
   TotalUnitsResult,
 } from "../types";
+import { ChronologicalQueue, type ChronologicalEvent } from "./chronological-queue";
 import { arrayIncludes } from "../utils/array";
 import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units";
 import { parseStrengthIntoRatio } from "../utils/strength";
@@ -1609,7 +1610,8 @@ function treatmentStepWindow(
   sourceClock?: TreatmentWallClock,
   predecessorClock?: TreatmentWallClock,
   options?: NextDueDoseOptions,
-  predecessorPoint?: Date
+  predecessorPoint?: Date,
+  deferFiniteCompletion = false
 ): TreatmentStepWindow {
   const stage = course.stages[index];
   const start = stage.start
@@ -1670,7 +1672,12 @@ function treatmentStepWindow(
       absoluteEnd
     );
     let completionPoint: Date | undefined;
-    if (recurrence?.count !== undefined || arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate)) {
+    // Overlapping capped cycles cannot close an exact-count phase using
+    // its LOCAL pre-cap completion point: earlier accepted administrations
+    // from another cycle may defer this component's third actual dose.
+    // The shared chronological acceptor owns count completion in that case.
+    if (!deferFiniteCompletion &&
+        (recurrence?.count !== undefined || arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate))) {
       const completion = finiteAdministrationCompletion(
         administration,
         cadence.origin,
@@ -1770,6 +1777,19 @@ function stepOccursInCycle(step: CanonicalCourse["stages"][number], cycleIndex?:
 /** Component-local accepted administrations across repeat-cycle boundaries.
  * Allocate only for a course that actually declares a rolling cap. */
 type RollingCycleUsage = Map<string, string[]>;
+/** A cycle's exact administration count is independent of other cycles.
+ * Shared rolling limits, however, are evaluated globally in timestamp order.
+ * Quota is retained by the pending events of this one member/cycle; no map
+ * of every historical cycle is required. */
+interface UncommittedCycleEvent extends ChronologicalEvent {
+  key: string;
+  member: CanonicalAdministration;
+  quota: { remaining: number | undefined };
+}
+type EmitCycleOpportunity = (
+  iso: string, key: string, member: CanonicalAdministration,
+  quota: {remaining: number | undefined}
+) => void;
 function hasRollingCycleLimit(course: CanonicalCourse): boolean {
   for (const stage of course.stages)
     for (const component of stage.administrations)
@@ -1777,6 +1797,28 @@ function hasRollingCycleLimit(course: CanonicalCourse): boolean {
         return true;
   return false;
 }
+/** One simple stage with no explicit cross-cycle duration, finite count,
+ * or relative boundary cannot extend its own administration horizon.
+ * Retain the scalar capped-cycle fast path without recomputing a full
+ * treatment window just to discover a provably absent overlap. */
+function definitelyNonOverlappingCycle(course: CanonicalCourse): boolean {
+  if (course.stages.length !== 1) return false;
+  const stage = course.stages[0];
+  if (stage.start || stage.end) return false;
+  for (const member of stage.administrations) {
+    const repeat = member.schedule?.recurrence;
+    if (member.phaseOrigin || member.phaseOriginIssue ||
+        member.anchoredLength || member.delayMinutes ||
+        repeat?.courseLength || repeat?.courseLengthRange ||
+        repeat?.calendarWindow?.end || repeat?.calendarWindow?.start ||
+        repeat?.count !== undefined || repeat?.countMax !== undefined ||
+        repeat?.occurrenceDuration !== undefined ||
+        repeat?.startOffset || repeat?.endOffset ||
+        member.schedule?.explicitEvents?.length) return false;
+  }
+  return true;
+}
+
 function rollingCycleKey(stage: number, component: number): string {
   return stage + ":" + component;
 }
@@ -1836,7 +1878,8 @@ function scheduleTreatmentRelativeCourse(
   cycleDefaultEnd?: Date,
   cycleIndex?: number,
   sourceClock?: TreatmentWallClock,
-  rollingUsage?: RollingCycleUsage
+  rollingUsage?: RollingCycleUsage,
+  collect?: EmitCycleOpportunity
 ): string[] {
   const timeZone = options.timeZone ?? options.config?.timeZone;
   if (!timeZone) throw new Error("timeZone is required for relative treatment-step scheduling");
@@ -1859,7 +1902,8 @@ function scheduleTreatmentRelativeCourse(
       sourceClock,
       predecessorClock,
       options,
-      predecessorPoint
+      predecessorPoint,
+      Boolean(collect)
     );
     for (let memberIndex = 0; memberIndex < window.administrations.length; memberIndex++) {
       const member = window.administrations[memberIndex];
@@ -1869,21 +1913,34 @@ function scheduleTreatmentRelativeCourse(
       if (effectiveEnd && from >= effectiveEnd) continue;
       const effectiveFrom = from > member.eligibleFrom ? from : member.eligibleFrom;
       const original = member.administration;
-      const execution = rollingUsage && effectiveEnd && original.schedule?.recurrence
-        ? { ...original,
-            phaseOrigin: undefined, phaseOriginIssue: undefined,
-            schedule: { ...original.schedule, recurrence: {
-              ...original.schedule.recurrence,
-              // The resolved stage/cycle end is an exclusive upper bound.
-              // Bound generation BEFORE enumerating, not after producing
-              // 10,000 future candidates only to discard nearly all of them.
-              calendarWindow: {
-                ...original.schedule.recurrence.calendarWindow,
-                end: new Date(effectiveEnd.getTime() - 1).toISOString()
-              }
-            } }
-          }
-        : { ...original, phaseOrigin: undefined, phaseOriginIssue: undefined };
+      const originalRepeat = original.schedule?.recurrence;
+      const quota = collect && originalRepeat
+        ? { remaining: repeatOccurrenceCap(originalRepeat) } : { remaining: undefined };
+      // Overlapping cycles must first emit UNCOMMITTED opportunities.
+      // Their caps and count are evaluated later in global timestamp order,
+      // not prematurely while iterating the source cycle ordinal.
+      const counted = collect && originalRepeat &&
+        !isSingleAdministrationRepeat(originalRepeat)
+        ? { ...originalRepeat, count: undefined, countMax: undefined,
+            occurrenceCap: undefined } : originalRepeat;
+      const execution: CanonicalAdministration = {
+        ...original,
+        phaseOrigin: undefined,
+        phaseOriginIssue: undefined,
+        ...(collect ? { limits: original.limits?.filter((item) => item.scope !== "period") } : {}),
+        ...((collect || rollingUsage) && effectiveEnd && originalRepeat ? {
+          schedule: { ...original.schedule, recurrence: {
+            ...counted,
+            ...(collect ? { occurrenceCap: undefined } : {}),
+            // The resolved stage/cycle end is exclusive. Clip generation
+            // BEFORE enumerating, rather than asking for 10,000 later dates.
+            calendarWindow: {
+              ...originalRepeat.calendarWindow,
+              end: new Date(effectiveEnd.getTime() - 1).toISOString()
+            }
+          } }
+        } : {})
+      };
       const times = nextDueDoses(
         execution,
         {
@@ -1891,17 +1948,23 @@ function scheduleTreatmentRelativeCourse(
           from: effectiveFrom,
           orderedAt: member.recurrenceOrigin,
           limit,
-          ...(rollingUsage ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) } : {}),
+          ...(collect ? {priorDoseTimes:undefined} : rollingUsage
+            ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) }
+            : {}),
           ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
         } as PhaseCountOptions
       );
       let history = rollingUsage?.get(key);
       for (const at of times) {
         if (effectiveEnd && Date.parse(at) >= effectiveEnd.getTime()) break;
-        doses.push(at);
-        if (rollingUsage) {
-          if (!history) rollingUsage.set(key, history = []);
-          history.push(at);
+        if (collect) {
+          collect(at,key,original,quota);
+        } else {
+          doses.push(at);
+          if (rollingUsage) {
+            if (!history) rollingUsage.set(key, history = []);
+            history.push(at);
+          }
         }
       }
     }
@@ -1913,7 +1976,7 @@ function scheduleTreatmentRelativeCourse(
       ? getTimeParts(window.completionPoint, timeZone)
       : window.capClock;
   }
-  return doses.sort((left, right) => Date.parse(left) - Date.parse(right)).slice(0, limit);
+  return collect ? [] : doses.sort((left, right) => Date.parse(left) - Date.parse(right)).slice(0, limit);
 }
 /** One clock-ownership decision for both repeated-course scheduling
  * and supply. Integral calendar day/week/month/year cycles keep the
@@ -1963,6 +2026,189 @@ function cycleOrdinalNearQuery(
   return elapsed ? Math.max(0, Math.floor((from.getTime() - anchor.getTime()) / elapsed) - 1) : 0;
 }
 
+/** A cap ledger uses one chronologically appended stream per component.
+ * Each accepted timestamp advances each cap's head at most once; unlike
+ * repeatedly calling applyQuantityCaps on copied histories, this is O(C)
+ * amortized per opportunity (C = authored number of caps). */
+interface ChronologicalCapLedger {
+  caps: CanonicalOccurrenceCapExpr[];
+  times: number[];
+  heads: number[];
+  occurrence?: CanonicalOccurrenceCapExpr;
+  occurrenceKey?: string;
+  occurrenceUsed: number;
+  /** Supplied actual doses grouped once, not rescanned for every bucket. */
+  priorByBucket?: Map<string, number[]>;
+}
+function upperBoundTimestamp(sorted: readonly number[], target: number): number {
+  let low = 0,
+    high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (sorted[mid] <= target) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+/** Supported overlapping treatment cycles require global chronological
+ * acceptance. Source cycles are generated in ordinal order, but their
+ * opportunities are queued until the next cycle's start proves that NO
+ * later cycle can precede them. Shared rolling caps then see earlier
+ * administrations before later ones. Scheduling and numeric supply both
+ * consume this SAME event stream, without a second cap algorithm.
+ *
+ * This specialized path is invoked ONLY when a rolling-capped first cycle
+ * actually extends past its successor's start; nonoverlap scalar/staged
+ * paths and the efficient ordinary repeated-course loop remain unchanged. */
+function chronologicalRepeatedEvents(
+  course: CanonicalCourse,
+  options: NextDueDoseOptions,
+  zone: string,
+  until: Date | undefined,
+  resultLimit: number,
+  context?: MedicationContext
+): UncommittedCycleEvent[] {
+  const from = coerceDate(options.from, "from"),
+    anchor = options.orderedAt === undefined ? from : coerceDate(options.orderedAt, "orderedAt");
+  const advance = durationStepper(course.cycleInterval, zone, anchor);
+  if (!advance)
+    throw new MedicationQuantityCalculationError(
+      "repeat-cycle-unresolved",
+      "The supplied repeatCycle does not define a usable numeric interval."
+    );
+  const firstClock = getTimeParts(anchor, zone);
+  const calendar = !!normalizedCalendarInterval(
+    course.cycleInterval?.value,
+    parseBoundsDurationUnit(course.cycleInterval)
+  );
+  const singleCycle = { ...course, cycleInterval: undefined };
+  const queue = new ChronologicalQueue<UncommittedCycleEvent>();
+  const ledgers = new Map<string, ChronologicalCapLedger>();
+  const results: UncommittedCycleEvent[] = [];
+  const prior: number[] = [];
+  for (const stamp of options.priorDoseTimes ?? []) prior.push(coerceDate(stamp, "priorDoseTimes").getTime());
+  if (prior.length > 1) prior.sort((a, b) => a - b);
+  let serial = 0;
+  const emit: EmitCycleOpportunity = (iso, key, member, quota) => {
+    const at = Date.parse(iso);
+    if (!Number.isFinite(at) || (until && at >= until.getTime())) return;
+    queue.push({ at, iso, key, member, quota, serial: serial++ });
+  };
+  const accept = (event: UncommittedCycleEvent): boolean => {
+    if (event.quota.remaining !== undefined && event.quota.remaining <= 0) return false;
+    let state = ledgers.get(event.key);
+    if (!state) {
+      const caps = executableQuantityCaps(event.member, context);
+      const occurrence = getTimingOccurrenceCap(event.member.schedule?.recurrence);
+      let priorByBucket: Map<string, number[]> | undefined;
+      if (occurrence && prior.length) {
+        priorByBucket = new Map();
+        for (const timestamp of prior) {
+          const bucket = occurrenceCapBucketKey(new Date(timestamp), occurrence, zone);
+          let values = priorByBucket.get(bucket);
+          if (!values) priorByBucket.set(bucket, (values = []));
+          values.push(timestamp);
+        }
+      }
+      state = {
+        caps,
+        times: [],
+        heads: new Array(caps.length).fill(0),
+        occurrence,
+        occurrenceUsed: 0,
+        priorByBucket,
+      };
+      ledgers.set(event.key, state);
+    }
+    const at = event.at;
+    const date = new Date(at);
+    for (let index = 0; index < state.caps.length; index++) {
+      const cap = state.caps[index],
+        since = quantityCapWindowStart(date, cap, zone);
+      let head = state.heads[index];
+      while (head < state.times.length && state.times[head] <= since) head++;
+      state.heads[index] = head;
+      const previously = prior.length
+        ? upperBoundTimestamp(prior, at) - upperBoundTimestamp(prior, since)
+        : 0;
+      if (state.times.length - head + previously >= cap.max) return false;
+    }
+    const occurrence = state.occurrence;
+    if (occurrence) {
+      const bucket = occurrenceCapBucketKey(date, occurrence, zone);
+      if (state.occurrenceKey !== bucket) {
+        state.occurrenceKey = bucket;
+        state.occurrenceUsed = 0;
+      }
+      // Binary-search only this bucket's supplied dates. Later supplied
+      // timestamps inside the same bucket must not count before they occur.
+      const supplied = state.priorByBucket?.get(bucket);
+      const past = supplied ? upperBoundTimestamp(supplied, at) : 0;
+      if (state.occurrenceUsed + past >= occurrence.max) return false;
+    }
+    if (event.quota.remaining !== undefined) event.quota.remaining--;
+    if (state.caps.length) {
+      state.times.push(at);
+      if (state.times.length > 256) {
+        let trim = state.heads[0];
+        for (let index = 1; index < state.heads.length; index++)
+          if (state.heads[index] < trim) trim = state.heads[index];
+        if (trim >= 128) {
+          state.times.splice(0, trim);
+          for (let index = 0; index < state.heads.length; index++) state.heads[index] -= trim;
+        }
+      }
+    }
+    if (occurrence) state.occurrenceUsed++;
+    return true;
+  };
+  const drain = (before: number): void => {
+    let next = queue.first();
+    while (next && next.at < before) {
+      const event = queue.pop()!;
+      if (accept(event) && event.at >= from.getTime()) {
+        results.push(event);
+        if (results.length >= resultLimit) return;
+      }
+      next = queue.first();
+    }
+  };
+  let cycleStart = anchor,
+    cycleIndex = 0;
+  while (
+    cycleIndex < 10000 &&
+    (!until || cycleStart < until) &&
+    course.stages.some((step) => stepOccursInCycle(step, cycleIndex))
+  ) {
+    const next = advance(cycleStart);
+    if (!next || next <= cycleStart) break;
+    const sourceClock = repeatedCycleWallClock(calendar, firstClock, cycleStart, zone);
+    scheduleTreatmentRelativeCourse(
+      singleCycle,
+      {
+        ...options,
+        from: cycleStart,
+        orderedAt: cycleStart,
+        priorCount: undefined,
+        priorDoseTimes: undefined,
+        limit: 10000,
+      },
+      next,
+      cycleIndex,
+      sourceClock,
+      undefined,
+      emit
+    );
+    drain(next.getTime());
+    cycleStart = next;
+    cycleIndex++;
+    if (results.length >= resultLimit) break;
+  }
+  if (results.length < resultLimit) drain(until?.getTime() ?? Number.POSITIVE_INFINITY);
+  return results;
+}
+
 function scheduleRepeatedCourse(
   course: CanonicalCourse,
   options: NextDueDoseOptions,
@@ -1986,6 +2232,17 @@ function scheduleRepeatedCourse(
   const results: string[] = [];
   const singleCycle = { ...course, cycleInterval: undefined };
   const rollingUsage = hasRollingCycleLimit(singleCycle) ? new Map<string, string[]>() : undefined;
+  if(rollingUsage && !definitelyNonOverlappingCycle(singleCycle)){
+    const nextCycle=advance(anchor);
+    if(nextCycle&&repeatedCourseHorizon(singleCycle,anchor,nextCycle,timeZone,firstClock,options)>nextCycle){
+      // Only overlapping capped courses need the chronological merge.
+      // Both scheduling and supply share the same accepted event stream.
+      const events=chronologicalRepeatedEvents(course,options,timeZone,undefined,limit);
+      const ordered:string[]=[];
+      for(const event of events)ordered.push(event.iso);
+      return ordered;
+    }
+  }
   let cycleStart = anchor;
   let guard = 0;
   const historicalOrdinal = cycleOrdinalNearQuery(course.cycleInterval, anchor, from, timeZone);
@@ -2480,7 +2737,10 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const unconstrained: CanonicalAdministration = withoutOccurrenceCap({
       ...plainDosage,
       limits: one.limits?.filter((item) => item.scope !== "period"),
-      ...(exactCount !== undefined && sourceRepeat ? {
+      ...(exactCount !== undefined && sourceRepeat && !isSingleAdministrationRepeat(sourceRepeat) ? {
+        // Only multi-opportunity recurrences need their count removed
+        // while evaluating eligibility. An authored one-time count=1
+        // has NO cadence without this identity; keep its unique instant.
         schedule: { ...one.schedule, recurrence: {
           ...sourceRepeat, count: undefined, countMax: undefined
         } }
@@ -4848,6 +5108,52 @@ function calculateCourseTotalUnits(
     const singleCycle = { ...course, cycleInterval: undefined };
     const priorCycleUsage = hasRollingCycleLimit(singleCycle)
       ? new Map<string, string[]>() : undefined;
+    const firstCycleEnd=cycleAdvance(anchor);
+    if(priorCycleUsage && !definitelyNonOverlappingCycle(singleCycle) && firstCycleEnd &&
+        repeatedCourseHorizon(singleCycle,anchor,firstCycleEnd,zone,firstClock,options)>firstCycleEnd){
+      // The identical chronological acceptance stream governs numeric
+      // supply; cycle-ordinal summation is incorrect for overlapping
+      // event windows with a shared rolling cap.
+      const events=chronologicalRepeatedEvents(course,{
+        ...options,from:queryStart,orderedAt:anchor,limit:10000
+      },zone,queryEnd,Number.POSITIVE_INFINITY,options.context);
+      const byMember=new Map<string,{member:CanonicalAdministration;dates:string[]}>();
+      for(const event of events){
+        let group=byMember.get(event.key);
+        if(!group) {
+          group={member:event.member,dates:[]};
+          byMember.set(event.key,group);
+        }
+        group.dates.push(event.iso);
+      }
+      const entries:Array<{total:TotalUnitsResult;unit:string|undefined}>=[];
+      for(const group of byMember.values()){
+        const dosage:CanonicalAdministration={
+          ...group.member,
+          delayMinutes:undefined,phaseOrigin:undefined,phaseOriginIssue:undefined,
+          limits:group.member.limits?.filter(limit=>limit.scope!=="period"),
+          // Eligibility was already evaluated on each concrete event.
+          // Without a patient-specific condition evaluator, the accepted
+          // opportunities still represent a MAXIMUM rather than a promise
+          // of doses administered, so retain that typed condition as an
+          // explanation source for calculateTotalUnitsSingle.
+          predicate:options.evaluateCondition?undefined:group.member.predicate,
+          calendarPredicate:options.evaluateCondition?undefined:group.member.calendarPredicate,
+          excludedDates:undefined,excludedWeekdays:undefined,
+          schedule:{explicitEvents:group.dates}
+        };
+        const measured=prepareMeasuredDose(dosage,options);
+        const total=calculateTotalUnitsSingle({
+          ...options,dosage,from:queryStart,orderedAt:anchor,
+          durationValue:(queryEnd.getTime()-queryStart.getTime())/1000,
+          durationUnit:DurationUnit.Second,roundToMultiple:undefined,
+          evaluateCondition:undefined,
+        });
+        entries.push({total,unit:measured.amounts?.[0]?.quantity?.unit??
+          measured.amounts?.[0]?.quantity?.code});
+      }
+      return sumCourseUnits(entries,options);
+    }
     let cycleStart = anchor;
     let guard = 0;
     while (

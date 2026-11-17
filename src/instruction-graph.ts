@@ -4250,8 +4250,19 @@ export function instructionGraphSourceConflictsWithDose(
   clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
 ): boolean {
   const graph = clause.instructionGraph;
-  const owner = graph && primaryDoseAmountOwner(graph, clause, options);
-  return Boolean(owner && primaryActionAmountConflicts(owner, clause.dose));
+  const dose = clause.dose;
+  if (!graph || !dose || dose.defaulted ||
+      (dose.value === undefined && !dose.range)) return false;
+  const owner = primaryDoseAmountOwner(graph, clause, options);
+  if (!owner) {
+    // HPSG primary-dose facts need not be repeated in auxiliary actions.
+    // Check typed evidence or the saved R5 edit fingerprint, not raw text.
+    if (dose.sourceDoseVerified) return false;
+    for (const evidence of clause.evidence ?? [])
+      if (evidence.lexicalCategory === "dose") return false;
+    return true;
+  }
+  return primaryActionAmountConflicts(owner, dose);
 }
 
 export function instructionGraphRichPrimaryAction(

@@ -156,6 +156,28 @@ for (const locale of ["en", "th"]) {
     m.formatSigBatch(parsed.eye.fhir, "long", { locale })
   );
 }
+// Source-preserving formatting has its own clinical ownership and performance
+// boundary. A graph-backed authored dose must be retained when unchanged but
+// never replayed after the R5 dosage quantity is edited.
+const authoredGraphRow = baseline.parseSig("ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา", { locale: "th" })
+  .fhir[0];
+const copiedAuthoredGraphRow = structuredClone(authoredGraphRow);
+const editedGraphRow = structuredClone(authoredGraphRow);
+if (!editedGraphRow?.doseAndRate?.[0]?.doseQuantity)
+  throw new Error("Authoritative roundtrip benchmark requires the parsed quantity");
+editedGraphRow.doseAndRate[0].doseQuantity.value = 2;
+const amountlessGraphRow = baseline.parseSig("ผสมน้ำแล้วดื่ม", { locale: "th" }).fhir[0];
+const addedDoseRow = { ...amountlessGraphRow, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
+add("formatSig", "formatSig/R5-roundtrip-unchanged-thai", (m) =>
+  m.formatSig(copiedAuthoredGraphRow, "long", { locale: "th", realizationMode: "roundtrip" })
+);
+add("formatSig", "formatSig/R5-roundtrip-edited-thai", (m) =>
+  m.formatSig(editedGraphRow, "long", { locale: "th", realizationMode: "roundtrip" })
+);
+add("formatSig", "formatSig/R5-roundtrip-added-dose-thai", (m) =>
+  m.formatSig(addedDoseRow, "long", { locale: "th", realizationMode: "roundtrip" })
+);
+
 add("formatSig", "formatSig/R6-author-source", (m) => m.formatSig(wire, "long"));
 add("formatParseBatch", "formatParseBatch/ordinary", (m) => m.formatParseBatch(parsed.ordinary, "long"));
 add("formatParseBatch", "formatParseBatch/staged", (m) => m.formatParseBatch(parsed.staged, "long"));

@@ -3023,6 +3023,14 @@ describe("November 17 repeated-course caps remain bounded and anchored", () => {
       durationUnit: FhirPeriodUnit.Day,
     });
     expect(supply.totalUnits).toBe(5);
+    // A query BETWEEN admissible two-day administrations catches any
+    // accidental cap reset at the requested from time, unlike the
+    // November 12 query aligned to the first administration.
+    const between="2026-11-13T00:00:00+07:00";
+    expect(nextDueDoses(course,{...base,from:between,limit:1}))
+      .toEqual(["2026-11-14T08:00:00+07:00"]);
+    expect(calculateTotalUnits({...base,from:between,dosage:course,
+      durationValue:1,durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(0);
   });
   it("a 60-day course retains exactly 30 administrations without retaining stale historical limits", () => {
     const next = nextDueDoses(course, { ...base, from: orderedAt, limit: 30 });
@@ -3037,5 +3045,93 @@ describe("November 17 repeated-course caps remain bounded and anchored", () => {
       durationUnit: FhirPeriodUnit.Day,
     });
     expect(supply.totalUnits).toBe(30);
+  });
+});
+
+
+describe("PR14 new review: conditional one-time count ownership", () => {
+  const one={kind:"administration" as const,amounts:[{quantity:{value:1,unit:"tab"}}],
+    schedule:{recurrence:{count:1}},predicate:{kind:"state" as const,name:"symptoms",expected:true,text:"symptoms"}};
+  const options={from:"2026-11-02T00:00:00+07:00",
+    orderedAt:"2026-11-02T00:00:00+07:00",timeZone:"Asia/Bangkok",limit:3};
+  it("retains the single administration when its condition is true",()=>{
+    expect(nextDueDoses(one,{...options,evaluateCondition:()=>true}))
+      .toEqual(["2026-11-02T00:00:00+07:00"]);
+    expect(calculateTotalUnits({...options,dosage:one,durationValue:1,durationUnit:FhirPeriodUnit.Day,
+      evaluateCondition:()=>true}).totalUnits).toBe(1);
+  });
+  it("does not invent a second event when its original condition is false",()=>{
+    expect(nextDueDoses(one,{...options,evaluateCondition:()=>false})).toEqual([]);
+  });
+  it("keeps the authored event at treatment start, not at a later query",()=>{
+    expect(nextDueDoses(one,{...options,from:"2026-11-03T00:00:00+07:00",
+      evaluateCondition:()=>true})).toEqual([]);
+  });
+});
+
+
+describe("PR14 new review: overlapping repeated-course chronological rolling allowance", () => {
+  const anchor="2026-01-01T00:00:00Z";
+  const member={kind:"administration" as const,
+    amounts:[{quantity:{value:1,unit:"tab"}}],
+    schedule:{recurrence:{
+      frequency:1,period:3,periodUnit:FhirPeriodUnit.Day,
+      clocks:["00:00:00"],courseLength:{value:4,unit:"d"}
+    }},
+    limits:[{scope:"period" as const,amount:{value:1,unit:"tab"},
+      period:{value:2,unit:"d"}}]
+  };
+  const course={kind:"course" as const,cycleInterval:{value:1,unit:"d"},
+    stages:[{administrations:[member]}]};
+  const opts={orderedAt:anchor,from:anchor,timeZone:"UTC"};
+  it("commits Jan 3 before Jan 4 even though Jan 4 belongs to the earlier cycle",()=>{
+    const due=nextDueDoses(course,{...opts,limit:6});
+    expect(due).toEqual(["01","03","05","07","09","11"].map(day =>
+      "2026-01-"+day+"T00:00:00+00:00"));
+    expect(due).not.toContain("2026-01-04T00:00:00+00:00");
+    expect(calculateTotalUnits({...opts,dosage:course,durationValue:6,
+      durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(3);
+  });
+  it("keeps prior overlapped history across an arbitrary mid-window query",()=>{
+    const from="2026-01-04T00:00:00Z";
+    expect(nextDueDoses(course,{...opts,from,limit:2}))
+      .toEqual(["2026-01-05T00:00:00+00:00","2026-01-07T00:00:00+00:00"]);
+    expect(calculateTotalUnits({...opts,from,dosage:course,durationValue:2,
+      durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(1);
+  });
+  it("keeps an authored count of 3 after rolling-cap exclusions, within a six-day stage",()=>{
+    // Exactly one authored cycle, with three ACTUAL administrations. A
+    // synthetic Jan 3 phase completion from the raw count must not
+    // suppress its third eligible Jan 5 administration.
+    const stageMember={...member,schedule:{recurrence:{
+      frequency:1,period:1,periodUnit:FhirPeriodUnit.Day,
+      clocks:["00:00:00"],courseLength:{value:6,unit:"d"},count:3
+    }}};
+    const single={...course,stages:[{count:1,administrations:[stageMember]}]};
+    expect(nextDueDoses(single,{...opts,limit:4}))
+      .toEqual(["01","03","05"].map(day=>"2026-01-"+day+"T00:00:00+00:00"));
+    expect(calculateTotalUnits({...opts,dosage:single,durationValue:6,
+      durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(3);
+  });
+  it("defers each cycle's exact count until three ACTUAL capped administrations are accepted",()=>{
+    const dose={...member,schedule:{recurrence:{
+      frequency:1,period:1,periodUnit:FhirPeriodUnit.Day,
+      clocks:["00:00:00"],courseLength:{value:10,unit:"d"},count:3
+    }}};
+    const twice={...course,stages:[{count:2,administrations:[dose]}]};
+    // Cycle 0 owns Jan 1/3/5; cycle 1's Jan 2/4/6 are suppressed by
+    // those earlier events. Its own accepted count is Jan 7/9/11.
+    const expected=["01","03","05","07","09","11"]
+      .map(day=>"2026-01-"+day+"T00:00:00+00:00");
+    expect(nextDueDoses(twice,{...opts,limit:7})).toEqual(expected);
+    expect(calculateTotalUnits({...opts,dosage:twice,durationValue:12,
+      durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(6);
+  });
+  it("does not reset allowance or count a dose for the in-between day",()=>{
+    const from="2026-01-02T00:00:00Z";
+    expect(nextDueDoses(course,{...opts,from,limit:1}))
+      .toEqual(["2026-01-03T00:00:00+00:00"]);
+    expect(calculateTotalUnits({...opts,from,dosage:course,durationValue:1,
+      durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(0);
   });
 });

@@ -138,6 +138,9 @@ function applySingleDoseDefault(
     isDiscreteUnit(state.unit)
   ) {
     state.dose = 1;
+    // Keep the default distinguishable from a later clinically edited dose.
+    // This is not a FHIR field or a rendered-word heuristic.
+    state.primaryClause.dose!.defaulted = true;
   }
 }
 

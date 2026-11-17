@@ -8,6 +8,32 @@ import { administrationFromClause, courseFromAdministrations, courseFromParallel
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
+/** Provenance of freshly parsed, graph-backed R5 rows. A primary
+ * HPSG dose may not appear among the auxiliary graph's Amount arguments.
+ * Identity membership avoids regenerating an entire long instruction just
+ * to recover information the same parser has already established.
+ * This weak set is NOT a cached clinical model, not serialized, and does
+ * not freeze/copy any returned values. Re-imports have their own source
+ * verification and externally edited copies cannot inherit membership. */
+const FRESH_HPSG_DOSE_SOURCE = new WeakSet<FhirDosage>();
+
+/** Roundtrip source reuse requires clinical ownership evidence. Fresh HPSG
+ * rows carry it by identity; serialized R5 rows carry an existing edit
+ * fingerprint. A marker-less foreign row has NO trusted dose ownership, so
+ * regenerate its canonical display instead of running an entire second
+ * formatter merely to guess whether its old source text is still current.
+ * This is source-replay policy, not input hardening or a defensive clone. */
+function markOriginalGraphDose(
+  dosage: FhirDosage,
+  clause: CanonicalSigClause,
+  options: FormatOptions | undefined
+): void {
+  const amount = clause.dose;
+  if (options?.realizationMode !== "roundtrip" || !amount || !clause.instructionGraph) return;
+  if (FRESH_HPSG_DOSE_SOURCE.has(dosage) || dosageMatchesSavedProjection(dosage))
+    amount.sourceDoseVerified = true;
+}
+
 /** Native editing/projection API. Existing .fhir / .fhirNext fields retain
  * their established versions; canonical is the internal source of meaning. */
 export type { CanonicalCourse, CanonicalStage, CanonicalAdministration,
@@ -34,6 +60,7 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
+  dosageMatchesSavedProjection,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
@@ -1100,6 +1127,11 @@ export function formatSig(
     hasDisplayRelevantModifier
   )) return dosage.text;
   const clause = canonicalFromFhir(dosage);
+  // Roundtrip can reuse an HPSG-owned source quantity omitted from the
+  // auxiliary action graph only when the persisted R5 clinical projection
+  // STILL matches. A newly added/edited dose invalidates that source replay.
+  // Other format modes never pay this fingerprint walk.
+  markOriginalGraphDose(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const rendered = formatCanonicalClause(clause, style, localization, options);
   let displayed = displayCondition
@@ -1297,6 +1329,10 @@ function fromFhirDosageInternal(
     : undefined;
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
   const clause = canonicalFromFhir(dosage);
+  // The saved fingerprint proves that a primary source dose still matches
+  // its exported R5 clinical fields, even if the auxiliary instruction
+  // graph contains no Amount. Only roundtrip source reuse needs this hash.
+  markOriginalGraphDose(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||
@@ -1593,6 +1629,13 @@ function buildParseResult(
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
+  // Save only the parser's actual HPSG dose provenance for this freshly
+  // created row. An inferred default has no authored dose evidence.
+  if(clause.dose && clause.instructionGraph)
+    for(const evidence of clause.evidence??[])if(evidence.lexicalCategory==="dose"){
+      FRESH_HPSG_DOSE_SOURCE.add(fhir);
+      break;
+    }
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];

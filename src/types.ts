@@ -1534,6 +1534,13 @@ export interface CanonicalDoseRange {
 }
 
 export interface CanonicalDoseExpr {
+  /** Explicitly assumed one discrete dose from caller policy, not source
+   * evidence. Roundtrip source wording can remain unchanged for this case. */
+  defaulted?: boolean;
+  /** The imported R5 row still matches its persisted clinical fingerprint.
+   * Only source-preserving realization consults this fact; canonical
+   * execution ignores it. No source wording is reparsed to infer a dose. */
+  sourceDoseVerified?: boolean;
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;

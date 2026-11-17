@@ -2572,3 +2572,75 @@ describe("November 17 review: institution dose action owns prior quantitative in
     }
   });
 });
+
+
+describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
+  it("retains an original HPSG-owned Thai dose without replaying a changed dose", () => {
+    const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+    const parsed = parsePublicSig(source, { locale: "th" });
+    const row = parsed.items[0].fhir;
+    expect(formatSig(row, "long", { locale: "th", realizationMode: "roundtrip" }))
+      .toBe(source);
+    const entry = row.doseAndRate![0];
+    if (!entry.doseQuantity) throw new Error("Expected authored HPSG dose");
+    const changed = {
+      ...row,
+      doseAndRate: [{ ...entry, doseQuantity: { ...entry.doseQuantity, value: 2 } }]
+    };
+    const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(text).toMatch(/(?:2|สอง)/u);
+    expect(text).not.toBe(source);
+    expect(entry.doseQuantity.value).toBe(1);
+  });
+  it("rechecks the live dose after a previously verified external R5 row is edited in place", () => {
+    const source="ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+    // The authoritative persisted top-level R5 row owns the saved edit
+    // fingerprint; per-item parser previews intentionally do not.
+    const row=structuredClone(parsePublicSig(source,{locale:"th"}).fhir[0]);
+    const show=()=>formatSig(row,"long",{locale:"th",realizationMode:"roundtrip"});
+    expect(show()).toBe(source);
+    const dose=row.doseAndRate?.[0]?.doseQuantity;
+    if(!dose)throw new Error("authored dose missing");
+    dose.value=2;
+    const changed=show();
+    expect(changed).not.toBe(source);
+    expect(changed).toMatch(/(?:2|สอง)/u);
+    dose.value=1;
+    expect(show()).toBe(source);
+  });
+
+  it("displays a newly introduced dose in an imported amountless Thai R5 row", () => {
+    const source = "ผสมน้ำแล้วดื่ม";
+    const row = parsePublicSig(source, { locale: "th" }).items[0].fhir;
+    const changed = { ...row, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
+    const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(text).toMatch(/(?:2|สอง)/u);
+    expect(text).toMatch(/(?:เม็ด|tablet)/u);
+    expect(text).not.toBe(source);
+  });
+});
+
+describe("PR14 new review: amountless authored source with a later canonical dose",()=>{
+  for(const [source,locale] of [
+    ["Mix with water then swallow","en"],
+    ["ผสมน้ำแล้วดื่ม","th"]
+  ] as const){
+    it("retains a canonical quantity added to amountless "+locale+" source",()=>{
+      const parsed=parsePublicSig(source);
+      const clause=parsed.meta.canonical.clauses[0];
+      expect(clause.instructionGraph?.actions.length).toBeGreaterThan(0);
+      expect(clause.dose?.value).toBeUndefined();
+      const edited={...clause,dose:{value:1,unit:"tab"}};
+      const output=formatCanonicalClause(edited,"long",resolveSigLocalization(locale),
+        {realizationMode:"roundtrip",locale});
+      expect(output).not.toBe(source);
+      expect(output).toMatch(/(?:1|one|หนึ่ง)/ui);
+      expect(output).toMatch(/(?:tablet|tab|เม็ด)/ui);
+      expect(instructionGraphSourceConflictsWithDose(edited)).toBe(true);
+    });
+  }
+  it("does not treat an empty dose object as an authored administered quantity",()=>{
+    const clause=parsePublicSig("Mix with water then swallow").meta.canonical.clauses[0];
+    expect(instructionGraphSourceConflictsWithDose({...clause,dose:{}})).toBe(false);
+  });
+});

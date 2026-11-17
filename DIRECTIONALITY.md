@@ -375,3 +375,25 @@ The all-public benchmark covers all legacy exports including autocomplete
 interchange, scheduling and supply, not only parseSig/formatSig.
 The 4% regression ceiling applies independently to each measured domain
 against the exact built origin/master, never to an aggregate median.
+
+
+## 2026-11-17 — Chronological overlap and source replay ownership
+
+Overlapping capped repeat cycles MUST accept actual administrations
+in timestamp order, independent of source cycle ordinal. A typed
+min-heap is used ONLY when a full first-cycle horizon proves real
+overlap; ordinary capped one-stage courses use a cheap structural
+non-overlap proof and their established fast path. Supply and nextDue
+consume identical accepted timestamps and their clinical rolling-cap
+and finite-count allowance; neither makes a second calendar engine.
+
+FHIR R5 and current R6 are independent projections from canonical
+meaning. The ancillary instruction graph can lack an Amount even
+when the HPSG primary dosage owns an authored quantity. Source
+roundtrip may reuse that old text only with source evidence or
+verified persisted R5 projection. Editing a quantity invalidates
+its evidence and uses the typed canonical realizer. An inferred
+default does not claim to be an authored source quantity.
+Persisted source evidence is verified without reparsing or emitting
+a new FHIR metadata field; the ordinary parsing and formatting
+hot paths never pay a second realization/graph traversal.
