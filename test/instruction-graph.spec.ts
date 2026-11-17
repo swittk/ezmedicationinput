@@ -1568,9 +1568,10 @@ describe("composed instruction concepts", () => {
     }
   });
 
-  it("clones constituent codings and preserves an explicitly supplied expression as one coding", () => {
+  it("reuses immutable constituent definitions and preserves an explicitly supplied expression as one coding", () => {
     const first = getMedicationInstructionConcept("new_patch")!;
-    first.components![0].coding!.code = "changed";
+    expect(getMedicationInstructionConcept("new_patch")).toBe(first);
+    expect(Object.isFrozen(first)).toBe(false);
     expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("733005001");
     const expression = "22253000:363698007=(78883009:272741003=24028007)";
     const frames = parseInstructionActions("Avoid toe discomfort", 0, {
@@ -2513,4 +2514,27 @@ describe("review 2026-11-16 19h: incomplete graph quantities do not invent amoun
       expect(JSON.stringify(frame)).toBe(original);
     }
   );
+});
+
+
+describe("indexed instruction metadata import",()=>{
+  it("keeps first-value ownership, repeated children and externally edited input visible",()=>{
+    const source="Dissolve 2 tablets in water, then drink slowly";
+    const actions=parseInstructionActions(source);
+    const wire=buildInstructionGraphExtension({sourceText:source,sourceLocale:"en",actions})!;
+    const first=wire.extension!.find(item=>item.url==="action")!;
+    const lemma=first.extension!.find(item=>item.url==="predicateLemma")!;
+    const original=lemma.valueString;
+    const originalArguments=parseInstructionGraphExtension([wire])!.actions[0].args;
+    first.extension!.push({url:"predicateLemma",valueString:"not-the-owner"});
+    first.extension!.push({url:"__proto__",valueString:"ordinary unknown metadata"});
+    expect(parseInstructionGraphExtension([wire])?.actions.map(action=>action.predicate.lemma))
+      .toEqual(actions.map(action=>action.predicate.lemma));
+    // A later external input edit is not hidden by any persisted identity index.
+    lemma.valueString="edited-source-action";
+    expect(parseInstructionGraphExtension([wire])?.actions[0].predicate.lemma).toBe("edited-source-action");
+    expect(original).toBe("dissolve");
+    expect(parseInstructionGraphExtension([wire])?.actions[0].args)
+      .toEqual(originalArguments);
+  });
 });

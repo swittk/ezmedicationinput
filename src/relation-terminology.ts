@@ -1,7 +1,7 @@
 import source from "./relation-terminology.json";
 import { baseLanguageTag, localizedConfig, localizedValue } from "./localization";
 import { AdviceRelation, FhirCoding } from "./types";
-import { objectEntries, objectFromEntries, objectValues } from "./utils/object";
+import { objectEntries, objectValues } from "./utils/object";
 
 type SupportedLocale = string;
 const BODY_SITE_LOCATIVE_RELATION_VALUES = [
@@ -117,8 +117,20 @@ interface RelationTerminologySource {
   bodySiteRelations?: SourceBodySiteRelation[];
 }
 
+/** Exact lexical normalization is a pure string operation. Reuse bounded
+ * results across parsing/suggestions without caching mutable clinical data. */
+const NORMALIZED_RELATION_LIMIT=2048;
+const normalizedRelations=new Map<string,string>();
 function normalize(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/gu, " ");
+  const known=normalizedRelations.get(value);
+  if(known!==undefined)return known;
+  const normalized=value.trim().toLowerCase().replace(/\s+/gu," ");
+  if(value.length<=128){
+    if(normalizedRelations.size>=NORMALIZED_RELATION_LIMIT)
+      normalizedRelations.delete(normalizedRelations.keys().next().value!);
+    normalizedRelations.set(value,normalized);
+  }
+  return normalized;
 }
 
 function localeKey(locale: string): SupportedLocale {
@@ -281,29 +293,39 @@ export function resolveActionRelationSurfaceCandidates(surface: string): readonl
   return ACTION_RELATION_INDEX.get(normalize(surface)) ?? [];
 }
 
+/** The declarative relation tables are immutable after initialization.
+ * Index an ambiguous surface once, not once per parse/grammar lookup. */
+const actionRelationPreferences=new Map<string,{
+  first:AdviceRelation;byClass:ReadonlyMap<string,AdviceRelation>
+}>();
 export function resolveActionRelationSurface(
-  surface: string,
-  preferredSemanticClasses?: readonly string[]
-): AdviceRelation | undefined {
-  const normalized = normalize(surface);
-  const candidates = ACTION_RELATION_INDEX.get(normalized) ?? [];
-  if (!candidates.length) return undefined;
-  for (const semanticClass of preferredSemanticClasses ?? []) {
-    const preferred = candidates.find((candidate) =>
-      ADVICE_BY_RELATION.get(candidate)?.semanticClass === semanticClass
-    );
-    if (preferred) return preferred;
+  surface:string,preferredSemanticClasses?:readonly string[]
+):AdviceRelation|undefined {
+  const normalized=normalize(surface),candidates=ACTION_RELATION_INDEX.get(normalized);
+  if(!candidates?.length)return undefined;
+  if(candidates.length===1)return candidates[0];
+  let index=actionRelationPreferences.get(normalized);
+  if(!index){
+    const byClass=new Map<string,AdviceRelation>(),members=new Set(candidates);
+    for(const candidate of candidates){
+      const semanticClass=ADVICE_BY_RELATION.get(candidate)?.semanticClass;
+      if(semanticClass!==undefined&&!byClass.has(semanticClass))byClass.set(semanticClass,candidate);
+    }
+    let first=candidates[0],found=false;
+    for(const locale of Object.keys(LOCALE_LEXEMES)){
+      for(const lexeme of LOCALE_LEXEMES[locale].get(normalized)??[]){
+        if(!lexeme.defaultForAmbiguousSurface)continue;
+        if(members.has(lexeme.canonical as AdviceRelation))first=lexeme.canonical as AdviceRelation;
+        found=true;break;
+      }
+      if(found)break;
+    }
+    index={first,byClass};actionRelationPreferences.set(normalized,index);
   }
-  if (candidates.length === 1) return candidates[0];
-  const localeCandidates = objectValues(LOCALE_LEXEMES)
-    .map((index) => index.get(normalized) ?? [])
-    .reduce((all, values) => all.concat(values), [] as RelationLocaleLexeme[]);
-  const preferredCanonical = localeCandidates.find((lexeme) => lexeme.defaultForAmbiguousSurface)?.canonical;
-  if (preferredCanonical) {
-    const preferred = candidates.find((candidate) => candidate === preferredCanonical);
-    if (preferred) return preferred;
+  for(const semanticClass of preferredSemanticClasses??[]){
+    const preferred=index.byClass.get(semanticClass);if(preferred)return preferred;
   }
-  return candidates[0];
+  return index.first;
 }
 
 export function resolveActionRelationSurfaceByGrammarFeature(

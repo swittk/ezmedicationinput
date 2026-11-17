@@ -1,0 +1,614 @@
+/** Public API performance gate, not just parse/format/supply.
+ *
+ * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
+ *   [--only regex] [--rounds 9] [--target-ms 12] [--smoke] [--json report.json]
+ *
+ * Each exported function has a fixture or an explicit new-API classification.
+ * Ordinary and adversarial API families are separate measurements; a fast
+ * scheduler cannot hide slow suggestions/import/formatting. Paired alternating
+ * runs share inputs, JIT warmup and invocation counts. No timing assertion lives
+ * inside correctness tests. Tiny noisy APIs report both absolute time and spread.
+ */
+import { performance } from "node:perf_hooks";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpus } from "node:os";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+const argv = process.argv.slice(2),
+  value = (flag, fallback) => {
+    const i = argv.indexOf(flag);
+    return i < 0 ? fallback : argv[i + 1];
+  };
+const baselinePath = value("--baseline", process.env.EZMED_BASELINE);
+if (!baselinePath) throw new Error("Supply --baseline pointing to the built origin/master package");
+const baseline = await import(pathToFileURL(resolve(baselinePath)).href);
+const candidate = await import(new URL("../dist/index.js", import.meta.url));
+const filter = new RegExp(value("--only", ".")),
+  rounds = Number(value("--rounds", "9"));
+const targetMs = Number(value("--target-ms", "12")),
+  smoke = argv.includes("--smoke");
+const maxRegression = 0.04;
+const S = {
+  ordinary: "1 tab PO BID",
+  thai: "กิน 2 เม็ดเช้า, 3 เม็ดเย็น เป็นเวลา 1 สัปดาห์",
+  eye: "1 drop OD q2h x7d then qid; 1 drop OS qid x1mo then bid",
+  staged:
+    "2 tabs morning, 1 tab evening for 1 week then 2 tabs morning for 1 month then 1/2 tab PO on monday-friday",
+  guard: "Take 2 tabs QID max 2 tabs/day",
+  action: "Dissolve 2 tablets in water, then drink slowly",
+  routine: "Take 1 tablet PO BID for 3 days",
+};
+const parsed = Object.fromEntries(Object.entries(S).map(([key, text]) => [key, baseline.parseSig(text)]));
+const rows = parsed.routine.fhir,
+  wire = parsed.routine.fhirNext,
+  complex = parsed.eye.fhirNext;
+const plainWire = structuredClone(wire);
+delete plainWire.renderedInstruction;
+for (const s of plainWire.step) for (const a of s.component) delete a.text;
+const condition = { kind: "measurement", name: "SBP", operation: "gt", value: 160, text: "SBP >160" };
+const graph = parsed.action.meta.canonical.clauses[0].instructionGraph;
+const graphExtension = baseline.buildInstructionGraphExtension(graph);
+const action = baseline.listMedicationInstructionActions()[0],
+  concept = baseline.listMedicationInstructionConcepts()[0];
+const symptom = baseline.listSymptomDefinitions().find((s) => s.coding?.code);
+const relation = {
+  relationText: "around",
+  relationCoding: { system: baseline.SNOMED_SYSTEM, code: "66459002" },
+  targetText: "left eye",
+  targetCoding: { system: baseline.SNOMED_SYSTEM, code: "129004000" },
+  sourceText: "around left eye",
+};
+const relationConcept = { extension: baseline.buildBodySiteSpatialRelationExtensions(relation) };
+const counted = { extension: [baseline.buildBodySiteAdministrationTargetCountExtension(2)] };
+const conditionRow = {};
+baseline.setDosageCondition(conditionRow, condition);
+const dateRow = {};
+baseline.setDosageExcludedDates(dateRow, ["2026-11-19"]);
+const weekdayRow = {};
+baseline.setDosageExcludedWeekdays(weekdayRow, ["sat", "sun"]);
+const choice = { groupId: "g1", branchId: "b1", selectionBehavior: "exactly-one" };
+const choiceRow = {};
+baseline.setDosageAlternativeChoice(choiceRow, choice);
+const dateOptions = { datePolicy: { referenceDate: "2026-11-17" } };
+const schedule = {
+  from: "2026-11-18T00:00:00+07:00",
+  orderedAt: "2026-11-18T00:00:00+07:00",
+  timeZone: "Asia/Bangkok",
+  limit: 10,
+  durationValue: 3,
+  durationUnit: "d",
+};
+const cases = [],
+  covered = new Set();
+function add(api, label, run, domain = api) {
+  covered.add(api);
+  cases.push({ api, name: label, domain, run });
+}
+function simple(api, args = [], label = api) {
+  // Resolve each named export once, as a consuming named import does. A
+  // different-size module namespace must not add a per-call property lookup
+  // to the latency of an otherwise identical sub-microsecond helper.
+  const before = baseline[api],
+    after = candidate[api];
+  add(api, label, (m) => (m === baseline ? before : after)(...args));
+  cases[cases.length - 1].direct = new Map([
+    [baseline, () => before(...args)],
+    [candidate, () => after(...args)],
+  ]);
+}
+for (const key of ["ordinary", "thai", "eye", "staged", "guard", "action"]) {
+  add("parseSig", "parseSig/" + key, (m) => m.parseSig(S[key]));
+  add("parseSigAsync", "parseSigAsync/" + key, (m) => m.parseSigAsync(S[key]));
+  add("lintSig", "lintSig/" + key, (m) => m.lintSig(S[key]));
+}
+// Same established interactive autocomplete corpus as bench/suggest.mjs.
+const suggestCases = [
+  "",
+  "1x",
+  "1 tab po q",
+  "5 m",
+  "0.5 tab",
+  "1 tab po prn a",
+  "1 tab po morn hs",
+  "1 poc",
+  "1-",
+  "1 drop to od q2h",
+  "500 mg po q4-6h prn pain",
+  "500 millig",
+  "at 14:3",
+  "กิน",
+  "กิน ครั้งล",
+  "ทา",
+  "รับประทาน 1 เม็ด เมื่อมีอาการปว",
+  "รับประทาน 1 เม",
+  "รับประทาน 1 เม็ด ว",
+  "รับประทาน 1 เม็ด ก่อนอ",
+  "ทาบริเวณผ",
+  "apply to right e",
+  "1 drop to o",
+  "1 tab po b",
+  "take",
+  "apply",
+  "take 1 tab bef",
+  "zzzz",
+];
+for (const input of suggestCases)
+  add("suggestSig", "suggestSig/" + (input || "empty"), (m) =>
+    m.suggestSig(input, {
+      limit: 20,
+      ...(/[ก-๙]/u.test(input) ? { locale: "th" } : {}),
+      ...(input === "1-" ? { enableMealDashSyntax: true } : {}),
+    })
+  );
+for (const locale of ["en", "th"]) {
+  for (const [label, input] of [
+    ["R5", rows[0]],
+    ["R6", wire],
+    ["R6-source-less", plainWire],
+    ["R6-complex", complex],
+  ])
+    add("formatSig", `formatSig/${label}/${locale}`, (m) => m.formatSig(input, "long", { locale }));
+  add("fromFhir", "fromFhir/simple/" + locale, (m) => m.fromFhir(wire, { locale }));
+  add("fromFhir", "fromFhir/complex/" + locale, (m) => m.fromFhir(complex, { locale }));
+  add("fromFhirDosage", "fromFhirDosage/" + locale, (m) => m.fromFhirDosage(rows[0], { locale }));
+  add("formatSigBatch", "formatSigBatch/" + locale, (m) =>
+    m.formatSigBatch(parsed.eye.fhir, "long", { locale })
+  );
+}
+add("formatSig", "formatSig/R6-author-source", (m) => m.formatSig(wire, "long"));
+add("formatParseBatch", "formatParseBatch/ordinary", (m) => m.formatParseBatch(parsed.ordinary, "long"));
+add("formatParseBatch", "formatParseBatch/staged", (m) => m.formatParseBatch(parsed.staged, "long"));
+for (const [name, input] of [
+  ["scalar", rows[0]],
+  ["parallel-array", parsed.eye.fhir],
+  ["native-R6", complex],
+]) {
+  add("nextDueDoses", "nextDueDoses/" + name, (m) => m.nextDueDoses(input, schedule));
+  add("calculateTotalUnits", "calculateTotalUnits/" + name, (m) =>
+    m.calculateTotalUnits({ ...schedule, dosage: input })
+  );
+}
+// Varied dates defeat a benchmark which only wins by remembering one query.
+let variedIndex = 0;
+const variedDates = Array.from({ length: 97 }, (_, i) =>
+  new Date(Date.UTC(2026, 0, 1 + i * 7, 1)).toISOString()
+);
+add("nextDueDoses", "nextDueDoses/varied-calendars", (m, i) => {
+  const d = variedDates[i % variedDates.length];
+  return m.nextDueDoses(rows[0], { ...schedule, from: d, orderedAt: d });
+});
+for (const [name, input] of [
+  ["simple", rows],
+  ["complex", parsed.eye.fhir],
+]) {
+  add("toDosageDetails", "toDosageDetails/" + name, (m) => m.toDosageDetails(input));
+  add("toFhirR5Dosages", "toFhirR5Dosages/R5-" + name, (m) => m.toFhirR5Dosages(input));
+  add("toEzDosages", "toEzDosages/" + name, (m) => m.toEzDosages(input));
+}
+for (const [name, input] of [
+  ["simple", wire],
+  ["complex", complex],
+]) {
+  add("toFhirR5Dosages", "toFhirR5Dosages/R6-" + name, (m) => m.toFhirR5Dosages(input));
+  add("fromDosageDetails", "fromDosageDetails/" + name, (m) => m.fromDosageDetails(input));
+}
+simple("parseStrength", ["250 mg/5 mL"]);
+simple("parseStrengthIntoRatio", ["500 mg/tablet"]);
+simple("parseStrengthComponents", ["875 mg + 125 mg"]);
+simple("evaluateMedicationCondition", [condition, { SBP: 170 }]);
+for (const [api, args] of [
+  ["getDosageCondition", [conditionRow]],
+  ["getDosageExcludedDates", [dateRow]],
+  ["getDosageExcludedWeekdays", [weekdayRow]],
+  ["getDosageAlternativeChoice", [choiceRow]],
+  [
+    "getEmaQuantityComparator",
+    [
+      {
+        extension: [
+          {
+            url: baseline.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+            valueCoding: { system: baseline.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
+          },
+        ],
+      },
+    ],
+  ],
+  ["getTimingOccurrenceCap", [baseline.parseSig("1 tab up to 3 doses per day").fhir[0].timing?.repeat]],
+])
+  simple(api, args);
+for (const [api, value] of [
+  ["setDosageCondition", condition],
+  ["setDosageExcludedDates", ["2026-11-19"]],
+  ["setDosageExcludedWeekdays", ["sun"]],
+  ["setDosageAlternativeChoice", choice],
+])
+  add(api, api, (m) => {
+    const row = {};
+    m[api](row, value);
+    return row;
+  });
+for (const api of ["getDoseUnitApproximation", "getDoseUnitKind", "getDoseUnitSemantics"])
+  simple(api, ["drop"]);
+simple("listDoseUnitTerminology");
+for (const api of ["lookupBodySite", "lookupBodySiteAsync", "getBodySiteCode", "getBodySiteCodeAsync"])
+  simple(api, ["left eye"]);
+for (const api of ["getBodySiteText", "getBodySiteTextAsync"])
+  simple(api, [{ system: baseline.SNOMED_SYSTEM, code: "129004000" }, { locale: "th" }]);
+for (const api of ["suggestBodySites", "suggestBodySiteText"]) simple(api, ["left e", { limit: 10 }]);
+simple("listSupportedBodySiteText", [{ limit: 30 }]);
+simple("listSupportedBodySiteGrammar");
+simple("buildBodySiteTopographicalModifierCoding", [relation]);
+simple("buildBodySiteAdministrationTargetCountExtension", [2]);
+simple("parseBodySiteAdministrationTargetCountExtension", [counted]);
+simple("getBodySiteAdministrationTargetCount", [counted]);
+simple("buildBodySiteSpatialRelationExtension", [relation]);
+simple("buildBodySiteSpatialRelationExtensions", [relation]);
+simple("parseBodySiteSpatialRelationExtension", [relationConcept]);
+simple("cloneBodySiteSpatialRelation", [relation]);
+for (const [suffix, params] of [
+  ["FindingSite", ["22253000", "129004000"]],
+  ["BodySiteLaterality", ["81745001", "7771000"]],
+  ["BodySiteTopographicalModifier", ["81745001", "66459002"]],
+]) {
+  const build = "buildSnomed" + suffix + "PostcoordinationCode",
+    code = baseline[build](...params);
+  simple(build, params);
+  simple("parseSnomed" + suffix + "PostcoordinationCode", [code]);
+  const has =
+    suffix === "BodySiteTopographicalModifier"
+      ? "hasSnomedTopographicalModifierPostcoordination"
+      : "hasSnomed" + suffix + "Postcoordination";
+  simple(has, [code]);
+}
+simple("buildSnomedFindingSiteCoding", [
+  {
+    focusCoding: { system: baseline.SNOMED_SYSTEM, code: "22253000" },
+    siteCoding: { system: baseline.SNOMED_SYSTEM, code: "129004000" },
+  },
+]);
+simple("parseInstructionActions", [S.action]);
+simple("realizeInstructionGraph", [graph, "th"]);
+simple("buildInstructionGraphExtension", [graph]);
+simple("parseInstructionGraphExtension", [[graphExtension]]);
+simple("getMedicationInstructionAction", [action.code]);
+simple("resolveMedicationInstructionAction", ["dissolve"]);
+simple("resolveMedicationInstructionSequenceAction", ["swallow"]);
+simple("getMedicationInstructionConcept", [concept.code]);
+simple("resolveMedicationInstructionConcept", ["water"]);
+for (const api of [
+  "listMedicationInstructionActions",
+  "listMedicationInstructionConcepts",
+  "buildMedicationInstructionActionCodeSystem",
+  "buildMedicationInstructionConceptCodeSystem",
+  "buildInfusionCarrierMaterialStructureDefinition",
+  "buildDosageAlternativeChoiceStructureDefinition",
+  "listSymptomDefinitions",
+  "listAdviceRelationDefinitions",
+  "listBodySiteRelationDefinitions",
+  "getRegisteredSigLocalizations",
+  "listMedicationSurfaceSegmenters",
+  "listMedicationDateResolvers",
+])
+  simple(api);
+simple("normalizeSymptomKey", ["  CHEST pain  "]);
+simple("resolveSymptomDefinition", ["pain"]);
+simple("findSymptomDefinitionByCoding", [symptom.coding.system, symptom.coding.code]);
+simple("getAdviceRelationDefinition", ["before"]);
+simple("getBodySiteRelationDefinition", ["around"]);
+simple("getBodySiteRelationRealization", ["around", "th"]);
+simple("localizeAdviceRelation", ["before", "th"]);
+simple("normalizeBodySiteRelation", ["around"]);
+simple("resolveActionRelationSurface", ["then"]);
+simple("resolveAdviceRelationSurface", ["before"]);
+for (const api of [
+  "getAdviceLocaleAdapter",
+  "getInstructionActionLocaleAdapter",
+  "getSuggestLocaleAdapter",
+  "getMedicationLexerLocalePack",
+  "listMedicationLocaleLexemes",
+  "resolveSigLocalization",
+  "resolveSigTranslation",
+])
+  simple(api, ["th"]);
+simple("inferMedicationLocale", [S.thai, "en"]);
+simple("findMedicationDateListSpans", ["Take 1 tablet on 2026-11-18, 2026-11-20", dateOptions]);
+simple("parseMedicationDateListAt", ["on 2026-11-18, 2026-11-20", 0, dateOptions]);
+add(
+  "MedicationQuantityCalculationError",
+  "MedicationQuantityCalculationError",
+  (m) => new m.MedicationQuantityCalculationError("missing-regimen", "benchmark")
+);
+// Registration cases replace a single fixed ID (no growing registry). Run last
+// because lexer registration deliberately invalidates locale suggestion indexes.
+for (const [register, get] of [
+  ["registerAdviceLocaleAdapter", "getAdviceLocaleAdapter"],
+  ["registerInstructionActionLocaleAdapter", "getInstructionActionLocaleAdapter"],
+  ["registerSuggestLocaleAdapter", "getSuggestLocaleAdapter"],
+]) {
+  const adapters = new Map([
+    [baseline, baseline[get]("en")],
+    [candidate, candidate[get]("en")],
+  ]);
+  add(register, register, (m) => m[register](adapters.get(m)), "registration");
+}
+const lexerPacks = new Map([
+  [baseline, baseline.getMedicationLexerLocalePack("th")],
+  [candidate, candidate.getMedicationLexerLocalePack("th")],
+]);
+add(
+  "registerMedicationLexerLocalePack",
+  "registerMedicationLexerLocalePack",
+  (m) => m.registerMedicationLexerLocalePack(lexerPacks.get(m)),
+  "registration"
+);
+add(
+  "registerMedicationLocaleDetector",
+  "registerMedicationLocaleDetector",
+  (m) => m.registerMedicationLocaleDetector({ locale: "bench", test: () => false, priority: -100 }),
+  "registration"
+);
+add(
+  "registerMedicationSurfaceSegmenter",
+  "registerMedicationSurfaceSegmenter",
+  (m) => m.registerMedicationSurfaceSegmenter({ locale: "bench", script: /a^/, segment: () => [] }),
+  "registration"
+);
+add(
+  "registerIntlMedicationSurfaceSegmenter",
+  "registerIntlMedicationSurfaceSegmenter",
+  (m) => m.registerIntlMedicationSurfaceSegmenter("en", /a^/),
+  "registration"
+);
+add(
+  "registerMedicationDateResolver",
+  "registerMedicationDateResolver",
+  (m) => m.registerMedicationDateResolver({ id: "bench", resolveYear: () => undefined }),
+  "registration"
+);
+add(
+  "registerSigLocalization",
+  "registerSigLocalization",
+  (m) => m.registerSigLocalization({ locale: "bench" }),
+  "registration"
+);
+const newApis = new Set([
+  "importCanonicalCourse",
+  "editCanonicalCourse",
+  "projectCanonicalCourse",
+  "formatCanonicalAdministration",
+  "formatCanonicalCourse",
+  "projectEditableR5Course",
+]);
+const missing = Object.keys(candidate).filter(
+  (k) => typeof candidate[k] === "function" && !covered.has(k) && !newApis.has(k)
+);
+if (missing.length) throw new Error("Uncovered public APIs: " + missing.join(", "));
+if (
+  baseline.parseBodySiteAdministrationTargetCountExtension(counted) !== 2 ||
+  candidate.parseBodySiteAdministrationTargetCountExtension(counted) !== 2
+)
+  throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
+const outputPath = value("--json", undefined);
+const report = {
+  complete: false,
+  startedAt: new Date().toISOString(),
+  runtime: {
+    node: process.version,
+    platform: process.platform,
+    architecture: process.arch,
+    cpu: cpus()[0]?.model,
+  },
+  baselineSha256: createHash("sha256")
+    .update(readFileSync(resolve(baselinePath)))
+    .digest("hex"),
+  candidateSha256: createHash("sha256")
+    .update(readFileSync(new URL("../dist/index.js", import.meta.url)))
+    .digest("hex"),
+  baseline: resolve(baselinePath),
+  candidate: new URL("../dist/index.js", import.meta.url).pathname,
+  publicFunctions: Object.keys(candidate).filter((k) => typeof candidate[k] === "function").length,
+  coveredPublicFunctions: covered.size,
+  newApis: [...newApis],
+  threshold: 1 + maxRegression,
+  methodology:
+    "Alternating paired warm batches; helper exports captured before timing; no cross-domain averaging",
+  filter: filter.source,
+  selectedComparisons: cases.filter(
+    (test) => filter.test(test.name) && typeof baseline[test.api] === "function"
+  ).length,
+  rounds,
+  cases: [],
+  errors: [],
+};
+/** Save outside measured work. A timed-out run remains an explicitly
+ * incomplete report containing every completed scenario instead of losing
+ * its evidence or accidentally being treated as a successful complete run. */
+function checkpoint(complete = false) {
+  report.complete = complete;
+  report.updatedAt = new Date().toISOString();
+  report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
+  report.failing = report.cases.filter((c) => c.pass === false).length;
+  if (outputPath) {
+    const temporary = outputPath + ".tmp";
+    writeFileSync(temporary, JSON.stringify(report, null, 2) + "\n");
+    renameSync(temporary, outputPath);
+  }
+}
+checkpoint();
+const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+let sink;
+async function measure(test, module, iterations, async) {
+  const invoke = test.direct?.get(module) ?? ((i) => test.run(module, i));
+  const start = performance.now();
+  if (async) for (let i = 0; i < iterations; i++) sink = await invoke(i);
+  else for (let i = 0; i < iterations; i++) sink = invoke(i);
+  return ((performance.now() - start) * 1000) / iterations;
+}
+/** Calibrate to steady-state duration, not a three-call pilot that can be
+ * dominated by a first JIT transition for sub-microsecond getters. Both builds
+ * use the identical final count; threshold and paired ordering stay fixed.
+ * Calibrate to the slower side: a 100x speedup must not force 100x-longer
+ * baseline batches merely to give the faster implementation a long sample. */
+async function calibratedIterations(test, modules, async) {
+  let iterations = 4;
+  for (let attempt = 0; attempt < 7; attempt++) {
+    let slowest = 0;
+    for (const module of modules) slowest = Math.max(slowest, await measure(test, module, iterations, async));
+    if (slowest * iterations >= targetMs * 800 || iterations >= 1000000) return iterations;
+    const required = Math.ceil((targetMs * 1000) / Math.max(slowest, 0.005));
+    iterations = Math.min(1000000, Math.max(iterations * 2, Math.min(iterations * 16, required)));
+  }
+  return iterations;
+}
+for (const test of cases) {
+  if (!filter.test(test.name)) continue;
+  if (typeof baseline[test.api] !== "function") continue;
+  try {
+    const left = test.run(baseline, 0),
+      right = test.run(candidate, 0);
+    const async = !!left?.then || !!right?.then;
+    if (async) {
+      await left;
+      await right;
+    }
+    if (smoke) {
+      report.cases.push({ name: test.name, api: test.api, smoke: true });
+      continue;
+    }
+    for (let i = 0; i < 12; i++) {
+      if (async) {
+        await test.run(baseline, i);
+        await test.run(candidate, i);
+      } else {
+        test.run(baseline, i);
+        test.run(candidate, i);
+      }
+    }
+    const iterations = await calibratedIterations(test, [baseline, candidate], async);
+    const a = [],
+      b = [];
+    for (let r = 0; r < rounds; r++) {
+      if (global.gc) global.gc();
+      if (r % 2) {
+        b.push(await measure(test, candidate, iterations, async));
+        a.push(await measure(test, baseline, iterations, async));
+      } else {
+        a.push(await measure(test, baseline, iterations, async));
+        b.push(await measure(test, candidate, iterations, async));
+      }
+    }
+    const old = median(a),
+      current = median(b),
+      ratio = median(b.map((value, index) => value / a[index]));
+    const result = {
+      name: test.name,
+      api: test.api,
+      domain: test.domain,
+      iterations,
+      baselineUs: old,
+      candidateUs: current,
+      ratio,
+      samples: { baselineUs: a, candidateUs: b },
+      changePercent: (ratio - 1) * 100,
+      pass: ratio <= 1 + maxRegression,
+      baselineSpread: (Math.max(...a) - Math.min(...a)) / old,
+      candidateSpread: (Math.max(...b) - Math.min(...b)) / current,
+    };
+    report.cases.push(result);
+    console.log(
+      `${result.pass ? "PASS" : "FAIL"} ${test.name}: ${old.toFixed(2)} -> ${current.toFixed(
+        2
+      )} us (${result.changePercent.toFixed(1)}%)`
+    );
+  } catch (error) {
+    report.errors.push({ name: test.name, error: String(error.stack ?? error) });
+    console.error("ERROR", test.name, error.message);
+  } finally {
+    checkpoint();
+  }
+}
+// New functions have no pre-refactor namesake. Measure them explicitly
+// rather than exempt their costs from visibility or invent a false baseline.
+// Clinical correctness of edits/projections is covered by native oracles.
+const nativeSource = candidate.importCanonicalCourse(complex);
+const nativeTextless = structuredClone(nativeSource);
+delete nativeTextless.instruction;
+for (const stage of nativeTextless.stages) for (const a of stage.administrations) delete a.text;
+const nativeCases = [
+  ["importCanonicalCourse", "native/import-R6", () => candidate.importCanonicalCourse(complex)],
+  ["importCanonicalCourse", "native/import-R5", () => candidate.importCanonicalCourse(parsed.eye.fhir)],
+  [
+    "editCanonicalCourse",
+    "native/edit",
+    () =>
+      candidate.editCanonicalCourse(nativeSource, (draft) => {
+        draft.stages[0].administrations[0].amounts[0].quantity.value = 3;
+      }),
+  ],
+  ["projectCanonicalCourse", "native/project-both", () => candidate.projectCanonicalCourse(nativeSource)],
+  [
+    "formatCanonicalAdministration",
+    "native/format-administration",
+    () =>
+      candidate.formatCanonicalAdministration(nativeTextless.stages[0].administrations[0], "long", {
+        locale: "th",
+      }),
+  ],
+  [
+    "formatCanonicalCourse",
+    "native/format-course",
+    () => candidate.formatCanonicalCourse(nativeTextless, "long", { locale: "th" }),
+  ],
+  ["projectEditableR5Course", "native/project-editable-R5", () => candidate.projectEditableR5Course(complex)],
+];
+report.newApiMeasurements = [];
+for (const [api, name, run] of nativeCases) {
+  if (!filter.test(name)) continue;
+  try {
+    run();
+    if (smoke) {
+      report.newApiMeasurements.push({ api, name, smoke: true });
+      continue;
+    }
+    const test = { run };
+    for (let i = 0; i < 12; i++) run();
+    const iterations = await calibratedIterations(test, [candidate], false);
+    const times = [];
+    for (let r = 0; r < rounds; r++) {
+      if (global.gc) global.gc();
+      times.push(await measure(test, candidate, iterations, false));
+    }
+    const candidateUs = median(times);
+    report.newApiMeasurements.push({
+      api,
+      name,
+      iterations,
+      candidateUs,
+      spread: (Math.max(...times) - Math.min(...times)) / candidateUs,
+    });
+    console.log(`NEW ${name}: ${candidateUs.toFixed(2)} us (no previous API baseline)`);
+  } catch (error) {
+    report.errors.push({ name, error: String(error.stack ?? error) });
+    console.error("ERROR", name, error.message);
+  } finally {
+    checkpoint();
+  }
+}
+report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
+report.failing = report.cases.filter((c) => c.pass === false).length;
+checkpoint(true);
+console.log(
+  JSON.stringify({
+    covered: report.coveredPublicFunctions,
+    total: report.publicFunctions,
+    newApis: report.newApis,
+    newApiMeasurements: report.newApiMeasurements.length,
+    cases: report.cases.length,
+    passing: report.passing,
+    failing: report.failing,
+    errors: report.errors,
+  })
+);
+if (report.errors.length || report.failing) process.exitCode = 1;

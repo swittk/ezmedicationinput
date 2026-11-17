@@ -1,3 +1,7 @@
+import type { CourseLanguage } from "./locales/course/types";
+import { ENGLISH_COURSE } from "./locales/course/en";
+import { THAI_COURSE } from "./locales/course/th";
+export type { CourseLanguage } from "./locales/course/types";
 import { quantityComparatorText } from "./localization";
 import { hasDailyRecurrenceAcrossClocks } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
@@ -100,6 +104,9 @@ export interface SigLongContext extends SigFormatContext {
 
 export interface SigLocalization {
   readonly locale: string;
+  /** Optional language-pack facet for whole-course text. Clinical facts stay
+   * in canonical code; adding a language never edits the course algorithm. */
+  readonly course?: CourseLanguage;
   formatShort?(context: SigShortContext): string;
   formatLong?(context: SigLongContext): string;
 }
@@ -136,10 +143,10 @@ export function resolveSigLocalization(
   const inherited = config?.inherit
     ? REGISTERED_LOCALIZATIONS.get(config.inherit.toLowerCase())
     : undefined;
+  // Registered localizations are immutable-by-contract. Returning the
+  // established object needs no repeat allocation on every clause render.
+  if (!config) return base;
 
-  if (!base && !inherited && !config) {
-    return undefined;
-  }
 
   const resolvedLocale =
     config?.locale ??
@@ -150,7 +157,9 @@ export function resolveSigLocalization(
     "custom";
 
   const result: SigLocalization = {
-    locale: resolvedLocale
+    locale: resolvedLocale,
+    ...(config?.course ?? inherited?.course ?? base?.course
+      ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
 
   if (base?.formatShort) {
@@ -174,7 +183,7 @@ export function resolveSigLocalization(
     result.formatLong = config.formatLong;
   }
 
-  if (!result.formatShort && !result.formatLong) {
+  if (!result.formatShort && !result.formatLong && !result.course) {
     return base ?? inherited ?? result;
   }
 
@@ -183,9 +192,27 @@ export function resolveSigLocalization(
 
 registerSigLocalization({
   locale: "en",
+  course: ENGLISH_COURSE,
   formatShort: ({ defaultText }) => defaultText,
   formatLong: ({ defaultText }) => defaultText
 });
+
+/** Resolve the course facet once at a public formatting boundary. Reuse the
+ * existing registry and inheritance contract; no new pack registry or parser. */
+export function resolveCourseLanguage(locale?: string, config?: SigLocalizationConfig,
+  resolved?: SigLocalization): CourseLanguage {
+  if (resolved?.course) return resolved.course;
+  if (config?.course) return config.course;
+  // Per-call inheritance overrides a registered base exactly as clause
+  // callbacks do. The output locale tag is a label, not an inheritance veto.
+  const inherited=config?.inherit?REGISTERED_LOCALIZATIONS.get(config.inherit.toLowerCase())?.course:undefined;
+  if(inherited)return inherited;
+  const key = (config?.locale ?? locale ?? "en").toLowerCase();
+  const exact=REGISTERED_LOCALIZATIONS.get(key)?.course;
+  if(exact)return exact;
+  const separator=key.indexOf("-");
+  return (separator>=0?REGISTERED_LOCALIZATIONS.get(key.slice(0,separator))?.course:undefined) ?? ENGLISH_COURSE;
+}
 
 export type SigTranslation = SigLocalization;
 export type SigTranslationConfig = SigLocalizationConfig;
@@ -203,6 +230,7 @@ export function resolveSigTranslation(
 function createThaiLocalization(): SigLocalization {
   return {
     locale: "th",
+    course: THAI_COURSE,
     formatShort: ({ clause }) => formatShortThai(clause),
     formatLong: ({
       clause,

@@ -253,135 +253,80 @@ export function courseFromParallel(
  * spans remain unchanged; edited dose/schedule/guard values are authoritative.
  */
 export function clauseForAdministration(a: CanonicalAdministration): CanonicalSigClause {
-  const rawText = a.syntax?.rawText ?? a.text ?? "";
-  const base = a.syntax ?? {
-    kind: "administration" as const,
-    rawText,
-    raw: { text: rawText, start: 0, end: rawText.length, tokenIndices: [] },
-    leftovers: [],
-    evidence: [],
-    confidence: 1,
+  const rawText=a.syntax?.rawText??a.text??"";
+  const base=a.syntax;
+  // ES6 object spread is emitted as per-property defineProperty helper loops.
+  // A straight shallow copy plus assignments keeps this hot rendering view
+  // cheap without caching stale data or copying its source graph recursively.
+  const result:CanonicalSigClause=base?Object.assign({},base):{
+    kind:"administration",rawText,raw:{text:rawText,start:0,end:rawText.length,tokenIndices:[]},
+    leftovers:[],evidence:[],confidence:1
   };
-  const r = a.schedule?.recurrence,
-    length = r?.courseLength ?? a.anchoredLength?.quantity;
-  const lengthRange = r?.courseLengthRange ?? a.anchoredLength?.range;
-  const dose = a.amounts?.[0];
-  const unit = (length?.code ??
-    length?.unit ??
-    lengthRange?.low?.code ??
-    lengthRange?.low?.unit ??
-    lengthRange?.high?.code ??
-    lengthRange?.high?.unit) as NonNullable<CanonicalSigClause["schedule"]>["durationUnit"];
-  const schedule: CanonicalSigClause["schedule"] = a.schedule
-    ? {
-        ...base.schedule,
-        count: r?.count,
-        countMax: r?.countMax,
-        frequency: r?.frequency,
-        frequencyMax: r?.frequencyMax,
-        period: r?.period,
-        periodMax: r?.periodMax,
-        periodUnit: r?.periodUnit,
-        administrationDuration: r?.occurrenceDuration,
-        administrationDurationMax: r?.occurrenceDurationMax,
-        administrationDurationUnit: r?.occurrenceDurationUnit,
-        duration: length?.value ?? lengthRange?.low?.value,
-        durationMax: lengthRange?.high?.value,
-        durationUnit: unit,
-        durationComparator: length?.comparator ?? lengthRange?.low?.comparator,
-        durationMaxComparator: lengthRange?.high?.comparator,
-        boundsStart: r?.calendarWindow?.start,
-        boundsEnd: r?.calendarWindow?.end,
-        timeOfDay: r?.clocks,
-        when: r?.anchors,
-        dayOfWeek: r?.dayOfWeek,
-        dayOfMonth: r?.monthDays,
-        weekdayOrdinal: r?.weekdayOrdinal as -1 | 1 | 2 | 3 | 4 | 5 | undefined,
-        activityTiming: r?.activityTiming,
-        eventWindow: r?.eventWindow,
-        clockWindow: r?.clockWindow,
-        occurrenceCap: r?.occurrenceCap,
-        offset: r?.offset,
-        offsetMin: r?.offsetMin,
-        offsetMax: r?.offsetMax,
-        administrationOffsetMinutes: a.delayMinutes,
-        cycleDayConstraint: a.cycleDays,
-        maxDosePerPeriod: a.limits
-          ?.filter((limit) => limit.scope === "period" && limit.amount && limit.period)
-          .map((limit) => ({
-            amount: limit.amount?.value!,
-            unit: limit.amount?.unit ?? limit.amount?.code ?? "",
-            amountComparator: limit.amount?.comparator,
-            period: limit.period?.value!,
-            periodUnit: (limit.period?.code ?? limit.period?.unit) as NonNullable<
-              CanonicalSigClause["schedule"]
-            >["periodUnit"] &
-              string,
-            periodComparator: limit.period?.comparator,
-          })),
-        timingCode: a.schedule.code?.coding?.[0]?.code ?? a.schedule.code?.text ?? base.schedule?.timingCode,
-      }
-    : undefined;
-  const routeIdentity = a.route?.coding?.find((value) => value.code)?.code;
-  const routeCode = routeIdentity
-    ? ROUTE_BY_SNOMED[routeIdentity as keyof typeof ROUTE_BY_SNOMED] ??
-      (Object.prototype.hasOwnProperty.call(ROUTE_SNOMED, routeIdentity)
-        ? (routeIdentity as RouteCode)
-        : undefined)
-    : undefined;
-  const targetCode = a.target?.coding?.find((value) => value.code);
-  const sameTarget = a.target?.text === base.site?.text && targetCode?.code === base.site?.coding?.code;
-  const methodCode = a.method?.coding?.find((value) => value.code);
-  const sameMethod = a.method?.text === base.method?.text && methodCode?.code === base.method?.coding?.code;
-  return {
-    ...base,
-    dose: dose?.quantity
-      ? {
-          value: dose.quantity.value,
-          unit: dose.quantity.unit,
-          ...(dose.quantity.comparator ? { comparator: dose.quantity.comparator } : {}),
-        }
-      : dose?.range
-      ? {
-          range: { low: dose.range.low?.value, high: dose.range.high?.value },
-          unit: dose.range.low?.unit ?? dose.range.high?.unit,
-        }
-      : undefined,
-    schedule,
-    clinicalAdjuncts: {
-      ...base.clinicalAdjuncts,
-      condition: a.predicate,
-      calendarDayCondition: a.calendarPredicate,
-      excludedDates: a.excludedDates,
-      excludedWeekdays: a.excludedWeekdays,
-    },
-    patientInstruction: a.patientInstruction,
-    prn: a.asNeeded ? { ...base.prn, enabled: true } : undefined,
-    // Vocabulary/translation annotations stay attached to source concepts.
-    // Only live native concept values override that evidence.
-    site: a.target
-      ? {
-          ...(sameTarget ? base.site : {}),
-          text: a.target.text,
-          ...(targetCode?.code ? { coding: { ...targetCode, code: targetCode.code } } : {}),
-          administrationTargetCount: a.targetCount,
-        }
-      : undefined,
-    route: a.route
-      ? {
-          ...(routeCode === base.route?.code && a.route.text === base.route?.text ? base.route : {}),
-          code: routeCode,
-          text: a.route.text,
-        }
-      : undefined,
-    method: a.method
-      ? {
-          ...(sameMethod ? base.method : {}),
-          text: a.method.text,
-          ...(methodCode ? { coding: methodCode } : {}),
-        }
-      : undefined,
-  };
+  const r=a.schedule?.recurrence;
+  const length=r?.courseLength??a.anchoredLength?.quantity;
+  const range=r?.courseLengthRange??a.anchoredLength?.range;
+  const value=a.amounts?.[0];
+  if(value?.quantity){
+    result.dose={value:value.quantity.value,unit:value.quantity.unit};
+    if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;
+  }else if(value?.range)result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
+    unit:value.range.low?.unit??value.range.high?.unit};
+  else result.dose=undefined;
+  if(a.schedule){
+    const schedule:NonNullable<CanonicalSigClause["schedule"]>=base?.schedule?Object.assign({},base.schedule):{};
+    schedule.count=r?.count;schedule.countMax=r?.countMax;
+    schedule.frequency=r?.frequency;schedule.frequencyMax=r?.frequencyMax;
+    schedule.period=r?.period;schedule.periodMax=r?.periodMax;schedule.periodUnit=r?.periodUnit;
+    schedule.administrationDuration=r?.occurrenceDuration;schedule.administrationDurationMax=r?.occurrenceDurationMax;
+    schedule.administrationDurationUnit=r?.occurrenceDurationUnit;
+    schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
+    schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;
+    schedule.durationComparator=length?.comparator??range?.low?.comparator;
+    schedule.durationMaxComparator=range?.high?.comparator;
+    schedule.boundsStart=r?.calendarWindow?.start;schedule.boundsEnd=r?.calendarWindow?.end;
+    schedule.timeOfDay=r?.clocks;schedule.when=r?.anchors;schedule.dayOfWeek=r?.dayOfWeek;
+    schedule.dayOfMonth=r?.monthDays;schedule.weekdayOrdinal=r?.weekdayOrdinal as typeof schedule.weekdayOrdinal;
+    schedule.activityTiming=r?.activityTiming;schedule.eventWindow=r?.eventWindow;schedule.clockWindow=r?.clockWindow;
+    schedule.occurrenceCap=r?.occurrenceCap;schedule.offset=r?.offset;schedule.offsetMin=r?.offsetMin;schedule.offsetMax=r?.offsetMax;
+    schedule.administrationOffsetMinutes=a.delayMinutes;schedule.cycleDayConstraint=a.cycleDays;
+    let limits:NonNullable<typeof schedule.maxDosePerPeriod>|undefined;
+    for(const limit of a.limits??[]){
+      if(limit.scope!=="period"||!limit.amount||!limit.period)continue;
+      (limits??=[]).push({amount:limit.amount.value!,unit:limit.amount.unit??limit.amount.code??"",
+        amountComparator:limit.amount.comparator,period:limit.period.value!,
+        periodUnit:(limit.period.code??limit.period.unit) as NonNullable<typeof schedule.periodUnit>,periodComparator:limit.period.comparator});
+    }
+    schedule.maxDosePerPeriod=limits;
+    schedule.timingCode=a.schedule.code?.coding?.[0]?.code??a.schedule.code?.text??base?.schedule?.timingCode;
+    result.schedule=schedule;
+  }else result.schedule=undefined;
+  result.clinicalAdjuncts=Object.assign({},base?.clinicalAdjuncts,{condition:a.predicate,
+    calendarDayCondition:a.calendarPredicate,excludedDates:a.excludedDates,excludedWeekdays:a.excludedWeekdays});
+  result.patientInstruction=a.patientInstruction;
+  result.prn=a.asNeeded?Object.assign({},base?.prn,{enabled:true}):undefined;
+  let routeIdentity:string|undefined;
+  for(const code of a.route?.coding??[])if(code.code){routeIdentity=code.code;break;}
+  const routeCode=routeIdentity?ROUTE_BY_SNOMED[routeIdentity as keyof typeof ROUTE_BY_SNOMED]??
+    (Object.prototype.hasOwnProperty.call(ROUTE_SNOMED,routeIdentity)?routeIdentity as RouteCode:undefined):undefined;
+  if(a.route){
+    const same=routeCode===base?.route?.code&&a.route.text===base?.route?.text;
+    result.route=Object.assign({},same?base?.route:undefined,{code:routeCode,text:a.route.text});
+  }else result.route=undefined;
+  let targetCode:NonNullable<NonNullable<typeof a.target>["coding"]>[number]|undefined;
+  for(const code of a.target?.coding??[])if(code.code){targetCode=code;break;}
+  if(a.target){
+    const same=a.target.text===base?.site?.text&&targetCode?.code===base?.site?.coding?.code;
+    result.site=Object.assign({},same?base?.site:undefined,{text:a.target.text,administrationTargetCount:a.targetCount});
+    if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
+  }else result.site=undefined;
+  let methodCode:NonNullable<NonNullable<typeof a.method>["coding"]>[number]|undefined;
+  for(const code of a.method?.coding??[])if(code.code){methodCode=code;break;}
+  if(a.method){
+    const same=a.method.text===base?.method?.text&&methodCode?.code===base?.method?.coding?.code;
+    result.method=Object.assign({},same?base?.method:undefined,{text:a.method.text});
+    if(methodCode)result.method.coding=methodCode;
+  }else result.method=undefined;
+  return result;
 }
 
 /** Compose the already-scoped administrations into a single clinical course.

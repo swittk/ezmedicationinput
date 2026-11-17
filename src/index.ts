@@ -1,7 +1,9 @@
+import { courseFromR5 } from "./adapters/r5-import";
+import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
-  rateRangePreview } from "./canonical/format-course";
+  rateRangePreview, formatCourseChoices } from "./canonical/format-course";
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, clauseForAdministration } from "./canonical/compile";
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
@@ -22,11 +24,14 @@ export function projectCanonicalCourse(course: CanonicalCourse, options?: ParseO
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
-  return { fhir: toFhirR5DosagesInternal(fhirNext), fhirNext };
+  return { fhir: projectNativeR5Course(course, {
+    bodySitePostcoordination: options?.bodySitePostcoordination,
+    includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
+  }).dosages, fhirNext };
 }
 
 import {
-  toDosageDetails, toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages, fromDosageDetails, projectEditableR5Course,
+  toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
   DOSAGE_DETAILS_R5_URL,
@@ -55,7 +60,7 @@ import {
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
-import { resolveSigLocalization } from "./i18n";
+import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
 import {
   applyPrnReasonCoding,
@@ -307,6 +312,7 @@ export {
   resolveSigTranslation
 } from "./i18n";
 export type {
+  CourseLanguage,
   SigLocalization,
   SigLocalizationConfig,
   SigTranslation,
@@ -572,7 +578,10 @@ function buildWholeCourseResult(
   // Neither canonical course construction nor native execution consumes it.
   const typedSteps = !parallel && canonical.stages.some(stage => stage.start || stage.end || stage.count !== undefined);
   const courseProjection = typedRepeatCycle || typedSteps || parallel
-    ? projectEditableR5Course(fhirNext) : undefined;
+    ? projectNativeR5Course(canonical, {
+      bodySitePostcoordination:options?.bodySitePostcoordination,
+      includeTranslationExtensions:Boolean(options?.locale||options?.i18n)
+    }, true, true, false) : undefined;
   const projectedFhir = courseProjection?.dosages ?? toEzDosages(results.map(item => item.fhir));
   // The same JSON-compatible structural bridge serves both public routes:
   // parser FHIR rows and callers using strict toFhirR5Dosages directly.
@@ -580,11 +589,12 @@ function buildWholeCourseResult(
   const warnings = new Set<string>();
   const consumedTokens: string[] = [];
   const leftovers: string[] = [];
+  const knownLeftovers=new Set<string>();
   for (const item of results) {
     for (const warning of item.warnings) warnings.add(warning);
     consumedTokens.push(...item.meta.consumedTokens);
-    if (item.meta.leftoverText && leftovers.indexOf(item.meta.leftoverText) < 0) {
-      leftovers.push(item.meta.leftoverText);
+    if (item.meta.leftoverText && !knownLeftovers.has(item.meta.leftoverText)) {
+      knownLeftovers.add(item.meta.leftoverText);leftovers.push(item.meta.leftoverText);
     }
   }
   // Realize ordinary multi-clause courses afresh. Rich R6 courses prefer the
@@ -999,41 +1009,11 @@ export async function parseSigAsync(
  * @param options Requested locale and conjunction punctuation.
  * @param separator Separator for independently concurrent members.
  */
-function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
-  members: readonly T[], render: (member: T) => string,
-  options?: FormatOptions, separator = "; "
-): string {
-  if (!members.some(member => getDosageAlternativeChoice(member))) {
-    return joinGeneratedClauses(members.map(render).filter(text => text.trim()));
-  }
-  const thai = (options?.locale ?? "").toLowerCase().indexOf("th") === 0;
-  const emitted = new Set<string>();
-  const parts: string[] = [];
-  for (const member of members) {
-    const choice = getDosageAlternativeChoice(member);
-    if (!choice) {
-      const text = render(member).trim();
-      if (text) parts.push(text);
-      continue;
-    }
-    if (emitted.has(choice.groupId)) continue;
-    emitted.add(choice.groupId);
-    const branches = new Map<string, string[]>();
-    for (const candidate of members) {
-      const candidateChoice = getDosageAlternativeChoice(candidate);
-      if (candidateChoice?.groupId !== choice.groupId) continue;
-      const texts = branches.get(candidateChoice.branchId) ?? [];
-      const text = render(candidate).trim().replace(/[.!?]+$/u, "");
-      if (text) texts.push(text);
-      branches.set(candidateChoice.branchId, texts);
-    }
-    const alternatives = [...branches.values()].map(texts => texts.join("; ")).filter(Boolean);
-    if (alternatives.length) {
-      parts.push((thai ? "เลือกอย่างใดอย่างหนึ่ง: " : "Choose one: ") +
-        alternatives.join(thai ? " หรือ " : " or ") + ".");
-    }
-  }
-  return parts.join(separator);
+function formatChoiceMembers<T extends Pick<FhirDosage,"modifierExtension">>(
+  members:readonly T[],render:(member:T)=>string,options?:FormatOptions,separator="; "
+):string {
+  return formatCourseChoices(members,render,getDosageAlternativeChoice,
+    resolveCourseLanguage(options?.locale,options?.i18n),separator);
 }
 
 /** Append structured rate ranges ONLY to a freshly computed preview.
@@ -1041,7 +1021,7 @@ function formatChoiceMembers<T extends Pick<FhirDosage, "modifierExtension">>(
  * presence of Dosage.text (which may be unused during structured editing).
  * Ordinary one-entry SIGs exit at the single optional-field check. */
 function appendSourceLessRateRanges(
-  displayed: string, dosage: FhirDosage, thai: boolean
+  displayed: string, dosage: FhirDosage, words: CourseLanguage
 ): string {
   const entries = dosage.doseAndRate;
   if (!entries?.length) return displayed;
@@ -1049,7 +1029,7 @@ function appendSourceLessRateRanges(
   const expressions: string[] = [];
   for (const entry of entries) {
     const range = entry.rateRange && rateRangePreview(rangeFromFhir(entry.rateRange)!);
-    if (range) expressions.push((thai ? "ช่วงอัตราการให้ยา: " : "Rate range: ") + range);
+    if (range) expressions.push(words.rateRangeLabel + range);
   }
   return expressions.length ? joinGeneratedClauses([displayed, ...expressions]) : displayed;
 }
@@ -1105,7 +1085,7 @@ export function formatSig(
       displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
     }
     return appendSourceLessRateRanges(displayed, dosage,
-      (options?.locale ?? "").toLowerCase().startsWith("th"));
+      resolveCourseLanguage(options?.locale,options?.i18n,localization));
   }
   const quantity = dosage.doseAndRate?.[0];
   // Until rich rate and relative-weight units have dedicated realizers, retain
@@ -1132,58 +1112,41 @@ export function formatSig(
     displayed = appendMedicationExcludedWeekdaysText(displayed, displayExcludedWeekdays, options);
   }
   return appendSourceLessRateRanges(displayed, dosage,
-    (options?.locale ?? "").toLowerCase().startsWith("th"));
+    resolveCourseLanguage(options?.locale,options?.i18n,localization));
 }
 
 export function formatSigBatch(
-  dosages: FhirDosage[],
-  style: "short" | "long" = "short",
-  options?: FormatBatchOptions
-): string {
-  const separator = options?.separator ?? ", ";
-  const firstSequence = dosages[0]?.sequence ?? 1;
-  // Distinct ordinary R5 sequences also carry course-level ordering, even
-  // without a retained R6 marker. Equal/absent sequences remain concurrent.
-  if (dosages.some(dosage => (dosage.sequence ?? 1) !== firstSequence ||
-    dosage.modifierExtension?.some(extension => extension.url === DOSAGE_DETAILS_R5_URL))) {
-    // Batch formatting requests a realization; undefined native R6 options
-    // instead request the original course source. Keep those APIs distinct.
-    return formatSig(toDosageDetails(dosages), style, options ?? {});
+  dosages:FhirDosage[],style:"short"|"long"="short",options?:FormatBatchOptions
+):string {
+  const separator=options?.separator??", ";
+  const sequence=dosages[0]?.sequence??1;
+  let hasCourse=false,hasChoice=false;
+  // One classification walk. Do not format through an R6 intermediary or
+  // repeat a whole-array scan for each independent classification flag.
+  for(const dosage of dosages){
+    if((dosage.sequence??1)!==sequence)hasCourse=true;
+    for(const e of dosage.modifierExtension??[])if(e.url===DOSAGE_DETAILS_R5_URL)hasCourse=true;
+    if(!hasChoice&&getDosageAlternativeChoice(dosage))hasChoice=true;
   }
-  if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
-    return formatChoiceMembers(dosages, dosage => formatSig(dosage, style, options), options, separator);
-  }
-  const formatted: string[] = [];
-  for (const dosage of dosages) {
-    const text = formatSig(dosage, style, options);
-    if (text.trim()) {
-      formatted.push(text);
-    }
-  }
-  return formatted.join(separator);
+  if(hasCourse)return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,options??{});
+  if(hasChoice)return formatChoiceMembers(dosages,dosage=>formatSig(dosage,style,options),options,separator);
+  const text:string[]=[];
+  for(const dosage of dosages){const value=formatSig(dosage,style,options);if(value.trim())text.push(value);}
+  return text.join(separator);
 }
 
-export function formatParseBatch(
-  batch: ParseBatchResult,
-  style: "short" | "long" = "short",
-  separator = ", "
-): string {
-  // Item displays cannot encode course-wide starts, pauses or repetition.
-  // Keep the already realized whole-course text (and its locale) for those
-  // semantics; the custom separator still applies to ordinary flat batches.
-  if (batch.fhirNext.step.length > 1 || batch.fhirNext.repeatCycle ||
-    batch.fhirNext.step.some(step => step.start || step.end || step.count !== undefined)) {
-    return style === "short" ? batch.shortText : batch.longText;
+export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
+  // Keep already-localized whole-course timing and choice wording. Ordinary
+  // items are collected once without mapping an unused array of FHIR rows.
+  if(batch.fhirNext.step.length>1||batch.fhirNext.repeatCycle)return style==="short"?batch.shortText:batch.longText;
+  for(const step of batch.fhirNext.step)if(step.start||step.end||step.count!==undefined)
+    return style==="short"?batch.shortText:batch.longText;
+  const text:string[]=[];
+  for(const item of batch.items){
+    if(getDosageAlternativeChoice(item.fhir))return style==="short"?batch.shortText:batch.longText;
+    const value=style==="short"?item.shortText:item.longText;if(value?.trim())text.push(value);
   }
-  const dosages = batch.items.map(item => item.fhir);
-  if (dosages.some(dosage => getDosageAlternativeChoice(dosage))) {
-    // The batch already owns a localized, mutually exclusive choice display.
-    return style === "short" ? batch.shortText : batch.longText;
-  }
-  const texts = batch.items
-    .map((item) => (style === "short" ? item.shortText : item.longText))
-    .filter((text) => typeof text === "string" && text.trim().length > 0);
-  return texts.join(separator);
+  return text.join(separator);
 }
 
 /**
@@ -1202,14 +1165,16 @@ export function fromFhir(
   // R5 is a public output only. Project its strict component view and
   // extended editable view in ONE component traversal; do not separately
   // lower this entire R6 course into R5 twice just to format native items.
-  const projection = projectEditableR5Course(dosageDetails, true);
+  const native = courseFromR6(dosageDetails, true);
+  const projection = projectNativeR5Course(native,undefined,true,false,false,true);
+  if(!native.stages.some(stage=>stage.administrations.length))projection.dosages=[];
   const course = projection.course;
   const strict = projection.strictDosages ?? projection.dosages;
   const normalizedStrict = strict.length
     ? normalizeEmittedSemanticMarkers(strict, projection.dosages === strict)
     : strict;
   const r5Rows = normalizedStrict.length
-    ? (dosageDetails.renderedInstruction === undefined
+    ? (dosageDetails.renderedInstruction === undefined || !projection.dosages.length
       ? normalizedStrict
       : withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction))
     : toFhirR5Dosages(dosageDetails); // zero-component text/safety carrier only
@@ -1218,7 +1183,6 @@ export function fromFhir(
     : dosageDetails.renderedInstruction === undefined
       ? projection.dosages
       : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction);
-  const native = courseFromR6(dosageDetails, true);
   const compiled = new Map<CanonicalAdministration, CanonicalSigClause>();
   const items: ParseResult[] = [];
   let row = 0;
@@ -1292,9 +1256,8 @@ function provisionalFhirDisplay(
   options?: FormatOptions,
   showIncompleteLabel = true
 ): string {
-  const prefix = String(options?.locale ?? "").toLowerCase().startsWith("th")
-    ? "ข้อมูลบางส่วนเท่านั้น — ต้องตรวจสอบข้อจำกัดการใช้ยา"
-    : "INCOMPLETE medication interpretation — safety restrictions require review";
+  const words=resolveCourseLanguage(options?.locale,options?.i18n,localization);
+  const prefix=words.incompleteInterpretation;
   const recognized = formatCanonicalClause(clause, style, localization, options).trim();
   const maximums: string[] = [];
   const readableQuantity = (quantity: FhirQuantity | undefined): string | undefined => {
@@ -1305,22 +1268,22 @@ function provisionalFhirDisplay(
   };
   const perAdministration = readableQuantity(dosage.maxDosePerAdministration);
   const lifetime = readableQuantity(dosage.maxDosePerLifetime);
-  if (perAdministration) maximums.push(`max per administration: ${perAdministration}`);
-  if (lifetime) maximums.push(`max lifetime: ${lifetime}`);
+  if (perAdministration) maximums.push(words.maxAdministrationLabel+perAdministration);
+  if (lifetime) maximums.push(words.maxLifetimeLabel+lifetime);
   for (const period of dosage.maxDosePerPeriod ?? []) {
     const numerator = readableQuantity(period.numerator);
     const denominator = readableQuantity(period.denominator);
-    if (numerator && denominator) maximums.push(`max per period: ${numerator} / ${denominator}`);
+    if (numerator && denominator) maximums.push(words.maxPeriodLabel+numerator+" / "+denominator);
   }
   for (const amount of (dosage as EzDosage).doseAndRate ?? []) {
     if (amount.doseExpression)
-      maximums.push(unevaluatedExpressionText(amount.doseExpression, "dose"));
+      maximums.push(unevaluatedExpressionText(amount.doseExpression, "dose",words));
     if (amount.rateExpression)
-      maximums.push(unevaluatedExpressionText(amount.rateExpression, "rate"));
+      maximums.push(unevaluatedExpressionText(amount.rateExpression, "rate",words));
   }
   const body = joinGeneratedClauses([recognized, ...maximums].filter(Boolean));
-  if (!showIncompleteLabel) return body || "Structured FHIR data is retained";
-  return body ? `${prefix}: ${body}` : `${prefix}. Structured FHIR data is retained.`;
+  if (!showIncompleteLabel) return body || words.retainedStructure;
+  return body ? `${prefix}: ${body}` : `${prefix}. ${words.retainedStructure}.`;
 }
 
 function fromFhirDosageInternal(
@@ -1361,9 +1324,9 @@ function fromFhirDosageInternal(
       shortText = appendMedicationExcludedWeekdaysText(shortText, excludedWeekdays, options);
       computedLong = appendMedicationExcludedWeekdaysText(computedLong, excludedWeekdays, options);
     }
-    const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
-    shortText = appendSourceLessRateRanges(shortText, dosage, thai);
-    computedLong = appendSourceLessRateRanges(computedLong, dosage, thai);
+    const words=resolveCourseLanguage(options?.locale,options?.i18n,localization);
+    shortText = appendSourceLessRateRanges(shortText, dosage, words);
+    computedLong = appendSourceLessRateRanges(computedLong, dosage, words);
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];

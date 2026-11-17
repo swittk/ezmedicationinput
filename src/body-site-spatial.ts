@@ -32,6 +32,15 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   };
 }
 
+/** Shared immutable-by-contract Coding fields for ordinary projection and
+ * import. Only the explicitly named clone API detaches nested metadata. */
+function sharedCodingFields(coding:FhirCoding|undefined):FhirCoding|undefined {
+  return coding?.code?{
+    system:coding.system,code:coding.code,display:coding.display,
+    extension:coding.extension,_display:coding._display,i18n:coding.i18n
+  }:undefined;
+}
+
 function cloneBodySiteCoding(coding: BodySiteCode | undefined): BodySiteCode | undefined {
   if (!coding?.code) {
     return undefined;
@@ -81,7 +90,7 @@ export function buildBodySiteSpatialRelationExtension(
     return undefined;
   }
   const children: FhirExtension[] = [];
-  const relationCoding = cloneCoding(relation.relationCoding);
+  const relationCoding = sharedCodingFields(relation.relationCoding);
   if (relationCoding?.code) {
     children.push({ url: RELATION_URL, valueCoding: relationCoding });
   }
@@ -127,20 +136,24 @@ export function parseBodySiteSpatialRelationExtension(
   if (!extension?.extension?.length) {
     return undefined;
   }
-  const relationCoding = cloneCoding(
-    extension.extension.find((child) => child.url === RELATION_URL)?.valueCoding
-  );
-  const relationText =
-    extension.extension.find((child) => child.url === RELATION_TEXT_URL)?.valueString ??
-    relationCoding?.display ??
-    "";
-  const targetConcept = extension.extension.find((child) => child.url === TARGET_URL)
-    ?.valueCodeableConcept;
-  const targetCoding = firstCodingWithCode(targetConcept);
-  const targetText =
-    targetConcept?.text ??
-    extension.extension.find((child) => child.url === TARGET_TEXT_URL)?.valueString;
-  const sourceText = extension.extension.find((child) => child.url === SOURCE_TEXT_URL)?.valueString;
+  // Decode each field once. The first occurrence owns its field even if
+  // that occurrence's value is absent, matching the original import contract.
+  let relationNode:FhirExtension|undefined,relationTextNode:FhirExtension|undefined,
+    targetNode:FhirExtension|undefined,targetTextNode:FhirExtension|undefined,
+    sourceNode:FhirExtension|undefined;
+  for(const node of extension.extension)switch(node.url){
+    case RELATION_URL:if(!relationNode)relationNode=node;break;
+    case RELATION_TEXT_URL:if(!relationTextNode)relationTextNode=node;break;
+    case TARGET_URL:if(!targetNode)targetNode=node;break;
+    case TARGET_TEXT_URL:if(!targetTextNode)targetTextNode=node;break;
+    case SOURCE_TEXT_URL:if(!sourceNode)sourceNode=node;break;
+  }
+  const relationCoding=sharedCodingFields(relationNode?.valueCoding);
+  const relationText=relationTextNode?.valueString??relationCoding?.display??"";
+  const targetConcept=targetNode?.valueCodeableConcept;
+  const targetCoding=firstCodingWithCode(targetConcept);
+  const targetText=targetConcept?.text??targetTextNode?.valueString;
+  const sourceText=sourceNode?.valueString;
   if (!relationText && !relationCoding?.code && !targetText && !targetCoding?.code && !sourceText) {
     return undefined;
   }

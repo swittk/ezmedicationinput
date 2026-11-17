@@ -219,7 +219,10 @@ describe("non-equivalent standardized constituents of local instruction actions"
       expect.objectContaining({ role, coding: expect.objectContaining({ code, system: SNOMED }) })
     ]));
     const again = getMedicationInstructionAction(action)!;
-    again.semanticComponents![0].coding.code = "changed";
+    // Lookup returns the immutable-by-contract dictionary definition, not a
+    // defensive copy of its full contextual vocabulary tree on every token.
+    expect(again).toBe(definition);
+    expect(Object.isFrozen(again)).toBe(false);
     expect(getMedicationInstructionAction(action)?.semanticComponents?.[0]?.coding.code).toBe(code);
   });
 
@@ -243,7 +246,7 @@ describe("non-equivalent standardized constituents of local instruction actions"
     const bare = getMedicationInstructionAction("rotate")!;
     expect(bare.semanticComponents).toBeUndefined();
     expect(bare.contextualSemanticComponents).toHaveLength(2);
-    bare.contextualSemanticComponents![0].component.coding.code = "bad";
+    expect(getMedicationInstructionAction("rotate")).toBe(bare);
     expect(getMedicationInstructionAction("rotate")!.contextualSemanticComponents![0].component.coding.code)
       .toBe("49572008");
   });
@@ -265,7 +268,7 @@ describe("non-equivalent standardized constituents of local instruction actions"
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
     const definition = getMedicationInstructionAction("reapply")!;
     expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
-    definition.semanticComponents![0].coding.code = "bad";
+    expect(getMedicationInstructionAction("reapply")).toBe(definition);
     expect(getMedicationInstructionAction("reapply")?.semanticComponents?.[0].coding.code).toBe("C47886");
     expect(getMedicationInstructionAction("tilt")?.semanticComponents?.[0].coding.code).toBe("257912008");
   });
@@ -308,7 +311,7 @@ describe("partial coded clinical concept constituents", () => {
       expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
     ]));
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
-    concept.components![0].coding!.code = "mutated";
+    expect(getMedicationInstructionConcept(name)).toBe(concept);
     expect(getMedicationInstructionConcept(name)?.components?.[0]?.coding?.code).toBe(code);
   });
 });

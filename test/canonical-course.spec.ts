@@ -81,6 +81,14 @@ describe("canonical course architecture", () => {
       );
     }
   });
+  it("R5 import/export are independent native adapters, never complete R6 intermediate workflows",()=>{
+    const writer=readFileSync(new URL("../src/adapters/r5-course.ts",import.meta.url),"utf8");
+    const reader=readFileSync(new URL("../src/adapters/r5-import.ts",import.meta.url),"utf8");
+    for(const source of [writer,reader])
+      expect(source).not.toMatch(/\b(?:courseToR6|projectCourseToR6|courseFromR6|administrationToR6|fromR6Dosage|toDosageDetails)\s*\(/u);
+    expect(writer).toMatch(/administrationToR5\s*\(/u);
+    expect(reader).toMatch(/administrationFromR5\s*\(/u);
+  });
   it("the original public scheduling file is only an input adapter, not a second engine", () => {
     const text = readFileSync(new URL("../src/schedule.ts", import.meta.url), "utf8");
     expect(text).toContain("inputToCanonical");

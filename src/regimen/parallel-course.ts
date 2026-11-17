@@ -1,3 +1,4 @@
+import { projectNativeR5Course } from "../adapters/r5-course";
 import { fromDosageDetails } from '../dosage-course';
 import { type FhirProjectionOptions } from '../fhir';
 import { courseFromParallel } from '../canonical/compile';
@@ -391,6 +392,6 @@ export function projectParallelRegimen(
   const canonical = courseFromParallel(regimen, clauseTexts, renderedInstruction);
   const details = projectFreshlyCompiledCourseToR6(canonical, options);
   // These are public interchange projections, not the course's working state.
-  const { dosages, course } = fromDosageDetails(details);
+  const { dosages, course } = projectNativeR5Course(canonical,options,true,true);
   return { kind: 'resolved', dosages, course, details, canonical };
 }

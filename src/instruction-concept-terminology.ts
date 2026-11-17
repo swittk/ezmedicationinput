@@ -175,6 +175,9 @@ function customDefinitionForSurface(
   return undefined;
 }
 
+/** Dictionary definitions are immutable by caller contract. Repeated
+ * lexical resolution must not recursively clone the same vocabulary tree.
+ * Explicit frame construction still copies only the fields it later edits. */
 export function resolveMedicationInstructionConcept(
   surface: string,
   options?: ParseOptions
@@ -182,7 +185,7 @@ export function resolveMedicationInstructionConcept(
   const custom = customDefinitionForSurface(surface, options);
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeConceptSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function getMedicationInstructionConcept(
@@ -191,11 +194,11 @@ export function getMedicationInstructionConcept(
   const definition = !system || system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM
     ? DEFAULT_BY_CODE.get(code)
     : DEFAULT_BY_CODING.get(system + "|" + code);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function listMedicationInstructionConcepts(): MedicationInstructionConceptDefinition[] {
-  return DEFAULT_CONCEPTS.map(cloneDefinition);
+  return DEFAULT_CONCEPTS;
 }
 
 export function buildMedicationInstructionConceptCodeSystem(): MedicationInstructionConceptCodeSystem {

@@ -1062,19 +1062,23 @@ describe("FHIR projection structural comparison hygiene", () => {
     expect(toDosageDetails(reordered)).toEqual(expected);
   });
 
-  it("keeps unknown nested FHIR content isolated without JSON cloning", () => {
+  it("preserves unknown nested FHIR content with immutable-by-contract zero-copy outputs", () => {
     const shared: FhirDosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
       extension: [{ url: "urn:test:unknown", extension: [{ url: "detail", valueString: "retain" }] }]
     };
     const input: FhirR6DosageInstruction = { step: [{ component: [shared, shared] }] };
     const output = toFhirR5Dosages(input);
-    output[0].doseAndRate![0].doseQuantity!.value = 2;
-    output[0].extension![0].extension![0].valueString = "edited";
+    // Public outputs are immutable by caller contract. Protecting callers
+    // who mutate returned nested values would require the defensive cloning
+    // explicitly rejected by the API owner. Conversion itself changes none.
+    expect(output[0].doseAndRate![0].doseQuantity).toBe(shared.doseAndRate![0].doseQuantity);
     expect(output[1].doseAndRate![0].doseQuantity!.value).toBe(1);
+    expect(output[0].extension![0]).toBe(shared.extension![0]);
     expect(output[1].extension![0].extension![0].valueString).toBe("retain");
     expect(shared.doseAndRate![0].doseQuantity!.value).toBe(1);
     expect(shared.extension![0].extension![0].valueString).toBe("retain");
+    expect(Object.isFrozen(output)).toBe(false);
   });
 
   it("preserves dose edits and original text when optional empty metadata is omitted", () => {

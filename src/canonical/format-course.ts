@@ -12,104 +12,109 @@ import type {
 } from "./course";
 import { measureOperator as getQuantityComparator } from "./course";
 import { clauseForAdministration } from "./compile";
-import { DAY_NAMES, formatCanonicalClause, joinWithAnd } from "../format";
-import { DAY_NAMES_THAI, joinWithAndThai, resolveSigLocalization } from "../i18n";
+import { formatCanonicalClause } from "../format";
+import {
+  resolveSigLocalization,
+  resolveCourseLanguage,
+  type SigLocalization,
+  type CourseLanguage,
+} from "../i18n";
 
-export function joinGeneratedClauses(clauses: string[]): string {
-  return clauses
-    .map((clause, index) => (index < clauses.length - 1 ? clause.replace(/\.\s*$/u, "") : clause))
-    .join("; ");
+/** Resolved once per invocation; recursive clinical composition reuses it. */
+interface CourseFormatEnvironment {
+  localization?: SigLocalization;
+  words: CourseLanguage;
 }
-function medicationConditionBody(condition: MedicationCondition, locale?: string): string {
-  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
+function courseEnvironment(options?: FormatOptions): CourseFormatEnvironment {
+  const localization = resolveSigLocalization(options?.locale, options?.i18n);
+  return { localization, words: resolveCourseLanguage(options?.locale, options?.i18n, localization) };
+}
+
+export function joinGeneratedClauses(clauses: readonly string[]): string {
+  let result = "";
+  for (let index = 0; index < clauses.length; index++) {
+    if (index) result += "; ";
+    result += index < clauses.length - 1 ? clauses[index].replace(/\.\s*$/u, "") : clauses[index];
+  }
+  return result;
+}
+function medicationConditionBody(condition: MedicationCondition, words: CourseLanguage): string {
   switch (condition.kind) {
     case "measurement": {
-      // Imported FHIR often supplies only the concept label as text. It is
-      // not a realization of a comparator, value, or negated Boolean state.
-      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
-        return condition.text.trim();
-      }
-      const operator = {
-        gt: ">",
-        ge: ">=",
-        lt: "<",
-        le: "<=",
-        eq: "=",
-        ne: "!=",
-      }[condition.operation];
+      // A concept label is not a full rendering of its numeric predicate.
+      const source = condition.text?.trim();
+      if (source && source !== condition.name.trim()) return source;
+      const operator = { gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!=" }[condition.operation];
       return (
         condition.name + " " + operator + " " + condition.value + (condition.unit ? " " + condition.unit : "")
       );
     }
-    case "state":
-      // Imported FHIR often supplies only the concept label as text. It is
-      // not a realization of a comparator, value, or negated Boolean state.
-      if (condition.text?.trim() && condition.text.trim() !== condition.name.trim()) {
-        return condition.text.trim();
-      }
-      return condition.expected ? condition.name : (thai ? "ไม่ " : "not ") + condition.name;
+    case "state": {
+      const source = condition.text?.trim();
+      if (source && source !== condition.name.trim()) return source;
+      return condition.expected ? condition.name : words.notPrefix + condition.name;
+    }
     case "text":
       return condition.text;
     case "not":
-      return (thai ? "ไม่ " : "not ") + "(" + medicationConditionBody(condition.condition, locale) + ")";
+      return words.notPrefix + "(" + medicationConditionBody(condition.condition, words) + ")";
     case "all":
-    case "any":
-      return condition.conditions
-        .map((value) => {
-          const body = medicationConditionBody(value, locale);
-          // Mixed Boolean daughters retain the exact tree grouping. Only the
-          // outer NOT uses "unless"; an inner NOT must remain explicit here.
-          return (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind
-            ? "(" + body + ")"
-            : body;
-        })
-        .join(condition.kind === "all" ? (thai ? " และ " : " and ") : thai ? " หรือ " : " or ");
+    case "any": {
+      let result = "";
+      const separator = condition.kind === "all" ? words.allSeparator : words.anySeparator;
+      for (const value of condition.conditions) {
+        const body = medicationConditionBody(value, words);
+        // Preserve Boolean grouping. Only the outer NOT licenses 'unless'.
+        const grouped = (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind;
+        if (result) result += separator;
+        result += grouped ? "(" + body + ")" : body;
+      }
+      return result;
+    }
   }
 }
-
 export function appendMedicationExcludedDatesText(
   text: string,
   dates: readonly string[],
-  options?: FormatOptions
+  options?: FormatOptions,
+  environment?: CourseFormatEnvironment
 ): string {
   if (!dates.length) return text;
-  const thai = (options?.locale ?? "").toLowerCase().indexOf("th") === 0;
+  const words = (environment ?? courseEnvironment(options)).words;
   const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  const lead = thai ? "ยกเว้นวันที่" : "except";
-  const separator = thai ? " และ " : " and ";
-  return (trimmed ? trimmed + " " : "") + lead + " " + dates.join(separator) + ".";
+  return (trimmed ? trimmed + " " : "") + words.exceptDates + " " + dates.join(words.allSeparator) + ".";
 }
-
-/** Realize a typed weekday exclusion when no source-written instruction exists.
- * Reuse the ordinary localizers rather than introducing a competing day lexicon.
- */
+/** The locale owns weekday vocabulary; clinical exclusion membership is
+ * walked once instead of repeatedly looking through prior array members. */
 export function appendMedicationExcludedWeekdaysText(
   text: string,
   days: readonly FhirDayOfWeek[],
-  options?: FormatOptions
+  options?: FormatOptions,
+  environment?: CourseFormatEnvironment
 ): string {
   if (!days.length) return text;
-  const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
-  const labels = [...new Set(days)].map((day) => (thai ? DAY_NAMES_THAI[day] : DAY_NAMES[day]) ?? day);
-  const readable = thai ? joinWithAndThai(labels) : joinWithAnd(labels);
+  const words = (environment ?? courseEnvironment(options)).words;
+  const seen = new Set<FhirDayOfWeek>(),
+    labels: string[] = [];
+  for (const day of days)
+    if (!seen.has(day)) {
+      seen.add(day);
+      labels.push(words.weekdayName(day));
+    }
   const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + (thai ? "ยกเว้น" : "except ") + readable + ".";
+  return (trimmed ? trimmed + " " : "") + words.exceptWeekdays + words.joinList(labels) + ".";
 }
-
 export function appendMedicationConditionText(
   text: string,
   condition: MedicationCondition,
-  options?: FormatOptions
+  options?: FormatOptions,
+  environment?: CourseFormatEnvironment
 ): string {
-  const locale = options?.locale;
-  const thai = (locale ?? "").toLowerCase().indexOf("th") === 0;
-  const body =
-    condition.kind === "not"
-      ? medicationConditionBody(condition.condition, locale)
-      : medicationConditionBody(condition, locale);
-  const lead = condition.kind === "not" ? (thai ? "เว้นแต่" : "unless") : thai ? "เฉพาะเมื่อ" : "only if";
+  const words = (environment ?? courseEnvironment(options)).words;
+  const negated = condition.kind === "not";
+  const body = medicationConditionBody(negated ? condition.condition : condition, words);
   const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + lead + " " + body + ".";
+  return (trimmed ? trimmed + " " : "") + (negated ? words.unless : words.onlyIf) + " " + body + ".";
 }
 
 /** Resolve exact day/week quantities without converting clock-time units to calendar days.
@@ -169,60 +174,32 @@ function medicationFreeCourseWindows(
 
 /** Show an imported expression without evaluating it or inventing a dose.
  * Referenced/named expressions are usable structured data too. */
-export function unevaluatedExpressionText(expression: CanonicalExpression, kind: "dose" | "rate"): string {
+export function unevaluatedExpressionText(
+  expression: CanonicalExpression,
+  kind: "dose" | "rate",
+  words?: CourseLanguage
+): string {
   const detail = expression.expression ?? expression.reference ?? expression.description ?? expression.name;
-  return `unevaluated ${kind} expression${detail ? ": " + detail : ""}`;
+  return (words ?? resolveCourseLanguage()).expression(kind, detail);
 }
-
-/** Realize a temporal quantity without approximating calendar months or years.
- * @param quantity Original typed temporal quantity.
- * @param thai Whether the requested realization is Thai.
- * @returns The original amount/comparator with a localized temporal unit.
- */
-function formatCourseTimeQuantity(quantity: CanonicalMeasure, thai: boolean): string {
-  const units: Record<string, readonly [string, string, string]> = {
-    s: ["second", "seconds", "วินาที"],
-    min: ["minute", "minutes", "นาที"],
-    h: ["hour", "hours", "ชั่วโมง"],
-    d: ["day", "days", "วัน"],
-    wk: ["week", "weeks", "สัปดาห์"],
-    mo: ["month", "months", "เดือน"],
-    a: ["year", "years", "ปี"],
-  };
+/** Preserve temporal units exactly. Locale rules own wording; calendar
+ * months/years are never approximated as day counts by realization. */
+function formatCourseTimeQuantity(quantity: CanonicalMeasure, words: CourseLanguage): string {
   const unit = quantity.code ?? quantity.unit ?? "";
-  const label = units[unit]?.[thai ? 2 : quantity.value === 1 ? 0 : 1] ?? quantity.unit ?? unit;
+  const label = words.timeUnit(unit, quantity.value) ?? quantity.unit ?? unit;
   return `${getQuantityComparator(quantity) ?? ""}${quantity.value ?? ""} ${label}`.trim();
 }
-
-/** Render the typed whole-course repetition interval independently of component cadence.
- * @param cycle Original R6 repeatCycle quantity; unknown units remain verbatim.
- * @param thai Whether the requested realization is Thai.
- * @param count Supplied common step repetition count, when explicitly finite.
- * @returns A visible cycle instruction preserving the supplied count without inventing an end date.
- */
-function formatCourseRepeatCycle(cycle: CanonicalMeasure, thai: boolean, count?: number): string {
+/** Clinical validity is determined here. The language realizes either a
+ * known repetition or an uninterpreted source-qualified interval. */
+function formatCourseRepeatCycle(cycle: CanonicalMeasure, words: CourseLanguage, count?: number): string {
   const unit = cycle.code ?? cycle.unit ?? "";
-  const interval = formatCourseTimeQuantity(cycle, thai);
-  const iterations =
-    count === undefined
-      ? ""
-      : thai
-      ? ` จำนวน ${count} รอบ`
-      : ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
-  if (
-    getQuantityComparator(cycle) ||
-    cycle.value === undefined ||
-    !Number.isFinite(cycle.value) ||
-    cycle.value <= 0 ||
-    !unit
-  ) {
-    return thai
-      ? `ระยะรอบการใช้ยา: ${interval}${iterations}.`
-      : `Repeat-cycle interval: ${interval}${iterations}.`;
-  }
-  return thai
-    ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับวันที่ใหม่ในแต่ละรอบ).`
-    : `Repeat this schedule every ${interval}${iterations} (days are numbered within each cycle).`;
+  const exact =
+    !getQuantityComparator(cycle) &&
+    cycle.value !== undefined &&
+    Number.isFinite(cycle.value) &&
+    cycle.value > 0 &&
+    Boolean(unit);
+  return words.repeatCycle(formatCourseTimeQuantity(cycle, words), exact, count);
 }
 
 /** Read a typed treatment-start quantity without reinterpreting its calendar unit.
@@ -258,20 +235,13 @@ function treatmentStepOffsetDays(relative: CanonicalCourse["stages"][number]["st
 function formatCalendarStepWindow(
   start: CanonicalMeasure | undefined,
   end: CanonicalMeasure | undefined,
-  thai: boolean
+  words: CourseLanguage
 ): string {
-  const point = (quantity: CanonicalMeasure) =>
-    quantity.value === 0 && !getQuantityComparator(quantity)
-      ? thai
-        ? "เริ่มการรักษา"
-        : "treatment start"
-      : thai
-      ? `${formatCourseTimeQuantity(quantity, true)}หลังเริ่มการรักษา`
-      : `${formatCourseTimeQuantity(quantity, false)} after treatment start`;
-  if (start && end)
-    return thai ? `ตั้งแต่${point(start)}จนถึง${point(end)}` : `From ${point(start)} until ${point(end)}`;
-  if (start) return thai ? `ตั้งแต่${point(start)}เป็นต้นไป` : `From ${point(start)} onward`;
-  return end ? (thai ? `จนถึง${point(end)}` : `Until ${point(end)}`) : "";
+  const point = (q: CanonicalMeasure) =>
+    q.value === 0 && !getQuantityComparator(q)
+      ? words.treatmentStart
+      : words.afterTreatmentStart(formatCourseTimeQuantity(q, words));
+  return words.calendarWindow(start ? point(start) : undefined, end ? point(end) : undefined);
 }
 
 /** Source-less R6 rateRange remains a range, never a guessed exact rate.
@@ -320,17 +290,19 @@ export function prefersSourceInstruction(course: CanonicalCourse): boolean {
 
 /** One pass organizes native choice membership. It never decodes a wire
  * marker or repeatedly scans the entire component array for each branch. */
-function formatCanonicalChoices(
-  members: readonly CanonicalAdministration[],
-  render: (member: CanonicalAdministration) => string,
-  options?: FormatOptions,
+export function formatCourseChoices<T>(
+  members: readonly T[],
+  render: (member: T) => string,
+  choiceOf: (member: T) => CanonicalAdministration["choice"],
+  words: CourseLanguage,
   separator = "; "
 ): string {
+  if (members.length === 1 && !choiceOf(members[0])) return render(members[0]).trim();
   const slots: Array<{ text: string } | { group: string }> = [];
   const groups = new Map<string, Map<string, string[]>>();
   for (const member of members) {
-    const choice = member.choice,
-      text = render(member).trim();
+    const text = render(member).trim(),
+      choice = choiceOf(member);
     if (!choice) {
       if (text) slots.push({ text });
       continue;
@@ -344,18 +316,22 @@ function formatCanonicalChoices(
     if (!branch) branches.set(choice.branchId, (branch = []));
     if (text) branch.push(text.replace(/[.!?]+$/u, ""));
   }
-  if (!groups.size) return joinGeneratedClauses(slots.map((slot) => (slot as { text: string }).text));
-  const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
-  return slots
-    .map((slot) => {
-      if ("text" in slot) return slot.text;
-      const choices = [...groups.get(slot.group)!.values()].map((texts) => texts.join("; ")).filter(Boolean);
-      return choices.length
-        ? (thai ? "เลือกอย่างใดอย่างหนึ่ง: " : "Choose one: ") + choices.join(thai ? " หรือ " : " or ") + "."
-        : "";
-    })
-    .filter(Boolean)
-    .join(separator);
+  const output: string[] = [];
+  for (const slot of slots) {
+    if ("text" in slot) {
+      output.push(slot.text);
+      continue;
+    }
+    let body = "";
+    for (const branch of groups.get(slot.group)!.values()) {
+      const text = branch.join("; ");
+      if (!text) continue;
+      if (body) body += words.anySeparator;
+      body += text;
+    }
+    if (body) output.push(words.choicePrefix + body + ".");
+  }
+  return groups.size ? output.join(separator) : joinGeneratedClauses(output);
 }
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
@@ -363,8 +339,11 @@ function formatCanonicalBase(
   a: CanonicalAdministration,
   style: "short" | "long",
   options?: FormatOptions,
-  compiled?: CanonicalSigClause
+  compiled?: CanonicalSigClause,
+  environment?: CourseFormatEnvironment
 ): string {
+  const env = environment ?? courseEnvironment(options),
+    words = env.words;
   const primary = a.amounts?.[0];
   const maxima = Boolean(a.limits?.length);
   const rich =
@@ -384,12 +363,7 @@ function formatCanonicalBase(
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a);
-  let rendered = formatCanonicalClause(
-    clause,
-    style,
-    resolveSigLocalization(options?.locale, options?.i18n),
-    options
-  );
+  let rendered = formatCanonicalClause(clause, style, env.localization, options);
   const limits: string[] = [];
   const readable = (q: CanonicalMeasure | undefined) =>
     q?.value !== undefined && Number.isFinite(q.value)
@@ -400,23 +374,20 @@ function formatCanonicalBase(
     if (!amount) continue;
     if (limit.scope === "period") {
       const period = readable(limit.period);
-      if (period) limits.push("max per period: " + amount + " / " + period);
-    } else if (limit.scope === "administration") limits.push("max per administration: " + amount);
-    else if (limit.scope === "lifetime") limits.push("max lifetime: " + amount);
+      if (period) limits.push(words.maxPeriodLabel + amount + " / " + period);
+    } else if (limit.scope === "administration") limits.push(words.maxAdministrationLabel + amount);
+    else if (limit.scope === "lifetime") limits.push(words.maxLifetimeLabel + amount);
   }
   if (limits.length) rendered = joinGeneratedClauses([rendered, ...limits]);
-  if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options);
+  if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.excludedDates?.length)
-    rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options);
+    rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options, env);
   if (a.excludedWeekdays?.length)
-    rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options);
+    rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   const ranges: string[] = [];
   for (const amount of a.amounts ?? []) {
     const text = amount.rateRange && rateRangePreview(amount.rateRange);
-    if (text)
-      ranges.push(
-        (options?.locale?.toLowerCase().startsWith("th") ? "ช่วงอัตราการให้ยา: " : "Rate range: ") + text
-      );
+    if (text) ranges.push(words.rateRangeLabel + text);
   }
   return ranges.length ? joinGeneratedClauses([rendered, ...ranges]) : rendered;
 }
@@ -437,7 +408,12 @@ export function formatCanonicalAdministration(
       ))
   )
     return a.text;
-  return formatCanonicalCourse({ kind: "course", stages: [{ administrations: [a] }] }, style, options, compiled);
+  return formatCanonicalCourse(
+    { kind: "course", stages: [{ administrations: [a] }] },
+    style,
+    options,
+    compiled
+  );
 }
 
 export function formatCanonicalCourse(
@@ -465,25 +441,60 @@ export function formatCanonicalCourse(
     return oneOrCourse.instruction;
   }
   if (oneOrCourse.stages.length === 0) return "";
+  const environment = courseEnvironment(options),
+    words = environment.words;
+  const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
+  const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
+  if (
+    only &&
+    administration &&
+    !only.start &&
+    !only.end &&
+    only.count === undefined &&
+    !oneOrCourse.cycleInterval &&
+    !administration.choice
+  ) {
+    const recurrence = administration.schedule?.recurrence;
+    const amount = administration.amounts?.[0];
+    if (
+      (administration.amounts?.length ?? 0) <= 1 &&
+      !recurrence?.startOffset &&
+      !recurrence?.endOffset &&
+      !amount?.quantity?.comparator &&
+      !amount?.rate &&
+      !amount?.rateRatio &&
+      !amount?.rateRange &&
+      !amount?.expression &&
+      !amount?.rateExpression
+    )
+      return formatCanonicalBase(administration, style, options, compiled?.get(administration), environment);
+  }
   // Rendering needs each component's projection, not a persisted copy of
   // the whole course plus edit markers on every component.
-  const thai = (options?.locale ?? "").toLowerCase().startsWith("th");
   const stages: string[] = [];
   const firstRepeatCount = oneOrCourse.stages[0]?.count;
-  const courseRepeatCount =
-    firstRepeatCount !== undefined && oneOrCourse.stages.every((step) => step.count === firstRepeatCount)
-      ? firstRepeatCount
-      : undefined;
-  let priorEndDays: number | undefined;
-  const windows = oneOrCourse.stages.map((step, index) => {
+  let courseRepeatCount = firstRepeatCount,
+    priorEndDays: number | undefined,
+    hasTimedStages = false;
+  const windows: Array<{ start: number | undefined; end: number | undefined }> = [];
+  const activeWindows: typeof windows = [];
+  // One traversal establishes count agreement, source windows and the
+  // presence of explicit boundaries; no separate every/map/some/filter chain.
+  for (let index = 0; index < oneOrCourse.stages.length; index++) {
+    const step = oneOrCourse.stages[index];
+    if (step.count !== firstRepeatCount) courseRepeatCount = undefined;
+    if (step.start || step.end) hasTimedStages = true;
     const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
-    const end = treatmentStepOffsetDays(step.end);
+    const end = treatmentStepOffsetDays(step.end),
+      window = { start, end };
     priorEndDays = end;
-    return { start, end };
-  });
-  for (const [index, step] of oneOrCourse.stages.entries()) {
+    windows.push(window);
+    if (step.administrations.length) activeWindows.push(window);
+  }
+  for (let index = 0; index < oneOrCourse.stages.length; index++) {
+    const step = oneOrCourse.stages[index];
     const { start: startDays, end: endDays } = windows[index];
-    const rendered = formatCanonicalChoices(
+    const rendered = formatCourseChoices(
       step.administrations,
       (component) => {
         const repeat = component.schedule?.recurrence;
@@ -527,8 +538,13 @@ export function formatCanonicalCourse(
             }),
           };
         }
-        const recognized = formatCanonicalBase(display, style, options,
-          display === component ? compiled?.get(component) : undefined);
+        const recognized = formatCanonicalBase(
+          display,
+          style,
+          options,
+          display === component ? compiled?.get(component) : undefined,
+          environment
+        );
         const expressions: string[] = [];
         if (hasOffsets && repeat) {
           const periodUnit = repeat.periodUnit;
@@ -541,7 +557,7 @@ export function formatCanonicalCourse(
                       code: periodUnit,
                       unit: periodUnit,
                     },
-                    thai
+                    words
                   )}`
                 : formatCourseTimeQuantity(
                     {
@@ -549,17 +565,17 @@ export function formatCanonicalCourse(
                       code: periodUnit,
                       unit: periodUnit,
                     },
-                    thai
+                    words
                   )
               : periodUnit && repeat.periodMax !== undefined
-              ? (thai ? "ไม่เกิน " : "up to ") +
+              ? words.upTo("") +
                 formatCourseTimeQuantity(
                   {
                     value: repeat.periodMax,
                     code: periodUnit,
                     unit: periodUnit,
                   },
-                  thai
+                  words
                 )
               : undefined;
           const frequency =
@@ -568,36 +584,18 @@ export function formatCanonicalCourse(
                 ? `${repeat.frequency}–${repeat.frequencyMax}`
                 : String(repeat.frequency)
               : repeat.frequencyMax !== undefined
-              ? (thai ? "ไม่เกิน " : "up to ") + repeat.frequencyMax
+              ? words.upTo("") + repeat.frequencyMax
               : undefined;
-          if (frequency)
-            expressions.push(
-              thai
-                ? `ให้ยา ${frequency} ครั้ง${period ? "ต่อช่วง " + period : ""}`
-                : `${frequency} administrations${period ? " per " + period : ""}`
-            );
-          else if (period && repeat.periodMax !== undefined)
-            expressions.push(thai ? `ช่วงเวลาการให้ยา ${period}` : `Dosing period: ${period}`);
-          const periodContext = period
-            ? thai
-              ? ` (รอบละ ${period})`
-              : ` (each period lasts ${period})`
-            : "";
+          if (frequency) expressions.push(words.administrations(frequency, period));
+          else if (period && repeat.periodMax !== undefined) expressions.push(words.dosingPeriod(period));
+          const periodContext = period ? words.periodContext(period) : "";
           if (repeat.startOffset) {
-            const offset = formatCourseTimeQuantity(repeat.startOffset, thai);
-            expressions.push(
-              thai
-                ? `เริ่มให้ยาหลังเริ่มรอบ ${offset}${periodContext}`
-                : `Dosing starts ${offset} after the period begins${periodContext}`
-            );
+            const offset = formatCourseTimeQuantity(repeat.startOffset, words);
+            expressions.push(words.startsWithinPeriod(offset, periodContext));
           }
           if (repeat.endOffset) {
-            const offset = formatCourseTimeQuantity(repeat.endOffset, thai);
-            expressions.push(
-              thai
-                ? `งดยาในช่วง ${offset}สุดท้ายของแต่ละรอบ${periodContext}`
-                : `No doses during the final ${offset} of each period${periodContext}`
-            );
+            const offset = formatCourseTimeQuantity(repeat.endOffset, words);
+            expressions.push(words.endsWithinPeriod(offset, periodContext));
           }
         }
         for (const amount of component.amounts ?? []) {
@@ -606,7 +604,7 @@ export function formatCanonicalCourse(
           // without introducing invalid R5 dose/rate choices.
           if (amount.quantity?.comparator && amount.quantity.value !== undefined) {
             expressions.push(
-              (thai ? "ขนาดยาต่อครั้ง: " : "Dose: ") +
+              words.doseLabel +
                 amount.quantity.comparator +
                 amount.quantity.value +
                 (amount.quantity.unit || amount.quantity.code
@@ -618,11 +616,9 @@ export function formatCanonicalCourse(
             const rate = amount.rate;
             const unit = rate.unit ?? rate.code;
             expressions.push(
-              (thai ? "อัตราการให้ยา: " : "Rate: ") +
+              words.rateLabel +
                 (rate.value === undefined
-                  ? thai
-                    ? "ไม่ระบุค่า"
-                    : "unspecified"
+                  ? words.unspecified
                   : (getQuantityComparator(rate) ?? "") + rate.value) +
                 (unit ? " " + unit : "")
             );
@@ -634,7 +630,7 @@ export function formatCanonicalCourse(
           const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
           const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
           if (hasNumerator || hasDenominator) {
-            const unspecified = thai ? "ไม่ระบุค่า" : "unspecified";
+            const unspecified = words.unspecified;
             const numeratorValue =
               numerator?.value === undefined
                 ? unspecified
@@ -644,7 +640,7 @@ export function formatCanonicalCourse(
                 ? unspecified
                 : (getQuantityComparator(denominator) ?? "") + denominator.value;
             expressions.push(
-              (thai ? "อัตราการให้ยา: " : "Rate: ") +
+              words.rateLabel +
                 numeratorValue +
                 (numeratorUnit ? " " + numeratorUnit : "") +
                 (hasDenominator
@@ -652,13 +648,15 @@ export function formatCanonicalCourse(
                   : "")
             );
           }
-          if (amount.expression) expressions.push(unevaluatedExpressionText(amount.expression, "dose"));
+          if (amount.expression)
+            expressions.push(unevaluatedExpressionText(amount.expression, "dose", words));
           if (amount.rateExpression)
-            expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate"));
+            expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate", words));
         }
         return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
       },
-      options
+      (member) => member.choice,
+      words
     );
     if (!rendered.trim()) continue;
     let timing = "";
@@ -681,52 +679,36 @@ export function formatCanonicalCourse(
           (!step.end || endQuantity) &&
           !(startDays !== undefined && endDays !== undefined && endDays <= startDays)
         ) {
-          timing = formatCalendarStepWindow(startQuantity, endQuantity, thai);
+          timing = formatCalendarStepWindow(startQuantity, endQuantity, words);
         } else {
           const source = [step.start?.description, step.end?.description]
             .filter((value): value is string => Boolean(value?.trim()))
             .join("; ");
-          timing = source
-            ? thai
-              ? `ต้องตรวจสอบช่วงเวลา: ${source}`
-              : `Timing requires review: ${source}`
-            : thai
-            ? "ต้องตรวจสอบช่วงเวลาการใช้ยา"
-            : "Stage timing requires review";
+          timing = words.reviewTiming(source || undefined);
         }
       } else if (endDays !== undefined && startDays !== undefined) {
-        timing = thai ? `วันที่ ${startDays + 1}–${endDays}` : `Days ${startDays + 1}–${endDays}`;
+        timing = words.dayRange(startDays + 1, endDays);
       } else if (startDays !== undefined) {
-        timing = thai ? `ตั้งแต่วันที่ ${startDays + 1} เป็นต้นไป` : `From day ${startDays + 1} onward`;
+        timing = words.fromDay(startDays + 1);
       } else if (endDays !== undefined) {
-        timing = thai ? `ถึงวันที่ ${endDays}` : `Through day ${endDays}`;
+        timing = words.throughDay(endDays);
       }
     }
     const stageCount =
       oneOrCourse.cycleInterval && courseRepeatCount === undefined && step.count !== undefined
-        ? thai
-          ? `จำนวน ${step.count} รอบ`
-          : `for ${step.count} ${step.count === 1 ? "cycle" : "cycles"}`
+        ? words.repeatCount(step.count)
         : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");
     stages.push(heading ? `${heading}: ${rendered}` : rendered);
   }
-  const hasTimedStages = oneOrCourse.stages.some((step) => step.start || step.end);
   if (hasTimedStages) {
-    const pauses = medicationFreeCourseWindows(
-      windows.filter((_, index) => oneOrCourse.stages[index].administrations.length > 0),
-      oneOrCourse.cycleInterval
-    );
+    const pauses = medicationFreeCourseWindows(activeWindows, oneOrCourse.cycleInterval);
     for (const pause of pauses) {
-      stages.push(
-        thai
-          ? `งดยาในวันที่ ${pause.start + 1}–${pause.end}.`
-          : `No doses on days ${pause.start + 1}–${pause.end}.`
-      );
+      stages.push(words.noDoseDays(pause.start + 1, pause.end));
     }
   }
   if (oneOrCourse.cycleInterval) {
-    stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, thai, courseRepeatCount));
+    stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, courseRepeatCount));
   }
-  return stages.join(hasTimedStages || oneOrCourse.cycleInterval ? " " : thai ? " จากนั้น " : " then ");
+  return stages.join(hasTimedStages || oneOrCourse.cycleInterval ? " " : words.stageSeparator);
 }

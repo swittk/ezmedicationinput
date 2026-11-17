@@ -69,8 +69,8 @@ export interface CanonicalDoseLimit {
   expression?: CanonicalExpression;
   period?: CanonicalMeasure;
   text?: string;
-  /** External-only metadata, not a second executable limit. */
-  provenance?: Record<string, unknown>;
+  /** Typed original wire limit; clinical execution uses the fields above. */
+  provenance?: import("../types").FhirR6DoseLimit;
 }
 /** Understood clinical safety policy, not a bag of arbitrary restrictions.
  * Unrecognized FHIR annotations remain ONLY in external source provenance.
@@ -201,7 +201,11 @@ export interface CanonicalAdministration {
   cycleDays?: CanonicalCycleDayConstraint;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   syntax?: CanonicalSigClause;
-  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown> };
+  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
+    /** Original foreign fields retained inside an imported R5 row. Only
+     * adapters inspect this source; execution reads the typed fields above. */
+    retained?: Partial<import("../types").FhirR6Dosage> };
+  missingContexts?: string[];
 }
 export interface CanonicalStage {
   administrations: CanonicalAdministration[];
@@ -218,7 +222,7 @@ export interface CanonicalCourse {
   cycleInterval?: CanonicalMeasure;
   safety?: CanonicalSafety;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
-  provenance?: { format: "r6" | "syntax"; data: Record<string, unknown> };
+  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown> };
 }
 export type CanonicalScheduleInput =
   | CanonicalCourse

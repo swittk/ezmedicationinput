@@ -433,7 +433,7 @@ export function resolveMedicationInstructionSequenceAction(
   }
   for (const definition of DEFAULT_ACTIONS) {
     if ((definition.sequenceAliases ?? []).some((alias) => normalizeActionSurface(alias) === target)) {
-      return cloneDefinition(definition);
+      return definition;
     }
   }
   return undefined;
@@ -460,7 +460,7 @@ export function resolveMedicationInstructionSeparableAction(
     if (definition.separableAliases?.some((alias) =>
       normalizeActionSurface(alias.lead) === normalizedLead &&
       normalizeActionSurface(alias.particle) === normalizedParticle
-    )) return cloneDefinition(definition);
+    )) return definition;
   }
   return undefined;
 }
@@ -472,6 +472,9 @@ export function medicationInstructionActionIsSafetyScopeTarget(
   return resolveMedicationInstructionAction(surface, options)?.safetyScopeTarget === true;
 }
 
+/** Dictionary definitions are immutable by caller contract. Repeated
+ * lexical resolution must not recursively clone the same vocabulary tree.
+ * Explicit frame construction still copies only the fields it later edits. */
 export function resolveMedicationInstructionAction(
   surface: string,
   options?: ParseOptions
@@ -479,18 +482,18 @@ export function resolveMedicationInstructionAction(
   const custom = customDefinitionForSurface(surface, options);
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeActionSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function getMedicationInstructionAction(
   code: string
 ): MedicationInstructionActionDefinition | undefined {
   const definition = DEFAULT_BY_CODE.get(code);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {
-  return DEFAULT_ACTIONS.map(cloneDefinition);
+  return DEFAULT_ACTIONS;
 }
 
 export function buildMedicationInstructionActionCodeSystem(): MedicationInstructionActionCodeSystem {

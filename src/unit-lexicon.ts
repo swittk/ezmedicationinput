@@ -174,7 +174,10 @@ function getDoseUnitTerminologyEntry(unit: string | undefined): DoseUnitTerminol
   if (!unit) {
     return undefined;
   }
-  return DOSE_UNIT_TERMINOLOGY_BY_KEY.get(normalizeUnitKey(unit) ?? "");
+  // Parsed unit codes are already normalized. Reuse their indexed entry
+  // directly; external mixed-case/whitespace aliases still normalize below.
+  return DOSE_UNIT_TERMINOLOGY_BY_KEY.get(unit) ??
+    DOSE_UNIT_TERMINOLOGY_BY_KEY.get(normalizeUnitKey(unit) ?? "");
 }
 
 export function getDoseUnitKind(unit: string | undefined): DoseUnitKind | undefined {
@@ -189,6 +192,7 @@ export function getDoseUnitApproximation(
     return undefined;
   }
   const terminologyEntry = getDoseUnitTerminologyEntry(unit);
+  if (!context) return terminologyEntry?.approximateQuantity;
   const override = unitApproximationOverride(unit, context) ??
     unitApproximationOverride(terminologyEntry?.unit ?? "", context);
   if (override) {

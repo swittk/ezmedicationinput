@@ -300,6 +300,73 @@ Highlights:
   without imposing timing-sensitive test thresholds.
 
 
+## Extending course realization to another language
+
+Whole-course wording is a typed optional `course` facet on the existing
+`SigLocalization` registration. It complements the same `formatShort` and
+`formatLong` clause hooks—there is no separate registry or second parser.
+
+```ts
+import {
+  registerSigLocalization,
+  resolveSigLocalization,
+  formatCanonicalCourse,
+} from "ezmedicationinput";
+
+const english = resolveSigLocalization("en")!;
+registerSigLocalization({
+  locale: "example",
+  formatShort: ({ defaultText }) => defaultText,
+  formatLong: ({ defaultText }) => defaultText,
+  course: {
+    ...english.course!,
+    dayRange: (first, last) => `Jours ${first}–${last}`,
+    noDoseDays: (first, last) => `Pause ${first}–${last}.`,
+    rateLabel: "Débit: ",
+    unspecified: "non spécifié",
+  },
+});
+
+// Uses the registered clause and course facets together.
+const text = formatCanonicalCourse(nativeCourse, "long", { locale: "example" });
+```
+
+A full language implementation supplies its own clause hooks and course facet;
+the example deliberately inherits the other English strings. Course templates
+receive resolved counts, intervals, unit codes, predicates and stage windows.
+They do not change clinical scope, calculate dates, choose a treatment branch,
+or reinterpret dose numbers. `i18n.inherit`/`i18n.course` can inherit or override
+the facet using the existing per-call configuration.
+
+Adding course wording alone does **not** add parsing or autocomplete in that
+language. Lexer, relation/action terminology and suggestion registrations keep
+their existing roles. This boundary lets a future language-pack installer group
+those registrations without changing the shared clinical engine.
+
+## Public API performance comparisons
+
+`bench/public-api.mjs` measures the established public surface, including
+suggestions, asynchronous parse/lint, FHIR import/export, structured formatting,
+calendar/supply calculations, terminology getters and locale registration.
+
+```sh
+npm run build
+node --expose-gc bench/public-api.mjs \
+  --baseline /path/to/built-master/dist/index.js \
+  --rounds 17 --target-ms 24 --json public-api-results.json
+```
+
+The harness checks that every exported function has a representative fixture or
+an explicit new-API classification. Each scenario is measured independently
+with paired alternating runs; faster scheduling cannot hide slower suggestions
+or conversion. Helper exports are captured before timing, so repeated module
+namespace lookups are not mistaken for the cost of a named function call.
+Timing-sensitive thresholds are kept out of clinical unit tests. Reports include
+build hashes, runtime details, raw paired samples, timing spread and the
+per-scenario gate. Each finished scenario is saved atomically; an interrupted
+run remains explicitly incomplete rather than losing its results. Host/JIT noise
+still requires repeated runs for borderline or sub-microsecond results.
+
 ## Formal HPSG substrate
 
 The HPSG core now uses an actual typed-feature-structure runtime on the live parse path. Signs participate in a subtype hierarchy, feature appropriateness is validated, general feature unification preserves reentrancy/structure sharing, and phrase mothers unify daughter `SYNSEM` structures rather than relying only on flat TypeScript object merging. Structural AVMs are immutable and memoized because the medication grammar reuses a small number of SYNSEM shapes heavily.

@@ -63,8 +63,13 @@ export function registerInstructionActionLocaleAdapter(adapter: InstructionActio
 }
 
 export function getInstructionActionLocaleAdapter(locale: string): InstructionActionLocaleAdapter {
-  const key = baseLanguageTag(locale) ?? locale.toLowerCase();
-  return ADAPTERS.get(key) ?? ADAPTERS.get("en")!;
+  // Standard calls already carry a normalized language key. Avoid regex/tag
+  // normalization when the registered locale is an exact match; region and
+  // mixed-case fallback semantics remain unchanged for other callers.
+  const exact=ADAPTERS.get(locale);
+  if(exact)return exact;
+  const key=baseLanguageTag(locale)??locale.toLowerCase();
+  return ADAPTERS.get(key)??ADAPTERS.get("en")!;
 }
 
 function lowerInitial(value: string): string {

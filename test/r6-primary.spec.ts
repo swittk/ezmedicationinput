@@ -6230,3 +6230,31 @@ describe("review 2026-11-16 19h: rateRange surface provenance", () => {
     expect(formatSig(dosage, "long")).toBe("Infuse as instructed.");
   });
 });
+
+
+describe("persisted edit fingerprint compatibility",()=>{
+  it("streams the exact existing editable-row view without cloning a dosage tree",async()=>{
+    const {dosageProjectionFingerprint,compactProjectionFingerprint,DOSAGE_DETAILS_R5_URL,
+      DOSAGE_RENDERED_INSTRUCTION_R5_URL}=await import("../src/dosage-course");
+    const keys=new Set(["sequence","stepCount","step","component","context","contextRequired","course","emptyStep","missingContext"]);
+    const input=toFhirR5Dosages({step:[{component:[{
+      timing:{repeat:{frequency:1,period:1,periodUnit:FhirPeriodUnit.Day}},
+      doseAndRate:[{doseQuantity:{value:1,unit:"tab",comparator:"~"}}]
+    }]},{component:[{doseAndRate:[{doseQuantity:{value:2,unit:"tab"}}]}]}]});
+    for(const row of input){
+      // Independent old encoding oracle: semantically active local fields are
+      // hashed; original text and saved comparison fingerprints are excluded.
+      const {text:_text,extension,modifierExtension,...clinical}=row;
+      const keptExtensions=extension?.filter(e=>e.url!==DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+      const keptModifiers=[];
+      for(const marker of modifierExtension??[]){
+        if(marker.url!==DOSAGE_DETAILS_R5_URL){keptModifiers.push(marker);continue;}
+        if(marker.extension?.some(e=>e.url==="rowIndex"))
+          keptModifiers.push({...marker,extension:marker.extension.filter(e=>keys.has(e.url))});
+      }
+      const oldView={...clinical,...(keptExtensions?.length?{extension:keptExtensions}:{}),
+        ...(keptModifiers.length?{modifierExtension:keptModifiers}:{})};
+      expect(dosageProjectionFingerprint(row)).toBe(compactProjectionFingerprint(oldView));
+    }
+  });
+});

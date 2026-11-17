@@ -30,6 +30,23 @@ import {
 } from "../src/index";
 
 describe("locale-extensible language architecture", () => {
+  it("replaces locale detectors in stable priority order and updates their ordering when priority changes",()=>{
+    const test=(input:string)=>input==="locale-registry-priority-fixture";
+    registerMedicationLocaleDetector({locale:"prioritya",priority:1000,test});
+    registerMedicationLocaleDetector({locale:"priorityb",priority:1000,test});
+    expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("prioritya");
+    registerMedicationLocaleDetector({locale:"prioritya",priority:1000,test:()=>false});
+    expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("priorityb");
+    registerMedicationLocaleDetector({locale:"prioritya",priority:1000,test});
+    expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("prioritya");
+    const changed={locale:"priorityb",priority:1001,test};
+    registerMedicationLocaleDetector(changed);
+    expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("priorityb");
+    changed.priority=999;
+    registerMedicationLocaleDetector(changed);
+    expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("prioritya");
+  });
+
   it("uses arbitrary BCP-47-ish locale keys with base-language fallback", () => {
     expect(localizedValue({ ja: "日本語", lo: "ລາວ" }, "ja-JP")).toBe("日本語");
     expect(localizedValue({ ja: "日本語", lo: "ລາວ" }, "lo-LA")).toBe("ລາວ");
