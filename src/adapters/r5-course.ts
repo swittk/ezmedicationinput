@@ -77,16 +77,17 @@ function retentionForAdministration(
     !!a.syntax && (!a.provenance || a.provenance.format === "syntax")
   );
   const rawSite = raw?.site;
-  const site =
-    rawSite || a.siteReference
-      ? {
-          ...rawSite,
-          ...(row.site ? { concept: row.site } : {}),
-          ...(a.siteReference ? { reference: a.siteReference } : {}),
-        }
-      : row.site
-      ? { concept: row.site }
-      : undefined;
+  // A source CodeableReference may carry independent IDs/extensions, but its
+  // known concept/reference are controlled by the current native facts. Do
+  // not restore known fields merely because the original object had them.
+  const site = rawSite || row.site || a.siteReference
+    ? { ...rawSite, ...(row.site ? { concept: row.site } : {}),
+        ...(a.siteReference ? { reference: a.siteReference } : {}) }
+    : undefined;
+  if (site) {
+    if (!row.site) delete site.concept;
+    if (!a.siteReference) delete site.reference;
+  }
   const recurrence = a.schedule?.recurrence;
   const component: Partial<FhirR6Dosage> = {};
   const baseline: ComponentDeltaBaseline = {};

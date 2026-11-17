@@ -1184,7 +1184,11 @@ function administrationToWire(
     delete output.maxDosePerPeriod;
     delete output.maxDosePerAdministration;
     delete output.maxDosePerLifetime;
-    assign(output, "safety", safetyToWire(a.safety, source?.safety, a.limits, Boolean(clause)));
+    // An explicit native removal must not resurrect an imported clinical
+    // doseLimit. But an ordinary dosage with no authored safety must not
+    // grow a synthetic empty R6 safety policy merely because limits=undefined.
+    const limits = a.limits ?? (source?.safety?.doseLimit !== undefined ? [] : undefined);
+    assign(output, "safety", safetyToWire(a.safety, source?.safety, limits, Boolean(clause)));
   } else {
     delete output.safety;
     delete output.maxDosePerPeriod;

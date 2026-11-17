@@ -1,6 +1,9 @@
-import { EventTiming, FhirDayOfWeek, FhirPeriodUnit } from "./types";
+import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type ParseOptions } from "./types";
 
 export interface TimingSummaryOptions {
+  /** Scoped vocabulary in the original parse/format request. Do not build
+   * any second registry or retain it on the canonical clinical course. */
+  instructionActionMap?: ParseOptions["instructionActionMap"];
   realizationMode?: "normalized" | "roundtrip";
   groupMealTimingsByRelation?: boolean;
   includeTimesPerDaySummary?: boolean;

@@ -2538,3 +2538,37 @@ describe("indexed instruction metadata import",()=>{
       .toEqual(originalArguments);
   });
 });
+
+
+describe("November 17 review: institution dose action owns prior quantitative instruction", () => {
+  const options = {
+    instructionActionMap: {
+      disperse: {
+        code: "disperse",
+        display: "Disperse",
+        semanticClass: "procedure",
+        procedural: true,
+        acceptsAmount: true,
+        definesDose: true,
+        argumentParser: "amount-material-destination" as const,
+        realizer: "amount-material-destination" as const,
+      },
+    },
+  };
+  it("detects the custom earlier amount owner when the final drink action owns the administration", () => {
+    const source = "Disperse 2 tablets in water, then drink slowly";
+    const parsed = parsePublicSig(source, options);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.actions[0]?.predicate.lemma).toBe("disperse");
+    expect(clause.instructionGraph?.primaryAdministrationSpan).toBeDefined();
+    const changed = { ...clause, dose: { ...clause.dose!, value: 3 } };
+    expect(instructionGraphSourceConflictsWithDose(changed, options)).toBe(true);
+    const unchanged = { ...clause, dose: { ...clause.dose!, value: 2 } };
+    expect(instructionGraphSourceConflictsWithDose(unchanged, options)).toBe(false);
+    for (const locale of ["en", "th"]) {
+      const rendered = formatCanonicalClause(changed, "long", resolveSigLocalization(locale), options);
+      expect(rendered).not.toContain("Disperse 2 tablets in water, then drink slowly");
+      expect(rendered).not.toContain("2 tablets");
+    }
+  });
+});

@@ -4208,50 +4208,49 @@ function frameWithoutSupersededAmount(
  * without that span use a matching unit/method, then the first ordered
  * administration amount. Later independent actions keep their own amounts.
  * No source text is parsed or changed to make this selection. */
+/** The source graph is immutable during realization. One pass establishes
+ * amount ownership, honoring an explicitly registered dose-defining action
+ * without rebuilding the institution's vocabulary on the default path.
+ * Standard coded built-ins continue to use the original code registry. */
 function primaryDoseAmountOwner(
-  graph: CanonicalInstructionGraph, clause: Pick<CanonicalSigClause, "dose" | "method">
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method">,
+  options?: Pick<ParseOptions, "instructionActionMap">
 ): AdviceFrame | undefined {
   if (!clause.dose) return undefined;
-  const amountActions = graph.actions.filter(action =>
-    action.polarity !== AdvicePolarity.Negate &&
-    action.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity));
-  if (!amountActions.length) return undefined;
-  const primary = graph.primaryAdministrationSpan;
-  if (primary) {
-    const overlapping = amountActions.find(action =>
-      action.span.start < primary.end && primary.start < action.span.end);
-    if (overlapping) return overlapping;
-    // A source-backed primary method can be downstream of the dose-defining
-    // preparation action ('Dissolve 2 tablets, then drink'). Only one
-    // EARLIER explicitly dose-defining preparatory action can supply it.
-    // A device priming amount ('prime 6 sprays') is not the therapeutic dose;
-    // a later 'take another 1 tablet' is a different administration.
-    const earlier = amountActions.filter(action => action.span.end <= primary.start &&
-      getMedicationInstructionAction(action.predicate.lemma)?.definesDose);
-    return earlier.length === 1 ? earlier[0] : undefined;
+  const primary=graph.primaryAdministrationSpan;
+  let earliest:AdviceFrame|undefined,overlap:AdviceFrame|undefined;
+  let doseDefiner:AdviceFrame|undefined,definedCount=0;
+  let earlier:AdviceFrame|undefined,earlierCount=0;
+  for(const action of graph.actions) {
+    if(action.polarity===AdvicePolarity.Negate)continue;
+    let hasAmount=false;
+    for(const arg of action.args)
+      if(arg.role===AdviceArgumentRole.Amount&&arg.quantity){hasAmount=true;break;}
+    if(!hasAmount)continue;
+    if(!earliest||action.span.start<earliest.span.start)earliest=action;
+    if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
+      overlap=action;
+    const custom=options?.instructionActionMap
+      ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
+    const definesDose=(custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose;
+    if(definesDose) {
+      definedCount++;
+      if(!doseDefiner||action.span.start<doseDefiner.span.start)doseDefiner=action;
+      if(primary && action.span.end<=primary.start) { earlierCount++;earlier=action; }
+    }
   }
-  // The current edited unit or amount is NOT evidence of historic source
-  // ownership. A later independent 5 mL drink must not become the owner
-  // just because the clinician edited the earlier tablet dose to 3 mL.
-  // The current method is editable. It cannot identify which OLD action
-  // owned the originally prescribed quantity; using it would steal an
-  // independent later drink/instillation when the formulation changes.
-  const doseDefiners = amountActions.filter(action =>
-    getMedicationInstructionAction(action.predicate.lemma)?.definesDose);
-  if (doseDefiners.length === 1) return doseDefiners[0];
-  // A missing owner span cannot prove the intended dose from a later
-  // matching number. First source administration wins as a conventional
-  // fallback; all subsequent amounts remain independent.
-  const candidates = doseDefiners.length ? doseDefiners : amountActions;
-  return candidates.reduce((first, action) =>
-    action.span.start < first.span.start ? action : first);
+  if(primary)return overlap??(earlierCount===1?earlier:undefined);
+  return definedCount===1?doseDefiner:doseDefiner??earliest;
 }
 
 /** Whole-source replay and action realization have the same amount owner.
  * Unrelated later-stage Amounts are not evidence the canonical dose changed. */
-export function instructionGraphSourceConflictsWithDose(clause: CanonicalSigClause): boolean {
+export function instructionGraphSourceConflictsWithDose(
+  clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
   const graph = clause.instructionGraph;
-  const owner = graph && primaryDoseAmountOwner(graph, clause);
+  const owner = graph && primaryDoseAmountOwner(graph, clause, options);
   return Boolean(owner && primaryActionAmountConflicts(owner, clause.dose));
 }
 
@@ -4477,6 +4476,7 @@ export function realizeInstructionGraph(
     position?: "all" | "pre" | "post";
     /** Prefer deliberately unambiguous lexical labels when generating parse-safe text. */
     roundtripSafe?: boolean;
+    instructionActionMap?: ParseOptions["instructionActionMap"];
   }
 ): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
@@ -4485,7 +4485,7 @@ export function realizeInstructionGraph(
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
   const amountOwner = options?.omitCanonicalAdministration
-    ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration) : undefined;
+    ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration, options) : undefined;
   const primaryAction = primary ? graph.actions.findIndex(frame =>
     frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();

@@ -6258,3 +6258,32 @@ describe("persisted edit fingerprint compatibility",()=>{
     }
   });
 });
+
+
+describe("November 17 review: historical retained rateRatio bridge", () => {
+  it("reads previous R5 valueRatio child without recreating another external version", async () => {
+    const { decodeCourseDetails } = await import("../src/dosage-course");
+    const ratio = { numerator: { value: 120, unit: "mL" }, denominator: { value: 2, unit: "h" } };
+    const encoded = {
+      url: "urn:test:old-course",
+      extension: [
+        {
+          url: "step",
+          extension: [
+            {
+              url: "component",
+              extension: [
+                {
+                  url: "doseAndRate",
+                  extension: [{ url: "rateRatio", valueRatio: ratio }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const rebuilt = decodeCourseDetails(encoded);
+    expect(rebuilt?.step[0].component[0].doseAndRate?.[0].rateRatio).toEqual(ratio);
+  });
+});

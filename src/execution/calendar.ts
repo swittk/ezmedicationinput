@@ -209,7 +209,9 @@ export function getTimeParts(date: Date, timeZone: string): TimeParts {
 export function getOffset(date: Date, timeZone: string): number {
   const { year, month, day, hour, minute, second } = getTimeParts(date, timeZone);
   const zonedTime = Date.UTC(year, month - 1, day, hour, minute, second);
-  return (zonedTime - date.getTime()) / (SECONDS_PER_MINUTE * 1000);
+  // Intl parts are whole-second precision. Match that precision on the
+  // source instant (including pre-epoch times) before calculating minutes.
+  return (zonedTime - (date.getTime() - date.getUTCMilliseconds())) / (SECONDS_PER_MINUTE * 1000);
 }
 
 /**

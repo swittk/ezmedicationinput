@@ -1511,6 +1511,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
           includeWarnings: true,
           omitCanonicalAdministration: clause,
+          instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: richPrimaryGraphAction
@@ -1528,6 +1529,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
           onlyWarnings: true,
           omitCanonicalAdministration: clause,
+          instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: additionalSemanticSourceTexts
@@ -1548,6 +1550,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? realizeInstructionGraph(clause.instructionGraph, "en", {
         includeWarnings: true,
         omitCanonicalAdministration: clause,
+        instructionActionMap: options?.instructionActionMap,
         preferSourceText: roundTrip,
         roundtripSafe: roundTrip,
         omitSourceTexts: additionalSemanticSourceTexts,
@@ -1562,6 +1565,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? realizeInstructionGraph(clause.instructionGraph, "en", {
         includeWarnings: true,
         omitCanonicalAdministration: clause,
+        instructionActionMap: options?.instructionActionMap,
         preferSourceText: roundTrip,
         roundtripSafe: roundTrip,
         omitSourceTexts: postGraphOmissions,
@@ -1574,6 +1578,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
           includeWarnings: false,
           omitCanonicalAdministration: clause,
+          instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
           omitSourceTexts: postGraphOmissions
@@ -1630,7 +1635,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
     roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
-    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause)
+    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
@@ -1939,7 +1944,8 @@ export function formatCanonicalClause(
       realizationMode: options?.realizationMode ?? "normalized",
       sitePlacement: options?.sitePlacement ??
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
-      formatDefault
+      formatDefault,
+      instructionActionMap: options?.instructionActionMap
     };
     return localization.formatLong(context);
   }

@@ -432,3 +432,101 @@ describe("native clinical concept edits", () => {
     );
   });
 });
+
+
+describe("November 17 review: live native clinical facts own projection and realization", () => {
+  it("removing a native administration limit clears it from R6 without dropping unrelated safety annotations", () => {
+    const raw: FhirR6DosageInstruction = {
+      step: [
+        {
+          component: [
+            {
+              safety: {
+                id: "policy",
+                ifExceeded: "contact prescriber",
+                extension: [{ url: "urn:external:safety", valueString: "retain" }],
+                doseLimit: [{ scope: "administration", valueQuantity: { value: 2, unit: "tab" } }],
+              },
+              doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+            },
+          ],
+        },
+      ],
+    };
+    const native = courseFromR6(raw, true);
+    expect(native.stages[0].administrations[0].limits).toHaveLength(1);
+    native.stages[0].administrations[0].limits = undefined;
+    const exported = courseToR6(native).step[0].component[0].safety!;
+    expect(exported.doseLimit).toEqual([]);
+    expect(exported.id).toBe("policy");
+    expect(exported.ifExceeded).toBe("contact prescriber");
+    expect(exported.extension).toEqual(raw.step[0].component[0].safety?.extension);
+  });
+
+  it("R5 retained site metadata cannot restore explicitly cleared native concept/reference", () => {
+    const native = courseFromR6(source, true);
+    const a = native.stages[0].administrations[0];
+    a.siteReference = undefined;
+    let rows = courseToR5(native);
+    let reopened = inputToCanonical(rows);
+    expect("stages" in reopened && reopened.stages[0].administrations[0].siteReference).toBeUndefined();
+    expect("stages" in reopened && reopened.stages[0].administrations[0].target?.text).toBe("left eye");
+    a.target = undefined;
+    rows = courseToR5(native);
+    reopened = inputToCanonical(rows);
+    if (!("stages" in reopened)) throw new Error("R5 course metadata lost");
+    expect(reopened.stages[0].administrations[0].target).toBeUndefined();
+    expect(reopened.stages[0].administrations[0].siteReference).toBeUndefined();
+  });
+});
+
+describe("November 17 review: typed course ownership without inferred exact bounds", () => {
+  it("does not create an exact stage cutover from two approximate seven-day components", async () => {
+    const { courseFromAdministrations } = await import("../src/canonical/compile");
+    const length = { value: 7, unit: "d", code: "d", comparator: "~" as const };
+    const administration = (clock: string) => ({
+      kind: "administration" as const,
+      stageOrdinal: 1,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: {
+        recurrence: {
+          frequency: 1,
+          period: 1,
+          periodUnit: "d" as const,
+          clocks: [clock],
+          courseLength: length,
+        },
+      },
+    });
+    const course = courseFromAdministrations(
+      [administration("08:00:00"), administration("20:00:00")],
+      "Take twice daily for approximately one week"
+    );
+    expect(course.stages).toHaveLength(1);
+    expect(course.stages[0].end).toBeUndefined();
+    expect(course.stages[0].administrations).toHaveLength(2);
+    expect(
+      course.stages[0].administrations.every((a) => a.schedule?.recurrence?.courseLength?.comparator === "~")
+    ).toBe(true);
+  });
+
+  it("does not silently choose the last of two independent administration maxima", async () => {
+    const { numericAdministrationLimits } = await import("../src/canonical/course");
+    const native = {
+      kind: "administration" as const,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d" as const, clocks: ["08:00:00"] } },
+      limits: [
+        { scope: "administration" as const, amount: { value: 2, unit: "tab" } },
+        { scope: "administration" as const, amount: { value: 1, unit: "tab" } },
+      ],
+    };
+    expect(numericAdministrationLimits(native)).toMatchObject({
+      multiple: true,
+      administration: { value: 1, unit: "tab" },
+    });
+    const calculated = calculateTotalUnits({ ...options, dosage: native });
+    expect(calculated.totalUnits).toBe(3);
+    expect(calculated.quantityKind).toBe("maximum");
+  });
+});

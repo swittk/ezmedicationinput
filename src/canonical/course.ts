@@ -256,6 +256,30 @@ export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDa
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
 
+/** Scan the native scoped bounds ONCE. This summary is consumed by
+ * quantity calculation; the single-limit debug accessor below remains a
+ * lightweight convenience, not a safety or validation API. */
+export function numericAdministrationLimits(a: CanonicalAdministration): {
+  administration?: CanonicalMeasure;
+  lifetime?: CanonicalMeasure;
+  multiple: boolean;
+} {
+  let administration: CanonicalMeasure | undefined;
+  let lifetime: CanonicalMeasure | undefined;
+  let multiple = false;
+  for (const limit of a.limits ?? []) {
+    if (!limit.amount || limit.period || limit.expression) continue;
+    if (limit.scope === "administration") {
+      if (administration) multiple = true;
+      administration = limit.amount;
+    } else if (limit.scope === "lifetime") {
+      if (lifetime) multiple = true;
+      lifetime = limit.amount;
+    }
+  }
+  return { administration, lifetime, multiple };
+}
+
 /** Choose the last fully numeric source constraint where the clinical API
  * expects a single bound; other choices remain retained and explicitly
  * unevaluated. Period constraints are consumed independently by the engine. */

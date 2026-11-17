@@ -385,12 +385,15 @@ export function courseFromAdministrations(
       length?.value !== undefined &&
       length.value > 0 &&
       Number.isFinite(length.value) &&
+      !length.comparator &&
       administrations.every((a) => {
         const r = a.schedule?.recurrence,
           own = r?.courseLength;
         return (
           own?.value === length.value &&
           own?.unit === length.unit &&
+          own?.code === length.code &&
+          !own?.comparator &&
           !r?.calendarWindow?.start &&
           !r?.calendarWindow?.end
         );

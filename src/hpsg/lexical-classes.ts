@@ -802,6 +802,10 @@ export function doseComparatorNumberAt(
   const embeddedMillion = /^([0-9]+(?:\.[0-9]+)?)m$/u.exec(word);
   if (value === undefined && embeddedMillion) value = Number(embeddedMillion[1]) * 1_000_000;
   if (value === undefined) return undefined;
+  // In a qualified dose, "2.4m" is the lexical million suffix, not
+  // an administration unit of metres. Do not return early with rawUnit=m
+  // before the typed million grammar has scaled the numeric head.
+  if (embeddedMillion) return { comparator, value: Number(embeddedMillion[1]) * 1_000_000, numericIndex };
   if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
   const million = embeddedMillion
     ? { value, numericIndex }

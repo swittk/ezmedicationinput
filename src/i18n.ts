@@ -92,6 +92,7 @@ export interface SigFormatContext {
   readonly includeTimesPerDaySummary: boolean;
   readonly realizationMode: "normalized" | "roundtrip";
   readonly sitePlacement: "natural" | "trailing";
+  readonly instructionActionMap?: TimingSummaryOptions["instructionActionMap"];
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -238,13 +239,15 @@ function createThaiLocalization(): SigLocalization {
       groupMealTimingsByRelation,
       includeTimesPerDaySummary,
       realizationMode,
-      sitePlacement
+      sitePlacement,
+      instructionActionMap
     }) =>
       formatLongThai(clause, {
         groupMealTimingsByRelation,
         includeTimesPerDaySummary,
         realizationMode,
-        sitePlacement
+        sitePlacement,
+        instructionActionMap
       })
   };
 }
@@ -2075,7 +2078,7 @@ function formatLongThai(
   if (
     options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
-    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause)
+    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
@@ -2360,6 +2363,7 @@ function formatLongThai(
   const graphRealizationOptions = {
     includeWarnings: true,
     omitCanonicalAdministration: clause,
+    instructionActionMap: options?.instructionActionMap,
     preferSourceText: roundTrip,
     roundtripSafe: roundTrip,
     omitSourceTexts: graphRealizationOmissions

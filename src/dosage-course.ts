@@ -1672,7 +1672,14 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
     }
     let value: unknown;
     if (field.extension) value = child.extension?.[0] && cloneStructuredValue(child.extension[0]);
-    else if (field.fields) value = child.extension && decodeFields(child.extension, field.fields);
+    else if (field.fields) {
+      // Older saved rateRatio bridges used FHIR Extension.valueRatio.
+      // New nested field shapes take precedence when both are present.
+      value = child.extension
+        ? decodeFields(child.extension, field.fields)
+        : child.url === "rateRatio" && child.valueRatio
+          ? child.valueRatio : undefined;
+    }
     else if (field.quantity) {
       value = child.valueQuantity && quantityFromR5(cloneStructuredValue(child.valueQuantity));
       if (!value && child.extension) {

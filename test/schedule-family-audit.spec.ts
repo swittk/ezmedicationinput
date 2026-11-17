@@ -2811,3 +2811,231 @@ describe("review 2026-11-16 19h: count belongs to eligible successor administrat
     }
   });
 });
+
+
+describe("November 17 review: point precision on valid timezone offsets", () => {
+  it("keeps the UTC offset whole-minute when the source instant has 500 milliseconds", async () => {
+    const { getOffset, formatZonedIso } = await import("../src/execution/calendar");
+    for (const [instant, zone, expected] of [
+      ["2026-11-02T12:00:00.500Z", "UTC", 0],
+      ["2026-11-02T12:00:00.500Z", "Asia/Bangkok", 420],
+      ["2026-11-02T12:00:00.500Z", "America/New_York", -300],
+      ["1969-12-31T23:59:59.500Z", "UTC", 0],
+    ] as const) {
+      const time = new Date(instant);
+      expect(getOffset(time, zone)).toBe(expected);
+      const display = formatZonedIso(time, zone);
+      expect(display).toMatch(/[+-]\d\d:\d\d$/u);
+      expect(display).not.toContain(".008333");
+    }
+  });
+});
+
+describe("November 17 CodeRabbit scheduling root-family oracles", () => {
+  const orderedAt = "2026-11-02T00:00:00+07:00"; // Monday
+  const base = { from: orderedAt, orderedAt, timeZone: "Asia/Bangkok", limit: 12 };
+  const oneTablet = [{ quantity: { value: 1, unit: "tab" } }];
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } as const;
+
+  it("a counted BID course never counts an extra same-day clock toward supply", () => {
+    const dose = {
+      kind: "administration" as const,
+      amounts: oneTablet,
+      schedule: {
+        recurrence: {
+          frequency: 2,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Day,
+          clocks: ["08:00:00", "20:00:00"],
+          count: 3,
+        },
+      },
+    };
+    const expected = ["2026-11-02T08:00:00+07:00", "2026-11-02T20:00:00+07:00", "2026-11-03T08:00:00+07:00"];
+    expect(nextDueDoses(dose, base)).toEqual(expected);
+    expect(
+      calculateTotalUnits({ ...base, dosage: dose, durationValue: 2, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits
+    ).toBe(3);
+  });
+
+  it("exclusion weekdays do not consume an exact 3-administration count, including a later query", () => {
+    const dose = {
+      kind: "administration" as const,
+      amounts: oneTablet,
+      excludedWeekdays: ["tue" as const],
+      schedule: { recurrence: { ...daily, count: 3 } },
+    };
+    const expected = ["2026-11-02T08:00:00+07:00", "2026-11-04T08:00:00+07:00", "2026-11-05T08:00:00+07:00"];
+    expect(nextDueDoses(dose, base)).toEqual(expected);
+    expect(nextDueDoses(dose, { ...base, from: "2026-11-04T00:00:00+07:00" })).toEqual(expected.slice(1));
+    // When the clinician/application supplied an exact prior-count history,
+    // that history is authoritative; it must not be consumed twice.
+    expect(nextDueDoses(dose, { ...base, from: "2026-11-05T00:00:00+07:00", priorCount: 2 })).toEqual(
+      expected.slice(2)
+    );
+    expect(
+      calculateTotalUnits({ ...base, dosage: dose, durationValue: 4, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits
+    ).toBe(3);
+    expect(
+      calculateTotalUnits({
+        ...base,
+        dosage: dose,
+        from: "2026-11-04T00:00:00+07:00",
+        durationValue: 2,
+        durationUnit: FhirPeriodUnit.Day,
+      }).totalUnits
+    ).toBe(2);
+  });
+
+  it("uses prescribed Mon/Tue/Thu membership in a partial weekly supply window", () => {
+    const dose = {
+      kind: "administration" as const,
+      amounts: oneTablet,
+      schedule: {
+        recurrence: {
+          frequency: 3,
+          period: 1,
+          periodUnit: FhirPeriodUnit.Week,
+          dayOfWeek: ["mon" as const, "tue" as const, "thu" as const],
+        },
+      },
+    };
+    expect(nextDueDoses(dose, base).slice(0, 3)).toEqual([
+      "2026-11-02T00:00:00+07:00",
+      "2026-11-03T00:00:00+07:00",
+      "2026-11-05T00:00:00+07:00",
+    ]);
+    expect(
+      calculateTotalUnits({ ...base, dosage: dose, durationValue: 2, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits
+    ).toBe(2);
+  });
+
+  it("long-running q4h and civil-daily dosing reach a late query with limit 1", () => {
+    const old = "2026-01-01T00:00:00+07:00";
+    const july = "2026-07-01T00:00:00+07:00";
+    for (const recurrence of [
+      { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour },
+      { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day },
+    ]) {
+      const dose = { kind: "administration" as const, amounts: oneTablet, schedule: { recurrence } };
+      // The unqualified daily regimen uses the established institution
+      // morning default (09:00), whereas q4h is anchored exactly at midnight.
+      const expected = recurrence.periodUnit === FhirPeriodUnit.Day ? "2026-07-01T09:00:00+07:00" : july;
+      expect(nextDueDoses(dose, { orderedAt: old, from: july, timeZone: "Asia/Bangkok", limit: 1 })).toEqual([
+        expected,
+      ]);
+    }
+  });
+
+  it("a daily repeated course queried 22 months later is not bounded by the output limit", () => {
+    const old = "2025-01-01T00:00:00+07:00";
+    const from = "2026-11-02T00:00:00+07:00";
+    const course = {
+      kind: "course" as const,
+      cycleInterval: { value: 1, unit: "d" },
+      stages: [
+        {
+          administrations: [
+            { kind: "administration" as const, amounts: oneTablet, schedule: { recurrence: { ...daily } } },
+          ],
+        },
+      ],
+    };
+    expect(nextDueDoses(course, { orderedAt: old, from, timeZone: "Asia/Bangkok", limit: 1 })).toEqual([
+      "2026-11-02T08:00:00+07:00",
+    ]);
+  });
+
+  it("a one-tablet daily cycle carries the one-tablet/2d rolling cap across cycles", () => {
+    const course = {
+      kind: "course" as const,
+      cycleInterval: { value: 1, unit: "d" },
+      stages: [
+        {
+          administrations: [
+            {
+              kind: "administration" as const,
+              amounts: oneTablet,
+              schedule: { recurrence: { ...daily } },
+              limits: [
+                {
+                  scope: "period" as const,
+                  amount: { value: 1, unit: "tab" },
+                  period: { value: 2, unit: "d" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const expected = Array.from(
+      { length: 7 },
+      (_, i) => "2026-11-" + String(2 + 2 * i).padStart(2, "0") + "T08:00:00+07:00"
+    );
+    expect(nextDueDoses(course, { ...base, limit: 7 })).toEqual(expected);
+    expect(
+      calculateTotalUnits({ ...base, dosage: course, durationValue: 14, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits
+    ).toBe(7);
+  });
+});
+
+describe("November 17 repeated-course caps remain bounded and anchored", () => {
+  const course = {
+    kind: "course" as const,
+    cycleInterval: { value: 1, unit: "d" },
+    stages: [
+      {
+        administrations: [
+          {
+            kind: "administration" as const,
+            amounts: [{ quantity: { value: 1, unit: "tab" } }],
+            schedule: {
+              recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] },
+            },
+            limits: [
+              {
+                scope: "period" as const,
+                amount: { value: 1, unit: "tab" },
+                period: { value: 2, unit: "d" },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const orderedAt = "2026-11-02T00:00:00+07:00";
+  const base = { orderedAt, timeZone: "Asia/Bangkok" };
+  it("a later supply window excludes earlier administrations but uses them as rolling-cap history", () => {
+    const from = "2026-11-12T00:00:00+07:00";
+    const next = nextDueDoses(course, { ...base, from, limit: 5 });
+    expect(next).toEqual([12, 14, 16, 18, 20].map((day) => "2026-11-" + String(day) + "T08:00:00+07:00"));
+    const supply = calculateTotalUnits({
+      ...base,
+      from,
+      dosage: course,
+      durationValue: 10,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply.totalUnits).toBe(5);
+  });
+  it("a 60-day course retains exactly 30 administrations without retaining stale historical limits", () => {
+    const next = nextDueDoses(course, { ...base, from: orderedAt, limit: 30 });
+    expect(next).toHaveLength(30);
+    expect(next[0]).toBe("2026-11-02T08:00:00+07:00");
+    expect(next[29]).toBe("2026-12-30T08:00:00+07:00");
+    const supply = calculateTotalUnits({
+      ...base,
+      from: orderedAt,
+      dosage: course,
+      durationValue: 60,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply.totalUnits).toBe(30);
+  });
+});

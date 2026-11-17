@@ -6783,3 +6783,166 @@ These are same-host measurements, not mobile hardware guarantees.
 Do NOT manually request another CodeRabbit review, merge/publish
 packages, alter Shinebright or original PR #13. Update only the
 existing stacked PR #14 after a final green source/dist gate.
+
+
+## 2026-11-17 — PR #14 CodeRabbit full review: 16 findings, clinical roots vs internal footguns
+
+Reviewed CodeRabbit review 5932592298 and every one of its sixteen
+original inline findings against AGENTS and DIRECTIONALITY. No new
+full-review request, independent app change, API-defense framework,
+or user-visible hard safety veto.
+
+**Fourteen supported clinical/interchange/performance families fixed:**
+1. Native R6 safety removal no longer resurrects saved source doseLimit;
+   ordinary dosages never acquire synthetic empty safety. A first overly
+   broad attempt caused 296 source regressions and was corrected at the
+   export ownership boundary; no existing test weakened.
+2. Direct R5 output clears known site concept/reference independently,
+   retaining truly unknown source wrapper metadata.
+3. Derived exact phase ends require equal, unqualified typed durations
+   including code; approximate seven-day stages remain approximate.
+4. Multiple same-scope numeric safety maxima are recognized in one pass,
+   and total supply explicitly reports maximum/unevaluated instead of
+   pretending one arbitrary last maximum is definitive.
+5. Old R5 source-retained rateRatio valueRatio forms are recovered when
+   no nested child extension exists, without R6 intermediary.
+6. Whole-second Intl timezone offset comparisons ignore the source
+   instant's fractional milliseconds (including pre-epoch instants).
+7. Repeated cycles safely seek near late queries only when the original
+   first-cycle horizon proves no overlapping administration tail.
+8. Finite count is consumed on accepted administrations after calendar,
+   condition and period-cap filtering, not excluded candidates. A
+   supplied priorCount is not consumed twice by history replay.
+9. Rolling quantity/occurrence limits persist across repeated-cycle
+   boundaries per concrete stage/component. Accepted event history is
+   shared by scheduling and supply and trimmed to the actual limit
+   lookback. Candidate enumeration is bounded at the clinical cycle
+   end, not 10000 future dates then dropped.
+10. True elapsed and safe civil interval recurrences seek by authored
+    duration, not output-limit times an arbitrary history step count.
+    The established daily default clock remains 09:00 (not midnight).
+11. Each scheduled occurrence checks the exact count immediately,
+    preventing a fourth BID dose within a three-dose course.
+12. Weekday-filtered recurrence is counted before generic frequency
+    redistribution in supply, preserving Mon/Tue/Thu partial weeks.
+13. Comparator-headed glued million doses are scaled by typed HPSG
+    lexical grammar before any attached-unit candidate interpretation.
+14. Scoped custom definesDose actions resolve against the supplied
+    institution vocabulary for the one-pass source amount owner and
+    EN/TH graph realization, without altering the global defaults.
+
+**Two CodeRabbit findings REJECTED as internal editing footguns:**
+- A caller spreading/replacing a native intermediate administration
+  object is responsible for its own identity and provenance. No
+  runtime graph walk to repair that arbitrary object replacement.
+- A caller changing native predicate numbers/states without updating
+  its source prose is also responsible for that private/debug mismatch.
+  No recursive automatic source-text rewrite or defensive hardening.
+Both defensive edits were explored and then REVERTED as directed by
+the product owner; this is deliberately not a general-purpose
+user-friendly canonical editing framework.
+
+Independent regression oracles cover R6 limit clearing, R5 site
+clearing, equal/approximate stage duration, competing maxima, old
+rateRatio bridges, subsecond timezone offsets, eligible counted
+BID and excluded weekdays, later explicit count history, partial
+weekly windows, late elapsed/calendar queries, long repeated-cycle
+lookup and rolling caps over 14/60 days and later query windows.
+The original six rolling-cap oracles took 11.4 seconds after a
+correct-but-naive source-history enumeration; bounding input
+recurrence before generation reduced that to about 32 milliseconds.
+All existing comments remain preserved; no late regex rescue/parser
+pass, defensive output clone, API compatibility shim or cross-FHIR
+intermediate was added.
+
+Intermediate full source gate after initial fixes: 4256/4256
+tests in 46 suites and all four packaged ESM/CJS tests. After
+explicitly rejecting internal footgun changes, the five affected
+families passed 1105/1105 tests. Updated 200-case R5, current R6,
+short/long realization parity versus parent PR #13: zero differences.
+Final complete source/dist and all-public API performance checks
+follow before PR update. Hard throughput rule remains no reproducible
+regression above 4 percent in ANY public API domain versus master,
+including suggestions and terminology helpers.
+
+
+### PR #14 full-review performance gate (17 November, after clinical fixes)
+
+Paired warm benchmarks used the exact built origin/master checkpoint
+7d62823 (not the older stacked PR #13), through the repository
+bench/public-api.mjs covering 112 existing public functions in 178
+independent cases plus seven new native APIs. 21 alternating rounds,
+28ms target sample window. Full result: **177/178 pass, zero errors**.
+Examples measured in this same run: ordinary parse -6.0%, Thai
+parse -5.8%, ocular parse -3.2%, staged parse -2.6%, English
+action parse -12.9%, various English/Thai autocomplete samples
+-6% to -78%, R5 scalar scheduling -83.6%, scalar supply -83.6%,
+parallel-array scheduling -75.1%, parallel-array supply -71.5%,
+R6 nextDue -81.1%, R6 supply -82.7%, R5 simple conversion
+-9.7% to -20.4%, complex direct R5 adapter -7.3% to -20.6%,
+graph realization -54.3%, graph import -78.4%.
+
+The single initial flag: body-site administration target count
+measured approximately 0.03->0.04 microseconds (+16.0%), an
+extremely short getter that had previously shown large host/JIT
+variance. Independently rerunning this SAME public benchmark case
+with 41 rounds and a 105ms target window on the latest built code
+yielded 0.033357379 -> 0.025160453 microseconds (**-24.98%**,
+PASS). This is not a reproducible >4% regression. The initial
+raw measurement is retained in the JSON report, not deleted or
+averaged away with faster functions. Strict per-domain throughput
+gate, with no hidden regressions, remains the product contract.
+
+After this run, the same-family eligible-count path additionally
+distinguished explicitly supplied priorCount from history that
+EZMED must infer. A caller's count is not subtracted twice.
+This affects only the finite, filtered, explicitly supplied-count
+branch; the common parser/formatter and ordinary execution hot
+paths do not change. The historical valueRatio adapter also ceased
+performing an unnecessary defensive clone, consistent with the
+immutable-by-caller contract.
+
+New regression test blocks were formatted in isolation, leaving
+existing verbose comments and unrelated source formatting intact.
+
+
+### Final PR #14 review gate, 17 November 2026
+
+After rejecting the two debug/intermediate-edit footguns and
+normalizing only the new test blocks (no unrelated formatting):
+- npm run build: PASS ESM, CommonJS, TypeScript declarations.
+- npm test: **4255/4255 tests, 46/46 suites PASS**.
+- npm run test:dist: **4/4 packaged export tests PASS**.
+- 200 realistic R5/R6/short/long output comparison against the
+  parent R6 PR #13: **ZERO differing fields**.
+- Entire legacy public API: **178 scenarios, 177 green, one
+  submicrosecond target-count microcase flagged**, no errors;
+  every clinical parser, suggester, formatter, FHIR converter, date
+  utility, scheduler, supply and substantive terminology domain
+  satisfied the per-case 4% criterion.
+- The exact flagged target-count case at roughly 0.03 to 0.04
+  microseconds failed one short paired run (+16.0%); an
+  independent 41-round/105ms-pair precision repetition on the
+  same final built code measured 0.033357379 to 0.025160453
+  microseconds (**24.98% faster**, PASS). The initial noisy
+  failure remains in its JSON benchmark report. No repeatable
+  >4% regression is established.
+- Final built source also remeasured **36/36 directly touched
+  public API scenarios green** (17 paired rounds/24ms target),
+  including ordinary and staged parsing, FHIR R5/R6 conversion,
+  current-R6 import/format, next-dose and supply operations.
+  The parser's staged sample had high absolute per-run jitter
+  but a paired median speedup, not a reproducible regression.
+- Explicit caller-provided priorCount, far-history cycle seeking,
+  and historical legacy valueRatio input are covered by targeted
+  oracles and work only in their specialized source-owned paths.
+  Standard parsing/formatting and uncapped scheduling have no new
+  always-on pass.
+
+Per-owner decision: 14 clinically actionable findings fixed
+at their source-owning layer, two internal/debug editing
+footgun findings rejected as directionally inappropriate,
+with no defensive reconciliation, output freeze or new
+API compatibility promise. No extra CodeRabbit full review
+requested; all discussion belongs to the existing original
+PR #14 review threads.
