@@ -1,7 +1,7 @@
 /** English course wording. Clinical scope and date arithmetic are supplied
  * by the canonical formatter; this module owns words and English inflection. */
 import type { CourseLanguage } from "./types";
-import { DAY_NAMES, joinWithAnd } from "../../format";
+import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./weekday-vocabulary";
 const UNITS: Readonly<Record<string, readonly [string, string]>> = {
   s: ["second", "seconds"],
   min: ["minute", "minutes"],
@@ -31,8 +31,8 @@ export const ENGLISH_COURSE: CourseLanguage = {
   maxAdministrationLabel: "max per administration: ",
   maxLifetimeLabel: "max lifetime: ",
   maxPeriodLabel: "max per period: ",
-  weekdayName: (day) => DAY_NAMES[day] ?? day,
-  joinList: (items) => joinWithAnd(items as string[]),
+  weekdayName: (day) => ENGLISH_DAY_NAMES[day] ?? day,
+  joinList: (items) => joinLocalizedList(items,"and"),
   timeUnit: (unit, value) => UNITS[unit]?.[value === 1 ? 0 : 1],
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "up to " + value,

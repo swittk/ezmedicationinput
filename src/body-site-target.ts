@@ -26,11 +26,10 @@ interface BodySiteTargetCountOptions {
 }
 
 function normalizeAdministrationTargetCount(value: number | undefined): number | undefined {
-  if (!Number.isFinite(value) || value === undefined) {
-    return undefined;
-  }
-  const rounded = Math.trunc(value);
-  return rounded >= 2 ? rounded : undefined;
+  // Counts 0/1 do not require a multiplicity marker. Avoid a conversion for
+  // the overwhelmingly common absent/single-target values.
+  return value !== undefined && value >= 2 && Number.isFinite(value)
+    ? Math.trunc(value) : undefined;
 }
 
 function siteTextFromLike(
@@ -79,8 +78,15 @@ export function buildBodySiteAdministrationTargetCountExtension(
 export function parseBodySiteAdministrationTargetCountExtension(
   concept: FhirCodeableConcept | { extension?: FhirExtension[] } | undefined
 ): number | undefined {
-  for(const extension of concept?.extension??[]) {
-    if(extension.url===BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL)
+  const extensions = concept?.extension;
+  if (!extensions?.length) return undefined;
+  // Most sites have at most one extension. Inspect it directly without an
+  // iterator/allocation; preserve first-match semantics for longer lists.
+  if (extensions[0].url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL)
+    return normalizeAdministrationTargetCount(extensions[0].valueInteger);
+  for (let index = 1; index < extensions.length; index++) {
+    const extension = extensions[index];
+    if (extension.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL)
       return normalizeAdministrationTargetCount(extension.valueInteger);
   }
   return undefined;
@@ -108,13 +114,33 @@ export function getBodySiteAdministrationTargetCount(
       const direct=normalizeAdministrationTargetCount(explicitCount);
       if(direct!==undefined)return direct;
     }
-    for(const marker of fact.extension??[]) {
-      if(marker.url!==BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL)continue;
-      const count=normalizeAdministrationTargetCount(marker.valueInteger);
-      if(count!==undefined)return count;
-      break;
+    const markers = fact.extension;
+    if (markers?.length) {
+      const first = markers[0];
+      if (first.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
+        // The single-extension path dominates ordinary clinical lookups.
+        // Skip a helper call and iteration on that already-known final field.
+        const value = first.valueInteger;
+        if (value !== undefined && value >= 2 && Number.isFinite(value))
+          return Math.trunc(value);
+      } else for (let index = 1; index < markers.length; index++) {
+        const marker = markers[index];
+        if (marker.url !== BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) continue;
+        const count = normalizeAdministrationTargetCount(marker.valueInteger);
+        if (count !== undefined) return count;
+        break;
+      }
     }
   }
+  return inferredBodySiteTargetCount(site,options);
+}
+
+/** Only uncoded/unmarked inputs need text lookup and the bounded vocabulary
+ * cache. Keep this heavier path out of the direct typed-count reader so
+ * repeated explicit-count queries do not carry its parsing/cache machinery. */
+function inferredBodySiteTargetCount(
+  site:string|SiteLike|FhirCodeableConcept,options?:BodySiteTargetCountOptions
+):number|undefined {
   const text = siteTextFromLike(site, options);
   if (!text) {
     return undefined;

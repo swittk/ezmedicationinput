@@ -7,6 +7,10 @@ import { registerSigLocalization, resolveSigLocalization } from "../src/i18n";
 import { formatSigBatch, setDosageAlternativeChoice } from "../src/index";
 import type { FhirDosage } from "../src/types";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
+import { DAY_NAMES, joinWithAnd } from "../src/format";
+import { DAY_NAMES_THAI, joinWithAndThai } from "../src/i18n";
+import { ENGLISH_DAY_NAMES, THAI_DAY_NAMES, joinLocalizedList } from "../src/locales/course/weekday-vocabulary";
+
 import {
   formatCanonicalCourse,
   formatCanonicalAdministration,
@@ -32,6 +36,28 @@ const boundaries: CanonicalCourse = {
     },
   ],
 };
+
+describe("dependency-free course vocabulary", () => {
+  it("reuses the historical weekday tables without a circular locale-registry dependency", () => {
+    expect(DAY_NAMES).toBe(ENGLISH_DAY_NAMES);
+    expect(DAY_NAMES_THAI).toBe(THAI_DAY_NAMES);
+    for (const name of ["en", "th"]) {
+      const moduleText = readFileSync(new URL("../src/locales/course/" + name + ".ts", import.meta.url), "utf8");
+      expect(moduleText).not.toMatch(/from\s+["']\.\.\/\.\.\/(?:i18n|format)["']/u);
+      expect(moduleText).toContain('from "./weekday-vocabulary"');
+    }
+  });
+  it("retains original 0/1/2/3+ list join behavior without slicing arrays", () => {
+    const items = ["Monday", "Tuesday", "Wednesday", "Thursday"];
+    expect(joinWithAnd([])).toBe("");
+    expect(joinWithAnd(items.slice(0, 1))).toBe("Monday");
+    expect(joinWithAnd(items.slice(0, 2))).toBe("Monday and Tuesday");
+    expect(joinWithAnd(items.slice(0, 3))).toBe("Monday, Tuesday and Wednesday");
+    expect(joinWithAnd(items)).toBe("Monday, Tuesday, Wednesday and Thursday");
+    expect(joinWithAndThai(items.slice(0, 3))).toBe("Monday, Tuesday และ Wednesday");
+    expect(joinLocalizedList(items, "ou")).toBe("Monday, Tuesday, Wednesday ou Thursday");
+  });
+});
 
 describe("course locale boundary", () => {
   it("keeps built-in clinical windows, gaps and repeat periods exact in EN and TH", () => {

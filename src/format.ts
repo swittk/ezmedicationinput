@@ -1,3 +1,4 @@
+import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
@@ -108,15 +109,7 @@ const WHEN_TEXT: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "immediately"
 };
 
-export const DAY_NAMES: Record<string, string> = {
-  mon: "Monday",
-  tue: "Tuesday",
-  wed: "Wednesday",
-  thu: "Thursday",
-  fri: "Friday",
-  sat: "Saturday",
-  sun: "Sunday"
-};
+export const DAY_NAMES: Record<string, string> = ENGLISH_DAY_NAMES;
 
 const EN_TIMES_PER_DAY: Record<number, string> = {
   1: "once daily",
@@ -764,16 +757,7 @@ function collectWhenPhrases(
 }
 
 export function joinWithAnd(parts: string[]): string {
-  if (!parts.length) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return parts[0];
-  }
-  if (parts.length === 2) {
-    return `${parts[0]} and ${parts[1]}`;
-  }
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return joinLocalizedList(parts, "and");
 }
 
 function combineFrequencyAndEvents(

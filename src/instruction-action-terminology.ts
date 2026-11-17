@@ -496,7 +496,25 @@ export function listMedicationInstructionActions(): MedicationInstructionActionD
   return DEFAULT_ACTIONS;
 }
 
+/** A CodeSystem snapshot is a public value, not mutable global schema.
+ * Build it with one definition walk and one language-key walk per published
+ * action; avoid filter→map and map→filter pipelines on every public call. */
 export function buildMedicationInstructionActionCodeSystem(): MedicationInstructionActionCodeSystem {
+  const concepts: MedicationInstructionActionCodeSystem["concept"] = [];
+  for (const definition of DEFAULT_ACTIONS) {
+    // A local action remains part of the published CodeSystem even when
+    // extra NLM/HL7/SNOMED codings are provided for the same instruction.
+    if (definition.coding?.system !== MEDICATION_INSTRUCTION_ACTION_SYSTEM &&
+        (definition.coding || definition.externalCodings?.length)) continue;
+    const designations: NonNullable<MedicationInstructionActionCodeSystem["concept"]>[number]["designation"] = [];
+    const translations = definition.i18n;
+    if (translations) for (const language in translations) {
+      if (!Object.prototype.hasOwnProperty.call(translations, language)) continue;
+      const value = translations[language];
+      if (value) designations.push({ language, value });
+    }
+    concepts.push({ code: definition.code, display: definition.display, designation: designations });
+  }
   return {
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_ACTION_SYSTEM,
@@ -506,19 +524,7 @@ export function buildMedicationInstructionActionCodeSystem(): MedicationInstruct
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_ACTIONS.filter((definition) =>
-      // A local action remains part of the published CodeSystem even when
-      // extra NLM/HL7/SNOMED codings are provided for the same instruction.
-      definition.coding?.system === MEDICATION_INSTRUCTION_ACTION_SYSTEM ||
-      (!definition.coding && !definition.externalCodings?.length)
-    ).map((definition) => ({
-      code: definition.code,
-      display: definition.display,
-      designation: Object.keys(definition.i18n ?? {}).map((language) => ({
-        language,
-        value: definition.i18n?.[language] ?? ""
-      })).filter((designation) => designation.value.length > 0)
-    }))
+    concept: concepts
   };
 }
 

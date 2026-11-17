@@ -96,7 +96,29 @@ Use `fromFhir(fhirNext)` to import that **current R6** structure.
 Older R6 `DosageDetails` drafts are not supported by the R6 importer.
 The R5 editing/export APIs are unchanged; no downstream storage migration is required.
 
-### Native clinical courses and editing
+### Internal native clinical courses and editing (unstable)
+
+**INTERNAL USE ONLY — NOT A BACKWARD-COMPATIBLE API OR PERSISTENCE FORMAT.**
+`CanonicalCourse`, `CanonicalStage`, `CanonicalAdministration`, their
+nested clinical types, `meta.canonical`, and the native
+import/edit/project/format helpers are implementation surfaces for EZMED
+development. **Their structures, identities, field names, invariants, and
+function signatures may be changed or removed at any time without
+deprecation, migration, compatibility adapters, or support for earlier
+internal shapes.** This remains true even where TypeScript types or helper
+functions are currently exported from the package. Do not persist these
+objects, build downstream integrations against them, or assume one version
+can load another version's internal model.
+
+**Only the documented external interchange contracts are compatibility
+boundaries:** `.fhir` and the established R5 editing/persistence APIs
+remain R5; `.fhirNext` and `fromFhir` use the *current supported* R6
+structure, not obsolete R6 drafts. The internal model is deliberately free
+to evolve for maximum clinical expressiveness, performance, and
+maintainability; no old internal representation must be retained.
+
+The following example is **for internal contributors and tests only**,
+not recommended downstream application integration code.
 
 `batch.meta.canonical.course` is EZMED's authoritative internal clinical course.
 It is not a FHIR datatype: stages own concurrent administrations; each
@@ -301,6 +323,13 @@ Highlights:
 
 
 ## Extending course realization to another language
+
+**Internal extension example:** the native course-realization facet and its
+clinical-model inputs are not a versioned third-party plugin contract.
+They may be restructured along with the internal model, without preserving
+previous facet shapes. Future language packs should depend on language
+boundaries and shared clinical semantics rather than pinning a historic
+`CanonicalCourse` layout.
 
 Whole-course wording is a typed optional `course` facet on the existing
 `SigLocalization` registration. It complements the same `formatShort` and

@@ -1,7 +1,7 @@
 /** Thai course wording. Keep locale realization separate from shared
  * interval/count/condition semantics; this is a facet of SigLocalization. */
 import type { CourseLanguage } from "./types";
-import { DAY_NAMES_THAI, joinWithAndThai } from "../../i18n";
+import { THAI_DAY_NAMES, joinLocalizedList } from "./weekday-vocabulary";
 const UNITS: Readonly<Record<string, string>> = {
   s: "วินาที",
   min: "นาที",
@@ -33,8 +33,8 @@ export const THAI_COURSE: CourseLanguage = {
   maxAdministrationLabel: "max per administration: ",
   maxLifetimeLabel: "max lifetime: ",
   maxPeriodLabel: "max per period: ",
-  weekdayName: (day) => DAY_NAMES_THAI[day] ?? day,
-  joinList: (items) => joinWithAndThai(items as string[]),
+  weekdayName: (day) => THAI_DAY_NAMES[day] ?? day,
+  joinList: (items) => joinLocalizedList(items,"และ"),
   timeUnit: (unit) => UNITS[unit],
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "ไม่เกิน " + value,

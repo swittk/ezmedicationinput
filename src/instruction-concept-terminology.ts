@@ -201,7 +201,25 @@ export function listMedicationInstructionConcepts(): MedicationInstructionConcep
   return DEFAULT_CONCEPTS;
 }
 
+/** The public CodeSystem is freshly returned, but its published concepts
+ * require only one source-definition walk and one designation walk each.
+ * This avoids filter->map and map->filter intermediary arrays per call. */
 export function buildMedicationInstructionConceptCodeSystem(): MedicationInstructionConceptCodeSystem {
+  const concepts: MedicationInstructionConceptCodeSystem["concept"] = [];
+  for (const definition of DEFAULT_CONCEPTS) {
+    // An explicit local whole-phrase code remains part of this CodeSystem
+    // even when its standard-coded constituents are also available.
+    if (definition.coding?.system !== MEDICATION_INSTRUCTION_CONCEPT_SYSTEM &&
+        (definition.coding || definition.externalCodings?.length || definition.components?.length)) continue;
+    const designations: NonNullable<MedicationInstructionConceptCodeSystem["concept"]>[number]["designation"] = [];
+    const translations = definition.i18n;
+    if (translations) for (const language in translations) {
+      if (!Object.prototype.hasOwnProperty.call(translations, language)) continue;
+      const value = translations[language];
+      if (value) designations.push({ language, value });
+    }
+    concepts.push({ code: definition.code, display: definition.display, designation: designations });
+  }
   return {
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
@@ -211,19 +229,7 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_CONCEPTS.filter((definition) =>
-      // An explicit local whole-phrase code remains part of this CodeSystem
-      // even when its standard-coded constituents are also available.
-      definition.coding?.system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM ||
-      (!definition.coding && !definition.externalCodings?.length && !definition.components?.length)
-    ).map((definition) => ({
-      code: definition.code,
-      display: definition.display,
-      designation: Object.keys(definition.i18n ?? {}).map((language) => ({
-        language,
-        value: definition.i18n?.[language] ?? ""
-      })).filter((designation) => designation.value.length > 0)
-    }))
+    concept: concepts
   };
 }
 

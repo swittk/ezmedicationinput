@@ -6637,3 +6637,149 @@ course, while retaining all existing typed lossless extension and
 edit-reconciliation semantics. There is NO acceptable simple-only
 shortcut hiding an R6 fallback. No code pushed to remote PR #14,
 no extra CodeRabbit review, no unrelated app edits.
+
+
+## 2026-11-17 — Local owner direction: prepare language-pack boundaries
+
+While rewriting the native course formatter, separate language-dependent
+EN/TH wording and locale-specific grammatical licensing into locale-owned
+adapters. Keep the clinical model/compiler/execution/FHIR adapters neutral;
+reuse existing registries, keep the HPSG parser single-pass, preserve public
+R5/current-R6 behavior and throughput, and defer a complete language-pack
+framework. The language-pack boundary is now captured in native code and DIRECTIONALITY.
+The coordination-only bulletin remains untracked and outside the PR.
+
+
+## 2026-11-17 — Finishing language boundary and every public-API speed gate
+
+Resumed from the WIP branch after the complete direct R5/R6 projection
+checkpoint 27bbd48. Owner constraints were read from AGENTS and the
+untracked local coordination bulletin before edits.
+
+- Canonical CourseLanguage is an optional typed facet of the EXISTING
+  SigLocalization registry. EN/TH calendar windows, stage/choice text,
+  predicates and negation, exclusions, temporal units, rate and dose
+  labels, safety fallbacks and cycle wording belong to locale modules.
+  Shared canonical formatting resolves the locale once and composes
+  typed meaning, not language-specific conditions. A third-language
+  test covers inheritance, locales and source-neutral wording.
+- Native R5 edit comparison hashes stream their persisted token view
+  directly, without building a second stripped dosage tree.
+  Instruction graph metadata uses one direct typed field walk per
+  imported node, rather than per-field find/filter/indexOf rescans.
+  Relation lookup indexes ambiguous lexical surfaces once, preserving
+  language-specific terms and default options.
+- Public suggestion, date/locale registration and body-site utility
+  paths avoid repeated temporary arrays and unneeded cloning.
+  Body-site multiplicity has a single-extension fast path and zero-copy
+  immutable-by-contract Coding projections. CodeSystem generation
+  uses one pass over published actions and one pass over its language
+  designations, not filtered/maps of maps.
+- Native quantity-cap units use switch membership rather than new
+  arrays and indexOf per dose. Multiple excluded dates use a single Set
+  per query; one excluded date uses direct equality. No O(doses * dates)
+  indexOf loop.
+- The original 178-domain long benchmark against built origin/master
+  identified four tiny helper regressions after all parse/suggest/format/
+  schedule scenarios passed. Subsequent 31-round 95-ms targeted tests
+  cleared all four: target count -28.9%, spatial builder -8.2%,
+  spatial extensions builder -4.8%, action CodeSystem -35.1%.
+  This targeted check is not a waiver of the final all-public gate.
+- Full source correctness on the preceding build: 4232 tests, 46
+  suites; packaged ESM/CJS tests 4/4. The latest micro-optimization
+  changes require their own final build, full suite and all-public
+  acceptance report before push/merge.
+
+No separate locale registry, second HPSG parser, R5/R6 conversion
+intermediate, unsupported old R6 format, or defensive freeze/copy was
+added. Preserve original PR #13, avoid new CodeRabbit review requests,
+and do not publish the coordination-only bulletin.
+
+
+## 2026-11-17 — Final direct-adapter/language/throughput hard-gate review
+
+Owner requested completion, not another rolling review loop. Current
+branch is a stacked refactor of EZMED only, with PR #13 untouched.
+The saved direct-adapter commit 27bbd48 established complete
+CanonicalCourse-to-R5 and CanonicalCourse-to-R6 sibling outputs and
+native R5/R6 readers. Neither native adapter uses the other output
+version as a processing intermediate; historical R6-shaped metadata
+inside saved R5 is only external provenance.
+
+Latest core changes:
+- Removed duplicate R5 stage index additions, per-call dosage-source
+  strip clones, redundant lexical scans, double locale lookup and
+  hidden defensive copies.
+- EN/TH whole-course realization is a typed locale-owned facet of
+  the existing SigLocalization registry. The shared weekday and list
+  vocabulary module now has NO imports from either central i18n or the
+  shared formatter, eliminating a circular dependency. Historical
+  English/Thai day tables and joinWithAnd helpers remain API-identical;
+  joins use one loop rather than slice() plus join().
+- Added independent tests that a third locale inherits clause/course
+  realization, EN/TH windows/conditions keep exact wording, and the
+  locale modules do not import their central registry or formatter.
+- Body-site target count uses a direct single-extension fast path,
+  unchanged coding uses immutable-by-contract references, and
+  SNOMED finding-site/laterality/topographical attribute parsing
+  finds the first colon once and compares a fixed-width marker,
+  preserving nested original expressions.
+- Both Action and Concept public CodeSystem builders emit identical
+  deep-equal standards documents using ONE definition walk and ONE
+  translation walk per emitted concept. No filter/map+map/filter
+  intermediary arrays; CodeSystem source comments preserved.
+- Quantity cap unit aliases use direct switch membership (no arrays
+  allocated for each cap); multiple excluded-date membership is
+  indexed once per request with a single-date equality fast path.
+  No O(administrations * excluded dates) indexOf loop remains.
+- A source-only local coordination bulletin was archived outside the
+  repository and the temporary AGENTS.md pointer restored before
+  publishing. Durable language guidance is in DIRECTIONALITY.md and
+  public extension examples in README.md.
+
+Clinical verification of the penultimate code and language module:
+- npm run build TypeScript/ESM/CJS PASS;
+- npm test 4,237/4,237 in 46/46 suites PASS;
+- npm run test:dist 4/4 PASS;
+- exact 200-case parent PR #13 comparison of R5, current R6, short
+  and long display text: ZERO mismatches;
+- exact 28-suggestion EN/TH public corpus comparison: ZERO mismatches;
+- new single-delimiter SNOMED family and circular-language-source
+  tests PASS.
+The final CodeSystem generation optimization has also passed focused
+terminology tests and produced exact deep-equal output versus master.
+One final full suite/dist gate follows the last CodeSystem change.
+
+Strict speed gate: exact built origin/master at 7d62823 versus current
+ES6 build. 178 established public API scenarios measured individually
+with 21 alternating warm rounds, 28ms target per sample, plus 7 new
+native API scenarios measured without invented baseline. 177/178
+initial per-scenario passes, 0 errors. The single initial flagged
+case is getBodySiteAdministrationTargetCount on a 0.04-microsecond
+operation: raw short-run 0.03781->0.04126us (+6.3%), with 28.3% and
+18.7% within-sample spreads. Two longer targeted independent checks
+using 31+41 rounds and ~95-105ms sample windows measured the SAME
+input materially faster than main (-30.5% and -25.2%). This is
+non-reproducible submicro host/JIT noise, not an established >4%
+slowdown. The original failing measurement remains visible rather
+than deleting it; never waiver a reproducible slowdown.
+Other representative public changes in the 178-case run: ordinary
+parse -9.5%, Thai parse -6.2%, ocular parse -1.0%, staged parse -2.1%;
+suggestSig(1 tab po q) -9.3%, Thai suggestSig(กิน) -26.5%;
+R6 complex import -33.5%, R6 English format -24.1%;
+R5 complex toDosageDetails -9.3%; native R6 due -81.5%, supply
+-83.0%. No observed reproducible >4% slowdown in any measured
+established public domain. The public-API harness covers 112 legacy
+function exports, 178 realistic fixtures and 7 new native API cases;
+no aggregate domain hides a failing function.
+
+Additional independent 24 paired isolated-process cold ESM import
+runs: master median 115.358ms, candidate 114.744ms (-0.53%);
+post-GC heap 8,068,948 vs 7,698,236 bytes (-4.59%). Bundle
+uncompressed JS size increased due the complete native model, but
+the measured cold import time and retained heap did not regress.
+These are same-host measurements, not mobile hardware guarantees.
+
+Do NOT manually request another CodeRabbit review, merge/publish
+packages, alter Shinebright or original PR #13. Update only the
+existing stacked PR #14 after a final green source/dist gate.

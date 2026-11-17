@@ -57,6 +57,17 @@ Reasoning:
 - the current clause language is narrow enough that a local grammar is maintainable
 - suggestions can still be derived later from grammar productions without committing the package to a larger parser toolkit today
 
+## Language-pack boundary during native realization (2026-11-17)
+
+Future locales must plug into language-specific lexicons, grammar licensing,
+realization templates, and suggestion adapters; the canonical clinical facts,
+clinical composition, execution, and FHIR adapters must remain locale-neutral.
+While touching `canonical/format-course.ts`, extract hardcoded EN/TH
+course-level wording behind locale-owned realization rather than expanding
+language conditionals. Reuse existing locale registries; no second parser,
+full language-pack framework, or ordinary-path performance regression.
+The concrete EN/TH course realizers live under src/locales/course/ and use the existing SigLocalization registry.
+
 ## Native course authority (2026-11-16)
 
 The canonical clause/regimen pipeline now continues into a complete native
@@ -327,9 +338,40 @@ If learned behavior is added later, it should be:
 - Performance acceptance: no reproducible >4% slowdown in ANY parser,
   import, formatter, scheduling or supply domain versus origin/master;
   target faster in every domain, with no aggregate-median waiver.
-- BLOCKER: the native-to-R5 adapter still constructs R6 first. The required
-  architecture is independent native-to-R5 and native-to-R6 adapters, both
-  retaining full clinical meaning and existing R5 lossless edit metadata.
-  A simple-only direct path hiding a fallback through R6 is not completion.
-- Keep original PR #13 and published PR #14 unchanged until all code,
-  clinical, performance and direct-adapter gates are fulfilled.
+- Original audit blocker (resolved in the later direct-adapter checkpoint):
+  native-to-R5 used to construct R6 first. Complete R5 and R6 sibling
+  projection/import now independently own their source-compatibility codecs.
+  The historical issue remains documented here as context, not an active gate.
+- Preserve the original PR #13. Update stacked PR #14 only after source,
+  compatibility and per-domain performance acceptance is verified.
+
+
+## 2026-11-17 — Direct sibling adapters and course localization (supersedes prior R5 blocker)
+
+The historical CanonicalCourse -> R6 -> R5 blocker above was resolved
+at the complete interchange boundary, not hidden behind a limited fast
+path. Native clinical course remains the sole internal authority:
+
+- adapters/r5-course.ts emits strict R5 fields and complete retained edit
+  metadata directly from native facts.
+- adapters/r5-import.ts reconciles live R5 rows directly. It may decode an
+  R6-shaped historical *source snapshot* embedded in an older R5 extension,
+  but does not construct a new R6 processing intermediate.
+- adapters/canonical-course.ts imports/projects current R6 independently.
+  Native parsing, formatting, scheduling and supply do not transit either
+  external version on their internal paths.
+- Opaque source remains recoverable and inert; understood clinical fields
+  are explicit typed values, not generic executable property bags.
+
+Whole-course EN/TH words are a typed CourseLanguage facet on the existing
+SigLocalization registry. Shared canonical code computes clinical facts,
+dates, conditions and dose/rate scope only. Locale-owned modules in
+locales/course/ supply calendars, stages, temporal units, conjunctions,
+conditions, exclusions, rate/dose labels and technical fallbacks. A third
+language test covers registration and inheritance without a second parser.
+
+The all-public benchmark covers all legacy exports including autocomplete
+(suggestSig), date and locale registration, graph encode/decode, R5/R6
+interchange, scheduling and supply, not only parseSig/formatSig.
+The 4% regression ceiling applies independently to each measured domain
+against the exact built origin/master, never to an aggregate median.

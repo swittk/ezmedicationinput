@@ -35,10 +35,10 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
 /** Shared immutable-by-contract Coding fields for ordinary projection and
  * import. Only the explicitly named clone API detaches nested metadata. */
 function sharedCodingFields(coding:FhirCoding|undefined):FhirCoding|undefined {
-  return coding?.code?{
-    system:coding.system,code:coding.code,display:coding.display,
-    extension:coding.extension,_display:coding._display,i18n:coding.i18n
-  }:undefined;
+  // Output values are immutable by caller contract. Keep existing coding
+  // identity (including source annotations) rather than allocating a second
+  // coding shell solely to protect a caller from mutating its result.
+  return coding?.code ? coding : undefined;
 }
 
 function cloneBodySiteCoding(coding: BodySiteCode | undefined): BodySiteCode | undefined {

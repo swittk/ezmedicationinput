@@ -205,9 +205,12 @@ const CONDITION_MEASUREMENT_CODES: Record<string, { code: string; display: strin
 function replacementExtensions(
   dosage: Pick<FhirDosage, "modifierExtension">, url: string, value: FhirExtension | undefined
 ): void {
-  const existing = (dosage.modifierExtension ?? []).filter(extension => extension.url !== url);
-  const result = value ? [...existing, value] : existing;
-  dosage.modifierExtension = result.length ? result : undefined;
+  const prior=dosage.modifierExtension;
+  if(!prior?.length){dosage.modifierExtension=value?[value]:undefined;return;}
+  const result:FhirExtension[]=[];
+  for(const extension of prior)if(extension.url!==url)result.push(extension);
+  if(value)result.push(value);
+  dosage.modifierExtension=result.length?result:undefined;
 }
 
 const CONDITION_FIELDS={

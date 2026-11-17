@@ -96,15 +96,15 @@ function courseFromFields(
       if (a.contextIssue === "conflicting-course-phase") contextIssue = a.contextIssue;
       else if (a.contextIssue && !contextIssue) contextIssue = a.contextIssue;
     }
-  return {
-    kind: "course",
-    stages,
-    instruction: fields.renderedInstruction,
-    cycleInterval: measureFromWire(fields.repeatCycle),
-    safety: safetyFromWire(fields.safety, true),
-    ...(contextIssue ? { contextIssue } : {}),
-    provenance: { format: "r5", data: fields },
+  const course:CanonicalCourse={
+    kind:"course",stages,instruction:fields.renderedInstruction,
+    cycleInterval:measureFromWire(fields.repeatCycle),
+    safety:safetyFromWire(fields.safety,true),provenance:{format:"r5",data:fields}
   };
+  // Set an optional typed scalar directly instead of creating spread
+  // fragments/descriptors on every imported course in the ES6 build.
+  if(contextIssue)course.contextIssue=contextIssue;
+  return course;
 }
 function extensionFields(course: CanonicalCourse): FhirExtension[] {
   return (course.provenance?.data.extension as FhirExtension[] | undefined) ?? [];
@@ -1502,7 +1502,7 @@ export function courseFromR5(
     );
     return withPreservedSourceExtension(result, instructionSource);
   }
-  const header = { ...(course ?? {}) };
+  const header:Omit<FhirR6DosageInstruction,"step"> & {step?:EzCourseMetadata["step"]}=Object.assign({},course);
   delete header.step;
   if (course?.renderedInstruction === undefined) {
     if (renderedInstruction !== undefined) header.renderedInstruction = renderedInstruction;

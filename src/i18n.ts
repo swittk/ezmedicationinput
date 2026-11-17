@@ -1,3 +1,4 @@
+import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
 import type { CourseLanguage } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
@@ -299,15 +300,7 @@ const WHEN_TEXT_THAI: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "ทันที"
 };
 
-export const DAY_NAMES_THAI: Record<string, string> = {
-  mon: "วันจันทร์",
-  tue: "วันอังคาร",
-  wed: "วันพุธ",
-  thu: "วันพฤหัสบดี",
-  fri: "วันศุกร์",
-  sat: "วันเสาร์",
-  sun: "วันอาทิตย์"
-};
+export const DAY_NAMES_THAI: Record<string, string> = THAI_DAY_NAMES;
 
 const TH_TIMES_PER_DAY: Record<number, string> = {
   1: "วันละครั้ง",
@@ -1376,16 +1369,7 @@ function collectWhenPhrasesThai(
 }
 
 export function joinWithAndThai(parts: string[]): string {
-  if (!parts.length) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return parts[0];
-  }
-  if (parts.length === 2) {
-    return `${parts[0]} และ ${parts[1]}`;
-  }
-  return `${parts.slice(0, -1).join(", ")} และ ${parts[parts.length - 1]}`;
+  return joinLocalizedList(parts, "และ");
 }
 
 function combineFrequencyAndEventsThai(

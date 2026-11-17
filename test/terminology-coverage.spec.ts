@@ -492,3 +492,41 @@ describe("Open English WordNet 2025 exact nonclinical result senses", () => {
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
   });
 });
+
+
+describe("single-delimiter SNOMED postcoordination parsing", () => {
+  it("roundtrips the supported finding-site, topographical and laterality attributes", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    const focus = rules.buildSnomedFindingSitePostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedFindingSitePostcoordinationCode(focus))
+      .toEqual({ focusCode: "12345", siteCode: "67890" });
+    const topographical = rules.buildSnomedBodySiteTopographicalModifierPostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode(topographical))
+      .toEqual({ siteCode: "12345", modifierCode: "67890" });
+    const laterality = rules.buildSnomedBodySiteLateralityPostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedBodySiteLateralityPostcoordinationCode(laterality))
+      .toEqual({ siteCode: "12345", lateralityCode: "67890" });
+  });
+  it("does not reinterpret a nested later attribute as the first top-level relationship", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    for (const buildAndParse of [
+      [rules.buildSnomedFindingSitePostcoordinationCode, rules.parseSnomedFindingSitePostcoordinationCode],
+      [rules.buildSnomedBodySiteTopographicalModifierPostcoordinationCode,
+       rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode],
+      [rules.buildSnomedBodySiteLateralityPostcoordinationCode,
+       rules.parseSnomedBodySiteLateralityPostcoordinationCode]
+    ] as const) {
+      const [build, parse] = buildAndParse;
+      const valid = build("12345", "67890");
+      expect(parse("12345:unexpected=0" + valid.slice(5))).toBeUndefined();
+      expect(parse(valid)).toBeDefined();
+    }
+  });
+  it("retains the full parenthesized nested finding-site expression", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    const site = "67890:12345=45678";
+    const code = rules.buildSnomedFindingSitePostcoordinationCode("12345", site);
+    expect(rules.parseSnomedFindingSitePostcoordinationCode(code))
+      .toEqual({ focusCode: "12345", siteCode: site });
+  });
+});

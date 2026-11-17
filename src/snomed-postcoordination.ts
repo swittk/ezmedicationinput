@@ -50,8 +50,12 @@ export function buildSnomedBodySiteLateralityPostcoordinationCode(
 export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
   code: string | undefined
 ): { siteCode: string; modifierCode: string } | undefined {
-  const markerIndex = code?.indexOf(SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER) ?? -1;
-  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
+  // A valid assignment starts at the FIRST colon; an embedded extra
+  // relation cannot be mistaken for the requested top-level attribute.
+  // Find the colon once, then compare its fixed-width marker directly.
+  // No second substring search and no repeated array membership walk.
+  const markerIndex = code?.indexOf(":") ?? -1;
+  if (!code || markerIndex < 0 || code.slice(markerIndex, markerIndex + SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER.length) !== SNOMED_TOPOGRAPHICAL_MODIFIER_MARKER) {
     return undefined;
   }
   const siteCode = code.slice(0, markerIndex).trim();
@@ -67,8 +71,12 @@ export function parseSnomedBodySiteTopographicalModifierPostcoordinationCode(
 export function parseSnomedBodySiteLateralityPostcoordinationCode(
   code: string | undefined
 ): { siteCode: string; lateralityCode: string } | undefined {
-  const markerIndex = code?.indexOf(SNOMED_LATERALITY_MARKER) ?? -1;
-  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
+  // A valid assignment starts at the FIRST colon; an embedded extra
+  // relation cannot be mistaken for the requested top-level attribute.
+  // Find the colon once, then compare its fixed-width marker directly.
+  // No second substring search and no repeated array membership walk.
+  const markerIndex = code?.indexOf(":") ?? -1;
+  if (!code || markerIndex < 0 || code.slice(markerIndex, markerIndex + SNOMED_LATERALITY_MARKER.length) !== SNOMED_LATERALITY_MARKER) {
     return undefined;
   }
   const siteCode = code.slice(0, markerIndex).trim();
@@ -84,8 +92,12 @@ export function parseSnomedBodySiteLateralityPostcoordinationCode(
 export function parseSnomedFindingSitePostcoordinationCode(
   code: string | undefined
 ): { focusCode: string; siteCode: string } | undefined {
-  const markerIndex = code?.indexOf(SNOMED_FINDING_SITE_ATTRIBUTE_MARKER) ?? -1;
-  if (!code || markerIndex < 0 || code.indexOf(":") !== markerIndex) {
+  // A valid assignment starts at the FIRST colon; an embedded extra
+  // relation cannot be mistaken for the requested top-level attribute.
+  // Find the colon once, then compare its fixed-width marker directly.
+  // No second substring search and no repeated array membership walk.
+  const markerIndex = code?.indexOf(":") ?? -1;
+  if (!code || markerIndex < 0 || code.slice(markerIndex, markerIndex + SNOMED_FINDING_SITE_ATTRIBUTE_MARKER.length) !== SNOMED_FINDING_SITE_ATTRIBUTE_MARKER) {
     return undefined;
   }
   const focusCode = code.slice(0, markerIndex).trim();

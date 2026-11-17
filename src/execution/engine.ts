@@ -1222,6 +1222,25 @@ function applyOccurrenceCap(
 /** Maximum medication quantity per time window is not the same as a
  * frequency cap: divide by the actual per-administration quantity first.
  * Do not silently discard a limit when the dose unit cannot be compared. */
+/** Clinical unit synonyms and period-unit membership are constant-time
+ * typed rules. Do not allocate a temporary array or call indexOf for every
+ * cap on every schedule/supply evaluation. */
+function normalizeQuantityCapUnit(unit: string): string {
+  const text = unit.trim().toLowerCase();
+  switch (text) {
+    case "tab": case "tabs": case "tablet": case "tablets": return "tab";
+    case "cap": case "caps": case "capsule": case "capsules": return "cap";
+    case "drop": case "drops": return "drop";
+    default: return text;
+  }
+}
+function isQuantityCapPeriodUnit(unit: string | undefined): boolean {
+  switch (unit) {
+    case "s": case "min": case "h": case "d":
+    case "wk": case "mo": case "a": return true;
+    default: return false;
+  }
+}
 function executableQuantityCaps(
   dosage: CanonicalAdministration,
   context?: MedicationContext
@@ -1242,13 +1261,6 @@ function executableQuantityCaps(
   ) {
     return [];
   }
-  const normalizeUnit = (unit: string) => {
-    const text = unit.trim().toLowerCase();
-    if (["tab", "tabs", "tablet", "tablets"].indexOf(text) >= 0) return "tab";
-    if (["cap", "caps", "capsule", "capsules"].indexOf(text) >= 0) return "cap";
-    if (["drop", "drops"].indexOf(text) >= 0) return "drop";
-    return text;
-  };
   const caps: CanonicalOccurrenceCapExpr[] = [];
   for (const limit of limits) {
     if (limit.scope !== "period" || limit.expression) continue;
@@ -1271,15 +1283,14 @@ function executableQuantityCaps(
       period === undefined ||
       !Number.isInteger(period) ||
       period <= 0 ||
-      !periodUnit ||
-      ["s", "min", "h", "d", "wk", "mo", "a"].indexOf(periodUnit) < 0
+      !isQuantityCapPeriodUnit(periodUnit)
     ) {
       continue;
     }
     const actualUnit = getDoseQuantityUnit(dose);
     const maximumUnit = getDoseQuantityUnit(numerator);
-    const normalizedActual = normalizeUnit(actualUnit);
-    const normalizedMaximum = normalizeUnit(maximumUnit);
+    const normalizedActual = normalizeQuantityCapUnit(actualUnit);
+    const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
     const perTargetDose =
       normalizedActual === normalizedMaximum ? dose.value : convertValue(dose.value, actualUnit, maximumUnit);
     if (perTargetDose === null || !Number.isFinite(perTargetDose) || perTargetDose <= 0) {
@@ -2253,6 +2264,9 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   if (unscheduledOccurrenceCapacity(one)) return [];
   const guard = getDosageCondition(one);
   const exclusions = getDosageExcludedDates(one);
+  // Small exclusion sets are common; avoid allocating a Set for one date.
+  // Larger lists must not perform O(doses × excludedDates) array searches.
+  const excludedDateSet = exclusions.length > 1 ? new Set(exclusions) : undefined;
   const excludedWeekdays = new Set<string>(getDosageExcludedWeekdays(one));
   if (guard || exclusions.length || excludedWeekdays.size) {
     const limit = options?.limit ?? 10;
@@ -2298,7 +2312,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
         if (exclusions.length) {
           const { year, month, day } = getTimeParts(new Date(at), timeZone);
           const localDate = `${pad(year, 4)}-${pad(month)}-${pad(day)}`;
-          if (exclusions.indexOf(localDate) >= 0) continue;
+          if (excludedDateSet ? excludedDateSet.has(localDate) : exclusions[0] === localDate) continue;
         }
         if (guard && options.evaluateCondition) {
           const eligible = options.evaluateCondition(guard, at);
