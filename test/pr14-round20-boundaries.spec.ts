@@ -109,8 +109,10 @@ describe("strict R6 projection preserves current editable facts", () => {
       safety: { doseLimit: [{ scope: "administration", valueQuantity: { value: 4, unit: "tab" } }] },
     }] }] };
     const projected = fromDosageDetails(source);
-    expect(toDosageDetails(projected.dosages, undefined, projected.course).step[0].component[0].condition)
-      .toEqual(source.step[0].component[0].condition);
+    projected.dosages[0].maxDosePerAdministration = { value: 3, unit: "tab" };
+    const changed = toDosageDetails(projected.dosages, undefined, projected.course).step[0].component[0];
+    expect(changed.safety?.doseLimit?.[0].valueQuantity?.value).toBe(3);
+    expect(changed.condition).toEqual(source.step[0].component[0].condition);
   });
 
   it.each(["~", "<=", ">="] as const)("encodes %s only in permitted scalar/range/ratio wire slots", comparator => {

@@ -80,8 +80,11 @@ describe("repeated-course clinical chronology", () => {
         course.stages[1],
       ]
     };
-    expect(nextDueDoses(incomplete, { ...options, limit: 20 }))
-      .toContain("2026-01-02T09:00:00+00:00");
+    const incompleteDue = nextDueDoses(incomplete, { ...options, limit: 20 });
+    expect(incompleteDue.slice(0, 2)).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00",
+    ]);
+    expect(incompleteDue).toContain("2026-01-02T09:00:00+00:00");
   });
 
   it("counts two genuinely accepted administrations at one time across overlapping daily cycles", () => {

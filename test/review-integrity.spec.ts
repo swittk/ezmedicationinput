@@ -646,8 +646,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
             reference: { reference: "BodyStructure/right-eye" }
           },
           timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+          // An expression-only choice is valid R6 and requires retained R5 semantics.
           doseAndRate: [{
-            doseQuantity: { value: 1, unit: "drop" },
             doseExpression: { language: "text/fhirpath", expression: "one right-eye drop" }
           }]
         },
@@ -679,7 +679,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(right.id).toBe("right-eye");
     expect(right.site?.reference?.reference).toBe("BodyStructure/right-eye");
     expect(right.doseAndRate?.[0].doseExpression?.expression).toBe("one right-eye drop");
-    expect(right.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(right.doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(() => fromFhir(restored)).not.toThrow();
     expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
   });
 

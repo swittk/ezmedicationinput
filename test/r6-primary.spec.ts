@@ -1,3 +1,4 @@
+import { decodeR5RetainedFields } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
 import conditionalDoseProfile from "../fhir/r5/medication-conditional-dose.json";
@@ -2926,10 +2927,21 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     conflicting[0].doseAndRate![0].doseExpression = { expression: "%patient.weight*3" };
     conflicting[0].doseAndRate![0].doseQuantity = { value: 3, unit: "mg" };
     const unresolved = toDosageDetails(conflicting);
-    expect(unresolved.step[0].component[0].doseAndRate?.[0]).toMatchObject({
-      doseExpression: { expression: "%patient.weight*3" }, doseQuantity: { value: 3 }
+    const unresolvedAmount = unresolved.step[0].component[0].doseAndRate![0];
+    expect(unresolvedAmount.doseQuantity).toBeUndefined();
+    expect(unresolvedAmount.doseExpression).toBeUndefined();
+    expect(unresolvedAmount.extension).toContainEqual({
+      url: "urn:ezmedicationinput:r6-unresolved-dose-source", extension: [
+        { url: "doseQuantity", valueQuantity: { value: 3, unit: "mg" } },
+        { url: "doseExpression", valueExpression: { expression: "%patient.weight*3" } },
+      ],
     });
-    expect(() => fromFhir(unresolved)).toThrow(/multiple dose\[x\]/);
+    expect(() => fromFhir(unresolved)).not.toThrow();
+    expect(fromFhir(JSON.parse(JSON.stringify(unresolved))).fhirNext.step[0].component[0].doseAndRate![0])
+      .toEqual(unresolvedAmount);
+    expect(conflicting[0].doseAndRate![0]).toMatchObject({
+      doseExpression: { expression: "%patient.weight*3" }, doseQuantity: { value: 3 },
+    });
   });
 
   it("executes R6 21-in-28 active-window offsets without administering during the rest days", () => {
@@ -3835,6 +3847,11 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       { url: "quantity", valueQuantity: { value: 5, unit: "mg" } },
       { url: "comparator", valueCode: "~" }
     ];
+    // Inspect the legacy codec result directly: the live R5 quantity still
+    // has its EMA operator and must not mask a broken retained-field decoder.
+    const legacy = decodeR5RetainedFields(rows[0].modifierExtension![0]);
+    expect(legacy.component?.doseAndRate?.[0].doseQuantity)
+      .toMatchObject({ value: 5, unit: "mg", comparator: "~" });
     expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity)
       .toEqual(simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })!);
   });
@@ -4056,7 +4073,9 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }
     const changed = parseSig("approximately 5 mg PO BID then 5 mg PO QD");
     expect(getQuantityComparator(changed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity)).toBe("~");
-    expect(changed.fhirNext.step[1].component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBeUndefined();
+    const replacement = changed.fhirNext.step[1].component[0].doseAndRate?.[0]?.doseQuantity;
+    expect(replacement).toMatchObject({ value: 5, unit: "mg" });
+    expect(getQuantityComparator(replacement)).toBeUndefined();
     const three = parseSig("5 mg PO BID then approximately 7 mg PO QD then QD");
     expect(three.fhirNext.step.map(step =>
       getQuantityComparator(step.component[0].doseAndRate?.[0]?.doseQuantity))).toEqual([undefined, "~", "~"]);
@@ -4425,7 +4444,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       const amount = { value: 100, unit: "mL/h", extension: qualifier(code),
         ...(native ? { comparator: "<" as const } : {}) };
       for (const [rate, expected] of [
-        [{ rateQuantity: amount }, `${expectedOperator}100 mL/h`],
+        // A scalar rate is SimpleQuantity in R6: keep its qualifier in EMA.
+        [{ rateQuantity: { value: 100, unit: "mL/h", extension: qualifier(code) } }, `${operator}100 mL/h`],
         [{ rateRatio: { numerator: { ...amount, unit: "mL" },
           denominator: { value: 2, unit: "h", extension: qualifier("100000000053") } } },
           `${expectedOperator}100 mL / >=2 h`]
@@ -4858,7 +4878,16 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       safety: { doseLimit: [a, { ...a, extension: b.extension }] }
     }] }] };
+    // R5 Ratio Element metadata now survives projection. An explicitly
+    // annotated live B remains B even when its numeric value matches A.
+    const identified = toFhirR5Dosages(twin);
+    identified[0].maxDosePerPeriod!.shift();
+    expect(toDosageDetails(identified).step[0].component[0].safety?.doseLimit?.[0].extension)
+      .toEqual(b.extension);
+    // A consumer can return only the numeric R5 projection. With those
+    // live annotations omitted, the retained twin sources are ambiguous.
     const ambiguous = toFhirR5Dosages(twin);
+    for (const ratio of ambiguous[0].maxDosePerPeriod!) delete ratio.extension;
     ambiguous[0].maxDosePerPeriod!.shift();
     const survivor = toDosageDetails(ambiguous);
     const active = survivor.step[0].component[0].safety?.doseLimit?.[0];

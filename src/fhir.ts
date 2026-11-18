@@ -40,7 +40,8 @@ import {
   ROUTE_SNOMED,
   ROUTE_TEXT,
   findPrnReasonDefinitionByCoding,
-  getStandardDoseUnitCoding
+  getStandardDoseUnitCoding,
+  getDoseQuantityUnit
 } from "./maps";
 import {
   AdvicePolarity,
@@ -1809,6 +1810,7 @@ export function deserializeCanonicalContext(
     };
   }
 
+  let hasPrnReason = false;
   const prnReasons = dosage.asNeededFor?.length
     ? dosage.asNeededFor.map((concept) => {
       const coding = concept.coding?.find((code) => Boolean(code.code));
@@ -1816,8 +1818,10 @@ export function deserializeCanonicalContext(
         ? findPrnReasonDefinitionByCoding(coding.system ?? SNOMED_SYSTEM, coding.code)
         : undefined;
       const i18n = codeableConceptTranslationI18n(concept, coding, defaultDef?.i18n);
+      const text = getFallbackPrnReasonText(concept);
+      if (text || coding?.code || i18n.text) hasPrnReason = true;
       return {
-        text: getFallbackPrnReasonText(concept),
+        text,
         i18n: i18n.text,
         spatialRelation: parseBodySiteSpatialRelationExtension(concept),
         triggerPhase: parsePrnTriggerPhase(concept),
@@ -1837,9 +1841,9 @@ export function deserializeCanonicalContext(
   const primaryReason = prnReasons?.[0];
   const asNeeded = dosage.asNeeded ??
     (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean;
-  if (asNeeded || primaryReason?.text || primaryReason?.coding?.code) {
+  if (asNeeded || hasPrnReason) {
     clause.prn = {
-      enabled: Boolean(asNeeded || primaryReason?.text || primaryReason?.coding?.code),
+      enabled: Boolean(asNeeded || hasPrnReason),
       reason:
         prnReasons?.length === 1
           ? primaryReason
@@ -1998,7 +2002,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     const comparator = getQuantityComparator(doseAndRate.doseQuantity);
     clause.dose = {
       value: doseAndRate.doseQuantity.value,
-      unit: doseAndRate.doseQuantity.unit,
+      unit: doseAndRate.doseQuantity.unit ?? (getDoseQuantityUnit(doseAndRate.doseQuantity) || undefined),
       ...(comparator ? { comparator } : {})
     };
   }

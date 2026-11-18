@@ -268,6 +268,8 @@ describe("repeated maximum-capacity history", () => {
     expect(supply(course, 2).totalUnits).toBe(4);
     expect(supply(course, 4).totalUnits).toBe(8);
     expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
+    member.schedule!.recurrence!.countMax = 1;
+    expect(supply(course, 1).totalUnits).toBe(2);
   });
 
   it("carries the same maximum plan into a later rolling-cap query", () => {

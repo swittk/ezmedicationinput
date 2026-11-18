@@ -382,12 +382,15 @@ function appendDoseLimits(
   text: string,
   limits: readonly CanonicalDoseLimit[] | undefined,
   words: CourseLanguage,
-  owner?: "course" | "stage"
+  owner?: "course" | "stage",
+  ifExceeded?: string
 ): string {
-  if (!limits?.length) return text;
+  const action = ifExceeded?.trim();
+  if (!limits?.length && !action) return text;
   const label = owner === "course" ? words.courseLimitsLabel
     : owner === "stage" ? words.stageLimitsLabel : "";
-  const rendered = label + formatDoseLimits(limits, words);
+  const values = limits?.length ? formatDoseLimits(limits, words) : "";
+  const rendered = label + (action && values ? joinGeneratedClauses([values, action]) : values || action);
   return text ? joinGeneratedClauses([text, rendered]) : rendered;
 }
 
@@ -416,13 +419,15 @@ function formatCanonicalBase(
     a.siteReference ||
     a.excludedDates?.length ||
     a.excludedWeekdays?.length;
-  if (a.text?.trim() && (maxima || rich)) return a.text;
+  if (options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
+      a.text?.trim() && (maxima || rich)) return a.text;
   // A structured import already built this exact scoped clause for item
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
-  if (a.limits?.length) rendered = appendDoseLimits(rendered, a.limits, words);
+  if (a.limits?.length || a.safety?.ifExceeded)
+    rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
@@ -441,8 +446,15 @@ function formatCanonicalBase(
   if (a.excludedWeekdays?.length)
     rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   const ranges: string[] = [];
-  for (const amount of a.amounts ?? []) {
-    if (amount.range && doseRangeNeedsEndpointPreview(amount.range)) {
+  for (let index = 0; index < (a.amounts?.length ?? 0); index++) {
+    const amount = a.amounts![index];
+    // The clause represents only the first entry; later ordinary doses are
+    // independent authored amounts, including a dose after a rate-only entry.
+    if (index > 0 && amount.quantity?.value !== undefined && !amount.quantity.comparator) {
+      const unit = amount.quantity.unit ?? getDoseQuantityUnit(amount.quantity);
+      ranges.push(words.doseLabel + amount.quantity.value + (unit ? " " + unit : ""));
+    }
+    if (amount.range && (index > 0 || doseRangeNeedsEndpointPreview(amount.range))) {
       const dose = rateRangePreview(amount.range);
       if (dose) ranges.push(words.doseLabel + dose);
     }
@@ -459,6 +471,7 @@ export function formatCanonicalAdministration(
 ): string {
   // A component's authored source is distinct from a course-wide instruction.
   if (
+    options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
     a.text?.trim() &&
     (a.schedule?.recurrence?.startOffset ||
       a.schedule?.recurrence?.endOffset ||
@@ -487,24 +500,23 @@ export function formatCanonicalCourse(
   // boolean conditions in an English/Thai realization attempt. For an
   // ordinary R5-compatible course, explicit format options request a fresh
   // realization instead of the potentially stale saved display string.
-  const prefersCourseSource = prefersSourceInstruction(oneOrCourse);
   if (
     oneOrCourse.instruction &&
     (options === undefined ||
       options.realizationMode === "roundtrip" ||
       oneOrCourse.stages.length === 0 ||
-      prefersCourseSource)
+      (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
   ) {
     // An explicitly requested round trip preserves the *original* source
     // surface, not a normalized paraphrase. Edited R5 inputs have their
     // stale source invalidated by the R5->R6 reconciliation first.
     return oneOrCourse.instruction;
   }
-  if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length) return "";
+  if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length && !oneOrCourse.safety?.ifExceeded) return "";
   const environment = courseEnvironment(options),
     words = environment.words;
   if (oneOrCourse.stages.length === 0)
-    return appendDoseLimits("", oneOrCourse.safety!.limits!, words, "course");
+    return appendDoseLimits("", oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
   if (
@@ -533,10 +545,10 @@ export function formatCanonicalCourse(
       let rendered = formatCanonicalBase(
         administration, style, options, compiled?.get(administration), environment
       );
-      if (only.safety?.limits?.length)
-        rendered = appendDoseLimits(rendered, only.safety.limits, words, "stage");
-      if (oneOrCourse.safety?.limits?.length)
-        rendered = appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course");
+      if (only.safety)
+        rendered = appendDoseLimits(rendered, only.safety.limits, words, "stage", only.safety.ifExceeded);
+      if (oneOrCourse.safety)
+        rendered = appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded);
       return rendered;
     }
   }
@@ -726,8 +738,8 @@ export function formatCanonicalCourse(
       (member) => member.choice,
       words
     );
-    if (step.safety?.limits?.length)
-      rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage");
+    if (step.safety)
+      rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
     if (!rendered.trim()) continue;
     let timing = "";
     if (step.start || step.end) {
@@ -791,7 +803,7 @@ export function formatCanonicalCourse(
   }
   const rendered = stages.join(hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
     ? " " : words.stageSeparator);
-  return oneOrCourse.safety?.limits?.length
-    ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course")
+  return oneOrCourse.safety
+    ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded)
     : rendered;
 }

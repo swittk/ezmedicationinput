@@ -40,6 +40,7 @@ import {
   DOSE_COMPARATOR_SYMBOLS,
   doseComparatorNumberAt,
   millionDoseNumberAt,
+  compactMillionDoseNumber,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
@@ -1289,8 +1290,10 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })];
       }
     }
-    const millionMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)m$/);
-    if (millionMatch) {
+    const lexicalWord = token.canonical ?? token.lower;
+    const millionValue = compactMillionDoseNumber(lexicalWord.startsWith(".")
+      ? lexicalWord.replace(/\.+$/gu, "") : lower);
+    if (millionValue !== undefined) {
       const unit = unitAfter(context, start + 1);
       return [
         lexicalSign({
@@ -1300,7 +1303,7 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           synsem: {
             head: {
               dose: {
-                value: parseFloat(millionMatch[1]) * 1_000_000,
+                value: millionValue,
                 unit: unit?.unit
               }
             },

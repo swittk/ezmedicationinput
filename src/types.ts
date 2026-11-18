@@ -487,6 +487,7 @@ export interface FhirR6DosageCondition extends FhirBackboneElement {
   valueReference?: FhirReference;
   valueExpression?: FhirExpression;
   valueRange?: FhirRange;
+  valueRatio?: FhirR6Ratio;
   valuePeriod?: FhirPeriod;
   text?: string;
 }
@@ -496,9 +497,11 @@ export type FhirR6DoseLimit = FhirElement & {
   scope: "dosage" | "period" | "administration" | "lifetime";
   period?: FhirR6Quantity;
   text?: string;
+  _valueInteger?: FhirPrimitiveElement;
 } & (
   | { valueQuantity: FhirR6Quantity; valueInteger?: never; valueExpression?: never }
   | { valueInteger: number; valueQuantity?: never; valueExpression?: never }
+  | { _valueInteger: FhirPrimitiveElement; valueInteger?: never; valueQuantity?: never; valueExpression?: never }
   | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never }
 );
 

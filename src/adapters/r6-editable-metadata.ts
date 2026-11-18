@@ -6,19 +6,44 @@
  */
 import type {
   FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
-  FhirR6DosageSafety, FhirR6DosageStep,
+  FhirR6DosageSafety, FhirR6DosageStep, FhirR6Ratio,
 } from "../types";
 import { equalStructuredValues } from "../stable-structure";
-import { encodeR6SourceMetadata, decodeR6SourceMetadata } from "../dosage-course";
+import { quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
+import { encodeR6SourceMetadata, decodeR6SourceMetadata, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
 
 function replaceSource(owner: { extension?: FhirExtension[] }, url: string, value: object | undefined): void {
   const extensions = owner.extension?.filter(item => item.url !== url) ?? [];
-  if (value !== undefined) extensions.push(encodeR6SourceMetadata(url, value, url === R6_DRAFT_STEPS_SOURCE_URL ? "drafts" : "safety"));
+  const prior = owner.extension?.filter(item => item.url === url) ?? [];
+  if (value !== undefined) {
+    const kind = url === R6_DRAFT_STEPS_SOURCE_URL ? "drafts" : "safety";
+    let retained: Record<string, unknown> | undefined;
+    if (prior[0]) {
+      try { retained = decodeR6SourceMetadata(prior[0], kind); }
+      catch { /* Unreadable external source is retained below, never executed. */ }
+    }
+    // Current known fields overwrite the snapshot; decoded unfamiliar children
+    // and the marker's own Element metadata remain recoverable source data.
+    const current = encodeR6SourceMetadata(url, { ...retained, ...value }, kind);
+    const retired = prior.slice(retained ? 1 : 0);
+    if (retired.length) extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired });
+    extensions.push(retained ? { ...prior[0], ...current } : current);
+  }
   if (extensions.length) owner.extension = extensions;
   else delete owner.extension;
+}
+
+/** Retired external source remains inert and recoverable. It must no longer
+ * supply hidden timing/safety after a live wire edit, but must not disappear. */
+function retireSource(owner: { extension?: FhirExtension[] }, url: string): void {
+  const markers = owner.extension?.filter(item => item.url === url);
+  if (!markers?.length) return;
+  const kept = owner.extension!.filter(item => item.url !== url);
+  kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
+  owner.extension = kept;
 }
 
 export function retainDraftSteps(
@@ -29,7 +54,7 @@ export function retainDraftSteps(
   if (drafts?.length)
     replaceSource(output, R6_DRAFT_STEPS_SOURCE_URL, { drafts, synthesizedStarts, projected: output.step });
   else if (output.extension?.some(item => item.url === R6_DRAFT_STEPS_SOURCE_URL))
-    replaceSource(output, R6_DRAFT_STEPS_SOURCE_URL, undefined);
+    retireSource(output, R6_DRAFT_STEPS_SOURCE_URL);
 }
 
 /** Restore inactive editable stages only while the exported active course
@@ -98,7 +123,7 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
   const policy = step?.safety;
   if (!policy) {
     if (output.extension?.some(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL))
-      replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, undefined);
+      retireSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL);
     return;
   }
   const course = output.safety;
@@ -117,3 +142,38 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
   delete step!.safety;
 }
 
+
+/** Conflicting externally edited choices have no single active clinical meaning.
+ * Keep every submitted value in typed source data, leaving the independent
+ * dose/rate dimension available without inventing a winner for the conflict. */
+export function retainConflictingAmountChoices(
+  amount: Record<string, unknown>, doseConflict: boolean, rateConflict: boolean
+): void {
+  const retain = (kind: "dose" | "rate", fields: readonly (readonly [string, string])[]) => {
+    const source: FhirExtension[] = [];
+    for (const [field, valueKey] of fields) {
+      if (amount[field] === undefined) continue;
+      let value = amount[field];
+      if (field === "rateRatio") {
+        const ratio = value as FhirR6Ratio;
+        value = { ...ratio,
+          ...(ratio.numerator ? { numerator: generalQuantityForR5(ratio.numerator) } : {}),
+          ...(ratio.denominator ? { denominator: simpleQuantityForR5(ratio.denominator) } : {}),
+        };
+      }
+      source.push({ url: field, [valueKey]: value } as FhirExtension);
+      delete amount[field];
+    }
+    amount.extension = [
+      ...((amount.extension as FhirExtension[] | undefined) ?? []),
+      { url: `urn:ezmedicationinput:r6-unresolved-${kind}-source`, extension: source },
+    ];
+  };
+  if (doseConflict) retain("dose", [
+    ["doseQuantity", "valueQuantity"], ["doseRange", "valueRange"], ["doseExpression", "valueExpression"],
+  ]);
+  if (rateConflict) retain("rate", [
+    ["rateQuantity", "valueQuantity"], ["rateRange", "valueRange"],
+    ["rateRatio", "valueRatio"], ["rateExpression", "valueExpression"],
+  ]);
+}

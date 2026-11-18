@@ -106,10 +106,12 @@ function retentionForAdministration(
     changed = true;
   }
   const regeneratedSafety = row.safety ?? r5SafetyBaseline(row);
-  // Editable R5 exposes both maxima and lifted safety. Save their common
-  // baseline even when equivalent so a later edit to one view can be assigned
-  // to its true owner after persistence.
-  if ((editable && safety) || !equalStructuredValues(safety, regeneratedSafety)) {
+  // Editable R5 exposes both maxima and lifted safety. Strict period
+  // maxima can also carry limit Element metadata on the Ratio itself. Keep
+  // an edit baseline for that authored metadata even when fully projected:
+  // deleting the live Ratio must retire its source, not erase its history.
+  if ((editable && safety) || !equalStructuredValues(safety, regeneratedSafety) ||
+      safety?.doseLimit?.some(limit => limit.id !== undefined || Boolean(limit.extension?.length))) {
     component.safety = safety;
     baseline.safety = compactProjectionFingerprint(r5SafetyBaseline(row));
     changed = true;
@@ -268,7 +270,8 @@ export function projectNativeR5Course(
         a.schedule?.recurrence?.endOffset
       )
         needsBridge = true;
-      const site = a.provenance?.format === "r6" ? (a.provenance.data as FhirR6Dosage).site : undefined;
+      const site = a.provenance?.format === "r6"
+        ? (a.provenance.data as FhirR6Dosage).site : a.provenance?.retained?.site;
       if (site?.id || site?.extension?.length) needsBridge = true;
       if (needsBridge) break;
       for (const value of a.amounts ?? [])

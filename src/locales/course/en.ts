@@ -39,7 +39,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   timeUnit: (unit, value) => UNITS[unit]?.[value === 1 ? 0 : 1],
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
   upTo: (value) => "up to " + value,
-  administrations: (frequency, period) => `${frequency} administrations${period ? " per " + period : ""}`,
+  administrations: (frequency, period) => `${frequency} ${frequency === "1" ? "administration" : "administrations"}${period ? " per " + period : ""}`,
   dosingPeriod: (period) => `Dosing period: ${period}`,
   periodContext: (period) => ` (each period lasts ${period})`,
   startsWithinPeriod: (offset, context) => `Dosing starts ${offset} after the period begins${context}`,

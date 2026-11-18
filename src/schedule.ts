@@ -26,5 +26,19 @@ export function calculateTotalUnits(options: TotalUnitsOptions | CanonicalSupply
   if (!options || !options.dosage)
     throw new MedicationQuantityCalculationError("missing-regimen",
       "A medication dosage or complete treatment course is required for supply calculation.");
-  return executeSupply({ ...options, dosage: inputToCanonical(options.dosage) });
+  // Read the declared options directly, including prototype-backed getters.
+  // This boundary already needs one normalized object; a fixed typed snapshot
+  // preserves that public input contract without an enumeration/spread pass.
+  return executeSupply({
+    dosage: inputToCanonical(options.dosage),
+    from: options.from, orderedAt: options.orderedAt,
+    timeZone: options.timeZone, config: options.config,
+    durationValue: options.durationValue, durationUnit: options.durationUnit,
+    context: options.context, patientWeightKg: options.patientWeightKg,
+    roundToMultiple: options.roundToMultiple, limit: options.limit,
+    priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
+    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition,
+    eventClock: options.eventClock, mealOffsets: options.mealOffsets,
+    frequencyDefaults: options.frequencyDefaults,
+  });
 }

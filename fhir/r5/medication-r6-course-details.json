@@ -146,6 +146,36 @@
         ]
       },
       {
+        "id": "Extension.extension:countScope",
+        "path": "Extension.extension",
+        "sliceName": "countScope",
+        "min": 0,
+        "max": "1",
+        "definition": "Current count semantics: step.count repeats that step. The previous unversioned owned R5 encoding used the first step count as the whole-course bound when repeatCycle was present; import migrates that saved representation and preserves its source."
+      },
+      {
+        "id": "Extension.extension:countScope.url",
+        "path": "Extension.extension.url",
+        "fixedUri": "countScope"
+      },
+      {
+        "id": "Extension.extension:countScope.extension",
+        "path": "Extension.extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.extension:countScope.value[x]",
+        "path": "Extension.extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "code"
+          }
+        ],
+        "fixedCode": "step"
+      },
+      {
         "id": "Extension.extension:step",
         "path": "Extension.extension",
         "sliceName": "step",
@@ -1332,7 +1362,7 @@
         "max": "1",
         "type": [
           {
-            "code": "code"
+            "code": "string"
           }
         ]
       },
@@ -2804,7 +2834,7 @@
         "max": "1",
         "type": [
           {
-            "code": "code"
+            "code": "string"
           }
         ]
       },
@@ -4399,7 +4429,7 @@
         "max": "1",
         "type": [
           {
-            "code": "code"
+            "code": "string"
           }
         ]
       },
@@ -6327,7 +6357,7 @@
         "max": "1",
         "type": [
           {
-            "code": "code"
+            "code": "string"
           }
         ]
       },

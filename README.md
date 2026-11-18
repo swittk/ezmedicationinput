@@ -94,7 +94,12 @@ The `fhirNext` object follows **FHIR R6 6.0.0-snapshot1 (November 13, 2026)**:
 `DosageInstruction.step[].component[]` contains R6 `Dosage` values.
 Use `fromFhir(fhirNext)` to import that **current R6** structure.
 Older R6 `DosageDetails` drafts are not supported by the R6 importer.
-The R5 editing/export APIs are unchanged; no downstream storage migration is required.
+The R5 editing/export APIs are unchanged; the current reader accepts previously
+saved R5 rows without a downstream storage migration. New exports encode an
+approximation on `SimpleQuantity` using the EMA quantity-operator coding. The
+current reader accepts both that encoding and the older package comparator
+child. Older package readers may not recover `~` from a new export; this is not
+a guarantee that an older reader can interpret every newer extension encoding.
 
 ### Internal native clinical model (unstable)
 
@@ -118,8 +123,9 @@ to evolve for maximum clinical expressiveness, performance, and
 maintainability; no old internal representation must be retained.
 
 Native courses are parser implementation data. EZMED does not expose a native
-editing workflow. Parser and projection outputs are immutable by caller
-contract; ordinary imports do not deep-clone or freeze them defensively.
+editing workflow. Parser and projection outputs, including borrowed catalog
+and provider listings, are immutable by caller contract; ordinary imports and
+listing calls do not deep-clone or freeze them defensively.
 Applications that modify external R5 or current R6 data pass those values back
 through the corresponding import boundary. Native scheduling, formatting, and
 supply consume clinical facts directly; the R5 reconciliation bridge is confined
@@ -289,7 +295,8 @@ Whole-course wording is a typed optional `course` facet on the existing
 
 ```ts
 import {
-  parseSig,
+  importCanonicalCourse,
+  FhirPeriodUnit,
   registerSigLocalization,
   resolveSigLocalization,
   formatCanonicalCourse,
@@ -309,9 +316,22 @@ registerSigLocalization({
   },
 });
 
-// Uses the registered clause and course facets together.
-const nativeCourse = parseSig("Take 1 tablet daily for 3 days").meta.canonical.course!;
-const text = formatCanonicalCourse(nativeCourse, "long", { locale: "example" });
+// An explicit treatment-day window uses both clause and course wording.
+const treatmentStart = { coding: [{
+  system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+}] };
+const nativeCourse = importCanonicalCourse({ step: [{
+  start: { contextCode: treatmentStart, offsetDuration: { value: 0, unit: "d" } },
+  end: { contextCode: treatmentStart, offsetDuration: { value: 3, unit: "d" } },
+  component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+  }],
+}] });
+const text = formatCanonicalCourse(nativeCourse, "long", {
+  locale: "example", realizationMode: "normalized",
+});
+// text includes "Jours 1–3" from the registered course.dayRange callback.
 ```
 
 A full language implementation supplies its own clause hooks and course facet;
@@ -346,8 +366,12 @@ or conversion. Helper exports are captured before timing, so repeated module
 namespace lookups are not mistaken for the cost of a named function call.
 Timing-sensitive thresholds are kept out of clinical unit tests. Reports include
 build hashes, runtime details, raw paired samples, timing spread and the
-per-scenario gate. Each finished scenario is saved atomically; an interrupted
-run remains explicitly incomplete rather than losing its results. Host/JIT noise
+per-scenario gate. Cases with an independent edited-dose oracle record whether
+both versions perform the same clinical work. Incorrect baseline wording keeps
+its raw timing but receives no regression verdict. APIs missing from the baseline
+receive an explicit candidate-only measurement. An incomplete report is saved
+atomically before imports and fixture setup, then after each finished scenario;
+an interrupted run remains explicitly incomplete rather than losing its results. Host/JIT noise
 still requires repeated runs for borderline or sub-microsecond results.
 
 ## Formal HPSG substrate
@@ -902,7 +926,15 @@ Key rules:
 
 ### Medication amount calculation
 
-`calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges (using the high value), and unit conversions between doses and containers.
+`calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges, and unit conversions between doses and containers. A range uses its upper quantity where feasible; interacting quantity and administration-count limits are considered together. For example, 1.5–2 tablets, at most once per day, with a three-tablet limit over 48 hours permits three tablets across two days as 1.5 + 1.5.
+
+Untimed ranged supply with interacting limits uses a bounded exact calculation.
+If it reports `ranged-capacity-complexity`, use a shorter supply window or supply
+a resolved per-administration quantity. A strict range that has a finite
+supremum but no attainable maximum reports `ranged-capacity-open-maximum`;
+resolve the dose or provide a closed range before requesting a numeric maximum.
+These are supply-calculation results; the structured instruction and source
+remain available for parsing, display, persistence, and correction.
 
 ```ts
 import { calculateTotalUnits, parseSig } from "ezmedicationinput";

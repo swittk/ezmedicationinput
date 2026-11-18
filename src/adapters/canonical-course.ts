@@ -1,7 +1,8 @@
+import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
-import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps } from "./r6-editable-metadata";
+import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps, retainConflictingAmountChoices } from "./r6-editable-metadata";
 /**
  * Interchange boundary for EZMED's canonical course.
  *
@@ -348,7 +349,7 @@ export function safetyToWire(
   if (policy?.ifExceeded === undefined) delete output.ifExceeded;
   else output.ifExceeded = policy.ifExceeded;
   const known = limits ?? policy?.limits;
-  if (known !== undefined) {
+  if (known?.length) {
     output.doseLimit = known.map((limit) => {
       const saved = limit.provenance as FhirR6DoseLimit | undefined;
       // R6 value[x] is an exclusive choice: never resurrect a stale source
@@ -356,11 +357,14 @@ export function safetyToWire(
       const {
         valueQuantity: _oldQuantity,
         valueInteger: _oldCount,
+        _valueInteger: countMetadata,
         valueExpression: _oldExpression,
         period: _oldPeriod,
         text: _oldText,
+        numerator: _ratioNumerator,
+        denominator: _ratioDenominator,
         ...metadata
-      } = saved ?? {};
+      } = (saved ?? {}) as FhirR6DoseLimit & { numerator?: unknown; denominator?: unknown };
       const period =
         limit.period && inferCoding
           ? {
@@ -388,11 +392,21 @@ export function safetyToWire(
           },
         } satisfies FhirR6DoseLimit;
       if (limit.count !== undefined)
-        return { ...common, valueInteger: limit.count } satisfies FhirR6DoseLimit;
+        return { ...common, valueInteger: limit.count,
+          ...(countMetadata ? { _valueInteger: countMetadata } : {}) } satisfies FhirR6DoseLimit;
       if (limit.expression) return { ...common, valueExpression: limit.expression } satisfies FhirR6DoseLimit;
+      // FHIR permits an extension-only primitive. It is source evidence,
+      // not a numeric ceiling, and must not prevent importing the dosage.
+      if (countMetadata && saved?.valueInteger === undefined)
+        return { ...common, _valueInteger: countMetadata } satisfies FhirR6DoseLimit;
       throw new TypeError("An authored safety limit must contain a numeric, count, or expression value");
     });
   } else delete output.doseLimit;
+  if (!output.doseLimit && !output.ifExceeded &&
+      !Object.keys(output).some(key => {
+        const value = (output as Record<string, unknown>)[key];
+        return key !== "id" && value !== undefined && (!Array.isArray(value) || value.length > 0);
+      })) return undefined;
   return output;
 }
 export function amountFromWire(
@@ -511,6 +525,7 @@ function baseAdministration(
         scope: "period",
         amount: measureFromR5(maximum.numerator),
         period: measureFromR5(maximum.denominator),
+        provenance: maximum,
       });
     if (input.maxDosePerAdministration)
       (limits ??= []).push({
@@ -558,11 +573,12 @@ export function administrationFromR5(
   sourceContext = false
 ): CanonicalAdministration {
   const result = baseAdministration(raw, "r5", sourceContext);
-  // R5 slots are decoded in the initial amount/limit traversal. Never
-  // build them with the R6 reader only to walk and replace every field again.
-  const safety = (raw as EzDosage).safety;
-  if (safety?.doseLimit)
-    result.limits = safety.doseLimit.map((limit) => ({
+  // Most rows have only R5 maxima and need no mirror reconciliation.
+  // Lifted safety has a persisted baseline so either current view can own an edit.
+  if ((raw as EzDosage).safety) {
+    const safety = reconcileLiftedR5Safety(raw as EzDosage);
+    result.safety = safetyFromWire(safety);
+    result.limits = safety?.doseLimit?.map((limit) => ({
       scope: limit.scope,
       amount: measureFromWire(limit.valueQuantity),
       count: limit.valueInteger,
@@ -571,6 +587,7 @@ export function administrationFromR5(
       text: limit.text,
       provenance: limit,
     }));
+  }
   return result;
 }
 export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = false): CanonicalCourse {
@@ -607,7 +624,15 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
 /** Reconciliation is solely an R5 import concern, never part of native
  * course execution. A simple scalar needs no course reconstruction. */
 export function isR6DosageInstruction(input: object): input is FhirR6DosageInstructionInput {
-  return "step" in input || "renderedInstruction" in input || "repeatCycle" in input;
+  if ("step" in input || "renderedInstruction" in input || "repeatCycle" in input) return true;
+  // Header-only R6 instructions may carry just course safety. An extended
+  // R5 dosage still owns its dosage fields, even when it also carries safety.
+  return "safety" in input && !("text" in input || "sequence" in input ||
+    "doseAndRate" in input || "timing" in input || "route" in input ||
+    "site" in input || "method" in input || "condition" in input ||
+    "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
+    "patientInstruction" in input || "maxDosePerPeriod" in input ||
+    "maxDosePerAdministration" in input || "maxDosePerLifetime" in input);
 }
 export function inputToCanonical(
   input:
@@ -676,7 +701,7 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
     assign(output, "contextPath",
       b.anchor === "path" || b.anchor === "resource-reference" || b.anchor === "definition"
         ? b.contextPath : undefined);
-    assign(output, "contextCode", b.anchor === "coded-event" ? b.contextCode : undefined);
+    assign(output, "contextCode", b.contextCode);
   }
   assign(output, "text", b.description);
   assign(output, "offsetDuration", b.displacement);
@@ -966,8 +991,17 @@ function administrationToWire(
     "doseAndRate",
     a.amounts?.map((value) => {
       const original = value.provenance as NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined;
+      const externalR5 = target === "r6" && a.provenance?.format === "r5";
+      const doseConflict = externalR5 && (value.quantity !== undefined
+        ? value.range !== undefined || value.expression !== undefined
+        : value.range !== undefined && value.expression !== undefined);
+      const rateConflict = externalR5 && (value.rate !== undefined
+        ? value.rateRange !== undefined || value.rateRatio !== undefined || value.rateExpression !== undefined
+        : value.rateRange !== undefined
+          ? value.rateRatio !== undefined || value.rateExpression !== undefined
+          : value.rateRatio !== undefined && value.rateExpression !== undefined);
       if (
-        !clause &&
+        !doseConflict && !rateConflict && !clause &&
         original &&
         original.doseQuantity === value.quantity &&
         original.doseRange === value.range &&
@@ -1072,6 +1106,14 @@ function administrationToWire(
       );
       assign(rate, "rateExpression", target === "r6" ? value.rateExpression : undefined);
       assign(rate, "type", value.role);
+      if (doseConflict || rateConflict) retainConflictingAmountChoices(rate, doseConflict, rateConflict);
+      if (target === "r5" && (value.expression || value.rateExpression) &&
+          Object.keys(rate).every(key => key === "id" || rate[key] === undefined ||
+            (Array.isArray(rate[key]) && !(rate[key] as unknown[]).length)))
+        rate.extension = [{ url: R5_EXPRESSION_SLOT_SOURCE_URL, extension: [
+          ...(value.expression ? [{ url: "doseExpression", valueExpression: value.expression }] : []),
+          ...(value.rateExpression ? [{ url: "rateExpression", valueExpression: value.rateExpression }] : [])
+        ] }];
       return rate;
     })
   );
@@ -1242,7 +1284,13 @@ function administrationToWire(
             ? { system: "http://unitsofmeasure.org", code: limit.period.unit }
             : {}),
         };
+        const {
+          scope: _scope, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
+          valueExpression: _expression, period: _period, text: _text,
+          numerator: _numerator, denominator: _denominator, ...metadata
+        } = (limit.provenance ?? {}) as Record<string, unknown>;
         (periodLimits ??= []).push({
+          ...metadata,
           numerator: generalQuantityForR5(amount),
           denominator: simpleQuantityForR5(period),
         });
@@ -1416,7 +1464,7 @@ export function unchangedR6SourceDisplay(
   raw: FhirR6DosageInstructionInput,
   options?: FormatOptions
 ): string | undefined {
-  if (!raw.renderedInstruction) return undefined;
+  if (!raw.renderedInstruction || options?.realizationMode === "normalized") return undefined;
   if (
     !options ||
     options.realizationMode === "roundtrip" ||

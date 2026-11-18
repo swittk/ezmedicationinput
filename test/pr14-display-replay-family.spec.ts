@@ -163,8 +163,9 @@ describe("saved R5 source replay observes all live timing values", () => {
   it.each(["fresh", "persisted"] as const)(
     "invalidates the %s authored Thai source after editing its second clock", (kind) => {
     const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด เวลา 08:00 และ 20:00 แล้วหลับตา";
-    const original = parseSig(source, { locale: "th" }).fhir[0];
-    const row = kind === "fresh" ? original : structuredClone(original);
+    const parsed = parseSig(source, { locale: "th" });
+    const row = kind === "fresh" ? parsed.items[0].fhir
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
     const options = { locale: "th", realizationMode: "roundtrip" as const };
     expect(formatSig(row, "long", options)).toBe(source);
     row.timing!.repeat!.timeOfDay![1] = "22:00:00";

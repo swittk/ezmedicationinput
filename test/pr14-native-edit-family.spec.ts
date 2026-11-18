@@ -20,7 +20,7 @@ describe("compiled clinical facts and source units survive projection", () => {
       schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
         courseLength: { value: 7, unit: "d" } } } });
     const after = courseFromAdministrations([dose(1), dose(2)], "");
-    expect(after.stages[0].start!.displacement).toMatchObject({ value: 2, unit: "d" });
+    expect(after.stages[0].start!.displacement).toMatchObject({ value: 48, unit: "h" });
     expect(after.stages[0].end).toBeUndefined();
     const options = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z",
       timeZone: "UTC", durationValue: 14, durationUnit: FhirPeriodUnit.Day };
@@ -31,8 +31,10 @@ describe("compiled clinical facts and source units survive projection", () => {
       expect(supply.totalUnits).toBe(21);
       const due = nextDueDoses(input, { ...options, limit: 20 });
       expect(due).toHaveLength(14);
-      expect(due[0]).toContain("2026-01-03");
-      expect(due[13]).toContain("2026-01-09");
+      expect(due.map(instant => instant.slice(0, 10))).toEqual(
+        Array.from({ length: 7 }, (_, day) => `2026-01-${String(day + 3).padStart(2, "0")}`)
+          .flatMap(day => [day, day])
+      );
     }
   });
 
@@ -88,6 +90,7 @@ describe("compiled clinical facts and source units survive projection", () => {
     }] }] };
     const rendered = formatSig(course, "long", { locale: "en" });
     expect(rendered).toContain(">=500–<=1000 mg");
+    expect(rendered).toContain("250 mg");
     expect(rendered.split(">=500–<=1000 mg")).toHaveLength(2);
     expect(rendered).not.toMatch(/(?<!>=)500[–-]1000 mg/);
     expect(member(course).amounts![0].range!.high!.comparator).toBe("<=");

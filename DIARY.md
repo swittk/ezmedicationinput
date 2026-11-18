@@ -7646,3 +7646,273 @@ Source keys: **R** = main review; **F1** = first follow-up (comment 6976526702);
 Review responses belong only in relevant existing inline threads, with the
 commit and concise evidence. No unsolicited top-level comment or additional
 full-review request is part of this round.
+
+
+## 2026-11-18 — PR #14 full review round 21
+
+Reviewed head: `d85c762f195046f155b5349a122b5d6722dfffa9`.
+The full review submitted at 20:16 Bangkok contained **78 distinct findings:
+44 major, 31 minor, and 3 trivial**. These arrived in the review body and three
+overflow comments, not new inline threads; the earlier 44 resolved inline
+threads are therefore not evidence that this round was already addressed.
+The inventory below is exhaustive and keyed to that review's order.
+
+**Disposition: 74 accepted fixes and 4 rejected defensive-copy requests.**
+The accepted set includes 41 major, 30 minor, and 3 trivial findings. Rejected
+IDs 27, 30, 31, and 68 concern mutation of borrowed immutable catalog/provider
+outputs. The owner's existing immutable-output contract applies; no native
+editor, clone/freeze layer, or compatibility reader for earlier native models
+has been restored.
+
+### Product gate and architecture
+
+- **Real requirement and harm:** accepted items concern supported external
+  R5/current R6 data, reasonable Thai/English medication input, actual missing
+  or stale preview facts, incorrect scheduling/supply, or missing evidence for
+  those contracts. The four caller-mutation requests do not meet that gate.
+- **Natural owner:** lexical and dimensional meaning stays in the existing
+  typed HPSG rules; wording and regional fallback stay in locale facets;
+  external source reconciliation stays at the R5/R6 boundaries; date and
+  quantity arithmetic stays in the execution engine. There is no second parser.
+- **Cheap and data-preserving:** ordinary parser/scalar paths receive no
+  generalized optimizer or defensive copy. Source choices, unknown metadata,
+  unresolved conditions and original wording remain recoverable. The
+  specialized capacity planner is entered only by numeric untimed ranged
+  supply with interacting quantity/use caps.
+- **Independent oracle:** the rows below cite actual dose/unit/time/scope
+  expectations. Added tests check complete event dates, every relevant
+  component, valid choice types, and persisted reopen cycles. They do not use
+  the implementation's own returned schedule as the expected quantity.
+
+### Ranged supply: exact bounded calculation and declared limits
+
+The initial greedy repair was rejected during this round. It still lost
+maximum supply when a partial dose consumed a scarce use, or when taking the
+largest first dose prevented a better later allocation. The final planner
+selects critical eligible event times and solves all quantities together with
+prefix-sum difference constraints. At fixed times, per-dose bounds and rolling
+caps are interval-sum inequalities; negative cycles identify an impossible
+placement. Strict lower bounds receive a separate feasibility and attained
+objective check.
+
+Independent expected results include 3 tablets in one day versus 4 in two days
+for range 1–2 with two uses and a 3/day cap; 5 tablets from 3+2 under 4/day and
+5/48h caps; 3.5 with unequal remaining capacity and actual history; and 3 from
+1.5+1.5 under one use/day and a 3/48h cap, both with and without an explicit
+total count. A separate 48-case feasible-allocation audit passed, including
+all eight cases that defeated the rejected heuristic. Calendar re-entry tests
+check the second actual release of a monthly cap.
+
+Cheap attained upper bounds run first and avoid search for ordinary long
+capacity plans. If exact search is needed, the explicit limits are **32
+potential slots and 50,000 visited states**. `ranged-capacity-complexity` is a
+supply-only diagnostic when those limits are exceeded; it suggests a shorter
+window or a resolved dose quantity. `ranged-capacity-open-maximum` identifies
+a strict range with a finite supremum but no attainable maximum. Neither
+changes parsing, display, stored clinical facts, or source retention. No
+heuristic underestimate is returned as an exact maximum.
+
+### External persistence details
+
+Historical owned compact R5 markers did not distinguish whole-course cycle
+count from current local-step count. The migration is restricted to the old
+owned marker contract: cycle interval, a positive first-step count, and no
+explicit conflicting course bound. New compact writes carry `countScope=step`;
+current local-step and whole-course counts remain independent. Raw current R6
+and arbitrary step counts have no historical fallback. The original marker
+stays inert. This unavoidable ambiguity in unversioned historical bytes does
+not create a native-model compatibility obligation.
+
+Conflicting external dose/rate edits now export as valid R6 with every
+conflicting choice in typed inert source data, no arbitrarily selected active
+choice, and the independent dose/rate dimension preserved. Source Ratio values
+use portable quantity-operator encoding for strict R5. Repeated saves preserve
+Ratio annotations, draft-source marker metadata and duplicates, site wrappers,
+retired safety facts and flat reconciliation history without source growth.
+
+### Validation and performance
+
+- Full source suite: **4,592/4,592 passed across 59 files**, including 115
+  additional tests since the reviewed head. Runtime 54.34 seconds.
+- Built ESM/CJS distributions and declarations: passed; distribution export
+  suite: **4/4 passed**.
+- Strict production typecheck and the eight-file new/targeted regression
+  typecheck: passed. The older canonical-course fixture has 13 strict fixture
+  diagnostics, all reproduced in the reviewed baseline (which had 14); they
+  were not introduced or hidden by this round and are outside the new-test gate.
+- README localization snippet: checked against the built declarations and
+  executed against the built package; output is `Jours 1–3: Use 1 tablet once daily.`
+- Independent exact-capacity audit: **48/48 feasible cases**, plus the repeated
+  monthly-expiry oracle, passed.
+- Benchmark smoke: **117/117 public functions reached**, 181 master-paired
+  scenarios plus seven candidate-only measurements, no execution errors.
+- Final performance gates and unwaived previous-head differences are recorded below.
+
+The first integrated run identified two real safety-history regressions after
+Ratio metadata became fully expressible in R5. Strict rows now retain a typed
+safety baseline when authored limit metadata must remain recoverable after
+removal. Tests separately cover an explicitly annotated surviving limit and
+truly indistinguishable numeric twins whose live annotations are absent.
+Earlier invalid simultaneous-choice fixtures and obsolete internal helper
+calls were corrected while preserving their association, quantity and text
+oracles; no native compatibility layer was added.
+### Final performance evidence
+
+All 117 exported functions were exercised against fresh builds of master
+`7d628239dc1cb5695c5fe1d8b9150682fe4d1adb` and the reviewed head
+`d85c762f195046f155b5349a122b5d6722dfffa9`. Main runs used nine alternating paired
+rounds with 12 ms calibration targets. Flagged master cases were repeated for
+41 rounds at 40 ms; flagged previous-head cases used 31 rounds at 40 ms. Timing
+runs were sequential, separate from tests/builds, and used `node --expose-gc`.
+
+- **Fresh master: 179/179 comparable scenarios meet the 4% gate.** The initial
+  run had 174 passes and five flags; all five passed the longer run. Two edited
+  Thai scenarios preserve raw timings but are explicitly non-equivalent because
+  master returns the superseded or missing dose. Seven scenarios measure APIs
+  absent from master, including the previously unmeasured EMA comparator helper.
+- **Previous head: 181/188 meet the 4% comparison after the targeted repeat.**
+  The initial run flagged 37; 30 passed the longer repeat, seven remain above
+  threshold. These are reported below and are not waived by faster parsing or
+  averaged into another API family.
+- **Separate 32-case clinical/API corpus:** 23 rounds at 40 ms, using each
+  version's own parsed/persisted inputs and independent clinical facts. Seven
+  cases remain above 4% against the previous head; listed separately below.
+  The earlier doubled ranged-supply runtime was removed by proving an attained
+  cap bound before considering the second complete clock plan.
+
+The targeted optimizations preserve current semantics: regional cache entries
+use generation invalidation; current/non-cycle R5 rows skip legacy migration
+scans; retained-row encoding appends count scope without copying the full row;
+external choice checks short-circuit; period-only maxima defer unrelated unit
+lookups. No correctness oracle or output-retention requirement was removed for
+these timings.
+
+#### Remaining previous-head flags: public API corpus
+
+The latency columns are independent sample medians; the change column is the
+median of paired ratios, so it need not equal the ratio of those two medians.
+
+| Scenario | Previous median (µs) | Current median (µs) | Median paired change |
+| --- | ---: | ---: | ---: |
+| `formatSig/R6/en` | 12.1915 | 12.8797 | +4.74% |
+| `fromFhirDosage/en` | 9.9275 | 10.7000 | +9.76% |
+| `toFhirR5Dosages/R6-complex` | 233.5965 | 236.2868 | +4.38% |
+| `realizeInstructionGraph` | 6.3048 | 6.8037 | +6.39% |
+| `buildMedicationInstructionActionCodeSystem` | 3.2999 | 3.4769 | +6.12% |
+| `resolveSigLocalization` | 0.0389 | 0.0435 | +13.65% |
+| `resolveSigTranslation` | 0.0419 | 0.0447 | +6.30% |
+
+#### Remaining previous-head flags: separate 32-case corpus
+
+| Scenario | Previous median (µs) | Current median (µs) | Median latency change |
+| --- | ---: | ---: | ---: |
+| R6 TH source replay | 0.0301 | 0.0328 | +8.96% |
+| R5 to R6 | 89.6157 | 95.8557 | +6.96% |
+| R6 to R5 | 79.5442 | 86.8902 | +9.24% |
+| staged supply | 418.4091 | 438.8825 | +4.89% |
+| locale detect | 0.0420 | 0.0438 | +4.33% |
+| native projection | 39.8932 | 44.2485 | +10.92% |
+| overlap capped supply | 740.1131 | 777.1635 | +5.01% |
+
+These previous-head results remain a performance limitation; this round does
+not claim every function became faster. The fresh-master acceptance gate,
+correctness suite, build and distribution checks are green.
+
+Build evidence:
+
+- Master ESM SHA-256: `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`.
+- Reviewed-head ESM SHA-256: `e3047eeaa45930fb3a5d73cad4010a608b628237b57c1a24478d1c14ff5c5e8b`.
+- Final candidate ESM SHA-256: `a3149d2c3a8560e848bd4a0a7f2243126d0cc6b605e40d3180a283d6e4743edf`.
+
+
+### Complete finding dispositions
+
+Source labels: **R** = review body; **F1/F2/F3** = overflow comments
+6979670341 / 6979671562 / 6979672784. Each accepted row's implementation and
+independent oracle are recorded below; no finding is inferred resolved merely
+from the inline thread count.
+
+| ID | Severity / source | Area | Disposition and evidence |
+| --- | --- | --- | --- |
+| 1 | major · R | `src/adapters/canonical-course.ts` | **Fixed.** Retain extension-only _valueInteger safety choices as source without inventing a numeric ceiling; course, step and component scopes survive strict R5/R6 saves. |
+| 2 | major · R | `src/adapters/canonical-course.ts` | **Fixed.** Serialize contextCode together with resource/definition context and contextPath; both event-reference families remain intact and execution declines an unresolved external anchor. |
+| 3 | major · R | `src/adapters/canonical-course.ts` | **Fixed.** Explicit normalized R6 previews bypass saved course/component wording and render current dose/cadence; source text remains retained. Cyclic-course regression covers the independent adapter path. |
+| 4 | major · R | `src/dosage-course.ts` | **Fixed.** Supported typed external safety text was encoded in a code slot. SAFETY.ifExceeded writes valueString; reads the historical valueCode spelling. Existing retained-course StructureDefinition changed all four safety-action slices to string. Test checks multiline typed payloads in R5 and single-step R6 source records and legacy decoding independently. |
+| 5 | major · R | `src/dosage-course.ts` | **Fixed.** R6 source snapshot decoding retains SimpleQuantity wire qualifiers for comparison with current R6. Ordinary R5 decoding retains its clinical operator interpretation; scalar, general-ratio and draft-scope probes pass. |
+| 6 | major · R | `src/dosage-course.ts` | **Fixed.** Cached source replay omitted replacement of live timing extension arrays. Observe Timing.extension identity and repeat.extension identity using the already shallow repeat snapshot. No nested provenance copy or scan. Tests seed a true replay proof and replace each live extension array, obtaining false. |
+| 7 | major · R | `src/canonical/course.ts` | **Fixed.** ACCEPT: externally supplied incomplete maximum must retain known arithmetic Scoped numeric scan now intersects usable bounds in dose units and flags unresolved siblings separately. 10tab lifetime plus incomplete Quantity gives10 over14days in either order, retained incomplete source/explanation. |
+| 8 | major · R | `src/fhir-course-cycle-count.ts` | **Fixed.** Actual origin/master external saved-row writer used first step.count as whole-course cycle count; new semantics differ. Newly emitted owned compact R5 markers include countScope='step'. Only an unversioned owned marker with shared repeatCycle, positive first-step count, and no explicit course bound/conflict migrates to the course-count modifier. Original marker remains flat inert source. Current R5 marker, raw current R6, and simultaneous local-step/course counts keep current semantics. Literal serialized master fixture produces 21 daily doses across three 14-day cycles and no fourth cycle; persistence preserves the bound. |
+| 9 | major · R | `test/pr14-round20-execution.spec.ts` | **Fixed.** ACCEPT: compatible maxima are an intersection 10/20tab lifetime in either order yields10; g/mg maxima normalize and select1500mg; incompatible mL stays unevaluated without erasing known mass cap. Existing round20 and canonical-course maxima oracles corrected. |
+| 10 | major · R | `test/r6-primary.spec.ts` | **Fixed.** Conflicting external dose/rate choices move into typed inert source extensions, preserving every submitted value and the independent dimension. Strict R6 reopens without an arbitrary active choice; retained Ratio sources use portable R5 operator encoding. |
+| 11 | major · R | `src/adapters/r5-course.ts` | **Fixed.** Stripping an expression could leave an empty/id-only R5 doseAndRate element. Add an inert typed expression-source extension only for otherwise empty expression slots. The retained row delta still owns association and reconciliation. Consume the exact duplicate slot annotation after the delta has restored the expression or preserved it in superseded course history. Tests verify nonempty strict slots, exact expression association around a numeric neighbor, repeated persistence, direct scalar projection, and numeric replacement. |
+| 12 | major · R | `src/index.ts` | **Fixed.** Public batch preview must retain course-owned safety; joining items loses an 8-tab/day cap. formatParseBatch selects computed whole-course display when course/stage safety owns content. Constant/property checks in existing walk; ordinary separator behavior stays supported. New test checks short/long cap once, plus ordinary custom separator. |
+| 13 | major · R | `src/index.ts` | **Fixed.** Explicit normalized R6 preview must show live dose/cadence; saved renderedInstruction hid a change from1/BID to2/TID. Normalized course/component formatters bypass source-text shortcuts. Root updated unchangedR6SourceDisplay. Source remains unmodified; source-only input still displays its text; lazy source preference avoids scans when not relevant. Public formatSig, fromFhir, direct course formatter all assert2tablets, three times daily, cap8; JSON/source unchanged. Root covers cyclic sibling. |
+| 14 | major · R | `src/canonical/format-course.ts` | **Fixed.** Explicit FHIR event instant includes date, clock and offset; date-only display erased meaningful scheduling detail. EN/TH clause locale renderers use typed calendarEvent.fhirDateTime when present; short forms same. Existing event walk, no reparsing; date-only paths retain localized civil-date rendering. Z and+07:00 timestamp full-string checks in short/long EN/TH; execution epoch equals literal source instant; date-only stays20Nov with no clock. |
+| 15 | major · R | `src/canonical/format-course.ts` | **Fixed.** Authored ifExceeded action is clinical instruction even without numeric cap. Existing scope-aware safety display now appends ifExceeded at component/stage/course owner. No evaluation; original action text retained; one owning scope emits once. Each scope with/without8tab/day limit; legal multi-step fixture for stage safety; action occurs exactly once; safety-only course included. |
+| 16 | major · R | `src/canonical/format-course.ts` | **Fixed.** Every doseAndRate entry is a dose fact; ordinary later dose vanished behind rate-only first entry. Existing amount rendering walk adds later ordinary quantities/ranges not represented by first-entry clause. Reuses one amount pass; no source mutation; qualified-dose outer rendering unchanged. Source-less5mL/h +10mL +2mg all visible; ordinary single1tablet not duplicated. |
+| 17 | major · R | `src/canonical/format-course.ts` | **Fixed.** Current structured condition must be displayed independently of component.text; otherwise SBP>160 becomes unconditional. Base/component source shortcut excluded for predicate and normalized preview. Condition remains typed, composed by existing condition realizer; original text unchanged. R6 import with textTake1tablet daily +SBP>160mmHg displays dose and condition; text retained. |
+| 18 | major · R | `src/canonical/compile.ts` | **Fixed.** A numeric range endpoint owns its unit; empty low mg must not rename high1g. Clause range projection selects the valued endpoint's unit; rich two-ended ranges keep existing endpoint path. One conditional, no extra traversal; retained rich endpoints unchanged. Upper-only1g with empty lowmg; lower-only2mg with empty highg; >=500mg–<=1g full endpoint oracle. |
+| 19 | major · R | `src/adapters/r5-import.ts` | **Fixed.** Undefined safety reconciliation result was not applied, leaving lifted limits active. Apply both safety and limits even when undefined. Root's shared safetyToWire correction also omits the resulting empty wire object. Tests delete the sole maximum after persistence, prove no active safety/cap and no revival, and prove original cap remains in source history. A sibling case preserves independent count limit and free-text action. |
+| 20 | major · R | `src/adapters/r5-import.ts` | **Fixed.** Historical baseline wording was passed as an explicit replacement instruction. Separate replacement instruction from baseline wording; only reuse baseline when structural reconciliation is unchanged. Keep explicit complete replacement instruction authoritative. Tests exercise unchanged input, step count change, header change, carried unchanged wording, and explicit replacement. All-empty inactive carrier text keeps its established behavior. |
+| 21 | trivial · R | `test/course-language.spec.ts` | **Fixed.** Condition fixture must distinguish state negation from an outer unless. Added top-level not around compound all/any guard. Test only. Exact EN unless +THเว้นแต่ strings preserve innernot and groupedOR. |
+| 22 | trivial · R | `test/pr14-display-replay-family.spec.ts` | **Fixed.** Fresh-source replay regression must use WeakMap-tracked object, persisted case actual JSON boundary. Fresh uses parsed.items[0].fhir; persisted JSON-clones parsed.fhir[0]. Test only; exercises distinct proof paths. Second clock20→22, dose1drop retained, restoration returns source in both cases. |
+| 23 | major · F1 | `src/adapters/r5-import.ts` | **Fixed.** Active-course extension replacement checked old retained history instead of preserving it into the new result. Carry old flat history children into the new course and retain the latest snapshot without nested history. Tests replace active annotations, verify both earlier source and latest source, and prove three resaves do not grow source count. |
+| 24 | major · F1 | `src/adapters/r6-editable-metadata.ts` | **Fixed.** Retire unmatched draft/single-step source without erasing it. Regeneration retains marker IDs, unknown typed children and duplicate markers; repeated persisted saves stay stable without activating hidden old stages. |
+| 25 | major · F1 | `src/fhir.ts` | **Fixed.** Code-only Quantity has a real unit; EMA~500mg became unitless. canonicalFromFhir uses established getDoseQuantityUnit fallback after authored unit. Constant lookup; preserves original unit/coding/extension. ~500 with UCUMmg gives canonical500/mg/~ and preview; authored milligrams overrides coding label. |
+| 26 | major · F1 | `src/fhir.ts` | **Fixed.** Any usable asNeededFor indication licenses PRN; array order must not erase later pain reason. Existing import map tracks usable text/coding/translation across all entries; retains entire reason array. Thai renderer uses retained translation-only reason. Piggybacks existing map, no second scan; existing coded condition morphology preserved. Translation-onlyThai nausea +pain in both orders: PRN enabled, both reasons retained, Englishpain andThai nausea displayed; no flag/reasons staysnonPRN. |
+| 27 | major · F1 | `src/instruction-action-terminology.ts` | **Rejected.** Rejected: action catalog results are borrowed immutable views under the owner contract. Caller splice does not justify defensive listing copies or a new native-misuse support obligation. |
+| 28 | major · F1 | `src/instruction-graph.ts` | **Fixed.** Preparation amount and amountless rich primary share one dose; adding2tablets toDrink duplicatesDissolve2tablets. Rich-primary realizer consults same source Amount owner before inserting live dose. Scan only for amountless rich primary; graph immutable; edited-dose tests still demandnewamount. Saved external graphDissolve2tablets→Drinkslowly: exactlyone2tablets/2เม็ด; both actions retained inEN/TH; graph byte snapshot unchanged. |
+| 29 | major · F1 | `src/instruction-graph.ts` | **Fixed.** Removing a dose from public R5 must not revive graph Amount; duration/spit are independent. Failed source projection proof keeps old Amount ownership identifiable without current dose; both primary selectors reject it; owner-only display copy removes obsolete Amount. Fresh source proof includes action-derived authored dose, not inferred defaults. Existing fingerprint used onlyroundtrip or absent-dose graph path; no graph/source mutation; capture removes old evidence-array scan. Fresh tracked row and JSON-persistedSwish10mL30sec→Spit after removingdoseAndRate: no10mL, retain30seconds/spit, graphunchanged in normalized/roundtrip. Existing301graphtests verify unrelated amounts. |
+| 30 | major · F1 | `src/instruction-concept-terminology.ts` | **Rejected.** Rejected: concept catalog results remain borrowed immutable views. Do not add allocation on every list call to support caller mutation. |
+| 31 | major · F1 | `src/instruction-concept-terminology.ts` | **Rejected.** Rejected: concept component trees follow the same immutable output contract. No defensive nested clone or freeze layer is added. |
+| 32 | major · F1 | `src/schedule.ts` | **Fixed.** Scalar import overwrote edited R5 maxima with an unchanged lifted safety mirror. toEzDosages stores a nonmodifier typed safety baseline using the existing retained-field codec. administrationFromR5 reconciles live maxima and explicit safety edits against it; no-safety rows retain the fast path. Historical unmarked mirrors with present R5 maxima respect those maxima; standalone safety-only input remains active. Tests prove one-dose/day scheduling after a two-to-one cap edit, explicit safety edit winning, and deletion of final cap. |
+| 33 | major · F1 | `bench/public-api.mjs` | **Fixed.** Benchmark gating requires equivalent clinical work for the two edited Thai fixtures. Independent dose oracles fail an incorrect candidate; incorrect baseline output retains both raw timings and an explicit non-equivalent classification without a latency verdict. |
+| 34 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: actual ranged supply can be wrong; no heuristic labeled maximum Original count applied after greedy packing; early partial use could lose a later larger feasible dose. Initial two-plan heuristic was rejected by independent counterexamples. Final exact bounded planner searches critical times and solves all selected quantities jointly as prefix-sum difference inequalities. Numeric oracles: count2 range1–2 cap3/day over2days=4; one day=3; range1–3 caps4/day+5/48h=5; unequal future capacity with prior history=3.5; range1.5–2 one-use/day cap3/48h=3 both with and WITHOUT explicit totalcount. Strict endpoints, monthly cap, repeated calendar expiry, large cheap proof, and source-preserving complexity diagnostic covered. |
+| 35 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: treatment-relative zero offset must preserve exact instant Day displacement now uses existing precision-preserving calendar step helper. Ordered08:00:00.500, start+0d, one-time dose retains.500. |
+| 36 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: authored concrete clocks remain a feasible maximum candidate Overlapping capped supply compares complete authored-clock and inferred upper-frequency plans through the same admission ledger; separate lifetime accounting selects winning plan only. Two active06:00 doses in06–07 query produce2, rather than inferred08/20 yielding0. |
+| 37 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: first implicit treatment start has calendar semantics When first stage starts at treatment anchor and ends+1civil day, repetitions retain civil span; Mar7 09NewYork source repeated3times includes Mar10 08:30. Implicit successor starts are not reinterpreted as treatment zero. |
+| 38 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: initial-cycle horizon cannot prove later nonoverlap Shared capped cycles use chronological admission unless structural clipping or matching civil/elapsed duration scales proves ALL cycles disjoint. 24elapsed-hour phase in daily cycles across spring DST admits only two Mar9midnight doses under2/2h cap. Unbounded/simple and matching1civil-day phases preserve fast path. Untimed capacity countMax does not create a concrete phase tail. |
+| 39 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: waking recurrence history must match real generated occurrences History uses the existing waking-hour generator before generic anchors. q4h WAKE08–HS20 count4 queried17 consumes08/12/16 and leaves only nextday08. Explicit priorCount remains authoritative. |
+| 40 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: shifted event membership uses actual timestamp and source anchor day Daily schedule/supply scan includes preceding meal anchor for positive dayShift, bounded by treatment's source day. Dinner23:45+30m returns nextday00:15 and supply1; finite-count late-query neighbor confirms no pre-treatment dinner is fabricated. |
+| 41 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: concentration must reach executable cap admission Mass/volume conversion in executableQuantityCaps now receives measured strength and internal supply scheduling carries context. 5mLq6h at100mg/5mL max200mg/day =>10mL. Without concentration =>20mL plus retained unevaluated maximum, no guessed conversion. |
+| 42 | major · F1 | `src/execution/engine.ts` | **Fixed.** ACCEPT: actual historical administration consumes finite count exactly once Counted capped replay adds actual past administrations to consumed total and omits coincident planned replay BEFORE cap acceptance. Count2,daily09,actualJan1 leaves onlyJan2 with both1/day and2/day caps. Explicit priorCount2 yieldsnone. |
+| 43 | major · F1 | `src/hpsg/lexical-classes.ts` | **Fixed.** Fractional compact million is shared numeral morphology; .5m must mean500000, including about/~. Shared compactMillionDoseNumber in lexical-classes used by comparator and ordinary dose rules; ordinary leadingdecimal is not stripped as punctuation. Bounded token morphology only, no surface semantic repair; ordinary already-normalized word reused. about.5m,~.5m,.5m,.5M,≤.5m literal500000/unit/comparator; about.5mg remains0.5mg. |
+| 44 | major · F1 | `src/hpsg/rule-context.ts` | **Fixed.** Verb-free rate with explicitIV is ordinary infusion syntax; 5mL/hIV must not be lost or become5bolus. Fixed-rate construction licenses adjacent typed intravenous route meaning before/after expression. Bounded adjacent token lookups; existing typed route vocabulary; leaves unlicensed rates as source. 5mL/hIV for2h and spaced perhour intravenously retain5/mL/h +2h duration andIV, no scalardose in anycomponent. |
+| 45 | major · F1 | `src/hpsg/rules/clinical-quantity-rules.ts` | **Fixed.** Biologic-activity per-time dose is a rate; scalar comparator rule must not detach1000units from/hr. Dimensional unit matcher accepts unit/units/IU in same fixed-rate numerator family. Existing massTerm/volumeOrMassTerm meaning owns[iU]; no extra pass. Approximately1000units/hr and~1000units/hr retain1000/[iU]/h/~ andIV, no bolus; approximate1000units once remains scalar; unlicensed100units/hr stayssource. |
+| 46 | major · F1 | `src/hpsg/rules/clinical-quantity-rules.ts` | **Fixed.** Attached@ quantity marker should share spaced@ rate grammar without capturing clocks. Clinical quantity prefix supports attached@ numeric/qualified form; fixed-rate constituent owns marker. Bounded lexical prefix, only typed per-time quantity licensesrate. IV@100mL/hr vsIV@100mL/hr spaced and@~100; @08:00 with1tablet remains08:00 clock and1tab dose. |
+| 47 | minor · F1 | `test/canonical-course.spec.ts` | **Fixed.** RelativeTime path fixture now supplies its owning resource reference and verifies the complete structured boundary; it no longer uses an invalid path-only example. |
+| 48 | minor · F1 | `src/adapters/canonical-course.ts` | **Fixed.** Typed limit provenance preserves original R5 Ratio metadata. Both raw imports and the toEzDosages lifted-safety path retain IDs/extensions after quantity edits and repeated strict projection. |
+| 49 | minor · F2 | `src/types.ts` | **Fixed.** DosageCondition includes the supported valueRatio choice; a typed ratio condition and unrelated annotations persist through R5/current R6. |
+| 50 | minor · F2 | `test/r6-primary.spec.ts` | **Fixed.** Exact-dose assertion checked only native comparator and could miss stale EMA. Assert replacement value=5, unit=mg and getQuantityComparator(...)=undefined. Existing taper semantic test passes. |
+| 51 | minor · F2 | `test/r6-primary.spec.ts` | **Fixed.** Legacy comparator test's active EMA value could mask a broken legacy decoder. Directly decode the retained marker and assert value/unit/native comparator before merged-course assertion. Existing legacy codec test passes. |
+| 52 | minor · F2 | `test/r6-primary.spec.ts` | **Fixed.** Strict R6 scalar rate fixture used invalid native SimpleQuantity comparator. Scalar rate fixtures now use EMA only. Native-over-EMA precedence remains exercised on valid general Ratio numerator; all display and reopen assertions pass. |
+| 53 | minor · F2 | `test/pr14-round20-boundaries.spec.ts` | **Fixed.** The condition/safety regression now actually edits the administration maximum from4to3 and asserts both the changed maximum and unchanged condition. |
+| 54 | trivial · F2 | `test/pr14-round20-execution.spec.ts` | **Fixed.** ACCEPT: nonvacuous tests exposed another actual phase-horizon bug Kept whole-query total3 but added day-specific oracles. Initial failures showed old total came from oneFeb28 +oneMar30 +oneMar31. Explicit finite event lists had no phase horizon and were wrongly clipped at next cycle. Their final potential event now establishes completion; shared chronological admission gives Feb28=1,Mar30=2,Mar31=0. Analogous yearly leap case1/2/0 also passes. |
+| 55 | minor · F2 | `src/index.ts` | **Fixed.** Public formatSig must classify accepted safety-onlyR6 consistently withfromFhir. Root adapter isR6DosageInstruction recognizes safety-only and excludes R5 dosage field shape; formatter handles no-component safety action. Shared adapter dispatch, noduplicate detection inindex. formatSig/fromFhir same8tab/day action text, plus action-only safety header; root covers EzDosage negative. |
+| 56 | minor · F2 | `src/adapters/r5-course.ts` | **Fixed.** needsBridge looked only at original R6 provenance, missing retained wrapper metadata after first R5 save. Inspect the same R6-or-retained source site used by retentionForAdministration. Tests preserve wrapper id/extension through three persisted saves and keep a live concept clear authoritative. |
+| 57 | minor · F2 | `src/fhir-quantity-operator.ts` | **Fixed.** Replacing an EMA code retained old translated display metadata. Shared operator edit helper removes active _display/i18n on code change and saves the original Coding in a separate inert valueCoding source extension. Unchanged operator retains authored translations. Tests cover simple/general quantities, correct current operator, original-source equality and stable repeated writes. |
+| 58 | minor · F2 | `src/canonical/compile.ts` | **Fixed.** 1440elapsedminutes is24hours, not1civil day acrossDST. Compiler lifts delay in h/min only; onsetDays retains separate calendar path. One unit choice; noenginework here; native/R5/R6keepelapsedh. ExplicitTake1tablet once in24hours orderedMar7noonNewYork yieldsMar8 13:00-04 inR6,R5,native; stagedisplacement24h. Root updates2880minutes fixture to48h. |
+| 59 | minor · F2 | `src/i18n.ts` | **Fixed.** Partial regional locale registration must inherit each missing facet; course-onlyth-TH lostThai clauses. Registry resolves formatShort/formatLong/course independently from exact/base. Complete exact registrations return existingobject; composed regional result cached and invalidated on explicitregistration; nodefensivecopies. th-TH course-only inheritsThai short/long; th-extra clause-only inheritsThai course; re-registration invalidatescomposedcache. |
+| 60 | minor · F2 | `src/instruction-graph.ts` | **Fixed.** Partial quantity text is useful authored meaning; normalizedmg cannot replaceup to prescribedamount. translatedArgument returns preservedtext for quantity withno numericbound before normalized fallback. No inventednumber/qualifier; numeric/ranged quantitiesretainlocalizedpath. Serialized graph partial<=mg keepsup to theprescribedamount inEN/TH, unchangedpartialQuantity. |
+| 61 | minor · F2 | `src/schedule.ts` | **Fixed.** ACCEPT: public calculation options may have declared prototype getters Public calculateTotalUnits reads each typed option directly rather than object spread losing prototype getter. Instance timeZone getter usingthis.zone works. No generic defensive clone/editor layer. |
+| 62 | minor · F2 | `bench/public-api.mjs` | **Fixed.** EMA comparator benchmark uses candidate-owned identifiers, verifies decoding of~ and measures candidate-only when master lacks the helper; prior builds receive a normal paired comparison. Reports distinguish registered fixtures from measured function coverage. |
+| 63 | minor · F2 | `bench/public-api.mjs` | **Fixed.** Write an atomic incomplete report before dynamic imports and fixture setup. A deliberately missing baseline produces a fresh incomplete initializing report instead of leaving stale completed evidence. |
+| 64 | minor · F2 | `README.md` | **Fixed.** README localization example imports an explicit treatment-day window and actually renders Jours1–3 via course.dayRange; source runtime and strict built-declaration checks verify the complete snippet. |
+| 65 | minor · F2 | `README.md` | **Fixed.** README distinguishes current-reader compatibility with previously saved R5 from older-reader interpretation of newer encodings, including the EMA approximation operator. |
+| 66 | minor · F2 | `src/execution/calendar.ts` | **Fixed.** ACCEPT: date-only boundary owns first midnight in a fold Calendar boundaries seed offset resolution from preceding day, without another Intl lookup; punctual clock behavior unchanged. Amman2021Oct29 date-only start includes first00:30(+03), whose UTC instant isOct28 21:30. |
+| 67 | minor · F2 | `src/execution/engine.ts` | **Fixed.** ACCEPT: calculation horizon must retain milliseconds Horizon uses existing durationStepper for civil day/week; start12:00:00.500 includes next boundary-date12:00:00.250 in bothday/week tests. |
+| 68 | minor · F2 | `src/lexer/surface-segmenter.ts` | **Rejected.** Rejected: listed segmenter descriptors are borrowed immutable views. Registration snapshots remain supported; caller mutation of listing results does not justify defensive copies. |
+| 69 | minor · F2 | `src/hpsg/rules/site-rules.ts` | **Fixed.** Weight-rate at/@ qualifier belongs to rate, not anatomicalsite. Weight constituent owns externalmarker and records all ownedtokens before sitefallback, using shared separateRateMarker helper. Boundedmarkerlookup/existingtokenwalk; markerconsumed, no@leftover. atapproximately,@approximately,atmost,atleast0.1mcg/kg/min: exact0.1/ug/kg/min+operator, no site, no leftovers. |
+| 70 | minor · F2 | `src/locales/course/en.ts` | **Fixed.** Locale wording must agree with literal count1. English courseadministrations uses singularonlyforfrequencystring1. Constant stringconditional inlocale facet. 1administration/day,2administrations/day,1–2plural, lifetimeinteger1singular. |
+| 71 | minor · F2 | `test/pr14-execution-family.spec.ts` | **Fixed.** ACCEPT: strengthen existing expected capacity Existing4/8 rolling cases retained. Added countMax1 one-day member =>2tab, not4. |
+| 72 | minor · F2 | `test/pr14-followup-clinical.spec.ts` | **Fixed.** ACCEPT: strengthen initial sequence assertion Incomplete cap must begin Jan1 08loading then09maintenance, in order. Jan2 assertion and separate7tab complete-cap supply remain. |
+| 73 | minor · F2 | `test/hpsg-clinical-quantity.spec.ts` | **Fixed.** Compactmillion tests need units/operators inR5 andcanonical. Existingtable nowcarries expected~ or<= andassertsIU. Testonly. Allthree2.4M/2.4m cases assert2400000/IU/expectedoperator inR5 andcanonical. |
+| 74 | minor · F2 | `test/instruction-graph.spec.ts` | **Fixed.** Editing medicationdose must retain independentlyquantifiedmixingvolume/contacttime inThai too. Existing adversarialgraphfixture nowasserts bothThai realizationchannels. Testonly; unknownsolventtext may remainuntranslated but100mL mustsurvive. BothrealizeInstructionGraph andformatCanonicalClause retain100มิลลิลิตร and5นาที forknownwater; solventretains100mL/Thaiquantity. |
+| 75 | minor · F2 | `test/pr14-native-edit-family.spec.ts` | **Fixed.** The mixed-range staged preview independently requires the later250mg dose, in addition to exactly one occurrence of the first qualified range. |
+| 76 | minor · F3 | `test/pr14-native-edit-family.spec.ts` | **Fixed.** The delayed parallel-course regression asserts every January3–9 date twice and total21tablets across native/R5/R6; elapsed2880minutes remains48hours. |
+| 77 | minor · F3 | `test/pr14-rate-time-family.spec.ts` | **Fixed.** Verb-free scalar upperbound must remain<=, notmerelyvalue2. Strengthened existingrate-time fixture. Testonly. atmost2tabletsdaily exactvalue2/unitTab/comparator<=, norate. |
+| 78 | minor · F3 | `test/pr14-rate-time-family.spec.ts` | **Fixed.** Negative rate test must inspectall native steps/components, notjustfirst. Strengthened existing unmarkedrate fixture nestedwalk. Testonly. No doseQuantity/rateQuantity inanycomponent forunmarked100mL/hr; newbiologicnegativecasesextendfamily. |
+
+Review replies belong only in the relevant existing inline threads, with the
+commit and concise verification. No top-level comment or new full-review
+request is authorized by this work.

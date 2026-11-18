@@ -27,6 +27,9 @@ export const DOSAGE_EXCLUDED_DATES_R5_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-excluded-calendar-dates";
 export const DOSAGE_DETAILS_R5_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details";
+/** Keeps an expression-only R5 backbone element valid without inventing a dose. */
+export const R5_EXPRESSION_SLOT_SOURCE_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-expression-slot-source";
 /** Non-modifier metadata: preserves the author's entire literal instruction
  * without forcing ordinary R5 consumers to implement R6 safety semantics. */
 export const DOSAGE_RENDERED_INSTRUCTION_R5_URL =
@@ -494,9 +497,10 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
   const doseLimit: NonNullable<FhirR6DosageSafety["doseLimit"]> = [];
   for (const maximum of dosage.maxDosePerPeriod ?? []) {
     if (!maximum.numerator || !maximum.denominator) continue;
+    const { numerator, denominator, ...metadata } = maximum;
     doseLimit.push({
-      scope: "period", valueQuantity: quantityFromR5(maximum.numerator)!,
-      period: quantityFromR5(maximum.denominator)
+      ...metadata, scope: "period", valueQuantity: quantityFromR5(numerator)!,
+      period: quantityFromR5(denominator)
     });
   }
   if (dosage.maxDosePerAdministration) {
@@ -674,6 +678,23 @@ export function reconcileR5SafetySnapshot(
   return reconcileR5SafetyEdits(retained, projected);
 }
 
+/** A lifted safety mirror and its R5 maxima are two views of one value.
+ * A persisted baseline makes subsequent edits to either view unambiguous. */
+const R5_LIFTED_SAFETY_SOURCE_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-lifted-safety-source";
+export function reconcileLiftedR5Safety(row: EzDosage): FhirR6DosageSafety | undefined {
+  const marker = row.extension?.find(item => item.url === R5_LIFTED_SAFETY_SOURCE_URL);
+  if (marker) {
+    const saved = decodeR5RetainedFields(marker);
+    if (saved.component?.safety)
+      return reconcileR5SafetySnapshot(row, saved.component.safety, saved.baseline?.safety);
+  }
+  // Historical lifted rows did not carry a baseline. Their existing R5
+  // maxima retain ownership; a safety-only input is independently authored.
+  const projected = r5SafetyBaseline(row);
+  return projected && row.safety ? reconcileR5SafetyEdits(row.safety, projected) : row.safety;
+}
+
 /** Lift real R6 concepts once into the familiar flat R5 dosage shape. */
 export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] {
   let result:EzDosage[]|undefined;
@@ -695,7 +716,16 @@ export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] 
     if(!result)result=dosages.slice(0,index);
     const row:EzDosage=Object.assign({},input);
     if(predicate)row.condition=[conditionToR6(predicate)];
-    if(safety)row.safety=safety;if(dates?.length)row.excludedDates=dates;
+    if(safety){
+      row.safety=safety;
+      row.extension=[...(input.extension??[]).filter(item=>item.url!==R5_LIFTED_SAFETY_SOURCE_URL),{
+        url:R5_LIFTED_SAFETY_SOURCE_URL,
+        extension:encodeR5RetainedFields({component:{safety},baseline:{
+          safety:compactProjectionFingerprint(safety)
+        }})
+      }];
+    }
+    if(dates?.length)row.excludedDates=dates;
     result.push(row);
   }
   return result??dosages as EzDosage[];
@@ -1073,6 +1103,7 @@ interface SourceReplayProof {
 }
 interface SourceTimingObservation {
   original: FhirTiming;
+  extension?: FhirExtension[];
   repeat?: FhirTimingRepeat;
   repeatValues?: FhirTimingRepeat;
   events?: string[];
@@ -1127,7 +1158,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   if (!timing) return undefined;
   const repeat = timing.repeat, code = timing.code;
   return {
-    original: timing, repeat,
+    original: timing, extension: timing.extension, repeat,
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; no source extension is traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
@@ -1153,7 +1184,7 @@ export function matchesSourceReplayTiming(
   proof: SourceTimingObservation | undefined
 ): boolean {
   if (!timing || !proof) return timing === undefined && proof === undefined;
-  if (timing !== proof.original || timing.code !== proof.timingCode ||
+  if (timing !== proof.original || timing.extension !== proof.extension || timing.code !== proof.timingCode ||
       timing.code?.text !== proof.codeText) return false;
   const codings = timing.code?.coding;
   if ((codings?.length ?? 0) !== (proof.codings?.length ?? 0)) return false;
@@ -1163,7 +1194,7 @@ export function matchesSourceReplayTiming(
         coding.code !== prior.code || coding.display !== prior.display) return false;
   }
   const repeat = timing.repeat, prior = proof.repeatValues;
-  return repeat === proof.repeat &&
+  return repeat === proof.repeat && repeat?.extension === prior?.extension &&
     repeat?.frequency === prior?.frequency && repeat?.frequencyMax === prior?.frequencyMax &&
     repeat?.period === prior?.period && repeat?.periodMax === prior?.periodMax &&
     repeat?.periodUnit === prior?.periodUnit &&
@@ -1381,6 +1412,8 @@ export interface CompactCourseRow {
   rowIndex: number;
   sequence: number;
   stepCount: number;
+  /** Current saved-row contract: step.count repeats only that step. */
+  countScope?: "step";
   step?: Omit<FhirR6DosageInstruction["step"][number], "component">;
   component?: Partial<FhirR6Dosage>;
   /** R6 offsets are typed extension children, never R5 Extension.valueTiming. */
@@ -1423,9 +1456,11 @@ export function attachCourseDetailsExtensions(dosages:(FhirDosage|EzDosage)[],de
  * supplies only final retained fields which cannot live in an R5 Dosage row.
  * The old extension names remain stable so existing persisted edits reopen. */
 export function attachR5RetainedRow(row: FhirDosage | EzDosage, retained: CompactCourseRow): void {
-  replacementExtensions(row, DOSAGE_DETAILS_R5_URL, {
-    url: DOSAGE_DETAILS_R5_URL, extension: encodeFields(retained, COMPACT_ROW)
-  });
+  const extension = encodeFields(retained, COMPACT_ROW);
+  // The encoded children are already fresh output. Add current semantics
+  // there instead of copying the complete retained row just for one field.
+  if (retained.countScope === undefined) extension.push({ url: "countScope", valueCode: "step" });
+  replacementExtensions(row, DOSAGE_DETAILS_R5_URL, { url: DOSAGE_DETAILS_R5_URL, extension });
 }
 /** A course with no administration has a source carrier, not a fabricated
  * dosage. Encode the header and empty-stage metadata directly into its R5
@@ -1655,6 +1690,7 @@ export function getCourseContextIssue(
 type ValueField = Extract<keyof FhirExtension, `value${string}`>;
 interface BridgeField {
   value?: ValueField;
+  legacyValue?: ValueField;
   fields?: BridgeShape;
   repeated?: boolean;
   extension?: boolean;
@@ -1691,7 +1727,7 @@ const CONDITION: BridgeShape = {
 };
 const SAFETY: BridgeShape = {
   ...ELEMENT,
-  ifExceeded: { value: "valueCode" },
+  ifExceeded: { value: "valueString", legacyValue: "valueCode" },
   doseLimit: { repeated: true, fields: {
     ...ELEMENT,
     scope: { value: "valueCode" },
@@ -1751,6 +1787,7 @@ const COMPACT_ROW: BridgeShape = {
   rowIndex: { value: "valueInteger" },
   sequence: { value: "valueInteger" },
   stepCount: { value: "valueInteger" },
+  countScope: { value: "valueCode" },
   step: { fields: STEP },
   component: { fields: COMPONENT },
   // R6 Timing offsets are SimpleQuantity, not Quantity: their EMA
@@ -1798,7 +1835,9 @@ export function decodeR6SourceMetadata(
   marker: FhirExtension, kind: "drafts" | "safety"
 ): Record<string, unknown> | undefined {
   if (!marker.extension || marker.valueString !== undefined) return undefined;
-  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE);
+  // Source snapshots are compared with live R6 wire objects. SimpleQuantity
+  // keeps its EMA extension here; ordinary R5 reconciliation still decodes it.
+  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE, true);
 }
 
 const PREDICATE: Record<string, BridgeField> = {
@@ -1910,7 +1949,9 @@ function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
  * @param children Named extension children.
  * @param shape Declared semantic fields for this backbone.
  */
-function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): Record<string, unknown> {
+function decodeFields(
+  children: readonly FhirExtension[], shape: BridgeShape, preserveSimpleWire = false
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const child of children) {
     if (child.url === "empty") continue;
@@ -1939,12 +1980,14 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
       // Older saved rateRatio bridges used FHIR Extension.valueRatio.
       // New nested field shapes take precedence when both are present.
       value = child.extension
-        ? decodeFields(child.extension, field.fields)
+        ? decodeFields(child.extension, field.fields, preserveSimpleWire)
         : child.url === "rateRatio" && child.valueRatio
           ? child.valueRatio : undefined;
     }
     else if (field.quantity) {
-      value = child.valueQuantity && quantityFromR5(cloneStructuredValue(child.valueQuantity));
+      value = child.valueQuantity && (preserveSimpleWire && field.quantity === "simple"
+        ? cloneStructuredValue(child.valueQuantity)
+        : quantityFromR5(cloneStructuredValue(child.valueQuantity)));
       if (!value && child.extension) {
         // Read previous versions of our bridge without emitting that old
         // private comparator-child representation on any new export.
@@ -1953,7 +1996,9 @@ function decodeFields(children: readonly FhirExtension[], shape: BridgeShape): R
         if (quantity) value = { ...cloneStructuredValue(quantity),
           ...(comparator ? { comparator } : {}) };
       }
-    } else if (field.value) value = cloneStructuredValue(child[field.value]);
+    } else if (field.value) value = cloneStructuredValue(
+      child[field.value] ?? (field.legacyValue ? child[field.legacyValue] : undefined)
+    );
     if (value === undefined) continue;
     if (field.repeated) ((result[child.url] ??= []) as unknown[]).push(value);
     else result[child.url] = value;

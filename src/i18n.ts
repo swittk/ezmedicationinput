@@ -126,22 +126,45 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
 );
 
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
+const RESOLVED_REGIONAL_LOCALIZATIONS = new Map<string, {
+  generation: number;
+  localization: SigLocalization;
+}>();
+let localizationGeneration = 0;
 
 export function registerSigLocalization(localization: SigLocalization): void {
   REGISTERED_LOCALIZATIONS.set(localization.locale.toLowerCase(), localization);
+  localizationGeneration++;
 }
 
 export function getRegisteredSigLocalizations(): SigLocalization[] {
   return Array.from(REGISTERED_LOCALIZATIONS.values());
 }
 
-/** All language facets use exact registration before the base language. */
+/** Each regional facet overrides only its matching base-language facet.
+ * Complete registrations keep their allocation-free common path; partial
+ * regional compositions are refreshed lazily after explicit registration. */
 function registeredLocalization(key: string | undefined): SigLocalization | undefined {
   if (!key) return undefined;
   const exact = REGISTERED_LOCALIZATIONS.get(key);
-  if (exact) return exact;
+  if (exact?.formatShort && exact.formatLong && exact.course) return exact;
   const separator = key.indexOf("-");
-  return separator < 0 ? undefined : REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
+  if (separator < 0) return exact;
+  const base = REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
+  if (!exact || !base) return exact ?? base;
+  const cached = RESOLVED_REGIONAL_LOCALIZATIONS.get(key);
+  if (cached?.generation === localizationGeneration) return cached.localization;
+  const resolved: SigLocalization = {
+    locale: exact.locale,
+    formatShort: exact.formatShort ?? base.formatShort,
+    formatLong: exact.formatLong ?? base.formatLong,
+    course: exact.course ?? base.course,
+  };
+  RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {
+    generation: localizationGeneration,
+    localization: resolved,
+  });
+  return resolved;
 }
 
 export function resolveSigLocalization(
@@ -1741,7 +1764,7 @@ function describeCalendarEventsThai(
   if (!events?.length) return undefined;
   const parts: string[] = [];
   for (const event of events) {
-    const formatted = formatIsoCalendarDateThai(event.isoDate);
+    const formatted = event.fhirDateTime ?? formatIsoCalendarDateThai(event.isoDate);
     if (formatted) parts.push(formatted);
   }
   if (!parts.length) return undefined;
@@ -1882,7 +1905,8 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
   // we actually need to translate a non-Thai/no-source reason into Thai.
   const sourceText = reason.text?.trim();
   const sourceIsThai = Boolean(sourceText && /[\u0E00-\u0E7F]/u.test(sourceText));
-  let text = sourceIsThai ? sourceText : reason.coding?.display ?? sourceText;
+  const translated = reason.i18n?.th?.trim() || reason.coding?.i18n?.th?.trim();
+  let text = sourceIsThai ? sourceText : translated ?? reason.coding?.display ?? sourceText;
   const coding = reason.coding;
   if (coding?.code) {
     const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
@@ -2002,7 +2026,7 @@ function formatShortThai(clause: CanonicalSigClause): string {
     parts.push(days.join(",") + (ordinal === undefined ? "" : ordinal === -1 ? "สุดท้าย" : `ครั้งที่${ordinal}`));
   }
   if (schedule.calendarEvents?.length) {
-    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+    parts.push(`@${schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate).join(",")}`);
   }
   if (schedule.boundsStart) {
     parts.push(`ตั้งแต่${schedule.boundsStart}`);
@@ -2262,7 +2286,7 @@ function formatLongThai(
     ? instructionGraphRoundTripPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause.dose, "th")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th")
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

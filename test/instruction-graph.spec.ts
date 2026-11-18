@@ -2243,7 +2243,20 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
           expect(rendered.toLowerCase()).toContain(item.toLowerCase());
           expect(long.toLowerCase()).toContain(item.toLowerCase());
         }
-        expect(long).toContain(locale === "en" ? String(amount) : String(amount));
+        if (locale === "th") {
+          if (source.includes("100 mL water")) {
+            expect(rendered).toContain("100 มิลลิลิตร");
+            expect(long).toContain("100 มิลลิลิตร");
+          } else if (source.includes("100 mL")) {
+            expect(rendered).toMatch(/100 (?:mL|มิลลิลิตร)/u);
+            expect(long).toMatch(/100 (?:mL|มิลลิลิตร)/u);
+          }
+          if (source.includes("5 minutes")) {
+            expect(rendered).toContain("5 นาที");
+            expect(long).toContain("5 นาที");
+          }
+        }
+        expect(long).toContain(String(amount));
       }
       expect(JSON.stringify(graph)).toBe(saved);
       // An independent mixing Substance/Duration never inherits the

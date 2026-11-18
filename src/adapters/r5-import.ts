@@ -1,3 +1,4 @@
+import { R5_EXPRESSION_SLOT_SOURCE_URL } from "../dosage-course";
 /**
  * R5 live rows and retained R5 profile -> native clinical course.
  *
@@ -24,7 +25,7 @@ import {
   administrationToR5,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
-import { getCourseCycleCount } from "../fhir-course-cycle-count";
+import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
 import { quantityFromR5, simpleQuantityForR5, quantityForR5 } from "../fhir-quantity-operator";
 import {
@@ -254,19 +255,19 @@ function restoreComponentDelta(
   }
   if (delta?.safety) {
     const safety = reconcileR5SafetySnapshot(row, delta.safety, local.baseline?.safety);
-    if (safety) {
-      fresh.safety = safetyFromWire(safety);
-      retained.safety = safety;
-      fresh.limits = safety.doseLimit?.map((limit) => ({
-        scope: limit.scope,
-        amount: measureFromWire(limit.valueQuantity),
-        count: limit.valueInteger,
-        expression: limit.valueExpression,
-        period: measureFromWire(limit.period),
-        text: limit.text,
-        provenance: limit,
-      }));
-    }
+    // Reconciliation can deliberately remove the final limit. Apply that
+    // empty result too, otherwise the lifted mirror remains active.
+    fresh.safety = safetyFromWire(safety);
+    fresh.limits = safety?.doseLimit?.map((limit) => ({
+      scope: limit.scope,
+      amount: measureFromWire(limit.valueQuantity),
+      count: limit.valueInteger,
+      expression: limit.valueExpression,
+      period: measureFromWire(limit.period),
+      text: limit.text,
+      provenance: limit,
+    }));
+    if (safety) retained.safety = safety;
     if (!equalStructuredValues(safety, delta.safety)) {
       superseded = true;
       addWarning(
@@ -419,6 +420,23 @@ function restoreComponentDelta(
           )
             delete entry.rateRatio;
           if (!equalStructuredValues(entry.rateRatio, old.rateRatio)) supersededQuantity = true;
+        }
+      }
+      // A strict R5 expression-only slot needs an extension to satisfy
+      // ele-1. The row delta now owns its exact expressions, either restored
+      // above or retained in superseded source history. Consume only that
+      // duplicate generated annotation; unknown source children stay inert.
+      const extensions = entry.provenance?.extension as FhirExtension[] | undefined;
+      if (extensions?.length && (old.doseExpression || old.rateExpression)) {
+        const restored = { url: R5_EXPRESSION_SLOT_SOURCE_URL, extension: [
+          ...(old.doseExpression ? [{ url: "doseExpression", valueExpression: old.doseExpression }] : []),
+          ...(old.rateExpression ? [{ url: "rateExpression", valueExpression: old.rateExpression }] : [])
+        ] };
+        const kept = extensions.filter(item => !equalStructuredValues(item, restored));
+        if (kept.length !== extensions.length) {
+          entry.provenance = { ...entry.provenance };
+          if (kept.length) entry.provenance.extension = kept;
+          else delete entry.provenance.extension;
         }
       }
     }
@@ -653,6 +671,30 @@ function reconcileNativeCompactCourse(
       if (context !== CONFLICTING_PHASE_CONTEXT) missing.add(context);
     }
   }
+  // The previous owned R5 writer stored whole-course repetitions on the
+  // first step. Only that unversioned saved-row contract is migrated here;
+  // current markers and arbitrary R6 step.count always keep step semantics.
+  let legacyCycleCount: number | undefined;
+  if (header?.countScope === undefined && header?.course?.repeatCycle &&
+      getCourseCycleCount(header.course) === undefined &&
+      !conflictingContexts.size && !conflictingPhases.has(1)) {
+    const firstSavedStep = metadata.get(1);
+    if (Number.isInteger(firstSavedStep?.step.count) && firstSavedStep!.step.count! > 0) {
+      // Current rows and courses without the old cycle encoding need no
+      // secondary row scan or temporary first-stage list.
+      const legacyFirstRows = localRows.filter(local => local?.value.sequence === 1 &&
+        local.value.context === header.context);
+      if (legacyFirstRows.length && legacyFirstRows.every(local => local?.value.countScope === undefined)) {
+        legacyCycleCount = firstSavedStep!.step.count;
+        const { count: _courseCount, ...step } = firstSavedStep!.step;
+        metadata.set(1, { ...firstSavedStep!, step });
+        for (const local of legacyFirstRows)
+          if (local) sources.push(sourceWithoutNestedHistory(local.marker));
+        addWarning(warnings,
+          "Migrated the saved R5 course repetition count from the previous first-step encoding; original metadata retained as source provenance.");
+      }
+    }
+  }
   for (const step of header?.emptyStep ?? []) {
     const { sequence, ...fields } = step;
     metadata.set(sequence, { step: fields, rowIndex: -1 });
@@ -681,6 +723,12 @@ function reconcileNativeCompactCourse(
     // Compact rows keep R6 wrappers; edit fields are R5. Split their owners
     // before merging so clearing native extensions does not clear modifiers.
     const merged = r6StepMetadata({ ...r5StepMetadata(previous?.step ?? {}), ...fields });
+    if (legacyCycleCount !== undefined && sequence === 1 &&
+        Number.isInteger(fields.count) && fields.count! > 0) {
+      if (fields.count !== legacyCycleCount) metadataEdited = true;
+      legacyCycleCount = fields.count;
+      delete merged.count;
+    }
     if (!equivalentProjection(previous?.step ?? {}, merged)) {
       metadataEdited = true;
       if (previous?.marker) sources.push(localReconciliationSource(previous.marker));
@@ -860,14 +908,14 @@ function reconcileNativeCompactCourse(
         instruction += (index ? "; " : "") + live[index].text;
     }
   }
-  const result = courseFromFields(
-    {
-      ...header?.course,
-      ...courseEdits,
-      ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
-    },
-    steps
-  );
+  const currentHeader = {
+    ...header?.course,
+    ...courseEdits,
+    ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
+  };
+  if (legacyCycleCount !== undefined && courseEdits.modifierExtension === undefined)
+    setCourseCycleCount(currentHeader, legacyCycleCount);
+  const result = courseFromFields(currentHeader, steps);
   if (savedInstruction !== undefined && !instructionMatches)
     addWarning(
       warnings,
@@ -918,7 +966,8 @@ function reconcileNativeRetainedCourse(
   initialWarnings: readonly string[] = [],
   retainedSource?: FhirExtension,
   additionalSources: readonly FhirExtension[] = [],
-  sourceContext = false
+  sourceContext = false,
+  baselineInstruction?: string
 ): CanonicalCourse {
   const sourceRows = new Map<
     FhirR6Dosage,
@@ -1319,6 +1368,7 @@ function reconcileNativeRetainedCourse(
     steps.push(stageFromFields(editedR6Step, components));
   }
   const { renderedInstruction: retainedInstruction, step: _retainedSteps, ...retainedFields } = retained;
+  const unchangedInstruction = retainedInstruction ?? baselineInstruction;
   const result = courseFromFields(
     {
       ...retainedFields,
@@ -1329,25 +1379,26 @@ function reconcileNativeRetainedCourse(
       ...(course?.safety !== undefined ? { safety: course.safety } : {}),
       ...(editedInstruction !== undefined
         ? { renderedInstruction: editedInstruction }
-        : !structuredChanged && retainedInstruction !== undefined
-        ? { renderedInstruction: retainedInstruction }
+        : !structuredChanged && unchangedInstruction !== undefined
+        ? { renderedInstruction: unchangedInstruction }
         : {}),
     },
     steps
   );
-  if (structuredChanged && editedInstruction === undefined && retainedInstruction !== undefined) {
+  if (structuredChanged && editedInstruction === undefined && unchangedInstruction !== undefined) {
     addWarning(
       warnings,
       "Structured dosage fields changed; the original rendered instruction was retained as source provenance instead of displayed as the current instruction."
     );
   }
-  if (
-    (structuredChanged || preserveRetainedMarkers) &&
-    retainedSource &&
-    !retained.extension?.some((extension) => extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)
-  ) {
-    sourceFragments.unshift(retainedSource);
-  }
+  // Replacing active annotations does not delete the saved reconciliation
+  // history. Keep its flat source children before retaining this snapshot.
+  if (course?.extension !== undefined)
+    for (const extension of retained.extension ?? [])
+      if (extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+        sourceFragments.push(...(extension.extension ?? []));
+  if ((structuredChanged || preserveRetainedMarkers) && retainedSource)
+    sourceFragments.unshift(sourceWithoutNestedHistory(retainedSource));
   return withReconciliationSources(withReconciliationWarnings(result, warnings), sourceFragments);
 }
 
@@ -1464,7 +1515,10 @@ export function courseFromR5(
   const explicitCourseInstruction = course?.renderedInstruction !== undefined &&
     (!hasInstructionBaseline || course.renderedInstruction !== savedInstruction)
     ? course.renderedInstruction : undefined;
-  const currentInstruction = explicitCourseInstruction ?? renderedInstruction ?? preservedInstruction;
+  // Baseline wording is reusable only while its structure is unchanged;
+  // never pass it to reconciliation as an explicit replacement instruction.
+  const replacementInstruction = explicitCourseInstruction ?? renderedInstruction ?? clinicianEditedText;
+  const currentInstruction = replacementInstruction ?? preservedInstruction;
   const instructionSource =
     instructionMarker && (!instructionStillMatches || hasUnrecognizedEditMetadata(instructionMarker))
       ? instructionMarker
@@ -1574,15 +1628,17 @@ export function courseFromR5(
     const result = reconcileNativeRetainedCourse(
       retained,
       effectiveDosages,
-      currentInstruction,
+      replacementInstruction,
       course,
       preserveRetainedMarkers,
       warnings,
       retainedSource,
       reconciliationSources,
-      sourceContext
+      sourceContext,
+      instructionStillMatches ? savedInstruction : undefined
     );
-    return withPreservedSourceExtension(result, instructionSource);
+    return withPreservedSourceExtension(result, instructionSource ??
+      (savedInstruction !== undefined && result.instruction !== savedInstruction ? instructionMarker : undefined));
   }
   // An all-empty editable R5 projection has no dosage carrier. Its course
   // annotation is the only saved source; retain deleted drafts as inert

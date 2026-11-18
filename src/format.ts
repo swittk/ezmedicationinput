@@ -959,7 +959,7 @@ function describeCalendarEventsEnglish(
   if (!events?.length) return undefined;
   const parts: string[] = [];
   for (const event of events) {
-    const formatted = formatIsoCalendarDateEnglish(event.isoDate);
+    const formatted = event.fhirDateTime ?? formatIsoCalendarDateEnglish(event.isoDate);
     if (formatted) parts.push(formatted);
   }
   return parts.length ? `on ${joinWithAnd(parts)}` : undefined;
@@ -1175,7 +1175,7 @@ function formatShort(clause: CanonicalSigClause): string {
     parts.push(times.join(","));
   }
   if (schedule.calendarEvents?.length) {
-    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+    parts.push(`@${schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate).join(",")}`);
   }
   if (schedule.boundsStart) {
     parts.push(`from${schedule.boundsStart}`);
@@ -1369,7 +1369,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? instructionGraphRichPrimaryAction(clause)
     : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause.dose, "en")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en")
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

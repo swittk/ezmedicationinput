@@ -1053,6 +1053,39 @@ function occurrenceCapBucketKey(date: Date, cap: CanonicalOccurrenceCapExpr, tim
  * retreat, so a binary search over the whole requested horizon is invalid.
  * Jump directly to the candidate expiry date, then search only monotone
  * pieces separated by civil days and source/target offset transitions. */
+function calendarQuantityWindowCuts(
+  begin: number, stop: number, cap: CanonicalOccurrenceCapExpr, zone: string
+): number[] {
+const day = startOfLocalDay(new Date(begin), zone), nextDay = addLocalDays(day, 1, zone);
+const cuts = [begin, stop];
+  const sourceTransition = calendarOffsetTransition(day, nextDay, zone);
+  if (sourceTransition !== undefined && sourceTransition > begin && sourceTransition < stop)
+    cuts.push(sourceTransition);
+  const target = new Date(quantityCapWindowStart(new Date(begin), cap, zone));
+  const targetDay = startOfLocalDay(target, zone), targetNext = addLocalDays(targetDay, 1, zone);
+  const targetTransition = calendarOffsetTransition(targetDay, targetNext, zone);
+  if (targetTransition !== undefined) {
+    // A target gap's shifted clocks jump back at the end of its gap;
+    // a target fold has two possible offsets. Place both wall-clock
+    // edges into this source day, using both of its actual offsets.
+    const before = getTimeParts(new Date(targetTransition - 1), zone);
+    const after = getTimeParts(new Date(targetTransition), zone);
+    const edges = [before.hour * 3600 + before.minute * 60 + before.second + 1,
+      after.hour * 3600 + after.minute * 60 + after.second];
+    const source = getTimeParts(day, zone);
+    const offsets = [getOffset(day, zone), getOffset(new Date(nextDay.getTime() - 1), zone)];
+    for (const edge of edges) for (const offset of offsets) {
+      const at = Date.UTC(source.year, source.month - 1, source.day) + edge * 1000 - offset * 60000;
+      if (at <= begin || at >= stop) continue;
+      const actual = getTimeParts(new Date(at), zone);
+      if (actual.year === source.year && actual.month === source.month && actual.day === source.day &&
+          actual.hour * 3600 + actual.minute * 60 + actual.second === edge) cuts.push(at);
+    }
+  }
+  cuts.sort((a, b) => a - b);
+  return cuts;
+}
+
 function calendarQuantityCapRelease(
   from: number, oldest: number, cap: CanonicalOccurrenceCapExpr, end: number, zone: string
 ): number {
@@ -1062,32 +1095,7 @@ function calendarQuantityCapRelease(
   while (day.getTime() < end) {
     const nextDay = addLocalDays(day, 1, zone);
     const begin = Math.max(from, day.getTime()), stop = Math.min(end, nextDay.getTime());
-    const cuts = [begin, stop];
-    const sourceTransition = calendarOffsetTransition(day, nextDay, zone);
-    if (sourceTransition !== undefined && sourceTransition > begin && sourceTransition < stop)
-      cuts.push(sourceTransition);
-    const target = new Date(quantityCapWindowStart(new Date(begin), cap, zone));
-    const targetDay = startOfLocalDay(target, zone), targetNext = addLocalDays(targetDay, 1, zone);
-    const targetTransition = calendarOffsetTransition(targetDay, targetNext, zone);
-    if (targetTransition !== undefined) {
-      // A target gap's shifted clocks jump back at the end of its gap;
-      // a target fold has two possible offsets. Place both wall-clock
-      // edges into this source day, using both of its actual offsets.
-      const before = getTimeParts(new Date(targetTransition - 1), zone);
-      const after = getTimeParts(new Date(targetTransition), zone);
-      const edges = [before.hour * 3600 + before.minute * 60 + before.second + 1,
-        after.hour * 3600 + after.minute * 60 + after.second];
-      const source = getTimeParts(day, zone);
-      const offsets = [getOffset(day, zone), getOffset(new Date(nextDay.getTime() - 1), zone)];
-      for (const edge of edges) for (const offset of offsets) {
-        const at = Date.UTC(source.year, source.month - 1, source.day) + edge * 1000 - offset * 60000;
-        if (at <= begin || at >= stop) continue;
-        const actual = getTimeParts(new Date(at), zone);
-        if (actual.year === source.year && actual.month === source.month && actual.day === source.day &&
-            actual.hour * 3600 + actual.minute * 60 + actual.second === edge) cuts.push(at);
-      }
-    }
-    cuts.sort((a, b) => a - b);
+    const cuts = calendarQuantityWindowCuts(begin, stop, cap, zone);
     for (let index = 0; index + 1 < cuts.length; index++) {
       let low = cuts[index], high = cuts[index + 1] - 1;
       if (low > high) continue;
@@ -1117,9 +1125,10 @@ function maximumCapacityWithRollingLimits(
   zone: string,
   allocations?: SupplyAllocation[],
   range?: ExecutableDoseRange,
-  weightedPrior?: readonly SupplyAllocation[]
+  weightedPrior?: readonly SupplyAllocation[],
+  remainingCount = Infinity
 ): number {
-  if (!intervals.length) return 0;
+  if (!intervals.length || remainingCount <= 0) return 0;
   const end = intervals[intervals.length - 1].end;
   const prior: SupplyAllocation[] = (priorDoseTimes ?? []).map((value) => ({
     at: coerceDate(value, "priorDoseTimes").getTime(),
@@ -1147,9 +1156,9 @@ function maximumCapacityWithRollingLimits(
   let at = intervals[0].start;
   for (const interval of intervals) {
     at = Math.max(at, interval.start);
-    while (at < interval.end) {
+    while (at < interval.end && count < remainingCount) {
       const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
-      let room = cap.max - (used.get(bucket) ?? 0);
+      let room = Math.min(cap.max - (used.get(bucket) ?? 0), remainingCount - count);
       if (room <= 0) {
         at = firstInstant(at + 1, (value) => occurrenceCapBucketIndex(new Date(value), cap, zone) > bucket);
         continue;
@@ -1200,6 +1209,212 @@ function maximumCapacityWithRollingLimits(
   }
   return count;
 }
+/** This search is restricted to untimed ranged supply with interacting
+ * occurrence/quantity allowances. Ordinary schedules and scalar doses never
+ * enter it. Cheap attainable bounds handle common long-horizon capacity. */
+const MAX_CAPACITY_SLOTS = 32;
+const MAX_CAPACITY_STATES = 50000;
+function capacityComplexity(): never {
+  throw new MedicationQuantityCalculationError("ranged-capacity-complexity",
+    "The ranged dose and interacting quantity/use limits exceed the exact supply planner's 32-slot or 50,000-state bound. Use a shorter supply window or provide a resolved per-administration quantity; the original constraints remain retained.");
+}
+interface QuantityDifferenceEdge { from: number; to: number; value: number; strict?: boolean }
+function fixedCapacityQuantities(
+  times: readonly number[], caps: readonly CanonicalOccurrenceCapExpr[],
+  prior: readonly SupplyAllocation[], range: ExecutableDoseRange, zone: string
+): { quantity: number; values: number[]; attained: boolean } | undefined {
+  const edges: QuantityDifferenceEdge[] = [];
+  for (let index = 1; index <= times.length; index++) {
+    edges.push({ from: index - 1, to: index, value: range.high });
+    edges.push({ from: index, to: index - 1, value: -range.low, strict: range.strictLow });
+    for (const cap of caps) {
+      const since = quantityCapWindowStart(new Date(times[index - 1]), cap, zone);
+      let first = 0;
+      while (first < index && times[first] <= since) first++;
+      let used = 0;
+      for (const item of prior) if (item.at > since && item.at <= times[index - 1])
+        used += item.quantity ?? item.count * range.high;
+      edges.push({ from: first, to: index, value: cap.max - used });
+    }
+  }
+  // Prefix sums turn all rolling quantities and per-dose endpoints into
+  // difference inequalities. The shortest path from S0 fixes the largest
+  // feasible final sum; a negative cycle means these event slots cannot fit.
+  const solve = (strict: boolean, objective?: number) => {
+    const graph = objective === undefined ? edges :
+      [...edges, { from: times.length, to: 0, value: -objective }];
+    const values = new Array<number>(times.length + 1).fill(Infinity);
+    const infinitesimal = new Array<number>(times.length + 1).fill(0);
+    values[0] = 0;
+    for (let pass = 0; pass <= times.length; pass++) {
+      let changed = false;
+      for (const edge of graph) {
+        if (!Number.isFinite(values[edge.from])) continue;
+        const candidate = values[edge.from] + edge.value;
+        const epsilon = infinitesimal[edge.from] - (strict && edge.strict ? 1 : 0);
+        const delta = candidate - values[edge.to];
+        if (delta < -1e-10 || (Math.abs(delta) <= 1e-10 && epsilon < infinitesimal[edge.to])) {
+          values[edge.to] = candidate; infinitesimal[edge.to] = epsilon; changed = true;
+        }
+      }
+      if (!changed) return { values, infinitesimal, graph };
+      if (pass === times.length) return undefined;
+    }
+    return undefined;
+  };
+  const closed = solve(false);
+  if (!closed) return undefined;
+  const quantity = closed.values[times.length];
+  if (!range.strictLow) return { quantity, attained: true,
+    values: times.map((_, i) => closed.values[i + 1] - closed.values[i]) };
+  if (!solve(true)) return undefined;
+  const exact = solve(true, quantity);
+  if (!exact) return { quantity, values: [], attained: false };
+  // Choose a real positive perturbation satisfying every strict edge while
+  // retaining the exact objective, rather than treating >low as >=low.
+  let epsilon = Math.max(1, range.high) * 1e-7;
+  for (const edge of exact.graph) {
+    const slack = edge.value - (exact.values[edge.to] - exact.values[edge.from]);
+    const coefficient = exact.infinitesimal[edge.to] - exact.infinitesimal[edge.from];
+    if (slack > 1e-10 && coefficient > 0) epsilon = Math.min(epsilon, slack / (coefficient + 1) / 2);
+  }
+  const values = times.map((_, index) =>
+    exact.values[index + 1] - exact.values[index] +
+    epsilon * (exact.infinitesimal[index + 1] - exact.infinitesimal[index]));
+  return { quantity, values, attained: true };
+}
+function elapsedCapMilliseconds(cap: CanonicalOccurrenceCapExpr): number | undefined {
+  switch (cap.periodUnit) {
+    case DurationUnit.Second: return cap.period * 1000;
+    case DurationUnit.Minute: return cap.period * 60000;
+    case DurationUnit.Hour: return cap.period * 3600000;
+    case DurationUnit.Day: return cap.period * 86400000;
+    case DurationUnit.Week: return cap.period * 604800000;
+    default: return undefined;
+  }
+}
+function maximumRangedCapacity(
+  intervals: readonly { start: number; end: number }[], cap: CanonicalOccurrenceCapExpr,
+  quantityCaps: readonly CanonicalOccurrenceCapExpr[], priorDoseTimes: CanonicalSupplyOptions["priorDoseTimes"],
+  zone: string, allocations: SupplyAllocation[], range: ExecutableDoseRange,
+  weightedPrior: readonly SupplyAllocation[] | undefined, slotBudget: number
+): number {
+  const sum = (plan: readonly SupplyAllocation[]) => plan.reduce((value, item) => value +
+    (item.quantity ?? item.count * range.high), 0);
+  let bestQuantity = sum(allocations);
+  let best = allocations.slice();
+  const from = intervals[0]?.start, end = intervals[intervals.length - 1]?.end;
+  if (from === undefined || end === undefined || slotBudget <= 0) return 0;
+  let upper = slotBudget * range.high;
+  for (const limit of quantityCaps) {
+    const width = elapsedCapMilliseconds(limit);
+    if (width) {
+      const blocks = Math.ceil((end - from) / width);
+      upper = Math.min(upper, blocks * limit.max);
+      if (range.low > 0) slotBudget = Math.min(slotBudget, blocks *
+        (range.strictLow ? Math.ceil(limit.max / range.low) - 1 : Math.floor(limit.max / range.low + 1e-9)));
+    }
+  }
+  upper = Math.min(upper, slotBudget * range.high);
+  if (bestQuantity >= upper - 1e-9) return best.reduce((n, item) => n + item.count, 0);
+  if (slotBudget > MAX_CAPACITY_SLOTS) capacityComplexity();
+  const prior: SupplyAllocation[] = (priorDoseTimes ?? []).map(value => ({
+    at: coerceDate(value, "priorDoseTimes").getTime(), count: 1, quantity: range.high,
+  }));
+  if (weightedPrior?.length) prior.push(...weightedPrior);
+  const priorByBucket = new Map<number, number>();
+  for (const item of prior) {
+    const key = occurrenceCapBucketIndex(new Date(item.at), cap, zone);
+    priorByBucket.set(key, (priorByBucket.get(key) ?? 0) + item.count);
+  }
+  const eligible = (at: number) => intervals.some(interval => at >= interval.start && at < interval.end);
+  const base = new Set<number>();
+  let states = 0;
+  const spend = () => { if (++states > MAX_CAPACITY_STATES) capacityComplexity(); };
+  for (const interval of intervals) {
+    base.add(interval.start);
+    let at = interval.start;
+    while (at < interval.end) {
+      spend();
+      const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
+      if (occurrenceCapBucketIndex(new Date(interval.end - 1), cap, zone) === bucket) break;
+      let low = at + 1, high = interval.end - 1;
+      while (low < high) {
+        const middle = low + Math.floor((high - low) / 2);
+        if (occurrenceCapBucketIndex(new Date(middle), cap, zone) > bucket) high = middle;
+        else low = middle + 1;
+      }
+      base.add(low); at = low;
+    }
+  }
+  const expiries = (oldest: number, out: Set<number>) => {
+    for (const limit of quantityCaps) {
+      const width = elapsedCapMilliseconds(limit);
+      if (width) {
+        const at = oldest + width;
+        if (eligible(at)) out.add(at);
+      } else {
+        // A calendar cutoff can release, re-include, and release the same
+        // history again. Enumerate every civil/offset monotone piece.
+        for (const interval of intervals) {
+          const cuts = calendarQuantityWindowCuts(interval.start, interval.end, limit, zone);
+          for (let index = 0; index + 1 < cuts.length; index++) {
+            spend();
+            let low = cuts[index], high = cuts[index + 1] - 1;
+            out.add(low);
+            if (quantityCapWindowStart(new Date(high), limit, zone) < oldest) continue;
+            while (low < high) {
+              const middle = low + Math.floor((high - low) / 2);
+              if (quantityCapWindowStart(new Date(middle), limit, zone) >= oldest) high = middle;
+              else low = middle + 1;
+            }
+            out.add(low);
+          }
+        }
+      }
+    }
+  };
+  for (const item of prior) expiries(item.at, base);
+  let supremum = bestQuantity;
+  const times: number[] = [], used = new Map<number, number>();
+  const explore = (candidates: readonly number[]): void => {
+    if (bestQuantity >= upper - 1e-9 || times.length >= slotBudget) return;
+    const minimum = times.length ? times[times.length - 1] : from;
+    for (const at of candidates) {
+      if (at < minimum) continue;
+      spend();
+      const bucket = occurrenceCapBucketIndex(new Date(at), cap, zone);
+      if ((used.get(bucket) ?? 0) + (priorByBucket.get(bucket) ?? 0) >= cap.max) continue;
+      times.push(at);
+      const plan = fixedCapacityQuantities(times, quantityCaps, prior, range, zone);
+      if (plan) {
+        supremum = Math.max(supremum, plan.quantity);
+        if (plan.attained && plan.quantity > bestQuantity + 1e-9) {
+          bestQuantity = plan.quantity;
+          best = [];
+          for (let index = 0; index < times.length; index++) if (plan.values[index] > 0)
+            best.push({ at: times[index], count: 1, quantity: plan.values[index] });
+        }
+        if (times.length < slotBudget && plan.quantity + (slotBudget - times.length) * range.high > bestQuantity + 1e-9) {
+          used.set(bucket, (used.get(bucket) ?? 0) + 1);
+          const next = new Set(candidates);
+          expiries(at, next);
+          explore(Array.from(next).sort((a, b) => a - b));
+          used.set(bucket, used.get(bucket)! - 1);
+        }
+      }
+      times.pop();
+      if (bestQuantity >= upper - 1e-9) return;
+    }
+  };
+  explore(Array.from(base).sort((a, b) => a - b));
+  if (supremum > bestQuantity + 1e-9)
+    throw new MedicationQuantityCalculationError("ranged-capacity-open-maximum",
+      "These strict dose lower bounds have a finite supply supremum but no attainable maximum. Provide a resolved per-administration quantity or a closed dose range before calculating supply; all source constraints remain retained.");
+  allocations.splice(0, allocations.length, ...best);
+  return best.reduce((n, item) => n + item.count, 0);
+}
+
 /** Count permitted capacity, not invented clocks, in each explicit cap period.
  * @param dosage Typed calendar restrictions on the dosage.
  * @param cap Per-period maximum administration count.
@@ -1259,10 +1474,31 @@ function maximumUnscheduledCapCount(
     }
     day = next;
   }
+  const total = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  const remaining = total === undefined ? Infinity
+    : Math.max(0, total - Math.floor(options.priorCount ?? options.priorDoseTimes?.length ?? 0));
   if (quantityCaps.length || allocations) {
-    return maximumCapacityWithRollingLimits(
-      intervals, cap, quantityCaps, options.priorDoseTimes, timeZone, allocations, range, weightedPrior
+    const packed = allocations ?? [];
+    const count = maximumCapacityWithRollingLimits(
+      intervals, cap, quantityCaps, options.priorDoseTimes, timeZone, packed, range, weightedPrior, remaining
     );
+    if (!range || !quantityCaps.length || range.low === range.high) return count;
+    let possibleSlots = ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
+    if (options.priorDoseTimes?.length || weightedPrior?.length) {
+      const used = new Map<number, number>();
+      const record = (at: number, count: number) => {
+        const bucket = occurrenceCapBucketIndex(new Date(at), cap, timeZone);
+        if (ranges.some(range => range.first <= bucket && bucket <= range.last))
+          used.set(bucket, (used.get(bucket) ?? 0) + count);
+      };
+      for (const value of options.priorDoseTimes ?? []) record(coerceDate(value, "priorDoseTimes").getTime(), 1);
+      for (const item of weightedPrior ?? []) record(item.at, item.count);
+      for (const count of used.values()) possibleSlots -= Math.min(cap.max, count);
+    }
+    const slotBudget = Math.min(remaining, possibleSlots);
+    return maximumRangedCapacity(intervals, cap, quantityCaps, options.priorDoseTimes,
+      timeZone, packed, range, weightedPrior, slotBudget);
+
   }
   let count = ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
   const used = new Map<number, number>();
@@ -1273,7 +1509,7 @@ function maximumUnscheduledCapCount(
     }
   }
   for (const value of used.values()) count -= Math.min(cap.max, value);
-  return Math.max(0, count);
+  return Math.min(remaining, Math.max(0, count));
 }
 function applyOccurrenceCap(
   candidates: string[],
@@ -1429,7 +1665,7 @@ function executableQuantityCaps(
     const normalizedActual = normalizeQuantityCapUnit(actualUnit);
     const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
     const perTargetDose =
-      normalizedActual === normalizedMaximum ? dose.value : convertValue(dose.value, actualUnit, maximumUnit);
+      normalizedActual === normalizedMaximum ? dose.value : convertValue(dose.value, actualUnit, maximumUnit, measuredStrengthRatio(context));
     if (perTargetDose === null || !Number.isFinite(perTargetDose) || perTargetDose <= 0) {
       continue;
     }
@@ -1621,18 +1857,7 @@ function treatmentRelativeInstant(
     case "d":
     case "wk": {
       const days = unit === "wk" ? quantity * 7 : quantity;
-      const parts = getTimeParts(orderedAt, timeZone);
-      const clock = sourceClock ?? parts;
-      const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
-      const result = calendarBoundaryDate(
-        timeZone,
-        shifted.getUTCFullYear(),
-        shifted.getUTCMonth() + 1,
-        shifted.getUTCDate(),
-        clock.hour,
-        clock.minute,
-        clock.second
-      );
+      const result = addCalendarDaysAtClock(orderedAt, days, timeZone, sourceClock ?? getTimeParts(orderedAt, timeZone));
       if (!result) throw new Error("Invalid R6 treatment-day offset");
       return result;
     }
@@ -1873,6 +2098,19 @@ function treatmentStepWindow(
       absoluteEnd
     );
     let completionPoint: Date | undefined;
+    if (administration.schedule?.explicitEvents?.length) {
+      // A finite authored event list owns its last possible administration.
+      // Its future events may extend beyond the next cycle's default clip.
+      const completion = explicitAdministrationCompletion(administration, cadence.origin,
+        eligibleFrom, options ?? { from: cadence.origin, timeZone }, timeZone);
+      if (completion) {
+        const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
+        if (!endExclusive || fence <= endExclusive) {
+          endExclusive = fence;
+          if (completion.point) completionPoint = completion.end;
+        }
+      }
+    }
     // Overlapping capped cycles cannot close an exact-count phase using
     // its LOCAL pre-cap completion point: earlier accepted administrations
     // from another cycle may defer this component's third actual dose.
@@ -1936,14 +2174,14 @@ function treatmentStepWindow(
 /** A repeated step keeps its authored civil duration when both boundaries
  * use a compatible calendar unit. Other resolved spans remain elapsed; an
  * implicit finite-count step instead restarts after its accepted completion. */
-function stepRepeatSpan(stage: CanonicalStage, window: TreatmentStepWindow): CanonicalMeasure | undefined {
+function stepRepeatSpan(stage: CanonicalStage, window: TreatmentStepWindow, implicitTreatmentStart: boolean): CanonicalMeasure | undefined {
   if (!window.end || window.completionPoint) return undefined;
   const start = stage.start?.displacement;
   const end = stage.end?.displacement;
   if (end && !end.comparator && (!start || !start.comparator)) {
     const unit = parseBoundsDurationUnit(end), startUnit = parseBoundsDurationUnit(start);
     const z = normalizedCalendarInterval(end.value, unit);
-    const a = start?.value === 0 && z
+    const a = (start?.value === 0 || (!stage.start && implicitTreatmentStart)) && z
       ? z.days !== undefined ? { days: 0 } : { months: 0 }
       : start ? normalizedCalendarInterval(start.value, startUnit) : undefined;
     if (a?.days !== undefined && z?.days !== undefined && z.days > a.days)
@@ -1991,6 +2229,7 @@ function* treatmentStepWindows(
     const repetitions = positiveInteger(stage.count) ?? 1;
     let localAnchor = anchor, localCourse = course, localClock = sourceClock;
     let advance: ((at: Date) => Date | null) | null | undefined;
+    let civilRepetition = false;
     for (let repetition = 0; repetition < repetitions; repetition++) {
       const window = treatmentStepWindow(localCourse, index, localAnchor, previousEnd,
         timeZone, localClock, predecessorClock, options, predecessorPoint,
@@ -2024,7 +2263,8 @@ function* treatmentStepWindows(
           localClock = predecessorClock;
         } else {
           if (advance === undefined) {
-            const span = stepRepeatSpan(stage, window);
+            const span = stepRepeatSpan(stage, window, index === 0 && window.start.getTime() === localAnchor.getTime());
+            civilRepetition = !!normalizedCalendarInterval(span?.value, parseBoundsDurationUnit(span));
             advance = durationStepper(span, timeZone, localAnchor, "recurrence", localClock);
           }
           const next = advance?.(localAnchor);
@@ -2033,8 +2273,7 @@ function* treatmentStepWindows(
               "The repeated treatment step does not define a usable duration.");
           localAnchor = next;
           // The original source clock belongs only to civil repetition.
-          const span = stepRepeatSpan(stage, window);
-          if (!normalizedCalendarInterval(span?.value, parseBoundsDurationUnit(span)))
+          if (!civilRepetition)
             localClock = getTimeParts(localAnchor, timeZone);
         }
       }
@@ -2109,24 +2348,44 @@ function hasRollingCycleLimit(course: CanonicalCourse): boolean {
         return true;
   return false;
 }
-/** One simple stage with no explicit cross-cycle duration, finite count,
- * or relative boundary cannot extend its own administration horizon.
- * Retain the scalar capped-cycle fast path without recomputing a full
- * treatment window just to discover a provably absent overlap. */
-function definitelyNonOverlappingCycle(course: CanonicalCourse): boolean {
+/** Compare relative spans only when their calendar/elapsed meanings agree.
+ * A 24-hour phase is not bounded by every one-day cycle at a clock change. */
+function durationFitsEveryCycle(bound: CanonicalMeasure, cycle: CanonicalMeasure | undefined): boolean {
+  if (!cycle || bound.value === undefined || cycle.value === undefined ||
+      bound.value <= 0 || cycle.value <= 0 ||
+      (bound.comparator && bound.comparator !== "~" && bound.comparator !== "<" && bound.comparator !== "<="))
+    return false;
+  const boundUnit = parseBoundsDurationUnit(bound), cycleUnit = parseBoundsDurationUnit(cycle);
+  if (!boundUnit || !cycleUnit) return false;
+  const left = normalizedCalendarInterval(bound.value, boundUnit);
+  const right = normalizedCalendarInterval(cycle.value, cycleUnit);
+  if (left || right) return !!left && !!right && (
+    left.days !== undefined && right.days !== undefined && left.days <= right.days ||
+    left.months !== undefined && right.months !== undefined && left.months <= right.months);
+  const seconds = (value: number, unit: DurationUnit) => unit === DurationUnit.Second ? value :
+    unit === DurationUnit.Minute ? value * 60 : unit === DurationUnit.Hour ? value * 3600 :
+    unit === DurationUnit.Day ? value * 86400 : unit === DurationUnit.Week ? value * 604800 : NaN;
+  return seconds(bound.value, boundUnit) <= seconds(cycle.value, cycleUnit);
+}
+/** Unbounded scalar members are clipped at the next cycle. Explicit civil
+ * or elapsed lengths also prove nonoverlap when both spans share a scale.
+ * Exact counted schedules and absolute event lists may extend farther. */
+function definitelyNonOverlappingCycle(course: CanonicalCourse, cycle?: CanonicalMeasure): boolean {
   if (course.stages.length !== 1) return false;
   const stage = course.stages[0];
-  if (stage.start || stage.end) return false;
+  if (stage.start || stage.end || (stage.count !== undefined && stage.count !== 1)) return false;
   for (const member of stage.administrations) {
     const repeat = member.schedule?.recurrence;
     if (member.phaseOrigin || member.phaseOriginIssue ||
         member.anchoredLength || member.delayMinutes ||
-        repeat?.courseLength || repeat?.courseLengthRange ||
         repeat?.calendarWindow?.end || repeat?.calendarWindow?.start ||
-        repeat?.count !== undefined || repeat?.countMax !== undefined ||
+        (repeat?.count !== undefined && !unscheduledOccurrenceCapacity(member)) ||
         repeat?.occurrenceDuration !== undefined ||
         repeat?.startOffset || repeat?.endOffset ||
         member.schedule?.explicitEvents?.length) return false;
+    if (repeat?.courseLength && !durationFitsEveryCycle(repeat.courseLength, cycle)) return false;
+    if (repeat?.courseLengthRange && (!repeat.courseLengthRange.high ||
+        !durationFitsEveryCycle(repeat.courseLengthRange.high, cycle))) return false;
   }
   return true;
 }
@@ -2499,9 +2758,8 @@ function chronologicalCapAcceptor(
  * administrations before later ones. Scheduling and numeric supply both
  * consume this SAME event stream, without a second cap algorithm.
  *
- * This specialized path is invoked ONLY when a rolling-capped first cycle
- * actually extends past its successor's start; nonoverlap scalar/staged
- * paths and the efficient ordinary repeated-course loop remain unchanged. */
+ * This path is needed when overlapping capped cycles are possible. A
+ * structural clipping proof keeps ordinary nonoverlapping cycles fast. */
 function chronologicalRepeatedEvents(
   course: CanonicalCourse,
   options: NextDueDoseOptions,
@@ -2608,29 +2866,19 @@ function scheduleRepeatedCourse(
   const results: string[] = [];
   const singleCycle = { ...course, cycleInterval: undefined };
   const rollingUsage = hasRollingCycleLimit(singleCycle) ? new Map<string, string[]>() : undefined;
-  if(rollingUsage && !definitelyNonOverlappingCycle(singleCycle)){
-    const nextCycle=advance(anchor);
-    if(nextCycle&&repeatedCourseHorizon(singleCycle,anchor,nextCycle,timeZone,firstClock,options)>nextCycle){
-      // Only overlapping capped courses need the chronological merge.
-      // Both scheduling and supply share the same accepted event stream.
-      const events=chronologicalRepeatedEvents(course,options,timeZone,undefined,limit);
-      const ordered:string[]=[];
-      for(const event of events)ordered.push(event.iso);
-      return ordered;
-    }
+  if (rollingUsage && !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval)) {
+    // An elapsed phase can outlast a later civil cycle after a clock change,
+    // even when the first cycle fits. Only structural clipping proves that
+    // every cycle is disjoint; otherwise admit events in timestamp order.
+    const events = chronologicalRepeatedEvents(course, options, timeZone, undefined, limit);
+    return events.map(event => event.iso);
   }
   let cycleStart = anchor;
   let guard = 0;
   const historicalOrdinal = cycleOrdinalNearQuery(course.cycleInterval, anchor, from, timeZone);
   if (!rollingUsage && historicalOrdinal > 0 && course.stages.length === 1 &&
       !course.stages[0].start && !course.stages[0].end) {
-    const firstEnd = advance(anchor);
-    // A stage can have an administration tail extending into later cycles.
-    // Only seek directly when the actual first-cycle horizon proves there
-    // is no such tail. Preserve historic overlapping cycles otherwise.
-    const noOverlap = firstEnd && repeatedCourseHorizon(
-      singleCycle, anchor, firstEnd, timeZone, firstClock, options
-    ) <= firstEnd;
+    const noOverlap = definitelyNonOverlappingCycle(singleCycle, course.cycleInterval);
     if (noOverlap) {
       const interval = normalizedCalendarInterval(
         course.cycleInterval?.value, parseBoundsDurationUnit(course.cycleInterval)
@@ -2950,7 +3198,13 @@ function executionCourseWithPeriodOffsets(course: CanonicalCourse): CanonicalCou
  * eligible administration. This never becomes public options or FHIR state. */
 type PhaseCountOptions = NextDueDoseOptions & {
   countEligibilityStart?: Date;
+  /** Actual doses already counted while replaying a finite capped course. */
+  countedActualTimes?: ReadonlySet<number>;
 };
+function unrecordedCountCandidates(candidates: string[], options: NextDueDoseOptions): string[] {
+  const recorded = (options as PhaseCountOptions).countedActualTimes;
+  return recorded ? candidates.filter(iso => !recorded.has(Date.parse(iso))) : candidates;
+}
 export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDoseOptions): string[] {
   if (Array.isArray(dosage))
     return nextDueDoses(courseFromCanonicalRows(selectedAlternativeMembers(dosage, options)), options);
@@ -3009,12 +3263,17 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const origin = eligibleAt ?? resolveRepeatBoundsStart(repeatForCount, zone) ??
       (options.orderedAt === undefined ? requestedFrom : coerceDate(options.orderedAt, "orderedAt"));
     let used = options.priorCount ?? 0;
-    if (one.asNeeded && options.priorCount === undefined) {
-      // A PRN opportunity is not evidence of use; only known actual doses
-      // consume its total allowance before a later query.
+    let countedActualTimes: Set<number> | undefined;
+    if (options.priorCount === undefined) {
+      // Actual history consumes the total count once. A coincident planned
+      // event is the same administration, so omit it from inferred replay
+      // before either rolling or occurrence ceilings are admitted.
       for (const stamp of options.priorDoseTimes ?? []) {
         const actual = coerceDate(stamp, "priorDoseTimes");
-        if (actual >= origin && actual < requestedFrom) used++;
+        if (actual >= origin && actual < requestedFrom) {
+          used++;
+          (countedActualTimes ??= new Set()).add(actual.getTime());
+        }
       }
     }
     const available = Math.max(0, acceptedCount - Math.floor(used));
@@ -3034,6 +3293,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const candidates = nextDueDoses(uncapped, {
       ...options,
       countEligibilityStart: undefined,
+      countedActualTimes,
       priorCount: undefined,
       from: one.asNeeded || (options.priorCount !== undefined && !eligibleAt)
         ? requestedFrom : origin,
@@ -3115,7 +3375,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       excludedWeekdays: _excludedWeekdays,
       ...plainDosage
     } = one;
-    const quantityCaps = executableQuantityCaps(one);
+    const quantityCaps = executableQuantityCaps(one, (options as Partial<CanonicalSupplyOptions>).context);
     const occurrenceCap = getTimingOccurrenceCap(one.schedule?.recurrence);
     // The cap is an allowance for *administered* doses, not for candidate
     // opportunities. Remove it while evaluating exclusions and conditions,
@@ -3182,7 +3442,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       // Nor may a dose rejected by one cap consume the other's allowance.
       // Commit the eligible candidate only after every authored cap accepts it.
       const capped = applyQuantityCaps(
-        accepted,
+        unrecordedCountCandidates(accepted, options),
         quantityCaps,
         options.priorDoseTimes,
         timeZone,
@@ -3361,7 +3621,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     throw new Error("Configuration with a valid timeZone is required");
   }
   dosage = prepareBestEffortTiming(dosage);
-  const quantityCaps = executableQuantityCaps(dosage);
+  const quantityCaps = executableQuantityCaps(dosage, (options as Partial<CanonicalSupplyOptions>).context);
   if (quantityCaps.length) {
     const requestLimit = Math.floor(limit);
     let candidateLimit = Math.min(10000, Math.max(16, requestLimit * 4));
@@ -3373,7 +3633,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     while (true) {
       const candidates = nextDueDoses(unsafeguarded, { ...options, limit: candidateLimit });
       const accepted = applyQuantityCaps(
-        candidates,
+        unrecordedCountCandidates(candidates, options),
         quantityCaps,
         options.priorDoseTimes,
         timeZone,
@@ -3396,7 +3656,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         priorDoseTimes: undefined,
       });
       const capped = applyOccurrenceCap(
-        uncapped,
+        unrecordedCountCandidates(uncapped, options),
         occurrenceCap,
         options.priorDoseTimes,
         timeZone,
@@ -3583,7 +3843,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
           )
           .slice(0, effectiveLimit);
       }
-      let currentDay = startOfLocalDay(from, timeZone);
+      let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
       let iterations = 0;
       const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit);
       while (
@@ -3762,6 +4022,10 @@ function derivePriorCountFromHistory(
     count += 1;
     return true;
   };
+  const waking = generateWakingHoursIntervalSeries(repeat, config, orderedAt,
+    orderedAt, from, timeZone, normalizedCount ?? 100000, dayFilter,
+    enforceDayFilter, calendarDays);
+  if (waking) return waking.length;
   const elapsedOrigin = clockAnchoredElapsedOrigin(
     repeat,
     resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt,
@@ -4391,6 +4655,18 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
   }
   return results;
 }
+/** Resolved clock entries are sorted by dayShift. The last entry determines
+ * how many earlier anchor dates may still yield an event inside this query. */
+function firstClockAnchorDay(
+  from: Date, entries: readonly ExpandedTime[], zone: string, orderedAt?: Date | null
+): Date {
+  const day = startOfLocalDay(from, zone);
+  const shift = entries[entries.length - 1]?.dayShift ?? 0;
+  if (shift <= 0) return day;
+  const first = addLocalDays(day, -shift, zone);
+  const treatmentDay = orderedAt ? startOfLocalDay(orderedAt, zone) : undefined;
+  return treatmentDay && treatmentDay > first ? treatmentDay : first;
+}
 /**
  * Internal helper to count dose events within a time range.
  *
@@ -4513,7 +4789,7 @@ function countScheduleEvents(
           ).length
         );
       }
-      let currentDay = startOfLocalDay(from, timeZone);
+      let currentDay = firstClockAnchorDay(from, expanded, timeZone, orderedAt);
       let iterations = 0;
       const maxIterations = calendarScanLimit(currentDay, to, hardLimit);
       while (count < countLimit && currentDay < to && iterations < maxIterations) {
@@ -4661,27 +4937,7 @@ function calculationHorizon(options: CanonicalSupplyOptions, zone: string): Date
       "The requested dispensing duration has no supported time unit; supply a duration in minutes, hours, days, weeks, months or years."
     );
   const from = coerceDate(options.from, "from");
-  let end: Date | null;
-  if (
-    (options.durationUnit === DurationUnit.Day || options.durationUnit === DurationUnit.Week) &&
-    Number.isInteger(options.durationValue)
-  ) {
-    const days = options.durationValue * (options.durationUnit === DurationUnit.Week ? 7 : 1);
-    const parts = getTimeParts(from, zone);
-    const shifted = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
-    end =
-      makeZonedDate(
-        zone,
-        shifted.getUTCFullYear(),
-        shifted.getUTCMonth() + 1,
-        shifted.getUTCDate(),
-        parts.hour,
-        parts.minute,
-        parts.second
-      ) ?? advance(from);
-  } else {
-    end = advance(from);
-  }
+  const end = advance(from);
   if (!end || end <= from)
     throw new MedicationQuantityCalculationError(
       "invalid-horizon",
@@ -4838,12 +5094,15 @@ function hasTimedRangedCaps(course: CanonicalCourse): boolean {
  */
 function maximumChronologicalSupplyCourse(
   course: CanonicalCourse,
-  options: CanonicalSupplyOptions
+  options: CanonicalSupplyOptions,
+  preserveClocks = false
 ): {
   course: CanonicalCourse;
+  hasClockAlternative: boolean;
   originalOf: Map<CanonicalAdministration, CanonicalAdministration>;
 } {
   let alteredStages: CanonicalStage[] | undefined;
+  let hasClockAlternative = false;
   const originalOf = new Map<CanonicalAdministration, CanonicalAdministration>();
   for (let i = 0; i < course.stages.length; i++) {
     const stage = course.stages[i];
@@ -4862,8 +5121,9 @@ function maximumChronologicalSupplyCourse(
       if (amounts?.length === 1 && !amounts[0].quantity && amounts[0].range &&
           hasPeriodLimits(generated))
         generated = prepareMeasuredDose(generated, options);
-      if (maximal.frequencyMaximum) {
+      if (maximal.frequencyMaximum && !preserveClocks) {
         const repeat = generated.schedule!.recurrence!;
+        hasClockAlternative ||= !!(repeat.clocks?.length || repeat.anchors?.length || generated.schedule!.code);
         generated = {
           ...generated,
           schedule: {
@@ -4885,7 +5145,7 @@ function maximumChronologicalSupplyCourse(
   }
   return {
     course: alteredStages ? { ...course, stages: alteredStages } : course,
-    originalOf,
+    hasClockAlternative, originalOf,
   };
 }
 function prepareMeasuredDose(
@@ -4948,7 +5208,7 @@ function prepareMeasuredDose(
     quantity = high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
       ? high : undefined;
     if (!quantity && low?.value !== undefined && Number.isFinite(low.value) && low.value > 0) {
-      const maximum = numericAdministrationLimits(dosage).administration;
+      const maximum = numericAdministrationLimits(dosage, measuredStrengthRatio(options.context), getDoseQuantityUnit).administration;
       const operator = maximum?.comparator;
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
         const unit = getDoseQuantityUnit(low), maxUnit = getDoseQuantityUnit(maximum);
@@ -4962,7 +5222,7 @@ function prepareMeasuredDose(
         "The prescribed dose range has no finite upper bound. Provide the applicable dose or a compatible administration maximum before calculating supply.");
     }
     if (quantity) {
-      const maximum = numericAdministrationLimits(dosage).administration;
+      const maximum = numericAdministrationLimits(dosage, measuredStrengthRatio(options.context), getDoseQuantityUnit).administration;
       const operator = maximum?.comparator;
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
         const unit = getDoseQuantityUnit(quantity), maxUnit = getDoseQuantityUnit(maximum);
@@ -5207,12 +5467,12 @@ function calculateTotalUnitsSingle(
   const maximalTiming = prepareMaximumSupplyTiming(sourceDosage);
   const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
   const rangePlan = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, context) : undefined;
-  const numericLimits = numericAdministrationLimits(dosage);
-  // Two independently authored bounds of the same scope must not be
-  // silently replaced by whichever happened to appear last in the data.
+  const strength = measuredStrengthRatio(context);
+  const numericLimits = numericAdministrationLimits(dosage, strength, getDoseQuantityUnit);
+  // Applicable maxima intersect; retained incomplete bounds still explain
+  // why only part of the authored constraints could be evaluated.
   let unevaluatedMaximumDose = numericLimits.multiple;
   let lifetimeMaximum: number | undefined;
-  const strength = measuredStrengthRatio(context);
   const doseForLimits = dosage.amounts?.[0]?.quantity;
   const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = numericLimits.lifetime;
@@ -5221,7 +5481,7 @@ function calculateTotalUnitsSingle(
     lifetime?.value !== undefined &&
     Number.isFinite(lifetime.value) &&
     lifetime.value >= 0 &&
-    (!lifetimeOperator || lifetimeOperator === "~")
+    (!lifetimeOperator || lifetimeOperator === "~" || lifetimeOperator === "<=")
   ) {
     const lifetimeUnit = getDoseQuantityUnit(lifetime);
     const converted =
@@ -5250,7 +5510,7 @@ function calculateTotalUnitsSingle(
       limit.value === undefined ||
       !Number.isFinite(limit.value) ||
       limit.value < 0 ||
-      (limitOperator && limitOperator !== "~")
+      (limitOperator && limitOperator !== "~" && limitOperator !== "<=")
     ) {
       unevaluatedMaximumDose = true;
     } else {
@@ -5360,13 +5620,6 @@ function calculateTotalUnitsSingle(
       rangePlan?.caps ?? executableQuantityCaps(dosage, context),
       capacityAllocations, rangePlan, supplyAccounting?.rangePrior
     );
-    const totalCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
-    if (totalCap !== undefined) {
-      count = Math.min(
-        count,
-        Math.max(0, totalCap - (options.priorCount ?? options.priorDoseTimes?.length ?? 0))
-      );
-    }
   } else if (rangePlan) {
     const concrete = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime, timeZone);
     let selected = concrete;
@@ -5729,6 +5982,65 @@ function calculateChronologicalCourseUnits(
       }
       return sumCourseUnits(entries,options);
 }
+/** A single component shares its rolling quantity ceiling across active
+ * cycles. If a feasible plan fills a cap-width partition of this query, no
+ * alternative clock plan can increase its total. Calendar month/year caps
+ * need their actual cutoff history and do not use this elapsed-time proof. */
+function attainedChronologicalSupplyBound(
+  course: CanonicalCourse, result: TotalUnitsResult, options: CanonicalSupplyOptions,
+  start: Date, end: Date
+): boolean {
+  if (course.stages.length !== 1 || course.stages[0].administrations.length !== 1) return false;
+  const member = course.stages[0].administrations[0];
+  const quantity = member.amounts?.length === 1 ? member.amounts[0].quantity : undefined;
+  const unit = quantity?.unit ?? quantity?.code;
+  if (!quantity || result.unit !== unit || /\/kg$/i.test(unit ?? "")) return false;
+  const range = member.amounts![0].range ? executableDoseRange(member, options.context) : undefined;
+  if (member.amounts![0].range && !range) return false;
+  const multiplier = getAdministrationTargetMultiplier(member, options.context);
+  const caps = range?.caps ?? executableQuantityCaps(member, options.context);
+  for (const cap of caps) {
+    const width = elapsedCapMilliseconds(cap);
+    if (!width || !Number.isFinite(width) || !Number.isFinite(cap.max) || cap.max <= 0) continue;
+    let bound = Math.ceil((end.getTime() - start.getTime()) / width) * cap.max *
+      (range ? 1 : quantity.value!) * multiplier;
+    if (options.roundToMultiple && options.roundToMultiple > 0)
+      bound = Math.ceil(bound / options.roundToMultiple) * options.roundToMultiple;
+    if (result.totalUnits >= bound - 1e-9) return true;
+  }
+  return false;
+}
+/** Compare complete feasible supply plans; inferred upper-frequency clocks
+ * cannot erase larger authored-clock quantities in a short query window. */
+function maximumChronologicalCourseUnits(
+  course: CanonicalCourse, options: CanonicalSupplyOptions, zone: string,
+  queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage
+): TotalUnitsResult {
+  const maximum = maximumChronologicalSupplyCourse(course, options);
+  if (!maximum.hasClockAlternative) return calculateChronologicalCourseUnits(
+    maximum.course, maximum.originalOf, options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
+  const upperUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
+  const upper = calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
+    options, zone, queryStart, queryEnd, anchor, upperUsage);
+  if (attainedChronologicalSupplyBound(maximum.course, upper, options, queryStart, queryEnd)) {
+    if (lifetimeUsage && upperUsage) {
+      lifetimeUsage.clear();
+      for (const [key, value] of upperUsage) lifetimeUsage.set(key, value);
+    }
+    return upper;
+  }
+  const authored = maximumChronologicalSupplyCourse(course, options, true);
+  const authoredUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
+  const concrete = calculateChronologicalCourseUnits(authored.course, authored.originalOf,
+    options, zone, queryStart, queryEnd, anchor, authoredUsage);
+  const selected = concrete.totalUnits > upper.totalUnits ? concrete : upper;
+  const selectedUsage = selected === concrete ? authoredUsage : upperUsage;
+  if (lifetimeUsage && selectedUsage) {
+    lifetimeUsage.clear();
+    for (const [key, value] of selectedUsage) lifetimeUsage.set(key, value);
+  }
+  return selected;
+}
 /**
  * Calculate a complete sequential/parallel regimen with the same global R6
  * step windows that the scheduler uses. Supply is summed per component,
@@ -5763,9 +6075,7 @@ function calculateCourseTotalUnits(
   const repeatedStep = hasRepeatedStep(course);
   if (repeatedStep) lifetimeUsage ??= lifetimeCycleUsage(course);
   if (!course.cycleInterval && repeatedStep && hasRollingCycleLimit(course)) {
-    const maximum = maximumChronologicalSupplyCourse(course, options);
-    return calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
-      options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
+    return maximumChronologicalCourseUnits(course, options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
   }
   const cycleAdvance = durationStepper(course.cycleInterval, zone, anchor);
   if (course.cycleInterval && !cycleAdvance)
@@ -5795,20 +6105,10 @@ function calculateCourseTotalUnits(
       if (member.amounts?.[0]?.range && hasPeriodLimits(member) && unscheduledOccurrenceCapacity(member)) {
         rangeUsage = new Map(); break;
       }
-    const firstCycleEnd=cycleAdvance(anchor);
     const timedRangedCaps = priorCycleUsage && hasTimedRangedCaps(singleCycle);
-    if(priorCycleUsage && (timedRangedCaps || !definitelyNonOverlappingCycle(singleCycle)) && firstCycleEnd){
-      const maximum = maximumChronologicalSupplyCourse(course, options);
-      const maximumCycle = maximum.course === course
-        ? singleCycle : { ...maximum.course, cycleInterval: undefined };
-      if (timedRangedCaps || repeatedCourseHorizon(maximumCycle,anchor,firstCycleEnd,zone,firstClock,options)>firstCycleEnd) {
-      // The identical chronological acceptance stream governs numeric
-      // supply; cycle-ordinal summation is incorrect for overlapping
-      // event windows with a shared rolling cap. Maximal frequency
-      // opportunities use this SAME ledger, without changing source clocks.
-      return calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
-        options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
-      }
+    if (priorCycleUsage && (timedRangedCaps || !definitelyNonOverlappingCycle(singleCycle, course.cycleInterval))) {
+      return maximumChronologicalCourseUnits(course, options, zone,
+        queryStart, queryEnd, anchor, lifetimeUsage);
     }
     let cycleStart = anchor;
     let guard = 0;
@@ -6145,6 +6445,24 @@ function successorIntervalStart(
   return fallback;
 }
 /** Completion of a finite administration count, independent of query window. */
+/** Finite explicit events end at their authored final opportunity. Local
+ * caps cannot determine this horizon: another active cycle shares their
+ * admission ledger, and no rejected fixed event can move to a new date. */
+function explicitAdministrationCompletion(
+  dosage: CanonicalAdministration, start: Date, eligibleFrom: Date,
+  options: NextDueDoseOptions, zone: string
+): { end: Date; point: boolean } | undefined {
+  const repeat = dosage.schedule?.recurrence;
+  const raw = withoutOccurrenceCap({
+    ...dosage, phaseOrigin: undefined, phaseOriginIssue: undefined,
+    limits: dosage.limits?.filter(limit => limit.scope !== "period"),
+    schedule: { ...dosage.schedule, recurrence: repeat
+      ? { ...repeat, count: undefined, countMax: undefined } : undefined },
+  });
+  const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
+    priorCount: undefined, priorDoseTimes: undefined, limit: 10000 });
+  return due.length ? completionAfterAcceptedAdministration(dosage, new Date(due[due.length - 1]), zone) : undefined;
+}
 function finiteAdministrationCompletion(
   dosage: CanonicalAdministration,
   start: Date,

@@ -365,8 +365,9 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
     if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;
   }else if(value?.range && !doseRangeNeedsEndpointPreview(value.range))result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
-    unit:value.range.low?.unit??value.range.high?.unit??
-      (getDoseQuantityUnit(value.range.low) || getDoseQuantityUnit(value.range.high) || undefined)};
+    unit:value.range.low?.value !== undefined
+      ? value.range.low.unit ?? (getDoseQuantityUnit(value.range.low) || undefined)
+      : value.range.high?.unit ?? (getDoseQuantityUnit(value.range.high) || undefined)};
   else result.dose=undefined;
   if(a.schedule){
     const schedule:NonNullable<CanonicalSigClause["schedule"]>=base?.schedule?Object.assign({},base.schedule):{};
@@ -467,10 +468,12 @@ export function courseFromAdministrations(
           !a.schedule?.recurrence?.anchors?.length
       )
     ) {
-      const unit = minutes % 1440 === 0 ? "d" : minutes % 60 === 0 ? "h" : "min";
+      // A delay stated in minutes/hours is elapsed time, including full 24h
+      // multiples. Calendar-relative onsetDays has its separate path below.
+      const unit = minutes % 60 === 0 ? "h" : "min";
       start = clinicalBoundary({
         unit,
-        value: unit === "d" ? minutes / 1440 : unit === "h" ? minutes / 60 : minutes,
+        value: unit === "h" ? minutes / 60 : minutes,
       });
     }
     const onset = first.onsetDays;

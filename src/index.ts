@@ -74,7 +74,7 @@ function markOriginalGraphSource(
   clause: CanonicalSigClause,
   options: FormatOptions | undefined
 ): void {
-  if (options?.realizationMode !== "roundtrip" || !clause.instructionGraph) return;
+  if (!clause.instructionGraph || (options?.realizationMode !== "roundtrip" && clause.dose)) return;
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
   const verified = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   clause.sourceProjectionVerified = verified;
@@ -1185,7 +1185,7 @@ export function formatSig(
   // Roundtrip can reuse an HPSG-owned source quantity omitted from the
   // auxiliary action graph only when the persisted R5 clinical projection
   // STILL matches. A newly added/edited dose invalidates that source replay.
-  // Other format modes never pay this fingerprint walk.
+  // Other format modes need that proof only when the live dose was removed.
   markOriginalGraphSource(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const rendered = formatCanonicalClause(clause, style, localization, options);
@@ -1225,8 +1225,8 @@ export function formatSigBatch(
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
-  if(batch.fhirNext.step.length>1||batch.fhirNext.repeatCycle)return style==="short"?batch.shortText:batch.longText;
-  for(const step of batch.fhirNext.step)if(step.start||step.end||step.count!==undefined)
+  if(batch.fhirNext.step.length>1||batch.fhirNext.repeatCycle||batch.fhirNext.safety)return style==="short"?batch.shortText:batch.longText;
+  for(const step of batch.fhirNext.step)if(step.start||step.end||step.count!==undefined||step.safety)
     return style==="short"?batch.shortText:batch.longText;
   const text:string[]=[];
   for(const item of batch.items){
@@ -1386,7 +1386,7 @@ function fromFhirDosageInternal(
   const clause = canonicalFromFhir(dosage);
   // The saved fingerprint proves that a primary source dose still matches
   // its exported R5 clinical fields, even if the auxiliary instruction
-  // graph contains no Amount. Only roundtrip source reuse needs this hash.
+  // graph contains no Amount. A removed dose also needs this ownership proof.
   markOriginalGraphSource(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const guarded = getDosageCondition(dosage) !== undefined ||
@@ -1684,13 +1684,11 @@ function buildParseResult(
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
-  // Save only the parser's actual HPSG dose provenance for this freshly
-  // created row. An inferred default has no authored dose evidence.
-  if(clause.dose && clause.instructionGraph)
-    for(const evidence of clause.evidence??[])if(evidence.lexicalCategory==="dose"){
-      captureFreshDose(fhir);
-      break;
-    }
+  // Capture a freshly emitted authored amount whether its producer was
+  // the dose lexeme or the typed instruction action (for example Swish).
+  // Inferred defaults have no authored amount to protect from later removal.
+  if (clause.dose && !clause.dose.defaulted && clause.instructionGraph)
+    captureFreshDose(fhir);
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];

@@ -22,8 +22,6 @@ const argv = process.argv.slice(2),
   };
 const baselinePath = value("--baseline", process.env.EZMED_BASELINE);
 if (!baselinePath) throw new Error("Supply --baseline pointing to the built origin/master package");
-const baseline = await import(pathToFileURL(resolve(baselinePath)).href);
-const candidate = await import(new URL("../dist/index.js", import.meta.url));
 const filter = new RegExp(value("--only", ".")),
   rounds = Number(value("--rounds", "9"));
 const targetMs = Number(value("--target-ms", "12")),
@@ -31,6 +29,44 @@ const targetMs = Number(value("--target-ms", "12")),
 if (!smoke && (!Number.isInteger(rounds) || rounds < 1))
   throw new Error("--rounds must be a positive integer for timed measurements");
 const maxRegression = 0.04;
+const outputPath = value("--json", undefined);
+const report = {
+  complete: false,
+  startedAt: new Date().toISOString(),
+  phase: "initializing",
+  cases: [],
+  newApiMeasurements: [],
+  errors: [],
+};
+/** Save outside measured work. A timed-out run remains an explicitly
+ * incomplete report containing every completed scenario instead of losing
+ * its evidence or accidentally being treated as a successful complete run. */
+function checkpoint(complete = false) {
+  report.complete = complete;
+  if (complete) report.phase = "complete";
+  report.updatedAt = new Date().toISOString();
+  report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
+  report.failing = report.cases.filter((c) => c.pass === false).length;
+  report.nonEquivalent = report.cases.filter((c) => c.equivalentWork === false).length;
+  report.measuredPublicFunctions = new Set([
+    ...report.cases.map(c => c.api), ...report.newApiMeasurements.map(c => c.api),
+  ]).size;
+  if (outputPath) {
+    const temporary = outputPath + ".tmp";
+    writeFileSync(temporary, JSON.stringify(report, null, 2) + "\n");
+    renameSync(temporary, outputPath);
+  }
+}
+checkpoint();
+const baseline = await import(pathToFileURL(resolve(baselinePath)).href);
+const candidate = await import(new URL("../dist/index.js", import.meta.url));
+const emaComparatorQuantity = { extension: [{
+  url: candidate.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+  valueCoding: { system: candidate.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
+}] };
+const candidateEmaComparator = candidate.getEmaQuantityComparator;
+if (candidateEmaComparator(emaComparatorQuantity) !== "~")
+  throw new Error("EMA comparator fixture must decode the encoded approximation");
 const S = {
   ordinary: "1 tab PO BID",
   thai: "กิน 2 เม็ดเช้า, 3 เม็ดเย็น เป็นเวลา 1 สัปดาห์",
@@ -226,19 +262,7 @@ for (const [api, args] of [
   ["getDosageExcludedDates", [dateRow]],
   ["getDosageExcludedWeekdays", [weekdayRow]],
   ["getDosageAlternativeChoice", [choiceRow]],
-  [
-    "getEmaQuantityComparator",
-    [
-      {
-        extension: [
-          {
-            url: baseline.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
-            valueCoding: { system: baseline.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
-          },
-        ],
-      },
-    ],
-  ],
+  ["getEmaQuantityComparator", [emaComparatorQuantity]],
   ["getTimingOccurrenceCap", [baseline.parseSig("1 tab up to 3 doses per day").fhir[0].timing?.repeat]],
 ])
   simple(api, args);
@@ -426,6 +450,7 @@ const newApis = new Set([
   "formatCanonicalAdministration",
   "formatCanonicalCourse",
   "projectEditableR5Course",
+  "getEmaQuantityComparator",
 ].filter(api => typeof baseline[api] !== "function"));
 const missing = Object.keys(candidate).filter(
   (k) => typeof candidate[k] === "function" && !covered.has(k) && !newApis.has(k)
@@ -436,10 +461,8 @@ if (
   candidate.parseBodySiteAdministrationTargetCountExtension(counted) !== 2
 )
   throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
-const outputPath = value("--json", undefined);
-const report = {
-  complete: false,
-  startedAt: new Date().toISOString(),
+Object.assign(report, {
+  phase: "measuring",
   runtime: {
     node: process.version,
     platform: process.platform,
@@ -465,23 +488,7 @@ const report = {
     (test) => filter.test(test.name) && typeof baseline[test.api] === "function"
   ).length,
   rounds,
-  cases: [],
-  errors: [],
-};
-/** Save outside measured work. A timed-out run remains an explicitly
- * incomplete report containing every completed scenario instead of losing
- * its evidence or accidentally being treated as a successful complete run. */
-function checkpoint(complete = false) {
-  report.complete = complete;
-  report.updatedAt = new Date().toISOString();
-  report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
-  report.failing = report.cases.filter((c) => c.pass === false).length;
-  if (outputPath) {
-    const temporary = outputPath + ".tmp";
-    writeFileSync(temporary, JSON.stringify(report, null, 2) + "\n");
-    renameSync(temporary, outputPath);
-  }
-}
+});
 checkpoint();
 const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
 let sink;
@@ -508,19 +515,30 @@ async function calibratedIterations(test, modules, async) {
   }
   return iterations;
 }
+// These edit cases have an independent clinical oracle. An older formatter
+// that returns the superseded quantity is doing different work; keep both
+// timings visible but apply the latency gate only when both render the edit.
+const equivalenceOracles = new Map([
+  ["formatSig/R5-roundtrip-edited-thai", output => /2\s*หยด/.test(output)],
+  ["formatSig/R5-roundtrip-added-dose-thai", output => /2\s*เม็ด/.test(output)],
+]);
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
   if (typeof baseline[test.api] !== "function") continue;
   try {
-    const left = test.run(baseline, 0),
-      right = test.run(candidate, 0);
+    let left = test.run(baseline, 0), right = test.run(candidate, 0);
     const async = !!left?.then || !!right?.then;
-    if (async) {
-      await left;
-      await right;
-    }
+    if (async) { left = await left; right = await right; }
+    const oracle = equivalenceOracles.get(test.name);
+    if (oracle && !oracle(right)) throw new Error("Candidate failed the edited-dose output oracle");
+    const equivalentWork = !oracle || oracle(left);
+    const equivalence = { equivalentWork, ...(equivalentWork ? {} : {
+      classification: "different-clinical-output",
+      reason: "Baseline does not render the edited dose; raw timings retained without a regression verdict",
+      output: { baseline: left, candidate: right },
+    }) };
     if (smoke) {
-      report.cases.push({ name: test.name, api: test.api, smoke: true });
+      report.cases.push({ name: test.name, api: test.api, smoke: true, ...equivalence });
       continue;
     }
     for (let i = 0; i < 12; i++) {
@@ -558,13 +576,14 @@ for (const test of cases) {
       ratio,
       samples: { baselineUs: a, candidateUs: b },
       changePercent: (ratio - 1) * 100,
-      pass: ratio <= 1 + maxRegression,
+      ...equivalence,
+      ...(equivalentWork ? { pass: ratio <= 1 + maxRegression } : {}),
       baselineSpread: (Math.max(...a) - Math.min(...a)) / old,
       candidateSpread: (Math.max(...b) - Math.min(...b)) / current,
     };
     report.cases.push(result);
     console.log(
-      `${result.pass ? "PASS" : "FAIL"} ${test.name}: ${old.toFixed(2)} -> ${current.toFixed(
+      `${!equivalentWork ? "DIFFERENT" : result.pass ? "PASS" : "FAIL"} ${test.name}: ${old.toFixed(2)} -> ${current.toFixed(
         2
       )} us (${result.changePercent.toFixed(1)}%)`
     );
@@ -580,6 +599,7 @@ for (const test of cases) {
 // Clinical correctness of edits/projections is covered by native oracles.
 const { source: nativeSource, textless: nativeTextless } = nativeFixtures.get(candidate);
 const nativeCases = [
+  ["getEmaQuantityComparator", "getEmaQuantityComparator", () => candidateEmaComparator(emaComparatorQuantity)],
   ["importCanonicalCourse", "native/import-R6", () => candidate.importCanonicalCourse(complex)],
   ["importCanonicalCourse", "native/import-R5", () => candidate.importCanonicalCourse(parsed.eye.fhir)],
 

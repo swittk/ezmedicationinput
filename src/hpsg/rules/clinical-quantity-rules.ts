@@ -1,4 +1,5 @@
 import { LexKind } from "../../lexer/token-types";
+import { getRouteMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
@@ -404,17 +405,29 @@ function fixedVolumeOverTime(
   );
 }
 
+/** Rate heads own their marker before the site/advice fallbacks run. */
+function separateRateMarker(context: HpsgClauseContext, phraseStart: number): number | undefined {
+  const index = phraseStart - 1, token = context.tokens[index];
+  return token && available(context, index) && /^(?:at|@)$/u.test(normalizeTokenLower(token))
+    ? index : undefined;
+}
+
 function weightQuantity(
   context: HpsgClauseContext,
   start: number,
   value: number,
-  expression: UnitExpression
+  expression: UnitExpression,
+  phraseStart = start
 ) {
   const parts = expression.compact.split("/");
   if (parts.length < 2 || parts[1] !== "kg") return undefined;
   const numerator = massTerm(value, parts[0]);
   if (!numerator) return undefined;
-  const indices = Array.from({ length: expression.end - start }, (_, offset) => start + offset);
+  const marker = separateRateMarker(context, phraseStart);
+  const indices = [
+    ...(marker !== undefined ? [marker] : []),
+    ...Array.from({ length: expression.end - start }, (_, offset) => start + offset),
+  ];
   const bodyMass: HpsgDimensionalQuantityTerm = {
     value: 1,
     unit: "kg",
@@ -499,18 +512,22 @@ function fixedRate(
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
   const cue = context.tokens[phraseStart - 1];
-  const hasSeparateRateMarker = Boolean(cue && available(context, phraseStart - 1) &&
-    /^(?:at|@)$/u.test(normalizeTokenLower(cue)));
+  const hasSeparateRateMarker = separateRateMarker(context, phraseStart) !== undefined;
   // An inclusive comparator can share AT with the rate head ("at most",
   // "at least"). Keep the entire qualifier owned by its quantity; only
   // a marker outside that qualifier needs to be consumed separately.
-  const hasRateMarker = hasSeparateRateMarker || (phraseStart < start &&
+  const hasRateMarker = hasSeparateRateMarker ||
+    context.tokens[phraseStart].lower.startsWith("@") || (phraseStart < start &&
     available(context, phraseStart) &&
     normalizeTokenLower(context.tokens[phraseStart]) === "at");
-  // An unmarked rate is valid only inside an explicit infusion/run
-  // construction; standalone numeric rates must never be inferred as doses.
+  // The neighboring IV route licenses a verb-free infusion instruction.
+  // Route meaning is shared with the lexical route rule, including synonyms.
+  const next = context.tokens[expression.end];
+  const after = next?.original === "," ? context.tokens[expression.end + 1] : next;
+  const hasInfusionRoute = getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
+    getRouteMeaning(after)?.code === RouteCode["Intravenous route"];
   if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasAdministrationCue(context, start))) return undefined;
+      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, start))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
     ...(hasSeparateRateMarker ? [phraseStart - 1] : []),
@@ -600,8 +617,9 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     let phraseStart = start;
     let quantityToken = token;
     const lower = token.kind === LexKind.Number ? "" : normalizeTokenLower(token);
+    const quantityLower = lower.startsWith("@") && lower.length > 1 ? lower.slice(1) : lower;
     let qualified = token.kind === LexKind.Number ? undefined :
-      doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+      doseComparatorNumberAt(context.tokens, start, context.limit, quantityLower);
     // AT is a rate head when its following quantity has a per-time unit.
     // Start that constituent at AT, before the generic site rule can claim
     // "at approximately" as an anatomical destination.
@@ -619,7 +637,7 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
     // trailing sentence punctuation only; never turn .1 into 1.
     const attached = !qualified && quantityToken.kind !== LexKind.Number
-      ? attachedNumberUnitAt(quantityToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+      ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
     const value = qualified?.value ??
       (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
     // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
@@ -635,14 +653,20 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     if (over) return [over];
     const accepts = (candidate: string) =>
       /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-      /^(?:ml|l|mcg|ug|mg|g)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
+      /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
     const expression = compactUnitExpression(
       context, numericStart + 1, accepts, unit ?? ""
     );
     if (!expression) return [];
     const weight = qualifyClinicalSign(context, phraseStart, numericStart,
-      weightQuantity(context, numericStart, value, expression), comparator);
-    if (weight) return [weight];
+      weightQuantity(context, numericStart, value, expression, phraseStart), comparator);
+    if (weight) {
+      // Weight rates own the same external AT/@ marker as fixed rates.
+      // Publish ownership before the site fallback examines that marker.
+      const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+      for (const token of weight.tokens) owned.add(token.index);
+      return [weight];
+    }
     const rate = qualifyClinicalSign(context, phraseStart, numericStart,
       fixedRate(context, numericStart, value, expression, phraseStart), comparator);
     if (rate) {

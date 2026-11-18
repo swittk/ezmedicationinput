@@ -79,13 +79,13 @@ describe("quantity accounting retains the meaning of the supplied constraints", 
   });
 
   it.each([[10, 20], [20, 10], [10, 20, 30]])(
-    "does not arbitrarily apply one of several unevaluated lifetime bounds (%s, %s)", (...values) => {
+    "uses the tightest compatible lifetime bound (%s, %s)", (...values) => {
       const input = dose();
       input.limits = values.map(value => ({ scope: "lifetime", amount: { value, unit: "tab" } }));
       const result = supply(input, 30);
-      expect(result.totalUnits).toBe(30);
+      expect(result.totalUnits).toBe(10);
       expect(result.quantityKind).toBe("maximum");
-      expect(result.explanation).toContain("could not be applied");
+      expect(result.explanation).not.toContain("could not be applied");
     }
   );
   it("still evaluates one lifetime bound", () => {
@@ -154,6 +154,10 @@ describe("step and cap planning", () => {
       timeZone: "UTC", durationValue: 33, durationUnit: FhirPeriodUnit.Day,
     });
     expect(actual.totalUnits).toBe(3);
+    for (const [from, expected] of [["2026-02-28", 1], ["2026-03-30", 2], ["2026-03-31", 0]] as const) {
+      expect(calculateTotalUnits({ dosage: course, from: from + "T00:00:00Z", orderedAt: "2025-03-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(expected);
+    }
   });
 });
 
@@ -334,6 +338,10 @@ describe("calendar quantity limits retain reversible membership and find the fir
       dosage: course, from: "2027-02-28T00:00:00Z", orderedAt: "2026-03-01T00:00:00Z",
       timeZone: "UTC", durationValue: 368, durationUnit: FhirPeriodUnit.Day,
     }).totalUnits).toBe(3);
+    for (const [from, expected] of [["2027-02-28", 1], ["2028-02-28", 2], ["2028-02-29", 0]] as const) {
+      expect(calculateTotalUnits({ dosage: course, from: from + "T00:00:00Z", orderedAt: "2026-03-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(expected);
+    }
   });
 });
 

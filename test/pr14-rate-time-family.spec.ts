@@ -46,13 +46,15 @@ describe("rate heads shared with inclusive quantity comparators", () => {
     expect(getQuantityComparator(scalar.doseQuantity)).toBe("<=");
     expect(scalar.rateQuantity).toBeUndefined();
     const unmarked = parseSig("100 mL/hr");
-    for (const amount of unmarked.fhirNext.step[0]?.component[0]?.doseAndRate ?? []) {
-      expect(amount.doseQuantity).toBeUndefined();
-      expect(amount.rateQuantity).toBeUndefined();
-    }
+    for (const step of unmarked.fhirNext.step) for (const component of step.component)
+      for (const amount of component.doseAndRate ?? []) {
+        expect(amount.doseQuantity).toBeUndefined();
+        expect(amount.rateQuantity).toBeUndefined();
+      }
     expect(unmarked.input).toBe("100 mL/hr");
     const qualifiedTablet = parseSig("at most 2 tablets daily").fhirNext.step[0].component[0].doseAndRate![0];
-    expect(qualifiedTablet.doseQuantity?.value).toBe(2);
+    expect(qualifiedTablet.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(getQuantityComparator(qualifiedTablet.doseQuantity)).toBe("<=");
     expect(qualifiedTablet.rateQuantity).toBeUndefined();
   });
 });

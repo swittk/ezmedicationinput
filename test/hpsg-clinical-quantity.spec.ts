@@ -1730,14 +1730,19 @@ describe("November 16 qualified glued tablet fractions", () => {
 
 
 describe("November 17 review: comparator-headed million quantity", () => {
-  it.each(["approximately 2.4M IU IM once", "about 2.4m IU IM once", "≤2.4m IU IM once"])(
+  it.each([
+    ["approximately 2.4M IU IM once", "~"],
+    ["about 2.4m IU IM once", "~"],
+    ["≤2.4m IU IM once", "<="],
+  ] as const)(
     "preserves qualified million scaling in %s",
-    (source) => {
+    (source, comparator) => {
       const parsed = parsePublicSig(source);
       const quantity = parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity;
-      expect(quantity?.value).toBe(2400000);
-      expect(quantity?.unit?.toLowerCase()).not.toBe("m");
-      expect(parsed.meta.canonical.clauses[0].dose?.value).toBe(2400000);
+      expect(quantity).toMatchObject({ value: 2400000, unit: "IU" });
+      expect(getQuantityComparator(quantity)).toBe(comparator);
+      expect(parsed.meta.canonical.clauses[0].dose)
+        .toMatchObject({ value: 2400000, unit: "IU", comparator });
     }
   );
 });

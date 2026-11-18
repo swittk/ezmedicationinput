@@ -1,0 +1,364 @@
+import { describe, expect, it } from "vitest";
+import {
+  formatSig, formatParseBatch, fromFhir, parseSig, nextDueDoses,
+  parseInstructionActions, formatCanonicalCourse,
+} from "../src/index";
+import { courseFromR6 } from "../src/adapters/canonical-course";
+import { formatCanonicalClause } from "../src/format";
+import { canonicalFromFhir } from "../src/fhir";
+import { registerSigLocalization, resolveSigLocalization } from "../src/i18n";
+import { ENGLISH_COURSE } from "../src/locales/course/en";
+import { THAI_COURSE } from "../src/locales/course/th";
+import { simpleQuantityForR5, getQuantityComparator } from "../src/fhir-quantity-operator";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { realizeInstructionAction } from "../src/instruction-graph";
+import { AdviceArgumentRole, FhirPeriodUnit, RouteCode } from "../src/types";
+import type { FhirDosage, FhirR6Dosage, FhirR6DosageInstruction } from "../src/types";
+
+const tabletQuantity = { value: 1, unit: "tab" };
+const tablet: FhirR6Dosage = {
+  doseAndRate: [{ doseQuantity: tabletQuantity }],
+  timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+};
+const cap = { doseLimit: [{ scope: "period" as const,
+  valueQuantity: { value: 8, unit: "tab" }, period: { value: 1, unit: "d" } }] };
+const normalized = { locale: "en", realizationMode: "normalized" as const };
+
+describe("review 21 current structured course preview", () => {
+  it("keeps the shared course cap in batch preview and an ordinary custom separator", () => {
+    const batch = fromFhir({ safety: cap, step: [{ component: [tablet] }] }, normalized);
+    for (const style of ["short", "long"] as const) {
+      const text = formatParseBatch(batch, style, " | ");
+      expect(text).toContain("Across this course: max per period: 8 tab / 1 d");
+      expect(text.match(/8 tab/g)).toHaveLength(1);
+    }
+    const ordinary = fromFhir({ step: [{ component: [tablet, tablet] }] }, normalized);
+    expect(formatParseBatch(ordinary, "long", " | "))
+      .toBe(ordinary.items.map(item => item.longText).join(" | "));
+  });
+
+  it("uses the live R6 cadence and dose in normalized preview while retaining the authored source", () => {
+    const source = "Take 1 tablet twice daily";
+    const raw = JSON.parse(JSON.stringify(parseSig(source).fhirNext)) as FhirR6DosageInstruction;
+    raw.safety = cap;
+    raw.step[0].component[0].timing!.repeat!.frequency = 3;
+    raw.step[0].component[0].doseAndRate![0].doseQuantity!.value = 2;
+    const saved = JSON.stringify(raw);
+    for (const text of [
+      formatSig(raw, "long", normalized),
+      fromFhir(raw, normalized).longText,
+      formatCanonicalCourse(courseFromR6(raw), "long", normalized),
+    ]) {
+      expect(text).toMatch(/2 tablets/i);
+      expect(text).toMatch(/three times daily/i);
+      expect(text).toContain("8 tab / 1 d");
+      expect(text).not.toContain("twice daily");
+    }
+    expect(JSON.stringify(raw)).toBe(saved);
+    expect(raw.renderedInstruction).toBe(source);
+    expect(formatSig({ renderedInstruction: source }, "long", normalized)).toBe(source);
+  });
+
+  it.each(["2026-11-20T15:00:00Z", "2026-11-20T15:30:00+07:00"])(
+    "preserves every authored event clock and offset: %s", event => {
+      const raw: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: tablet.doseAndRate, timing: { event: [event] },
+      }] }] };
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const text = formatSig(raw, style, { locale, realizationMode: "normalized" });
+        expect(text).toContain(event);
+      }
+      expect(fromFhir(raw).meta.canonical.course!.stages[0].administrations[0].schedule?.explicitEvents)
+        .toEqual([event]);
+      expect(nextDueDoses(raw, { from: event, orderedAt: event, timeZone: "UTC", limit: 1 })
+        .map(Date.parse)).toEqual([Date.parse(event)]);
+    }
+  );
+
+  it("keeps date-only events date-only", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: tablet.doseAndRate, timing: { event: ["2026-11-20"] },
+    }] }] };
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toMatch(/20 Nov 2026/);
+    expect(text).not.toMatch(/T00:00|00:00|Z/);
+  });
+
+  it.each(["component", "stage", "course"] as const)(
+    "retains a %s ifExceeded instruction with and without a numeric limit", scope => {
+      const action = "Hold the next dose and call the clinic";
+      for (const numeric of [false, true]) {
+        const safety = { ...(numeric ? cap : {}), ifExceeded: action };
+        const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...tablet }] }] };
+        if (scope === "component") raw.step[0].component[0].safety = safety;
+        else if (scope === "stage") {
+          raw.step[0].safety = safety;
+          raw.step.push({ component: [tablet] });
+        }
+        else raw.safety = safety;
+        const text = fromFhir(raw, normalized).longText;
+        expect(text).toContain(action);
+        expect(text.split(action)).toHaveLength(2);
+        if (numeric) expect(text).toContain("8 tab / 1 d");
+        if (scope === "stage") expect(text).toContain("Within this stage:");
+        if (scope === "course") expect(text).toContain("Across this course:");
+      }
+    }
+  );
+
+  it("recognizes a safety-only R6 header in both public entry points", () => {
+    const raw = { safety: { ...cap, ifExceeded: "Call the clinic" } };
+    expect(formatSig(raw, "long", normalized)).toBe(fromFhir(raw, normalized).longText);
+    expect(formatSig(raw, "long", normalized)).toContain("8 tab / 1 d");
+    expect(formatSig({ safety: { ifExceeded: "Call the clinic" } }, "long", normalized))
+      .toContain("Across this course: Call the clinic");
+  });
+
+  it("renders a later ordinary dose after a rate-only entry without duplicating a first dose", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: tablet.timing,
+      doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } },
+        { doseQuantity: { value: 10, unit: "mL" } },
+        { doseQuantity: { value: 2, unit: "mg" } }],
+    }] }] };
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toContain("5 mL/h");
+    expect(text).toContain("10 mL");
+    expect(text).toContain("2 mg");
+    const single = formatSig({ step: [{ component: [tablet] }] }, "long", normalized);
+    expect(single.match(/1 tablet/g)).toHaveLength(1);
+  });
+
+  it("does not let component text hide a structured blood-pressure condition", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, text: "Take 1 tablet daily",
+      condition: [{ code: { text: "SBP" }, operation: "gt",
+        valueQuantity: { value: 160, unit: "mmHg" } }],
+    }] }] };
+    const text = fromFhir(raw, normalized).longText;
+    expect(text).toMatch(/1 tablet/i);
+    expect(text).toContain("only if SBP > 160 mmHg");
+    expect(raw.step[0].component[0].text).toBe("Take 1 tablet daily");
+  });
+
+  it.each([
+    [{ low: { unit: "mg" }, high: { value: 1, unit: "g" } }, /(?:up to|<=|≤) ?1 g/, "1 mg"],
+    [{ low: { value: 2, unit: "mg" }, high: { unit: "g" } }, /(?:at least|>=|≥) ?2 mg/, "2 g"],
+  ] as const)("takes the unit from a valued one-sided range endpoint", (doseRange, expected, wrong) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseRange }], timing: tablet.timing,
+    }] }] };
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toMatch(expected);
+    expect(text).not.toContain(wrong);
+  });
+
+  it("shows distinct two-sided range units and both endpoint qualifiers", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseRange: { low: simpleQuantityForR5({ value: 500, unit: "mg", comparator: ">=" }),
+        high: simpleQuantityForR5({ value: 1, unit: "g", comparator: "<=" }) } }],
+    }] }] };
+    expect(formatSig(raw, "long", normalized)).toContain(">=500 mg – <=1 g");
+  });
+});
+
+describe("review 21 R5 quantity and indication import", () => {
+  it("uses a coded quantity unit for a qualified scalar and respects its authored display unit", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: simpleQuantityForR5({
+      value: 500, code: "mg", system: "http://unitsofmeasure.org", comparator: "~",
+    }) }] };
+    expect(canonicalFromFhir(row).dose).toMatchObject({ value: 500, unit: "mg", comparator: "~" });
+    expect(formatSig(row, "long", normalized)).toMatch(/approximately 500 mg/i);
+    row.doseAndRate![0].doseQuantity!.unit = "milligrams";
+    expect(canonicalFromFhir(row).dose?.unit).toBe("milligrams");
+  });
+
+  it.each([false, true])("retains every PRN reason independently of array order (%s)", reverse => {
+    const translated = { _text: { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/translation",
+      extension: [{ url: "lang", valueCode: "th" }, { url: "content", valueString: "คลื่นไส้" }],
+    }] } };
+    const pain = { text: "pain" };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: tabletQuantity }],
+      asNeededFor: reverse ? [pain, translated] : [translated, pain] };
+    const clause = canonicalFromFhir(row);
+    expect(clause.prn?.enabled).toBe(true);
+    expect(clause.prn?.reasons).toHaveLength(2);
+    expect(clause.prn?.reasons?.some(reason => reason.text === "pain")).toBe(true);
+    expect(clause.prn?.reasons?.some(reason => reason.i18n?.th === "คลื่นไส้")).toBe(true);
+    expect(formatSig(row, "long", normalized)).toMatch(/as needed.*pain/i);
+    expect(formatSig(row, "long", { locale: "th", realizationMode: "normalized" })).toContain("คลื่นไส้");
+    expect(canonicalFromFhir({ doseAndRate: [{ doseQuantity: tabletQuantity }] }).prn).toBeUndefined();
+  });
+});
+
+describe("review 21 source graph amount ownership", () => {
+  it("renders the unchanged preparation amount once beside an amountless rich drink action", () => {
+    const source = "Dissolve 2 tablets in water, then drink slowly";
+    const actions = parseInstructionActions(source);
+    const drink = actions.find(action => action.predicate.lemma === "drink")!;
+    drink.args = [{ role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" }];
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...drink.span } };
+    const clause = canonicalFromFhir(parseSig("Drink 2 tablets").fhir[0]);
+    clause.instructionGraph = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!]);
+    const saved = JSON.stringify(clause.instructionGraph);
+    for (const locale of ["en", "th"]) {
+      const text = formatCanonicalClause(clause, "long", resolveSigLocalization(locale), normalized);
+      expect(text.match(locale === "en" ? /2 tablets/g : /2 เม็ด/g)).toHaveLength(1);
+      expect(text.toLowerCase()).toContain(locale === "en" ? "dissolve" : "ละลาย");
+      expect(text.toLowerCase()).toContain(locale === "en" ? "drink" : "ดื่ม");
+    }
+    expect(JSON.stringify(clause.instructionGraph)).toBe(saved);
+  });
+
+  it.each(["fresh", "persisted"] as const)(
+    "does not revive a removed %s dose but retains duration and the independent spit action", kind => {
+      const source = "Swish 10 mL for 30 seconds, then spit";
+      const parsed = parseSig(source);
+      const row = kind === "fresh" ? parsed.items[0].fhir
+        : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+      const savedGraph = canonicalFromFhir(row).instructionGraph;
+      delete row.doseAndRate;
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(row, "long", { locale: "en", realizationMode });
+        expect(text).not.toMatch(/10\s*mL/i);
+        expect(text.toLowerCase()).toContain("30 seconds");
+        expect(text.toLowerCase()).toContain("spit");
+      }
+      expect(canonicalFromFhir(row).instructionGraph).toEqual(savedGraph);
+    }
+  );
+
+  it("uses preserved partial quantity text instead of a unit-only normalized token", () => {
+    const actions = parseInstructionActions("Dissolve 2 tablets in water");
+    const action = actions[0];
+    const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+    amount.text = "up to the prescribed amount";
+    amount.normalized = "mg";
+    amount.quantity = { unit: "mg", comparator: "<=" };
+    const graph = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: "Dissolve up to the prescribed amount in water", actions,
+    })!])!;
+    for (const locale of ["en", "th"]) {
+      expect(realizeInstructionAction(graph.actions[0], locale)).toContain("up to the prescribed amount");
+    }
+    expect(graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+      .toEqual({ unit: "mg", comparator: "<=" });
+  });
+});
+
+describe("review 21 dimensional quantity grammar", () => {
+  it.each([
+    ["about .5m units", 500000, "U", "~"], ["~.5m units", 500000, "U", "~"],
+    ["about .5 mg", 0.5, "mg", "~"], [".5m units", 500000, "U", undefined],
+    [".5M IU", 500000, "IU", undefined], ["≤.5m IU", 500000, "IU", "<="],
+  ] as const)("keeps the numeric multiplier and comparator together in %s", (source, value, unit, comparator) => {
+    const parsed = parseSig(source);
+    const quantity = parsed.fhir[0].doseAndRate![0].doseQuantity!;
+    expect(quantity).toMatchObject({ value, unit });
+    expect(getQuantityComparator(quantity)).toBe(comparator);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value, unit });
+    expect(parsed.meta.canonical.clauses[0].dose?.comparator).toBe(comparator);
+  });
+
+  it.each([
+    ["5 mL/h IV for 2 hours", 5, "mL/h", undefined, 2],
+    ["5 mL per hour intravenously for 2 hours", 5, "mL/h", undefined, 2],
+    ["IV @100mL/hr", 100, "mL/h", undefined, undefined],
+    ["IV @ 100 mL/hr", 100, "mL/h", undefined, undefined],
+    ["IV @~100mL/hr", 100, "mL/h", "~", undefined],
+    ["Infuse heparin IV at approximately 1000 units / hr", 1000, "[iU]/h", "~", undefined],
+    ["Infuse heparin IV at ~1000units/hr", 1000, "[iU]/h", "~", undefined],
+  ] as const)("retains the licensed rate in %s", (source, value, unit, comparator, duration) => {
+    const parsed = parseSig(source);
+    const component = parsed.fhirNext.step[0].component[0];
+    const amount = component.doseAndRate![0];
+    expect(amount.rateQuantity).toMatchObject({ value, unit });
+    expect(getQuantityComparator(amount.rateQuantity)).toBe(comparator);
+    for (const step of parsed.fhirNext.step) for (const item of step.component)
+      for (const dose of item.doseAndRate ?? []) expect(dose.doseQuantity).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].route?.code).toBe(RouteCode["Intravenous route"]);
+    if (duration !== undefined) expect(component.timing?.repeat)
+      .toMatchObject({ duration, durationUnit: FhirPeriodUnit.Hour });
+  });
+
+  it.each(["100 mL/hr", "100 units/hr", "approximately 100 units / hr"])(
+    "does not detach a scalar dose from an unlicensed per-time amount: %s", source => {
+      const parsed = parseSig(source);
+      for (const step of parsed.fhirNext.step) for (const component of step.component)
+        for (const amount of component.doseAndRate ?? []) {
+          expect(amount.doseQuantity).toBeUndefined();
+          expect(amount.rateQuantity).toBeUndefined();
+        }
+      expect(parsed.input).toBe(source);
+    }
+  );
+
+  it("keeps a biologic-activity scalar distinct from a rate and @ clocks distinct from rate markers", () => {
+    const scalar = parseSig("Inject approximately 1000 units once").fhirNext.step[0].component[0].doseAndRate![0];
+    expect(scalar.doseQuantity).toMatchObject({ value: 1000, unit: "U" });
+    expect(getQuantityComparator(scalar.doseQuantity)).toBe("~");
+    expect(scalar.rateQuantity).toBeUndefined();
+    const clock = parseSig("Take 1 tablet @08:00").fhirNext.step[0].component[0];
+    expect(clock.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(clock.doseAndRate![0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+  });
+
+  it.each(["at approximately", "@ approximately", "at most", "at least"])(
+    "keeps the weight-rate marker out of an anatomical site: %s", marker => {
+      const parsed = parseSig("Infuse IV " + marker + " 0.1 mcg/kg/min");
+      const component = parsed.fhirNext.step[0].component[0];
+      expect(component.site).toBeUndefined();
+      expect(parsed.meta.canonical.clauses[0].site).toBeUndefined();
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      expect(component.doseAndRate![0].rateQuantity).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
+      expect(getQuantityComparator(component.doseAndRate![0].rateQuantity))
+        .toBe(marker === "at most" ? "<=" : marker === "at least" ? ">=" : "~");
+    }
+  );
+
+  it("keeps a 24-hour delay elapsed across the spring DST transition", () => {
+    const parsed = parseSig("Take 1 tablet once in 24 hours");
+    const course = parsed.meta.canonical.course!;
+    expect(course.stages[0].start?.displacement)
+      .toMatchObject({ value: 24, unit: "h" });
+    const options = { from: "2026-03-07T12:00:00-05:00", orderedAt: "2026-03-07T12:00:00-05:00",
+      timeZone: "America/New_York", limit: 1 };
+    for (const input of [parsed.fhirNext, parsed.fhir, course]) {
+      expect(nextDueDoses(input, options)).toEqual(["2026-03-08T13:00:00-04:00"]);
+    }
+  });
+});
+
+describe("review 21 locale facets and grammar number", () => {
+  it("inherits missing clause facets from a regional registration's base language", () => {
+    registerSigLocalization({ locale: "th-TH", course: THAI_COURSE });
+    const regional = resolveSigLocalization("th-TH")!;
+    const base = resolveSigLocalization("th")!;
+    expect(regional.formatLong).toBe(base.formatLong);
+    expect(regional.formatShort).toBe(base.formatShort);
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th-TH" })).toContain("เม็ด");
+  });
+
+  it("inherits a missing regional course facet while preserving exact clause callbacks", () => {
+    const formatLong = () => "LOCAL DOSE.";
+    registerSigLocalization({ locale: "th-extra", formatLong });
+    const localization = resolveSigLocalization("th-extra")!;
+    expect(localization.formatLong).toBe(formatLong);
+    expect(localization.course).toBe(THAI_COURSE);
+    expect(formatSig({ safety: cap, step: [{ component: [tablet] }] }, "long", { locale: "th-extra" }))
+      .toContain("ตลอดแผนการใช้ยานี้:");
+    registerSigLocalization({ locale: "th-extra", course: ENGLISH_COURSE });
+    expect(resolveSigLocalization("th-extra")?.formatLong).toBe(resolveSigLocalization("th")?.formatLong);
+  });
+
+  it("uses singular administration for one and plural wording for multiple/ranged/limited counts", () => {
+    expect(ENGLISH_COURSE.administrations("1", "day")).toBe("1 administration per day");
+    expect(ENGLISH_COURSE.administrations("2", "day")).toBe("2 administrations per day");
+    expect(ENGLISH_COURSE.administrations("1–2", "day")).toBe("1–2 administrations per day");
+    const raw = { safety: { doseLimit: [{ scope: "lifetime" as const, valueInteger: 1 }] } };
+    expect(formatSig(raw, "long", normalized)).toContain("1 administration");
+    expect(formatSig(raw, "long", normalized)).not.toContain("1 administrations");
+  });
+});

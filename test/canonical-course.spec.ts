@@ -300,7 +300,7 @@ describe("typed external boundary anchors", () => {
     const forms = [
       { contextReference: { reference: "Observation/anchor" }, anchor: "resource-reference" },
       { contextDefinition: "https://example.org/StructureDefinition/visit", anchor: "definition" },
-      { contextPath: "%patient.startDate", anchor: "path" },
+      { contextReference: { reference: "Patient/anchor" }, contextPath: "startDate", anchor: "resource-reference" },
       { contextCode: { coding: [{ system: "urn:events", code: "trigger" }] }, anchor: "coded-event" }
     ] as const;
     for (const form of forms) {
@@ -363,7 +363,7 @@ describe("November 17 review: live native clinical facts own projection and real
     expect(native.stages[0].administrations[0].limits).toHaveLength(1);
     native.stages[0].administrations[0].limits = undefined;
     const exported = courseToR6(native).step[0].component[0].safety!;
-    expect(exported.doseLimit).toEqual([]);
+    expect(exported.doseLimit).toBeUndefined();
     expect(exported.id).toBe("policy");
     expect(exported.ifExceeded).toBe("contact prescriber");
     expect(exported.extension).toEqual(raw.step[0].component[0].safety?.extension);
@@ -416,7 +416,7 @@ describe("November 17 review: typed course ownership without inferred exact boun
     ).toBe(true);
   });
 
-  it("does not silently choose the last of two independent administration maxima", async () => {
+  it("intersects compatible administration maxima without replacing a contradictory stated dose", async () => {
     const { numericAdministrationLimits } = await import("../src/canonical/course");
     const native = {
       kind: "administration" as const,
@@ -430,14 +430,13 @@ describe("November 17 review: typed course ownership without inferred exact boun
     for (const limits of [native.limits, native.limits.slice().reverse()]) {
       const variant = { ...native, limits };
       expect(numericAdministrationLimits(variant)).toMatchObject({
-        multiple: true,
-        administration: undefined,
+        multiple: false,
+        administration: { value: 0.5, unit: "tab" },
       });
       const calculated = calculateTotalUnits({ ...options, dosage: variant });
       expect(calculated.totalUnits).toBe(3);
       expect(calculated.quantityKind).toBe("maximum");
       expect(calculated.explanation).toContain("could not be applied");
     }
-    const calculated = calculateTotalUnits({ ...options, dosage: native });
   });
 });

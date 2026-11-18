@@ -11,6 +11,7 @@
  * A caller editing clinical fields creates the next authoritative course;
  * adapters serialize those fields and preserve unrelated source metadata.
  */
+import { convertValue } from "../utils/units";
 import type {
   CanonicalSigClause,
   CanonicalActivityTimingExpr,
@@ -70,7 +71,7 @@ export interface CanonicalDoseLimit {
   period?: CanonicalMeasure;
   text?: string;
   /** Typed original wire limit; clinical execution uses the fields above. */
-  provenance?: import("../types").FhirR6DoseLimit;
+  provenance?: import("../types").FhirR6DoseLimit | import("../types").FhirRatio;
 }
 /** Understood clinical safety policy, not a bag of arbitrary restrictions.
  * Unrecognized FHIR annotations remain ONLY in external source provenance.
@@ -258,34 +259,51 @@ export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDa
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
 
-/** Scan the native scoped bounds ONCE. This summary is consumed by
- * quantity calculation; the single-limit debug accessor below remains a
- * lightweight convenience, not a safety or validation API. */
-export function numericAdministrationLimits(a: CanonicalAdministration): {
+/** Intersect usable scoped maxima in the administration's quantity unit.
+ * Incomplete or incomparable retained constraints do not erase another
+ * known maximum. `multiple` records constraints still requiring evaluation. */
+export function numericAdministrationLimits(
+  a: CanonicalAdministration,
+  strength?: Parameters<typeof convertValue>[3],
+  unitOf: (measure: CanonicalMeasure | undefined) => string = measureUnit
+): {
   administration?: CanonicalMeasure;
   lifetime?: CanonicalMeasure;
   multiple: boolean;
 } {
   let administration: CanonicalMeasure | undefined;
   let lifetime: CanonicalMeasure | undefined;
-  let multiple = false, seenAdministration = false, seenLifetime = false;
+  let administrationValue = Infinity, lifetimeValue = Infinity;
+  let multiple = false;
+  let doseUnit: string | undefined;
   for (const limit of a.limits ?? []) {
-    if (!limit.amount || limit.period || limit.expression) continue;
-    if (limit.scope === "administration") {
-      if (seenAdministration) {
-        multiple = true;
-        administration = undefined;
-      } else administration = limit.amount;
-      seenAdministration = true;
-    } else if (limit.scope === "lifetime") {
-      if (seenLifetime) {
-        multiple = true;
-        lifetime = undefined;
-      } else lifetime = limit.amount;
-      seenLifetime = true;
+    if (limit.scope !== "administration" && limit.scope !== "lifetime") continue;
+    const bound = limit.amount;
+    if (limit.period || limit.expression || bound?.value === undefined ||
+        !Number.isFinite(bound.value) || bound.value < 0 ||
+        (bound.comparator && bound.comparator !== "~" && bound.comparator !== "<=")) {
+      multiple = true;
+      continue;
     }
+    if (doseUnit === undefined) {
+      const amount = a.amounts?.[0];
+      doseUnit = unitOf(amount?.quantity ?? amount?.range?.high ?? amount?.range?.low);
+    }
+    const current = limit.scope === "administration" ? administration : lifetime;
+    const target = doseUnit || unitOf(current) || unitOf(bound);
+    const value = convertValue(bound.value, unitOf(bound), target, strength);
+    if (value === null || !Number.isFinite(value)) {
+      multiple = true;
+      continue;
+    }
+    if (limit.scope === "administration") {
+      if (value < administrationValue) { administration = bound; administrationValue = value; }
+    } else if (value < lifetimeValue) { lifetime = bound; lifetimeValue = value; }
   }
   return { administration, lifetime, multiple };
+}
+function measureUnit(measure: CanonicalMeasure | undefined): string {
+  return measure?.unit ?? measure?.code ?? "";
 }
 
 /** Choose the last fully numeric source constraint where the clinical API

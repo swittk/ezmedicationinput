@@ -33,14 +33,24 @@ describe("review family: current quantity and scope own meaning", () => {
     }
   );
 
-  it("preserves independent route and cadence beside an unheaded dimensional amount", () => {
+  it("uses the typed IV route to license a verb-free rate while retaining its independent cadence", () => {
     const parsed = parseSig("100 mL / hr IV daily");
     const clause = parsed.meta.canonical.clauses[0];
     expect(clause.dose).toBeUndefined();
-    expect(clause.clinicalQuantity).toBeUndefined();
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "rate-quantity",
+      numerator: { value: 100, unit: "mL", dimension: "volume" },
+      denominators: [{ value: 1, unit: "h", dimension: "time" }],
+    });
+    expect(clause.clinicalQuantity?.numerator.comparator).toBeUndefined();
+    for (const amount of [parsed.fhir[0].doseAndRate![0],
+      parsed.fhirNext.step[0].component[0].doseAndRate![0]]) {
+      expect(amount.rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+      expect(amount.doseQuantity).toBeUndefined();
+    }
     expect(clause.route?.code).toBe("47625008");
     expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
-    expect(clause.leftovers?.map(part => part.text).join(" ")).toBe("100 mL / hr");
+    expect(clause.leftovers?.map(part => part.text).join(" ")).toBe("");
     expect(parsed.input).toBe("100 mL / hr IV daily");
   });
 
@@ -215,7 +225,11 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     frame.args = [amount, { role: AdviceArgumentRole.Manner, text: "slowly",
       normalized: "slowly", i18n: { th: "ช้าๆ" } }];
     const snapshot = JSON.stringify(frame);
-    const text = realizeRichPrimaryWithCanonicalDose(frame, { value: 2, unit: "tab", comparator: "<=" }, locale);
+    const clause = parseSig("Take at most 2 tablets").meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 2, unit: "tab", comparator: "<=" });
+    clause.instructionGraph = { sourceText: "Take the prescribed amount slowly",
+      sourceLocale: "en", actions: [frame], primaryAdministrationSpan: { ...frame.span } };
+    const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale);
     expect(text).toContain(locale === "en" ? "at most 2 tablets" : "ไม่เกิน 2 เม็ด");
     expect(text).toContain(locale === "en" ? "slowly" : "ช้า");
     expect(JSON.stringify(frame)).toBe(snapshot);

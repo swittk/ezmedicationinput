@@ -90,6 +90,13 @@ describe("course locale boundary", () => {
     expect(appendMedicationConditionText("รับประทาน 1 เม็ด.", guard, { locale: "th" })).toBe(
       "รับประทาน 1 เม็ด เฉพาะเมื่อ ไม่ awake และ (SBP > 100 หรือ HR < 90)."
     );
+    const outerUnless = { kind: "not" as const, condition: guard };
+    expect(appendMedicationConditionText("Take 1 tablet.", outerUnless, { locale: "en" })).toBe(
+      "Take 1 tablet unless not awake and (SBP > 100 or HR < 90)."
+    );
+    expect(appendMedicationConditionText("รับประทาน 1 เม็ด.", outerUnless, { locale: "th" })).toBe(
+      "รับประทาน 1 เม็ด เว้นแต่ ไม่ awake และ (SBP > 100 หรือ HR < 90)."
+    );
   });
   it("adds a third language through the same registration including clauses, stages, rates and conditions", () => {
     registerSigLocalization({

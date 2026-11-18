@@ -758,6 +758,13 @@ export function attachedNumberUnitAt(lower: string):
   return matched ? { value: Number(matched[1]), rawUnit: matched[2] } : undefined;
 }
 
+/** A compact million suffix shares the attached-numeral decimal shape.
+ * The leading decimal point is numeric evidence, never punctuation. */
+export function compactMillionDoseNumber(lower: string): number | undefined {
+  const match = /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))m$/u.exec(lower);
+  return match ? Number(match[1]) * 1_000_000 : undefined;
+}
+
 /** One bounded quantity-prefix lexeme shared by scalar and dimensional
  * rules. It identifies source tokens; it does not assign a unit or dose. */
 export function doseComparatorNumberAt(
@@ -804,19 +811,13 @@ export function doseComparatorNumberAt(
   const attached = token.kind !== LexKind.Number ? attachedNumberUnitAt(word) : undefined;
   let value = token.kind === LexKind.Number ? token.value :
     attached?.value ?? DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
-  const embeddedMillion = /^([0-9]+(?:\.[0-9]+)?)m$/u.exec(word);
-  if (value === undefined && embeddedMillion) value = Number(embeddedMillion[1]) * 1_000_000;
+  const embeddedMillion = compactMillionDoseNumber(word);
+  // The million suffix belongs to the numeric head, not the unit slot.
+  if (embeddedMillion !== undefined) return { comparator, value: embeddedMillion, numericIndex };
   if (value === undefined) return undefined;
-  // In a qualified dose, "2.4m" is the lexical million suffix, not
-  // an administration unit of metres. Do not return early with rawUnit=m
-  // before the typed million grammar has scaled the numeric head.
-  if (embeddedMillion) return { comparator, value: Number(embeddedMillion[1]) * 1_000_000, numericIndex };
   if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
-  const million = embeddedMillion
-    ? { value, numericIndex }
-    : millionDoseNumberAt(tokens, numericIndex, limit, value);
-  if (!embeddedMillion && million)
-    return { comparator, ...million };
+  const million = millionDoseNumberAt(tokens, numericIndex, limit, value);
+  if (million) return { comparator, ...million };
   const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value);
   if (mixed) return { comparator, ...mixed };
   // The existing fraction vocabulary also licenses "a quarter" or
