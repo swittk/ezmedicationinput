@@ -9,9 +9,9 @@ import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFh
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
 /** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
- * instruction-graph Amounts. Retain only the ORIGINAL numeric R5 dose fields,
- * never a mutable FHIR object: a clinician can edit the very same row in
- * place. Only roundtrip source realization consults this small proof. */
+ * instruction-graph Amounts. Retain the ORIGINAL dose and timing values,
+ * never treat a mutable FHIR object as proof: a clinician can edit the very
+ * same row in place. Only roundtrip source realization consults this proof. */
 interface FreshDosePart {
   value?: number;
   unit?: string;
@@ -24,6 +24,7 @@ interface FreshDoseProof {
   quantity?: FreshDosePart;
   low?: FreshDosePart;
   high?: FreshDosePart;
+  timing?: ReturnType<typeof captureSourceReplayTiming>;
 }
 const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseProof>();
 function captureDosePart(
@@ -50,6 +51,7 @@ function captureFreshDose(dosage: FhirDosage): void {
     quantity: captureDosePart(first?.doseQuantity),
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
+    timing: captureSourceReplayTiming(dosage.timing),
   });
 }
 function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
@@ -58,7 +60,8 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   const first = current?.[0];
   return sameDosePart(original.quantity, first?.doseQuantity) &&
     sameDosePart(original.low, first?.doseRange?.low) &&
-    sameDosePart(original.high, first?.doseRange?.high);
+    sameDosePart(original.high, first?.doseRange?.high) &&
+    matchesSourceReplayTiming(dosage.timing, original.timing);
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -103,7 +106,7 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
-  dosageMatchesSavedProjection,
+  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays

@@ -9,7 +9,7 @@ import {
   simpleQuantityForR5
 } from "./fhir-quantity-operator";
 import {
-  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
+  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTiming, FhirCoding, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction,
   FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety,
   FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
@@ -1020,83 +1020,167 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
  * The first encounter checks the existing persisted, full-row edit fingerprint.
  * Later calls over the SAME object need not recursively hash the large,
  * unchanged provenance graph. Shallow FHIR ownership changes and live dosage
- * amount values still invalidate the proof; in particular a clinician editing
- * doseQuantity.value on a previously formatted R5 row cannot replay an old
- * HPSG-owned instruction.
+ * amounts/timing still invalidate the proof. Each clinical list entry and
+ * quantity qualifier participates: a later clock or rate-unit edit on a
+ * previously formatted R5 row cannot replay an old HPSG-owned instruction.
  *
  * The externally supplied object/provenance graph is immutable by caller
  * contract. Mutating an internal nested graph extension in place is a caller
  * footgun; adding deep defensive rescans to every format invocation would
  * violate the project's throughput contract.
  */
+interface SourceMeasureObservation {
+  original: FhirQuantity;
+  value?: number;
+  unit?: string;
+  code?: string;
+  system?: string;
+  comparator?: FhirR6Quantity["comparator"];
+}
 interface SourceDoseObservation {
   original: FhirDoseAndRate;
-  dose?: FhirSimpleQuantity;
-  doseValue?: number;
-  doseUnit?: string;
-  doseCode?: string;
-  rate?: FhirSimpleQuantity;
-  rateValue?: number;
-  rateUnit?: string;
-  rateCode?: string;
-  range?: FhirDoseAndRate["doseRange"];
-  rangeLow?: number;
-  rangeHigh?: number;
-  ratio?: FhirRatio;
-  ratioNumerator?: number;
-  ratioDenominator?: number;
+  dose?: SourceMeasureObservation;
+  rate?: SourceMeasureObservation;
+  rangeLow?: SourceMeasureObservation;
+  rangeHigh?: SourceMeasureObservation;
+  rateLow?: SourceMeasureObservation;
+  rateHigh?: SourceMeasureObservation;
+  ratioNumerator?: SourceMeasureObservation;
+  ratioDenominator?: SourceMeasureObservation;
 }
 interface SourceReplayProof {
   matches: boolean;
   top: Array<[string, unknown]>;
   amounts: SourceDoseObservation[];
+  timing?: SourceTimingObservation;
+}
+interface SourceTimingObservation {
+  original: FhirTiming;
   repeat?: FhirTimingRepeat;
-  frequency?: number;
-  period?: number;
-  count?: number;
-  timeOfDayCount?: number;
-  firstClock?: string;
+  repeatValues?: FhirTimingRepeat;
+  events?: string[];
+  clocks?: string[];
+  weekdays?: FhirDayOfWeek[];
+  anchors?: FhirTimingRepeat["when"];
+  timingCode?: FhirTiming["code"];
+  codeText?: string;
+  codings?: Array<{ original: FhirCoding; system?: string; version?: string;
+    code?: string; display?: string; userSelected?: boolean }>;
+  boundsDuration?: SourceMeasureObservation;
+  boundsLow?: SourceMeasureObservation;
+  boundsHigh?: SourceMeasureObservation;
+  boundsStart?: string;
+  boundsEnd?: string;
 }
 const SOURCE_REPLAY_PROOFS = new WeakMap<FhirDosage | EzDosage, SourceReplayProof>();
 
+function capturedReplayMeasure(quantity: FhirQuantity | undefined): SourceMeasureObservation | undefined {
+  return quantity ? {
+    original: quantity,
+    value: quantity.value,
+    unit: quantity.unit,
+    code: quantity.code,
+    system: quantity.system,
+    comparator: quantity.comparator ??
+      (quantity.extension?.length ? getEmaQuantityComparator(quantity) : undefined),
+  } : undefined;
+}
+function unchangedReplayMeasure(
+  quantity: FhirQuantity | undefined,
+  proof: SourceMeasureObservation | undefined
+): boolean {
+  if (!quantity || !proof) return quantity === undefined && proof === undefined;
+  return quantity === proof.original && quantity.value === proof.value &&
+    quantity.unit === proof.unit && quantity.code === proof.code && quantity.system === proof.system &&
+    (quantity.comparator ?? (quantity.extension?.length ? getEmaQuantityComparator(quantity) : undefined)) ===
+      proof.comparator;
+}
+/** These are short live clinical lists, not the retained grammar/provenance
+ * graph. Capture every entry once and compare without allocating on replay. */
+function unchangedReplayList<T>(current: readonly T[] | undefined, saved: readonly T[] | undefined): boolean {
+  if (!current || !saved) return current === undefined && saved === undefined;
+  if (current.length !== saved.length) return false;
+  for (let index = 0; index < saved.length; index++) if (current[index] !== saved[index]) return false;
+  return true;
+}
+/** Fresh parser rows and persisted R5 rows use the same live timing proof.
+ * Only small typed clinical fields are observed; retained source graphs are
+ * never copied or walked while formatting. */
+export function captureSourceReplayTiming(timing: FhirTiming | undefined): SourceTimingObservation | undefined {
+  if (!timing) return undefined;
+  const repeat = timing.repeat, code = timing.code;
+  return {
+    original: timing, repeat,
+    // The shallow snapshot owns scalar values only. Lists and bound quantities
+    // have explicit observations below; no source extension is traversed.
+    repeatValues: repeat ? { ...repeat } : undefined,
+    events: timing.event?.slice(),
+    clocks: repeat?.timeOfDay?.slice(),
+    weekdays: repeat?.dayOfWeek?.slice(),
+    anchors: repeat?.when?.slice(),
+    timingCode: code,
+    codeText: code?.text,
+    codings: code?.coding?.map(coding => ({
+      original: coding, system: coding.system, version: coding.version,
+      code: coding.code, display: coding.display,
+    })),
+    boundsDuration: capturedReplayMeasure(repeat?.boundsDuration),
+    boundsLow: capturedReplayMeasure(repeat?.boundsRange?.low),
+    boundsHigh: capturedReplayMeasure(repeat?.boundsRange?.high),
+    boundsStart: repeat?.boundsPeriod?.start,
+    boundsEnd: repeat?.boundsPeriod?.end,
+  };
+}
+export function matchesSourceReplayTiming(
+  timing: FhirTiming | undefined,
+  proof: SourceTimingObservation | undefined
+): boolean {
+  if (!timing || !proof) return timing === undefined && proof === undefined;
+  if (timing !== proof.original || timing.code !== proof.timingCode ||
+      timing.code?.text !== proof.codeText) return false;
+  const codings = timing.code?.coding;
+  if ((codings?.length ?? 0) !== (proof.codings?.length ?? 0)) return false;
+  for (let index = 0; index < (proof.codings?.length ?? 0); index++) {
+    const coding = codings![index], prior = proof.codings![index];
+    if (coding !== prior.original || coding.system !== prior.system || coding.version !== prior.version ||
+        coding.code !== prior.code || coding.display !== prior.display) return false;
+  }
+  const repeat = timing.repeat, prior = proof.repeatValues;
+  return repeat === proof.repeat &&
+    repeat?.frequency === prior?.frequency && repeat?.frequencyMax === prior?.frequencyMax &&
+    repeat?.period === prior?.period && repeat?.periodMax === prior?.periodMax &&
+    repeat?.periodUnit === prior?.periodUnit &&
+    repeat?.count === prior?.count && repeat?.countMax === prior?.countMax &&
+    repeat?.duration === prior?.duration && repeat?.durationMax === prior?.durationMax &&
+    repeat?.durationUnit === prior?.durationUnit && repeat?.offset === prior?.offset &&
+    unchangedReplayList(timing.event, proof.events) &&
+    unchangedReplayList(repeat?.timeOfDay, proof.clocks) &&
+    unchangedReplayList(repeat?.dayOfWeek, proof.weekdays) &&
+    unchangedReplayList(repeat?.when, proof.anchors) &&
+    unchangedReplayMeasure(repeat?.boundsDuration, proof.boundsDuration) &&
+    unchangedReplayMeasure(repeat?.boundsRange?.low, proof.boundsLow) &&
+    unchangedReplayMeasure(repeat?.boundsRange?.high, proof.boundsHigh) &&
+    repeat?.boundsPeriod?.start === proof.boundsStart && repeat?.boundsPeriod?.end === proof.boundsEnd;
+}
 function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): SourceReplayProof {
   const raw = dosage as Record<string, unknown>;
   const top: SourceReplayProof["top"] = [];
   for (const key of Object.keys(dosage)) top.push([key, raw[key]]);
   const amounts: SourceDoseObservation[] = [];
   for (const original of dosage.doseAndRate ?? []) {
-    const dose = original.doseQuantity,
-      rate = original.rateQuantity;
     amounts.push({
       original,
-      dose,
-      doseValue: dose?.value,
-      doseUnit: dose?.unit,
-      doseCode: dose?.code,
-      rate,
-      rateValue: rate?.value,
-      rateUnit: rate?.unit,
-      rateCode: rate?.code,
-      range: original.doseRange,
-      rangeLow: original.doseRange?.low?.value,
-      rangeHigh: original.doseRange?.high?.value,
-      ratio: original.rateRatio,
-      ratioNumerator: original.rateRatio?.numerator?.value,
-      ratioDenominator: original.rateRatio?.denominator?.value,
+      dose: capturedReplayMeasure(original.doseQuantity),
+      rate: capturedReplayMeasure(original.rateQuantity),
+      rangeLow: capturedReplayMeasure(original.doseRange?.low),
+      rangeHigh: capturedReplayMeasure(original.doseRange?.high),
+      rateLow: capturedReplayMeasure(original.rateRange?.low),
+      rateHigh: capturedReplayMeasure(original.rateRange?.high),
+      ratioNumerator: capturedReplayMeasure(original.rateRatio?.numerator),
+      ratioDenominator: capturedReplayMeasure(original.rateRatio?.denominator),
     });
   }
-  const repeat = dosage.timing?.repeat;
-  return {
-    matches,
-    top,
-    amounts,
-    repeat,
-    frequency: repeat?.frequency,
-    period: repeat?.period,
-    count: repeat?.count,
-    timeOfDayCount: repeat?.timeOfDay?.length,
-    firstClock: repeat?.timeOfDay?.[0],
-  };
+  return { matches, top, amounts, timing: captureSourceReplayTiming(dosage.timing) };
 }
 function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplayProof): boolean {
   const raw = dosage as Record<string, unknown>;
@@ -1107,36 +1191,20 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   const rows = dosage.doseAndRate;
   if ((rows?.length ?? 0) !== proof.amounts.length) return false;
   for (let index = 0; index < proof.amounts.length; index++) {
-    const prior = proof.amounts[index],
-      row = rows![index];
+    const prior = proof.amounts[index], row = rows![index];
     if (
       row !== prior.original ||
-      row.doseQuantity !== prior.dose ||
-      row.doseQuantity?.value !== prior.doseValue ||
-      row.doseQuantity?.unit !== prior.doseUnit ||
-      row.doseQuantity?.code !== prior.doseCode ||
-      row.rateQuantity !== prior.rate ||
-      row.rateQuantity?.value !== prior.rateValue ||
-      row.rateQuantity?.unit !== prior.rateUnit ||
-      row.rateQuantity?.code !== prior.rateCode ||
-      row.doseRange !== prior.range ||
-      row.doseRange?.low?.value !== prior.rangeLow ||
-      row.doseRange?.high?.value !== prior.rangeHigh ||
-      row.rateRatio !== prior.ratio ||
-      row.rateRatio?.numerator?.value !== prior.ratioNumerator ||
-      row.rateRatio?.denominator?.value !== prior.ratioDenominator
-    )
-      return false;
+      !unchangedReplayMeasure(row.doseQuantity, prior.dose) ||
+      !unchangedReplayMeasure(row.rateQuantity, prior.rate) ||
+      !unchangedReplayMeasure(row.doseRange?.low, prior.rangeLow) ||
+      !unchangedReplayMeasure(row.doseRange?.high, prior.rangeHigh) ||
+      !unchangedReplayMeasure(row.rateRange?.low, prior.rateLow) ||
+      !unchangedReplayMeasure(row.rateRange?.high, prior.rateHigh) ||
+      !unchangedReplayMeasure(row.rateRatio?.numerator, prior.ratioNumerator) ||
+      !unchangedReplayMeasure(row.rateRatio?.denominator, prior.ratioDenominator)
+    ) return false;
   }
-  const repeat = dosage.timing?.repeat;
-  return (
-    repeat === proof.repeat &&
-    repeat?.frequency === proof.frequency &&
-    repeat?.period === proof.period &&
-    repeat?.count === proof.count &&
-    repeat?.timeOfDay?.length === proof.timeOfDayCount &&
-    repeat?.timeOfDay?.[0] === proof.firstClock
-  );
+  return matchesSourceReplayTiming(dosage.timing, proof.timing);
 }
 
 /** Verify a saved editable R5 row's source clinical authority at most once

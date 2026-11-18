@@ -33,6 +33,9 @@ export const THAI_COURSE: CourseLanguage = {
   maxAdministrationLabel: "max per administration: ",
   maxLifetimeLabel: "max lifetime: ",
   maxPeriodLabel: "max per period: ",
+  maxDosageLabel: "max per dosage: ",
+  courseLimitsLabel: "ตลอดแผนการใช้ยานี้: ",
+  stageLimitsLabel: "ในขั้นตอนนี้: ",
   weekdayName: (day) => THAI_DAY_NAMES[day] ?? day,
   joinList: (items) => joinLocalizedList(items,"และ"),
   timeUnit: (unit) => UNITS[unit],
@@ -52,6 +55,7 @@ export const THAI_COURSE: CourseLanguage = {
       : end
       ? `จนถึง${end}`
       : "",
+  calendarEvents: (events) => "วันที่กำหนด: " + events.join(" และ "),
   reviewTiming: (source) => (source ? `ต้องตรวจสอบช่วงเวลา: ${source}` : "ต้องตรวจสอบช่วงเวลาการใช้ยา"),
   dayRange: (first, last) => `วันที่ ${first}–${last}`,
   fromDay: (first) => `ตั้งแต่วันที่ ${first} เป็นต้นไป`,

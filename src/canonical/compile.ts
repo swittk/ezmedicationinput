@@ -2,11 +2,12 @@
  * course. No FHIR serialization or reconstruction occurs in this module.
  * Source grammar is interpreted once; numerical execution consumes only
  * these normalized facts and preserves syntax as read-only evidence. */
-import type { CanonicalSigClause } from "../types";
+import type { CanonicalSigClause, CanonicalCalendarEventExpr } from "../types";
 import type {
   CanonicalAdministration,
   CanonicalAmount,
   CanonicalMeasure,
+  CanonicalRange,
   CanonicalRecurrence,
   CanonicalCourse,
   CanonicalStage,
@@ -14,7 +15,7 @@ import type {
 } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { getBodySiteAdministrationTargetCount } from "../body-site-target";
-import { ROUTE_BY_SNOMED, ROUTE_SNOMED } from "../maps";
+import { ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit } from "../maps";
 import type { RouteCode } from "../types";
 
 const quantity = (
@@ -176,6 +177,13 @@ export function administrationFromClause(
     syntax: clause,
     text,
     patientInstruction: clause.patientInstruction,
+    additionalInstructions: clause.additionalInstructions?.map((instruction) => ({
+      ...(instruction.text !== undefined ? { text: instruction.text } : {}),
+      ...(instruction.coding ? { coding: [{
+        ...instruction.coding,
+        system: instruction.coding.system ?? "http://snomed.info/sct",
+      }] } : {}),
+    })),
     amounts: amounts(clause),
     schedule: s
       ? {
@@ -248,6 +256,93 @@ export function courseFromParallel(
   return { kind: "course", instruction, stages };
 }
 
+/** An unchanged source date keeps its calendar/provenance. Edited native
+ * ISO dates supply their own date parts; a source calendar must not reinterpret
+ * a replacement date. This is a structural display view, not a date parser. */
+function calendarEventsForAdministration(a: CanonicalAdministration): CanonicalCalendarEventExpr[] | undefined {
+  const current = a.schedule?.explicitEvents;
+  if (!current?.length) return undefined;
+  const source = a.syntax?.schedule?.calendarEvents;
+  let unchanged = source?.length === current.length;
+  if (unchanged) {
+    for (let index = 0; index < current.length; index++)
+      if ((source![index].fhirDateTime ?? source![index].isoDate) !== current[index]) {
+        unchanged = false;
+        break;
+      }
+  }
+  if (unchanged) return source;
+  const originals = new Map<string, { events: CanonicalCalendarEventExpr[]; next: number }>();
+  for (const event of source ?? []) {
+    const key = event.fhirDateTime ?? event.isoDate;
+    let bucket = originals.get(key);
+    if (!bucket) originals.set(key, (bucket = { events: [], next: 0 }));
+    bucket.events.push(event);
+  }
+  const events: CanonicalCalendarEventExpr[] = [];
+  for (const value of current) {
+    const saved = originals.get(value);
+    if (saved && saved.next < saved.events.length) {
+      events.push(saved.events[saved.next++]);
+      continue;
+    }
+    // A reduced-precision date has no authored day. Leave it in native
+    // explicitEvents for raw realization instead of inventing date parts.
+    if (!/^\d{4}-\d{2}-\d{2}(?:$|T)/u.test(value)) continue;
+    const isoDate = value.slice(0, 10);
+    events.push({
+      isoDate,
+      ...(value === isoDate ? {} : { fhirDateTime: value }),
+      calendar: "gregory",
+      calendarYear: Number(value.slice(0, 4)),
+      month: Number(value.slice(5, 7)),
+      day: Number(value.slice(8, 10)),
+      sourceText: value,
+    });
+  }
+  return events.length ? events : undefined;
+}
+
+/** Grammar annotations belong to the instruction they describe. An edited
+ * native text/code receives a new view, while an untouched instruction keeps
+ * its localization and typed source evidence. */
+function additionalInstructionsForAdministration(a: CanonicalAdministration): CanonicalSigClause["additionalInstructions"] {
+  if (!a.additionalInstructions) return undefined;
+  const source = a.syntax?.additionalInstructions;
+  let byText: Map<string | undefined, NonNullable<typeof source>[number]> | undefined;
+  const matches = (instruction: NonNullable<typeof a.additionalInstructions>[number],
+    original: NonNullable<typeof source>[number] | undefined) => {
+    const code = instruction.coding?.find((entry) => entry.code);
+    return original && original.text === instruction.text && code?.code === original.coding?.code &&
+      (code?.system ?? "http://snomed.info/sct") === (original.coding?.system ?? "http://snomed.info/sct") &&
+      code?.display === original.coding?.display && code?.version === original.coding?.version;
+  };
+  return a.additionalInstructions?.map((instruction, index) => {
+    const original = source?.[index];
+    if (matches(instruction, original)) return original!;
+    // Reordering/removing an earlier instruction must not attach its source
+    // language evidence to another instruction. Build this lookup only after
+    // the ordinary same-order path has failed.
+    if (source?.length && !byText) {
+      byText = new Map();
+      for (const item of source) byText.set(item.text, item);
+    }
+    const reordered = byText?.get(instruction.text);
+    if (matches(instruction, reordered)) return reordered!;
+    return { text: instruction.text, coding: instruction.coding?.find((entry) => entry.code) };
+  });
+}
+
+/** The grammar's compact dose range has one shared unit and no endpoint
+ * operators. Rich native ranges must retain each independently authored
+ * endpoint instead of compressing them into a misleading scalar-unit view. */
+export function doseRangeNeedsEndpointPreview(range: CanonicalRange): boolean {
+  const low = range.low, high = range.high;
+  return Boolean(low?.comparator || high?.comparator ||
+    (low?.value !== undefined && high?.value !== undefined &&
+      (low.unit ?? getDoseQuantityUnit(low)) !== (high.unit ?? getDoseQuantityUnit(high))));
+}
+
 /** Project native live facts back into the existing grammar realization view.
  * This is NOT a parser and reads no wire object: grammar evidence and source
  * spans remain unchanged; edited dose/schedule/guard values are authoritative.
@@ -267,10 +362,11 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   const range=r?.courseLengthRange??a.anchoredLength?.range;
   const value=a.amounts?.[0];
   if(value?.quantity){
-    result.dose={value:value.quantity.value,unit:value.quantity.unit};
+    result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
     if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;
-  }else if(value?.range)result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
-    unit:value.range.low?.unit??value.range.high?.unit};
+  }else if(value?.range && !doseRangeNeedsEndpointPreview(value.range))result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
+    unit:value.range.low?.unit??value.range.high?.unit??
+      (getDoseQuantityUnit(value.range.low) || getDoseQuantityUnit(value.range.high) || undefined)};
   else result.dose=undefined;
   if(a.schedule){
     const schedule:NonNullable<CanonicalSigClause["schedule"]>=base?.schedule?Object.assign({},base.schedule):{};
@@ -284,6 +380,8 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     schedule.durationComparator=length?.comparator??range?.low?.comparator;
     schedule.durationMaxComparator=range?.high?.comparator;
     schedule.boundsStart=r?.calendarWindow?.start;schedule.boundsEnd=r?.calendarWindow?.end;
+    if (a.schedule.explicitEvents?.length || base?.schedule?.calendarEvents)
+      schedule.calendarEvents=calendarEventsForAdministration(a);
     schedule.timeOfDay=r?.clocks;schedule.when=r?.anchors;schedule.dayOfWeek=r?.dayOfWeek;
     schedule.dayOfMonth=r?.monthDays;schedule.weekdayOrdinal=r?.weekdayOrdinal as typeof schedule.weekdayOrdinal;
     schedule.activityTiming=r?.activityTiming;schedule.eventWindow=r?.eventWindow;schedule.clockWindow=r?.clockWindow;
@@ -297,12 +395,14 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
         periodUnit:(limit.period.code??limit.period.unit) as NonNullable<typeof schedule.periodUnit>,periodComparator:limit.period.comparator});
     }
     schedule.maxDosePerPeriod=limits;
-    schedule.timingCode=a.schedule.code?.coding?.[0]?.code??a.schedule.code?.text??base?.schedule?.timingCode;
+    schedule.timingCode=a.schedule.code?.coding?.[0]?.code??a.schedule.code?.text;
     result.schedule=schedule;
   }else result.schedule=undefined;
   result.clinicalAdjuncts=Object.assign({},base?.clinicalAdjuncts,{condition:a.predicate,
     calendarDayCondition:a.calendarPredicate,excludedDates:a.excludedDates,excludedWeekdays:a.excludedWeekdays});
   result.patientInstruction=a.patientInstruction;
+  if (a.additionalInstructions || base?.additionalInstructions)
+    result.additionalInstructions=additionalInstructionsForAdministration(a);
   result.prn=a.asNeeded?Object.assign({},base?.prn,{enabled:true}):undefined;
   let routeIdentity:string|undefined;
   for(const code of a.route?.coding??[])if(code.code){routeIdentity=code.code;break;}
@@ -381,6 +481,7 @@ export function courseFromAdministrations(
     const length = first.schedule?.recurrence?.courseLength;
     const end =
       key === 1 &&
+      !start &&
       administrations.length > 1 &&
       length?.value !== undefined &&
       length.value > 0 &&

@@ -225,9 +225,13 @@ export function formatZonedIso(date: Date, timeZone: string): string {
   const absoluteOffset = Math.abs(offsetMinutes);
   const offsetHours = Math.floor(absoluteOffset / SECONDS_PER_MINUTE);
   const offsetRemainder = absoluteOffset % SECONDS_PER_MINUTE;
+  // Civil Intl parts are whole seconds, but the accepted execution instant
+  // may be fractional. Preserve it without changing whole-second output.
+  const milliseconds = date.getUTCMilliseconds();
+  const fraction = milliseconds ? `.${pad(milliseconds, 3)}` : "";
   return `${pad(year, 4)}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(
     second
-  )}${offsetSign}${pad(offsetHours)}:${pad(offsetRemainder)}`;
+  )}${fraction}${offsetSign}${pad(offsetHours)}:${pad(offsetRemainder)}`;
 }
 
 /**

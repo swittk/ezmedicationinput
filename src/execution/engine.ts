@@ -1054,7 +1054,8 @@ function maximumCapacityWithRollingLimits(
   cap: CanonicalOccurrenceCapExpr,
   quantityCaps: readonly CanonicalOccurrenceCapExpr[],
   priorDoseTimes: CanonicalSupplyOptions["priorDoseTimes"],
-  zone: string
+  zone: string,
+  allocations?: Array<{ at: number; count: number }>
 ): number {
   if (!intervals.length) return 0;
   const end = intervals[intervals.length - 1].end;
@@ -1065,7 +1066,7 @@ function maximumCapacityWithRollingLimits(
   const allocated: Array<{
     at: number;
     count: number;
-  }> = [];
+  }> = allocations ?? [];
   const used = new Map<number, number>();
   for (const item of prior) {
     const bucket = occurrenceCapBucketIndex(new Date(item.at), cap, zone);
@@ -1141,7 +1142,8 @@ function maximumUnscheduledCapCount(
   end: Date,
   options: CanonicalSupplyOptions,
   timeZone: string,
-  quantityCaps: readonly CanonicalOccurrenceCapExpr[] = []
+  quantityCaps: readonly CanonicalOccurrenceCapExpr[] = [],
+  allocations?: Array<{ at: number; count: number }>
 ): number {
   if (from >= end) return 0;
   const repeat = dosage.schedule?.recurrence;
@@ -1172,7 +1174,7 @@ function maximumUnscheduledCapCount(
     ) {
       const start = Math.max(+from, +day),
         stop = Math.min(+end, +next);
-      if (quantityCaps.length) intervals.push({ start, end: stop });
+      if (quantityCaps.length || allocations) intervals.push({ start, end: stop });
       const first = occurrenceCapBucketIndex(new Date(start), cap, timeZone);
       const last = occurrenceCapBucketIndex(new Date(stop - 1), cap, timeZone);
       const previous = ranges[ranges.length - 1];
@@ -1181,8 +1183,10 @@ function maximumUnscheduledCapCount(
     }
     day = next;
   }
-  if (quantityCaps.length) {
-    return maximumCapacityWithRollingLimits(intervals, cap, quantityCaps, options.priorDoseTimes, timeZone);
+  if (quantityCaps.length || allocations) {
+    return maximumCapacityWithRollingLimits(
+      intervals, cap, quantityCaps, options.priorDoseTimes, timeZone, allocations
+    );
   }
   let count = ranges.reduce((total, range) => total + (range.last - range.first + 1) * cap.max, 0);
   const used = new Map<number, number>();
@@ -1385,9 +1389,12 @@ function applyQuantityCaps(
   caps: readonly CanonicalOccurrenceCapExpr[],
   priorDoseTimes: Array<Date | string> | undefined,
   zone: string,
-  limit: number
+  limit: number,
+  occurrence?: CanonicalOccurrenceCapExpr
 ): string[] {
-  if (!caps.length) return candidates.slice(0, Math.floor(limit));
+  if (!caps.length) return occurrence
+    ? applyOccurrenceCap(candidates, occurrence, priorDoseTimes, zone, limit)
+    : candidates.slice(0, Math.floor(limit));
   // R5 Dosage.maxDosePerPeriod means a maximum QUANTITY in a duration.
   // It is not a calendar-midnight reset: two 2-tablet administrations
   // before midnight must not license another 4 tablets after midnight.
@@ -1396,6 +1403,16 @@ function applyQuantityCaps(
     .sort((a, b) => a - b);
   const accepted: string[] = [];
   const acceptedTimes: number[] = [];
+  // All constraints admit the SAME candidate before either allowance is
+  // consumed. A rolling-quantity rejection cannot spend the calendar-period
+  // occurrence allowance and thereby hide a later eligible administration.
+  const occurrenceCounts = occurrence ? new Map<string, number>() : undefined;
+  if (occurrence && occurrenceCounts) {
+    for (const timestamp of prior) {
+      const key = occurrenceCapBucketKey(new Date(timestamp), occurrence, zone);
+      occurrenceCounts.set(key, (occurrenceCounts.get(key) ?? 0) + 1);
+    }
+  }
   const after = (sorted: readonly number[], boundary: number) => {
     let lo = 0,
       hi = sorted.length;
@@ -1409,6 +1426,9 @@ function applyQuantityCaps(
   for (const iso of candidates) {
     const at = new Date(iso);
     const timestamp = at.getTime();
+    const occurrenceKey = occurrence ? occurrenceCapBucketKey(at, occurrence, zone) : undefined;
+    if (occurrenceKey !== undefined && occurrence &&
+        (occurrenceCounts!.get(occurrenceKey) ?? 0) >= occurrence.max) continue;
     const fitsEveryCap = caps.every((cap) => {
       const first = quantityCapWindowStart(at, cap, zone);
       const existing = after(prior, timestamp) - after(prior, first);
@@ -1418,6 +1438,8 @@ function applyQuantityCaps(
     if (!fitsEveryCap) continue;
     accepted.push(iso);
     acceptedTimes.push(timestamp);
+    if (occurrenceKey !== undefined)
+      occurrenceCounts!.set(occurrenceKey, (occurrenceCounts!.get(occurrenceKey) ?? 0) + 1);
     if (accepted.length >= limit) break;
   }
   return accepted;
@@ -1425,7 +1447,7 @@ function applyQuantityCaps(
 function withoutOccurrenceCap(dosage: CanonicalAdministration): CanonicalAdministration {
   const timing = dosage.schedule;
   const repeat = timing?.recurrence;
-  if (!timing || !repeat) return dosage;
+  if (!timing || !repeat?.occurrenceCap) return dosage;
   return {
     ...dosage,
     schedule: {
@@ -1836,6 +1858,20 @@ function stepOccursInCycle(step: CanonicalCourse["stages"][number], cycleIndex?:
 /** Component-local accepted administrations across repeat-cycle boundaries.
  * Allocate only for a course that actually declares a rolling cap. */
 type RollingCycleUsage = Map<string, string[]>;
+/** Lifetime supply is a quantity ceiling, not a ban on concrete scheduling.
+ * Retain already calculated quantity (including a partial last allowance),
+ * independently of the rolling ledger's finite timestamp window. */
+type LifetimeCycleUsage = Map<string, number>;
+function hasLifetimeLimit(member: CanonicalAdministration): boolean {
+  for (const limit of member.limits ?? []) if (limit.scope === "lifetime") return true;
+  return false;
+}
+function lifetimeCycleUsage(course: CanonicalCourse): LifetimeCycleUsage | undefined {
+  for (const stage of course.stages)
+    for (const member of stage.administrations)
+      if (hasLifetimeLimit(member)) return new Map();
+  return undefined;
+}
 /** A cycle's exact administration count is independent of other cycles.
  * Shared rolling limits, however, are evaluated globally in timestamp order.
  * Quota is retained by the pending events of this one member/cycle; no map
@@ -2669,12 +2705,36 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   const finiteCount = hasDefiniteAdministrationCount(repeatForCount)
     ? repeatOccurrenceCap(repeatForCount)
     : undefined;
-  if (eligibleAt && finiteCount !== undefined && !one.asNeeded) {
+  // A recurrence's total count is another allowance on ADMINISTERED doses.
+  // A periodic/quantity cap must not spend it on rejected raw opportunities.
+  // countMax participates here as a ceiling, without becoming a phase-end
+  // promise. A one-time count-only instruction keeps its unique identity.
+  const capCount = repeatForCount &&
+      (repeatForCount.count !== undefined || repeatForCount.countMax !== undefined) &&
+      !isSingleAdministrationRepeat(repeatForCount) &&
+      (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount))
+    ? repeatOccurrenceCap(repeatForCount) : undefined;
+  const acceptedCount = eligibleAt && !one.asNeeded ? finiteCount : capCount;
+  if (acceptedCount !== undefined) {
     const requestedLimit = options.limit ?? 10;
     if (!Number.isFinite(requestedLimit) || requestedLimit <= 0) return [];
     if (options.priorCount !== undefined && (!Number.isFinite(options.priorCount) || options.priorCount < 0))
       throw new Error("Invalid priorCount supplied to nextDueDoses");
-    const available = Math.max(0, finiteCount - Math.floor(options.priorCount ?? 0));
+    const requestedFrom = coerceDate(options.from, "from");
+    const zone = options.timeZone ?? options.config?.timeZone;
+    if (!zone) throw new Error("A timeZone is required for counted capped scheduling");
+    const origin = eligibleAt ?? resolveRepeatBoundsStart(repeatForCount, zone) ??
+      (options.orderedAt === undefined ? requestedFrom : coerceDate(options.orderedAt, "orderedAt"));
+    let used = options.priorCount ?? 0;
+    if (one.asNeeded && options.priorCount === undefined) {
+      // A PRN opportunity is not evidence of use; only known actual doses
+      // consume its total allowance before a later query.
+      for (const stamp of options.priorDoseTimes ?? []) {
+        const actual = coerceDate(stamp, "priorDoseTimes");
+        if (actual >= origin && actual < requestedFrom) used++;
+      }
+    }
+    const available = Math.max(0, acceptedCount - Math.floor(used));
     if (!available) return [];
     const capped = Math.min(available, 10000);
     const uncapped: CanonicalAdministration = {
@@ -2692,7 +2752,8 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       ...options,
       countEligibilityStart: undefined,
       priorCount: undefined,
-      from: eligibleAt,
+      from: one.asNeeded || (options.priorCount !== undefined && !eligibleAt)
+        ? requestedFrom : origin,
       limit: capped,
     } as PhaseCountOptions);
     if (available > capped && candidates.length === capped)
@@ -2700,7 +2761,6 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
         "schedule-horizon-too-dense",
         "A counted successor exceeds 10,000 eligible administrations; shorten the clinically verified window."
       );
-    const requestedFrom = coerceDate(options.from, "from");
     return candidates
       .filter((iso) => Date.parse(iso) >= requestedFrom.getTime())
       .slice(0, Math.floor(requestedLimit));
@@ -2836,23 +2896,15 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
             accepted.length >= (maximumEligible ?? limit)) break;
       }
       // A conditionally withheld/excluded dose does not consume either cap.
-      // The periodic cap must see ALL accepted opportunities before quantity
-      // caps determine which can actually be given within the rolling limit.
-      const periodicallyCapped = occurrenceCap
-        ? applyOccurrenceCap(
-            accepted,
-            occurrenceCap,
-            options.priorDoseTimes,
-            timeZone,
-            Number.MAX_SAFE_INTEGER
-          )
-        : accepted;
+      // Nor may a dose rejected by one cap consume the other's allowance.
+      // Commit the eligible candidate only after every authored cap accepts it.
       const capped = applyQuantityCaps(
-        periodicallyCapped,
+        accepted,
         quantityCaps,
         options.priorDoseTimes,
         timeZone,
-        maximumEligible ?? limit
+        maximumEligible ?? limit,
+        occurrenceCap
       );
       // Date queries after the treatment start must not count prior accepted
       // doses as new results, but they still consume the source count.
@@ -3030,10 +3082,11 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   if (quantityCaps.length) {
     const requestLimit = Math.floor(limit);
     let candidateLimit = Math.min(10000, Math.max(16, requestLimit * 4));
-    const unsafeguarded: CanonicalAdministration = {
+    const occurrence = getTimingOccurrenceCap(dosage.schedule?.recurrence);
+    const unsafeguarded: CanonicalAdministration = withoutOccurrenceCap({
       ...dosage,
       limits: dosage.limits?.filter((limit) => limit.scope !== "period"),
-    };
+    });
     while (true) {
       const candidates = nextDueDoses(unsafeguarded, { ...options, limit: candidateLimit });
       const accepted = applyQuantityCaps(
@@ -3041,7 +3094,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         quantityCaps,
         options.priorDoseTimes,
         timeZone,
-        requestLimit
+        requestLimit,
+        occurrence
       );
       if (accepted.length >= requestLimit || candidates.length < candidateLimit || candidateLimit >= 10000)
         return accepted;
@@ -4442,7 +4496,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
  * choices. For overlapping capped cycles those extra opportunities MUST
  * pass through the same chronological cap ledger, not a post hoc count.
  *
- * Only the specialized overlapping supply path constructs this shallow
+ * Only repeated supply with shared caps constructs this shallow
  * projection. Preserve the original member for units, explanations and
  * source metadata; the projected member exists solely for scheduling.
  */
@@ -4726,7 +4780,13 @@ function calculateTotalUnitsSingle(
   options: Omit<CanonicalSupplyOptions, "dosage"> & {
     dosage: CanonicalAdministration;
   },
-  acceptedEventCount?: number
+  acceptedEventCount?: number,
+  supplyAccounting?: {
+    usedQuantity?: number;
+    actualPriorCount: number;
+    /** Accepted plan history for another supply cycle, never patient due times. */
+    acceptedTimes?: string[];
+  }
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
   requireResolvedCycleDays(sourceDosage);
@@ -4740,7 +4800,9 @@ function calculateTotalUnitsSingle(
     const shift = (value: Date | string, amount: number) =>
       new Date(coerceDate(value, "administration time").getTime() + amount);
     const end = calculationHorizon(options, timeZone);
-    return calculateTotalUnitsSingle({
+    const localAccounting = supplyAccounting?.acceptedTimes
+      ? { ...supplyAccounting, acceptedTimes: [] as string[] } : supplyAccounting;
+    const result = calculateTotalUnitsSingle({
       ...options,
       dosage: {
         ...sourceDosage,
@@ -4753,7 +4815,11 @@ function calculateTotalUnitsSingle(
       evaluateCondition: options.evaluateCondition
         ? (condition, at) => options.evaluateCondition!(condition, formatZonedIso(shift(at, delta), timeZone))
         : undefined,
-    }, acceptedEventCount);
+    }, acceptedEventCount, localAccounting);
+    if (supplyAccounting?.acceptedTimes && localAccounting?.acceptedTimes)
+      for (const stamp of localAccounting.acceptedTimes)
+        supplyAccounting.acceptedTimes.push(shift(stamp, delta).toISOString());
+    return result;
   }
   if (options.priorCount !== undefined && (!Number.isFinite(options.priorCount) || options.priorCount < 0))
     throw new MedicationQuantityCalculationError(
@@ -4788,10 +4854,10 @@ function calculateTotalUnitsSingle(
         : convertValue(lifetime.value, lifetimeUnit, doseUnitForLimits, strength);
     if (converted !== null && Number.isFinite(converted)) {
       const knownPrior =
-        (options.priorDoseTimes?.length ?? 0) *
+        (supplyAccounting?.actualPriorCount ?? options.priorDoseTimes?.length ?? 0) *
         (doseForLimits?.value ?? 0) *
         getAdministrationTargetMultiplier(dosage, context);
-      lifetimeMaximum = Math.max(0, converted - knownPrior);
+      lifetimeMaximum = Math.max(0, converted - knownPrior - (supplyAccounting?.usedQuantity ?? 0));
     } else {
       unevaluatedMaximumDose = true;
     }
@@ -4890,6 +4956,9 @@ function calculateTotalUnitsSingle(
     isWakingHoursInterval(repeat) ||
     Boolean((options as PhaseCountOptions).countEligibilityStart && hasDefiniteAdministrationCount(repeat));
   let count: number;
+  let selectedTimes: string[] | undefined;
+  const capacityAllocations = capacityCap && supplyAccounting?.acceptedTimes
+    ? [] as Array<{ at: number; count: number }> : undefined;
   if (acceptedEventCount !== undefined) {
     // The overlapping-cycle ledger has already evaluated and accepted every
     // concrete opportunity in global timestamp order. Count its accepted
@@ -4908,7 +4977,8 @@ function calculateTotalUnitsSingle(
       endDay,
       options,
       timeZone,
-      executableQuantityCaps(dosage, context)
+      executableQuantityCaps(dosage, context),
+      capacityAllocations
     );
     const totalCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
     if (totalCap !== undefined) {
@@ -4951,6 +5021,7 @@ function calculateTotalUnitsSingle(
       );
     }
     count = scheduled.filter((date) => Date.parse(date) < endDay.getTime()).length;
+    if (supplyAccounting?.acceptedTimes) selectedTimes = scheduled;
   } else {
     const exactEvents = dosage.schedule
       ? exactTimingEventOccurrences(
@@ -5012,7 +5083,34 @@ function calculateTotalUnitsSingle(
       evaluateCondition: options.evaluateCondition ?? (() => true),
       limit: 10000,
     });
-    count = Math.max(count, upperBoundTimes.filter((date) => Date.parse(date) < endDay.getTime()).length);
+    const upperCount = upperBoundTimes.filter((date) => Date.parse(date) < endDay.getTime()).length;
+    if (upperCount > count) {
+      count = upperCount;
+      if (supplyAccounting?.acceptedTimes) selectedTimes = upperBoundTimes;
+    }
+  }
+  if (supplyAccounting?.acceptedTimes) {
+    // A subsequent cycle consumes the SAME plan that produced this number.
+    // Capacity allocations are mathematical placements under known ceilings,
+    // not newly invented clinical times; they stay inside supply accounting.
+    const history = supplyAccounting.acceptedTimes;
+    let remaining = count;
+    if (capacityAllocations) {
+      for (const allocation of capacityAllocations) {
+        const take = Math.min(remaining, allocation.count);
+        const stamp = new Date(allocation.at).toISOString();
+        for (let index = 0; index < take; index++) history.push(stamp);
+        remaining -= take;
+        if (!remaining) break;
+      }
+    } else if (selectedTimes) {
+      for (const stamp of selectedTimes) {
+        if (!remaining) break;
+        if (Date.parse(stamp) >= endDay.getTime()) continue;
+        history.push(stamp);
+        remaining--;
+      }
+    }
   }
   const doseQuantity = dosage.amounts?.[0]?.quantity?.value ?? 0;
   const targetMultiplier = getAdministrationTargetMultiplier(dosage, context);
@@ -5048,9 +5146,13 @@ function calculateTotalUnitsSingle(
     maximumExplanations.push("the upper bound of the infusion-duration range was used");
   if (lifetimeMaximum !== undefined)
     maximumExplanations.push(
-      options.priorDoseTimes?.length
-        ? "the lifetime maximum was reduced by the supplied prior administrations"
-        : "the full lifetime maximum was treated as still available because no prior administrations were supplied"
+      (supplyAccounting?.usedQuantity ?? 0) > 0
+        ? (supplyAccounting?.actualPriorCount ?? options.priorDoseTimes?.length ?? 0) > 0
+          ? "the lifetime maximum was reduced by supplied prior administrations and accepted earlier cycle supply"
+          : "the lifetime maximum was reduced by accepted earlier cycle supply"
+        : (supplyAccounting?.actualPriorCount ?? options.priorDoseTimes?.length ?? 0) > 0
+          ? "the lifetime maximum was reduced by the supplied prior administrations"
+          : "the full lifetime maximum was treated as still available because no prior administrations were supplied"
     );
   if (unevaluatedMaximumDose)
     maximumExplanations.push("an unevaluable maximum-dose constraint was retained but could not be applied");
@@ -5170,7 +5272,8 @@ function calculateCourseTotalUnits(
   cycleDefaultEnd?: Date,
   cycleIndex?: number,
   sourceClock?: TreatmentWallClock,
-  rollingUsage?: RollingCycleUsage
+  rollingUsage?: RollingCycleUsage,
+  lifetimeUsage?: LifetimeCycleUsage
 ): TotalUnitsResult {
   course = executionCourseWithPeriodOffsets(selectedAlternativeCourse(course, options));
   requireExecutableCourseContext(course, "calculating");
@@ -5207,6 +5310,11 @@ function calculateCourseTotalUnits(
     const singleCycle = { ...course, cycleInterval: undefined };
     const priorCycleUsage = hasRollingCycleLimit(singleCycle)
       ? new Map<string, string[]>() : undefined;
+    // Lifetime consumption before this requested supply plan belongs to
+    // supplied ACTUAL administrations, exactly as in the single-cycle API.
+    // Do not invent historic consumption from scheduled opportunities. This
+    // ledger carries only accepted quantity within the current supply plan.
+    lifetimeUsage ??= lifetimeCycleUsage(singleCycle);
     const firstCycleEnd=cycleAdvance(anchor);
     if(priorCycleUsage && !definitelyNonOverlappingCycle(singleCycle) && firstCycleEnd){
       const maximum = maximumChronologicalSupplyCourse(course, options);
@@ -5233,7 +5341,7 @@ function calculateCourseTotalUnits(
         group.count++;
       }
       const entries:Array<{total:TotalUnitsResult;unit:string|undefined}>=[];
-      for(const group of byMember.values()){
+      for(const [key, group] of byMember){
         const dosage:CanonicalAdministration={
           ...group.member,
           delayMinutes:undefined,phaseOrigin:undefined,phaseOriginIssue:undefined,
@@ -5255,7 +5363,12 @@ function calculateCourseTotalUnits(
           durationValue:(queryEnd.getTime()-queryStart.getTime())/1000,
           durationUnit:DurationUnit.Second,roundToMultiple:undefined,
           evaluateCondition:undefined,
-        }, group.count);
+        }, group.count, lifetimeUsage ? {
+          usedQuantity: lifetimeUsage.get(key) ?? 0,
+          actualPriorCount: options.priorDoseTimes?.length ?? 0,
+        } : undefined);
+        if (lifetimeUsage && hasLifetimeLimit(group.member))
+          lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
         entries.push({total,unit:total.unit});
       }
       return sumCourseUnits(entries,options);
@@ -5274,6 +5387,18 @@ function calculateCourseTotalUnits(
       const horizon = repeatedCourseHorizon(singleCycle, cycleStart, cycleEnd, zone, originalClock, options);
       const windowStart = cycleStart > queryStart ? cycleStart : queryStart;
       const windowEnd = horizon < queryEnd ? horizon : queryEnd;
+      if (priorCycleUsage && cycleStart < queryStart) {
+        // Establish the existing rolling history from the same maximum
+        // supply plan, including cap-only capacity. These prior plan
+        // allocations do not claim actual historical lifetime consumption.
+        const priorEnd = horizon < queryStart ? horizon : queryStart;
+        if (priorEnd > cycleStart) calculateCourseTotalUnits(singleCycle, {
+          ...options, from: cycleStart, orderedAt: cycleStart,
+          durationValue: (priorEnd.getTime() - cycleStart.getTime()) / 1000,
+          durationUnit: DurationUnit.Second, priorCount: undefined,
+          roundToMultiple: undefined,
+        }, cycleEnd, guard, originalClock, priorCycleUsage);
+      }
       if (windowEnd > windowStart) {
         const total = calculateCourseTotalUnits(
           singleCycle,
@@ -5289,21 +5414,10 @@ function calculateCourseTotalUnits(
           cycleEnd,
           guard,
           originalClock,
-          priorCycleUsage
+          priorCycleUsage,
+          lifetimeUsage
         );
         entries.push({ total, unit: total.unit });
-      }
-      if (priorCycleUsage) {
-        // Scheduling owns accepted administrations and rolling allowance.
-        // Advance that SAME per-component history after supply has consumed
-        // the previous cycles; never reinitialize dose limits at midnight.
-        // This also establishes earlier history for a later from-query.
-        scheduleTreatmentRelativeCourse(
-          singleCycle, {
-            ...options, from: cycleStart, orderedAt: cycleStart,
-            priorCount: undefined, limit: 10000,
-          }, cycleEnd, guard, originalClock, priorCycleUsage
-        );
       }
       if(priorCycleUsage)trimRollingCycleHistory(singleCycle,priorCycleUsage,cycleEnd,zone);
       cycleStart = cycleEnd;
@@ -5366,6 +5480,10 @@ function calculateCourseTotalUnits(
         },
       };
       const measured = prepareMeasuredDose(bounded, options);
+      const key = rollingCycleKey(index, memberIndex);
+      const acceptedTimes: string[] | undefined = rollingUsage &&
+          (hasPeriodLimits(dosage) || getTimingOccurrenceCap(dosage.schedule?.recurrence))
+        ? [] : undefined;
       const total = calculateTotalUnitsSingle({
         ...options,
         dosage: bounded,
@@ -5373,10 +5491,22 @@ function calculateCourseTotalUnits(
         orderedAt: member.recurrenceOrigin,
         roundToMultiple: undefined,
         ...(rollingUsage ? { priorDoseTimes: rollingPriorTimes(
-          rollingUsage, rollingCycleKey(index,memberIndex), options.priorDoseTimes
+          rollingUsage, key, options.priorDoseTimes
         ) } : {}),
         ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
-      } as CanonicalSupplyOptions & PhaseCountOptions & { dosage: CanonicalAdministration });
+      } as CanonicalSupplyOptions & PhaseCountOptions & { dosage: CanonicalAdministration },
+        undefined, lifetimeUsage || acceptedTimes ? {
+          usedQuantity: lifetimeUsage?.get(key) ?? 0,
+          actualPriorCount: options.priorDoseTimes?.length ?? 0,
+          acceptedTimes,
+        } : undefined);
+      if (acceptedTimes?.length && rollingUsage) {
+        const history = rollingUsage.get(key);
+        if (history) history.push(...acceptedTimes);
+        else rollingUsage.set(key, acceptedTimes);
+      }
+      if (lifetimeUsage && hasLifetimeLimit(dosage))
+        lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
       entries.push({
         total,
         unit: measured.amounts?.[0]?.quantity?.unit ?? measured.amounts?.[0]?.quantity?.code,

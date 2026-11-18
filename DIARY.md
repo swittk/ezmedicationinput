@@ -7237,3 +7237,161 @@ not a like-for-like speed comparison (the prior output was clinically wrong).
 
 The new feedback was handled within the original CodeRabbit thread; no
 unsolicited top-level comments and no duplicate full review request.
+
+
+## 2026-11-18 — PR #14 family review: live facts and accepted supply own their results
+
+This pass covers fifteen inline findings and one unit-retention finding in
+the review body. Three bounded workers owned execution, native edits, and
+display/replay; integration also covered the dimensional-rate grammar,
+execution timestamp precision, and the README example. The findings pass
+the product gate: they concern ordinary clinical rates and supported
+structured edits/imports, with wrong amounts, dates, units, limits, or stale
+display. The fixes belong to the existing clinical, realization, or
+interchange owners. They do not add a second parser, route one FHIR version
+through the other, or impose new parser refusals.
+
+### Accepted administrations own allowances and repeat history
+
+- Calendar occurrence caps and rolling quantity caps now accept a candidate
+  together before consuming either allowance, in both regular and
+  conditional execution. With an actual prior dose at 20:00 the preceding
+  day, the valid next 20:00 dose is retained; the rejected 08:00 opportunity
+  cannot spend that day's allowance.
+- The same root cause affected finite counts and count maxima. Counts now
+  apply to admitted administrations, including late queries and PRN actual
+  history. A two-dose course cannot lose its second dose to a rejected raw
+  opportunity.
+- Repeated supply receives the selected plan directly from its numeric
+  calculation. It no longer calculates a frequency maximum and then
+  regenerates different concrete-clock history. Two tablets per two days
+  remains two across daily repeat cycles.
+- Untimed cap-only capacity uses the existing capacity allocator's internal
+  mathematical allocations for supply accounting. It remains a maximum,
+  without returned patient due timestamps. This fixes both repeated capacity
+  reset and the ranged-capacity case that a timestamp-only route would lose.
+- Lifetime quantity is carried per member across the requested supply plan:
+  one tablet daily with a three-tablet lifetime ceiling totals three over
+  fourteen days, or two with one actual prior administration. Earlier actual
+  lifetime consumption comes from supplied priors; historic scheduled
+  opportunities do not invent patient usage. Rolling history remains
+  separate. Fractional ceilings, target multiplication, known concentration,
+  and independent member ownership retain their established behavior.
+- Ordinary scalar supply creates no cycle-accounting sink. The cheap
+  nonoverlap guard remains, and nonoverlap repeated supply removes the old
+  second scheduling pass.
+
+### Current clinical edits override retained source fields
+
+- Safety projection excludes modeled period/text from saved metadata and
+  respects deletion of limits and ifExceeded. Unrelated IDs/extensions stay.
+- Native additional instructions are populated during compilation and own
+  display plus both projections. Matching unchanged/reordered instructions
+  retain their grammar evidence and localization; removed or replaced
+  instructions cannot reappear from syntax.
+- Approximate-rate retention reads the current denominator, so a one-hour
+  to two-hour edit survives R5 persistence. Its retained representation must
+  also preserve native or extension-based source qualifiers without adding
+  a different wire encoding.
+- Calendar views derive from live explicit events. Replaced/removed dates
+  do not reuse old grammar dates or known calendar annotations. Unchanged
+  and reordered events retain their source calendar evidence; duplicate
+  date values retain distinct primitive metadata. Partial dates remain raw,
+  without fabricated month/day values.
+- A shared delayed start no longer receives an unshifted derived stage end.
+  Two concurrent daily members of one and two tablets, delayed two days and
+  prescribed for seven days, total twenty-one tablets over fourteen member
+  events, January 3–9.
+- Source-less scalar and ranged quantities retain exact code-only units.
+  The neighboring mixed-unit case previously displayed 500 to 1 mg for
+  endpoints 500 mg and 1 g. Rich native range wording now retains both
+  endpoint units and operators, leaving the native range and FHIR values
+  unchanged. The compact clause is used only when it can express that range.
+
+### Display, source replay, locale registration, and rate grammar
+
+- One scoped limit renderer handles amount, administration count, and
+  unevaluated expression values. Member, stage, and whole-course allowances
+  stay at their own scopes; course limits appear once. Wording stays in the
+  existing CourseLanguage locale facet, including registered third locales.
+- The persisted source proof and fresh parser-row proof share observations
+  of live timing. Every clock/event/weekday/meal entry, relevant repeat
+  scalar/bound, and timing-code value participates. Public Thai regressions
+  change 20:00 to 22:00 and verify the new display for both original and
+  serialized rows. Small typed quantity/range/rate observations retain their
+  qualifiers. Replay uses scalar comparisons and short loops, without
+  reparsing or recursively scanning retained provenance.
+- Locale registration takes one provider snapshot so caller configuration
+  reuse cannot corrupt identity or replacement order. Detection adds no work.
+- AT can belong to both a dimensional rate head and an inclusive comparator.
+  IV at most 100 mL/hr retains the <=100 mL/h rate. Inclusive, approximate,
+  attached/spaced/per unit variants and ordinary scalar controls are covered
+  at the existing bounded HPSG quantity construction.
+- Execution ISO timestamps preserve nonzero milliseconds, with whole-second
+  output unchanged. Exact-event tests include timezone offsets, DST changes,
+  and pre-epoch fractions.
+- The README internal example uses FhirPeriodUnit.Day and is checked as a
+  complete strict TypeScript example against built declarations.
+
+### Integrated validation and performance
+
+- TypeScript declarations and ES6 ESM/CJS build: passed.
+- Source suite: **4,376/4,376 tests in 51/51 suites**; **92 new regression
+  cases** across the four bounded family suites.
+- Packaged exports: **4/4 passed**. The complete README example also passes
+  strict TypeScript against the final built declarations.
+- All 32 ordinary/equivalent benchmark workloads retain equal outputs.
+  Baselines were freshly built from exact pre-loop commit dc529c6 and master
+  7d62823, avoiding stale worktree bundles. The full scan used 23 alternating
+  warmed rounds; near-threshold readings received targeted 41-round checks.
+- Measured common-path regressions were corrected by skipping absent
+  instruction/calendar work, absent stage/course limit helpers, and needless
+  recurrence copies when there is no occurrence cap. Provider registration
+  copies its four typed fields directly, avoiding the ES6 spread helper.
+- The maximum confirmed increase versus dc529c6 is **3.76%**. No aggregate
+  average waives an individual domain. All shared public workloads also
+  remain within 4% versus freshly built master.
+- Corrected clinical examples with different totals are covered by independent
+  tests; their previously wrong work is not presented as an equivalent speed
+  comparison.
+
+Paired medians in microseconds (negative change is faster):
+
+| Workload | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| parse English | 1316.039 | 1323.999 | +0.60% |
+| parse Thai | 5776.545 | 5680.736 | -1.66% |
+| parse ocular taper | 4928.201 | 4925.519 | -0.05% |
+| parse rate | 1587.599 | 1598.667 | +0.70% |
+| suggest English | 383.220 | 381.076 | -0.56% |
+| suggest Thai | 1763.021 | 1777.283 | +0.81% |
+| R5 EN format | 10.517 | 10.339 | -1.69% |
+| R5 persisted source replay | 24.762 | 24.548 | -0.87% |
+| R5 fresh source replay | 23.972 | 23.132 | -3.50% |
+| R6 EN format | 10.359 | 10.748 | +3.76% |
+| R6 TH source replay | 0.032 | 0.032 | +1.54% |
+| R6 structured format | 8.629 | 8.386 | -2.82% |
+| R6 structured format TH | 15.827 | 16.226 | +2.52% |
+| R5 import | 27.871 | 27.163 | -2.54% |
+| R6 import | 38.561 | 38.325 | -0.61% |
+| R5 to R6 | 98.529 | 97.941 | -0.60% |
+| R6 to R5 | 79.926 | 82.433 | +3.14% |
+| scalar nextDue | 33.889 | 33.402 | -1.44% |
+| scalar supply | 38.021 | 37.299 | -1.90% |
+| staged nextDue | 515.214 | 503.764 | -2.22% |
+| staged supply | 452.438 | 438.430 | -3.10% |
+| explicit event nextDue | 6.139 | 6.264 | +2.03% |
+| locale detect | 0.067 | 0.069 | +2.45% |
+| locale register | 0.235 | 0.232 | -1.32% |
+| native source replay | 0.041 | 0.041 | -1.24% |
+| native generated format | 88.471 | 82.182 | -7.11% |
+| native projection | 43.883 | 45.074 | +2.71% |
+| nonoverlap capped nextDue | 616.000 | 608.159 | -1.27% |
+| nonoverlap capped supply | 1491.034 | 967.751 | -35.10% |
+| overlap capped nextDue | 783.322 | 781.684 | -0.21% |
+| overlap capped supply | 809.053 | 818.810 | +1.21% |
+| overlap range supply | 209.861 | 216.177 | +3.01% |
+
+Review responses belong in the existing threads, including the outside-diff
+unit finding in its related compiler thread. No unsolicited top-level
+comment or duplicate review request is part of this loop.

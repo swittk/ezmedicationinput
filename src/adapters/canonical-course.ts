@@ -81,6 +81,7 @@ import {
   getCycleDayConstraint,
   getExactTimingOffsetMinutes,
   parseActivityTimingExtensions,
+  TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
   TIMING_FREQUENCY_MIN_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   TIMING_OFFSET_MIN_EXTENSION_URL,
@@ -341,10 +342,8 @@ export function safetyToWire(
 ): FhirR6DosageSafety | undefined {
   if (!policy && limits === undefined) return undefined;
   const output: FhirR6DosageSafety = { ...source };
-  if (policy) {
-    if (policy.ifExceeded === undefined) delete output.ifExceeded;
-    else output.ifExceeded = policy.ifExceeded;
-  }
+  if (policy?.ifExceeded === undefined) delete output.ifExceeded;
+  else output.ifExceeded = policy.ifExceeded;
   const known = limits ?? policy?.limits;
   if (known !== undefined) {
     output.doseLimit = known.map((limit) => {
@@ -355,6 +354,8 @@ export function safetyToWire(
         valueQuantity: _oldQuantity,
         valueInteger: _oldCount,
         valueExpression: _oldExpression,
+        period: _oldPeriod,
+        text: _oldText,
         ...metadata
       } = saved ?? {};
       const period =
@@ -388,7 +389,7 @@ export function safetyToWire(
       if (limit.expression) return { ...common, valueExpression: limit.expression } satisfies FhirR6DoseLimit;
       throw new TypeError("An authored safety limit must contain a numeric, count, or expression value");
     });
-  }
+  } else delete output.doseLimit;
   return output;
 }
 export function amountFromWire(
@@ -740,6 +741,34 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     return original;
   const output: Record<string, unknown> = Object.assign({}, t.provenance);
   assign(output, "event", t.explicitEvents);
+  // Primitive annotations describe the event at the same position. Preserve
+  // unrelated element metadata, but never keep an old source-calendar date
+  // after the native event was replaced. Unchanged/reordered events retain
+  // their exact original annotations without a second date interpretation.
+  if (original?._event && !same(original.event, t.explicitEvents)) {
+    if (!t.explicitEvents?.length) delete output._event;
+    else {
+      const byEvent = new Map<string, { indices: number[]; next: number }>();
+      for (let index = 0; index < (original.event?.length ?? 0); index++) {
+        const event = original.event![index];
+        let bucket = byEvent.get(event);
+        if (!bucket) byEvent.set(event, (bucket = { indices: [], next: 0 }));
+        bucket.indices.push(index);
+      }
+      output._event = t.explicitEvents.map((event, index) => {
+        const bucket = byEvent.get(event);
+        if (bucket && bucket.next < bucket.indices.length)
+          return original._event![bucket.indices[bucket.next++]] ?? null;
+        const previous = original._event![index];
+        if (!previous?.extension?.some((item) => item.url === TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL))
+          return previous ?? null;
+        const retained: Record<string, unknown> = { ...previous };
+        assign(retained, "extension", previous.extension.filter(
+          (item) => item.url !== TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL));
+        return retained;
+      });
+    }
+  }
   assign(output, "code", t.code);
   assign(output, "repeat", repeat);
   return output;
@@ -929,8 +958,22 @@ function administrationToWire(
   if (!clause) {
     assign(output, "route", a.route);
     assign(output, "method", a.method);
-    assign(output, "additionalInstruction", a.additionalInstructions);
   }
+  // Native instruction edits control the list even when the original grammar
+  // remains available as evidence. Reuse only generated element annotations,
+  // never source-only instructions that a clinician removed or replaced.
+  let additionalInstructions = a.additionalInstructions;
+  if (clause && context?.additionalInstruction && additionalInstructions) {
+    let generatedIndex = 0;
+    additionalInstructions = additionalInstructions.map((instruction) => {
+      const metadata = instruction.text?.trim() ? context.additionalInstruction?.[generatedIndex++] : undefined;
+      const projected: Record<string, unknown> = { ...metadata, ...instruction };
+      assign(projected, "text", instruction.text);
+      assign(projected, "coding", instruction.coding);
+      return projected;
+    });
+  }
+  assign(output, "additionalInstruction", additionalInstructions);
   assign(output, "asNeeded", a.asNeeded);
   assign(
     output,

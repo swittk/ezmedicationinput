@@ -24,6 +24,9 @@ export interface CourseLanguage {
   readonly maxAdministrationLabel: string;
   readonly maxLifetimeLabel: string;
   readonly maxPeriodLabel: string;
+  readonly maxDosageLabel: string;
+  readonly courseLimitsLabel: string;
+  readonly stageLimitsLabel: string;
   weekdayName(day: string): string;
   joinList(items: readonly string[]): string;
   timeUnit(unit: string, value: number | undefined): string | undefined;
@@ -36,6 +39,7 @@ export interface CourseLanguage {
   endsWithinPeriod(offset: string, context: string): string;
   afterTreatmentStart(offset: string): string;
   calendarWindow(start?: string, end?: string): string;
+  calendarEvents(events: readonly string[]): string;
   reviewTiming(source?: string): string;
   dayRange(first: number, last: number): string;
   fromDay(first: number): string;

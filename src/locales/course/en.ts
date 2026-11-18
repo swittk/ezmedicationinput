@@ -31,6 +31,9 @@ export const ENGLISH_COURSE: CourseLanguage = {
   maxAdministrationLabel: "max per administration: ",
   maxLifetimeLabel: "max lifetime: ",
   maxPeriodLabel: "max per period: ",
+  maxDosageLabel: "max per dosage: ",
+  courseLimitsLabel: "Across this course: ",
+  stageLimitsLabel: "Within this stage: ",
   weekdayName: (day) => ENGLISH_DAY_NAMES[day] ?? day,
   joinList: (items) => joinLocalizedList(items,"and"),
   timeUnit: (unit, value) => UNITS[unit]?.[value === 1 ? 0 : 1],
@@ -44,6 +47,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   afterTreatmentStart: (offset) => `${offset} after treatment start`,
   calendarWindow: (start, end) =>
     start && end ? `From ${start} until ${end}` : start ? `From ${start} onward` : end ? `Until ${end}` : "",
+  calendarEvents: (events) => "Scheduled events: " + events.join(", "),
   reviewTiming: (source) => (source ? `Timing requires review: ${source}` : "Stage timing requires review"),
   dayRange: (first, last) => `Days ${first}–${last}`,
   fromDay: (first) => `From day ${first} onward`,

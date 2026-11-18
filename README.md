@@ -130,7 +130,7 @@ projections, not competing internal working models.
 import {
   parseSig, editCanonicalCourse, projectCanonicalCourse,
   formatCanonicalCourse, nextDueDoses, calculateTotalUnits,
-  importCanonicalCourse,
+  importCanonicalCourse, FhirPeriodUnit,
 } from "ezmedicationinput";
 
 const parsed = parseSig("Take 1 tablet every morning for 3 days");
@@ -152,7 +152,7 @@ const request = {
 };
 const due = nextDueDoses(edited, { ...request, limit: 3 });
 const supply = calculateTotalUnits({
-  ...request, dosage: edited, durationValue: 3, durationUnit: "d",
+  ...request, dosage: edited, durationValue: 3, durationUnit: FhirPeriodUnit.Day,
 }); // 6 tablets
 
 // Existing persisted R5 or current R6 instructions can be imported once for

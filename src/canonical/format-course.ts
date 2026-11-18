@@ -9,9 +9,11 @@ import type {
   CanonicalMeasure,
   CanonicalRange,
   CanonicalExpression,
+  CanonicalDoseLimit,
 } from "./course";
 import { measureOperator as getQuantityComparator } from "./course";
-import { clauseForAdministration } from "./compile";
+import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
+import { getDoseQuantityUnit } from "../maps";
 import { formatCanonicalClause } from "../format";
 import {
   resolveSigLocalization,
@@ -244,12 +246,12 @@ function formatCalendarStepWindow(
   return words.calendarWindow(start ? point(start) : undefined, end ? point(end) : undefined);
 }
 
-/** Source-less R6 rateRange remains a range, never a guessed exact rate.
- * Keep both independently authored endpoints and their unit/EMA operators. */
+/** Source-less native dose/rate ranges retain both independently authored
+ * endpoints and their unit/operators, never a guessed shared unit or value. */
 export function rateRangePreview(range: CanonicalRange): string | undefined {
   const low = range.low,
     high = range.high;
-  const unit = (q: CanonicalMeasure | undefined) => q?.unit ?? q?.code ?? "";
+  const unit = (q: CanonicalMeasure | undefined) => q?.unit ?? getDoseQuantityUnit(q);
   const lowComparator = getQuantityComparator(low);
   const highComparator = getQuantityComparator(high);
   const lower = low?.value === undefined ? undefined : (lowComparator ?? "") + low.value;
@@ -333,6 +335,48 @@ export function formatCourseChoices<T>(
   }
   return groups.size ? output.join(separator) : joinGeneratedClauses(output);
 }
+/** Render the value and scope of each authored limit without evaluating it.
+ * Member, stage and course owners share this value rendering; their enclosing
+ * wording remains separate so a shared allowance is never repeated per dose.
+ * Partial quantities and expressions remain visible rather than disappearing
+ * merely because numeric execution cannot use them. */
+function formatDoseLimits(limits: readonly CanonicalDoseLimit[], words: CourseLanguage): string {
+  let rendered = "";
+  const readable = (quantity: CanonicalMeasure): string => {
+    const unit = quantity.unit ?? quantity.code;
+    const value = quantity.value !== undefined && Number.isFinite(quantity.value)
+      ? String(quantity.value) : words.unspecified;
+    return (quantity.comparator ?? "") + value + (unit ? " " + unit : "");
+  };
+  for (const limit of limits) {
+    const value = limit.amount
+      ? readable(limit.amount)
+      : limit.count !== undefined
+      ? words.administrations(String(limit.count))
+      : limit.expression
+      ? unevaluatedExpressionText(limit.expression, "dose", words)
+      : limit.text?.trim() || words.unspecified;
+    const label = limit.scope === "period" ? words.maxPeriodLabel
+      : limit.scope === "administration" ? words.maxAdministrationLabel
+      : limit.scope === "lifetime" ? words.maxLifetimeLabel : words.maxDosageLabel;
+    if (rendered) rendered += "; ";
+    rendered += label + value + (limit.period ? " / " + readable(limit.period) : "");
+  }
+  return rendered;
+}
+function appendDoseLimits(
+  text: string,
+  limits: readonly CanonicalDoseLimit[] | undefined,
+  words: CourseLanguage,
+  owner?: "course" | "stage"
+): string {
+  if (!limits?.length) return text;
+  const label = owner === "course" ? words.courseLimitsLabel
+    : owner === "stage" ? words.stageLimitsLabel : "";
+  const rendered = label + formatDoseLimits(limits, words);
+  return text ? joinGeneratedClauses([text, rendered]) : rendered;
+}
+
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
 function formatCanonicalBase(
@@ -364,21 +408,19 @@ function formatCanonicalBase(
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
-  const limits: string[] = [];
-  const readable = (q: CanonicalMeasure | undefined) =>
-    q?.value !== undefined && Number.isFinite(q.value)
-      ? `${q.comparator ?? ""}${q.value}${q.unit || q.code ? " " + (q.unit ?? q.code) : ""}`
-      : undefined;
-  for (const limit of a.limits ?? []) {
-    const amount = readable(limit.amount);
-    if (!amount) continue;
-    if (limit.scope === "period") {
-      const period = readable(limit.period);
-      if (period) limits.push(words.maxPeriodLabel + amount + " / " + period);
-    } else if (limit.scope === "administration") limits.push(words.maxAdministrationLabel + amount);
-    else if (limit.scope === "lifetime") limits.push(words.maxLifetimeLabel + amount);
+  if (a.limits?.length) rendered = appendDoseLimits(rendered, a.limits, words);
+  // The clause's calendar view needs a complete civil date. Partial FHIR
+  // dateTimes (for example YYYY-MM) remain useful authored information; show
+  // their original values instead of inventing a missing month/day or hiding
+  // them when the native-to-clause projection cannot represent them.
+  const events = a.schedule?.explicitEvents, calendarEvents = clause.schedule?.calendarEvents;
+  if (events?.length && events.length > (calendarEvents?.length ?? 0)) {
+    const represented = new Set<string | undefined>();
+    for (const event of calendarEvents ?? []) represented.add(event.fhirDateTime ?? event.isoDate);
+    const remaining: string[] = [];
+    for (const event of events) if (!represented.has(event)) remaining.push(event);
+    if (remaining.length) rendered = joinGeneratedClauses([rendered, words.calendarEvents(remaining)]);
   }
-  if (limits.length) rendered = joinGeneratedClauses([rendered, ...limits]);
   if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.excludedDates?.length)
     rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options, env);
@@ -386,6 +428,10 @@ function formatCanonicalBase(
     rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   const ranges: string[] = [];
   for (const amount of a.amounts ?? []) {
+    if (amount.range && doseRangeNeedsEndpointPreview(amount.range)) {
+      const dose = rateRangePreview(amount.range);
+      if (dose) ranges.push(words.doseLabel + dose);
+    }
     const text = amount.rateRange && rateRangePreview(amount.rateRange);
     if (text) ranges.push(words.rateRangeLabel + text);
   }
@@ -466,8 +512,16 @@ export function formatCanonicalCourse(
       !amount?.rateRange &&
       !amount?.expression &&
       !amount?.rateExpression
-    )
-      return formatCanonicalBase(administration, style, options, compiled?.get(administration), environment);
+    ) {
+      let rendered = formatCanonicalBase(
+        administration, style, options, compiled?.get(administration), environment
+      );
+      if (only.safety?.limits?.length)
+        rendered = appendDoseLimits(rendered, only.safety.limits, words, "stage");
+      if (oneOrCourse.safety?.limits?.length)
+        rendered = appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course");
+      return rendered;
+    }
   }
   // Rendering needs each component's projection, not a persisted copy of
   // the whole course plus edit markers on every component.
@@ -494,7 +548,7 @@ export function formatCanonicalCourse(
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
     const { start: startDays, end: endDays } = windows[index];
-    const rendered = formatCourseChoices(
+    let rendered = formatCourseChoices(
       step.administrations,
       (component) => {
         const repeat = component.schedule?.recurrence;
@@ -658,6 +712,8 @@ export function formatCanonicalCourse(
       (member) => member.choice,
       words
     );
+    if (step.safety?.limits?.length)
+      rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage");
     if (!rendered.trim()) continue;
     let timing = "";
     if (step.start || step.end) {
@@ -710,5 +766,8 @@ export function formatCanonicalCourse(
   if (oneOrCourse.cycleInterval) {
     stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, courseRepeatCount));
   }
-  return stages.join(hasTimedStages || oneOrCourse.cycleInterval ? " " : words.stageSeparator);
+  const rendered = stages.join(hasTimedStages || oneOrCourse.cycleInterval ? " " : words.stageSeparator);
+  return oneOrCourse.safety?.limits?.length
+    ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course")
+    : rendered;
 }

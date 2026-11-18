@@ -13,7 +13,7 @@ import type {
   FhirR6Dosage,
   FhirR6DosageStep,
   FhirR6DoseAndRate,
-  FhirR6Ratio,
+  FhirSimpleQuantity,
 } from "../types";
 import type { CanonicalCourse, CanonicalAdministration, CanonicalMeasure } from "../canonical/course";
 import type { FhirProjectionOptions } from "../fhir";
@@ -176,9 +176,15 @@ function retentionForAdministration(
             rateRatio: {
               ...value.rateRatio,
               numerator: coded(value.rateRatio.numerator, compiled),
-              denominator:
-                (value.provenance?.rateRatio as FhirR6Ratio | undefined)?.denominator ??
-                simpleQuantityForR5(coded(value.rateRatio.denominator, compiled)),
+              // Retention preserves the source representation, including a
+              // native operator accepted on a permissively imported ratio.
+              // Only its representation comes from provenance: ALL current
+              // denominator values/units/operators come from native facts.
+              // The actual strict R5 row is encoded independently above.
+              denominator: (value.provenance?.rateRatio as
+                { denominator?: CanonicalMeasure } | undefined)?.denominator?.comparator !== undefined
+                ? coded(value.rateRatio.denominator, compiled) as FhirSimpleQuantity | undefined
+                : simpleQuantityForR5(coded(value.rateRatio.denominator, compiled)),
             },
           }
         : {}),

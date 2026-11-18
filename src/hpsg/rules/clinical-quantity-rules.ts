@@ -499,15 +499,21 @@ function fixedRate(
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
   const cue = context.tokens[phraseStart - 1];
-  const hasRateMarker = Boolean(cue && available(context, phraseStart - 1) &&
+  const hasSeparateRateMarker = Boolean(cue && available(context, phraseStart - 1) &&
     /^(?:at|@)$/u.test(normalizeTokenLower(cue)));
+  // An inclusive comparator can share AT with the rate head ("at most",
+  // "at least"). Keep the entire qualifier owned by its quantity; only
+  // a marker outside that qualifier needs to be consumed separately.
+  const hasRateMarker = hasSeparateRateMarker || (phraseStart < start &&
+    available(context, phraseStart) &&
+    normalizeTokenLower(context.tokens[phraseStart]) === "at");
   // An unmarked rate is valid only inside an explicit infusion/run
   // construction; standalone numeric rates must never be inferred as doses.
   if (!numerator || !denominatorUnit ||
       (!hasRateMarker && !hasAdministrationCue(context, start))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
-    ...(hasRateMarker ? [phraseStart - 1] : []),
+    ...(hasSeparateRateMarker ? [phraseStart - 1] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
   if (duration) indices.push(...duration.indices);
