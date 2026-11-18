@@ -7916,3 +7916,38 @@ from the inline thread count.
 Review replies belong only in the relevant existing inline threads, with the
 commit and concise verification. No top-level comment or new full-review
 request is authorized by this work.
+
+
+## 2026-11-19 — Post-review locale-cache hot-path closure
+
+PR #14's preceding review round was integrated as ddc10ae with 74 recorded
+fixes and four explicitly rejected internal-misuse protections. The latest
+GitHub check found no unresolved inline threads and no newer published
+CodeRabbit findings after that commit. No full review request was made.
+
+A longer performance comparison highlighted two short public locale helper
+measurements (~0.04–0.05 microseconds/call). Wider family reruns confirmed
+the other five previously flagged workloads now pass. An initial experiment
+using a direct registry index made locale registration much slower and was
+discarded. The accepted change keeps the single registration map and makes
+the lazy partial-region cache valid by exact/base registration object identity
+rather than incrementing a global generation counter on every registration.
+
+The common registration path is now a single Map.set; regional inheritance
+is recomposed only when one of its registered providers is explicitly
+replaced. No global invalidation walk, per-clause clone, parsing pass or
+language-specific hot-path branch was added. A focused regression verifies
+that replacing a region's base updates its inherited formatter while
+retaining the regional formatter override.
+
+Final exact-commit comparison, 41 warmed paired rounds against ddc10ae:
+resolveSigLocalization -4.3%, resolveSigTranslation -2.9%, and
+registerSigLocalization -3.9%, all within the per-function 4% ceiling.
+The earlier comparison against d85c762 showed the two tiny lookup helpers
+with fluctuating >4% ratios despite 30–60% sample spread; this note does NOT
+claim that every noisy nanosecond-level historical comparison is green.
+
+Final current-worktree validation: TypeScript/ESM/CJS build passed;
+**4,593/4,593 source tests in 59 suites**, including the new regional
+cache-invalidation oracle, and **4/4 packaged tests** passed.
+No top-level GitHub comments or new review requests were made.

@@ -126,15 +126,17 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
 );
 
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
+// An inherited regional view is valid while BOTH its exact registration and
+// base registration still have the same identity. No invalidation walk or
+// generation increment is required for an ordinary locale registration.
 const RESOLVED_REGIONAL_LOCALIZATIONS = new Map<string, {
-  generation: number;
+  exact: SigLocalization;
+  base: SigLocalization;
   localization: SigLocalization;
 }>();
-let localizationGeneration = 0;
 
 export function registerSigLocalization(localization: SigLocalization): void {
   REGISTERED_LOCALIZATIONS.set(localization.locale.toLowerCase(), localization);
-  localizationGeneration++;
 }
 
 export function getRegisteredSigLocalizations(): SigLocalization[] {
@@ -153,7 +155,7 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
   const base = REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
   if (!exact || !base) return exact ?? base;
   const cached = RESOLVED_REGIONAL_LOCALIZATIONS.get(key);
-  if (cached?.generation === localizationGeneration) return cached.localization;
+  if (cached?.exact === exact && cached.base === base) return cached.localization;
   const resolved: SigLocalization = {
     locale: exact.locale,
     formatShort: exact.formatShort ?? base.formatShort,
@@ -161,7 +163,8 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
     course: exact.course ?? base.course,
   };
   RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {
-    generation: localizationGeneration,
+    exact,
+    base,
     localization: resolved,
   });
   return resolved;

@@ -341,6 +341,34 @@ describe("review 21 locale facets and grammar number", () => {
     expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th-TH" })).toContain("เม็ด");
   });
 
+  it("refreshes a partial region after re-registering its base without scanning on ordinary lookup", () => {
+    const before = ({ defaultText }: { defaultText: string }) => "Before " + defaultText;
+    const after = ({ defaultText }: { defaultText: string }) => "After " + defaultText;
+    const regionalShort = ({ defaultText }: { defaultText: string }) => "Short " + defaultText;
+    registerSigLocalization({
+      locale: "zz",
+      formatShort: before,
+      formatLong: before,
+      course: ENGLISH_COURSE,
+    });
+    registerSigLocalization({ locale: "zz-ZZ", formatShort: regionalShort });
+    const initial = resolveSigLocalization("zz-ZZ")!;
+    expect(initial.formatLong).toBe(before);
+    expect(initial.formatShort).toBe(regionalShort);
+    expect(initial.course).toBe(ENGLISH_COURSE);
+    registerSigLocalization({
+      locale: "zz",
+      formatShort: after,
+      formatLong: after,
+      course: ENGLISH_COURSE,
+    });
+    const updated = resolveSigLocalization("zz-ZZ")!;
+    expect(updated).not.toBe(initial);
+    expect(updated.formatLong).toBe(after);
+    expect(updated.formatShort).toBe(regionalShort);
+    expect(updated.course).toBe(ENGLISH_COURSE);
+  });
+
   it("inherits a missing regional course facet while preserving exact clause callbacks", () => {
     const formatLong = () => "LOCAL DOSE.";
     registerSigLocalization({ locale: "th-extra", formatLong });
