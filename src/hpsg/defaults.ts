@@ -141,6 +141,7 @@ function applySingleDoseDefault(
     // Keep the default distinguishable from a later clinically edited dose.
     // This is not a FHIR field or a rendered-word heuristic.
     state.primaryClause.dose!.defaulted = true;
+    state.primaryClause.dose!.defaultedUnit = state.unit;
   }
 }
 

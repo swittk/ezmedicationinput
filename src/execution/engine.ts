@@ -1611,7 +1611,8 @@ function treatmentStepWindow(
   predecessorClock?: TreatmentWallClock,
   options?: NextDueDoseOptions,
   predecessorPoint?: Date,
-  deferFiniteCompletion = false
+  deferFiniteCompletion = false,
+  capContext?: MedicationContext
 ): TreatmentStepWindow {
   const stage = course.stages[index];
   const start = stage.start
@@ -1675,9 +1676,15 @@ function treatmentStepWindow(
     // Overlapping capped cycles cannot close an exact-count phase using
     // its LOCAL pre-cap completion point: earlier accepted administrations
     // from another cycle may defer this component's third actual dose.
-    // The shared chronological acceptor owns count completion in that case.
-    if (!deferFiniteCompletion &&
-        (recurrence?.count !== undefined || arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate))) {
+    // The shared chronological acceptor owns count completion ONLY when this
+    // component has a cap shared across cycles. An uncapped counted loading
+    // component still completes locally, even when a later maintenance
+    // component triggers chronological collection for its own rolling cap.
+    if ((recurrence?.count !== undefined || arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate)) &&
+        (!deferFiniteCompletion ||
+         (!getTimingOccurrenceCap(recurrence) &&
+          (!hasPeriodLimits(administration) ||
+           !executableQuantityCaps(administration, capContext).length)))) {
       const completion = finiteAdministrationCompletion(
         administration,
         cadence.origin,
@@ -1879,7 +1886,8 @@ function scheduleTreatmentRelativeCourse(
   cycleIndex?: number,
   sourceClock?: TreatmentWallClock,
   rollingUsage?: RollingCycleUsage,
-  collect?: EmitCycleOpportunity
+  collect?: EmitCycleOpportunity,
+  capContext?: MedicationContext
 ): string[] {
   const timeZone = options.timeZone ?? options.config?.timeZone;
   if (!timeZone) throw new Error("timeZone is required for relative treatment-step scheduling");
@@ -1903,7 +1911,8 @@ function scheduleTreatmentRelativeCourse(
       predecessorClock,
       options,
       predecessorPoint,
-      Boolean(collect)
+      Boolean(collect),
+      capContext
     );
     for (let memberIndex = 0; memberIndex < window.administrations.length; memberIndex++) {
       const member = window.administrations[memberIndex];
@@ -2198,7 +2207,8 @@ function chronologicalRepeatedEvents(
       cycleIndex,
       sourceClock,
       undefined,
-      emit
+      emit,
+      context
     );
     drain(next.getTime());
     cycleStart = next;
@@ -4634,7 +4644,8 @@ function sumCourseUnits(
 function calculateTotalUnitsSingle(
   options: Omit<CanonicalSupplyOptions, "dosage"> & {
     dosage: CanonicalAdministration;
-  }
+  },
+  acceptedEventCount?: number
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
   requireResolvedCycleDays(sourceDosage);
@@ -4661,7 +4672,7 @@ function calculateTotalUnitsSingle(
       evaluateCondition: options.evaluateCondition
         ? (condition, at) => options.evaluateCondition!(condition, formatZonedIso(shift(at, delta), timeZone))
         : undefined,
-    });
+    }, acceptedEventCount);
   }
   if (options.priorCount !== undefined && (!Number.isFinite(options.priorCount) || options.priorCount < 0))
     throw new MedicationQuantityCalculationError(
@@ -4798,7 +4809,14 @@ function calculateTotalUnitsSingle(
     isWakingHoursInterval(repeat) ||
     Boolean((options as PhaseCountOptions).countEligibilityStart && hasDefiniteAdministrationCount(repeat));
   let count: number;
-  if (endDay <= countFrom) {
+  if (acceptedEventCount !== undefined) {
+    // The overlapping-cycle ledger has already evaluated and accepted every
+    // concrete opportunity in global timestamp order. Count its accepted
+    // administrations directly: the ordinary Timing.event reader correctly
+    // deduplicates repeated spellings of ONE event, but two overlapping
+    // treatment cycles can prescribe TWO real doses at the same instant.
+    count = acceptedEventCount;
+  } else if (endDay <= countFrom) {
     count = 0;
   } else if (capacityCap) {
     const begin = effectiveOrderedAt && effectiveOrderedAt > countFrom ? effectiveOrderedAt : countFrom;
@@ -4885,7 +4903,7 @@ function calculateTotalUnitsSingle(
             options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
           );
   }
-  if (maximalTiming.frequencyMaximum && dosage.schedule?.recurrence) {
+  if (acceptedEventCount === undefined && maximalTiming.frequencyMaximum && dosage.schedule?.recurrence) {
     // Scheduling keeps every stated clock/code as the concrete partial plan.
     // Numeric supply can still report the prescribed upper bound without
     // mutating or deleting those anchors on the caller's FHIR object.
@@ -5117,14 +5135,17 @@ function calculateCourseTotalUnits(
       const events=chronologicalRepeatedEvents(course,{
         ...options,from:queryStart,orderedAt:anchor,limit:10000
       },zone,queryEnd,Number.POSITIVE_INFINITY,options.context);
-      const byMember=new Map<string,{member:CanonicalAdministration;dates:string[]}>();
+      // Each accepted cycle event is one clinical administration, even when
+      // two cycles overlap at the exact same clock time. Keep its count,
+      // not a deduplicated list of dates or a second scheduling projection.
+      const byMember=new Map<string,{member:CanonicalAdministration;count:number}>();
       for(const event of events){
         let group=byMember.get(event.key);
         if(!group) {
-          group={member:event.member,dates:[]};
+          group={member:event.member,count:0};
           byMember.set(event.key,group);
         }
-        group.dates.push(event.iso);
+        group.count++;
       }
       const entries:Array<{total:TotalUnitsResult;unit:string|undefined}>=[];
       for(const group of byMember.values()){
@@ -5140,17 +5161,14 @@ function calculateCourseTotalUnits(
           predicate:options.evaluateCondition?undefined:group.member.predicate,
           calendarPredicate:options.evaluateCondition?undefined:group.member.calendarPredicate,
           excludedDates:undefined,excludedWeekdays:undefined,
-          schedule:{explicitEvents:group.dates}
         };
-        const measured=prepareMeasuredDose(dosage,options);
         const total=calculateTotalUnitsSingle({
           ...options,dosage,from:queryStart,orderedAt:anchor,
           durationValue:(queryEnd.getTime()-queryStart.getTime())/1000,
           durationUnit:DurationUnit.Second,roundToMultiple:undefined,
           evaluateCondition:undefined,
-        });
-        entries.push({total,unit:measured.amounts?.[0]?.quantity?.unit??
-          measured.amounts?.[0]?.quantity?.code});
+        }, group.count);
+        entries.push({total,unit:total.unit});
       }
       return sumCourseUnits(entries,options);
     }

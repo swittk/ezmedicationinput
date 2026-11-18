@@ -7077,3 +7077,61 @@ R5 source replay and subsequent in-place dose-edit recheck) completed:
   explicitly rejected internal/debug API hardening suggestions.
   Five latest clinical/coverage findings are now implemented and
   source-tested; do not request another full review or merge.
+
+
+## 2026-11-18 — PR #14 fresh review: finite loading, accepted event multiplicity, live source dose
+
+Four new real clinical correctness findings from the November 17 code review
+were reproduced as failing tests **before** implementation in
+`test/pr14-followup-clinical.spec.ts`. Each satisfies the product gate:
+supported clinician actions or treatment courses, observed wrong meaningful
+clinical output, fix at the existing owning layer, and no second parser or
+always-on defensive processing.
+
+1. **Uncapped finite loading stage followed by capped maintenance.** When
+   chronological cycle collection was enabled because a later stage had
+   a rolling limit, the first stage's one-dose completion was incorrectly
+   withheld, so the maintenance stage never ran. The existing
+   `treatmentStepWindow` now defers count completion only for a member
+   whose accepted dose count can actually be changed by a shared executable
+   cap. An unrelated capped successor does not stop finite loading. A
+   partially understood/unexecutable source cap remains retained but is
+   not fabricated into a completion blocker; supply passes its context
+   to the same cap decision in the chronological path.
+2. **Duplicate real administrations in overlapping repeated cycles.**
+   A chronological cap ledger may accept two independent administrations
+   at one instant. The supply adapter previously mapped those onto ordinary
+   `Timing.event`, where deduplication correctly merges duplicate
+   *representations* of one event but incorrectly merged these TWO doses.
+   The ledger's already-accepted count now flows directly into the
+   existing single-administration quantity calculator. Ordinary
+   `Timing.event` deduplication is unchanged; no second scheduler,
+   reparse, or extra event array was added.
+3. **Edited inferred dose.** The one-discrete-dose source exemption is valid
+   only while the inferred value remains one and the inferred unit remains
+   unchanged. Explicit quantity or unit edits now invalidate stale source
+   replay. Source inference and source evidence remain separate from
+   generated/edited clinical meaning.
+4. **Fresh parser R5 row edited in place.** WeakSet membership used to grant
+   source authority forever despite a changed live dose. A WeakMap now
+   holds a small original-value/unit/code/comparator observation for the
+   source-backed row, compared only on roundtrip realization. Serialized
+   R5 still uses its existing persisted fingerprint. A failed dose match
+   overrides historical lexical evidence when the graph has no independently
+   matching Amount owner; actual matching graph Amounts still preserve
+   source wording. Tests cover in-place quantity, unit, comparator, revert,
+   and English/Thai source retention.
+
+Gates on the isolated review worktree:
+- New oracles initially failed all four independently, and now pass.
+- npm run build: TypeScript + ESM/CJS PASS.
+- npm test: **4,273/4,273**, **47/47** source suites PASS.
+- npm run test:dist: **4/4** packaged exports PASS.
+- Paired, 31 alternating warmed comparisons vs checkpoint `9d6a00a`:
+  unchanged fresh R5 source replay -0.43%, projected R5 -1.43%, R6
+  English format +0.52%, ordinary parsing +2.46%. A separate 19-round
+  equivalent repeated capped fixture gave nextDue -4.10% and numeric
+  supply -5.14%. Changed-dose output and corrected duplicate-event
+  supply are not misreported as equivalent old/new workload speedups.
+- No GitHub comments, review requests, or other public messages were made
+  while implementing/reviewing this local correction.

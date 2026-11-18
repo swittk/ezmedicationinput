@@ -8,21 +8,63 @@ import { administrationFromClause, courseFromAdministrations, courseFromParallel
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
-/** Provenance of freshly parsed, graph-backed R5 rows. A primary
- * HPSG dose may not appear among the auxiliary graph's Amount arguments.
- * Identity membership avoids regenerating an entire long instruction just
- * to recover information the same parser has already established.
- * This weak set is NOT a cached clinical model, not serialized, and does
- * not freeze/copy any returned values. Re-imports have their own source
- * verification and externally edited copies cannot inherit membership. */
-const FRESH_HPSG_DOSE_SOURCE = new WeakSet<FhirDosage>();
+/** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
+ * instruction-graph Amounts. Retain only the ORIGINAL numeric R5 dose fields,
+ * never a mutable FHIR object: a clinician can edit the very same row in
+ * place. Only roundtrip source realization consults this small proof. */
+interface FreshDosePart {
+  value?: number;
+  unit?: string;
+  code?: string;
+  system?: string;
+  comparator?: string;
+}
+interface FreshDoseProof {
+  length: number;
+  quantity?: FreshDosePart;
+  low?: FreshDosePart;
+  high?: FreshDosePart;
+}
+const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseProof>();
+function captureDosePart(
+  value: NonNullable<NonNullable<FhirDosage["doseAndRate"]>[number]["doseQuantity"]> | undefined
+): FreshDosePart | undefined {
+  return value ? {
+    value: value.value, unit: value.unit, code: value.code, system: value.system,
+    comparator: getQuantityComparator(value)
+  } : undefined;
+}
+function sameDosePart(
+  part: FreshDosePart | undefined,
+  live: NonNullable<NonNullable<FhirDosage["doseAndRate"]>[number]["doseQuantity"]> | undefined
+): boolean {
+  if (!part || !live) return part === undefined && live === undefined;
+  return part.value === live.value && part.unit === live.unit &&
+    part.code === live.code && part.system === live.system &&
+    part.comparator === getQuantityComparator(live);
+}
+function captureFreshDose(dosage: FhirDosage): void {
+  const first = dosage.doseAndRate?.[0];
+  FRESH_HPSG_DOSE_SOURCE.set(dosage, {
+    length: dosage.doseAndRate?.length ?? 0,
+    quantity: captureDosePart(first?.doseQuantity),
+    low: captureDosePart(first?.doseRange?.low),
+    high: captureDosePart(first?.doseRange?.high),
+  });
+}
+function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
+  const current = dosage.doseAndRate;
+  if ((current?.length ?? 0) !== original.length) return false;
+  const first = current?.[0];
+  return sameDosePart(original.quantity, first?.doseQuantity) &&
+    sameDosePart(original.low, first?.doseRange?.low) &&
+    sameDosePart(original.high, first?.doseRange?.high);
+}
 
-/** Roundtrip source reuse requires clinical ownership evidence. Fresh HPSG
- * rows carry it by identity; serialized R5 rows carry an existing edit
- * fingerprint. A marker-less foreign row has NO trusted dose ownership, so
- * regenerate its canonical display instead of running an entire second
- * formatter merely to guess whether its old source text is still current.
- * This is source-replay policy, not input hardening or a defensive clone. */
+/** Source wording is authoritative only when the live dose still matches its
+ * original source. Direct parser rows use primitive comparisons; serialized
+ * R5 rows use their existing persisted edit fingerprint. A failed match must
+ * override stale lexical evidence retained in a deserialized grammar graph. */
 function markOriginalGraphDose(
   dosage: FhirDosage,
   clause: CanonicalSigClause,
@@ -30,8 +72,9 @@ function markOriginalGraphDose(
 ): void {
   const amount = clause.dose;
   if (options?.realizationMode !== "roundtrip" || !amount || !clause.instructionGraph) return;
-  if (FRESH_HPSG_DOSE_SOURCE.has(dosage) || dosageMatchesSavedProjection(dosage))
-    amount.sourceDoseVerified = true;
+  const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
+  amount.sourceDoseVerified =
+    fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
 }
 
 /** Native editing/projection API. Existing .fhir / .fhirNext fields retain
@@ -1633,7 +1676,7 @@ function buildParseResult(
   // created row. An inferred default has no authored dose evidence.
   if(clause.dose && clause.instructionGraph)
     for(const evidence of clause.evidence??[])if(evidence.lexicalCategory==="dose"){
-      FRESH_HPSG_DOSE_SOURCE.add(fhir);
+      captureFreshDose(fhir);
       break;
     }
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>

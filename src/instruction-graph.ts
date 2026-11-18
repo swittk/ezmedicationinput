@@ -4251,12 +4251,18 @@ export function instructionGraphSourceConflictsWithDose(
 ): boolean {
   const graph = clause.instructionGraph;
   const dose = clause.dose;
-  if (!graph || !dose || dose.defaulted ||
-      (dose.value === undefined && !dose.range)) return false;
+  if (!graph || !dose || (dose.value === undefined && !dose.range)) return false;
+  // The single-dose default is precisely one discrete unit. Changing that
+  // amount does not inherit permission to replay the old amountless wording.
+  if (dose.defaulted && dose.value === 1 && dose.unit === dose.defaultedUnit &&
+      !dose.range && !dose.comparator) return false;
   const owner = primaryDoseAmountOwner(graph, clause, options);
   if (!owner) {
     // HPSG primary-dose facts need not be repeated in auxiliary actions.
-    // Check typed evidence or the saved R5 edit fingerprint, not raw text.
+    // A failed live-source comparison overrides OLD evidence retained in a
+    // serialized graph. An actual Amount owner below remains independent
+    // evidence and is compared directly with the live dose.
+    if (dose.sourceDoseVerified === false) return true;
     if (dose.sourceDoseVerified) return false;
     for (const evidence of clause.evidence ?? [])
       if (evidence.lexicalCategory === "dose") return false;

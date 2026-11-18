@@ -1537,6 +1537,9 @@ export interface CanonicalDoseExpr {
   /** Explicitly assumed one discrete dose from caller policy, not source
    * evidence. Roundtrip source wording can remain unchanged for this case. */
   defaulted?: boolean;
+  /** Unit at the time the one-dose default was inferred. An edited unit
+   * must not inherit permission to replay amountless source wording. */
+  defaultedUnit?: string;
   /** The imported R5 row still matches its persisted clinical fingerprint.
    * Only source-preserving realization consults this fact; canonical
    * execution ignores it. No source wording is reparsed to infer a dose. */
