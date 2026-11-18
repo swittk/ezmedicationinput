@@ -28,6 +28,9 @@ export interface HpsgClauseContext {
     /** Tokens already owned by a dimensional rate constituent. Site/advice
      * fallbacks reuse this fact instead of treating a qualified rate as prose. */
     rateTokenIndices?: Set<number>;
+    /** A recognized per-time expression still owns its numeral when no rate
+     * head licenses it. Scalar-dose fallback must not detach that numeral. */
+    unlicensedRateTokenIndices?: Set<number>;
   };
   project?: boolean;
 }

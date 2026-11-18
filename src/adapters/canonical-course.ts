@@ -1,5 +1,7 @@
 import { courseFromR5 } from "./r5-import";
+import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
+import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps } from "./r6-editable-metadata";
 /**
  * Interchange boundary for EZMED's canonical course.
  *
@@ -14,6 +16,7 @@ import type {
   EzDosage,
   FhirR6Dosage,
   FhirR6DosageInstruction,
+  FhirR6DosageInstructionInput,
   FhirR6DoseLimit,
   FhirR6DosageSafety,
   FhirR6DosageStep,
@@ -570,9 +573,10 @@ export function administrationFromR5(
     }));
   return result;
 }
-export function courseFromR6(raw: FhirR6DosageInstruction, sourceContext = false): CanonicalCourse {
+export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = false): CanonicalCourse {
   const stages: CanonicalStage[] = [];
-  for (const step of raw.step) {
+  const retainedSafety = retainedSingleStepSafety(raw);
+  for (const step of editableCourseSteps(raw)) {
     const administrations: CanonicalAdministration[] = [];
     for (const component of step.component)
       administrations.push(administrationFromR6(component, sourceContext));
@@ -581,8 +585,9 @@ export function courseFromR6(raw: FhirR6DosageInstruction, sourceContext = false
       start: boundaryFromR6(step.start),
       end: boundaryFromR6(step.end),
       count: step.count,
-      safety: safetyFromWire(step.safety, true),
-      provenance: record(step),
+      safety: safetyFromWire(step.component.length ? retainedSafety?.step ?? step.safety : step.safety, true),
+      provenance: record(step.component.length && retainedSafety
+        ? { ...step, safety: retainedSafety.step } : step),
     });
   }
   const course: CanonicalCourse = {
@@ -590,8 +595,9 @@ export function courseFromR6(raw: FhirR6DosageInstruction, sourceContext = false
     stages,
     instruction: raw.renderedInstruction,
     cycleInterval: measureFromWire(raw.repeatCycle),
-    safety: safetyFromWire(raw.safety, true),
-    contextIssue: getCourseContextIssue(raw),
+    cycleCount: getCourseCycleCount(raw),
+    safety: safetyFromWire(retainedSafety ? retainedSafety.course : raw.safety, true),
+    contextIssue: raw.step ? getCourseContextIssue(raw as FhirR6DosageInstruction) : undefined,
     provenance: { format: "r6", data: record(raw) },
   };
   // No defensive copy. Re-reading an externally changed FHIR input should
@@ -600,11 +606,14 @@ export function courseFromR6(raw: FhirR6DosageInstruction, sourceContext = false
 }
 /** Reconciliation is solely an R5 import concern, never part of native
  * course execution. A simple scalar needs no course reconstruction. */
+export function isR6DosageInstruction(input: object): input is FhirR6DosageInstructionInput {
+  return "step" in input || "renderedInstruction" in input || "repeatCycle" in input;
+}
 export function inputToCanonical(
   input:
     | FhirDosage
     | readonly FhirDosage[]
-    | FhirR6DosageInstruction
+    | FhirR6DosageInstructionInput
     | ParseBatchResult
     | CanonicalScheduleInput
 ): CanonicalScheduleInput {
@@ -612,7 +621,7 @@ export function inputToCanonical(
     if ("kind" in input && (input.kind === "course" || input.kind === "administration"))
       return input as CanonicalCourse | CanonicalAdministration;
     if ("items" in input) return input.meta.canonical.course ?? courseFromR6(input.fhirNext);
-    if ("step" in input) return courseFromR6(input as FhirR6DosageInstruction);
+    if (isR6DosageInstruction(input)) return courseFromR6(input);
   }
   if (Array.isArray(input)) {
     if (input.length && "kind" in input[0]) return input as CanonicalAdministration[];
@@ -664,12 +673,14 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
   if (b.anchor !== "treatment-start") {
     assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
     assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
-    assign(output, "contextPath", b.anchor === "path" ? b.contextPath : undefined);
+    assign(output, "contextPath",
+      b.anchor === "path" || b.anchor === "resource-reference" || b.anchor === "definition"
+        ? b.contextPath : undefined);
     assign(output, "contextCode", b.anchor === "coded-event" ? b.contextCode : undefined);
   }
   assign(output, "text", b.description);
   assign(output, "offsetDuration", b.displacement);
-  assign(output, "offsetRange", b.displacementRange);
+  assign(output, "offsetRange", b.displacementRange ? serializeRange(b.displacementRange) : undefined);
   return output as FhirR6RelativeTime;
 }
 /** Reuse an unchanged Timing fragment by value/reference comparison on the
@@ -683,6 +694,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
   let repeat: FhirR6Timing["repeat"];
   if (r) {
     const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : r.courseLength;
+    const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange) : undefined;
     const start = target === "r6" ? simpleQuantityForR5(r.startOffset) : undefined;
     const end = target === "r6" ? simpleQuantityForR5(r.endOffset) : undefined;
     if (
@@ -700,7 +712,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       prior.durationMax === r.occurrenceDurationMax &&
       prior.durationUnit === r.occurrenceDurationUnit &&
       prior.boundsDuration === duration &&
-      prior.boundsRange === r.courseLengthRange &&
+      prior.boundsRange === lengthRange &&
       prior.boundsPeriod === r.calendarWindow &&
       prior.when === r.anchors &&
       prior.timeOfDay === r.clocks &&
@@ -723,7 +735,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       assign(value, "durationMax", r.occurrenceDurationMax);
       assign(value, "durationUnit", r.occurrenceDurationUnit);
       assign(value, "boundsDuration", duration);
-      assign(value, "boundsRange", r.courseLengthRange);
+      assign(value, "boundsRange", lengthRange);
       assign(value, "boundsPeriod", r.calendarWindow);
       assign(value, "when", r.anchors);
       assign(value, "timeOfDay", r.clocks);
@@ -741,34 +753,8 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     return original;
   const output: Record<string, unknown> = Object.assign({}, t.provenance);
   assign(output, "event", t.explicitEvents);
-  // Primitive annotations describe the event at the same position. Preserve
-  // unrelated element metadata, but never keep an old source-calendar date
-  // after the native event was replaced. Unchanged/reordered events retain
-  // their exact original annotations without a second date interpretation.
-  if (original?._event && !same(original.event, t.explicitEvents)) {
-    if (!t.explicitEvents?.length) delete output._event;
-    else {
-      const byEvent = new Map<string, { indices: number[]; next: number }>();
-      for (let index = 0; index < (original.event?.length ?? 0); index++) {
-        const event = original.event![index];
-        let bucket = byEvent.get(event);
-        if (!bucket) byEvent.set(event, (bucket = { indices: [], next: 0 }));
-        bucket.indices.push(index);
-      }
-      output._event = t.explicitEvents.map((event, index) => {
-        const bucket = byEvent.get(event);
-        if (bucket && bucket.next < bucket.indices.length)
-          return original._event![bucket.indices[bucket.next++]] ?? null;
-        const previous = original._event![index];
-        if (!previous?.extension?.some((item) => item.url === TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL))
-          return previous ?? null;
-        const retained: Record<string, unknown> = { ...previous };
-        assign(retained, "extension", previous.extension.filter(
-          (item) => item.url !== TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL));
-        return retained;
-      });
-    }
-  }
+  // Primitive annotations retain their external FHIR positions. Native facts
+  // are internal immutable values, not an editing API that infers event identity.
   assign(output, "code", t.code);
   assign(output, "repeat", repeat);
   return output;
@@ -1045,24 +1031,23 @@ function administrationToWire(
       assign(
         rate,
         "doseQuantity",
-        target === "r5" ? simpleQuantityForR5(code(value.quantity)) : code(value.quantity)
+        simpleQuantityForR5(code(value.quantity))
       );
       assign(
         rate,
         "doseRange",
-        value.range &&
-          (target === "r6" && !clause ? value.range : serializeRange(value.range, false, Boolean(clause)))
+        value.range && serializeRange(value.range, false, Boolean(clause))
       );
       assign(rate, "doseExpression", target === "r6" ? value.expression : undefined);
       assign(
         rate,
         "rateQuantity",
-        target === "r5" ? simpleQuantityForR5(code(value.rate)) : code(value.rate)
+        simpleQuantityForR5(code(value.rate))
       );
       assign(
         rate,
         "rateRange",
-        value.rateRange && (target === "r6" ? value.rateRange : serializeRange(value.rateRange))
+        value.rateRange && serializeRange(value.rateRange)
       );
       assign(
         rate,
@@ -1080,9 +1065,7 @@ function administrationToWire(
           ...(value.rateRatio.denominator
             ? {
                 denominator:
-                  target === "r5"
-                    ? simpleQuantityForR5(code(value.rateRatio.denominator))
-                    : code(value.rateRatio.denominator),
+                  simpleQuantityForR5(code(value.rateRatio.denominator)),
               }
             : {}),
         }
@@ -1124,10 +1107,16 @@ function administrationToWire(
     a.provenance?.format === "r6"
       ? (a.provenance.data as FhirR6Dosage)
       : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
-  const sourceCondition = source ? getDosageCondition(source as EzDosage) : undefined;
+  // A retained R6 delta is sparse; unrelated live lifted R5 fields remain
+  // authoritative. In particular, a safety-only delta must not hide the
+  // original authored condition coding/text on the R5 row.
+  const sourceRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
+  const conditionSource = sourceRow?.condition?.length ? sourceRow : source;
+  const sourceCondition = conditionSource ? getDosageCondition(conditionSource as EzDosage) : undefined;
   if (target === "r5") {
     delete output.condition;
-    if (a.predicate || source?.condition !== undefined)
+    if (a.predicate || sourceCondition || conditionSource?.condition !== undefined ||
+        sourceRow?.modifierExtension?.some(item => item.url === DOSAGE_CONDITION_R5_URL))
       setDosageCondition(output as FhirDosage, a.predicate, a.calendarPredicate);
   } else {
     // An R5 source may carry only a modifier predicate. Equal clinical
@@ -1136,8 +1125,8 @@ function administrationToWire(
     assign(
       output,
       "condition",
-      source?.condition?.length && same(sourceCondition, a.predicate)
-        ? source.condition
+      conditionSource?.condition?.length && same(sourceCondition, a.predicate)
+        ? conditionSource.condition
         : a.predicate
         ? [conditionToR6(a.predicate)]
         : undefined
@@ -1325,10 +1314,13 @@ function serializeRange(value: CanonicalRange, duration = false, doseCoding = fa
         ? { ...item, ...getStandardDoseUnitCoding(item.unit) }
         : item
     )!;
+  const low = value.low ? q(value.low) : undefined;
+  const high = value.high ? q(value.high) : undefined;
+  if (low === value.low && high === value.high) return value as FhirRange;
   return {
     ...value,
-    ...(value.low ? { low: q(value.low) } : {}),
-    ...(value.high ? { high: q(value.high) } : {}),
+    ...(low ? { low } : {}),
+    ...(high ? { high } : {}),
   } as FhirRange;
 }
 /** Header/step metadata is shared fragment serialization, NOT a course in
@@ -1336,10 +1328,12 @@ function serializeRange(value: CanonicalRange, duration = false, doseCoding = fa
 export function courseMetadataToWire(
   course: CanonicalCourse
 ): Omit<FhirR6DosageInstruction, "step" | "renderedInstruction"> {
-  const out: Record<string, unknown> = Object.assign({}, course.provenance?.data);
+  const out: Record<string, unknown> & { modifierExtension?: FhirExtension[] } =
+    Object.assign({}, course.provenance?.data);
   delete out.step;
   delete out.renderedInstruction;
   assign(out, "repeatCycle", course.cycleInterval);
+  setCourseCycleCount(out, course.cycleCount);
   const raw = course.provenance?.data as Partial<FhirR6DosageInstruction> | undefined;
   assign(out, "safety", safetyToWire(course.safety, raw?.safety));
   return out;
@@ -1363,13 +1357,32 @@ function projectCourseToR6(
   freshlyCompiled: boolean
 ): FhirR6DosageInstruction {
   const steps: FhirR6DosageStep[] = [];
-  for (const stage of course.stages) {
+  let drafts: Array<{ index: number; step: Omit<FhirR6DosageStep, "component"> }> | undefined;
+  let precedingDraftEnd: CanonicalBoundary | undefined;
+  let synthesizedStarts: number[] | undefined;
+  for (let index = 0; index < course.stages.length; index++) {
+    const stage = course.stages[index];
+    if (!stage.administrations.length) {
+      (drafts ??= []).push({ index, step: stageMetadataToWire(stage) });
+      precedingDraftEnd = stage.end ?? precedingDraftEnd;
+      continue;
+    }
     const component: FhirR6Dosage[] = [];
     for (const a of stage.administrations)
       component.push(administrationToR6(a, options, freshlyCompiled ? a.syntax : undefined));
-    steps.push(Object.assign(stageMetadataToWire(stage), { component }));
+    const metadata = stageMetadataToWire(stage);
+    // An empty edited stage is retained as source, not an invalid active
+    // component. Its authored end still anchors an implicit successor.
+    if (!stage.start && precedingDraftEnd) {
+      metadata.start = boundaryToWire(precedingDraftEnd);
+      (synthesizedStarts ??= []).push(steps.length);
+    }
+    precedingDraftEnd = undefined;
+    steps.push(Object.assign(metadata, { component }));
   }
   const result: FhirR6DosageInstruction = Object.assign(courseMetadataToWire(course), { step: steps });
+  liftSingleStepSafety(result);
+  if (drafts || result.extension?.length) retainDraftSteps(result, drafts, synthesizedStarts);
   if (course.instruction !== undefined) result.renderedInstruction = course.instruction;
   return result;
 }
@@ -1400,19 +1413,19 @@ export function courseToR5(course: CanonicalCourse): FhirDosage[] {
  * inspect only source authority/presence, never dose interpretation or event
  * calculations; computed previews always enter the canonical formatter. */
 export function unchangedR6SourceDisplay(
-  raw: FhirR6DosageInstruction,
+  raw: FhirR6DosageInstructionInput,
   options?: FormatOptions
 ): string | undefined {
   if (!raw.renderedInstruction) return undefined;
   if (
     !options ||
     options.realizationMode === "roundtrip" ||
-    !raw.step.length ||
+    !raw.step?.length ||
     raw.repeatCycle ||
     raw.safety
   )
     return raw.renderedInstruction;
-  for (const step of raw.step) {
+  for (const step of raw.step ?? []) {
     if (step.start || step.end || step.count !== undefined || step.safety) return raw.renderedInstruction;
     for (const a of step.component) {
       if (a.condition?.length || a.safety || a.site?.reference) return raw.renderedInstruction;
@@ -1427,12 +1440,12 @@ export function unchangedR6SourceDisplay(
  * Import normalization and persistence reconciliation happen once here, not
  * inside any native edit, formatter, or execution operation. */
 export function importCanonicalCourse(
-  input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction | ParseBatchResult | CanonicalCourse
+  input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstructionInput | ParseBatchResult | CanonicalCourse
 ): CanonicalCourse {
   if (!Array.isArray(input)) {
     if ("kind" in input && input.kind === "course") return input;
     if ("items" in input && input.meta.canonical.course) return input.meta.canonical.course;
-    if ("step" in input) return courseFromR6(input, true);
+    if (isR6DosageInstruction(input)) return courseFromR6(input, true);
     if ("items" in input) return courseFromR6(input.fhirNext, true);
   }
   const rows = Array.isArray(input) ? (input as readonly FhirDosage[]) : [input as FhirDosage];

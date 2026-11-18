@@ -234,6 +234,20 @@ function treatmentStepOffsetDays(relative: CanonicalCourse["stages"][number]["st
  * @param thai Whether the requested realization is Thai.
  * @returns Source-qualified relative wording without a guessed treatment start date.
  */
+function treatmentBoundaryRangeText(
+  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
+): string | undefined {
+  if (boundary?.anchor !== "treatment-start" || !boundary.displacementRange) return undefined;
+  const { low, high } = boundary.displacementRange;
+  const lower = low?.value === undefined ? undefined : formatCourseTimeQuantity(low, words);
+  const upper = high?.value === undefined ? undefined : formatCourseTimeQuantity(high, words);
+  if (!lower && !upper) return undefined;
+  const range = lower && upper ? lower + " – " + upper
+    : lower ? (low?.comparator ? "" : ">=") + lower
+    : high?.comparator ? upper! : words.upTo(upper!);
+  return words.afterTreatmentStart(range);
+}
+
 function formatCalendarStepWindow(
   start: CanonicalMeasure | undefined,
   end: CanonicalMeasure | undefined,
@@ -271,7 +285,7 @@ export function rateRangePreview(range: CanonicalRange): string | undefined {
 
 export function prefersSourceInstruction(course: CanonicalCourse): boolean {
   return Boolean(
-    course.cycleInterval ||
+    course.cycleInterval || course.cycleCount !== undefined ||
       course.safety ||
       course.stages.some(
         (step) =>
@@ -486,9 +500,11 @@ export function formatCanonicalCourse(
     // stale source invalidated by the R5->R6 reconciliation first.
     return oneOrCourse.instruction;
   }
-  if (oneOrCourse.stages.length === 0) return "";
+  if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length) return "";
   const environment = courseEnvironment(options),
     words = environment.words;
+  if (oneOrCourse.stages.length === 0)
+    return appendDoseLimits("", oneOrCourse.safety!.limits!, words, "course");
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
   if (
@@ -498,6 +514,7 @@ export function formatCanonicalCourse(
     !only.end &&
     only.count === undefined &&
     !oneOrCourse.cycleInterval &&
+    oneOrCourse.cycleCount === undefined &&
     !administration.choice
   ) {
     const recurrence = administration.schedule?.recurrence;
@@ -526,17 +543,14 @@ export function formatCanonicalCourse(
   // Rendering needs each component's projection, not a persisted copy of
   // the whole course plus edit markers on every component.
   const stages: string[] = [];
-  const firstRepeatCount = oneOrCourse.stages[0]?.count;
-  let courseRepeatCount = firstRepeatCount,
-    priorEndDays: number | undefined,
+  let priorEndDays: number | undefined,
     hasTimedStages = false;
   const windows: Array<{ start: number | undefined; end: number | undefined }> = [];
   const activeWindows: typeof windows = [];
-  // One traversal establishes count agreement, source windows and the
-  // presence of explicit boundaries; no separate every/map/some/filter chain.
+  // One traversal establishes source windows and explicit boundaries;
+  // no separate every/map/some/filter chain.
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
-    if (step.count !== firstRepeatCount) courseRepeatCount = undefined;
     if (step.start || step.end) hasTimedStages = true;
     const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
     const end = treatmentStepOffsetDays(step.end),
@@ -737,10 +751,20 @@ export function formatCanonicalCourse(
         ) {
           timing = formatCalendarStepWindow(startQuantity, endQuantity, words);
         } else {
-          const source = [step.start?.description, step.end?.description]
-            .filter((value): value is string => Boolean(value?.trim()))
-            .join("; ");
-          timing = words.reviewTiming(source || undefined);
+          const startRange = treatmentBoundaryRangeText(step.start, words);
+          const endRange = treatmentBoundaryRangeText(step.end, words);
+          if ((startRange || !step.start || startQuantity) &&
+              (endRange || !step.end || endQuantity) && (startRange || endRange)) {
+            const point = (q: CanonicalMeasure | undefined) => q
+              ? q.value === 0 && !getQuantityComparator(q) ? words.treatmentStart
+                : words.afterTreatmentStart(formatCourseTimeQuantity(q, words))
+              : undefined;
+            timing = words.calendarWindow(startRange ?? point(startQuantity), endRange ?? point(endQuantity));
+          } else {
+            const source = [step.start?.description ?? startRange, step.end?.description ?? endRange]
+              .filter((value): value is string => Boolean(value?.trim())).join("; ");
+            timing = words.reviewTiming(source || undefined);
+          }
         }
       } else if (endDays !== undefined && startDays !== undefined) {
         timing = words.dayRange(startDays + 1, endDays);
@@ -750,10 +774,7 @@ export function formatCanonicalCourse(
         timing = words.throughDay(endDays);
       }
     }
-    const stageCount =
-      oneOrCourse.cycleInterval && courseRepeatCount === undefined && step.count !== undefined
-        ? words.repeatCount(step.count)
-        : "";
+    const stageCount = step.count !== undefined ? words.repeatCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");
     stages.push(heading ? `${heading}: ${rendered}` : rendered);
   }
@@ -764,9 +785,12 @@ export function formatCanonicalCourse(
     }
   }
   if (oneOrCourse.cycleInterval) {
-    stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, courseRepeatCount));
+    stages.push(formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount));
+  } else if (oneOrCourse.cycleCount !== undefined) {
+    stages.push(words.repeatCount(oneOrCourse.cycleCount));
   }
-  const rendered = stages.join(hasTimedStages || oneOrCourse.cycleInterval ? " " : words.stageSeparator);
+  const rendered = stages.join(hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
+    ? " " : words.stageSeparator);
   return oneOrCourse.safety?.limits?.length
     ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course")
     : rendered;

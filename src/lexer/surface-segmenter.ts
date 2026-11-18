@@ -15,9 +15,9 @@ const SEGMENTER_INDEX=new Map<string,number>();
 export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceSegmenter): void {
   // Stateless script tests can safely reuse the registered expression.
   // Only /g or /y must lose their mutation-prone lastIndex behavior.
-  const normalized=segmenter.script.global||segmenter.script.sticky
-    ?{...segmenter,script:new RegExp(segmenter.script.source,segmenter.script.flags.replace(/[gy]/g,""))}
-    :segmenter;
+  const normalized = Object.assign({}, segmenter);
+  if (segmenter.script.global || segmenter.script.sticky)
+    normalized.script = new RegExp(segmenter.script.source, segmenter.script.flags.replace(/[gy]/g, ""));
   const existing=SEGMENTER_INDEX.get(segmenter.locale);
   if(existing!==undefined)SEGMENTERS[existing]=normalized;
   else{SEGMENTER_INDEX.set(segmenter.locale,SEGMENTERS.length);SEGMENTERS.push(normalized);}

@@ -14,6 +14,7 @@ import {
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { AdviceArgumentRole, FhirDosage } from "../src/types";
 import { getDosageCalendarDayCondition, setDosageCondition } from "../src/dosage-course";
+import { getCourseCycleCount } from "../src/fhir-course-cycle-count";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
 
@@ -1016,7 +1017,8 @@ describe("finite recurring-course punctuation and terminal cycle bound", () => {
     const parsed = parseSig(source);
     expect(parsed.fhirNext.repeatCycle).toMatchObject({ value: 14, code: "d" });
     expect(parsed.fhirNext.step).toHaveLength(1);
-    expect(parsed.fhirNext.step[0].count).toBe(3);
+    expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+    expect(parsed.fhirNext.step[0].count).toBeUndefined();
     const base = { timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00" };
     for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
       expect(nextDueDoses(dosage, { ...base, from: "2026-12-14T00:00:00+07:00", limit: 2 })).toEqual([]);

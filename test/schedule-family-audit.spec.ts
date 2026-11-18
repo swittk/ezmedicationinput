@@ -12,6 +12,7 @@ import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
+import { getCourseCycleCount } from "../src/fhir-course-cycle-count";
 
 const start = "2024-01-01T00:00:00Z";
 const due = {
@@ -998,15 +999,14 @@ describe("dose scheduling runtime guarantees", () => {
       repeatCycle: { value: 14, unit: "d", code: "d" },
       repeatCount: 3
     });
-    expect(parsed.fhirNext).toMatchObject({
-      repeatCycle: { value: 14, unit: "d", code: "d" },
-      step: [{ count: 3 }]
-    });
+    expect(parsed.fhirNext.repeatCycle).toMatchObject({ value: 14, unit: "d", code: "d" });
+    expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+    expect(parsed.fhirNext.step[0].count).toBeUndefined();
     const flat = JSON.parse(JSON.stringify(parsed.fhir));
-    expect(toDosageDetails(flat)).toMatchObject({
-      repeatCycle: { value: 14, unit: "d", code: "d" },
-      step: [{ count: 3 }]
-    });
+    const restoredCourse = toDosageDetails(flat);
+    expect(restoredCourse.repeatCycle).toMatchObject({ value: 14, unit: "d", code: "d" });
+    expect(getCourseCycleCount(restoredCourse)).toBe(3);
+    expect(restoredCourse.step[0].count).toBeUndefined();
     expect(nextDueDoses(flat, { ...base, limit: 10 })).toEqual(
       nextDueDoses(parsed.fhirNext, { ...base, limit: 10 })
     );
@@ -2741,6 +2741,29 @@ describe("count-vs-calendar predecessor clock ownership across DST", () => {
     }
   });
 
+  it("excludes Sunday 08:30 after a Saturday 08:00 one-civil-day boundary", () => {
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 7, code: "d", unit: "d" },
+      step: [
+        { component: [{ ...one, timing: { repeat: {
+          count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00"],
+        } } }] },
+        { component: [{ ...one, timing: { repeat: {
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:30:00"], boundsDuration: { value: 1, code: "d", unit: "d" },
+        } } }] },
+      ],
+    };
+    for (const input of [course, toFhirR5Dosages(course)]) {
+      expect(nextDueDoses(input, { ...start, limit: 4 })).toEqual([
+        "2027-03-13T08:00:00-05:00", "2027-03-13T08:30:00-05:00",
+        "2027-03-20T08:00:00-04:00", "2027-03-20T08:30:00-04:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...start }).totalUnits).toBe(2);
+    }
+  });
+
   it("a calendar-duration boundary retains its prescribed clock without a counted predecessor", () => {
     const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 7, code: "d", unit: "d" },
@@ -3100,27 +3123,28 @@ describe("PR14 new review: overlapping repeated-course chronological rolling all
       durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(1);
   });
   it("keeps an authored count of 3 after rolling-cap exclusions, within a six-day stage",()=>{
-    // Exactly one authored cycle, with three ACTUAL administrations. A
+    // One finite step, with three ACTUAL administrations. A
     // synthetic Jan 3 phase completion from the raw count must not
     // suppress its third eligible Jan 5 administration.
     const stageMember={...member,schedule:{recurrence:{
       frequency:1,period:1,periodUnit:FhirPeriodUnit.Day,
       clocks:["00:00:00"],courseLength:{value:6,unit:"d"},count:3
     }}};
-    const single={...course,stages:[{count:1,administrations:[stageMember]}]};
+    const single={...course,cycleInterval:undefined,stages:[{count:1,administrations:[stageMember]}]};
     expect(nextDueDoses(single,{...opts,limit:4}))
       .toEqual(["01","03","05"].map(day=>"2026-01-"+day+"T00:00:00+00:00"));
     expect(calculateTotalUnits({...opts,dosage:single,durationValue:6,
       durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(3);
   });
-  it("defers each cycle's exact count until three ACTUAL capped administrations are accepted",()=>{
+  it("defers each step repetition's exact count until three ACTUAL capped administrations are accepted",()=>{
     const dose={...member,schedule:{recurrence:{
       frequency:1,period:1,periodUnit:FhirPeriodUnit.Day,
       clocks:["00:00:00"],courseLength:{value:10,unit:"d"},count:3
     }}};
-    const twice={...course,stages:[{count:2,administrations:[dose]}]};
-    // Cycle 0 owns Jan 1/3/5; cycle 1's Jan 2/4/6 are suppressed by
-    // those earlier events. Its own accepted count is Jan 7/9/11.
+    const twice={...course,cycleInterval:undefined,stages:[{count:2,administrations:[dose]}]};
+    // The first step repetition owns Jan 1/3/5. Its final accepted dose
+    // opens the next repetition, whose Jan 6 opportunity is capped;
+    // its three accepted administrations are Jan 7/9/11.
     const expected=["01","03","05","07","09","11"]
       .map(day=>"2026-01-"+day+"T00:00:00+00:00");
     expect(nextDueDoses(twice,{...opts,limit:7})).toEqual(expected);

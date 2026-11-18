@@ -19,6 +19,7 @@ export function nextDueDoses(
     ParseBatchResult | CanonicalScheduleInput,
   options: NextDueDoseOptions
 ): string[] {
+  if (options.limit !== undefined && options.limit <= 0) return [];
   return executeDue(inputToCanonical(input), options);
 }
 export function calculateTotalUnits(options: TotalUnitsOptions | CanonicalSupplyOptions): TotalUnitsResult {

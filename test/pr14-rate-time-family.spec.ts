@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   nextDueDoses, parseSig, toDosageDetails, toFhirR5Dosages,
 } from "../src/index";
+import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { formatZonedIso } from "../src/execution/calendar";
 import type { FhirDosage } from "../src/types";
 
@@ -16,7 +17,8 @@ describe("rate heads shared with inclusive quantity comparators", () => {
       const parsed = parseSig(input);
       const dose = parsed.fhirNext.step[0].component[0].doseAndRate![0];
       expect(dose.rateQuantity, input).toMatchObject({ value: 100, unit: "mL/h" });
-      expect(dose.rateQuantity?.comparator, input).toBe(comparator);
+      expect(getQuantityComparator(dose.rateQuantity), input).toBe(comparator);
+      expect(dose.rateQuantity).not.toHaveProperty("comparator");
       expect(dose.doseQuantity, input).toBeUndefined();
       expect(parsed.input).toBe(input);
       expect(parsed.meta.leftoverText, input).toBeUndefined();
@@ -33,18 +35,25 @@ describe("rate heads shared with inclusive quantity comparators", () => {
     ["Infuse at most 0.5 mg per minute", "<="],
   ] as const)("keeps amount and per-time units together in %s", (input, comparator) => {
     const dose = parseSig(input).fhirNext.step[0].component[0].doseAndRate![0];
-    expect(dose.rateQuantity).toMatchObject({ value: 0.5, unit: "mg/min", comparator });
+    expect(dose.rateQuantity).toMatchObject({ value: 0.5, unit: "mg/min" });
+    expect(getQuantityComparator(dose.rateQuantity)).toBe(comparator);
     expect(dose.doseQuantity).toBeUndefined();
   });
 
   it("retains scalar comparators and requires a rate head for unmarked rates", () => {
     const scalar = parseSig("Take at most 2 tablets daily").fhirNext.step[0].component[0].doseAndRate![0];
-    expect(scalar.doseQuantity).toMatchObject({ value: 2, unit: "tab", comparator: "<=" });
+    expect(scalar.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(getQuantityComparator(scalar.doseQuantity)).toBe("<=");
     expect(scalar.rateQuantity).toBeUndefined();
-    for (const input of ["100 mL/hr", "at most 2 tablets daily"]) {
-      const dose = parseSig(input).fhirNext.step[0].component[0].doseAndRate![0];
-      expect(dose.rateQuantity, input).toBeUndefined();
+    const unmarked = parseSig("100 mL/hr");
+    for (const amount of unmarked.fhirNext.step[0]?.component[0]?.doseAndRate ?? []) {
+      expect(amount.doseQuantity).toBeUndefined();
+      expect(amount.rateQuantity).toBeUndefined();
     }
+    expect(unmarked.input).toBe("100 mL/hr");
+    const qualifiedTablet = parseSig("at most 2 tablets daily").fhirNext.step[0].component[0].doseAndRate![0];
+    expect(qualifiedTablet.doseQuantity?.value).toBe(2);
+    expect(qualifiedTablet.rateQuantity).toBeUndefined();
   });
 });
 

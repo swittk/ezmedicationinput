@@ -147,10 +147,12 @@ describe("course locale boundary", () => {
     };
     registerSigLocalization({
       locale: "choice-inherit",
-      formatLong: () => "Dose locale.",
+      formatLong: ({ clause }) => "Dose " + clause.dose?.value + ".",
       course: inherited,
     });
-    const rows: FhirDosage[] = [{ text: "First dose" }, { text: "Second dose" }];
+    const rows: FhirDosage[] = [1, 2].map(value => ({
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+    }));
     for (let i = 0; i < rows.length; i++)
       setDosageAlternativeChoice(rows[i], {
         groupId: "one-choice",
@@ -158,7 +160,7 @@ describe("course locale boundary", () => {
         selectionBehavior: "exactly-one",
       });
     const options = { i18n: { locale: "unregistered-output-tag", inherit: "choice-inherit" } };
-    expect(formatSigBatch(rows, "long", options)).toBe("Sélection: Dose locale ou Dose locale.");
+    expect(formatSigBatch(rows, "long", options)).toBe("Sélection: Dose 1 ou Dose 2.");
     expect(appendMedicationExcludedWeekdaysText("Dose.", ["mon"], options)).toBe("Dose sauf lundi.");
   });
   it("keeps a course-only override even when no clause callbacks are registered", () => {

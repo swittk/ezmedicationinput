@@ -6,6 +6,7 @@ import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json
 import r6SnapshotContract from "../fhir/r6/official-snapshot1-20261113-contract.json";
 import {
   parseSig, parseSigAsync, fromFhir, fromFhirDosage, formatSig, formatSigBatch, formatParseBatch,
+  importCanonicalCourse,
   nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
@@ -25,7 +26,7 @@ import {
   setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
 } from "../src/dosage-course";
 
-import { getQuantityComparator, quantityForR5, quantityFromR5 } from "../src/fhir-quantity-operator";
+import { getQuantityComparator, quantityForR5, quantityFromR5, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 
 describe("EZMED extended R5 dosage and R6 projection", () => {
   it.each(["QHS", "QAM", "QPM", "BLD"] as const)(
@@ -2271,9 +2272,10 @@ describe("compact course metadata ownership and editing", () => {
     const source = parseSig(input).fhirNext;
     const remaining = toFhirR5Dosages(source).slice(2);
     const restored = toDosageDetails(remaining);
-    expect(restored.step.map(step => step.component.length)).toEqual([0, 2, 2]);
-    expect(restored.step[1].start?.offsetDuration?.value).toBe(7);
-    expect(restored.step[2].start?.offsetDuration?.code).toBe("mo");
+    expect(restored.step.map(step => step.component.length)).toEqual([2, 2]);
+    expect(importCanonicalCourse(restored).stages.map(stage => stage.administrations.length)).toEqual([0, 2, 2]);
+    expect(restored.step[0].start?.offsetDuration?.value).toBe(7);
+    expect(restored.step[1].start?.offsetDuration?.code).toBe("mo");
     expect(nextDueDoses(remaining, options)).toEqual([
       "2026-10-26T08:00:00+07:00", "2026-10-26T08:00:00+07:00",
       "2026-10-26T12:00:00+07:00", "2026-10-26T12:00:00+07:00"
@@ -2319,12 +2321,13 @@ describe("compact course metadata ownership and editing", () => {
     const supplied = toDosageDetails(surviving, undefined, fromDosageDetails(source).course);
     expect(calculateTotalUnits({ ...options, dosage: supplied, durationValue: 28, durationUnit: "d" }).totalUnits).toBe(12);
     const restored = toDosageDetails(surviving);
-    expect(restored.step[1].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    expect(restored.step[1].start).toEqual(day(7));
+    expect(restored.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(restored.step[0].start).toEqual(day(7));
+    expect(importCanonicalCourse(restored).stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
     expect(() => formatSig(restored, "long")).not.toThrow();
-    // A partially deleted R5 draft keeps the missing phase editable, but
-    // cannot masquerade as a valid current R6 DosageInstruction.
-    expect(() => fromFhir(restored)).toThrow(/step\[0\].*component/);
+    // Strict R6 omits the missing phase, while its source extension reopens
+    // the draft and still carries the unresolved shared course context.
+    expect(() => fromFhir(restored)).not.toThrow();
     for (const dosage of [surviving, restored, toFhirR5Dosages(restored)]) {
       expect(() => nextDueDoses(dosage, options)).toThrow(/complete dosage array/);
       expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 28, durationUnit: "d" })).toThrow(/complete dosage array/);
@@ -2354,12 +2357,14 @@ describe("compact course metadata ownership and editing", () => {
       { id: "continuation", component: [component(2)] }
     ] };
     const remaining = toFhirR5Dosages(source).slice(1);
-    expect(toDosageDetails(remaining).step[1].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    const projected = toDosageDetails(remaining);
+    expect(projected.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
+    expect(importCanonicalCourse(projected).stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
     expect(() => nextDueDoses(remaining, options)).toThrow(/complete dosage array/);
     expect(() => calculateTotalUnits({ ...options, dosage: remaining, durationValue: 14, durationUnit: "d" })).toThrow(/complete dosage array/);
   });
 
-  it("preserves an incomplete R5 phase as an editable draft without accepting it as current R6", () => {
+  it("preserves an incomplete R5 phase as an editable draft behind valid R6 steps", () => {
     const source: FhirR6DosageInstruction = { step: [
       { end: day(7), component: [component(2)] },
       { start: day(7), end: day(14), component: [component()] }
@@ -2368,9 +2373,11 @@ describe("compact course metadata ownership and editing", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].sequence).toBe(2);
     const incomplete = toDosageDetails(rows);
-    expect(incomplete.step[0].component).toEqual([]);
-    expect(incomplete.step[1].component[0]).toMatchObject({ doseAndRate: [{ doseQuantity: { value: 1 } }] });
-    expect(() => fromFhir(incomplete)).toThrow(/step\[0\].*component/);
+    expect(incomplete.step).toHaveLength(1);
+    expect(incomplete.step[0].component[0]).toMatchObject({ doseAndRate: [{ doseQuantity: { value: 1 } }] });
+    expect(incomplete.step[0].start).toEqual(day(7));
+    expect(importCanonicalCourse(incomplete).stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
+    expect(() => fromFhir(incomplete)).not.toThrow();
     expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 21, durationUnit: "d" }).totalUnits).toBe(7);
   });
 
@@ -2824,15 +2831,15 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(adjusted.step[0].component[0].timing?.repeat).not.toHaveProperty("endOffset");
   });
 
-  it("keeps R6 Quantity comparators and CodeableReference metadata without leaking them into R5", () => {
+  it("keeps scalar qualifiers and CodeableReference metadata through both FHIR projections", () => {
     const course: FhirR6DosageInstruction = {
       step: [{ component: [{
         site: { id: "site-one", extension: [{ url: "https://example.org/site-meta", valueString: "retained" }],
           reference: { identifier: { system: "https://example.org/body", value: "left" },
             display: "original location" } },
         doseAndRate: [{
-          doseQuantity: { value: 1, comparator: "~", unit: "tab" },
-          rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" }
+          doseQuantity: simpleQuantityForR5({ value: 1, comparator: "~", unit: "tab" })!,
+          rateQuantity: simpleQuantityForR5({ value: 4, comparator: ">=", unit: "mL/h" })!
         }]
       }] }]
     };
@@ -2865,7 +2872,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const recomposed = toDosageDetails(edited);
     expect(recomposed.step[0].component[0].doseAndRate?.[0].doseQuantity)
       .toEqual({ value: 2, unit: "tab" });
-    expect(recomposed.step[0].component[0].doseAndRate?.[0].rateQuantity?.comparator).toBe(">=");
+    expect(getQuantityComparator(recomposed.step[0].component[0].doseAndRate?.[0].rateQuantity)).toBe(">=");
   });
 
   it("retains concept-only R6 site metadata independently of any cycle trigger", () => {
@@ -2989,7 +2996,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
 
   it("keeps superseded R6 source provenance on the edited row, without global warning scans", () => {
     const course: FhirR6DosageInstruction = { step: [{ component: [
-      { doseAndRate: [{ doseQuantity: { value: 1, comparator: "~", unit: "tab" } }] },
+      { doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, comparator: "~", unit: "tab" })! }] },
       { doseAndRate: [{ doseQuantity: { value: 3, unit: "tab" } }] }
     ] }] };
     const rows = toFhirR5Dosages(course);
@@ -3049,8 +3056,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   it("does not restore approximate quantities over a clinician's new dose/rate expressions", () => {
     const course: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{
-        doseQuantity: { value: 1, comparator: "~", unit: "tab" },
-        rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" }
+        doseQuantity: simpleQuantityForR5({ value: 1, comparator: "~", unit: "tab" })!,
+        rateQuantity: simpleQuantityForR5({ value: 4, comparator: ">=", unit: "mL/h" })!
       }]
     }] }] };
     const edited = toFhirR5Dosages(course);
@@ -3069,7 +3076,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       extension.url.includes("medication-course-reconciliation-source")) ?? [];
     expect(retained).toHaveLength(1);
     expect(JSON.stringify(retained)).toContain('"100000000055"');
-    expect(JSON.stringify(retained)).toContain('"comparator":">="');
+    expect(JSON.stringify(retained)).toContain('"100000000053"');
     expect(fromFhir(restored).fhirNext).toEqual(restored);
   });
 
@@ -3077,7 +3084,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const course: FhirR6DosageInstruction = {
       renderedInstruction: "Follow the clinician's written taper.",
       step: [{ component: [{
-        doseAndRate: [{ doseQuantity: { value: 1, comparator: "~", unit: "tab" } }]
+        doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, comparator: "~", unit: "tab" })! }]
       }] }]
     };
     const imported = fromFhir(course);
@@ -3403,7 +3410,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       const entry = (name: string, amount: number) => ({
         ...(identity === "id" ? { id: name } :
           { type: { coding: [{ code: name }] } }),
-        doseQuantity: { value: amount, unit: "mg", comparator: "~" as const }
+        doseQuantity: simpleQuantityForR5({ value: amount, unit: "mg", comparator: "~" as const })!
       });
       const course: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: [entry("calc", 10), entry("ordered", 5)]
@@ -3425,8 +3432,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     // Deletion therefore leaves the surviving 5 mg dose identifiable.
     const anonymous: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [
-        { doseQuantity: { value: 10, unit: "mg", comparator: "~" } },
-        { doseQuantity: { value: 5, unit: "mg", comparator: "~" } }
+        { doseQuantity: simpleQuantityForR5({ value: 10, unit: "mg", comparator: "~" })! },
+        { doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }
       ]
     }] }] };
     const anonymousRows = toFhirR5Dosages(anonymous);
@@ -3442,7 +3449,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     });
     const surviving = toDosageDetails(anonymousRows);
     expect(surviving.step[0].component[0].doseAndRate).toEqual([{
-      doseQuantity: { value: 5, unit: "mg", comparator: "~" }
+      doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })!
     }]);
     const provenance = surviving.extension?.filter(ext =>
       ext.url.includes("medication-course-reconciliation-source")) ?? [];
@@ -3454,11 +3461,11 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   it("projects every qualified R6 dose/rate as an active R5 number and retains its qualifier", () => {
     const course: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [
-        { doseQuantity: { value: 10, comparator: "~", unit: "mg",
-          code: "mg", system: "http://unitsofmeasure.org" } },
-        { doseQuantity: { value: 5, comparator: "<=", unit: "mg" } },
-        { rateQuantity: { value: 4, comparator: ">=", unit: "mL/h" } },
-        { rateQuantity: { value: 2.5, comparator: "~", unit: "mL/h" } }
+        { doseQuantity: simpleQuantityForR5({ value: 10, comparator: "~", unit: "mg",
+          code: "mg", system: "http://unitsofmeasure.org" })! },
+        { doseQuantity: simpleQuantityForR5({ value: 5, comparator: "<=", unit: "mg" })! },
+        { rateQuantity: simpleQuantityForR5({ value: 4, comparator: ">=", unit: "mL/h" })! },
+        { rateQuantity: simpleQuantityForR5({ value: 2.5, comparator: "~", unit: "mL/h" })! }
       ]
     }] }] };
     const rows = toFhirR5Dosages(course);
@@ -3484,13 +3491,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     edited[0].doseAndRate![0].doseQuantity!.value = 11;
     const corrected = toDosageDetails(edited);
     expect(corrected.step[0].component[0].doseAndRate?.[0].doseQuantity)
-      .toEqual({ value: 11, unit: "mg", code: "mg",
-        system: "http://unitsofmeasure.org", comparator: "~" });
-    expect(corrected.step[0].component[0].doseAndRate?.[1].doseQuantity?.comparator)
+      .toEqual(simpleQuantityForR5({ value: 11, unit: "mg", code: "mg",
+        system: "http://unitsofmeasure.org", comparator: "~" })!);
+    expect(getQuantityComparator(corrected.step[0].component[0].doseAndRate?.[1].doseQuantity))
       .toBe("<=");
-    expect(corrected.step[0].component[0].doseAndRate?.[2].rateQuantity?.comparator)
+    expect(getQuantityComparator(corrected.step[0].component[0].doseAndRate?.[2].rateQuantity))
       .toBe(">=");
-    expect(corrected.step[0].component[0].doseAndRate?.[3].rateQuantity?.comparator)
+    expect(getQuantityComparator(corrected.step[0].component[0].doseAndRate?.[3].rateQuantity))
       .toBe("~");
     expect(corrected.extension?.some(ext =>
       ext.url.includes("medication-course-reconciliation-source"))).toBe(true);
@@ -3499,8 +3506,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   it("keeps the active R5 dose even when equally valued anonymous R6 qualifiers are ambiguous", () => {
     const original: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [
-        { doseQuantity: { value: 5, unit: "mg", comparator: "~" } },
-        { doseQuantity: { value: 5, unit: "mg", comparator: ">=" } }
+        { doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! },
+        { doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: ">=" })! }
       ]
     }] }] };
     const rows = toFhirR5Dosages(original);
@@ -3511,13 +3518,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     // The published EMA operator coding keeps even identically valued
     // anonymous entries distinguishable; no guessed qualifier is needed.
     expect(restored.step[0].component[0].doseAndRate).toEqual([{
-      doseQuantity: { value: 5, unit: "mg", comparator: ">=" }
+      doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: ">=" })!
     }]);
     const provenance = restored.extension?.filter(ext =>
       ext.url.includes("medication-course-reconciliation-source")) ?? [];
     expect(provenance).toHaveLength(1);
     expect(JSON.stringify(provenance)).toContain('"100000000055"');
-    expect(JSON.stringify(provenance)).toContain('"comparator":">="');
+    expect(JSON.stringify(provenance)).toContain('"100000000053"');
   });
 
   it("replaces edited step modifiers without stacking old wrappers or deleting other extensions", () => {
@@ -3754,7 +3761,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     ["less than 5 mg PO QD", "<", "100000000050"],
     [">5 mg PO QD", ">", "100000000051"],
     ["more than 5 mg PO QD", ">", "100000000051"]
-  ] as const)("parses %s into an EMA R5 comparator and native R6 %s", (input, comparator, code) => {
+  ] as const)("parses %s into matching R5 and R6 SimpleQuantity operators %s", (input, comparator, code) => {
     const parsed = parseSig(input);
     const quantity = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
     expect(quantity?.value).toBe(5);
@@ -3764,12 +3771,17 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
     });
     expect(getEmaQuantityComparator(quantity)).toBe(comparator);
-    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator)
-      .toBe(comparator);
+    const r6Quantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+    expect(r6Quantity).not.toHaveProperty("comparator");
+    expect(r6Quantity?.extension?.[0]).toMatchObject({
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
+    });
+    expect(getQuantityComparator(r6Quantity)).toBe(comparator);
     expect(parsed.shortText).toContain(comparator + "5");
     expect(fromFhirDosage(parsed.fhir[0]).shortText).toContain(comparator + "5");
-    expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
-      .component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+    expect(getQuantityComparator(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
+      .component[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
   });
 
   it("imports independently authored EMA Quantity Operators while retaining unfamiliar ones verbatim", () => {
@@ -3784,9 +3796,9 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       doseAndRate: [{ doseQuantity: dose("100000000055") }]
     };
     const imported = toDosageDetails([exact]);
-    expect(imported.step[0].component[0].doseAndRate?.[0].doseQuantity).toEqual({
+    expect(imported.step[0].component[0].doseAndRate?.[0].doseQuantity).toEqual(simpleQuantityForR5({
       value: 5, unit: "mg", comparator: "~"
-    });
+    })!);
     expect(fromFhirDosage(exact).longText).toContain("approximately 5 mg");
     const preserved = toFhirR5Dosages(imported)[0].doseAndRate?.[0].doseQuantity;
     expect(preserved?.extension?.[0]).toEqual(dose("100000000055").extension[0]);
@@ -3809,7 +3821,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
 
   it("preserves old local bridge-comparator children while emitting only the standard EMA coding", () => {
     const course: FhirR6DosageInstruction = { step: [{ component: [{
-      doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator: "~" } }]
+      doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }]
     }] }] };
     const rows = toFhirR5Dosages(course);
     const component = rows[0].modifierExtension?.[0].extension?.find(child =>
@@ -3824,7 +3836,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       { url: "comparator", valueCode: "~" }
     ];
     expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity)
-      .toEqual({ value: 5, unit: "mg", comparator: "~" });
+      .toEqual(simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })!);
   });
 
   it("keeps standard EMA operators active in R5 maximum-dose and period quantities", () => {
@@ -3918,7 +3930,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       step: [{ start: relative(0), end: relative(21), component: [{
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
           timeOfDay: ["08:00:00"] } },
-        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator: "~" } }]
+        doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }]
       }] }]
     };
     const opts = { from: "2026-11-01T00:00:00+07:00",
@@ -3976,7 +3988,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(result.totalUnits).toBe(35);
       expect(result.unit).toBe("mg");
     }
-    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator)
+    expect(getQuantityComparator(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity))
       .toBe("~");
     expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity?.extension?.[0].valueCoding?.code)
       .toBe("100000000055");
@@ -4040,14 +4052,14 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(getEmaQuantityComparator(dose.doseAndRate?.[0]?.doseQuantity)).toBe("~");
     }
     for (const step of inherited.fhirNext.step) {
-      expect(step.component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBe("~");
+      expect(getQuantityComparator(step.component[0].doseAndRate?.[0]?.doseQuantity)).toBe("~");
     }
     const changed = parseSig("approximately 5 mg PO BID then 5 mg PO QD");
-    expect(changed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBe("~");
+    expect(getQuantityComparator(changed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity)).toBe("~");
     expect(changed.fhirNext.step[1].component[0].doseAndRate?.[0]?.doseQuantity?.comparator).toBeUndefined();
     const three = parseSig("5 mg PO BID then approximately 7 mg PO QD then QD");
     expect(three.fhirNext.step.map(step =>
-      step.component[0].doseAndRate?.[0]?.doseQuantity?.comparator)).toEqual([undefined, "~", "~"]);
+      getQuantityComparator(step.component[0].doseAndRate?.[0]?.doseQuantity))).toEqual([undefined, "~", "~"]);
   });
 
   it("displays EMA maximum operators, Thai comparators, and per-target doses without claiming exactness", () => {
@@ -4093,7 +4105,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(fromFhirDosage(dosage, { locale: "th" }).longText).toContain(phrase);
     }
     const native: FhirR6DosageInstruction = { step: [{ component: [{
-      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", comparator: "~" } }]
+      doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, unit: "tab", comparator: "~" })! }]
     }] }] };
     expect(fromFhir(native).items[0].longText).toContain("~1 tab");
   });
@@ -4202,7 +4214,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       .toContain("original-condition");
   });
 
-  it("reconciles enriched EMA comparator coding after a native edit without duplicating operators", () => {
+  it("preserves edited EMA scalar coding and reconciles native general-Quantity operators without duplicates", () => {
     const prior = {
       url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL, id: "rich-ema",
       valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM,
@@ -4210,14 +4222,21 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         userSelected: true }
     };
     const course: FhirR6DosageInstruction = { step: [{ component: [{
-      doseAndRate: [{ doseQuantity: {
+      doseAndRate: [{ doseQuantity: simpleQuantityForR5({
         value: 5, unit: "mg", comparator: "~",
         extension: [prior, { url: "https://example.org/measurement", valueBoolean: false }]
-      } }]
+      })! }]
     }] }] };
     const original = toFhirR5Dosages(course);
     expect(getEmaQuantityComparator(original[0].doseAndRate?.[0].doseQuantity)).toBe("~");
-    course.step[0].component[0].doseAndRate![0].doseQuantity!.comparator = "<=";
+    // An external editor supplies the current legal SimpleQuantity coding.
+    // The import/projection boundary owns preservation, not the editing UI.
+    course.step[0].component[0].doseAndRate![0].doseQuantity = {
+      value: 5, unit: "mg", extension: [{
+        ...prior, valueCoding: { ...prior.valueCoding, code: "100000000052",
+          display: "less than or equal to" }
+      }, { url: "https://example.org/measurement", valueBoolean: false }]
+    };
     const rows = toFhirR5Dosages(course);
     const quantity = rows[0].doseAndRate?.[0].doseQuantity;
     const comparatorExtensions = quantity?.extension?.filter(item =>
@@ -4232,7 +4251,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       url: "https://example.org/measurement", valueBoolean: false
     });
     expect(getEmaQuantityComparator(quantity)).toBe("<=");
-    expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator)
+    expect(getQuantityComparator(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseQuantity))
       .toBe("<=");
     expect(getEmaQuantityComparator(toFhirR5Dosages(
       toDosageDetails(rows))[0].doseAndRate?.[0].doseQuantity)).toBe("<=");
@@ -4267,7 +4286,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const one = (entry: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["doseAndRate"]>[number]) =>
       ({ step: [{ component: [{ doseAndRate: [entry] }] }] }) as FhirR6DosageInstruction;
     const exactRate = one({ rateQuantity: { value: 100, unit: "mL/h" } });
-    const mixed = one({ doseQuantity: { value: 500, unit: "mL", comparator: "~" },
+    const mixed = one({ doseQuantity: simpleQuantityForR5({ value: 500, unit: "mL", comparator: "~" })!,
       rateQuantity: { value: 100, unit: "mL/h" } });
     const ratio = one({ rateRatio: {
       numerator: { value: 500, unit: "mL" },
@@ -4369,7 +4388,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const operators = [undefined, "~", "<", "<=", ">", ">=", "ad"] as const;
     for (const doseComparator of operators) for (const rateComparator of operators) {
       const source: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{
-        doseQuantity: { value: 500, unit: "mL", ...(doseComparator ? { comparator: doseComparator } : {}) },
+        doseQuantity: simpleQuantityForR5({ value: 500, unit: "mL", ...(doseComparator ? { comparator: doseComparator } : {}) })!,
         rateRatio: { numerator: { value: 500, unit: "mL",
           ...(rateComparator ? { comparator: rateComparator } : {}) },
           denominator: { value: 2, unit: "h" } }
@@ -4378,7 +4397,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       const rebuilt = canonicalToFhir(canonicalFromFhir(row));
       const back = toDosageDetails([rebuilt]).step[0].component[0].doseAndRate![0];
       expect(back.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
-      expect(back.doseQuantity?.comparator).toBe(doseComparator);
+      expect(getQuantityComparator(back.doseQuantity)).toBe(doseComparator);
       expect(back.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
       expect(back.rateRatio?.numerator?.comparator).toBe(rateComparator);
       expect(back.rateRatio?.denominator?.value).toBe(2);
@@ -4434,10 +4453,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const parsed = parseSig(input);
     const native = parsed.fhirNext.step[0].component[0].doseAndRate![0][slot];
     expect(native?.value).toBe(value);
-    expect(native?.comparator).toBe(comparator);
+    expect(getQuantityComparator(native)).toBe(comparator);
     expect(getQuantityComparator(parsed.fhir[0].doseAndRate?.[0][slot])).toBe(comparator);
     const restored = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
-    expect(restored.step[0].component[0].doseAndRate?.[0][slot]?.comparator).toBe(comparator);
+    expect(getQuantityComparator(restored.step[0].component[0].doseAndRate?.[0][slot])).toBe(comparator);
     expect(parsed.input).toBe(input);
   });
 
@@ -4681,8 +4700,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     for (const maxOperator of [undefined, "~"] as const)
     for (const periodOperator of [undefined, "~", ">="] as const) {
       const source: FhirR6DosageInstruction = { step: [{ component: [{
-        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab",
-          ...(doseOperator ? { comparator: doseOperator } : {}) } }],
+        doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, unit: "tab",
+          ...(doseOperator ? { comparator: doseOperator } : {}) })! }],
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
           timeOfDay: ["08:00:00"] } },
         safety: { doseLimit: [{ scope: "period",
@@ -4703,7 +4722,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     // The existing source is never an excuse to blank a known numeric dose.
     const approximate = parseSig("approximately 5 mg PO QD");
     expect(calculateTotalUnits({ dosage: approximate, ...opts, durationValue: 7 }).totalUnits).toBe(35);
-    expect(approximate.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe("~");
+    expect(getQuantityComparator(approximate.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)).toBe("~");
   });
 
   it("uses the same nominal and unevaluated-operator policy for lifetime and administration limits", () => {
@@ -4711,7 +4730,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       timeZone: "UTC", durationValue: 4, durationUnit: FhirPeriodUnit.Day };
     for (const operator of [undefined, "~", ">="] as const) {
       const source: FhirR6DosageInstruction = { step: [{ component: [{
-        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator: "~" } }],
+        doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }],
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
         safety: { doseLimit: [
           { scope: "administration", valueQuantity: { value: 8, unit: "mg",
@@ -4850,31 +4869,33 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   });
 
   it.each(["<", "<=", "~", ">=", ">"] as const)(
-    "keeps nominal %s dose arithmetic identical through all dosage representations", comparator => {
+    "keeps %s dose supply bounds consistent through all dosage representations", comparator => {
       const original: FhirR6DosageInstruction = { step: [{ component: [{
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
-        doseAndRate: [{ doseQuantity: { value: 5, unit: "mg", comparator } }]
+        doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator })! }]
       }] }] };
       const strict = toFhirR5Dosages(original);
       const options = { from: "2026-11-02T00:00:00Z",
         orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC",
         durationValue: 7, durationUnit: FhirPeriodUnit.Day };
       for (const dosage of [original, strict, strict[0], fromFhir(original)]) {
-        expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(35);
+        if (comparator === ">" || comparator === ">=")
+          expect(() => calculateTotalUnits({ dosage, ...options })).toThrow(/lower bound/i);
+        else expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(35);
       }
       expect(toDosageDetails(strict)).toEqual(original);
-      expect(original.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+      expect(getQuantityComparator(original.step[0].component[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
     }
   );
 
-  it("uses nominal dose/rate/range values without discarding inequality qualifiers", () => {
+  it("distinguishes finite dose/rate/range estimates from unbounded lower limits", () => {
     const options = { from: "2026-11-02T00:00:00Z",
       orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC",
       durationValue: 7, durationUnit: FhirPeriodUnit.Day };
     const timing = { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
       duration: 2, durationUnit: FhirPeriodUnit.Hour } };
     for (const entry of [
-      { rateQuantity: { value: 10, unit: "mL/h", comparator: ">=" } },
+      { rateQuantity: simpleQuantityForR5({ value: 10, unit: "mL/h", comparator: ">=" })! },
       { rateRatio: { numerator: { value: 10, unit: "mL", comparator: "<=" },
         denominator: { value: 1, unit: "h" } } }
     ] as const) {
@@ -4882,15 +4903,17 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         timing, doseAndRate: [entry]
       }] }] };
       for (const dosage of [source, toFhirR5Dosages(source)]) {
-        expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(140);
+        if ("rateQuantity" in entry)
+          expect(() => calculateTotalUnits({ dosage, ...options })).toThrow(/lower bound/i);
+        else expect(calculateTotalUnits({ dosage, ...options }).totalUnits).toBe(140);
       }
       expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
     }
     const ranged: FhirR6DosageInstruction = { step: [{ component: [{
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
       doseAndRate: [{ doseRange: {
-        low: { value: 5, unit: "mg", comparator: ">=" },
-        high: { value: 8, unit: "mg", comparator: "<=" }
+        low: simpleQuantityForR5({ value: 5, unit: "mg", comparator: ">=" })!,
+        high: simpleQuantityForR5({ value: 8, unit: "mg", comparator: "<=" })!
       } }]
     }] }] };
     for (const dosage of [ranged, toFhirR5Dosages(ranged)])
@@ -5028,8 +5051,8 @@ describe("review family contract: active native comparator owns imported quantit
     expect(canonicalFromFhir(row).dose?.comparator).toBe(comparator);
     expect(parserStateFromFhir(row).primaryClause.dose?.comparator).toBe(comparator);
     const component = toDosageDetails([row]).step[0].component[0];
-    expect(component.doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
-    expect(component.doseAndRate?.[0].rateQuantity?.comparator).toBe(comparator);
+    expect(getQuantityComparator(component.doseAndRate?.[0].doseQuantity)).toBe(comparator);
+    expect(getQuantityComparator(component.doseAndRate?.[0].rateQuantity)).toBe(comparator);
     expect(component.timing?.repeat?.boundsDuration?.comparator).toBe(comparator);
     expect(component.safety?.doseLimit?.every(x => x.valueQuantity?.comparator === comparator)).toBe(true);
     expect(component.safety?.doseLimit?.find(x => x.scope === "period")?.period?.comparator).toBe(comparator);
@@ -5060,7 +5083,7 @@ describe("cross-pass preservation and execution family audit", () => {
         site: { id: "eye", extension: [note("site")], concept: { text: "left eye" } } }] },
       { id: "late", start: day(7), end: day(14), component: [{ doseAndRate: [{ id: "dose",
         type: { text: "ordered" }, extension: [note("entry")],
-        doseQuantity: { value: 0.5, unit: "tab", comparator: "~" } }] }] }
+        doseQuantity: simpleQuantityForR5({ value: 0.5, unit: "tab", comparator: "~" })! }] }] }
     ] }],
     ["condition with unfamiliar coding metadata", { step: [{ component: [{ ...ordinary, condition: [{
       code: { text: "Pressure", extension: [note("code")] }, operation: "gt",
@@ -5280,7 +5303,7 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
       const sourceQuantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
       expect(sourceQuantity?.value).toBe(amount);
       expect(sourceQuantity?.unit).toBe(unit);
-      expect(sourceQuantity?.comparator).toBe(comparator);
+      expect(getQuantityComparator(sourceQuantity)).toBe(comparator);
       const rows = toFhirR5Dosages(parsed.fhirNext);
       expect(rows[0].doseAndRate?.[0].doseQuantity?.value).toBe(amount);
       expect(getQuantityComparator(rows[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
@@ -5581,10 +5604,12 @@ describe("review 18: empty stages, course header provenance, and inherited civil
       sequence: 1, id: "future-stage",
       start: { offsetDuration: { value: 2, unit: "d" } }
     }] });
-    expect(edited.step).toHaveLength(1);
-    expect(edited.step[0].component).toEqual([]);
-    expect(edited.step[0].start?.offsetDuration?.value).toBe(2);
-    expect(edited.step[0].id).toBe("future-stage");
+    expect(edited.step).toEqual([]);
+    const editableStages = importCanonicalCourse(edited).stages;
+    expect(editableStages).toHaveLength(1);
+    expect(editableStages[0].administrations).toEqual([]);
+    expect(editableStages[0].start?.displacement?.value).toBe(2);
+    expect(editableStages[0].provenance?.id).toBe("future-stage");
     expect(edited.renderedInstruction).toBe(source.renderedInstruction);
     expect(JSON.stringify(edited.extension)).toContain("dosageDetails");
     expect(oldMarker).toContain("dosageDetails");
@@ -5594,9 +5619,13 @@ describe("review 18: empty stages, course header provenance, and inherited civil
     expect(carrier[0].doseAndRate).toBeUndefined();
     expect(carrier[0].timing).toBeUndefined();
     const reopened = toDosageDetails(JSON.parse(JSON.stringify(carrier)));
-    expect(reopened.step).toEqual(edited.step);
+    expect(reopened.step).toEqual([]);
+    expect(importCanonicalCourse(reopened).stages[0].start?.displacement?.value).toBe(2);
+    expect(importCanonicalCourse(reopened).stages[0].provenance?.id).toBe("future-stage");
     expect(reopened.renderedInstruction).toBe(source.renderedInstruction);
-    expect(toDosageDetails(toFhirR5Dosages(reopened)).step).toEqual(edited.step);
+    const again = toDosageDetails(toFhirR5Dosages(reopened));
+    expect(again.step).toEqual([]);
+    expect(importCanonicalCourse(again).stages[0].provenance?.id).toBe("future-stage");
 
     // Stage-only data also needs a carrier even with no whole-course text.
     const stageOnly: FhirR6DosageInstruction = { step: [{
@@ -5606,7 +5635,12 @@ describe("review 18: empty stages, course header provenance, and inherited civil
     const stageRows = toFhirR5Dosages(stageOnly);
     expect(stageRows).toHaveLength(1);
     expect(stageRows[0].doseAndRate).toBeUndefined();
-    expect(toDosageDetails(stageRows).step).toEqual(stageOnly.step);
+    const stageOutput = toDosageDetails(stageRows);
+    expect(stageOutput.step).toEqual([]);
+    const stageDraft = importCanonicalCourse(stageOutput).stages[0];
+    expect(stageDraft.administrations).toEqual([]);
+    expect(stageDraft.provenance?.id).toBe("pending");
+    expect(stageDraft.end?.displacement?.value).toBe(3);
   });
 
   it("keeps superseded course-level safety metadata when a compact header is replaced", () => {
@@ -5966,6 +6000,8 @@ describe("review 20: typed expression identity and normalized calendar equivalen
       const expected = nextDueDoses(alternate, opts);
       const amount = calculateTotalUnits({ dosage: alternate, ...opts,
         durationValue: 390, durationUnit: FhirPeriodUnit.Day }).totalUnits;
+      // One tablet at 03:00 on each civil day, with no rest gap.
+      expect(amount).toBe(390);
       for (const source of [original, alternate]) {
         for (const dosage of [source, toFhirR5Dosages(source), fromFhir(source)]) {
           const actual = nextDueDoses(dosage, opts);
@@ -5973,7 +6009,7 @@ describe("review 20: typed expression identity and normalized calendar equivalen
           expect(new Set(actual).size).toBe(actual.length);
           expect(calculateTotalUnits({ dosage, ...opts,
             durationValue: 390, durationUnit: FhirPeriodUnit.Day }).totalUnits)
-            .toBe(amount);
+            .toBe(390);
         }
         expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
       }
@@ -6049,7 +6085,7 @@ describe("November 16 current R6 review: partial rate ratio display", () => {
     [{ numerator: { value: 100, unit: "mL" }, denominator: { unit: "h" } },
       "Rate: 100 mL / unspecified h", "อัตราการให้ยา: 100 mL / ไม่ระบุค่า h"],
     [{ numerator: { value: 100, comparator: "~" as const, unit: "mL" },
-       denominator: { value: 2, comparator: ">=" as const, unit: "h" } },
+       denominator: simpleQuantityForR5({ value: 2, comparator: ">=" as const, unit: "h" })! },
       "Rate: ~100 mL / >=2 h", "อัตราการให้ยา: ~100 mL / >=2 h"],
     [{ numerator: { unit: "mL" }, denominator: { value: 2, unit: "h" } },
       "Rate: unspecified mL / 2 h", "อัตราการให้ยา: ไม่ระบุค่า mL / 2 h"]
@@ -6110,8 +6146,8 @@ describe("November 16 PR #13: SimpleQuantity offset and duration display familie
   it("renders independent low/high boundsRange comparators in both language outputs", () => {
     const course: FhirR6DosageInstruction = { step: [{ component: [{
       timing: { repeat: { boundsRange: {
-        low: { value: 3, unit: "d", code: "d", comparator: ">=" },
-        high: { value: 7, unit: "d", code: "d", comparator: "<=" }
+        low: simpleQuantityForR5({ value: 3, unit: "d", code: "d", comparator: ">=" })!,
+        high: simpleQuantityForR5({ value: 7, unit: "d", code: "d", comparator: "<=" })!
       } } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }] };
@@ -6160,8 +6196,9 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
     const rebuilt = toDosageDetails(saved, undefined, {
       step: [{ sequence: 3, id: "new-stage" }]
     });
-    expect(rebuilt.step).toHaveLength(1);
-    expect(rebuilt.step[0].id).toBe("first");
+    expect(rebuilt.step).toEqual([]);
+    expect(importCanonicalCourse(rebuilt).stages).toHaveLength(1);
+    expect(importCanonicalCourse(rebuilt).stages[0].provenance?.id).toBe("first");
     expect(JSON.stringify(rebuilt.extension)).toContain("new-stage");
     expect(JSON.stringify(rebuilt.extension)).toContain("3");
   });
@@ -6171,8 +6208,9 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
       const rebuilt = toDosageDetails(saved, undefined, {
         step: [{ sequence, id: "unassignable" }]
       });
-      expect(rebuilt.step).toHaveLength(1);
-      expect(rebuilt.step[0].id).toBe("first");
+      expect(rebuilt.step).toEqual([]);
+      expect(importCanonicalCourse(rebuilt).stages).toHaveLength(1);
+      expect(importCanonicalCourse(rebuilt).stages[0].provenance?.id).toBe("first");
       expect(JSON.stringify(rebuilt.extension)).toContain("unassignable");
     }
   });
@@ -6199,7 +6237,8 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
     const rebuilt = toDosageDetails(toFhirR5Dosages(textOnly), undefined, {
       step: [{ sequence: 2, id: "second" }]
     });
-    expect(rebuilt.step.map(step => step.id)).toEqual(["first", "second"]);
+    expect(rebuilt.step).toEqual([]);
+    expect(importCanonicalCourse(rebuilt).stages.map(stage => stage.provenance?.id)).toEqual(["first", "second"]);
   });
 });
 
@@ -6239,7 +6278,7 @@ describe("persisted edit fingerprint compatibility",()=>{
     const keys=new Set(["sequence","stepCount","step","component","context","contextRequired","course","emptyStep","missingContext"]);
     const input=toFhirR5Dosages({step:[{component:[{
       timing:{repeat:{frequency:1,period:1,periodUnit:FhirPeriodUnit.Day}},
-      doseAndRate:[{doseQuantity:{value:1,unit:"tab",comparator:"~"}}]
+      doseAndRate:[{doseQuantity:simpleQuantityForR5({value:1,unit:"tab",comparator:"~"})!}]
     }]},{component:[{doseAndRate:[{doseQuantity:{value:2,unit:"tab"}}]}]}]});
     for(const row of input){
       // Independent old encoding oracle: semantically active local fields are

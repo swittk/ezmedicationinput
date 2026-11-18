@@ -648,6 +648,14 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
     if (rate) {
       const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
       for (const token of rate.tokens) owned.add(token.index);
+    } else {
+      // Unit morphology already established a per-time quantity. Without a
+      // licensed rate head it remains source text; its numeric daughter must
+      // not become a separate, unitless administration dose.
+      const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
+      for (let index = phraseStart; index < expression.end; index++) {
+        owned.add(context.tokens[index].index);
+      }
     }
     return rate ? [rate] : [];
   });

@@ -214,6 +214,21 @@ export function getOffset(date: Date, timeZone: string): number {
   return (zonedTime - (date.getTime() - date.getUTCMilliseconds())) / (SECONDS_PER_MINUTE * 1000);
 }
 
+/** Locate the offset transition within one civil day. Calendar arithmetic
+ * can then split at the real discontinuity instead of assuming local wall
+ * clocks are monotone across a DST fold. Ordinary days need two lookups. */
+export function calendarOffsetTransition(start: Date, end: Date, timeZone: string): number | undefined {
+  const before = getOffset(start, timeZone);
+  if (getOffset(new Date(end.getTime() - 1), timeZone) === before) return undefined;
+  let low = start.getTime(), high = end.getTime() - 1;
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2);
+    if (getOffset(new Date(middle), timeZone) === before) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
 /**
  * Renders an ISO-8601 string that reflects the provided time zone instead of
  * defaulting to UTC.
@@ -344,7 +359,9 @@ export function addCalendarDaysAtClock(
   const rollover = new Date(Date.UTC(year, month - 1, day + days));
   const target = [rollover.getUTCFullYear(), rollover.getUTCMonth() + 1, rollover.getUTCDate()] as const;
   const { hour, minute, second } = clock;
-  return calendarBoundaryDate(timeZone, target[0], target[1], target[2], hour, minute, second);
+  const result = calendarBoundaryDate(timeZone, target[0], target[1], target[2], hour, minute, second);
+  if (result) result.setUTCMilliseconds(instant.getUTCMilliseconds());
+  return result;
 }
 
 /** A calendar cycle keeps its original wall clock even after one boundary
@@ -434,6 +451,7 @@ export function addCalendarMonths(
     clock.second
   );
   if (!result) throw new Error("Unable to resolve monthly advancement – invalid calendar date");
+  result.setUTCMilliseconds(date.getUTCMilliseconds());
   return result;
 }
 

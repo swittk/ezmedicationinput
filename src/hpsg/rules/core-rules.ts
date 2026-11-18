@@ -1114,6 +1114,7 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!tokens || !token) {
       return [];
     }
+    if (context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
     const supplementalDose = supplementalDoseAfter(context, start);
     if (supplementalDose) return [supplementalDose];
     if (quantityHasSupplementalPrefix(context.tokens, start)) return [];
@@ -1190,23 +1191,27 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? DOSE_FRACTION_DENOMINATOR_WORDS.get(denominatorLower)
       : undefined;
     if (numerator !== undefined && denominatorToken && denominator !== undefined) {
-      const unit = unitAfter(context, start + 2);
+      const fraction = numerator * denominator;
+      const scaled = millionDoseNumberAt(context.tokens, start + 1, context.limit, fraction);
+      const numericEnd = scaled ? scaled.numericIndex + 1 : start + 2;
+      const unit = unitAfter(context, numericEnd);
+      const numberTokens = scaled ? context.tokens.slice(start, numericEnd) : [token, denominatorToken];
       return [
         lexicalSign({
           type: "dose-sign",
           rule: "hpsg.lex.dose.wordFractionNumerator",
-          tokens: unit ? [token, denominatorToken, ...unit.tokens] : [token, denominatorToken],
+          tokens: unit ? [...numberTokens, ...unit.tokens] : numberTokens,
           synsem: {
             head: {
               dose: {
-                value: numerator * denominator,
+                value: scaled?.value ?? fraction,
                 unit: unit?.unit
               }
             },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: unit ? 10 : 5
+          score: scaled && unit ? 19 + numberTokens.length + unit.tokens.length : unit ? 10 : 5
         })
       ];
     }
@@ -1268,8 +1273,10 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     // Ordinary spelled million and comparator-qualified million share
     // one numeric multiplier; do not issue a fictitious 1-unit dose when
     // the actual known amount is 1,000,000 units.
-    if (numerator !== undefined && Number.isFinite(numerator)) {
-      const millions = millionDoseNumberAt(context.tokens, start, context.limit, numerator);
+    const wordFraction = numerator === undefined ? DOSE_FRACTION_WORDS.get(lower) : undefined;
+    const millionNumerator = numerator ?? wordFraction;
+    if (millionNumerator !== undefined && Number.isFinite(millionNumerator)) {
+      const millions = millionDoseNumberAt(context.tokens, start, context.limit, millionNumerator);
       if (millions &&
           tokensAvailable(context, start, millions.numericIndex + 1 - start)) {
         const unit = unitAfter(context, millions.numericIndex + 1);
@@ -1304,7 +1311,6 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
-    const wordFraction = DOSE_FRACTION_WORDS.get(lower);
     if (wordFraction !== undefined) {
       const unit = unitAfter(context, start + 1);
       return [

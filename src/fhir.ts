@@ -1010,13 +1010,13 @@ function buildFhirDurationQuantity(
 }
 
 function buildFhirBoundsRange(
-  low: number, high: number, unit: FhirPeriodUnit,
+  low: number | undefined, high: number, unit: FhirPeriodUnit,
   lowComparator?: FhirR6Quantity["comparator"],
   highComparator?: FhirR6Quantity["comparator"]
 ): FhirRange {
   return {
-    low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
-      ...(lowComparator ? { comparator: lowComparator } : {}) })!,
+    ...(low !== undefined ? { low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
+      ...(lowComparator ? { comparator: lowComparator } : {}) })! } : {}),
     high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, unit),
       ...(highComparator ? { comparator: highComparator } : {}) })!
   };
@@ -1480,12 +1480,13 @@ export function serializeCanonicalSchedule(
   // Timing permits one bounds[x]. Keep absolute bounds in boundsPeriod and
   // retain the authored duration/range as a typed modifier for exact execution
   // and editing, including partial days that have no date-only endpoint.
-  if (schedule?.duration !== undefined && schedule.durationUnit) {
+  if (schedule?.durationUnit && (schedule.duration !== undefined || schedule.durationMax !== undefined)) {
     const ranged = schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration ||
+        schedule.durationComparator !== undefined ||
         schedule.durationMaxComparator !== undefined);
     const duration = ranged ? undefined : buildFhirDurationQuantity(
-      schedule.duration, schedule.durationUnit, schedule.durationComparator);
+      schedule.duration!, schedule.durationUnit, schedule.durationComparator);
     const range = ranged ? buildFhirBoundsRange(
       schedule.duration, schedule.durationMax!, schedule.durationUnit,
       schedule.durationComparator, schedule.durationMaxComparator) : undefined;

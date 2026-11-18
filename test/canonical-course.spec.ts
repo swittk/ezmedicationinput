@@ -10,7 +10,7 @@ import {
   parseSig,
   fromFhir,
   formatSig,
-  editCanonicalCourse,
+
   projectCanonicalCourse,
 } from "../src/index";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
@@ -113,39 +113,11 @@ describe("canonical course architecture", () => {
   });
 });
 
-describe("native editable course and sibling projections", () => {
+describe("native course and sibling projections", () => {
   it("preserves external element/coding metadata exactly on untouched R6 import/export", () => {
     const native = courseFromR6(source, true);
     expect(courseToR6(native)).toEqual(source);
     expect(fromFhir(source).meta.canonical.course?.kind).toBe("course");
-  });
-  it("native numeric and recurrence edits are independent of the source and govern BOTH projections and execution", () => {
-    const original = cloneStructuredValue(source);
-    const imported = courseFromR6(original, true);
-    // Imported/projected values are immutable BY CONTRACT. Only the explicit
-    // edit API promises a new course without changing its input; no defensive
-    // copies are required on ordinary imports or execution.
-    const native = editCanonicalCourse(imported, draft => {
-      const a = draft.stages[0].administrations[0];
-      a.amounts![0].quantity!.value = 2;
-      a.schedule!.recurrence!.clocks![0] = "09:00:00";
-    });
-    expect(original).toEqual(source);
-    const r6 = courseToR6(native),
-      r5 = courseToR5(native);
-    expect(r6.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    expect(r5[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    for (const input of [native, r6, r5]) {
-      expect(nextDueDoses(input, options)).toEqual([
-        "2026-11-02T09:00:00+07:00",
-        "2026-11-03T09:00:00+07:00",
-        "2026-11-04T09:00:00+07:00",
-      ]);
-      expect(calculateTotalUnits({ ...options, dosage: input }).totalUnits).toBe(6);
-    }
-    expect(r6.extension).toEqual(source.extension);
-    expect(r6.step[0].component[0].extension).toEqual(source.step[0].component[0].extension);
-    expect(r6.step[0].component[0].site?.concept?.coding?.[0].version).toBe("7");
   });
   it("clearing one target side cannot resurrect it from the retained CodeableReference wrapper", () => {
     const native = courseFromR6(source, true);
@@ -221,38 +193,6 @@ describe("native editable course and sibling projections", () => {
     expect(raw.step[0].component[0].condition?.[0].text).toBe("Original guard");
     c.stages[0].administrations[0].predicate = undefined;
     expect(courseToR6(c).step[0].component[0]).not.toHaveProperty("condition");
-  });
-});
-
-describe("native edit display ownership", () => {
-  it("clears unchanged stale derived text after a clinical edit without mutating source or changing public export names", () => {
-    const parsed = parseSig("Take 1 tablet every morning for 3 days");
-    const before = parsed.meta.canonical.course!;
-    const edited = editCanonicalCourse(before, (draft) => {
-      draft.stages[0].administrations[0].amounts![0].quantity!.value = 2;
-    });
-    expect(before.stages[0].administrations[0].amounts?.[0].quantity?.value).toBe(1);
-    expect(before.instruction).toBe("Take 1 tablet every morning for 3 days");
-    expect(edited.instruction).toBeUndefined();
-    expect(formatSig(edited, "long", { locale: "en" })).toContain("2 tablets");
-    const exported = projectCanonicalCourse(edited);
-    expect(exported.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    expect(exported.fhir[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
-    expect(calculateTotalUnits({ ...options, dosage: edited }).totalUnits).toBe(6);
-    expect(edited.stages[0].administrations[0].syntax?.rawText).toContain("1 tablet");
-  });
-  it("moving draft members preserves their own source identity and invalidates only the whole-course ordering text", () => {
-    const native = courseFromR6(source, true);
-    native.stages[0].administrations.push({
-      ...cloneStructuredValue(native.stages[0].administrations[0]),
-      text: "Second independent dose",
-      amounts: [{ quantity: { value: 2, unit: "tab" } }],
-    });
-    native.instruction = "First, second";
-    const edited = editCanonicalCourse(native, (draft) => draft.stages[0].administrations.reverse());
-    expect(edited.instruction).toBeUndefined();
-    expect(edited.stages[0].administrations[0].text).toBe("Second independent dose");
-    expect(native.stages[0].administrations[0].amounts?.[0].quantity?.value).toBe(1);
   });
 });
 
@@ -399,40 +339,6 @@ describe("typed native safety and coding ownership", () => {
   });
 });
 
-describe("native clinical concept edits", () => {
-  it("a changed native laterality does not reuse the original site labels", () => {
-    const left = parseSig("1 drop left eye every morning").meta.canonical.course!;
-    const right = parseSig("1 drop right eye every morning").meta.canonical.course!;
-    const edited = editCanonicalCourse(left, (draft) => {
-      draft.stages[0].administrations[0].target = cloneStructuredValue(
-        right.stages[0].administrations[0].target
-      );
-    });
-    const expected = projectCanonicalCourse(right).fhirNext.step[0].component[0].site?.concept;
-    const actual = projectCanonicalCourse(edited).fhirNext.step[0].component[0].site?.concept;
-    expect(actual?.coding?.[0].code).toBe(expected?.coding?.[0].code);
-    expect(formatCanonicalCourse(edited, "long", { locale: "en" }).toLowerCase()).toContain("right eye");
-    expect(formatCanonicalCourse(edited, "long", { locale: "en" }).toLowerCase()).not.toContain("left eye");
-  });
-  it("current native route and method codes replace their original source-context coding", () => {
-    const oral = parseSig("Take 1 mL PO daily").meta.canonical.course!;
-    const injection = parseSig("Inject 1 mL IM daily").meta.canonical.course!;
-    const replacement = injection.stages[0].administrations[0];
-    const edited = editCanonicalCourse(oral, (draft) => {
-      const a = draft.stages[0].administrations[0];
-      a.route = cloneStructuredValue(replacement.route);
-      a.method = cloneStructuredValue(replacement.method);
-    });
-    const expected = projectCanonicalCourse(injection).fhirNext.step[0].component[0];
-    const actual = projectCanonicalCourse(edited).fhirNext.step[0].component[0];
-    expect(actual.route?.coding).toEqual(expected.route?.coding);
-    expect(actual.method?.coding).toEqual(expected.method?.coding);
-    expect(actual.route?.coding?.[0]?.code).not.toBe(
-      projectCanonicalCourse(oral).fhirNext.step[0].component[0].route?.coding?.[0]?.code
-    );
-  });
-});
-
 
 describe("November 17 review: live native clinical facts own projection and realization", () => {
   it("removing a native administration limit clears it from R6 without dropping unrelated safety annotations", () => {
@@ -518,15 +424,20 @@ describe("November 17 review: typed course ownership without inferred exact boun
       schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d" as const, clocks: ["08:00:00"] } },
       limits: [
         { scope: "administration" as const, amount: { value: 2, unit: "tab" } },
-        { scope: "administration" as const, amount: { value: 1, unit: "tab" } },
+        { scope: "administration" as const, amount: { value: 0.5, unit: "tab" } },
       ],
     };
-    expect(numericAdministrationLimits(native)).toMatchObject({
-      multiple: true,
-      administration: { value: 1, unit: "tab" },
-    });
+    for (const limits of [native.limits, native.limits.slice().reverse()]) {
+      const variant = { ...native, limits };
+      expect(numericAdministrationLimits(variant)).toMatchObject({
+        multiple: true,
+        administration: undefined,
+      });
+      const calculated = calculateTotalUnits({ ...options, dosage: variant });
+      expect(calculated.totalUnits).toBe(3);
+      expect(calculated.quantityKind).toBe("maximum");
+      expect(calculated.explanation).toContain("could not be applied");
+    }
     const calculated = calculateTotalUnits({ ...options, dosage: native });
-    expect(calculated.totalUnits).toBe(3);
-    expect(calculated.quantityKind).toBe("maximum");
   });
 });

@@ -282,7 +282,12 @@
             "Range",
             "Quantity",
             "Expression"
-          ]
+          ],
+          "typeProfiles": {
+            "Quantity": [
+              "http://hl7.org/fhir/StructureDefinition/SimpleQuantity"
+            ]
+          }
         },
         {
           "path": "Dosage.doseAndRate.rate[x]",
@@ -293,7 +298,12 @@
             "Range",
             "Quantity",
             "Expression"
-          ]
+          ],
+          "typeProfiles": {
+            "Quantity": [
+              "http://hl7.org/fhir/StructureDefinition/SimpleQuantity"
+            ]
+          }
         },
         {
           "path": "Dosage.safety",
@@ -657,7 +667,12 @@
           "max": "1",
           "types": [
             "Quantity"
-          ]
+          ],
+          "typeProfiles": {
+            "Quantity": [
+              "http://hl7.org/fhir/StructureDefinition/SimpleQuantity"
+            ]
+          }
         },
         {
           "path": "Timing.repeat.endOffset",
@@ -665,7 +680,12 @@
           "max": "1",
           "types": [
             "Quantity"
-          ]
+          ],
+          "typeProfiles": {
+            "Quantity": [
+              "http://hl7.org/fhir/StructureDefinition/SimpleQuantity"
+            ]
+          }
         },
         {
           "path": "Timing.repeat.dayOfWeek",

@@ -861,7 +861,12 @@ export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: strin
     }
 
     const token = prepared[cursor];
-    const canonical = canonicalLocaleLexeme(token.lower);
+    // Thai digits in a compact comparative number retain their original
+    // source while sharing the existing numeric grammar with ASCII digits.
+    const canonical = canonicalLocaleLexeme(token.lower) ??
+      (/^[~≈<>≥≤]/u.test(token.lower) && /[๐-๙]/u.test(token.lower)
+        ? token.lower.replace(/[๐-๙]/gu, digit => String(digit.charCodeAt(0) - 0x0e50))
+        : undefined);
     normalized.push(canonical ? { ...token, canonical } : { ...token });
     cursor += 1;
   }

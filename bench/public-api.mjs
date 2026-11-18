@@ -28,6 +28,8 @@ const filter = new RegExp(value("--only", ".")),
   rounds = Number(value("--rounds", "9"));
 const targetMs = Number(value("--target-ms", "12")),
   smoke = argv.includes("--smoke");
+if (!smoke && (!Number.isInteger(rounds) || rounds < 1))
+  throw new Error("--rounds must be a positive integer for timed measurements");
 const maxRegression = 0.04;
 const S = {
   ordinary: "1 tab PO BID",
@@ -395,14 +397,36 @@ add(
   (m) => m.registerSigLocalization({ locale: "bench" }),
   "registration"
 );
+// A previous PR build already has the native helpers. Compare those directly
+// when available; only master-era baselines lack a corresponding API.
+const nativeFixtures = new Map();
+const textlessWire = structuredClone(complex);
+delete textlessWire.renderedInstruction;
+for (const step of textlessWire.step) for (const a of step.component) delete a.text;
+for (const m of [baseline, candidate]) {
+  if (typeof m.importCanonicalCourse !== "function") continue;
+  nativeFixtures.set(m, {
+    source: m.importCanonicalCourse(complex),
+    textless: m.importCanonicalCourse(textlessWire),
+  });
+}
+if (nativeFixtures.has(baseline)) {
+  add("importCanonicalCourse", "native/import-R6", (m) => m.importCanonicalCourse(complex));
+  add("importCanonicalCourse", "native/import-R5", (m) => m.importCanonicalCourse(parsed.eye.fhir));
+  add("projectCanonicalCourse", "native/project-both", (m) => m.projectCanonicalCourse(nativeFixtures.get(m).source));
+  add("formatCanonicalAdministration", "native/format-administration", (m) =>
+    m.formatCanonicalAdministration(nativeFixtures.get(m).textless.stages[0].administrations[0], "long", { locale: "th" }));
+  add("formatCanonicalCourse", "native/format-course", (m) =>
+    m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }));
+  add("projectEditableR5Course", "native/project-editable-R5", (m) => m.projectEditableR5Course(complex));
+}
 const newApis = new Set([
   "importCanonicalCourse",
-  "editCanonicalCourse",
   "projectCanonicalCourse",
   "formatCanonicalAdministration",
   "formatCanonicalCourse",
   "projectEditableR5Course",
-]);
+].filter(api => typeof baseline[api] !== "function"));
 const missing = Object.keys(candidate).filter(
   (k) => typeof candidate[k] === "function" && !covered.has(k) && !newApis.has(k)
 );
@@ -554,21 +578,11 @@ for (const test of cases) {
 // New functions have no pre-refactor namesake. Measure them explicitly
 // rather than exempt their costs from visibility or invent a false baseline.
 // Clinical correctness of edits/projections is covered by native oracles.
-const nativeSource = candidate.importCanonicalCourse(complex);
-const nativeTextless = structuredClone(nativeSource);
-delete nativeTextless.instruction;
-for (const stage of nativeTextless.stages) for (const a of stage.administrations) delete a.text;
+const { source: nativeSource, textless: nativeTextless } = nativeFixtures.get(candidate);
 const nativeCases = [
   ["importCanonicalCourse", "native/import-R6", () => candidate.importCanonicalCourse(complex)],
   ["importCanonicalCourse", "native/import-R5", () => candidate.importCanonicalCourse(parsed.eye.fhir)],
-  [
-    "editCanonicalCourse",
-    "native/edit",
-    () =>
-      candidate.editCanonicalCourse(nativeSource, (draft) => {
-        draft.stages[0].administrations[0].amounts[0].quantity.value = 3;
-      }),
-  ],
+
   ["projectCanonicalCourse", "native/project-both", () => candidate.projectCanonicalCourse(nativeSource)],
   [
     "formatCanonicalAdministration",
@@ -587,7 +601,7 @@ const nativeCases = [
 ];
 report.newApiMeasurements = [];
 for (const [api, name, run] of nativeCases) {
-  if (!filter.test(name)) continue;
+  if (!filter.test(name) || typeof baseline[api] === "function") continue;
   try {
     run();
     if (smoke) {
@@ -618,6 +632,8 @@ for (const [api, name, run] of nativeCases) {
     checkpoint();
   }
 }
+if (!report.cases.length && !report.newApiMeasurements.length)
+  report.errors.push({ name: "selection", error: "--only selected no runnable benchmark scenarios" });
 report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
 report.failing = report.cases.filter((c) => c.pass === false).length;
 checkpoint(true);

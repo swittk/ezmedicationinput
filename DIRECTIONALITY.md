@@ -78,13 +78,18 @@ one typed HPSG pass; this is not a second grammar or a competing parser IR.
   course or administration extends `FhirDosage` or `DosageInstruction`.
 - `canonical/compile.ts` composes existing scoped clauses and parallel regimen
   phases. Syntax/source spans are evidence, not another editable dosage truth.
-- `canonical/edit-course.ts` owns explicit native edits and source/generated
-  text invalidation. It copies only when an edit is requested, never per query.
+- Native models have no public editor or mutation lifecycle. Externally
+  modified FHIR is reconciled at the interchange boundary; internal facts remain
+  free to change without defensive copying or compatibility obligations.
 - `canonical/format-course.ts` renders native facts without R5 lowering.
 - `execution/engine.ts` consumes native facts only. Its resolved administration
   windows separately own recurrence origin, first eligibility, exclusive end,
   completion point, and civil cap clock. Scheduling, repeat-cycle horizon, and
   supply use that same phase resolution, not three interpretations of a Date.
+  `stage.count` repeats that individual stage; `course.cycleCount` bounds
+  whole-course cycles. The grammar's finite course count must never be stored
+  in the R6 step count. Its R6 course modifier and the existing R5 bridge retain
+  the finite bound, including the last cycle's remaining active interval.
 - `execution/calendar.ts` owns the existing timezone/DST/calendar primitives;
   it knows no medication, FHIR, or parser representation.
 - `adapters/canonical-course.ts` imports R5/current R6 and exports them. Only

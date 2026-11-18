@@ -24,6 +24,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   }
   return {
     system: coding.system,
+    version: coding.version,
     code: coding.code,
     display: coding.display,
     extension: cloneExtensions(coding.extension),

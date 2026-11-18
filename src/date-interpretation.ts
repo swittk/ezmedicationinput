@@ -91,9 +91,9 @@ function matchedDateRelationLead(
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
   const id = resolver.id.trim().toLowerCase();
   if (!id) return;
-  // Registration accepts an immutable-by-contract provider. Only an ID
-  // requiring normalization needs a replacement descriptor.
-  DATE_RESOLVERS.set(id, id === resolver.id ? resolver : { ...resolver, id });
+  // Registration fixes the descriptor associated with this ID. Reusing a
+  // caller's descriptor for another registration must not change this entry.
+  DATE_RESOLVERS.set(id, Object.assign({}, resolver, { id }));
 }
 
 /** Return the currently registered calendar resolver ids. */

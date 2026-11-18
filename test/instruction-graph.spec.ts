@@ -6,6 +6,7 @@ import { realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose
 } from "../src/instruction-graph";
 import { formatCanonicalClause } from "../src/format";
+import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
@@ -2065,7 +2066,7 @@ describe("qualified quantities keep their meaning in action graph realization", 
       expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab", comparator });
       expect(parsed.longText).toContain(`${expected}2`);
       expect(parsed.longText).toContain("น้ำ");
-      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+      expect(getQuantityComparator(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
     }
   });
 
@@ -2569,6 +2570,9 @@ describe("November 17 review: institution dose action owns prior quantitative in
       const rendered = formatCanonicalClause(changed, "long", resolveSigLocalization(locale), options);
       expect(rendered).not.toContain("Disperse 2 tablets in water, then drink slowly");
       expect(rendered).not.toContain("2 tablets");
+      expect(rendered).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+      expect(rendered).toContain(locale === "en" ? "water" : "น้ำ");
+      expect(rendered.toLowerCase()).toContain(locale === "en" ? "drink" : "ดื่ม");
     }
   });
 });

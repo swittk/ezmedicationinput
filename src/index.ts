@@ -5,9 +5,10 @@ import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInst
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
   rateRangePreview, formatCourseChoices } from "./canonical/format-course";
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, clauseForAdministration } from "./canonical/compile";
-import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay } from "./adapters/canonical-course";
+import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
+import { getDoseQuantityUnit } from "./maps";
 /** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
  * instruction-graph Amounts. Retain the ORIGINAL dose and timing values,
  * never treat a mutable FHIR object as proof: a clinician can edit the very
@@ -68,16 +69,16 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
  * original source. Direct parser rows use primitive comparisons; serialized
  * R5 rows use their existing persisted edit fingerprint. A failed match must
  * override stale lexical evidence retained in a deserialized grammar graph. */
-function markOriginalGraphDose(
+function markOriginalGraphSource(
   dosage: FhirDosage,
   clause: CanonicalSigClause,
   options: FormatOptions | undefined
 ): void {
-  const amount = clause.dose;
-  if (options?.realizationMode !== "roundtrip" || !amount || !clause.instructionGraph) return;
+  if (options?.realizationMode !== "roundtrip" || !clause.instructionGraph) return;
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
-  amount.sourceDoseVerified =
-    fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  const verified = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  clause.sourceProjectionVerified = verified;
+  if (clause.dose) clause.dose.sourceDoseVerified = verified;
 }
 
 /** Native editing/projection API. Existing .fhir / .fhirNext fields retain
@@ -86,7 +87,6 @@ export type { CanonicalCourse, CanonicalStage, CanonicalAdministration,
   CanonicalRecurrence, CanonicalTiming, CanonicalBoundary, CanonicalAmount,
   CanonicalDoseLimit, CanonicalMeasure, CanonicalRange, CanonicalRatio,
   CanonicalScheduleInput, CanonicalSupplyOptions } from "./canonical/course";
-export { editCanonicalCourse } from "./canonical/edit-course";
 export { importCanonicalCourse } from "./adapters/canonical-course";
 export { formatCanonicalCourse, formatCanonicalAdministration } from "./canonical/format-course";
 export function projectCanonicalCourse(course: CanonicalCourse, options?: ParseOptions): {
@@ -410,6 +410,7 @@ interface SegmentCarry {
   routeText?: ParserState["routeText"];
   unit?: string;
   dose?: number;
+  doseRange?: ParserState["doseRange"];
   comparator?: NonNullable<CanonicalSigClause["dose"]>["comparator"];
   siteText?: ParserState["siteText"];
   siteI18n?: ParserState["siteI18n"];
@@ -640,8 +641,8 @@ function buildWholeCourseResult(
     administrations, input, typedRepeatCycle, regimenGraph.repeatCount);
   if (parallel) {
     if (typedRepeatCycle) canonical.cycleInterval = typedRepeatCycle;
-    if (regimenGraph.repeatCount !== undefined && canonical.stages[0])
-      canonical.stages[0].count = regimenGraph.repeatCount;
+    if (regimenGraph.repeatCount !== undefined)
+      canonical.cycleCount = regimenGraph.repeatCount;
   }
   const fhirNext = projectFreshlyCompiledCourseToR6(canonical, {
     bodySitePostcoordination: options?.bodySitePostcoordination,
@@ -1108,7 +1109,7 @@ function appendSourceLessRateRanges(
 }
 
 export function formatSig(
-  input: FhirDosage | FhirR6DosageInstruction | readonly EzDosage[] | CanonicalCourse | CanonicalAdministration,
+  input: FhirDosage | FhirR6DosageInstructionInput | readonly EzDosage[] | CanonicalCourse | CanonicalAdministration,
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
@@ -1119,13 +1120,21 @@ export function formatSig(
     return formatCanonicalCourse(input, style, options);
   if ("kind" in input && input.kind === "administration")
     return formatCanonicalAdministration(input, style, options);
-  const oneOrCourse = input as FhirDosage | FhirR6DosageInstruction;
-  if ("step" in oneOrCourse) {
+  const oneOrCourse = input as FhirDosage | FhirR6DosageInstructionInput;
+  if (isR6DosageInstruction(oneOrCourse)) {
     const source = unchangedR6SourceDisplay(oneOrCourse, options);
     if (source !== undefined) return source;
     return formatCanonicalCourse(courseFromR6(oneOrCourse, true), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
+  const doseRange = dosage.doseAndRate?.[0]?.doseRange;
+  // A compact clause range has one shared unit and no endpoint operators.
+  // Only richer endpoints need the existing native range realizer.
+  if (doseRange && (getQuantityComparator(doseRange.low) || getQuantityComparator(doseRange.high) ||
+      doseRange.low?.value !== undefined && doseRange.high?.value !== undefined &&
+      (doseRange.low.unit ?? getDoseQuantityUnit(doseRange.low)) !==
+      (doseRange.high.unit ?? getDoseQuantityUnit(doseRange.high))))
+    return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style, options ?? {});
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
   let displayCondition = dosage.condition?.length
     ? getDosageCondition(dosage)
@@ -1177,7 +1186,7 @@ export function formatSig(
   // auxiliary action graph only when the persisted R5 clinical projection
   // STILL matches. A newly added/edited dose invalidates that source replay.
   // Other format modes never pay this fingerprint walk.
-  markOriginalGraphDose(dosage,clause,options);
+  markOriginalGraphSource(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const rendered = formatCanonicalClause(clause, style, localization, options);
   let displayed = displayCondition
@@ -1378,7 +1387,7 @@ function fromFhirDosageInternal(
   // The saved fingerprint proves that a primary source dose still matches
   // its exported R5 clinical fields, even if the auxiliary instruction
   // graph contains no Amount. Only roundtrip source reuse needs this hash.
-  markOriginalGraphDose(dosage,clause,options);
+  markOriginalGraphSource(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||
@@ -1808,11 +1817,12 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
   if (
     internal.dose === undefined &&
     internal.doseRange === undefined &&
-    carry.dose !== undefined &&
+    (carry.dose !== undefined || carry.doseRange !== undefined) &&
     internal.unit &&
     internal.unit === carry.unit
   ) {
-    internal.dose = carry.dose;
+    if (carry.doseRange) internal.doseRange = { ...carry.doseRange };
+    else internal.dose = carry.dose;
     if (carry.comparator && internal.primaryClause.dose)
       internal.primaryClause.dose.comparator = carry.comparator;
   }
@@ -1836,8 +1846,9 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
     carry.siteSpatialRelation = internal.siteSpatialRelation;
     carry.administrationTargetGroup = internal.administrationTargetGroup;
   }
-  if (internal.dose !== undefined) {
+  if (internal.dose !== undefined || internal.doseRange !== undefined) {
     carry.dose = internal.dose;
+    carry.doseRange = internal.doseRange;
     // A newly authored exact dose explicitly supersedes the previous
     // comparator. Only an actually inherited amount inherits its qualifier.
     carry.comparator = internal.primaryClause.dose?.comparator;

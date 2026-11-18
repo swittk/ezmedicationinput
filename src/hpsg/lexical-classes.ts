@@ -735,11 +735,16 @@ export function additiveDoseNumberAt(
 export function millionDoseNumberAt(
   tokens: readonly LexToken[], start: number, limit: number, value: number
 ): { value: number; numericIndex: number } | undefined {
-  const next = start + 1 < limit ? tokens[start + 1] : undefined;
+  let index = start + 1;
+  let next = index < limit ? tokens[index] : undefined;
+  // A fractional multiplier licenses its article: "half a million".
+  // Exact and comparative heads consume the same complete numeric phrase.
+  if(value > 0 && value < 1 && next && DOSE_FRACTION_ARTICLES.has(next.canonical ?? next.lower))
+    next = ++index < limit ? tokens[index] : undefined;
   // Most doses have no multiplier. Avoid allocating a placeholder result
   // for every routine '1 tab' token on the phone parsing hot path.
   return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)
-    ? { value: value * 1_000_000, numericIndex: start + 1 }
+    ? { value: value * 1_000_000, numericIndex: index }
     : undefined;
 }
 
@@ -819,6 +824,10 @@ export function doseComparatorNumberAt(
   const denominator = numericIndex + 1 < limit ? tokens[numericIndex + 1] : undefined;
   const fraction = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
     denominator.canonical ?? denominator.lower);
-  if (fraction !== undefined) { value *= fraction; numericIndex++; }
+  if (fraction !== undefined) {
+    value *= fraction; numericIndex++;
+    const scaled = millionDoseNumberAt(tokens, numericIndex, limit, value);
+    if(scaled)return { comparator, ...scaled };
+  }
   return { comparator, value, numericIndex };
 }

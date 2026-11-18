@@ -404,10 +404,14 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   if (a.additionalInstructions || base?.additionalInstructions)
     result.additionalInstructions=additionalInstructionsForAdministration(a);
   result.prn=a.asNeeded?Object.assign({},base?.prn,{enabled:true}):undefined;
-  let routeIdentity:string|undefined;
-  for(const code of a.route?.coding??[])if(code.code){routeIdentity=code.code;break;}
-  const routeCode=routeIdentity?ROUTE_BY_SNOMED[routeIdentity as keyof typeof ROUTE_BY_SNOMED]??
-    (Object.prototype.hasOwnProperty.call(ROUTE_SNOMED,routeIdentity)?routeIdentity as RouteCode:undefined):undefined;
+  let routeCode:RouteCode|undefined;
+  for(const coding of a.route?.coding??[]){
+    if(!coding.code || coding.system && coding.system!=="http://snomed.info/sct")continue;
+    routeCode=ROUTE_BY_SNOMED[coding.code as keyof typeof ROUTE_BY_SNOMED]??
+      (!coding.system && Object.prototype.hasOwnProperty.call(ROUTE_SNOMED,coding.code)
+        ?coding.code as RouteCode:undefined);
+    if(routeCode)break;
+  }
   if(a.route){
     const same=routeCode===base?.route?.code&&a.route.text===base?.route?.text;
     result.route=Object.assign({},same?base?.route:undefined,{code:routeCode,text:a.route.text});
@@ -505,8 +509,9 @@ export function courseFromAdministrations(
       administrations,
       ...(start ? { start } : {}),
       ...(end ? { end } : {}),
-      ...(key === 1 && cycleInterval && repeatCount !== undefined ? { count: repeatCount } : {}),
     });
   }
-  return { kind: "course", instruction, stages, ...(cycleInterval ? { cycleInterval } : {}) };
+  return { kind: "course", instruction, stages,
+    ...(cycleInterval ? { cycleInterval } : {}),
+    ...(repeatCount !== undefined ? { cycleCount: repeatCount } : {}) };
 }

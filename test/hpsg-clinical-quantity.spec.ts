@@ -15,7 +15,17 @@ import {
   toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming, FhirPeriodUnit, type FhirDosage } from "../src/types";
+import { EventTiming, FhirPeriodUnit, type FhirDosage, type FhirQuantity } from "../src/types";
+import { getQuantityComparator } from "../src/fhir-quantity-operator";
+
+/** Scalar dose/rate choices use SimpleQuantity at either wire boundary.
+ * Their operator survives in the existing extension; native clinical facts
+ * still carry their operator directly and are asserted separately below. */
+function expectSimpleQuantityOperator(quantity: FhirQuantity | undefined, comparator: string | undefined): void {
+  expect(quantity?.comparator).toBeUndefined();
+  expect(getQuantityComparator(quantity)).toBe(comparator);
+  expect(getEmaQuantityComparator(quantity)).toBe(comparator);
+}
 import { getTimingMonthDays, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "../src/fhir";
 
 describe("HPSG clinical quantity grammar", () => {
@@ -1366,15 +1376,15 @@ describe("qualified clinical quantity family: source through HPSG and FHIR", () 
       expect(canonical.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h" });
       const native = parsed.fhirNext.step[0].component[0].doseAndRate![0];
       expect(native.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
-      expect(native.doseQuantity?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(native.doseQuantity, comparator);
       expect(native.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
       expect(native.rateRatio?.numerator?.comparator).toBe(comparator);
       expect(native.rateRatio?.denominator).toMatchObject({ value: 2, unit: "h" });
       const r5 = toFhirR5Dosages(parsed.fhirNext);
       expect(r5[0].doseAndRate?.[0].doseQuantity?.value).toBe(500);
       expect(getEmaQuantityComparator(r5[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
-      expect(toDosageDetails(JSON.parse(JSON.stringify(r5))).step[0].component[0]
-        .doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(toDosageDetails(JSON.parse(JSON.stringify(r5))).step[0].component[0]
+        .doseAndRate?.[0].doseQuantity, comparator);
       expect(parsed.input).toBe(input);
       expect(parsed.meta.leftoverText).toBeUndefined();
     }
@@ -1391,7 +1401,7 @@ describe("qualified clinical quantity family: source through HPSG and FHIR", () 
     const parsed = parsePublicSig(input);
     const entry = parsed.fhirNext.step[0].component[0].doseAndRate![0];
     expect(entry.doseQuantity).toMatchObject({ value: 20, unit: "mg" });
-    expect(entry.doseQuantity?.comparator).toBe(drugOp);
+    expectSimpleQuantityOperator(entry.doseQuantity, drugOp);
     expect(entry.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
     expect(entry.rateRatio?.numerator?.comparator).toBe(carrierOp);
     expect(entry.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
@@ -1411,13 +1421,14 @@ describe("qualified clinical quantity family: source through HPSG and FHIR", () 
     const parsed = parsePublicSig(`Infuse ${dose}500 mL IV at ${rate}100 mL/hr once`);
     const entry = parsed.fhirNext.step[0].component[0].doseAndRate![0];
     expect(entry.doseQuantity).toMatchObject({ value: 500, unit: "mL" });
-    expect(entry.doseQuantity?.comparator).toBe(doseOp);
+    expectSimpleQuantityOperator(entry.doseQuantity, doseOp);
     expect(entry.rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
-    expect(entry.rateQuantity?.comparator).toBe(rateOp);
+    expectSimpleQuantityOperator(entry.rateQuantity, rateOp);
     expect(parsed.meta.leftoverText).toBeUndefined();
-    const numeric = calculateTotalUnits({ dosage: parsed, durationValue: 1,
+    const numeric = () => calculateTotalUnits({ dosage: parsed, durationValue: 1,
       durationUnit: "d", from: "2026-11-01T00:00:00Z", orderedAt: "2026-11-01T00:00:00Z", timeZone: "UTC" });
-    expect(numeric.totalUnits).toBe(500);
+    if (doseOp === ">=") expect(numeric).toThrow(/lower bound/);
+    else expect(numeric().totalUnits).toBe(500);
   });
 
   it.each(["approximately ", "~", ">=", "≤"])("retains %s on unresolved daily amounts and divided doses without inventing a scalar", prefix => {
@@ -1427,15 +1438,18 @@ describe("qualified clinical quantity family: source through HPSG and FHIR", () 
     expect(incomplete.meta.canonical.clauses[0].clinicalQuantity?.numerator.comparator).toBe(expected);
     expect(incomplete.fhir[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
     const rate = incomplete.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity;
-    expect(rate).toMatchObject({ value: 6, unit: "mg/kg/d", comparator: expected });
+    expect(rate).toMatchObject({ value: 6, unit: "mg/kg/d" });
+    expectSimpleQuantityOperator(rate, expected);
     const divided = parsePublicSig(`${prefix}6 mg/kg/day in 3 divided doses`);
     expect(divided.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "mg/kg", comparator: expected });
-    expect(divided.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)
-      .toMatchObject({ value: 2, unit: "mg/kg", comparator: expected });
+    const dividedQuantity = divided.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+    expect(dividedQuantity).toMatchObject({ value: 2, unit: "mg/kg" });
+    expectSimpleQuantityOperator(dividedQuantity, expected);
     const infusion = parsePublicSig(`Infuse ${prefix}2 mcg/kg/min`);
     expect(infusion.meta.canonical.clauses[0].dose).toBeUndefined();
-    expect(infusion.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity)
-      .toMatchObject({ value: 2, unit: "ug/kg/min", comparator: expected });
+    const infusionRate = infusion.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity;
+    expect(infusionRate).toMatchObject({ value: 2, unit: "ug/kg/min" });
+    expectSimpleQuantityOperator(infusionRate, expected);
   });
 });
 
@@ -1454,8 +1468,7 @@ describe("qualified infusion duration imported as a Ratio denominator", () => {
       expect(canonical.dose?.comparator).toBeUndefined();
       const saved = canonicalToFhir(canonical);
       expect(saved.doseAndRate?.[0].rateRatio?.denominator?.value).toBe(2);
-      expect(getEmaQuantityComparator(saved.doseAndRate?.[0].rateRatio?.denominator)).toBe(comparator);
-      expect(saved.doseAndRate?.[0].rateRatio?.denominator?.comparator).toBeUndefined();
+      expectSimpleQuantityOperator(saved.doseAndRate?.[0].rateRatio?.denominator, comparator);
       expect(formatSig(toDosageDetails([saved]), "long", { locale: "en" }))
         .toContain(`Rate: 500 mL / ${comparator}2 h`);
     }
@@ -1477,10 +1490,10 @@ describe("comparative mixed numbers and shared dimensional quantities", () => {
     const parsed = parsePublicSig(text);
     const quantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
     expect(quantity?.value).toBeCloseTo(value);
-    expect(quantity?.comparator).toBe(comparator);
+    expectSimpleQuantityOperator(quantity, comparator);
     expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
-    expect(toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir))).step[0]
-      .component[0].doseAndRate?.[0].doseQuantity?.comparator).toBe(comparator);
+    expectSimpleQuantityOperator(toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir))).step[0]
+      .component[0].doseAndRate?.[0].doseQuantity, comparator);
     expect(parsed.input).toBe(text);
   });
 
@@ -1489,7 +1502,8 @@ describe("comparative mixed numbers and shared dimensional quantities", () => {
     const amounts = parsed.fhirNext.step.flatMap(step => step.component.flatMap(
       component => component.doseAndRate?.map(value => value.doseQuantity) ?? []));
     expect(amounts.map(value => value?.value)).toEqual([2, 0.5]);
-    expect(amounts.map(value => value?.comparator)).toEqual(["<=", undefined]);
+    expect(amounts.map(getQuantityComparator)).toEqual(["<=", undefined]);
+    expect(amounts.map(value => value?.comparator)).toEqual([undefined, undefined]);
     expect(parsePublicSig("Take two and a half tablets daily").fhirNext.step[0]
       .component[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2.5 });
   });
@@ -1502,8 +1516,9 @@ describe("comparative mixed numbers and shared dimensional quantities", () => {
         const a = joined.fhirNext.step[0].component[0].doseAndRate?.[0];
         const b = separated.fhirNext.step[0].component[0].doseAndRate?.[0];
         expect(a).toEqual(b);
-        expect(a?.rateQuantity).toMatchObject({ value: 0.1, comparator,
+        expect(a?.rateQuantity).toMatchObject({ value: 0.1,
           unit: suffix === "/hr" ? "ug/h" : "ug/kg/min" });
+        expectSimpleQuantityOperator(a?.rateQuantity, comparator);
         expect(a?.doseQuantity).toBeUndefined();
         expect(getEmaQuantityComparator(joined.fhir[0].doseAndRate?.[0].rateQuantity)).toBe(comparator);
       }
@@ -1532,8 +1547,9 @@ describe("comparative mixed numbers and shared dimensional quantities", () => {
       const parsed = parsePublicSig(text);
       expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.numerator)
         .toMatchObject({ value: 30, comparator: "~" });
-      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)
-        .toMatchObject({ value: 15, comparator: "~" });
+      const dividedQuantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
+      expect(dividedQuantity).toMatchObject({ value: 15 });
+      expectSimpleQuantityOperator(dividedQuantity, "~");
       expect(calculateTotalUnits({ dosage: parsed, from: "2026-11-02T00:00:00Z",
         timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(30);
     }
@@ -1553,14 +1569,14 @@ describe("fractional million and attached dimensional rate families", () => {
       const parsed = parsePublicSig(input);
       const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
       expect(dose).toMatchObject({ value, unit });
-      expect(dose?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(dose, comparator);
       const r5 = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
       expect(r5?.value).toBe(value);
       expect(getEmaQuantityComparator(r5)).toBe(comparator);
       const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
       const savedDose = reopened.step[0].component[0].doseAndRate?.[0].doseQuantity;
       expect(savedDose?.value).toBe(value);
-      expect(savedDose?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(savedDose, comparator);
       expect(parsed.input).toBe(input);
     }
   );
@@ -1576,8 +1592,9 @@ describe("fractional million and attached dimensional rate families", () => {
         result.fhirNext.step[0].component[0].doseAndRate?.[0]);
       for (const dose of doses) {
         expect(dose?.rateQuantity).toMatchObject({
-          value: 0.1, unit: "ug/kg/min", comparator
+          value: 0.1, unit: "ug/kg/min"
         });
+        expectSimpleQuantityOperator(dose?.rateQuantity, comparator);
         expect(dose?.doseQuantity).toBeUndefined();
       }
       expect(doses[0]).toEqual(doses[1]);
@@ -1599,7 +1616,7 @@ describe("fractional million and attached dimensional rate families", () => {
     const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0];
     expect(dose?.doseQuantity).toBeUndefined();
     expect(dose?.rateQuantity).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
-    expect(dose?.rateQuantity?.comparator).toBe(comparator);
+    expectSimpleQuantityOperator(dose?.rateQuantity, comparator);
     expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].rateQuantity)).toBe(comparator);
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.input).toBe(text);
@@ -1609,8 +1626,9 @@ describe("fractional million and attached dimensional rate families", () => {
     const amount = parsePublicSig("Inject approximately 0.1 µg/kg once");
     const dose = amount.fhirNext.step[0].component[0].doseAndRate?.[0];
     expect(dose?.doseQuantity).toMatchObject({
-      value: 0.1, unit: "ug/kg", comparator: "~"
+      value: 0.1, unit: "ug/kg"
     });
+    expectSimpleQuantityOperator(dose?.doseQuantity, "~");
     expect(dose?.rateQuantity).toBeUndefined();
   });
 });
@@ -1629,7 +1647,7 @@ describe("compact million multiplier stays distinct from an attached medication 
       const parsed = parsePublicSig(text);
       const dose = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
       expect(dose).toMatchObject({ value, unit: "IU" });
-      expect(dose?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(dose, comparator);
       const r5 = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
       expect(r5).toMatchObject({ value, unit: "IU" });
       expect(getEmaQuantityComparator(r5)).toBe(comparator);
@@ -1651,7 +1669,7 @@ describe("adversarial compact infusion carriers and leading-decimal rates", () =
       const parsed = parsePublicSig(input);
       const amount = parsed.fhirNext.step[0].component[0].doseAndRate![0];
       expect(amount.doseQuantity).toMatchObject({ value: 20, unit: "mg" });
-      expect(amount.doseQuantity?.comparator).toBe(approximateDrug ? "~" : undefined);
+      expectSimpleQuantityOperator(amount.doseQuantity, approximateDrug ? "~" : undefined);
       expect(amount.rateRatio?.numerator).toMatchObject({ value: 500, unit: "mL" });
       expect(amount.rateRatio?.numerator?.comparator).toBe(approximateCarrier ? "~" : undefined);
       expect(amount.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
@@ -1678,7 +1696,7 @@ describe("adversarial compact infusion carriers and leading-decimal rates", () =
       const parsed = parsePublicSig(input);
       const rate = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].rateQuantity;
       expect(rate).toMatchObject({ value: 0.1, unit: "ug/kg/min" });
-      expect(rate?.comparator).toBe(comparator);
+      expectSimpleQuantityOperator(rate, comparator);
       expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
       expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].rateQuantity))
         .toBe(comparator);

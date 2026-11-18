@@ -96,12 +96,12 @@ Use `fromFhir(fhirNext)` to import that **current R6** structure.
 Older R6 `DosageDetails` drafts are not supported by the R6 importer.
 The R5 editing/export APIs are unchanged; no downstream storage migration is required.
 
-### Internal native clinical courses and editing (unstable)
+### Internal native clinical model (unstable)
 
 **INTERNAL USE ONLY — NOT A BACKWARD-COMPATIBLE API OR PERSISTENCE FORMAT.**
 `CanonicalCourse`, `CanonicalStage`, `CanonicalAdministration`, their
 nested clinical types, `meta.canonical`, and the native
-import/edit/project/format helpers are implementation surfaces for EZMED
+import/project/format helpers are implementation surfaces for EZMED
 development. **Their structures, identities, field names, invariants, and
 function signatures may be changed or removed at any time without
 deprecation, migration, compatibility adapters, or support for earlier
@@ -117,61 +117,13 @@ structure, not obsolete R6 drafts. The internal model is deliberately free
 to evolve for maximum clinical expressiveness, performance, and
 maintainability; no old internal representation must be retained.
 
-The following example is **for internal contributors and tests only**,
-not recommended downstream application integration code.
-
-`batch.meta.canonical.course` is EZMED's authoritative internal clinical course.
-It is not a FHIR datatype: stages own concurrent administrations; each
-administration has typed amounts, recurrence, eligibility, limits, conditions,
-and source provenance. The existing `fhir` and `fhirNext` values are interchange
-projections, not competing internal working models.
-
-```ts
-import {
-  parseSig, editCanonicalCourse, projectCanonicalCourse,
-  formatCanonicalCourse, nextDueDoses, calculateTotalUnits,
-  importCanonicalCourse, FhirPeriodUnit,
-} from "ezmedicationinput";
-
-const parsed = parseSig("Take 1 tablet every morning for 3 days");
-const original = parsed.meta.canonical.course!;
-const edited = editCanonicalCourse(original, (draft) => {
-  draft.stages[0].administrations[0].amounts![0].quantity!.value = 2;
-});
-
-// The input is unchanged. Generated wording is refreshed after clinical edits;
-// deliberately replaced source text remains the clinician's own instruction.
-const display = formatCanonicalCourse(edited, "long", { locale: "en" });
-const { fhir, fhirNext } = projectCanonicalCourse(edited);
-// fhir: existing strict R5 interchange; fhirNext: current R6 DosageInstruction.
-
-const request = {
-  from: "2026-11-02T00:00:00+07:00",
-  orderedAt: "2026-11-02T00:00:00+07:00",
-  timeZone: "Asia/Bangkok",
-};
-const due = nextDueDoses(edited, { ...request, limit: 3 });
-const supply = calculateTotalUnits({
-  ...request, dosage: edited, durationValue: 3, durationUnit: FhirPeriodUnit.Day,
-}); // 6 tablets
-
-// Existing persisted R5 or current R6 instructions can be imported once for
-// the same native edit/format/execute workflow.
-const reopened = importCanonicalCourse(fhir);
-```
-
-Use one working representation per edit operation. Outputs are immutable
-by caller contract. Do not mutate parser, canonical or FHIR return values;
-EZMED does not deep-clone or freeze them defensively. Explicit edits create
-new course versions, which can be projected again to R5 or R6. Conversely, an edited
-external R5/R6 object must be passed to its importer/execution boundary, not to
-an older parsed batch whose canonical course still describes the prior input.
-
-`editCanonicalCourse` returns a new course, retains unknown external fields and
-source evidence, and clears unchanged generated text when clinical fields or
-stage order change. Native scheduling, whole-course formatting, and supply do
-not serialize into R5 to recover their meaning. The R5 extension/reconciliation
-bridge remains available only for R5 persistence and interchange compatibility.
+Native courses are parser implementation data. EZMED does not expose a native
+editing workflow. Parser and projection outputs are immutable by caller
+contract; ordinary imports do not deep-clone or freeze them defensively.
+Applications that modify external R5 or current R6 data pass those values back
+through the corresponding import boundary. Native scheduling, formatting, and
+supply consume clinical facts directly; the R5 reconciliation bridge is confined
+to R5 persistence and interchange.
 
 ### PRN reasons & additional instructions
 
@@ -337,6 +289,7 @@ Whole-course wording is a typed optional `course` facet on the existing
 
 ```ts
 import {
+  parseSig,
   registerSigLocalization,
   resolveSigLocalization,
   formatCanonicalCourse,
@@ -357,6 +310,7 @@ registerSigLocalization({
 });
 
 // Uses the registered clause and course facets together.
+const nativeCourse = parseSig("Take 1 tablet daily for 3 days").meta.canonical.course!;
 const text = formatCanonicalCourse(nativeCourse, "long", { locale: "example" });
 ```
 

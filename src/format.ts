@@ -996,12 +996,14 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
 }
 
 function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
-  if (schedule.duration === undefined || !schedule.durationUnit) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
+  if (schedule.duration === undefined)
+    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${schedule.durationUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   const qualifier = schedule.durationMax !== undefined &&
-    (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)
+    (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)
       ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
       : base;
   return `x${qualifier}${schedule.durationUnit}`;
@@ -1021,7 +1023,7 @@ function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefine
 }
 
 function describeDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
-  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
   const unit = schedule.durationUnit;
@@ -1043,9 +1045,11 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
         return value === 1 ? "unit" : "units";
     }
   };
+  if (schedule.duration === undefined)
+    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!)}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)) {
+      (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     return `for ${lower} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
   }
   return `for ${lower} ${label(schedule.duration)}`;

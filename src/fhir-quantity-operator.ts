@@ -3,7 +3,8 @@
  * R5 Dosage.doseAndRate.doseQuantity / rateQuantity use SimpleQuantity,
  * which has no comparator field. EMA's published comparator extension is
  * applicable to Element and preserves the qualifier without erasing the
- * numeric dose. R6 has a native comparator, including "~".
+ * numeric dose. General Quantity supports native comparators; SimpleQuantity
+ * remains comparator-free in both R5 and R6.
  *
  * Sources:
  * EMA http://ema.europa.eu/fhir/extension/comparator
@@ -130,8 +131,23 @@ export function quantityForR5(quantity: FhirR6Quantity | undefined):
   // Ordinary R5 comparisons are native, but imported enriched EMA metadata
   // must not contradict an edited native comparator.
   if (!quantity.extension?.length) return quantity as FhirQuantity;
-  const projected = simpleQuantityForR5(quantity);
-  return projected ? { ...projected, comparator: quantity.comparator } : quantity as FhirQuantity;
+  const code = emaCodeByComparator[quantity.comparator];
+  let changed = false;
+  const extension = quantity.extension.map(ext => {
+    const coding = ext.valueCoding;
+    if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
+        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
+        !coding.code || !comparatorByEmaCode[coding.code] || coding.code === code) return ext;
+    changed = true;
+    return { ...ext, valueCoding: {
+      ...coding, code,
+      ...(coding.display !== undefined
+        ? { display: emaDisplayByComparator[quantity.comparator!] } : {})
+    } };
+  });
+  // A native R5 operator needs no generated fallback. Otherwise removing the
+  // active comparator later would unexpectedly revive it from our own marker.
+  return changed ? { ...quantity, extension } as FhirQuantity : quantity as FhirQuantity;
 }
 
 /** Recover the current R6 native comparator from the published EMA Coding.

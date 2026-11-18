@@ -3640,14 +3640,19 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
 
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  const relation = c.destination && c.frame.relation
+  // Clinical substance concepts can fill the typed locative/accompaniment
+  // complement (e.g. disperse IN water), even when no Amount remains after
+  // a dose edit. Keep that independent complement in the selected template.
+  const relationTarget = c.destination ?? c.substance;
+  const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
-  const destination = relation && c.destination
-    ? joinLocalizedTokens(c.locale, [relation, c.destination])
+  const destination = relation && relationTarget
+    ? joinLocalizedTokens(c.locale, [relation, relationTarget])
     : undefined;
-  const material = c.material
-    ? joinLocalizedTokens(c.locale, [profile.materialPrefix || undefined, c.material])
+  const materialValue = c.material ?? (!relation || c.destination ? c.substance : undefined);
+  const material = materialValue
+    ? joinLocalizedTokens(c.locale, [profile.materialPrefix || undefined, materialValue])
     : undefined;
   return renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
@@ -3757,10 +3762,10 @@ export function realizeRichPrimaryWithCanonicalDose(
   const { value, range, unit, comparator } = dose;
   return realizeAction({
     ...frame, sourceText: "",
-    args: [...frame.args, {
+    args: [{
       role: AdviceArgumentRole.Amount,
       text: "", quantity: { value, range, unit, comparator }
-    }]
+    }, ...frame.args.filter(arg => arg.role !== AdviceArgumentRole.Amount)]
   }, locale);
 }
 
@@ -4220,7 +4225,6 @@ function primaryDoseAmountOwner(
   if (!clause.dose) return undefined;
   const primary=graph.primaryAdministrationSpan;
   let earliest:AdviceFrame|undefined,overlap:AdviceFrame|undefined;
-  let doseDefiner:AdviceFrame|undefined,definedCount=0;
   let earlier:AdviceFrame|undefined,earlierCount=0;
   for(const action of graph.actions) {
     if(action.polarity===AdvicePolarity.Negate)continue;
@@ -4231,17 +4235,19 @@ function primaryDoseAmountOwner(
     if(!earliest||action.span.start<earliest.span.start)earliest=action;
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
-    const custom=options?.instructionActionMap
-      ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
-    const definesDose=(custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose;
-    if(definesDose) {
-      definedCount++;
-      if(!doseDefiner||action.span.start<doseDefiner.span.start)doseDefiner=action;
-      if(primary && action.span.end<=primary.start) { earlierCount++;earlier=action; }
+    if(primary && action.span.end<=primary.start) {
+      const custom=options?.instructionActionMap
+        ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
+      if((custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose) {
+        earlierCount++;earlier=action;
+      }
     }
   }
   if(primary)return overlap??(earlierCount===1?earlier:undefined);
-  return definedCount===1?doseDefiner:doseDefiner??earliest;
+  // A spanless saved graph uses its original first amount-bearing action.
+  // A LIVE method/unit edit cannot transfer that ownership to a later
+  // independent action, even when the latter is a registered dose definer.
+  return earliest;
 }
 
 /** Whole-source replay and action realization have the same amount owner.
@@ -4251,7 +4257,11 @@ export function instructionGraphSourceConflictsWithDose(
 ): boolean {
   const graph = clause.instructionGraph;
   const dose = clause.dose;
-  if (!graph || !dose || (dose.value === undefined && !dose.range)) return false;
+  if (!graph) return false;
+  if (clause.sourceProjectionVerified === false) return true;
+  if (!dose || (dose.value === undefined && !dose.range)) return false;
+  // A failed live timing/dose proof takes precedence over source ownership.
+  if (dose.sourceDoseVerified === false) return true;
   // The single-dose default is precisely one discrete unit. Changing that
   // amount does not inherit permission to replay the old amountless wording.
   if (dose.defaulted && dose.value === 1 && dose.unit === dose.defaultedUnit &&
@@ -4259,10 +4269,8 @@ export function instructionGraphSourceConflictsWithDose(
   const owner = primaryDoseAmountOwner(graph, clause, options);
   if (!owner) {
     // HPSG primary-dose facts need not be repeated in auxiliary actions.
-    // A failed live-source comparison overrides OLD evidence retained in a
-    // serialized graph. An actual Amount owner below remains independent
-    // evidence and is compared directly with the live dose.
-    if (dose.sourceDoseVerified === false) return true;
+    // Failed live-source proof was handled above; an Amount owner below
+    // remains independent evidence and is compared with the live dose.
     if (dose.sourceDoseVerified) return false;
     for (const evidence of clause.evidence ?? [])
       if (evidence.lexicalCategory === "dose") return false;

@@ -135,15 +135,24 @@ export function getRegisteredSigLocalizations(): SigLocalization[] {
   return Array.from(REGISTERED_LOCALIZATIONS.values());
 }
 
+/** All language facets use exact registration before the base language. */
+function registeredLocalization(key: string | undefined): SigLocalization | undefined {
+  if (!key) return undefined;
+  const exact = REGISTERED_LOCALIZATIONS.get(key);
+  if (exact) return exact;
+  const separator = key.indexOf("-");
+  return separator < 0 ? undefined : REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
+}
+
 export function resolveSigLocalization(
   locale?: string,
   config?: SigLocalizationConfig
 ): SigLocalization | undefined {
   const normalizedLocale = config?.locale ?? locale;
   const targetKey = normalizedLocale?.toLowerCase();
-  const base = targetKey ? REGISTERED_LOCALIZATIONS.get(targetKey) : undefined;
+  const base = registeredLocalization(targetKey);
   const inherited = config?.inherit
-    ? REGISTERED_LOCALIZATIONS.get(config.inherit.toLowerCase())
+    ? registeredLocalization(config.inherit.toLowerCase())
     : undefined;
   // Registered localizations are immutable-by-contract. Returning the
   // established object needs no repeat allocation on every clause render.
@@ -207,13 +216,10 @@ export function resolveCourseLanguage(locale?: string, config?: SigLocalizationC
   if (config?.course) return config.course;
   // Per-call inheritance overrides a registered base exactly as clause
   // callbacks do. The output locale tag is a label, not an inheritance veto.
-  const inherited=config?.inherit?REGISTERED_LOCALIZATIONS.get(config.inherit.toLowerCase())?.course:undefined;
+  const inherited=config?.inherit?registeredLocalization(config.inherit.toLowerCase())?.course:undefined;
   if(inherited)return inherited;
   const key = (config?.locale ?? locale ?? "en").toLowerCase();
-  const exact=REGISTERED_LOCALIZATIONS.get(key)?.course;
-  if(exact)return exact;
-  const separator=key.indexOf("-");
-  return (separator>=0?REGISTERED_LOCALIZATIONS.get(key.slice(0,separator))?.course:undefined) ?? ENGLISH_COURSE;
+  return registeredLocalization(key)?.course ?? ENGLISH_COURSE;
 }
 
 export type SigTranslation = SigLocalization;
@@ -1778,12 +1784,14 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
 }
 
 function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | undefined {
-  if (schedule.duration === undefined || !schedule.durationUnit) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
+  if (schedule.duration === undefined)
+    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${schedule.durationUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   const qualifier = schedule.durationMax !== undefined &&
-    (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)
+    (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)
       ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
       : base;
   return `x${qualifier}${schedule.durationUnit}`;
@@ -1803,7 +1811,7 @@ function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined):
 }
 
 function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
-  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
   const unit = schedule.durationUnit;
@@ -1825,9 +1833,11 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
         return unit;
     }
   };
+  if (schedule.duration === undefined)
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label()}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || schedule.durationMaxComparator !== undefined)) {
+      (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     return `เป็นเวลา ${lower} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label()}`;
   }
   return `เป็นเวลา ${lower} ${label()}`;

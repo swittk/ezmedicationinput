@@ -14,12 +14,9 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
   const locale = baseLanguageTag(detector.locale) ?? detector.locale.toLowerCase();
   // Registration owns a stable provider snapshot. A caller may reuse or edit
   // its configuration later; only explicit registration changes this index.
-  // Copy the small public provider contract directly. ES6 object-spread
-  // helpers enumerate/define properties and are unnecessary at this boundary.
-  const normalized: MedicationLocaleDetector = {
-    locale, test: detector.test, priority: detector.priority,
-    joinsAdjacentSourceTokens: detector.joinsAdjacentSourceTokens,
-  };
+  // Preserve provider-owned configuration used by methods through `this`.
+  // Object.assign avoids the ES6 spread helper while copying only at registration.
+  const normalized: MedicationLocaleDetector = Object.assign({}, detector, { locale });
   const previous = DETECTOR_INDEX.get(locale),
     priority = normalized.priority ?? 0;
   if (previous) {

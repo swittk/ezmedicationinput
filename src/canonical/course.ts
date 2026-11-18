@@ -220,6 +220,8 @@ export interface CanonicalCourse {
   stages: CanonicalStage[];
   instruction?: string;
   cycleInterval?: CanonicalMeasure;
+  /** Total complete-course cycles, including the first; independent of each stage's local count. */
+  cycleCount?: number;
   safety?: CanonicalSafety;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown> };
@@ -266,15 +268,21 @@ export function numericAdministrationLimits(a: CanonicalAdministration): {
 } {
   let administration: CanonicalMeasure | undefined;
   let lifetime: CanonicalMeasure | undefined;
-  let multiple = false;
+  let multiple = false, seenAdministration = false, seenLifetime = false;
   for (const limit of a.limits ?? []) {
     if (!limit.amount || limit.period || limit.expression) continue;
     if (limit.scope === "administration") {
-      if (administration) multiple = true;
-      administration = limit.amount;
+      if (seenAdministration) {
+        multiple = true;
+        administration = undefined;
+      } else administration = limit.amount;
+      seenAdministration = true;
     } else if (limit.scope === "lifetime") {
-      if (lifetime) multiple = true;
-      lifetime = limit.amount;
+      if (seenLifetime) {
+        multiple = true;
+        lifetime = undefined;
+      } else lifetime = limit.amount;
+      seenLifetime = true;
     }
   }
   return { administration, lifetime, multiple };

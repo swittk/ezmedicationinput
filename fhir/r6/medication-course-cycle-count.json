@@ -1,0 +1,60 @@
+{
+  "resourceType": "StructureDefinition",
+  "id": "medication-course-cycle-count",
+  "url": "urn:ezmedicationinput:StructureDefinition:medication-course-cycle-count",
+  "version": "0.2.0-ez.0",
+  "name": "MedicationCourseCycleCount",
+  "title": "Finite whole-course cycle count",
+  "status": "draft",
+  "experimental": true,
+  "date": "2026-11-18",
+  "publisher": "ezmedicationinput contributors",
+  "description": "Total number of complete treatment-course cycles, including the first cycle. Each cycle repeats the complete ordered set of DosageInstruction steps at the repeatCycle interval. This course bound is independent of step.count, which repeats only its own step. The R5 course bridge retains this modifier in its shared course header.",
+  "fhirVersion": "6.0.0-snapshot1",
+  "kind": "complex-type",
+  "abstract": false,
+  "context": [
+    {
+      "type": "element",
+      "expression": "DosageInstruction"
+    }
+  ],
+  "type": "Extension",
+  "baseDefinition": "http://hl7.org/fhir/StructureDefinition/Extension",
+  "derivation": "constraint",
+  "differential": {
+    "element": [
+      {
+        "id": "Extension",
+        "path": "Extension",
+        "min": 0,
+        "max": "1",
+        "isModifier": true,
+        "isModifierReason": "Ignoring this extension loses the authored finite course bound and can cause additional treatment cycles."
+      },
+      {
+        "id": "Extension.extension",
+        "path": "Extension.extension",
+        "max": "0"
+      },
+      {
+        "id": "Extension.url",
+        "path": "Extension.url",
+        "fixedUri": "urn:ezmedicationinput:StructureDefinition:medication-course-cycle-count"
+      },
+      {
+        "id": "Extension.value[x]",
+        "path": "Extension.value[x]",
+        "min": 1,
+        "max": "1",
+        "type": [
+          {
+            "code": "integer"
+          }
+        ],
+        "minValueInteger": 1,
+        "definition": "Total whole-course cycles, including the initial cycle."
+      }
+    ]
+  }
+}

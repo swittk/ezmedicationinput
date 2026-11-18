@@ -7395,3 +7395,254 @@ Paired medians in microseconds (negative change is faster):
 Review responses belong in the existing threads, including the outside-diff
 unit finding in its related compiler thread. No unsolicited top-level
 comment or duplicate review request is part of this loop.
+
+
+## 2026-11-18 — Second family review: fixes and verification
+
+The review body and two follow-up comments contain **66 findings: 36 major,
+28 minor, and 2 trivial**. They did not create new inline threads, so a zero
+unresolved-thread count was not evidence of completion. This round accounts for
+all 66: **56 implemented, 7 rejected under the owner contract, and 3 withdrawn
+with removal of the unrequested native editor**. Three bounded owners covered
+execution, external R5 reconciliation, and meaning/realization; the coordinator
+implemented R6 wire preservation and integrated the changes.
+
+### Product and architecture decisions
+
+- Accepted findings concern supported SIGs, current external FHIR data, or a
+  real validation gap. The harmful cases were wrong dose, qualifier, route,
+  time, stage, duration, limit, source ownership, or numeric supply. Bench/test
+  corrections strengthen independent evidence rather than expanding grammar.
+- Language corrections stay in existing HPSG lexical/construction rules and
+  locale facets. FHIR adapters reconcile external data; they do not invent a
+  second semantic parser. No extra parse pass or per-parse provider copying was
+  added. The language-pack separation remains intact.
+- The public native editor, implementation, README workflow, benchmark case,
+  and editor-only tests are removed. No replacement editor, freeze/validation
+  wrapper, or native-model persistence contract was added. Internal objects and
+  borrowed catalogs remain immutable by caller contract. External R5/current R6
+  edits and unknown data remain supported.
+- Registration snapshots its descriptor once, preserving provider identity and
+  configuration used through `this`. This has a measurable one-time cost; it is
+  not paid by normal parsing, formatting, or suggestion calls.
+- R6 source records use the established typed FHIR extension codec, including
+  unknown-field retention. There is still no JSON parse/stringify in production
+  source. These records contain external FHIR fragments, not a serialized native
+  model. Inactive stages are kept as source rather than invalid active R6 steps;
+  clearing their membership cannot revive them from an old snapshot.
+- Integration exposed a real count collision. Grammar whole-course repetition
+  now owns `course.cycleCount`; `stage.count` owns local step repetitions. A
+  declared course-level R6 modifier preserves the finite course bound through
+  R5/R6, including the last cycle's remaining active interval. No external
+  `step.count` is reinterpreted as a whole-course count.
+- Numeric supply declines genuinely unbounded lower-bound quantities through
+  the existing typed execution error. Parsing, formatting, timing, qualifiers,
+  and retained source remain available. No new result-kind API or universal
+  parser refusal was introduced.
+
+### Independent clinical oracles
+
+| Case | Independently expected result |
+| --- | --- |
+| Two local one-day repetitions in each of three courses, spaced three days apart | Six tablets; January 1/2, 4/5, and 7/8 |
+| Three overlapping three-day cycles capped at one tablet per 24 hours | Five tablets, January 1–5; a query from January 4 returns two |
+| Range 1–2 tablets, two opportunities, total cap 3 | Three tablets, allocated as 2 + 1 |
+| Strict range greater than 1.5 through 2, cap 3 | One 2-tablet dose; two valid doses cannot fit |
+| Code-only UCUM 10 mL/hour for one hour | 10 mL |
+| Conflicting lifetime caps 10/20 and 20/10 | Identical 30-tablet prescribed maximum with unapplied-cap explanation; no arbitrary cap selection |
+| Supported civil-duration representations | 390 tablets, checked directly rather than against scheduler output |
+| Inactive predecessor ending at day 2, externally changed to day 5, then deleted | Active start follows the current boundary; deletion survives persistence while raw annotations remain inert |
+
+### Final correctness gates
+
+- **4,477/4,477 source tests passed in 55 files**, including **122 tests** in the
+  four new round-20 family suites (43 execution, 36 meaning, 29 R5, 14 boundaries).
+- **4/4 packaged ESM/CommonJS export tests passed** after a fresh build.
+- Production TypeScript, the selected changed/new test files, and the complete
+  README localization example passed strict type checking against declarations.
+- The first full run exposed finite-cycle, replay-proof, and structured-retention
+  integration failures. They were fixed in production, retaining the clinical
+  dates, amounts, and semantic round-trip expectations. The production JSON
+  prohibition was not relaxed.
+- Benchmark CLI checks reject zero, negative, or fractional rounds and a filter
+  selecting no runnable scenario. Native helpers are compared when the chosen
+  baseline already exports them, rather than always claiming no baseline.
+- `git diff --check` passed. Active source, tests, benchmark, and README no longer
+  reference the removed editor. The PR remains below the 100-file review limit.
+
+### Performance evidence and limits
+
+Freshly built master is `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`;
+the prior PR head is `6823ae967a738defa63d1d1b61cfe223c2532437`.
+The measured candidate ESM SHA-256 is
+`e3047eeaa45930fb3a5d73cad4010a608b628237b57c1a24478d1c14ff5c5e8b`.
+The public harness covers all **117 exported functions**: 181 comparisons plus
+six measurements of the five APIs absent from master, or 188 comparisons when
+using the previous PR head. Paired batches alternate version order. No aggregate
+average substitutes for individual results.
+
+Against master, **179 comparisons meet the 4% threshold** (largest measured
+increase among those: **3.96%**). The two remaining master cases have different
+clinical output and are explicitly not labelled equivalent-work passes:
+
+| Edited Thai fixture | Master behavior | Candidate and previous head | Previous head → candidate |
+| --- | --- | --- | --- |
+| Dose changed from 1 to 2 drops | Replays stale 1-drop source | Shows 2 drops and retains wash/close-eyes instructions | 191.4 → 193.7 µs |
+| Added 2-tablet dose | Drops the added dose | Keeps mix-water instruction and shows drink 2 tablets | 83.5 → 80.8 µs |
+
+Both corrected-output cases pass the previous-head timing gate. Their raw
+master timings were 147.2 → 193.1 µs and 67.5 → 104.8 µs; the faster incorrect
+source shortcuts are not used to claim a correctness-preserving speedup.
+
+The previous-head run initially flagged 41 of 188 scenarios with 9 rounds and
+12 ms batches. Those flagged scenarios were measured again with **23 rounds
+and 40 ms batches**. Thirteen remained above 4%; they are recorded below rather
+than waived or hidden. This comparison is separate from the required master
+gate. Several unchanged tiny helpers vary by hundredths or thousandths of a
+microsecond; registration changes also perform the newly required descriptor
+snapshot. No claim of zero previous-head regression is made.
+
+| Scenario | Previous head (µs) | Candidate (µs) | Paired change |
+| --- | ---: | ---: | ---: |
+| `suggestSig/ทาบริเวณผ` | 310.1679 | 316.1371 | +6.55% |
+| `formatSig/R6-complex/en` | 0.0326 | 0.0350 | +9.13% |
+| `nextDueDoses/scalar` | 36.3157 | 39.6464 | +5.53% |
+| `setDosageCondition` | 1.2423 | 1.3214 | +6.03% |
+| `parseBodySiteAdministrationTargetCountExtension` | 0.0243 | 0.0247 | +5.44% |
+| `parseBodySiteSpatialRelationExtension` | 0.0951 | 0.1341 | +37.49% |
+| `hasSnomedTopographicalModifierPostcoordination` | 0.0499 | 0.0529 | +7.67% |
+| `resolveSigLocalization` | 0.0414 | 0.0471 | +10.58% |
+| `resolveSigTranslation` | 0.0449 | 0.0500 | +14.23% |
+| `registerMedicationLocaleDetector` | 0.2961 | 0.4220 | +44.20% |
+| `registerMedicationSurfaceSegmenter` | 0.0779 | 0.1816 | +127.72% |
+| `registerIntlMedicationSurfaceSegmenter` | 0.0783 | 0.1664 | +115.66% |
+| `registerMedicationDateResolver` | 0.0644 | 0.1616 | +129.40% |
+
+The separate 32-case clinical-family study uses version-owned fresh fixtures,
+plus explicit persisted-input cases, 23 rounds, and 40 ms batches:
+
+| Workload | Previous head (µs) | Candidate (µs) | Change |
+| --- | ---: | ---: | ---: |
+| parse English | 1288.484 | 1318.691 | +2.34% |
+| parse Thai | 6052.425 | 6029.573 | -0.38% |
+| parse ocular taper | 5491.751 | 5372.858 | -2.16% |
+| parse rate | 1603.433 | 1604.017 | +0.04% |
+| suggest English | 405.314 | 419.147 | +3.41% |
+| suggest Thai | 1778.460 | 1801.751 | +1.31% |
+| R5 EN format | 10.207 | 10.882 | +6.61% |
+| R5 persisted source replay | 25.781 | 25.909 | +0.49% |
+| R5 fresh source replay | 22.206 | 23.190 | +4.43% |
+| R6 EN format | 10.442 | 10.802 | +3.45% |
+| R6 TH source replay | 0.031 | 0.031 | +2.30% |
+| R6 structured format | 9.287 | 9.169 | -1.27% |
+| R6 structured format TH | 16.975 | 17.980 | +5.92% |
+| R5 import | 28.426 | 29.783 | +4.77% |
+| R6 import | 41.481 | 38.547 | -7.07% |
+| R5 to R6 | 96.778 | 97.287 | +0.53% |
+| R6 to R5 | 81.122 | 83.914 | +3.44% |
+| scalar nextDue | 34.561 | 36.957 | +6.93% |
+| scalar supply | 36.641 | 38.400 | +4.80% |
+| staged nextDue | 506.980 | 522.646 | +3.09% |
+| staged supply | 445.504 | 442.466 | -0.68% |
+| explicit event nextDue | 6.452 | 6.501 | +0.75% |
+| locale detect | 0.049 | 0.046 | -5.55% |
+| locale register | 0.233 | 0.360 | +54.03% |
+| native source replay | 0.039 | 0.041 | +5.36% |
+| native generated format | 87.547 | 84.906 | -3.02% |
+| native projection | 49.331 | 50.461 | +2.29% |
+| nonoverlap capped nextDue | 715.821 | 720.542 | +0.66% |
+| nonoverlap capped supply | 985.640 | 975.659 | -1.01% |
+| overlap capped nextDue | 822.917 | 820.554 | -0.29% |
+| overlap capped supply | 846.414 | 863.174 | +1.98% |
+| overlap range supply | 185.339 | 198.995 | +7.37% |
+
+The range-supply case has a corrected amount and the rate parse has richer
+qualifier ownership; their timings do not establish output equivalence.
+Ordinary parse/suggest changes in this study range from -2.16% to +3.41%.
+Scalar scheduling rose 34.56 → 36.96 µs, while staged supply changed
+445.50 → 442.47 µs. These previous-head differences remain visible.
+
+Reproduce the public gate with `node --expose-gc bench/public-api.mjs --baseline
+<fresh-built-baseline>/dist/index.js --rounds 9 --target-ms 12 --json <report>`.
+Use 23 rounds and 40 ms batches for a longer per-scenario check. Correctness
+commands are `npx vitest run --dir test --maxWorkers=4 --minWorkers=1`,
+`npx tsc --noEmit -p tsconfig.json`, `npm run build`, and
+`npx vitest run test-dist --maxWorkers=2 --minWorkers=1`.
+
+### Every finding accounted for
+
+Source keys: **R** = main review; **F1** = first follow-up (comment 6976526702); **F2** = second follow-up (comment 6976527866). Paths are the original finding locations; a treatment may live in the shared implementation or locale facet named in the row. IDs 7 and 8 remain real external R5 metadata → strict R6 boundary requirements, covered through external-input tests rather than a native editing API.
+
+| ID | Source / original path | Disposition | Concrete treatment |
+|---:|---|---|---|
+| 1 | R · `src/regimen/parallel-course.ts` | Fixed | Qualified taper lengths no longer create exact parallel-stage boundaries; original doses, cadence, and qualified duration remain available. |
+| 2 | R · `src/regimen/coordination-scope.ts` | Fixed | Coordination equality includes the dose comparator; unequal qualifiers keep separate administrations, while identical qualifiers can share clocks. |
+| 3 | R · `src/fhir.ts` | Fixed | R5 preview routes qualified or mixed-unit range endpoints through the endpoint-aware renderer; ordinary same-unit ranges retain the fast path. |
+| 4 | R · `src/body-site-spatial.ts` | Fixed | Spatial relation coding copies retain `version` alongside system, code, display, and annotations. |
+| 5 | R · `src/adapters/canonical-course.ts` | Fixed | R5 projection recognizes a retained condition marker even after the live predicate is cleared, and removes that obsolete marker. |
+| 6 | R · `src/adapters/canonical-course.ts` | Fixed | R6 import and display accept optional-step input, including a text-only `renderedInstruction`; public dispatch uses the R6 shape guard. |
+| 7 | R · `src/adapters/canonical-course.ts` | Fixed | External R5 draft metadata produces only populated strict R6 steps; inactive FHIR step fragments and derived starts are retained as reversible source metadata. |
+| 8 | R · `src/adapters/canonical-course.ts` | Fixed | When external R5 metadata leaves one active R6 step, combine its safety with course safety at course scope and retain source roles only while the live policy matches. |
+| 9 | R · `src/adapters/canonical-course.ts` | Fixed | Relative-time projection keeps `contextPath` alongside a resource reference or definition instead of treating those choices as mutually exclusive. |
+| 10 | R · `src/adapters/canonical-course.ts` | Withdrawn | Native event-identity/reordering repair was removed with the native editor; externally supplied FHIR primitive annotations remain source data without an event-identity editor. |
+| 11 | R · `src/adapters/r5-import.ts` | Fixed | Reconcile changed or deleted live R5 maxima against the lifted-safety baseline before reuse; explicit safety changes win and unrelated limits/actions remain. |
+| 12 | R · `src/adapters/r5-import.ts` | Fixed | Build course wording from reconciled rows; a stale row or unchanged lifted heading cannot restore old dose text after an external structured edit. |
+| 13 | R · `src/adapters/r5-import.ts` | Fixed | Retained-member reuse checks exposed dose/rate expressions; explicit edits or clears survive while expressions never exposed in strict R5 can still restore. |
+| 14 | R · `src/adapters/r5-course.ts` | Fixed | Retire the owned R5 source marker before writing its replacement, so clearing the last retained field cannot resurrect an obsolete offset or policy. |
+| 15 | R · `src/types.ts` | Fixed | R6 scalar dose/rate and other SimpleQuantity slots use the comparator extension codec; valid general Quantity slots retain native operators, with wire assertions corrected. |
+| 16 | R · `src/canonical/course.ts` | Fixed | Conflicting same-scope lifetime limits no longer choose a source-order ceiling; mark the numeric summary unevaluated and retain the full policy and explanatory result. |
+| 17 | R · `src/fhir.ts` | Fixed | R5 projection retains a high-only duration range or anchored duration extension, including the upper qualifier and absent lower endpoint. |
+| 18 | R · `src/canonical/compile.ts` | Fixed | Route compilation selects a recognized SNOMED or parser-native coding anywhere in the list; an unrelated system cannot match merely by code string. |
+| 19 | R · `src/index.ts` | Fixed | Carry-forward replaces scalar and range as one current amount, including comparator, so a later range cannot revive an earlier scalar. |
+| 20 | R · `src/execution/engine.ts` | Fixed | The shared treatment-window planner repeats a step locally by its count, independently of a course cycle and within each course cycle when present. |
+| 21 | R · `src/execution/engine.ts` | Fixed | The resumable planner opens the successor only after the quota ledger accepts the final loading administration; rejected candidates cannot advance the stage. |
+| 22 | R · `src/execution/engine.ts` | Fixed | The quantity-weighted cap ledger accepts a feasible amount within an overlapping prescribed range and carries the actual accepted quantity into later capacity. |
+| 23 | R · `src/execution/engine.ts` | Fixed | Calendar cap membership can move backward without losing needed history; safe calendar retirement and adjacent capacity-release behavior remain under integration verification. |
+| 24 | R · `src/execution/engine.ts` | Fixed | Date-only starts, ends, and explicit events use local civil-day boundaries; authored clocked timestamps retain their exact instants. |
+| 25 | R · `src/dosage-course.ts` | Rejected | Keep O(1) borrowed-array reuse under the immutable-by-caller adapter contract; a mutable-looking return type does not justify defensive copying. |
+| 26 | R · `test/course-language.spec.ts` | Fixed | Choice-language tests use distinct dose values and assert both branches, so repeating one branch can no longer satisfy the test. |
+| 27 | F1 · `src/execution/engine.ts` | Fixed | Rate measurement resolves the UCUM code when the display unit is absent; the independent oracle is 10 mL/h for one hour yielding 10 mL. |
+| 28 | F1 · `src/canonical/format-course.ts` | Fixed | Course wording renders a step repeat count whenever present, without requiring a course-level repeat interval. |
+| 29 | F1 · `src/locale-detection.ts` | Fixed | Locale detector registration snapshots all provider-owned configuration, preserving fields used through `this` while normalizing the registered locale. |
+| 30 | F1 · `src/format.ts` | Fixed | English and Thai short/long formatting retain an upper-only course duration and its qualifier. |
+| 31 | F1 · `src/fhir-quantity-operator.ts` | Fixed | General R5 Quantity no longer gains a new redundant EMA operator for a legal native comparator; existing recognized annotations update and unrelated extensions survive. |
+| 32 | F1 · `src/hpsg/rules/core-rules.ts` | Fixed | Shared fractional/million lexical composition preserves preceding qualifiers and exact fractions, including half/a quarter million and mixed quantities. |
+| 33 | F1 · `src/instruction-concept-terminology.ts` | Rejected | Concept catalogs and lookups remain borrowed immutable definitions; caller mutation does not justify per-query detached copies. |
+| 34 | F1 · `src/instruction-concept-terminology.ts` | Rejected | Instruction-graph concept components follow the immutable internal contract; no recursive detachment layer is added for direct mutation. |
+| 35 | F1 · `src/instruction-action-terminology.ts` | Rejected | Locale callbacks receive readonly action definitions by contract; no per-callback clone is added to support mutation. |
+| 36 | F1 · `src/instruction-action-terminology.ts` | Rejected | Action catalogs remain borrowed immutable registry definitions; defensive catalog copies are outside the owner contract. |
+| 37 | F1 · `src/instruction-graph.ts` | Fixed | Rich action display places the current numeric quantity in the Amount role even when the saved Amount contains only text; saved frames remain unchanged. |
+| 38 | F1 · `src/instruction-graph.ts` | Fixed | Primary dose ownership follows the original source span or earliest original Amount, preventing a later independent dose-defining action from inheriting it. |
+| 39 | F1 · `test/hpsg-clinical-quantity.spec.ts` | Fixed | The lower-bound supply test expects the dedicated unresolved finite-upper-supply error for >/>= amounts; parser and schedule remain usable and approximate amounts stay nominal. |
+| 40 | F1 · `src/i18n.ts` | Fixed | Clause-level live-source proof precedes dose/default shortcuts, preventing old Thai clocks from replaying after external timing-only edits, including dose-less cases. |
+| 41 | F1 · `src/canonical/edit-course.ts` | Withdrawn | Removed the public native editor, provenance-only comparison, and editor-only regression; no replacement clone/deep-equality editing API is introduced. |
+| 42 | F1 · `test/pr14-native-edit-family.spec.ts` | Fixed | The retained test helper narrows native object input with `kind in input` before treating the remaining readonly input as an array. |
+| 43 | F1 · `test/pr14-native-edit-family.spec.ts` | Withdrawn | Removed the native-editor fixture demanding free text in `Timing.event`; no invalid-date validation layer is added, and supplied FHIR annotations remain preserved. |
+| 44 | F1 · `test/canonical-course.spec.ts` | Fixed | Maximum tests exercise both input orders with independent expectations, covering the stricter administration bound and unresolved conflicting lifetime bounds. |
+| 45 | F1 · `src/canonical/format-course.ts` | Fixed | An empty course still renders known course-wide limits through the existing scoped safety formatter. |
+| 46 | F1 · `src/canonical/format-course.ts` | Fixed | Relative-time previews render known low/high range endpoints and qualifiers through locale wording without inventing an exact start day. |
+| 47 | F1 · `test/r6-primary.spec.ts` | Fixed | Supply assertions use the independently expected 390 tablets across the civil-duration representations rather than deriving expected supply from scheduler output. |
+| 48 | F1 · `src/execution/calendar.ts` | Fixed | Civil day/month arithmetic preserves the original fractional milliseconds; the late-query regression checks the exact .500 instant. |
+| 49 | F1 · `src/date-interpretation.ts` | Fixed | Date resolver registration snapshots the descriptor even when its ID already needs no normalization, so later descriptor reuse cannot change that registration. |
+| 50 | F1 · `README.md` | Fixed | The localization README example now imports `parseSig` and defines `nativeCourse` before formatting it; the native editor example was removed separately. |
+| 51 | F1 · `test/schedule-family-audit.spec.ts` | Fixed | The DST/day-boundary test adds a Sunday 08:30 exclusion beyond the civil 08:00 cutoff and retains the positive 07:00 control. |
+| 52 | F1 · `bench/public-api.mjs` | Fixed | The benchmark rejects non-integer or non-positive timed round counts before entering measurement. |
+| 53 | F2 · `bench/public-api.mjs` | Fixed | The benchmark records an error when the filter selects no runnable comparison or new-API scenario, preventing an empty-success report. |
+| 54 | F2 · `src/schedule.ts` | Fixed | The public schedule boundary returns an empty result for a non-positive limit before input normalization or timezone processing. |
+| 55 | F2 · `src/suggest.ts` | Rejected | Default PRN candidates follow the borrowed immutable output contract; inter-request defensive copies are not added for caller mutation. |
+| 56 | F2 · `src/lexer/surface-segmenter.ts` | Rejected | Listed segmenter descriptors remain borrowed immutable registry views; no defensive listing copies are added. |
+| 57 | F2 · `src/lexer/surface-segmenter.ts` | Fixed | Segmenter registration snapshots every descriptor, including non-global regex providers; only global/sticky regex state needs normalization. |
+| 58 | F2 · `test/pr14-execution-family.spec.ts` | Fixed | The execution regression now asserts the exact January 1–5 08:00 UTC due-time array, not only five results. |
+| 59 | F2 · `test/pr14-display-replay-family.spec.ts` | Fixed | Partial-date preview tests explicitly reject fabricated zero dates and NaN while preserving the authored partial events. |
+| 60 | F2 · `test/pr14-display-replay-family.spec.ts` | Fixed | Each quantity, count, and expression assertion includes its own scope label, preventing a single unrelated label from satisfying the suite. |
+| 61 | F2 · `test/pr14-display-replay-family.spec.ts` | Fixed | Detector snapshot tests check the old registration immediately after mutating the caller descriptor and before replacement registration. |
+| 62 | F2 · `src/i18n.ts` | Fixed | Duration wording retains both endpoints when only the lower bound is qualified, including equal numeric endpoints and Thai output. |
+| 63 | F2 · `src/i18n.ts` | Fixed | Clause and course wording share exact-locale then base-language fallback, while retaining registered and per-call overrides. |
+| 64 | F2 · `test/instruction-graph.spec.ts` | Fixed | Tests require the current dose and independent water/drink instructions; the exposed shared realizer bug now preserves a typed Substance complement and relation. |
+| 65 | F2 · `test/pr14-rate-time-family.spec.ts` | Fixed | The unmarked-rate test rejects invented doses; recognized per-time lexical ownership now prevents scalar fallback and preserves the opaque source plus independent route/cadence. |
+| 66 | F2 · `src/lexer/surface.ts` | Fixed | The Thai locale lexer canonicalizes digits inside comparator decimals without changing raw spans, preserving the same values as ASCII forms. |
+
+
+Review responses belong only in relevant existing inline threads, with the
+commit and concise evidence. No unsolicited top-level comment or additional
+full-review request is part of this round.

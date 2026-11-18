@@ -92,6 +92,7 @@ function durationPosition(clause: CanonicalSigClause): RegimenPosition | undefin
   const schedule = clause.schedule;
   if (!schedule || schedule.boundsStart || schedule.boundsEnd ||
       schedule.count !== undefined || schedule.countMax !== undefined ||
+      schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined ||
       schedule.duration === undefined || schedule.duration <= 0 ||
       !Number.isInteger(schedule.duration) ||
       schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
@@ -155,7 +156,8 @@ function withCalendarEnd(clause: CanonicalSigClause, boundsEnd: string): Canonic
  * source track's relative duration. This is a canonical stage, not a FHIR edit. */
 function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
   const schedule = clause.schedule;
-  if (!schedule || schedule.duration === undefined) return clause;
+  if (!schedule || schedule.duration === undefined ||
+      schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined) return clause;
   const {
     duration: _duration,
     durationMax: _durationMax,

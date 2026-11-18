@@ -657,6 +657,23 @@ export function reconcileR5SafetyEdits(
   return Object.keys(retainedSafety).length ? retainedSafety : undefined;
 }
 
+/**
+ * Reconcile the two editable views of safety against the row's saved source.
+ * Explicit safety edits win. An unchanged lifted safety copy must not hide a
+ * changed/deleted R5 maximum; field-local merging retains R6-only limits and
+ * authored safety metadata. This runs only for rows with retained safety.
+ */
+export function reconcileR5SafetySnapshot(
+  row: EzDosage,
+  retained: FhirR6DosageSafety,
+  baseline: string | undefined
+): FhirR6DosageSafety | undefined {
+  if (row.safety !== undefined && !equalStructuredValues(row.safety, retained)) return row.safety;
+  const projected = r5SafetyBaseline(row);
+  if (baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
+  return reconcileR5SafetyEdits(retained, projected);
+}
+
 /** Lift real R6 concepts once into the familiar flat R5 dosage shape. */
 export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] {
   let result:EzDosage[]|undefined;
@@ -1208,8 +1225,9 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
 }
 
 /** Verify a saved editable R5 row's source clinical authority at most once
- * for an unchanged object. No always-on full graph hash or normalized render. */
-export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boolean {
+ * for an unchanged object. Missing provenance is unknown, not a mismatch.
+ * No always-on full graph hash or normalized render. */
+export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boolean | undefined {
   const cached = SOURCE_REPLAY_PROOFS.get(dosage);
   if (cached && unchangedReplayProof(dosage, cached)) return cached.matches;
   for (const marker of dosage.extension ?? []) {
@@ -1225,7 +1243,7 @@ export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boo
       return false;
     }
   }
-  return false;
+  return undefined;
 }
 
 export function dosageTextFingerprint(dosage: FhirDosage | EzDosage): string {
@@ -1316,7 +1334,7 @@ export function assertCurrentR6DosageInstruction(value: FhirR6DosageInstructionI
 
 /** A supplied R6 instruction is an input source, not an intermediate.
  * Normalize it once and serialize requested R5 views directly. */
-export function projectEditableR5Course(details:FhirR6DosageInstruction,strictPreview=false):{
+export function projectEditableR5Course(details:FhirR6DosageInstructionInput,strictPreview=false):{
   dosages:EzDosage[];course:EzCourseMetadata;strictDosages?:FhirDosage[]
 } {
   const native=courseFromR6(details);
@@ -1329,7 +1347,7 @@ export function projectEditableR5Course(details:FhirR6DosageInstruction,strictPr
 
 /** Import the complete native R6 course into the established editable R5
  * interchange contract. New internal course paths do not use this function. */
-export function fromDosageDetails(details: FhirR6DosageInstruction): {
+export function fromDosageDetails(details: FhirR6DosageInstructionInput): {
   dosages: EzDosage[]; course: EzCourseMetadata;
 } {
   const projected = projectEditableR5Course(details);
@@ -1342,10 +1360,10 @@ export function fromDosageDetails(details: FhirR6DosageInstruction): {
 /** Requested R5 export: either input version is imported into native
  * clinical facts, then written directly to R5. Neither external format is an
  * intermediate representation for the other. */
-export function toFhirR5Dosages(input:FhirR6DosageInstruction|readonly(FhirDosage|EzDosage)[],
+export function toFhirR5Dosages(input:FhirR6DosageInstructionInput|readonly(FhirDosage|EzDosage)[],
   metadata?:EzCourseMetadata):FhirDosage[] {
   const native=Array.isArray(input)?courseFromR5(input,metadata?.renderedInstruction,metadata)
-    :courseFromR6(input as FhirR6DosageInstruction);
+    :courseFromR6(input as FhirR6DosageInstructionInput);
   return projectNativeR5Course(native).dosages;
 }
 
@@ -1354,7 +1372,7 @@ export interface ComponentDeltaBaseline {
   condition?: string;
   safety?: string;
   site?: string;
-  doseAndRate?: Array<{ dose?: string; rate?: string }>;
+  doseAndRate?: Array<{ dose?: string; rate?: string; doseExpression?: string; rateExpression?: string }>;
   timing?: string;
 }
 
@@ -1640,7 +1658,7 @@ interface BridgeField {
   fields?: BridgeShape;
   repeated?: boolean;
   extension?: boolean;
-  quantity?: boolean;
+  quantity?: true | "simple";
 }
 type BridgeShape = Readonly<Record<string, BridgeField>>;
 
@@ -1650,6 +1668,7 @@ const ELEMENT: BridgeShape = {
   modifierExtension: { extension: true, repeated: true }
 };
 const QUANTITY: BridgeField = { quantity: true };
+const SIMPLE_QUANTITY: BridgeField = { quantity: "simple" };
 const RELATIVE_TIME: BridgeShape = {
   ...ELEMENT,
   contextReference: { value: "valueReference" },
@@ -1700,7 +1719,7 @@ const COMPONENT: BridgeShape = {
     ...ELEMENT,
     type: { value: "valueCodeableConcept" },
     doseRange: { value: "valueRange" },
-    doseQuantity: QUANTITY,
+    doseQuantity: SIMPLE_QUANTITY,
     doseExpression: { value: "valueExpression" },
     // A nested R6 numerator may carry "~", which is not legal inside
     // R5 Extension.valueRatio; reuse the typed Quantity codec.
@@ -1708,7 +1727,7 @@ const COMPONENT: BridgeShape = {
       ...ELEMENT, numerator: QUANTITY, denominator: { value: "valueQuantity" }
     } },
     rateRange: { value: "valueRange" },
-    rateQuantity: QUANTITY,
+    rateQuantity: SIMPLE_QUANTITY,
     rateExpression: { value: "valueExpression" }
   } }
 };
@@ -1745,7 +1764,8 @@ const COMPACT_ROW: BridgeShape = {
     condition: { value: "valueString" }, safety: { value: "valueString" },
     site: { value: "valueString" }, timing: { value: "valueString" },
     doseAndRate: { repeated: true, fields: {
-      dose: { value: "valueString" }, rate: { value: "valueString" }
+      dose: { value: "valueString" }, rate: { value: "valueString" },
+      doseExpression: { value: "valueString" }, rateExpression: { value: "valueString" }
     } }
   } },
   context: { value: "valueString" },
@@ -1754,6 +1774,33 @@ const COMPACT_ROW: BridgeShape = {
   emptyStep: { fields: COURSE_STEP, repeated: true },
   missingContext: { value: "valueString", repeated: true }
 };
+/** Inactive R6 wire stages and lifted safety use the same named datatype
+ * codec as the external course bridge. No native model or serialized text is
+ * stored in these source records. */
+const R6_DRAFT_SOURCE: BridgeShape = {
+  drafts: { repeated: true, fields: {
+    index: { value: "valueInteger" }, step: { fields: STEP }
+  } },
+  synthesizedStarts: { value: "valueInteger", repeated: true },
+  projected: { fields: STEP, repeated: true }
+};
+const R6_SINGLE_SAFETY_SOURCE: BridgeShape = {
+  course: { fields: SAFETY }, step: { fields: SAFETY }, projected: { fields: SAFETY }
+};
+
+export function encodeR6SourceMetadata(
+  url: string, value: object, kind: "drafts" | "safety"
+): FhirExtension {
+  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE) };
+}
+
+export function decodeR6SourceMetadata(
+  marker: FhirExtension, kind: "drafts" | "safety"
+): Record<string, unknown> | undefined {
+  if (!marker.extension || marker.valueString !== undefined) return undefined;
+  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE);
+}
+
 const PREDICATE: Record<string, BridgeField> = {
   kind: { value: "valueCode" }, name: { value: "valueString" },
   operation: { value: "valueCode" }, value: { value: "valueDecimal" },
@@ -1839,12 +1886,15 @@ function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
       } else if (field.fields) {
         children.push({ url: key, extension: encodeFields(item as object, field.fields) });
       } else if (field.quantity) {
-        // FHIR R5 Quantity supports <, <=, >, >=, ad natively. R6-only
-        // approximation uses EMA's already-published operator extension,
-        // never a new ad hoc comparator-code field.
+        // General R5 Quantity supports <, <=, >, >=, ad natively.
+        // SimpleQuantity roles require EMA for every operator; general
+        // Quantity needs it only for approximation. The retained field's
+        // declared role must survive decode/re-encode without false edits.
         children.push({
           url: key,
-          valueQuantity: generalQuantityForR5(item as FhirR6Quantity)
+          valueQuantity: field.quantity === "simple"
+            ? simpleQuantityForR5(item as FhirR6Quantity)
+            : generalQuantityForR5(item as FhirR6Quantity)
         });
       } else if (field.value) {
         children.push({ url: key, [field.value]: item });

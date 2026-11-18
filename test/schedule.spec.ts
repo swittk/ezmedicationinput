@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, evaluateMedicationCondition, toDosageDetails, toFhirR5Dosages, formatSig } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/fhir-course-cycle-count";
 import {
   EventTiming, FhirDosage, FhirR6DosageInstruction, NextDueDoseOptions,
   FhirPeriodUnit, FhirDayOfWeek
@@ -1729,7 +1730,8 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it("stops the already-supported three-cycle instruction after the third course", () => {
     const parsed = parseSig("1 tab daily for 7 days then stop for 7 days repeat for 3 cycles");
-    expect(parsed.fhirNext.step[0].count).toBe(3);
+    expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+    expect(parsed.fhirNext.step[0].count).toBeUndefined();
     for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
       expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
         timeZone: "Asia/Bangkok", limit: 3
@@ -1742,7 +1744,7 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it("keeps the last counted cycle's finite tail but never starts a fourth cycle", () => {
     const course = makeCycle(7, 21);
-    course.step[0].count = 3;
+    course.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }];
     for (const dosage of [course, toFhirR5Dosages(course)]) {
       expect(on(dosage, "2026-12-14")).toEqual(["2026-12-14T08:00:00+07:00"]);
       expect(on(dosage, "2026-12-21")).toEqual([]);
@@ -1757,7 +1759,8 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
       const input = "Take 1 tablet daily for 7 days" + tail + " for 3 cycles.";
       const parsed = parseSig(input);
       expect(parsed.fhirNext.repeatCycle?.value).toBe(14);
-      expect(parsed.fhirNext.step[0].count).toBe(3);
+      expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+      expect(parsed.fhirNext.step[0].count).toBeUndefined();
       expect(parsed.fhirNext.renderedInstruction).toBe(input);
       for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
         expect(nextDueDoses(dosage, { orderedAt, from: "2026-12-14T00:00:00+07:00",
@@ -1772,7 +1775,7 @@ describe("repeating R6 course intervals crossing cycle boundaries", () => {
 
   it.each([1, 3])("shows a source-less cycle count of %i in both languages", count => {
     const course = makeCycle(0, 7);
-    course.step[0].count = count;
+    course.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: count }];
     for (const input of [course, toFhirR5Dosages(course)]) {
       expect(formatSig(input, "long", { locale: "en" }))
         .toContain(count + (count === 1 ? " cycle" : " cycles"));

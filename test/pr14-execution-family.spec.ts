@@ -145,7 +145,11 @@ describe("accepted-count and lifetime related families", () => {
     const course = dailyCourse(member);
     expect(supply(member, 14).totalUnits).toBe(3);
     expect(supply(course, 14).totalUnits).toBe(3);
-    expect(nextDueDoses(course, { ...options, limit: 5 })).toHaveLength(5);
+    expect(nextDueDoses(course, { ...options, limit: 5 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00",
+      "2026-01-05T08:00:00+00:00",
+    ]);
   });
 
   it("keeps per-target quantity and known concentration in the lifetime ledger's units", () => {

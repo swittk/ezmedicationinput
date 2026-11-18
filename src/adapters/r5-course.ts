@@ -8,12 +8,12 @@
  */
 import type {
   FhirDosage,
+  FhirExtension,
   EzDosage,
   EzCourseMetadata,
   FhirR6Dosage,
   FhirR6DosageStep,
   FhirR6DoseAndRate,
-  FhirSimpleQuantity,
 } from "../types";
 import type { CanonicalCourse, CanonicalAdministration, CanonicalMeasure } from "../canonical/course";
 import type { FhirProjectionOptions } from "../fhir";
@@ -106,7 +106,10 @@ function retentionForAdministration(
     changed = true;
   }
   const regeneratedSafety = row.safety ?? r5SafetyBaseline(row);
-  if (!equalStructuredValues(safety, regeneratedSafety)) {
+  // Editable R5 exposes both maxima and lifted safety. Save their common
+  // baseline even when equivalent so a later edit to one view can be assigned
+  // to its true owner after persistence.
+  if ((editable && safety) || !equalStructuredValues(safety, regeneratedSafety)) {
     component.safety = safety;
     baseline.safety = compactProjectionFingerprint(r5SafetyBaseline(row));
     changed = true;
@@ -168,28 +171,25 @@ function retentionForAdministration(
       ...(value.provenance?.id ? { id: String(value.provenance.id) } : {}),
       ...(value.role ? { type: value.role } : {}),
       ...(value.expression ? { doseExpression: value.expression } : {}),
-      ...(value.quantity?.comparator ? { doseQuantity: coded(value.quantity, compiled) } : {}),
+      ...(value.quantity?.comparator ? { doseQuantity: simpleQuantityForR5(coded(value.quantity, compiled)) } : {}),
       ...(value.rateExpression ? { rateExpression: value.rateExpression } : {}),
-      ...(value.rate?.comparator ? { rateQuantity: coded(value.rate, compiled) } : {}),
+      ...(value.rate?.comparator ? { rateQuantity: simpleQuantityForR5(coded(value.rate, compiled)) } : {}),
       ...(value.rateRatio?.numerator?.comparator === "~"
         ? {
             rateRatio: {
               ...value.rateRatio,
               numerator: coded(value.rateRatio.numerator, compiled),
-              // Retention preserves the source representation, including a
-              // native operator accepted on a permissively imported ratio.
-              // Only its representation comes from provenance: ALL current
-              // denominator values/units/operators come from native facts.
-              // The actual strict R5 row is encoded independently above.
-              denominator: (value.provenance?.rateRatio as
-                { denominator?: CanonicalMeasure } | undefined)?.denominator?.comparator !== undefined
-                ? coded(value.rateRatio.denominator, compiled) as FhirSimpleQuantity | undefined
-                : simpleQuantityForR5(coded(value.rateRatio.denominator, compiled)),
+              // Ratio.denominator is SimpleQuantity in both wire versions.
+              // Keep the current native qualifier through its extension codec;
+              // permissive source spelling must not make strict output invalid.
+              denominator: simpleQuantityForR5(coded(value.rateRatio.denominator, compiled)),
             },
           }
         : {}),
     });
     fingerprints!.push({
+      ...(editable && value.expression ? { doseExpression: compactProjectionFingerprint(value.expression) } : {}),
+      ...(editable && value.rateExpression ? { rateExpression: compactProjectionFingerprint(value.rateExpression) } : {}),
       ...(hasDose
         ? {
             dose: compactProjectionFingerprint({
@@ -242,7 +242,9 @@ export function projectNativeR5Course(
     const stage = course.stages[i],
       fields = stageMetadataToWire(stage);
     steps.push(fields);
-    if (Object.keys(fields).length) {
+    if (Object.keys(fields).length || !stage.administrations.length) {
+      // The editable list owns explicitly retained empty stages, including
+      // fieldless ones. Keep their identity so absence can mean deletion.
       metadata.push({ sequence: i + 1, ...r5StepMetadata(fields) });
       needsBridge = true;
     }
@@ -325,13 +327,25 @@ export function projectNativeR5Course(
         row = Object.assign({}, strict);
         if (hasExpressions) row.doseAndRate = strict.doseAndRate?.map((entry) => Object.assign({}, entry));
       }
-      if (needsBridge) {
-        const missingContext: string[] = [];
-        for (const e of strict.modifierExtension ?? [])
-          if (e.url === DOSAGE_DETAILS_R5_URL)
-            for (const child of e.extension ?? [])
-              if (child.url === "missingContext" && child.valueString !== undefined)
-                missingContext.push(child.valueString);
+      let missingContext: string[] | undefined;
+      if (strict.modifierExtension?.length) {
+        let remaining: FhirExtension[] | undefined;
+        for (let index = 0; index < strict.modifierExtension.length; index++) {
+          const e = strict.modifierExtension[index];
+          if (e.url !== DOSAGE_DETAILS_R5_URL) { remaining?.push(e); continue; }
+          remaining ??= strict.modifierExtension.slice(0, index);
+          for (const child of e.extension ?? [])
+            if (child.url === "missingContext" && child.valueString !== undefined)
+              (missingContext ??= []).push(child.valueString);
+        }
+        // This output's bridge is rebuilt from live facts. In particular,
+        // clearing its last retained field must retire the previous marker.
+        if (remaining) {
+          strict.modifierExtension = remaining.length ? remaining : undefined;
+          if (row !== strict) row.modifierExtension = strict.modifierExtension;
+        }
+      }
+      if (needsBridge || missingContext?.length) {
         const common = {
           rowIndex,
           sequence: stageIndex + 1,
@@ -344,7 +358,7 @@ export function projectNativeR5Course(
                 ...(rowIndex === 0 ? retainedHeader : {}),
               }
             : {}),
-          ...(missingContext.length ? { missingContext } : {}),
+          ...(missingContext?.length ? { missingContext } : {}),
         };
         const write = (target: EzDosage, extended: boolean) => {
           const delta = retentionForAdministration(a, target, extended, freshlyCompiled);
@@ -354,7 +368,7 @@ export function projectNativeR5Course(
             delta.timingOffsets ||
             context ||
             course.stages.length > 1 ||
-            missingContext.length
+            missingContext?.length
           )
             attachR5RetainedRow(target, { ...common, ...delta });
         };

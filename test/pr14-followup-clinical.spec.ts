@@ -380,15 +380,25 @@ describe("November 18 review: dose ranges own upper-bound rolling-cap quantity",
     });
   });
 
-  it("keeps a contradictory one-tablet cap recoverable rather than vetoing the dose-range schedule", () => {
+  it("uses a feasible one-tablet dose when the cap intersects the authored range", () => {
     const course = rangedCourse(1);
-    expect(nextDueDoses(course, { ...options, limit: 3 })).toHaveLength(3);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply).toMatchObject({ totalUnits: 2, quantityKind: "maximum" });
+    expect(supply.explanation).not.toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].range.high.value).toBe(2);
+  });
+
+  it("keeps a cap below the range's lower endpoint recoverable and explicitly unevaluated", () => {
+    const course = rangedCourse(0.5);
     const supply = calculateTotalUnits({
       ...options, dosage: course, durationValue: 2,
       durationUnit: FhirPeriodUnit.Day,
     });
     expect(supply.quantityKind).toBe("maximum");
     expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
-    expect(course.stages[0].administrations[0].amounts[0].range.high.value).toBe(2);
+    expect(course.stages[0].administrations[0].amounts[0].range.low.value).toBe(1);
   });
 });

@@ -39,12 +39,12 @@ describe("source-less limit wording retains value and ownership", () => {
       ];
       const course = courseFromR6({ step: [{ component: [{ ...tablet, safety: { doseLimit: limits } }] }] });
       const text = formatCanonicalCourse(course, "long", { locale: "en" });
-      expect(text).toContain("8 tab");
-      expect(text).toContain("2 administrations");
-      expect(text).toContain("unevaluated dose expression: weight * 2");
-      expect(text).toContain(scope === "period" ? "max per period:" :
+      const label = scope === "period" ? "max per period:" :
         scope === "administration" ? "max per administration:" :
-        scope === "dosage" ? "max per dosage:" : "max lifetime:");
+        scope === "dosage" ? "max per dosage:" : "max lifetime:";
+      expect(text).toContain(label + " 8 tab");
+      expect(text).toContain(label + " 2 administrations");
+      expect(text).toContain(label + " unevaluated dose expression: weight * 2");
     },
   );
 
@@ -106,6 +106,11 @@ describe("partial explicit calendar events remain visible", () => {
       .toContain("Scheduled events: 2026, 2026-11");
     expect(formatCanonicalCourse(course, "long", { locale: "th" }))
       .toContain("วันที่กำหนด: 2026 และ 2026-11");
+    for (const locale of ["en", "th"]) {
+      const text = formatCanonicalCourse(course, "long", { locale });
+      expect(text).not.toMatch(/2026-00|2026-11-00|2026-00-00/u);
+      expect(text).not.toContain("NaN");
+    }
     expect(course.stages[0].administrations[0].schedule?.explicitEvents)
       .toEqual(["2026", "2026-11", "2026-11-20"]);
   });
@@ -206,6 +211,8 @@ describe("locale detector registration has stable provider identity", () => {
     registerMedicationLocaleDetector(detector);
     detector.locale = "bb";
     detector.test = value => value === "__locale_changed__";
+    expect(inferMedicationLocale("__locale_aa__")).toBe("aa");
+    expect(inferMedicationLocale("__locale_changed__", "fallback")).toBe("fallback");
     registerMedicationLocaleDetector({ locale: "cc", priority: 20, test: value => value === "__locale_cc__" });
     registerMedicationLocaleDetector({ locale: "aa", priority: 30, test: value => value === "__locale_aa_new__" });
     expect(inferMedicationLocale("__locale_cc__")).toBe("cc");

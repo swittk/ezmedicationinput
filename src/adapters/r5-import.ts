@@ -24,6 +24,8 @@ import {
   administrationToR5,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
+import { getCourseCycleCount } from "../fhir-course-cycle-count";
+import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
 import { quantityFromR5, simpleQuantityForR5, quantityForR5 } from "../fhir-quantity-operator";
 import {
   DOSAGE_DETAILS_R5_URL,
@@ -48,7 +50,7 @@ import {
   r5StepMetadata,
   r5ConditionBaseline,
   r5SafetyBaseline,
-  reconcileR5SafetyEdits,
+  reconcileR5SafetySnapshot,
   retainedDoseRateMatches,
   getDosageCondition,
   conditionToR6,
@@ -99,6 +101,7 @@ function courseFromFields(
   const course:CanonicalCourse={
     kind:"course",stages,instruction:fields.renderedInstruction,
     cycleInterval:measureFromWire(fields.repeatCycle),
+    cycleCount:getCourseCycleCount(fields),
     safety:safetyFromWire(fields.safety,true),provenance:{format:"r5",data:fields}
   };
   // Set an optional typed scalar directly instead of creating spread
@@ -250,11 +253,7 @@ function restoreComponentDelta(
     }
   }
   if (delta?.safety) {
-    const safety =
-      row.safety ??
-      (local.baseline?.safety === compactProjectionFingerprint(r5SafetyBaseline(row))
-        ? delta.safety
-        : reconcileR5SafetyEdits(delta.safety, r5SafetyBaseline(row)));
+    const safety = reconcileR5SafetySnapshot(row, delta.safety, local.baseline?.safety);
     if (safety) {
       fresh.safety = safetyFromWire(safety);
       retained.safety = safety;
@@ -364,7 +363,9 @@ function restoreComponentDelta(
         supersededExpression = true;
       }
       if (old.doseExpression) {
-        if (unchangedDose && !entry.expression) entry.expression = old.doseExpression;
+        if (unchangedDose && baseline?.doseExpression === undefined &&
+            !Object.prototype.hasOwnProperty.call(live, "doseExpression"))
+          entry.expression = old.doseExpression;
         else if (!equalStructuredValues(entry.expression, old.doseExpression)) supersededExpression = true;
       }
       if (old.doseQuantity?.comparator) {
@@ -385,7 +386,9 @@ function restoreComponentDelta(
         }
       }
       if (old.rateExpression) {
-        if (unchangedRate && !entry.rateExpression) entry.rateExpression = old.rateExpression;
+        if (unchangedRate && baseline?.rateExpression === undefined &&
+            !Object.prototype.hasOwnProperty.call(live, "rateExpression"))
+          entry.rateExpression = old.rateExpression;
         else if (!equalStructuredValues(entry.rateExpression, old.rateExpression))
           supersededExpression = true;
       }
@@ -483,6 +486,13 @@ function instructionBaseline(marker: FhirExtension | undefined): {
     rows.push(row);
   }
   return { instruction, rows, complete: complete && rows.length > 0 };
+}
+
+/** A returned draft baseline identifies the complete lifted membership list.
+ * Bare partial step annotations remain additive; [] explicitly clears drafts. */
+function ownsEmptyStageMembership(course: EzCourseMetadata | undefined): boolean {
+  return course?.step !== undefined && (!course.step.length ||
+    retainedDraftStepIndices(course) !== undefined);
 }
 
 function reconcileNativeCompactCourse(
@@ -677,6 +687,20 @@ function reconcileNativeCompactCourse(
     }
     metadata.set(sequence, { step: merged, rowIndex: -1 });
   }
+  // A lifted step list owns metadata-only stage membership. Its omission
+  // keeps the saved stages, but deleting an empty entry is a live edit; the
+  // retained header and its old stepCount cannot add that stage back.
+  let removedEmptySequences: Set<number> | undefined;
+  if (ownsEmptyStageMembership(editedCourse) && header?.emptyStep?.length) {
+    const liveSequences = new Set(dosages.map(dosage => dosage.sequence ?? 1));
+    for (const step of header.emptyStep) {
+      if (editedSequences.has(step.sequence) || liveSequences.has(step.sequence)) continue;
+      (removedEmptySequences ??= new Set()).add(step.sequence);
+      metadata.delete(step.sequence);
+      metadataEdited = true;
+      sources.push(retainedCourseStepSource(step));
+    }
+  }
   let instructionMarker: FhirExtension | undefined;
   for (const dosage of dosages) {
     instructionMarker = dosage.extension?.find(isRenderedInstructionMarker);
@@ -691,6 +715,8 @@ function reconcileNativeCompactCourse(
     !conflictingPhases.size &&
     baselineRows.length === dosages.length &&
     baselineRows.length > 0;
+  let textWasEdited = false, allTexts = true;
+  let structuredWasEdited = false, allTextsWereEdited = true;
   const live = dosages.map((dosage, index) => {
     const local = localRows[index];
     const sourceIndex = local?.value.rowIndex ?? index;
@@ -715,6 +741,10 @@ function reconcileNativeCompactCourse(
     if (!projectionMatches || !textMatches || used.has(sourceIndex) || !baseline) instructionMatches = false;
     used.add(sourceIndex);
     if (local && (!projectionMatches || !textMatches)) sources.push(localReconciliationSource(local.marker));
+    if (!textMatches) textWasEdited = true;
+    else allTextsWereEdited = false;
+    if (!projectionMatches) structuredWasEdited = true;
+    if ((!projectionMatches && textMatches) || !dosage.text) allTexts = false;
     return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
@@ -776,7 +806,8 @@ function reconcileNativeCompactCourse(
   const stageCount = Math.max(0, ...localRows.map((local) => local?.value.stepCount ?? 0));
   const observedLast = Math.max(0, ...sequences);
   const fillCount = Math.min(stageCount, observedLast, 10_000);
-  for (let sequence = 1; sequence <= fillCount; sequence++) sequences.add(sequence);
+  for (let sequence = 1; sequence <= fillCount; sequence++)
+    if (!removedEmptySequences?.has(sequence)) sequences.add(sequence);
   if (stageCount > 10_000 || observedLast > 10_000) {
     for (const local of localRows) {
       if (local && (local.value.stepCount > 10_000 || local.value.sequence > 10_000))
@@ -811,17 +842,29 @@ function reconcileNativeCompactCourse(
       );
     instructionMatches = false;
   }
+  // fromDosageDetails returns a lifted copy of renderedInstruction along
+  // with the saved baseline. Re-supplying that unchanged copy does not make
+  // old wording current after a row edit; an explicit replacement still wins.
+  let instruction = explicitInstruction !== undefined &&
+    (!parsedBaseline.complete || explicitInstruction !== savedInstruction)
+    ? explicitInstruction : renderedInstruction;
+  if (instruction === undefined) {
+    if (instructionMatches) instruction = savedInstruction;
+    // A component rewrite alongside clinical edits is not a replacement
+    // whole-course instruction. Recombine unchanged fragments only for a
+    // text-only edit; a structural rewrite needs all current text supplied.
+    else if (parsedBaseline.complete && allTexts && textWasEdited &&
+        (!structuredWasEdited || allTextsWereEdited)) {
+      instruction = "";
+      for (let index = 0; index < live.length; index++)
+        instruction += (index ? "; " : "") + live[index].text;
+    }
+  }
   const result = courseFromFields(
     {
       ...header?.course,
       ...courseEdits,
-      ...(explicitInstruction !== undefined
-        ? { renderedInstruction: explicitInstruction }
-        : renderedInstruction !== undefined
-        ? { renderedInstruction }
-        : instructionMatches && savedInstruction !== undefined
-        ? { renderedInstruction: savedInstruction }
-        : {}),
+      ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
     },
     steps
   );
@@ -927,8 +970,17 @@ function reconcileNativeRetainedCourse(
     }
     metadata.set(step.sequence, step);
   }
+  let removedEmptyStage = false;
+  const ownsEmptyMembership = ownsEmptyStageMembership(course);
+  const retainedSequences: number[] = [];
+  for (let index = 0; index < retained.step.length; index++) {
+    const sequence = index + 1;
+    if (ownsEmptyMembership && !retained.step[index].component.length &&
+        !metadata.has(sequence) && !groups.has(sequence)) removedEmptyStage = true;
+    else retainedSequences.push(sequence);
+  }
   const sequenceSet = new Set<number>([
-    ...retained.step.map((_, index) => index + 1),
+    ...retainedSequences,
     ...groups.keys(),
     ...metadata.keys(),
   ]);
@@ -996,6 +1048,7 @@ function reconcileNativeRetainedCourse(
     );
   }
   let structuredChanged = Boolean(
+    removedEmptyStage ||
     (course?.id !== undefined && course.id !== retained.id) ||
       (course?.extension !== undefined &&
         !equivalentProjection({ extension: retained.extension }, { extension: course.extension })) ||
@@ -1193,9 +1246,25 @@ function reconcileNativeRetainedCourse(
       const referenceEqual =
         !siteReferenceSpecified ||
         (old !== undefined && equivalentProjection(old.site?.reference, expanded.siteReference));
-      if (!rawEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual)
+      // The ordinary R5 projection intentionally omits expression choices.
+      // An explicitly supplied editable expression still owns its current
+      // meaning; only an absent strict-R5 field can inherit the saved source.
+      let expressionsEqual = true;
+      if (old && rawEqual)
+        for (let index = 0; index < (expanded.doseAndRate?.length ?? 0); index++) {
+          const liveEntry = expanded.doseAndRate![index];
+          const oldEntry = old.doseAndRate?.[index];
+          if ((Object.prototype.hasOwnProperty.call(liveEntry, "doseExpression") &&
+               !equalStructuredValues(liveEntry.doseExpression, oldEntry?.doseExpression)) ||
+              (Object.prototype.hasOwnProperty.call(liveEntry, "rateExpression") &&
+               !equalStructuredValues(liveEntry.rateExpression, oldEntry?.rateExpression))) {
+            expressionsEqual = false;
+            break;
+          }
+        }
+      if (!rawEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
         structuredChanged = true;
-      if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual) {
+      if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual) {
         components.push(sourceMember(old, sequence).native);
         continue;
       }
@@ -1365,6 +1434,7 @@ export function courseFromR5(
   let instructionStillMatches = hasInstructionBaseline && snapshot.rows.length === dosages.length;
   let textWasEdited = false,
     allTexts = true;
+  let structuredWasEdited = false, allTextsWereEdited = true;
   let effectiveDosages: readonly (FhirDosage | EzDosage)[] = dosages;
   if (hasInstructionBaseline)
     for (let index = 0; index < dosages.length; index++) {
@@ -1374,18 +1444,27 @@ export function courseFromR5(
       const textMatches = before?.text === dosageTextFingerprint(dosage);
       if (!projectionMatches || !textMatches) instructionStillMatches = false;
       if (!textMatches) textWasEdited = true;
+      else allTextsWereEdited = false;
+      if (!projectionMatches) structuredWasEdited = true;
       if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
       if (!projectionMatches && textMatches) {
         if (effectiveDosages === dosages) effectiveDosages = dosages.slice();
         (effectiveDosages as (FhirDosage | EzDosage)[])[index] = { ...dosage, text: undefined };
+        allTexts = false;
       }
     }
   let clinicianEditedText: string | undefined;
-  if (hasInstructionBaseline && !instructionStillMatches && allTexts && textWasEdited) {
+  if (hasInstructionBaseline && !instructionStillMatches && allTexts && textWasEdited &&
+      (!structuredWasEdited || allTextsWereEdited)) {
     clinicianEditedText = "";
-    for (let i = 0; i < dosages.length; i++) clinicianEditedText += (i ? "; " : "") + dosages[i].text;
+    for (let i = 0; i < effectiveDosages.length; i++)
+      clinicianEditedText += (i ? "; " : "") + effectiveDosages[i].text;
   }
   const preservedInstruction = instructionStillMatches ? savedInstruction : clinicianEditedText;
+  const explicitCourseInstruction = course?.renderedInstruction !== undefined &&
+    (!hasInstructionBaseline || course.renderedInstruction !== savedInstruction)
+    ? course.renderedInstruction : undefined;
+  const currentInstruction = explicitCourseInstruction ?? renderedInstruction ?? preservedInstruction;
   const instructionSource =
     instructionMarker && (!instructionStillMatches || hasUnrecognizedEditMetadata(instructionMarker))
       ? instructionMarker
@@ -1416,7 +1495,7 @@ export function courseFromR5(
       carrier.modifierExtension?.length === 1 &&
       carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL
     ) {
-      const instruction = course?.renderedInstruction ?? renderedInstruction ?? carrier.text;
+      const instruction = currentInstruction ?? carrier.text;
       // Even an incomplete clinician-authored stage is live editable data.
       // This carrier has no administration: merge its explicit stage edits
       // without treating the carrier's Dosage.text as an active component.
@@ -1449,6 +1528,9 @@ export function courseFromR5(
         if (!equalStructuredValues(prior, merged)) edited = true;
         emptySteps[sequence - 1] = stageFromFields(merged, []);
       }
+      const currentEmptySteps = ownsEmptyStageMembership(course)
+        ? emptySteps.filter((_, index) => editedSequences.has(index + 1)) : emptySteps;
+      if (currentEmptySteps.length !== emptySteps.length) edited = true;
       const { step: _originalSteps, renderedInstruction: _originalInstruction, ...originalHeader } = retained;
       const {
         step: _editedSteps,
@@ -1460,7 +1542,7 @@ export function courseFromR5(
         edited = true;
       const updated = courseFromFields(
         { ...header, ...(instruction !== undefined ? { renderedInstruction: instruction } : {}) },
-        emptySteps
+        currentEmptySteps
       );
       if (edited)
         addWarning(
@@ -1492,7 +1574,7 @@ export function courseFromR5(
     const result = reconcileNativeRetainedCourse(
       retained,
       effectiveDosages,
-      course?.renderedInstruction ?? renderedInstruction,
+      currentInstruction,
       course,
       preserveRetainedMarkers,
       warnings,
@@ -1502,12 +1584,25 @@ export function courseFromR5(
     );
     return withPreservedSourceExtension(result, instructionSource);
   }
+  // An all-empty editable R5 projection has no dosage carrier. Its course
+  // annotation is the only saved source; retain deleted drafts as inert
+  // provenance before the R6 writer replaces the active draft annotation.
+  if (course?.step !== undefined) {
+    const savedIndices = retainedDraftStepIndices(course);
+    if (savedIndices) {
+      const current = new Set(course.step.map(item => item.sequence));
+      if (savedIndices.some(index => !current.has(index + 1))) {
+        const marker = course.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
+        if (marker) reconciliationSources.push(marker);
+      }
+    }
+  }
   const header:Omit<FhirR6DosageInstruction,"step"> & {step?:EzCourseMetadata["step"]}=Object.assign({},course);
   delete header.step;
-  if (course?.renderedInstruction === undefined) {
-    if (renderedInstruction !== undefined) header.renderedInstruction = renderedInstruction;
-    else if (preservedInstruction !== undefined) header.renderedInstruction = preservedInstruction;
-    else if (effectiveDosages.length === 1 && effectiveDosages[0].text)
+  if (currentInstruction !== undefined) header.renderedInstruction = currentInstruction;
+  else {
+    delete header.renderedInstruction;
+    if (effectiveDosages.length === 1 && effectiveDosages[0].text)
       header.renderedInstruction = effectiveDosages[0].text;
   }
   if (effectiveDosages.length === 1 && !course?.step?.length) {

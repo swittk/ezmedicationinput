@@ -795,7 +795,7 @@ function sameDose(
 ): boolean {
   if (!left || !right) return left === right;
   return left.value === right.value && left.unit === right.unit &&
-    equalStructuredValues(left.range, right.range);
+    left.comparator === right.comparator && equalStructuredValues(left.range, right.range);
 }
 
 function sameSite(

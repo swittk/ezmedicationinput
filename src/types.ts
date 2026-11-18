@@ -441,9 +441,10 @@ export interface FhirDoseAndRate extends FhirBackboneElement {
  * itself (a BackboneType). No modifierExtension is valid on this child. */
 export type FhirR6DoseAndRate = Omit<EzDoseAndRate,
   "modifierExtension" | "doseQuantity" | "rateQuantity" | "rateRatio"> & {
-  /** R6 dose[x]/rate[x] select Quantity (not R5 SimpleQuantity). */
-  doseQuantity?: FhirR6Quantity;
-  rateQuantity?: FhirR6Quantity;
+  /** Both R5 and R6 scalar dose/rate choices constrain Quantity to
+   * SimpleQuantity. Qualifiers use the shared quantity-operator extension. */
+  doseQuantity?: FhirSimpleQuantity;
+  rateQuantity?: FhirSimpleQuantity;
   rateRatio?: FhirR6Ratio;
 };
 
@@ -1837,6 +1838,8 @@ export interface CanonicalClinicalAdjuncts {
 }
 
 export interface CanonicalSigClause {
+  /** Current dose/timing proof for replaying retained source, including dose-less clauses. */
+  sourceProjectionVerified?: boolean;
   kind: "administration";
   /** Source-backed phase operation; resolved by the typed regimen graph. */
   regimenAdjustment?: "replace" | "add" | "replace-target";
