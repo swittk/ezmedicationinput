@@ -316,3 +316,79 @@ describe("November 18 overlapping-course maximum supply and rate dose caps", () 
     });
   }
 });
+
+describe("November 18 review: dose ranges own upper-bound rolling-cap quantity", () => {
+  const options = {
+    from: "2026-01-01T00:00:00Z",
+    orderedAt: "2026-01-01T00:00:00Z",
+    timeZone: "UTC",
+  };
+  function rangedCourse(maxPerDay: number) {
+    return {
+      kind: "course" as const,
+      cycleInterval: { value: 1, unit: "d" },
+      stages: [{
+        administrations: [{
+          kind: "administration" as const,
+          amounts: [{ range: {
+            low: { value: 1, unit: "tab" },
+            high: { value: 2, unit: "tab" },
+          } }],
+          schedule: { recurrence: {
+            frequency: 1, frequencyMax: 2,
+            period: 1, periodUnit: FhirPeriodUnit.Day,
+            clocks: ["09:00:00"],
+            courseLength: { value: 2, unit: "d" },
+          } },
+          limits: [{ scope: "period" as const,
+            amount: { value: maxPerDay, unit: "tab" },
+            period: { value: 1, unit: "d" },
+          }],
+        }],
+      }],
+    };
+  }
+
+  it("caps the upper-range maximum plan by tablets, not just administrations", () => {
+    const course = rangedCourse(4);
+    const original = structuredClone(course);
+    // Clinical scheduling uses the one authored concrete clock; the
+    // two-per-day range belongs to maximum supply estimation only.
+    expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+    ]);
+    // Jan 1 and Jan 2 each allow only TWO 2-tab administrations:
+    // maximum quantity = 4 tabs/day x 2 days = 8, never 12.
+    expect(calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    })).toMatchObject({
+      totalUnits: 8, unit: "tab", quantityKind: "maximum",
+    });
+    expect(course).toEqual(original);
+  });
+
+  it("uses the upper dose of two tablets when one administration exhausts each day's cap", () => {
+    const course = rangedCourse(2);
+    expect(calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    })).toMatchObject({
+      totalUnits: 4, unit: "tab", quantityKind: "maximum",
+    });
+  });
+
+  it("keeps a contradictory one-tablet cap recoverable rather than vetoing the dose-range schedule", () => {
+    const course = rangedCourse(1);
+    expect(nextDueDoses(course, { ...options, limit: 3 })).toHaveLength(3);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply.quantityKind).toBe("maximum");
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].range.high.value).toBe(2);
+  });
+});

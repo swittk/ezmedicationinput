@@ -4446,7 +4446,10 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
  * projection. Preserve the original member for units, explanations and
  * source metadata; the projected member exists solely for scheduling.
  */
-function maximumChronologicalSupplyCourse(course: CanonicalCourse): {
+function maximumChronologicalSupplyCourse(
+  course: CanonicalCourse,
+  options: CanonicalSupplyOptions
+): {
   course: CanonicalCourse;
   originalOf: Map<CanonicalAdministration, CanonicalAdministration>;
 } {
@@ -4459,6 +4462,16 @@ function maximumChronologicalSupplyCourse(course: CanonicalCourse): {
       const source = stage.administrations[j];
       const maximal = prepareMaximumSupplyTiming(source);
       let generated = maximal.dosage;
+      // The cap ledger must count the same per-administration quantity as
+      // numeric supply. A range has no scalar amount until its applicable
+      // maximum is selected; otherwise overlapping cycles bypass the cap
+      // while the final measurement still multiplies by the upper dose.
+      // Use the existing supply measurer ONLY for this capped range branch.
+      // The original authored range stays on the source member.
+      const amounts = generated.amounts;
+      if (amounts?.length === 1 && !amounts[0].quantity && amounts[0].range &&
+          hasPeriodLimits(generated))
+        generated = prepareMeasuredDose(generated, options);
       if (maximal.frequencyMaximum) {
         const repeat = generated.schedule!.recurrence!;
         generated = {
@@ -5196,7 +5209,7 @@ function calculateCourseTotalUnits(
       ? new Map<string, string[]>() : undefined;
     const firstCycleEnd=cycleAdvance(anchor);
     if(priorCycleUsage && !definitelyNonOverlappingCycle(singleCycle) && firstCycleEnd){
-      const maximum = maximumChronologicalSupplyCourse(course);
+      const maximum = maximumChronologicalSupplyCourse(course, options);
       const maximumCycle = maximum.course === course
         ? singleCycle : { ...maximum.course, cycleInterval: undefined };
       if (repeatedCourseHorizon(maximumCycle,anchor,firstCycleEnd,zone,firstClock,options)>firstCycleEnd) {

@@ -7197,3 +7197,43 @@ Validation on this isolated branch:
 - GitHub replies belong within the individual existing CodeRabbit review
   threads; never post an unsolicited top-level PR comment or request
   duplicate full reviews.
+
+
+## 2026-11-18 — PR #14 review: ranged quantity must precede rolling-cap admission
+
+A new CodeRabbit finding identified a supported clinical correctness error in
+overlapping repeated-course maximum supply: `1–2 tablets`, once-to-twice
+daily, with `4 tablets/24h`. The maximum-frequency supply-only projection
+raised the frequency, but left a range without a scalar administration dose,
+so `executableQuantityCaps` skipped the period ceiling. The final supply
+measurer nevertheless selected the high endpoint, producing **12 tablets
+instead of the cap-compliant 8** across Jan 1–2.
+
+This was independently reproduced with failing exact-number tests before
+the patch. The correction is at the existing maximum-chronological-supply
+projection: ONLY when a member has a dose range, no scalar quantity, and a
+period cap, the already-existing `prepareMeasuredDose` owner resolves the
+upper/appropriate numerical dose before opportunities enter the shared cap
+ledger. This reuses the exact numeric-supply choice rather than establishing
+a second range interpretation. The original canonical course retains its
+complete range, its original concrete clock and provenance. No additional
+normal-parser work, full graph clone or FHIR-version intermediate is added.
+
+The independent tests now assert: 4 tabs/day cap -> 8 total tabs;
+2 tabs/day cap -> 4 total tabs; a contradictory 1 tab/day cap is retained as
+unevaluable rather than a hard veto; original source course remains
+byte/structure equivalent after calculation. The original concrete
+`nextDueDoses` clock plan is unchanged, including genuine overlapping
+cycles.
+
+Validation: TypeScript/ESM/CJS build passed; **4,284/4,284 source tests in
+47/47 suites**, packaged **4/4** passed. Paired comparison against exact
+pre-fix commit `228d66b` (23 alternating warmed rounds per case), all nine
+tested workloads within 4% regression threshold: ordinary parser +1.76%,
+ocular parser +0.52%, R6 EN format +2.90%, R6 TH format -4.77%, fresh R5
+Thai source +2.69%, scalar nextDue +1.96%, scalar supply +0.34%, overlapping
+capped scalar supply -2.44%. Corrected ranged supply has NEW output and is
+not a like-for-like speed comparison (the prior output was clinically wrong).
+
+The new feedback was handled within the original CodeRabbit thread; no
+unsolicited top-level comments and no duplicate full review request.
