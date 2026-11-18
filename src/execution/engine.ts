@@ -51,6 +51,7 @@ import type {
   CanonicalTiming,
   CanonicalRecurrence,
   CanonicalCourse,
+  CanonicalStage,
   CanonicalBoundary,
   CanonicalScheduleInput,
   CanonicalSupplyOptions,
@@ -1242,6 +1243,51 @@ function isQuantityCapPeriodUnit(unit: string | undefined): boolean {
     default: return false;
   }
 }
+/** A rate-only infusion has a measurable PER-ADMINISTRATION quantity only
+ * when its authored infusion duration resolves against the rate's time unit.
+ * This conversion is shared by supply and the chronological cap ledger:
+ * scheduling never guesses a quantity from a bare rate or unknown duration.
+ * Regular scalar tablet/drop paths never invoke the rate calculation. */
+const INFUSION_TIME_SECONDS: Readonly<Record<string, number>> = {
+  s: 1, min: 60, h: 3600, d: 86400, wk: 604800,
+};
+function measuredRateQuantity(
+  amount: CanonicalAmount,
+  recurrence: CanonicalRecurrence | undefined
+): CanonicalMeasure | undefined {
+  const duration = recurrence?.occurrenceDuration;
+  const durationUnit = recurrence?.occurrenceDurationUnit;
+  const seconds = durationUnit ? INFUSION_TIME_SECONDS[durationUnit] : undefined;
+  if (duration === undefined || !Number.isFinite(duration) || duration <= 0 || !seconds)
+    return undefined;
+  let value: number | undefined;
+  let unit: string | undefined;
+  let comparator: CanonicalMeasure["comparator"];
+  if (amount.rate?.value !== undefined && amount.rate.unit) {
+    const match = amount.rate.unit.match(/^(.+?)\/(s|min|h|d|wk)$/i);
+    const per = match ? INFUSION_TIME_SECONDS[match[2].toLowerCase()] : undefined;
+    if (per) {
+      value = amount.rate.value * duration * seconds / per;
+      unit = match![1];
+      comparator = amount.rate.comparator;
+    }
+  } else if (
+    amount.rateRatio?.numerator?.value !== undefined &&
+    amount.rateRatio.denominator?.value !== undefined
+  ) {
+    const numerator = amount.rateRatio.numerator;
+    const denominator = amount.rateRatio.denominator;
+    const per = INFUSION_TIME_SECONDS[(denominator.code ?? denominator.unit ?? "").toLowerCase()];
+    if (per && denominator.value! > 0) {
+      value = (numerator.value! / denominator.value!) * duration * seconds / per;
+      unit = numerator.unit ?? numerator.code;
+      comparator = numerator.comparator ?? denominator.comparator;
+    }
+  }
+  if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit)
+    return undefined;
+  return { value, unit, ...(comparator ? { comparator } : {}) };
+}
 function executableQuantityCaps(
   dosage: CanonicalAdministration,
   context?: MedicationContext
@@ -1249,7 +1295,11 @@ function executableQuantityCaps(
   const limits = dosage.limits ?? [];
   if (!limits.length) return [];
   const doseRates = dosage.amounts ?? [];
-  const dose = doseRates.length === 1 ? doseRates[0].quantity : undefined;
+  const first = doseRates.length === 1 ? doseRates[0] : undefined;
+  const dose = first?.quantity ??
+    (first && !first.expression && !first.rateExpression &&
+      (first.rate || first.rateRatio)
+      ? measuredRateQuantity(first, dosage.schedule?.recurrence) : undefined);
   const doseOperator = getQuantityComparator(dose);
   // Approximate amounts deliberately use their authored nominal values.
   // An inequality does not determine a unique dose-count conversion.
@@ -1299,9 +1349,11 @@ function executableQuantityCaps(
     }
     const equivalentDose = perTargetDose * getAdministrationTargetMultiplier(dosage, context);
     const max = Math.floor(maximum / equivalentDose + 1e-9);
-    if (max < 1) {
-      continue;
-    }
+    // A stated ceiling below the authored dose is contradictory. Preserve
+    // the clinician's editable schedule rather than turning a suggestion
+    // conflict into a universal zero-dose veto; supply will retain the
+    // unevaluable limit as a maximum instead.
+    if (max < 1) continue;
     caps.push({ max, period, periodUnit: periodUnit as DurationUnit });
   }
   return caps;
@@ -4385,6 +4437,54 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
     infusionDurationMaximum,
   };
 }
+/** The ordinary schedule remains the clinician's CONCRETE clocks. Numeric
+ * supply, however, may use the upper frequency/count/infusion-duration
+ * choices. For overlapping capped cycles those extra opportunities MUST
+ * pass through the same chronological cap ledger, not a post hoc count.
+ *
+ * Only the specialized overlapping supply path constructs this shallow
+ * projection. Preserve the original member for units, explanations and
+ * source metadata; the projected member exists solely for scheduling.
+ */
+function maximumChronologicalSupplyCourse(course: CanonicalCourse): {
+  course: CanonicalCourse;
+  originalOf: Map<CanonicalAdministration, CanonicalAdministration>;
+} {
+  let alteredStages: CanonicalStage[] | undefined;
+  const originalOf = new Map<CanonicalAdministration, CanonicalAdministration>();
+  for (let i = 0; i < course.stages.length; i++) {
+    const stage = course.stages[i];
+    let members: CanonicalAdministration[] | undefined;
+    for (let j = 0; j < stage.administrations.length; j++) {
+      const source = stage.administrations[j];
+      const maximal = prepareMaximumSupplyTiming(source);
+      let generated = maximal.dosage;
+      if (maximal.frequencyMaximum) {
+        const repeat = generated.schedule!.recurrence!;
+        generated = {
+          ...generated,
+          schedule: {
+            ...generated.schedule!,
+            code: undefined,
+            recurrence: { ...repeat, clocks: undefined, anchors: undefined },
+          },
+        };
+      }
+      if (generated === source) continue;
+      if (!members) members = stage.administrations.slice();
+      members[j] = generated;
+      originalOf.set(generated, source);
+    }
+    if (members) {
+      if (!alteredStages) alteredStages = course.stages.slice();
+      alteredStages[i] = { ...stage, administrations: members };
+    }
+  }
+  return {
+    course: alteredStages ? { ...course, stages: alteredStages } : course,
+    originalOf,
+  };
+}
 function prepareMeasuredDose(
   dosage: CanonicalAdministration,
   options: CanonicalSupplyOptions
@@ -4419,51 +4519,19 @@ function prepareMeasuredDose(
     return dosage;
   if (!quantity && (first.rate || first.rateRatio)) {
     const repeat = dosage.schedule?.recurrence;
-    const duration = repeat?.occurrenceDuration;
-    const durationUnit = repeat?.occurrenceDurationUnit;
-    if (duration === undefined || !durationUnit || duration <= 0)
+    if (repeat?.occurrenceDuration === undefined ||
+        !repeat.occurrenceDurationUnit ||
+        repeat.occurrenceDuration <= 0)
       throw new MedicationQuantityCalculationError(
         "infusion-duration-required",
         "Infusion rate is specified, but duration per infusion is not. Supply the infusion duration before computing volume/amount."
       );
-    const timeSeconds: Record<string, number> = {
-      s: 1,
-      min: 60,
-      h: 3600,
-      d: 86400,
-      wk: 604800,
-    };
-    let amount: number | undefined, unit: string | undefined;
-    if (first.rate?.value !== undefined && first.rate.unit) {
-      const match = first.rate.unit.match(/^(.+?)\/(s|min|h|d|wk)$/i);
-      if (match) {
-        const denominator = match[2].toLowerCase();
-        const divisor = timeSeconds[denominator];
-        const numerator = timeSeconds[durationUnit];
-        if (divisor && numerator) {
-          amount = (first.rate.value * duration * numerator) / divisor;
-          unit = match[1];
-        }
-      }
-    } else if (
-      first.rateRatio?.numerator?.value !== undefined &&
-      first.rateRatio.denominator?.value !== undefined
-    ) {
-      const numerator = first.rateRatio.numerator;
-      const denominator = first.rateRatio.denominator;
-      const divisor = timeSeconds[denominator.code ?? denominator.unit ?? ""];
-      const seconds = timeSeconds[durationUnit];
-      if (divisor && seconds && denominator.value! > 0) {
-        amount = ((numerator.value! / denominator.value!) * duration * seconds) / divisor;
-        unit = numerator.unit ?? numerator.code;
-      }
-    }
-    if (amount === undefined || !Number.isFinite(amount) || amount <= 0)
+    quantity = measuredRateQuantity(first, repeat);
+    if (!quantity)
       throw new MedicationQuantityCalculationError(
         "rate-units-unresolved",
         "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity."
       );
-    quantity = { value: amount, unit };
   }
   if (!quantity && first.range) {
     const high = first.range.high;
@@ -5127,12 +5195,16 @@ function calculateCourseTotalUnits(
     const priorCycleUsage = hasRollingCycleLimit(singleCycle)
       ? new Map<string, string[]>() : undefined;
     const firstCycleEnd=cycleAdvance(anchor);
-    if(priorCycleUsage && !definitelyNonOverlappingCycle(singleCycle) && firstCycleEnd &&
-        repeatedCourseHorizon(singleCycle,anchor,firstCycleEnd,zone,firstClock,options)>firstCycleEnd){
+    if(priorCycleUsage && !definitelyNonOverlappingCycle(singleCycle) && firstCycleEnd){
+      const maximum = maximumChronologicalSupplyCourse(course);
+      const maximumCycle = maximum.course === course
+        ? singleCycle : { ...maximum.course, cycleInterval: undefined };
+      if (repeatedCourseHorizon(maximumCycle,anchor,firstCycleEnd,zone,firstClock,options)>firstCycleEnd) {
       // The identical chronological acceptance stream governs numeric
       // supply; cycle-ordinal summation is incorrect for overlapping
-      // event windows with a shared rolling cap.
-      const events=chronologicalRepeatedEvents(course,{
+      // event windows with a shared rolling cap. Maximal frequency
+      // opportunities use this SAME ledger, without changing source clocks.
+      const events=chronologicalRepeatedEvents(maximum.course,{
         ...options,from:queryStart,orderedAt:anchor,limit:10000
       },zone,queryEnd,Number.POSITIVE_INFINITY,options.context);
       // Each accepted cycle event is one clinical administration, even when
@@ -5142,7 +5214,7 @@ function calculateCourseTotalUnits(
       for(const event of events){
         let group=byMember.get(event.key);
         if(!group) {
-          group={member:event.member,count:0};
+          group={member:maximum.originalOf.get(event.member) ?? event.member,count:0};
           byMember.set(event.key,group);
         }
         group.count++;
@@ -5152,7 +5224,10 @@ function calculateCourseTotalUnits(
         const dosage:CanonicalAdministration={
           ...group.member,
           delayMinutes:undefined,phaseOrigin:undefined,phaseOriginIssue:undefined,
-          limits:group.member.limits?.filter(limit=>limit.scope!=="period"),
+          // Retain authored period limits for the final supply explanation.
+          // The acceptedEventCount path never re-enforces them; any cap that
+          // could NOT be executed in the chronological ledger must still be
+          // visible as an unevaluated maximum, rather than vanishing.
           // Eligibility was already evaluated on each concrete event.
           // Without a patient-specific condition evaluator, the accepted
           // opportunities still represent a MAXIMUM rather than a promise
@@ -5171,6 +5246,7 @@ function calculateCourseTotalUnits(
         entries.push({total,unit:total.unit});
       }
       return sumCourseUnits(entries,options);
+      }
     }
     let cycleStart = anchor;
     let guard = 0;

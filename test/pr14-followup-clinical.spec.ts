@@ -50,12 +50,16 @@ describe("repeated-course clinical chronology", () => {
     };
     const due = nextDueDoses(course, { ...options, limit: 20 });
     expect(due).toContain("2026-01-01T08:00:00+00:00");
+    expect(due).toContain("2026-01-01T09:00:00+00:00");
     expect(due).toContain("2026-01-02T09:00:00+00:00");
     expect(due.some(value => value.startsWith("2026-01-04"))).toBe(true);
     const supply = calculateTotalUnits({
       ...options, dosage: course, durationValue: 5, durationUnit: FhirPeriodUnit.Day
     });
-    expect(supply.totalUnits).toBeGreaterThan(2);
+    // A finite 08:00 loading dose completes before the 09:00 maintenance
+    // clock ON JANUARY 1. The 5-day window therefore has two loading
+    // tablets plus five maintenance tablets (Jan 1 through Jan 5).
+    expect(supply.totalUnits).toBe(7);
     // A partially stated cap is preserved for review but cannot impose
     // shared chronological acceptance; the uncapped loading stage must
     // still finish before maintenance starts.
@@ -175,4 +179,140 @@ describe("R5 source dose identity after live edits", () => {
     expect(changedUnitText).not.toBe(source);
     expect(changedUnitText).toMatch(/drop/iu);
   });
+});
+
+describe("November 18 overlapping-course maximum supply and rate dose caps", () => {
+  const capPeriod = { value: 1, unit: "d" };
+  const anchor = "2026-01-01T00:00:00Z";
+  const o = { from: anchor, orderedAt: anchor, timeZone: "UTC" };
+  const stage = (amounts: Array<{
+    quantity?: { value: number; unit: string };
+    rate?: { value: number; unit: string };
+    rateRatio?: { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } };
+  }>, limit: number, maximum?: boolean) => ({
+    kind: "course" as const,
+    cycleInterval: { value: 1, unit: "d" },
+    stages: [{ administrations: [{
+      kind: "administration" as const,
+      amounts,
+      schedule: { recurrence: {
+        frequency: 1,
+        ...(maximum ? { frequencyMax: 2 } : {}),
+        period: 1,
+        periodUnit: FhirPeriodUnit.Day,
+        clocks: [maximum ? "09:00:00" : "00:00:00"],
+        courseLength: { value: 2, unit: "d" },
+        ...(amounts[0]?.rate || amounts[0]?.rateRatio
+          ? { occurrenceDuration: 1, occurrenceDurationUnit: FhirPeriodUnit.Hour }
+          : {}),
+      } },
+      limits: [{ scope: "period" as const,
+        amount: { value: limit, unit: amounts[0]?.quantity?.unit ?? "mL" },
+        period: capPeriod
+      }]
+    }] }]
+  });
+
+  it("keeps concrete scheduling at one clock, but computes two-per-cycle maximum supply through shared caps", () => {
+    const course = stage([{ quantity: { value: 1, unit: "tab" } }], 4, true);
+    expect(nextDueDoses(course, { ...o, limit: 5 })).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply).toMatchObject({ totalUnits: 10, unit: "tab", quantityKind: "maximum" });
+  });
+
+  it("applies a one-tablet rolling cap to the upper-frequency plan, not just the source clock plan", () => {
+    const course = stage([{ quantity: { value: 1, unit: "tab" } }], 1, true);
+    // Even two-per-cycle maximum opportunities must respect the one
+    // administration/day clinical ceiling across overlapping cycles.
+    expect(calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "maximum" });
+  });
+
+  it("retains a contradictory 5 mL/day cap without making the 10 mL infusion unschedulable", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 5);
+    const scheduled = nextDueDoses(course, { ...o, limit: 4 });
+    expect(scheduled).toEqual([
+      "2026-01-01T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-03T00:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply).toMatchObject({ totalUnits: 50, unit: "mL", quantityKind: "maximum" });
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].rate).toEqual({
+      value: 10, unit: "mL/h"
+    });
+  });
+
+  it("evaluates a rate-only maximum-frequency course with the SAME shared volume ceiling", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10, true);
+    const before = structuredClone(course);
+    const due = nextDueDoses(course, { ...o, limit: 3 });
+    expect(due).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 30, unit: "mL", quantityKind: "maximum" });
+    expect(course).toEqual(before);
+  });
+
+  it("carries rate-only rolling-cap history across a late supply query", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10);
+    const from = "2026-01-02T12:00:00Z";
+    expect(nextDueDoses(course, { ...o, from, limit: 2 })).toEqual([
+      "2026-01-03T00:00:00+00:00", "2026-01-04T00:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      ...o, from, dosage: course, durationValue: 1, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(10);
+  });
+
+  it("retains an incompatible period cap as unevaluated clinical meaning instead of claiming exact supply", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10);
+    const member = course.stages[0].administrations[0];
+    member.limits[0].amount.unit = "mg";
+    const originalLimit = structuredClone(member.limits);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply.totalUnits).toBe(50);
+    expect(supply.unit).toBe("mL");
+    expect(supply.quantityKind).toBe("maximum");
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(member.limits).toEqual(originalLimit);
+  });
+
+  for (const [name, amounts] of [
+    ["rate quantity", [{ rate: { value: 10, unit: "mL/h" } }]],
+    ["rate ratio", [{ rateRatio: { numerator: { value: 10, unit: "mL" },
+      denominator: { value: 1, unit: "h" } } }]],
+  ] as const) {
+    it("applies a 10 mL/24h limit to each measured 10 mL infusion from " + name, () => {
+      const course = stage([...amounts], 10);
+      expect(nextDueDoses(course, { ...o, limit: 4 })).toEqual([
+        "2026-01-01T00:00:00+00:00",
+        "2026-01-02T00:00:00+00:00",
+        "2026-01-03T00:00:00+00:00",
+        "2026-01-04T00:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({
+        ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+      })).toMatchObject({ totalUnits: 30, unit: "mL" });
+    });
+  }
 });

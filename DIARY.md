@@ -7135,3 +7135,65 @@ Gates on the isolated review worktree:
   supply are not misreported as equivalent old/new workload speedups.
 - No GitHub comments, review requests, or other public messages were made
   while implementing/reviewing this local correction.
+
+
+## 2026-11-18 — PR #14 second review loop: upper-frequency supply and measured rate caps
+
+Follow-up review of commit 1e20a9d correctly identified two clinical
+correctness gaps in the specialized overlapping repeated-course supply path:
+
+1. **Frequency range upper bound.** The chronological ledger was receiving
+   only the concrete source clock opportunities; `acceptedEventCount`
+   bypassed the ordinary maximum-frequency branch in numeric supply.
+   The specialized supply-only path now derives the same maximum timing
+   choices already used by ordinary supply, removes concrete clocks ONLY
+   for the maximum-frequency projection, and submits those opportunities
+   to the existing global chronological acceptor. It retains original
+   members for amounts, clinical explanations and data provenance. Ordinary
+   `nextDueDoses` retains authored clocks and source fields; no second
+   clinical scheduler or FHIR-version projection was introduced.
+
+2. **Rate-only infusion quantity caps.** The cap ledger previously recognized
+   only explicit per-administration `quantity`, ignoring `rate` and
+   `rateRatio` with a known occurrence duration. One shared typed
+   rate-times-duration conversion now supplies both ordinary numeric supply
+   and executable chronological period caps. A 10 mL/h one-hour infusion
+   with a 10 mL/24h cap schedules one accepted volume per day rather than
+   two coincident infusions from separate overlapping cycles. Rate-ratio,
+   rate plus maximum-frequency, and historical mid-course queries are
+   independently tested. Missing/incompatible rate quantities remain
+   unexecutable or explicitly unevaluated, never guessed.
+
+3. **Incomplete/colliding source caps and retention.** Period limits remain
+   present for supply explanation after accepted chronological counts have
+   been computed. A non-comparable or contradictory source limit does not
+   become a hard veto on the clinician's editable schedule; a computed
+   numeric supply is marked as a best-effort maximum, retaining the source
+   limit. Ordinary FHIR Timing.event deduplication stays intact while the
+   ledger independently counts genuinely distinct coincident doses.
+
+4. **Reviewer's suggested six-tablet loading/maintenance test value is not
+   valid for the specified schedule.** Loading is 2 tablets Jan 1 at 08:00;
+   implicit daily maintenance at 09:00 starts on Jan 1 (AFTER loading)
+   and continues Jan 2,3,4,5. Thus five-day supply is 2+5=7 tablets.
+   The regression now checks BOTH Jan 1 clocks and the exact total of 7.
+   Do not alter correct clinical semantics just to match a reviewer's
+   erroneous expectation.
+
+Validation on this isolated branch:
+- Build (TypeScript + ESM/CJS): PASS.
+- Source: **4,281/4,281** tests, **47/47** suites PASS.
+- Packaged exports: **4/4** PASS.
+- 11 ordinary/equivalent domains measured against pre-fix PR bundle with
+  21 alternating warmed paired rounds: ordinary parse -6.88%, scalar
+  supply +3.44%, unchanged overlapping capped supply -5.66%, R6
+  English format +1.72%, Thai format +0.89%, fresh R5 text +2.70%,
+  scalar due +0.86%, R5 import -0.91%, ordinary rate-only supply
+  -2.99%. Initial ocular +4.84% (no parser code changes) repeated
+  over 51 rounds gave **+2.80%**, with identical output. No reproducible
+  over-4% regression on a clinically equivalent workload.
+- New/changed clinical cases are not misrepresented as equivalent
+  benchmark speedups; they now perform required work previously omitted.
+- GitHub replies belong within the individual existing CodeRabbit review
+  threads; never post an unsolicited top-level PR comment or request
+  duplicate full reviews.
