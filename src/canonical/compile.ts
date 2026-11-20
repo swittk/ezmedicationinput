@@ -102,7 +102,8 @@ export function administrationFromClause(
   let recurrence: CanonicalRecurrence | undefined;
   if (s) {
     const ranged =
-      s.durationMax !== undefined && (s.durationMax !== s.duration || s.durationMaxComparator !== undefined);
+      s.durationMax !== undefined && (s.durationMax !== s.duration || s.durationMaxComparator !== undefined ||
+        s.durationMaxUnit !== undefined && s.durationMaxUnit !== s.durationUnit);
     recurrence = {
       count: s.count ?? (s.countMax !== undefined ? 1 : undefined),
       countMax: s.countMax,
@@ -118,7 +119,7 @@ export function administrationFromClause(
         ? {
             courseLengthRange: {
               low: quantity(s.duration, s.durationUnit, s.durationComparator),
-              high: quantity(s.durationMax, s.durationUnit, s.durationMaxComparator),
+              high: quantity(s.durationMax, s.durationMaxUnit ?? s.durationUnit, s.durationMaxComparator),
             },
           }
         : { courseLength: quantity(s.duration, s.durationUnit, s.durationComparator) }),
@@ -378,6 +379,7 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     schedule.administrationDurationUnit=r?.occurrenceDurationUnit;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
     schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;
+    schedule.durationMaxUnit=(range?.high?.code??range?.high?.unit) as typeof schedule.durationMaxUnit;
     schedule.durationComparator=length?.comparator??range?.low?.comparator;
     schedule.durationMaxComparator=range?.high?.comparator;
     schedule.boundsStart=r?.calendarWindow?.start;schedule.boundsEnd=r?.calendarWindow?.end;

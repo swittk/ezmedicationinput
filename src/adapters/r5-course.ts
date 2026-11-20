@@ -22,6 +22,7 @@ import {
   stageMetadataToWire,
   courseMetadataToWire,
   safetyToWire,
+  r6RepresentableLimits,
 } from "./canonical-course";
 import { equalStructuredValues } from "../stable-structure";
 import { getStandardDoseUnitCoding } from "../maps";
@@ -38,6 +39,9 @@ import {
   attachR5RetainedRow,
   createR5EmptyCourseCarrier,
   withDosageEditProvenance,
+  getDosageSourceTextAgreement,
+  getDosageSourceTextFingerprint,
+  type DosageSourceTextBaseline,
   r5StepMetadata,
   type CompactCourseRow,
   type ComponentDeltaBaseline,
@@ -73,7 +77,7 @@ function retentionForAdministration(
   const safety = safetyToWire(
     a.safety,
     raw?.safety ?? expandedSource?.safety,
-    a.limits,
+    r6RepresentableLimits(a.limits),
     !!a.syntax && (!a.provenance || a.provenance.format === "syntax")
   );
   const rawSite = raw?.site;
@@ -165,7 +169,15 @@ function retentionForAdministration(
           ...(earlier.provenance?.id ? { id: String(earlier.provenance.id) } : {}),
           ...(earlier.role ? { type: earlier.role } : {}),
         });
-        fingerprints.push({});
+        const prior = row.doseAndRate?.[previous];
+        fingerprints.push({
+          ...(prior?.doseQuantity || prior?.doseRange ? { dose: compactProjectionFingerprint({
+            doseQuantity: prior.doseQuantity, doseRange: prior.doseRange,
+          }) } : {}),
+          ...(prior?.rateQuantity || prior?.rateRange || prior?.rateRatio ? { rate: compactProjectionFingerprint({
+            rateQuantity: prior.rateQuantity, rateRange: prior.rateRange, rateRatio: prior.rateRatio,
+          }) } : {}),
+        });
       }
     }
     if (!retained) continue;
@@ -192,7 +204,7 @@ function retentionForAdministration(
     fingerprints!.push({
       ...(editable && value.expression ? { doseExpression: compactProjectionFingerprint(value.expression) } : {}),
       ...(editable && value.rateExpression ? { rateExpression: compactProjectionFingerprint(value.rateExpression) } : {}),
-      ...(hasDose
+      ...(hasDose || projected?.doseQuantity || projected?.doseRange
         ? {
             dose: compactProjectionFingerprint({
               doseQuantity: projected?.doseQuantity,
@@ -200,7 +212,7 @@ function retentionForAdministration(
             }),
           }
         : {}),
-      ...(hasRate
+      ...(hasRate || projected?.rateQuantity || projected?.rateRange || projected?.rateRatio
         ? {
             rate: compactProjectionFingerprint({
               rateQuantity: projected?.rateQuantity,
@@ -230,11 +242,14 @@ export function projectNativeR5Course(
   freshlyCompiled = false,
   attachInstruction = true,
   strictPreview = false,
-  suppliedRows?: readonly (FhirDosage | EzDosage)[]
+  suppliedRows?: readonly (FhirDosage | EzDosage)[],
+  deferSourceProvenance = false
 ): { dosages: EzDosage[]; course: EzCourseMetadata; strictDosages?: FhirDosage[] } {
   const header = courseMetadataToWire(course);
+  const sourceAgreement = course.provenance?.format !== "r6" && course.provenance?.sourceTextVerified !== false;
+  let rowSources: Array<DosageSourceTextBaseline | undefined> | undefined;
   const hasHeader = Object.keys(header).length > 0;
-  let hasAdministrations = false;
+  let hasAdministrations = false, hasSourceText = false;
   const steps: Omit<FhirR6DosageStep, "component">[] = [];
   const emptySteps: NonNullable<EzCourseMetadata["step"]> = [];
   const metadata: NonNullable<EzCourseMetadata["step"]> = [];
@@ -301,6 +316,14 @@ export function projectNativeR5Course(
     const hasStep = Object.keys(step).length > 0;
     for (const a of stage.administrations) {
       const rowIndex = rows.length;
+      const originalRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
+      const originalAgreement = !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
+        ? getDosageSourceTextAgreement(originalRow, false) : undefined;
+      if (!deferSourceProvenance && (originalAgreement === false || (sourceAgreement && a.provenance?.format === "r6"))) {
+        rowSources ??= [];
+        rowSources[rowIndex] = { sourceAgreement: false,
+          ...(originalRow ? { textFingerprint: getDosageSourceTextFingerprint(originalRow) } : {}) };
+      }
       const strict: EzDosage =
         suppliedRows?.[rowIndex] ??
         administrationToR5(a, stageIndex + 1, options, freshlyCompiled ? a.syntax : undefined);
@@ -378,20 +401,22 @@ export function projectNativeR5Course(
         if (distinct) write(strict, false);
         write(row, editable);
       }
+      if (row.text !== undefined) hasSourceText = true;
       rows.push(row);
       strictRows?.push(strict);
     }
   }
   if (!rows.length && (course.stages.length || course.instruction !== undefined || hasHeader))
     rows.push(createR5EmptyCourseCarrier(header, steps, course.instruction));
-  const dosages =
-    attachInstruction && course.instruction !== undefined && rows.length && hasAdministrations
-      ? withDosageEditProvenance(rows, course.instruction)
-      : rows;
+  const instruction = attachInstruction ? course.instruction : undefined;
+  // A caller that owns final semantic normalization writes these markers once
+  // after that normalization. Standalone projections retain local authority.
+  const writeProvenance = !deferSourceProvenance && hasAdministrations &&
+    (instruction !== undefined || !sourceAgreement && hasSourceText);
+  const dosages = writeProvenance
+    ? withDosageEditProvenance(rows, instruction, sourceAgreement, rowSources) : rows;
   const strictDosages = strictRows
-    ? attachInstruction && course.instruction !== undefined
-      ? withDosageEditProvenance(strictRows, course.instruction)
-      : strictRows
+    ? writeProvenance ? withDosageEditProvenance(strictRows, instruction, sourceAgreement, rowSources) : strictRows
     : dosages;
   return {
     dosages,

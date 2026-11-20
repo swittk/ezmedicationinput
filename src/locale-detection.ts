@@ -12,11 +12,17 @@ const DETECTOR_INDEX = new Map<string, { position: number; priority: number }>()
 
 export function registerMedicationLocaleDetector(detector: MedicationLocaleDetector): void {
   const locale = baseLanguageTag(detector.locale) ?? detector.locale.toLowerCase();
-  // Registration owns a stable provider snapshot. A caller may reuse or edit
-  // its configuration later; only explicit registration changes this index.
-  // Preserve provider-owned configuration used by methods through `this`.
-  // Object.assign avoids the ES6 spread helper while copying only at registration.
-  const normalized: MedicationLocaleDetector = Object.assign({}, detector, { locale });
+  // Snapshot descriptor fields once. Class providers retain their original
+  // receiver so prototype methods and private fields remain callable; plain
+  // descriptors keep their existing registered configuration through `this`.
+  const normalized: MedicationLocaleDetector = Object.assign({}, detector);
+  normalized.locale = locale;
+  const prototype = Object.getPrototypeOf(detector);
+  if (prototype !== Object.prototype && prototype !== null) {
+    normalized.priority = detector.priority;
+    normalized.joinsAdjacentSourceTokens = detector.joinsAdjacentSourceTokens;
+    normalized.test = detector.test.bind(detector);
+  }
   const previous = DETECTOR_INDEX.get(locale),
     priority = normalized.priority ?? 0;
   if (previous) {

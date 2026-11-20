@@ -1813,14 +1813,17 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
   if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit;
   if (schedule.duration === undefined)
-    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${schedule.durationUnit}`;
+    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
-  const qualifier = schedule.durationMax !== undefined &&
-    (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)
-      ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
-      : base;
-  return `x${qualifier}${schedule.durationUnit}`;
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== schedule.durationUnit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
+    return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
+  }
+  return `x${base}${schedule.durationUnit}`;
 }
 
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1841,8 +1844,11 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
     return undefined;
   }
   const unit = schedule.durationUnit;
-  const label = (): string => {
-    switch (unit) {
+  const upperUnit = schedule.durationMaxUnit ?? unit;
+  const label = (endpointUnit = unit): string => {
+    switch (endpointUnit) {
+      case FhirPeriodUnit.Second:
+        return "วินาที";
       case FhirPeriodUnit.Minute:
         return "นาที";
       case FhirPeriodUnit.Hour:
@@ -1856,15 +1862,17 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
       case FhirPeriodUnit.Year:
         return "ปี";
       default:
-        return unit;
+        return endpointUnit;
     }
   };
   if (schedule.duration === undefined)
-    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label()}`;
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(upperUnit)}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    return `เป็นเวลา ${lower} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label()}`;
+      (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== unit ? " " + label() : "";
+    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(upperUnit)}`;
   }
   return `เป็นเวลา ${lower} ${label()}`;
 }
@@ -1908,7 +1916,8 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
   // we actually need to translate a non-Thai/no-source reason into Thai.
   const sourceText = reason.text?.trim();
   const sourceIsThai = Boolean(sourceText && /[\u0E00-\u0E7F]/u.test(sourceText));
-  const translated = reason.i18n?.th?.trim() || reason.coding?.i18n?.th?.trim();
+  const reasonTranslation = reason.i18n?.th?.trim();
+  const translated = reasonTranslation || reason.coding?.i18n?.th?.trim();
   let text = sourceIsThai ? sourceText : translated ?? reason.coding?.display ?? sourceText;
   const coding = reason.coding;
   if (coding?.code) {
@@ -1931,7 +1940,12 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
       if (sourceIsRegisteredSurface) {
         text = definition?.conditionI18n?.th ?? text;
       }
-    } else {
+    } else if (!translated || translated === definition?.i18n?.th?.trim() ||
+        translated === definition?.conditionI18n?.th?.trim()) {
+      // Parser-produced translations may live on the reason or its coding.
+      // Only a registered noun/condition label takes the condition form
+      // ("ไข้" -> "มีไข้", "ไมเกรน" -> "มีอาการไมเกรน"); different authored
+      // wording remains intact in ordinary, coordinated and onset contexts.
       text = definition?.conditionI18n?.th ?? definition?.i18n?.th ?? text;
     }
   }

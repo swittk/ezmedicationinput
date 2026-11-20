@@ -1013,12 +1013,13 @@ function buildFhirDurationQuantity(
 function buildFhirBoundsRange(
   low: number | undefined, high: number, unit: FhirPeriodUnit,
   lowComparator?: FhirR6Quantity["comparator"],
-  highComparator?: FhirR6Quantity["comparator"]
+  highComparator?: FhirR6Quantity["comparator"],
+  highUnit: FhirPeriodUnit = unit
 ): FhirRange {
   return {
     ...(low !== undefined ? { low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
       ...(lowComparator ? { comparator: lowComparator } : {}) })! } : {}),
-    high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, unit),
+    high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, highUnit),
       ...(highComparator ? { comparator: highComparator } : {}) })!
   };
 }
@@ -1068,7 +1069,7 @@ function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUn
 
 function extractCanonicalTimingBounds(
   dosage: FhirDosage
-): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit;
+): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; durationMaxUnit?: FhirPeriodUnit;
   durationComparator?: FhirR6Quantity["comparator"];
   durationMaxComparator?: FhirR6Quantity["comparator"]; warning?: string } {
   const repeat = dosage.timing?.repeat;
@@ -1101,20 +1102,15 @@ function extractCanonicalTimingBounds(
     return {};
   }
 
-  let warning: string | undefined;
-  if (lowUnit && highUnit && lowUnit !== highUnit) {
-    warning = `FHIR timing boundsRange low/high units differ (${lowUnit} vs ${highUnit}); preserved numeric bounds using ${durationUnit}.`;
-  }
-
   const lowComparator = getQuantityComparator(low);
   const highComparator = getQuantityComparator(high);
   return {
     duration: low?.value,
     durationMax: high?.value,
     durationUnit,
+    durationMaxUnit: highUnit,
     ...(lowComparator ? { durationComparator: lowComparator } : {}),
-    ...(highComparator ? { durationMaxComparator: highComparator } : {}),
-    warning
+    ...(highComparator ? { durationMaxComparator: highComparator } : {})
   };
 }
 
@@ -1484,13 +1480,14 @@ export function serializeCanonicalSchedule(
   if (schedule?.durationUnit && (schedule.duration !== undefined || schedule.durationMax !== undefined)) {
     const ranged = schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration ||
+        schedule.durationMaxUnit !== undefined && schedule.durationMaxUnit !== schedule.durationUnit ||
         schedule.durationComparator !== undefined ||
         schedule.durationMaxComparator !== undefined);
     const duration = ranged ? undefined : buildFhirDurationQuantity(
       schedule.duration!, schedule.durationUnit, schedule.durationComparator);
     const range = ranged ? buildFhirBoundsRange(
       schedule.duration, schedule.durationMax!, schedule.durationUnit,
-      schedule.durationComparator, schedule.durationMaxComparator) : undefined;
+      schedule.durationComparator, schedule.durationMaxComparator, schedule.durationMaxUnit) : undefined;
     if (repeat.boundsPeriod) {
       dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
         url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
@@ -1956,6 +1953,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
       durationUnit: timingBounds.durationUnit,
+      durationMaxUnit: timingBounds.durationMaxUnit,
       durationComparator: timingBounds.durationComparator,
       durationMaxComparator: timingBounds.durationMaxComparator,
       boundsStart: repeat?.boundsPeriod?.start,
@@ -2035,9 +2033,10 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
-  if (timingBounds.durationComparator || timingBounds.durationMaxComparator) {
+  if (timingBounds.durationMaxUnit || timingBounds.durationComparator || timingBounds.durationMaxComparator) {
     state.primaryClause.schedule = {
       ...state.primaryClause.schedule,
+      durationMaxUnit: timingBounds.durationMaxUnit,
       ...(timingBounds.durationComparator
         ? { durationComparator: timingBounds.durationComparator } : {}),
       ...(timingBounds.durationMaxComparator

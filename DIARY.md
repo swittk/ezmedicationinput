@@ -7951,3 +7951,233 @@ Final current-worktree validation: TypeScript/ESM/CJS build passed;
 **4,593/4,593 source tests in 59 suites**, including the new regional
 cache-invalidation oracle, and **4/4 packaged tests** passed.
 No top-level GitHub comments or new review requests were made.
+
+## 2026-11-20 — Review round23: root causes and related families
+
+This round inventories review PRR_kwDOQAcO1M8AAAABZPPl9A (2026-11-20T06:53:57Z) and overflow comment 7032708178 against 9f3b3c8: **46 distinct findings, 23 major and 23 minor**. There were no new inline threads; resolved-thread counts were not used as a completion measure. Bounded delegation used three workers with disjoint owners; root integrated shared boundaries and validation.
+
+Each accepted disposition below states the supported requirement/actual harm, its existing typed owner, the cheap data-preserving change, and an independent oracle. **45 fixed; one rejected with its product gate recorded.** Native internal models remain unstable implementation details; R5 and current R6 remain direct sibling adapters, and language realization stays in the existing locale/HPSG facets.
+
+### Finding ledger
+
+| ID | Severity | Disposition, owner, and independent verification |
+|---|---|---|
+| 1 | major | **Fixed.** Supported class locale providers lost prototype methods. Registration now captures declared callables once, preserving class/private receivers and the established plain-descriptor snapshot contract; the same defect was fixed for segmenters and date resolvers. No lookup cloning. Independent class/private-field and re-registration tests pass. |
+| 2 | minor | **Fixed.** Custom action vocabulary must reach both formatter styles. The short formatter now forwards the same optional instructionActionMap reference as the long formatter. No registry mutation or copy; both callbacks assert the exact request map and the absent-map control. |
+| 3 | major | **Fixed.** A zero civil displacement must preserve the exact instant in a DST fold. The execution calendar boundary returns the original epoch for zero d/wk/mo/a; nonzero stepping is unchanged. Four New York second-01:30 cases each produce the literal -05:00 instant and one unit. |
+| 4 | major | **Fixed.** Actual administrations must consume count and quantity once. Scalar/repeated ranged replay separates actual timestamp identity from inferred or supplied priorCount. Matching historical clocks do not spend another quantity. Original, repeated, and explicit-priorCount oracles retain the independently expected 2 tablets. |
+| 5 | major | **Fixed.** Coded infusion dimensions must survive temporary rate×duration calculation. measuredRateQuantity retains numerator code/system with its display label; the source ratio is untouched. Thai and missing-display 10 mL/hour fixtures obey the 10 mL rolling ceiling and exact next-day clocks. |
+| 6 | major | **Fixed.** Supply must maximize total feasible ranged quantity, not the first dose or merely dose count. The chronological ledger reuses the fixed-time difference-constraint solver and bounded subset search, retaining finite phase quotas and history. Independent1.5+1.5=3 and2+0+2=4 examples, intersecting ceilings and a50-day plan pass; scalar scheduling avoids this optimizer. |
+| 7 | major | **Fixed.** An excluded upper endpoint cannot be an attained supply maximum. Typed strictHigh reaches the existing constraint solver; closed-supremum feasibility is distinguished from attainment. One strict dose reports no attainable maximum; smaller closed1.5 ceilings and two-dose interior total 3 remain executable without changing source comparators. |
+| 8 | major | **Fixed.** Administration-time order must precede limits. Only mixed day-shift clocks use the existing chronological queue and next-source-day lower bound. A00:15 clock precedes prior dinner’s00:30 spillover; full four-result and once/day cap oracles pass, with the ordinary same-shift append path unchanged. |
+| 9 | major | **Fixed.** Untimed PRN members retain capacity within resolved repeated windows and never gain fabricated due clocks. The capacity solver pools ranged windows while preserving each finite count/countMax identity and pre-query allocations. Weekly7/14, mixed21, binding countMax1 per two-day window total 3, due[], and the unchanged Jan 2 late-query0 oracle pass. |
+| 10 | major | **Fixed.** A benchmark oracle accepting 12 as 2 can hide wrong work. Complete numeric administration phrases now require exactly one full amount equal to 2, reject superseded 1 and 12/1.2/2.5/-2/22, and accept equivalent 2.0 and the fixture’s right-eye-before-dose forms. Checks run outside timed work. |
+| 11 | major | **Fixed.** A qualified unitless continuation must replace the earlier amount and inherit only the missing unit. Existing HPSG dose and regimen constructions now license a complete schedule-led continuation, including same-day anchors, while excluding duration nouns and arbitrary objects. Seven operator variants retain 1 tab across R5/R6; temporal/unknown-noun negative controls pass. |
+| 12 | major | **Fixed.** A material and a relation target may both be Substance concepts. The graph assigns the existing relation owner explicitly and realizes material independently in one argument traversal. Saline and water both survive EN/TH and version crossings; removing the Amount daughter still renders the material and complement without inventing a number. |
+| 13 | major | **Fixed.** Extracted native administrations must obey active-window offsets. Only offset-bearing scalars enter existing course normalization at scheduler/supply boundaries. Raw R6, projected R5, imported batch and extracted native component all start Nov 4, supply 0 during the first two days and 21 across 28 days. |
+| 14 | major | **Fixed.** Extension-backed fractional offsets and zero minimum frequency cannot leak into unsignedInt/positiveInt fields. timingToWire compares and writes the same wire-compatible values, retaining exact/frequency-minimum extensions once. The 0.5/zero roundtrip and ordinary 30/one standard-field control pass with unchanged input. |
+| 15 | major | **Fixed.** Reordered maxima must retain their own metadata. R5 reconciliation matches unique Element IDs before comparable-value fallback, then applies current numeric edits. Independently ordered/id-tagged period maxima retain the correct ID/extension and current value; ambiguous cases are not guessed. |
+| 16 | major | **Fixed.** Reordered R5 amount entries must not swap or resurrect retained expressions. Retention fingerprints now include an ordinary sibling dose/rate used to identify the slot, including preceding entries. Reorder, deletion, explicit edits and indistinguishable-slot controls preserve expressions at the right owner or inertly when ambiguous. |
+| 17 | major | **Fixed.** Duration range endpoints own separate units. Existing CanonicalScheduleExpr gains optional durationMaxUnit, carried through native and legacy clause boundaries and exhaustive scope inventories. Locale facets render 30 min–2 h and equal-number/different-unit ranges with both units/operators; source quantities remain unchanged. No parallel parser or unit flattening. |
+| 18 | major | **Fixed.** Global gap statements must include completed stage repetitions. Native formatting unions the full repeated span while retaining one-iteration heading/count; unknown repetition suppresses unsupported gap claims. A 7-day stage repeated twice fills 14 days, and the independently incorrect old days 8–14-off assertion was corrected. Implicit next-stage and overlap controls pass. |
+| 19 | major | **Fixed.** Cap selection and application must share supported unit equivalence. The existing constant-time tab/tablet, cap/capsule and drop normalizer is shared by canonical maximum selection and execution. Whitespace/case aliases yield the same 2-unit caps; incompatible mL constraints stay retained and explicitly unevaluated. |
+| 20 | major | **Fixed.** An extension-only/incomplete R5 Ratio is source data, not a fabricated R6 value[x]. The native boundary retains it in R5 and a typed ordinary valueRatio source envelope across R6, filtering only these incomplete source Ratios from live R6 safety. Empty, one-sided, primitive-metadata-only and ID/extension cases survive repeated saves without a number or exception. |
+| 21 | major | **Fixed.** An R6 header/component text is not proof that it agrees with editable clinical fields. Structured previews use current native facts; text-only inputs remain literal. Existing R5 display provenance carries typed header/row sourceAgreement independently from original graph replay, retaining original wording through crossings and explicit text edits. Scalar, rich rate, staged, default/roundtrip, text-only and repeated-save oracles pin dose 2 and preserve original dose 1 wording only as source. |
+| 22 | major | **Fixed.** In-place edits to recognized offset children must invalidate source replay. The existing narrow timing observation records exact/min/max values for fresh and persisted rows, without recursive graph snapshots or signature changes. Thai 30-minute source edited to 60 renders 1 hour and never replays 30 minutes. |
+| 23 | major | **Fixed.** Authored Thai PRN translations must outrank generic terminology without losing normal condition grammar. Custom reason/coding translations remain; a registered noun label receives its registered condition form. Breakthrough-pain overrides and ordinary fever/pain-or-fever controls pass; no input mutation or language branch outside its facet. |
+| 24 | major | **Fixed.** A current Quantity.comparator must retire conflicting EMA equality. The shared operator projection reconciles equality through the existing replacement path and retains authored old coding inertly. Simple and general quantities keep the current qualifier across repeated R5/R6 saves. |
+| 25 | minor | **Fixed.** Paired benchmark coverage belongs to the measured API. Native cases register independently; missing compatible fixtures are explicit unavailable entries with a failing exit, not omitted measurements. A synthetic baseline exporting format/project but lacking import records 3 unavailable cases while still measuring editable-R5 projection and candidate-only imports. |
+| 26 | minor | **Fixed.** Attached carrier quantities belong to the existing shared numeric grammar. Carrier parsing uses attachedNumberUnitAt and retains leading decimal punctuation; active dose, carrier, duration and material stay separate. .5L/0.5L and spaced/qualified controls retain 20 mg, 0.5 L, 4 h and normal saline through reopening. |
+| 27 | minor | **Fixed.** Public locale callbacks accept mutable reason arrays. The cached defaults stay private; only directPrnCompletion and the defaultDirections provider receive fresh arrays. A custom callback splices its argument and repeated calls still receive the full same reasons; internal read-only reuse remains cached. |
+| 28 | minor | **Fixed.** The maxima coding oracle now checks standard R5 numerator/denominator coding as well as R6. The existing projection test independently requires 2 tab with EDQM code 15054000 and 1 day with UCUM code d; production code is unchanged by this assertion. |
+| 29 | minor | **Fixed.** Fractional offset retention must be unique. The existing test now asserts the complete matching extension array equals exactly one 1.5 marker; duplicate active encodings cannot pass a containment-only oracle. |
+| 30 | minor | **Rejected.** The finding assumes a request-lifetime erasure contract that this library does not define. The 4,096-entry/128-character in-process normalization cache neither persists nor transmits lookup text; no actual access-boundary failure was demonstrated. Removing deliberate bounded memoization would add work to clinical lookup hot paths for a speculative requirement. No runtime defensive layer was added. |
+| 31 | minor | **Fixed.** The existing compact-million reopening matrix now checks value, IU unit and the reopened operator, so 2,400,000 IU cannot silently become exact when source is approximate or bounded. This is an independent assertion at the persistence boundary. |
+| 32 | minor | **Fixed.** The existing fixed-duration infusion matrix now requires the reopened 500 mL amount/unit before checking its operator. A retained comparator with a missing or changed dose cannot pass. |
+| 33 | minor | **Fixed.** The partial-quantity fallback test requires the intact authored 2 tablets argument in both locale outputs, plus no invented <=mg quantity and no graph mutation. It preserves source units without reparsing unknown source into fabricated clinical facts. |
+| 34 | minor | **Fixed.** The complete display oracle now counts both independent Drink 5 mL actions in EN/TH, while still excluding the superseded tablet dose and checking source immutability. One surviving 5 can no longer satisfy the test. |
+| 35 | minor | **Fixed.** The graph ownership test pins primaryAdministrationSpan to the actual final drink head at 34–39, rather than accepting any defined span. Existing independent 3-tablet/water/dose-edit checks remain. |
+| 36 | minor | **Fixed.** The conflicting external quantity/expression test snapshots input before conversion and compares the whole object afterward. It no longer compares aliases to the same object, so mutation would fail. |
+| 37 | minor | **Fixed.** The same boundary test checks the complete retained numeric source quantity under its typed dose/rate child, alongside the expression and independently active dimension. Source recovery is verified by value/unit, not only child count. |
+| 38 | minor | **Fixed.** The edited R5 maximum test now requires exactly one live current bound and excludes the superseded maximum. It can no longer pass with both old and new limits active. |
+| 39 | minor | **Fixed.** The active-window schedule test asserts all 22 literal dates, not only length and a few positions. Every existing representation must match Nov 4–24 followed by Dec 2; supply 21/42 assertions remain. |
+| 40 | minor | **Fixed.** The concurrent-origin schedule test compares the complete four-result list without slicing. An erroneous fifth administration can no longer be hidden. |
+| 41 | minor | **Fixed.** A phase-origin modifier owns its Element metadata. The boundary updates only valueQuantity, reuses unchanged markers and retains IDs/siblings. Whole marker/quantity metadata survives a 2→3 edit and three version crossings without input mutation. |
+| 42 | minor | **Fixed.** Recognized external source snapshots still own their child Element metadata. The adapter reuses an unchanged typed marker exactly; a changed snapshot retains the previous marker inertly once. Comparison occurs only for an actual external saved marker, and repeated-save ID/stability tests pass. |
+| 43 | minor | **Fixed.** The R6 dose-limit value[x] type must exclude unrelated primitive metadata. _valueInteger is allowed only with numeric/extension-only integer choices; quantity/expression alternatives explicitly forbid it. Compile-time negative cases and valid integer/primitive-only cases verify the contract without runtime hardening. |
+| 44 | minor | **Fixed.** An authored condition bridge ID must not disappear as though the wrapper were disposable. Exact generated-shape recognition and the existing condition setter retain external wrappers when typed facts agree; current predicate edits remain authoritative. IDs/child metadata survive both crossing directions and repeated saves. |
+| 45 | minor | **Fixed.** Generated R5 course stages must respect the caller separator. The native formatter accepts existing FormatBatchOptions and joins only generated stages/pauses with the requested separator. EN/TH public R5 sequence tests require newline-separated current doses; authored text-only wording stays exact. |
+| 46 | minor | **Fixed.** A rate-only preview must not start with a separator. The source-less R5 suffix join omits an empty leading clause; a 5–10 mL/h-only case has no leading punctuation, while dose 2 mg plus rate retains its separator. |
+
+
+### Integration and validation
+
+Source and execution use the current typed facts. Retained wording is a separate
+owner: the existing R5 display marker now records header and row source agreement,
+plus the original row-text fingerprint where needed. A current text replacement
+can own display without certifying an old serialized instruction graph. Text-only
+courses/components keep their authored wording; empty-course carrier rows do not
+gain invented administrations. The established fromDosageDetails facade now
+retains the same false source-agreement state across persisted R6/R5 crossings;
+its saved header cannot certify stale component wording or serialized graph
+hints. No internal editor compatibility API was restored.
+
+The related execution work keeps pre-query history and binding finite budgets
+per resolved source window. Untimed PRN capacity remains a quantity calculation,
+not a fabricated list of due timestamps. Existing independent late-query and
+Thai ordinary/onset-condition oracles were kept and the implementation corrected.
+
+New boundary and execution regressions were consolidated into the existing
+round 21 suites so the complete PR stays within the 100-file ceiling. The separate
+round 23 meaning and R5 suites cover the other families. Packaged tests separately
+assert current-fact preview and unchanged original instruction retention.
+
+Benchmark coverage and correctness are explicit: every measured native API either
+has a version-compatible paired fixture or a reported unavailable case with a
+failing exit. Complete edited-dose oracles reject numeric suffix matches and
+superseded doses. Five source-bearing R6 scenarios now do requested current-field
+preview generation where older versions only returned saved source. Their ordered
+clinical oracles cover every phase, both eyes, dose, cadence, month boundary and
+requested locale. Those cases retain both raw timings with a separate changed-work
+reason; ordinary simple/source-less/native-format comparisons keep their latency
+gate. This distinction is based on output, never on an unfavorable timing ratio.
+
+Performance follow-up removed duplicate descriptor overlays during provider
+registration, conditional object-spread work for native source agreement, and
+property-descriptor construction when selecting normalized formatting. The
+fromFhir boundary defers its first provenance write until the existing final
+normalization, avoiding compact markers that would be immediately replaced.
+Plain provider snapshots, class/private receivers, graph-source checks, and
+standalone editable projection annotations retain their existing contracts.
+
+Final runtime build: `41d4bd23db5919c2870194637389318b5fa8ae71b3b1d5a9a93b936d7e2eff14` (SHA-256 of dist/index.js).
+
+- Production ESM/CJS/declaration build and the strict regression type check passed.
+- Source tests: **4,702/4,702 across 61 suites**; packaged tests: **4/4**.
+- **109 source regressions added** relative to the previous 4,593-test head.
+- git diff --check passed. The complete PR has **99 changed files**, within the 100-file ceiling.
+- Fresh origin/master remained `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`;
+  the previous PR head remained `9f3b3c8a03bff3ccfa21c39db924dc2453725908`.
+
+#### Performance against fresh master
+
+All **174 comparable scenarios meet the 4% per-scenario limit**. The full run
+covered all 117 public functions: 181 paired scenarios plus 7 candidate-only
+measurements for APIs absent from master. The full run used 21 alternating paired
+rounds with a 35 ms target; it returned 166 passes and 8 timing flags. Every flag
+was repeated with 41 rounds and a 100 ms target, on the identical runtime build.
+All eight confirmations passed. No cross-domain averaging or threshold change
+was used. The original flags and confirmation results are retained below.
+
+| Scenario | Initial paired change | Longer paired change |
+|---|---:|---:|
+| `buildBodySiteSpatialRelationExtension` | +5.25% | -8.00% |
+| `buildBodySiteSpatialRelationExtensions` | +6.24% | -4.45% |
+| `buildSnomedFindingSitePostcoordinationCode` | +5.16% | +0.26% |
+| `parseSnomedFindingSitePostcoordinationCode` | +4.55% | +2.08% |
+| `hasSnomedFindingSitePostcoordination` | +6.32% | -2.26% |
+| `parseSnomedBodySiteTopographicalModifierPostcoordinationCode` | +5.33% | +2.77% |
+| `buildInfusionCarrierMaterialStructureDefinition` | +7.46% | +0.20% |
+| `listSymptomDefinitions` | +4.38% | +0.61% |
+
+Representative measurements (microseconds per call; percentage is the median
+of paired ratios, so it need not equal the ratio of the two standalone medians):
+
+| Scenario | Master µs | Candidate µs | Paired change |
+|---|---:|---:|---:|
+| `parseSig/ordinary` | 1613.533 | 1522.448 | -2.50% |
+| `parseSig/thai` | 5920.503 | 5484.286 | -7.10% |
+| `parseSig/eye` | 6432.792 | 6131.605 | -3.56% |
+| `parseSig/staged` | 9404.149 | 9141.746 | -4.55% |
+| `suggestSig/5 m` | 37.344 | 17.954 | -46.51% |
+| `formatSig/R6-source-less/en` | 27.969 | 18.407 | -34.29% |
+| `fromFhir/simple/en` | 128.158 | 72.161 | -44.33% |
+| `toDosageDetails/simple` | 22.901 | 18.301 | -20.19% |
+| `fromDosageDetails/simple` | 32.546 | 23.473 | -28.63% |
+
+#### Different output work and new APIs
+
+Seven master comparisons are **not counted as performance passes**: two older
+Thai edit outputs contain the wrong dose, and five older R6 outputs replay saved
+source rather than generate the requested current-field preview. Raw timings:
+
+| Scenario | Master µs | Candidate µs |
+|---|---:|---:|
+| `formatSig/R6-complex/en` | 0.342 | 152.942 |
+| `fromFhir/complex/en` | 911.089 | 777.362 |
+| `formatSig/R6-complex/th` | 0.421 | 376.145 |
+| `fromFhir/complex/th` | 1263.716 | 1337.915 |
+| `formatSig/R5-roundtrip-edited-thai` | 150.401 | 189.315 |
+| `formatSig/R5-roundtrip-added-dose-thai` | 66.198 | 85.591 |
+| `formatSig/R6-author-source` | 0.177 | 13.811 |
+
+The final benchmark oracle also requires all six complete one-drop administrations
+in the three-phase eye course, rejects an extra administration, and checks complete
+day-range endpoints. Independent controls reject 11/1.2/-1/2 as substitutes for 1
+and reject a 1–70 suffix match for 1–7. Both full smoke passes succeeded after
+this driver-only tightening, against the same tested runtime build.
+
+| API scenario absent from master | Candidate µs |
+|---|---:|
+| `getEmaQuantityComparator` | 0.027 |
+| `native/import-R6` | 17.398 |
+| `native/import-R5` | 196.755 |
+| `native/project-both` | 223.836 |
+| `native/format-administration` | 60.586 |
+| `native/format-course` | 330.453 |
+| `native/project-editable-R5` | 94.453 |
+
+#### Secondary comparison with the preceding PR build
+
+This diagnostic is reported independently of the requested fresh-master gate.
+The full previous-head run used 13 rounds/25 ms: 147 passes, 36 timing flags,
+and 5 different-preview-work cases. All 36 flags received 41-round/100-ms
+confirmation. Twenty-five cleared; **11 remained**, giving 172 passing comparable
+scenarios, 11 timing flags, and 5 non-equivalent cases. These are not claimed as
+passes or hidden behind aggregate improvements. Remaining confirmation results:
+
+| Scenario | Previous µs | Candidate µs | Paired change |
+|---|---:|---:|---:|
+| `suggestSig/at 14:3` | 4.2269 | 4.5994 | +6.28% |
+| `formatSigBatch/th` | 294.0229 | 408.7905 | +44.63% |
+| `toDosageDetails/simple` | 24.2271 | 38.6025 | +57.88% |
+| `fromDosageDetails/simple` | 26.1268 | 42.1722 | +61.85% |
+| `fromDosageDetails/complex` | 234.2780 | 366.9272 | +52.19% |
+| `evaluateMedicationCondition` | 0.0252 | 0.0254 | +5.80% |
+| `parseBodySiteSpatialRelationExtension` | 0.0903 | 0.1262 | +38.77% |
+| `registerMedicationSurfaceSegmenter` | 0.1501 | 0.1651 | +10.25% |
+| `native/import-R5` | 250.4728 | 342.0108 | +37.14% |
+| `native/project-both` | 227.4955 | 332.3152 | +47.24% |
+| `native/project-editable-R5` | 84.2559 | 90.9235 | +9.81% |
+
+Isolated CPU profiles of the three principal affected paths produced different
+latency ratios from the mixed harness; these profiles are diagnostic, not
+replacement performance passes:
+
+| Profile | Previous µs | Candidate µs |
+|---|---:|---:|
+| simple | 17.266 | 21.482 |
+| import | 226.005 | 238.143 |
+| project | 227.127 | 204.298 |
+
+The dominant cost is the existing clinical fingerprint traversal. Its source and
+call-tree ancestry are unchanged; the authority reader does not add a text hash
+for the previous parser fixtures and was not a principal hotspot. No extra
+clinical fingerprint pass was found. The remaining compact-then-full text-marker
+construction in fromDosageDetails is a bounded optimization candidate, not an
+explanation established for the broader timing variation. Authority semantics
+were not weakened to suppress a performance flag.
+
+Pre-optimization artifacts were also retained: build 708a36ed… had master
+166/8/7 and previous-head 140/43/5 pass/flag/non-equivalent counts; its longer
+confirmations left 1 master and 20 previous-head flags. The current runtime
+results above follow the targeted provider/copy/provenance optimizations.
+
+Baseline artifact SHA-256 values:
+- Master: `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`.
+- Previous PR: `50f378d1c9ac1c41d6a43e41485f8cc54af7a3cb07e93c3963f8e2effe299541`.
+
+Raw samples, logs and profiler data are retained under /tmp/ezmed14-round23-*;
+this committed section contains the dispositions, validation totals, exact build
+identities, all remaining flags and the relevant numerical evidence.
+No top-level GitHub comment or new full-review request is authorized.

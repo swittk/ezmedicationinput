@@ -1383,8 +1383,10 @@ describe("qualified clinical quantity family: source through HPSG and FHIR", () 
       const r5 = toFhirR5Dosages(parsed.fhirNext);
       expect(r5[0].doseAndRate?.[0].doseQuantity?.value).toBe(500);
       expect(getEmaQuantityComparator(r5[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
-      expectSimpleQuantityOperator(toDosageDetails(JSON.parse(JSON.stringify(r5))).step[0].component[0]
-        .doseAndRate?.[0].doseQuantity, comparator);
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(r5))).step[0].component[0]
+        .doseAndRate?.[0].doseQuantity;
+      expect(reopened).toMatchObject({ value: 500, unit: "mL" });
+      expectSimpleQuantityOperator(reopened, comparator);
       expect(parsed.input).toBe(input);
       expect(parsed.meta.leftoverText).toBeUndefined();
     }
@@ -1651,8 +1653,10 @@ describe("compact million multiplier stays distinct from an attached medication 
       const r5 = parsed.fhir[0].doseAndRate?.[0].doseQuantity;
       expect(r5).toMatchObject({ value, unit: "IU" });
       expect(getEmaQuantityComparator(r5)).toBe(comparator);
-      expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
-        .component[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value, unit: "IU" });
+      const reopened = toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step[0]
+        .component[0].doseAndRate?.[0].doseQuantity;
+      expect(reopened).toMatchObject({ value, unit: "IU" });
+      expectSimpleQuantityOperator(reopened, comparator);
       expect(parsed.input).toBe(text);
     });
 });

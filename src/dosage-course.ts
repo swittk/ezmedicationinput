@@ -1,4 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -314,8 +315,9 @@ function parseConditionModifier(extension: FhirExtension): MedicationCondition |
 }
 
 export function isExactConditionBridge(extension: FhirExtension): boolean {
+  if (extension.url !== DOSAGE_CONDITION_R5_URL || Object.keys(extension).length !== 2) return false;
   const predicate = parseConditionModifier(extension);
-  return predicate !== undefined && valueKeys(extension).length === 0 &&
+  return predicate !== undefined &&
     equalStructuredValues(extension.extension, [encodeConditionPredicate(predicate)]);
 }
 
@@ -343,11 +345,13 @@ export function getDosageCondition(dosage: Pick<FhirDosage,"modifierExtension"> 
 /** Read the source-certified whole-day predicate from the existing condition bridge.
  * @param dosage Editable dosage containing a structured condition extension.
  */
-function retainedCalendarDayPredicate(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
-  const extension = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
+function calendarDayPredicateFromMarker(extension: FhirExtension | undefined): MedicationCondition | undefined {
   const child = extension?.extension?.find(value => value.url === "calendarDayPredicate");
   const value = child ? decodeConditionPredicate(child) : undefined;
   return isMedicationCondition(value) ? value : undefined;
+}
+function retainedCalendarDayPredicate(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+  return calendarDayPredicateFromMarker(dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL));
 }
 
 /** A whole-day evaluation is licensed only for the same live predicate that
@@ -372,7 +376,13 @@ export function setDosageCondition(
   condition: MedicationCondition | undefined,
   calendarDayCondition?: MedicationCondition
 ): void {
-  const calendar = calendarDayCondition ?? retainedCalendarDayPredicate(dosage);
+  const previous = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
+  const priorCalendar = calendarDayPredicateFromMarker(previous);
+  const calendar = calendarDayCondition ?? priorCalendar;
+  // Existing external wrappers own IDs and unfamiliar children. The same
+  // typed facts do not require replacement merely to export another version.
+  if (condition && previous && equalStructuredValues(parseConditionModifier(previous), condition) &&
+      equalStructuredValues(priorCalendar, calendar)) return;
   const children = condition ? [encodeConditionPredicate(condition)] : [];
   if (condition && calendar && equalStructuredValues(condition, calendar)) {
     children.push({ ...encodeConditionPredicate(calendar), url: "calendarDayPredicate" });
@@ -554,13 +564,13 @@ export function reconcileR5SafetyEdits(
   const oldLimits = retained.doseLimit ?? [];
   const live = projected?.doseLimit ?? [];
   // A scope is NOT an identity: several per-period limits can coexist.
-  // Match a uniquely surviving amount + period first; then one remaining
-  // member of the same scope (an ordinary numeric edit). Deletions and
-  // ambiguous equal-valued rows never inherit arbitrary unknown metadata.
+  // An explicit Element.id owns its limit even after amount or order edits.
+  // ID-less limits use a unique amount + period, then an unambiguous numeric
+  // edit in the same scope. Ambiguous rows never inherit arbitrary metadata.
   const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits);
   const representable = oldLimits.map((_, index) => projectedIndices.has(index));
-  const signature = (limit: FhirR6DoseLimit) =>
-    compactProjectionFingerprint({
+  const signature = (limit: FhirR6DoseLimit) => limit.scope === "period" && limit.id !== undefined
+    ? "id:" + limit.id : "value:" + compactProjectionFingerprint({
       scope: limit.scope, valueQuantity: limit.valueQuantity, period: limit.period
     });
   const oldKeys = new Map<string, number>();
@@ -610,7 +620,8 @@ export function reconcileR5SafetyEdits(
     // Unmatched cardinality alone is not identity: deleting 5 mg/day and
     // adding 5 mL/30 days must NOT transfer the old ID or extension.
     // A numeric edit retains the same units and period window.
-    if (!sameUnit(original.valueQuantity, candidate.valueQuantity) ||
+    if (scope === "period" && original.id !== candidate.id ||
+        !sameUnit(original.valueQuantity, candidate.valueQuantity) ||
         (original.period || candidate.period) &&
         (!sameUnit(original.period, candidate.period) ||
           original.period?.value !== candidate.period?.value)) continue;
@@ -759,10 +770,17 @@ function hasOtherOwnField(value:FhirExtension,second:"extension"|"valueString"):
 export function hasUnrecognizedEditMetadata(marker:FhirExtension):boolean {
   if(hasOtherOwnField(marker,"extension"))return true;
   for(const field of marker.extension??[]){
-    if(field.url==="instruction"){if(hasOtherOwnField(field,"valueString"))return true;continue;}
+    if(field.url==="sourceAgreement"){
+      if(typeof field.valueBoolean!=="boolean"||Object.keys(field).some(key=>key!=="url"&&key!=="valueBoolean"))return true;
+      continue;
+    }
+    if(field.url==="instruction"||field.url==="textFingerprint"){if(hasOtherOwnField(field,"valueString"))return true;continue;}
     if(field.url!=="row"||hasOtherOwnField(field,"extension"))return true;
-    for(const part of field.extension??[])
-      if((part.url!=="projectionFingerprint"&&part.url!=="textFingerprint")||hasOtherOwnField(part,"valueString"))return true;
+    for(const part of field.extension??[]) {
+      if(part.url==="sourceAgreement") {
+        if(typeof part.valueBoolean!=="boolean"||Object.keys(part).some(key=>key!=="url"&&key!=="valueBoolean"))return true;
+      } else if((part.url!=="projectionFingerprint"&&part.url!=="textFingerprint")||hasOtherOwnField(part,"valueString"))return true;
+    }
   }
   return false;
 }
@@ -1106,6 +1124,9 @@ interface SourceTimingObservation {
   extension?: FhirExtension[];
   repeat?: FhirTimingRepeat;
   repeatValues?: FhirTimingRepeat;
+  offsetExact?: number;
+  offsetMin?: number;
+  offsetMax?: number;
   events?: string[];
   clocks?: string[];
   weekdays?: FhirDayOfWeek[];
@@ -1157,11 +1178,19 @@ function unchangedReplayList<T>(current: readonly T[] | undefined, saved: readon
 export function captureSourceReplayTiming(timing: FhirTiming | undefined): SourceTimingObservation | undefined {
   if (!timing) return undefined;
   const repeat = timing.repeat, code = timing.code;
+  let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
+  if (repeat?.extension) for (const extension of repeat.extension) {
+    const value = extension.valueInteger ?? extension.valueDecimal;
+    if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
+    else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
+    else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
+  }
   return {
     original: timing, extension: timing.extension, repeat,
     // The shallow snapshot owns scalar values only. Lists and bound quantities
-    // have explicit observations below; no source extension is traversed.
+    // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
+    offsetExact, offsetMin, offsetMax,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1194,6 +1223,14 @@ export function matchesSourceReplayTiming(
         coding.code !== prior.code || coding.display !== prior.display) return false;
   }
   const repeat = timing.repeat, prior = proof.repeatValues;
+  let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
+  if (repeat?.extension) for (const extension of repeat.extension) {
+    const value = extension.valueInteger ?? extension.valueDecimal;
+    if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
+    else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
+    else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
+  }
+  if (offsetExact !== proof.offsetExact || offsetMin !== proof.offsetMin || offsetMax !== proof.offsetMax) return false;
   return repeat === proof.repeat && repeat?.extension === prior?.extension &&
     repeat?.frequency === prior?.frequency && repeat?.frequencyMax === prior?.frequencyMax &&
     repeat?.period === prior?.period && repeat?.periodMax === prior?.periodMax &&
@@ -1255,12 +1292,57 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   return matchesSourceReplayTiming(dosage.timing, proof.timing);
 }
 
+/** Source text can be retained without claiming it agrees with current
+ * external clinical fields. The compact annotation is local to every row. */
+export function getDosageSourceTextFingerprint(dosage: Pick<FhirDosage, "extension">): string | undefined {
+  for (const marker of dosage.extension ?? []) {
+    if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
+    const text = marker.extension?.find(field => field.url === "textFingerprint")?.valueString ??
+      marker.extension?.find(field => field.url === "row")?.extension?.find(field => field.url === "textFingerprint")?.valueString;
+    if (text !== undefined) return text;
+  }
+  return undefined;
+}
+export function getDosageSourceTextAgreement(
+  dosage: Pick<FhirDosage, "extension" | "text">, acceptTextEdits = true
+): boolean | undefined {
+  for (const marker of dosage.extension ?? []) {
+    if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
+    const row = marker.extension?.find(field => field.url === "row");
+    const agreement = row?.extension?.find(field => field.url === "sourceAgreement")?.valueBoolean ??
+      marker.extension?.find(field => field.url === "sourceAgreement")?.valueBoolean;
+    if (agreement === undefined) continue;
+    if (agreement || !acceptTextEdits) return agreement;
+    const text = getDosageSourceTextFingerprint(dosage);
+    // Current text can own its explicit replacement without certifying the
+    // original serialized instruction graph. Replay callers reject edits.
+    return text !== undefined && text !== dosageTextFingerprint(dosage) ? true : false;
+  }
+  return undefined;
+}
+export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
+  if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL || Object.keys(marker).length !== 2 ||
+      !marker.extension?.length || marker.extension.length > 2) return false;
+  let fields = 0;
+  for (const field of marker.extension) {
+    if (Object.keys(field).length !== 2) return false;
+    if (field.url === "sourceAgreement" && typeof field.valueBoolean === "boolean" && !(fields & 1)) fields |= 1;
+    else if (field.url === "textFingerprint" && typeof field.valueString === "string" && !(fields & 2)) fields |= 2;
+    else return false;
+  }
+  return Boolean(fields & 1);
+}
+
 /** Verify a saved editable R5 row's source clinical authority at most once
  * for an unchanged object. Missing provenance is unknown, not a mismatch.
  * No always-on full graph hash or normalized render. */
 export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boolean | undefined {
   const cached = SOURCE_REPLAY_PROOFS.get(dosage);
   if (cached && unchangedReplayProof(dosage, cached)) return cached.matches;
+  if (getDosageSourceTextAgreement(dosage, false) === false) {
+    SOURCE_REPLAY_PROOFS.set(dosage, capturedReplayProof(dosage, false));
+    return false;
+  }
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
     for (const row of marker.extension ?? []) {
@@ -1285,22 +1367,54 @@ export function dosageTextFingerprint(dosage: FhirDosage | EzDosage): string {
  * Attach source/display provenance using repeated, structured row extensions.
  * Both primary parser output and strict R5 export use this same representation.
  * @param dosages Independently editable rows being returned to the caller.
- * @param instruction The author's unmodified instruction.
+ * @param instruction The author's unmodified instruction, when supplied.
+ * @param sourceAgreement Whether the producer established that wording agrees with the clinical fields.
  */
-export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(dosages:readonly T[],instruction:string):T[] {
-  if(!dosages.length)return [];
-  const children:FhirExtension[]=[{url:"instruction",valueString:instruction}];
-  const result:T[]=new Array(dosages.length);
-  for(let i=0;i<dosages.length;i++){
-    const row=dosages[i];result[i]=row;
-    children.push({url:"row",extension:[
-      {url:"projectionFingerprint",valueString:dosageProjectionFingerprint(row)},
-      {url:"textFingerprint",valueString:dosageTextFingerprint(row)}]});
+export interface DosageSourceTextBaseline {
+  sourceAgreement: boolean;
+  textFingerprint?: string;
+}
+export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
+  dosages: readonly T[], instruction: string | undefined, sourceAgreement = true,
+  rowSources?: readonly (DosageSourceTextBaseline | undefined)[]
+): T[] {
+  if (!dosages.length) return [];
+  const children: FhirExtension[] = instruction !== undefined ? [{ url: "instruction", valueString: instruction }] : [];
+  if (!sourceAgreement || rowSources) children.push({ url: "sourceAgreement", valueBoolean: sourceAgreement });
+  const result: T[] = new Array(dosages.length);
+  const replaceMarker = (row: T, marker: FhirExtension): T => {
+    const extension: FhirExtension[] = [];
+    for (const prior of row.extension ?? [])
+      if (!isRenderedInstructionMarker(prior) && !isCompactSourceAgreementMarker(prior)) extension.push(prior);
+    extension.push(marker);
+    return Object.assign({}, row, { extension });
+  };
+  for (let index = 0; index < dosages.length; index++) {
+    const row = dosages[index], original = rowSources?.[index];
+    result[index] = row;
+    if (instruction === undefined && row.text === undefined) continue;
+    const rowAgreement = original?.sourceAgreement ?? sourceAgreement;
+    const currentText = dosageTextFingerprint(row);
+    const sourceText = original?.textFingerprint ?? currentText;
+    if (instruction !== undefined) {
+      if (index === 0 && !rowAgreement) children.push({ url: "textFingerprint", valueString: sourceText });
+      const baseline: FhirExtension[] = [
+        { url: "projectionFingerprint", valueString: dosageProjectionFingerprint(row) },
+        { url: "textFingerprint", valueString: currentText },
+      ];
+      if (!sourceAgreement || rowSources) baseline.push({ url: "sourceAgreement", valueBoolean: rowAgreement });
+      children.push({ url: "row", extension: baseline });
+    }
+    // Later/scalar rows need only local source authority, not another course
+    // baseline. Preserve the original text fingerprint across explicit edits.
+    if (row.text !== undefined && (!rowAgreement || !sourceAgreement) && (index > 0 || instruction === undefined))
+      result[index] = replaceMarker(row, { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
+        { url: "sourceAgreement", valueBoolean: rowAgreement },
+        { url: "textFingerprint", valueString: sourceText },
+      ] });
   }
-  const extension:FhirExtension[]=[];
-  for(const e of dosages[0].extension??[])if(!isRenderedInstructionMarker(e))extension.push(e);
-  extension.push({url:DOSAGE_RENDERED_INSTRUCTION_R5_URL,extension:children});
-  result[0]=Object.assign({},dosages[0],{extension});
+  if (instruction !== undefined)
+    result[0] = replaceMarker(dosages[0], { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: children });
   return result;
 }
 
@@ -1384,7 +1498,7 @@ export function fromDosageDetails(details: FhirR6DosageInstructionInput): {
   const projected = projectEditableR5Course(details);
   return details.renderedInstruction === undefined ? projected : {
     ...projected,
-    dosages: withDosageEditProvenance(projected.dosages, details.renderedInstruction)
+    dosages: withDosageEditProvenance(projected.dosages, details.renderedInstruction, false)
   };
 }
 
@@ -1514,11 +1628,17 @@ export function localReconciliationSource(marker: FhirExtension): FhirExtension 
  */
 export function retainedDoseRateMatches(
   source: readonly NonNullable<FhirR6Dosage["doseAndRate"]>[number][],
-  live: readonly NonNullable<FhirR6Dosage["doseAndRate"]>[number][]
+  live: readonly NonNullable<FhirR6Dosage["doseAndRate"]>[number][],
+  baselines?: ComponentDeltaBaseline["doseAndRate"]
 ): Map<number, number> {
-  const identity = (entry: typeof source[number]): string | undefined =>
-    entry.id ? "id:" + entry.id :
-    entry.type ? "type:" + compactProjectionFingerprint(entry.type) : undefined;
+  const identity = (entry: typeof source[number]): string | undefined => {
+    if (entry.id) return "id:" + entry.id;
+    if (entry.type) return "type:" + compactProjectionFingerprint(entry.type);
+    const slot = entry.extension?.find(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL);
+    const dose = entry.doseExpression ?? slot?.extension?.find(item => item.url === "doseExpression")?.valueExpression;
+    const rate = entry.rateExpression ?? slot?.extension?.find(item => item.url === "rateExpression")?.valueExpression;
+    return dose || rate ? "expression:" + compactProjectionFingerprint({ dose, rate }) : undefined;
+  };
   const unique = (entries: typeof source): Map<string, number> => {
     const keys = new Map<string, number>();
     for (let i = 0; i < entries.length; i++) {
@@ -1563,6 +1683,43 @@ export function retainedDoseRateMatches(
         source[oldIndex].id || !live[liveIndex].id) continue;
     matches.set(liveIndex, oldIndex);
     used.add(oldIndex);
+  }
+  // A retained expression can have an ordinary representable sibling rate
+  // (or dose). Its baseline belongs to the slot, and distinguishes reordered
+  // anonymous entries without copying a second full source administration.
+  let oldProjectionKeys: Array<string | undefined> | undefined;
+  let liveProjectionKeys: Array<string | undefined> | undefined;
+  let unchangedProjectionOrder = source.length === live.length;
+  if (baselines) {
+    const empty = compactProjectionFingerprint({});
+    const projectionKey = (entry: typeof source[number], baseline: NonNullable<typeof baselines>[number] | undefined) => {
+      const dose = baseline?.dose ?? empty, rate = baseline?.rate ?? empty;
+      if (dose === empty && rate === empty) return undefined;
+      return (entry.id ? "id:" + entry.id : entry.type ? "type:" + compactProjectionFingerprint(entry.type) : "") +
+        "|" + dose + "|" + rate;
+    };
+    oldProjectionKeys = source.map((entry, index) => projectionKey(entry, baselines[index]));
+    liveProjectionKeys = live.map((entry, index) => {
+      const key = projectionKey(entry, {
+        dose: compactProjectionFingerprint({ doseQuantity: simpleQuantityForR5(entry.doseQuantity), doseRange: entry.doseRange }),
+        rate: compactProjectionFingerprint({ rateQuantity: simpleQuantityForR5(entry.rateQuantity), rateRange: entry.rateRange, rateRatio: entry.rateRatio }),
+      });
+      if (key !== oldProjectionKeys![index]) unchangedProjectionOrder = false;
+      return key;
+    });
+    const oldProjected = new Map<string, number>(), liveProjected = new Map<string, number>();
+    oldProjectionKeys.forEach((key, index) => {
+      if (key && !used.has(index)) oldProjected.set(key, oldProjected.has(key) ? -1 : index);
+    });
+    liveProjectionKeys.forEach((key, index) => {
+      if (key && !matches.has(index)) liveProjected.set(key, liveProjected.has(key) ? -1 : index);
+    });
+    for (const [key, oldIndex] of oldProjected) {
+      const liveIndex = liveProjected.get(key);
+      if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0) continue;
+      matches.set(liveIndex, oldIndex);
+      used.add(oldIndex);
+    }
   }
   // R5 SimpleQuantity retains the exact numeric value and unit even when
   // the R6 source had "~". That representable data identifies a surviving
@@ -1626,13 +1783,14 @@ export function retainedDoseRateMatches(
     group.sources.delete(oldIndex);reverseCounts[liveIndex]--;
     for(const other of liveGroups[liveIndex]??[])other.live.delete(liveIndex);
   }
-  // Identical cardinality retains the conventional slot ordering for
-  // anonymous or duplicate-type entries; explicit identities never fall
-  // back to a different slot when deleted or changed.
+  // Unchanged projected lists retain conventional ordering for anonymous
+  // duplicate entries. Once numeric slots change, an unmatched keyed entry
+  // has no proven association; keep its expression inert instead of guessing.
   if (source.length === live.length) {
     for (let i = 0; i < live.length; i++) {
       if (matches.has(i) || used.has(i) ||
           source[i]?.id || live[i]?.id ||
+          oldProjectionKeys?.[i] !== undefined && (!unchangedProjectionOrder || oldProjectionKeys[i] !== liveProjectionKeys?.[i]) ||
           !equalStructuredValues(source[i]?.type, live[i]?.type)) continue;
       matches.set(i, i);
       used.add(i);

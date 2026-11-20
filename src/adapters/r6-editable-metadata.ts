@@ -27,10 +27,13 @@ function replaceSource(owner: { extension?: FhirExtension[] }, url: string, valu
     }
     // Current known fields overwrite the snapshot; decoded unfamiliar children
     // and the marker's own Element metadata remain recoverable source data.
-    const current = encodeR6SourceMetadata(url, { ...retained, ...value }, kind);
-    const retired = prior.slice(retained ? 1 : 0);
+    const next = { ...retained, ...value };
+    // An unchanged snapshot still owns its exact typed child wrappers, including
+    // authored Element IDs. Rebuilding it would erase that external metadata.
+    const unchanged = retained !== undefined && equalStructuredValues(retained, next);
+    const retired = prior.slice(unchanged ? 1 : 0);
     if (retired.length) extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired });
-    extensions.push(retained ? { ...prior[0], ...current } : current);
+    extensions.push(unchanged ? prior[0] : encodeR6SourceMetadata(url, next, kind));
   }
   if (extensions.length) owner.extension = extensions;
   else delete owner.extension;

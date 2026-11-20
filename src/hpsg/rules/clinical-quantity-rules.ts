@@ -274,11 +274,13 @@ function activeDoseInCarrierOverTime(
       normalizeTokenLower(inToken) !== "in") return undefined;
   const qualifiedCarrier = carrierValueToken.kind === LexKind.Number ? undefined :
     doseComparatorNumberAt(context.tokens, carrierStart, context.limit, normalizeTokenLower(carrierValueToken));
+  const attachedCarrier = !qualifiedCarrier && carrierValueToken.kind !== LexKind.Number
+    ? attachedNumberUnitAt(carrierValueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
   const carrierNumber = qualifiedCarrier?.value ??
-    (carrierValueToken.kind === LexKind.Number ? carrierValueToken.value : undefined);
+    (carrierValueToken.kind === LexKind.Number ? carrierValueToken.value : attachedCarrier?.value);
   const carrierUnitStart = (qualifiedCarrier?.numericIndex ?? carrierStart) + 1;
   const carrierUnitToken = context.tokens[carrierUnitStart];
-  const carrierUnit = qualifiedCarrier?.rawUnit ??
+  const carrierUnit = qualifiedCarrier?.rawUnit ?? attachedCarrier?.rawUnit ??
     (carrierUnitToken && available(context, carrierUnitStart) ? normalizeTokenLower(carrierUnitToken) : undefined);
   if (carrierNumber === undefined || carrierNumber <= 0 || !carrierUnit) return undefined;
   const activeDose = massTerm(value, activeUnit);
@@ -292,7 +294,7 @@ function activeDoseInCarrierOverTime(
   // This is a bounded lexical NP inside a dimensionally licensed construction,
   // not a dictionary/keyword rule for saline, solution, dextrose, etc.
   // A number or clause separator cannot be silently absorbed as material.
-  let cursor = carrierUnitStart + (qualifiedCarrier?.rawUnit ? 0 : 1);
+  let cursor = carrierUnitStart + (qualifiedCarrier?.rawUnit || attachedCarrier?.rawUnit ? 0 : 1);
   const materialStart = cursor;
   while (cursor - materialStart < 3 && available(context, cursor)) {
     const token = context.tokens[cursor];

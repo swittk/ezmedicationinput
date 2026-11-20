@@ -2429,7 +2429,10 @@ describe("review 20: edited canonical administration cannot steal an independent
       }, "long", resolveSigLocalization(locale), {
         realizationMode: "roundtrip"
       });
-      expect(whole).toContain("5");
+      const administrations = locale === "en"
+        ? whole.match(/drink\s*5\s*mL/giu)
+        : whole.match(/ดื่ม\s*5\s*มิลลิลิตร/gu);
+      expect(administrations).toHaveLength(2);
       expect(whole).not.toContain("1 tablet");
     }
     expect(JSON.stringify(graph)).toBe(unchanged);
@@ -2524,7 +2527,9 @@ describe("review 2026-11-16 19h: incomplete graph quantities do not invent amoun
       const original = JSON.stringify(frame);
       const realized = realizeInstructionAction(frame, locale);
       expect(realized).not.toMatch(/(?:<=|≤)\s*mg/u);
-      expect(realized).toMatch(/2|สอง/u);
+      // An incomplete edited quantity uses the intact authored argument;
+      // retaining its tablet unit is essential even in a Thai realization.
+      expect(realized).toContain("2 tablets");
       expect(JSON.stringify(frame)).toBe(original);
     }
   );
@@ -2574,7 +2579,9 @@ describe("November 17 review: institution dose action owns prior quantitative in
     const parsed = parsePublicSig(source, options);
     const clause = parsed.meta.canonical.clauses[0];
     expect(clause.instructionGraph?.actions[0]?.predicate.lemma).toBe("disperse");
-    expect(clause.instructionGraph?.primaryAdministrationSpan).toBeDefined();
+    expect(clause.instructionGraph?.primaryAdministrationSpan).toEqual({
+      start: source.indexOf("drink"), end: source.indexOf("drink") + "drink".length
+    });
     const changed = { ...clause, dose: { ...clause.dose!, value: 3 } };
     expect(instructionGraphSourceConflictsWithDose(changed, options)).toBe(true);
     const unchanged = { ...clause, dose: { ...clause.dose!, value: 2 } };

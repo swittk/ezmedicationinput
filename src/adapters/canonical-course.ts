@@ -1,4 +1,4 @@
-import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL } from "../dosage-course";
+import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, isCompactSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
@@ -115,6 +115,26 @@ import {
   buildBodySiteAdministrationTargetCountExtension,
   BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
 } from "../body-site-target";
+
+/** An incomplete authored R5 maximum is retained source, not an invented R6 limit. */
+export const R5_SOURCE_ONLY_MAXIMUM_URL =
+  "urn:ezmedicationinput:StructureDefinition:r5-source-only-maximum";
+function sourceOnlyR5Maximum(limit: CanonicalDoseLimit): boolean {
+  return limit.scope === "period" && !!limit.provenance && !("scope" in limit.provenance) &&
+    (limit.amount?.value === undefined || limit.period?.value === undefined);
+}
+/** Share the unchanged list on the ordinary path; only incomplete R5 Ratios need filtering. */
+export function r6RepresentableLimits(limits: CanonicalDoseLimit[] | undefined): CanonicalDoseLimit[] | undefined {
+  if (!limits) return limits;
+  let kept: CanonicalDoseLimit[] | undefined;
+  for (let index = 0; index < limits.length; index++) {
+    const limit = limits[index];
+    if (sourceOnlyR5Maximum(limit)) {
+      kept ??= limits.slice(0, index);
+    } else if (kept) kept.push(limit);
+  }
+  return kept ?? limits;
+}
 
 const TREATMENT_START_SYSTEM = "http://hl7.org/fhir/evidence-variable-event";
 const record = (value: object): Record<string, unknown> => value as Record<string, unknown>;
@@ -484,6 +504,7 @@ function baseAdministration(
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
     amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
+  const sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
   const output: CanonicalAdministration = {
     kind: "administration",
     schedule: timing(raw.timing, format === "r5"),
@@ -518,6 +539,7 @@ function baseAdministration(
     cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
     provenance: { format, data: record(raw) },
   };
+  if (sourceTextVerified !== undefined) output.provenance!.sourceTextVerified = sourceTextVerified;
   if (format === "r5") {
     let limits: CanonicalDoseLimit[] | undefined;
     for (const maximum of input.maxDosePerPeriod ?? [])
@@ -565,6 +587,12 @@ export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): 
       text: limit.text,
       provenance: limit,
     }));
+  }
+  for (const marker of raw.extension ?? []) {
+    if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || !marker.valueRatio) continue;
+    const maximum = marker.valueRatio;
+    (result.limits ??= []).push({ scope: "period", amount: measureFromR5(maximum.numerator),
+      period: measureFromR5(maximum.denominator), provenance: maximum });
   }
   return result;
 }
@@ -617,6 +645,7 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
     contextIssue: raw.step ? getCourseContextIssue(raw as FhirR6DosageInstruction) : undefined,
     provenance: { format: "r6", data: record(raw) },
   };
+  if (stages.length) course.provenance!.sourceTextVerified = false;
   // No defensive copy. Re-reading an externally changed FHIR input should
   // still observe its current fields, while ordinary callers leave it alone.
   return course;
@@ -722,17 +751,23 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange) : undefined;
     const start = target === "r6" ? simpleQuantityForR5(r.startOffset) : undefined;
     const end = target === "r6" ? simpleQuantityForR5(r.endOffset) : undefined;
+    // Clinical zero frequency and signed/fractional offsets are carried by
+    // their typed extensions. Reuse and reconstruction must compare the same
+    // positiveInt/unsignedInt-compatible wire values.
+    const frequency = r.frequency === 0 ? undefined : r.frequency;
+    const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
+      ? r.offset : undefined;
     if (
       prior &&
       prior.count === r.count &&
       prior.countMax === r.countMax &&
-      prior.frequency === r.frequency &&
+      prior.frequency === frequency &&
       prior.frequencyMax === r.frequencyMax &&
       prior.period === r.period &&
       prior.periodMax === r.periodMax &&
       prior.periodUnit === r.periodUnit &&
       prior.dayOfWeek === r.dayOfWeek &&
-      prior.offset === r.offset &&
+      prior.offset === offset &&
       prior.duration === r.occurrenceDuration &&
       prior.durationMax === r.occurrenceDurationMax &&
       prior.durationUnit === r.occurrenceDurationUnit &&
@@ -749,13 +784,13 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       const value: Record<string, unknown> = Object.assign({}, r.provenance);
       assign(value, "count", r.count);
       assign(value, "countMax", r.countMax);
-      assign(value, "frequency", r.frequency);
+      assign(value, "frequency", frequency);
       assign(value, "frequencyMax", r.frequencyMax);
       assign(value, "period", r.period);
       assign(value, "periodMax", r.periodMax);
       assign(value, "periodUnit", r.periodUnit);
       assign(value, "dayOfWeek", r.dayOfWeek);
-      assign(value, "offset", r.offset);
+      assign(value, "offset", offset);
       assign(value, "duration", r.occurrenceDuration);
       assign(value, "durationMax", r.occurrenceDurationMax);
       assign(value, "durationUnit", r.occurrenceDurationUnit);
@@ -1210,10 +1245,25 @@ function administrationToWire(
       source.modifierExtension?.some((e) => e.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
   ) {
     const existing = (output.modifierExtension as FhirDosage["modifierExtension"]) ?? [];
-    output.modifierExtension = [
-      ...existing.filter((e) => e.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL),
-      ...(a.phaseOrigin ? [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: a.phaseOrigin }] : []),
-    ];
+    const phaseOrigin = simpleQuantityForR5(a.phaseOrigin);
+    let found = false;
+    let changed: FhirExtension[] | undefined;
+    for (let index = 0; index < existing.length; index++) {
+      const marker = existing[index];
+      if (marker.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL) {
+        if (changed) changed.push(marker);
+        continue;
+      }
+      found = true;
+      const replacement = phaseOrigin
+        ? marker.valueQuantity === phaseOrigin ? marker : { ...marker, valueQuantity: phaseOrigin }
+        : undefined;
+      if (replacement !== marker && !changed) changed = existing.slice(0, index);
+      if (changed && replacement) changed.push(replacement);
+    }
+    if (phaseOrigin && !found)
+      (changed ??= existing.slice()).push({ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin });
+    if (changed) assign(output, "modifierExtension", changed.length ? changed : undefined);
   }
   // Whole-course display baselines belong to the FINAL output, never to
   // a projected component copied from an earlier edited source. Remove only
@@ -1223,7 +1273,7 @@ function administrationToWire(
     let kept: FhirExtension[] | undefined;
     for (let i = 0; i < priorExtensions.length; i++) {
       const e = priorExtensions[i];
-      if (isRenderedInstructionMarker(e)) {
+      if (isRenderedInstructionMarker(e) || isCompactSourceAgreementMarker(e)) {
         if (!kept) kept = priorExtensions.slice(0, i);
       } else if (kept) kept.push(e);
     }
@@ -1262,14 +1312,48 @@ function administrationToWire(
     // doseLimit. But an ordinary dosage with no authored safety must not
     // grow a synthetic empty R6 safety policy merely because limits=undefined.
     const limits = a.limits ?? (source?.safety?.doseLimit !== undefined ? [] : undefined);
-    assign(output, "safety", safetyToWire(a.safety, source?.safety, limits, Boolean(clause)));
+    assign(output, "safety", safetyToWire(a.safety, source?.safety, r6RepresentableLimits(limits), Boolean(clause)));
+    // A Ratio with an extension-only/missing endpoint has no R6 value[x]
+    // equivalent. Keep its original source as inert ordinary metadata.
+    const originalExtensions = output.extension as FhirExtension[] | undefined;
+    let extensions: FhirExtension[] | undefined;
+    let sourceMarkers: Map<object, FhirExtension> | undefined;
+    for (let index = 0; index < (originalExtensions?.length ?? 0); index++) {
+      const marker = originalExtensions![index];
+      if (marker.url === R5_SOURCE_ONLY_MAXIMUM_URL && marker.valueRatio) {
+        (sourceMarkers ??= new Map()).set(marker.valueRatio, marker);
+        extensions ??= originalExtensions!.slice(0, index);
+      } else if (extensions) extensions.push(marker);
+    }
+    for (const limit of limits ?? []) if (sourceOnlyR5Maximum(limit)) {
+      extensions ??= originalExtensions?.slice() ?? [];
+      extensions.push(sourceMarkers?.get(limit.provenance!) ?? {
+        url: R5_SOURCE_ONLY_MAXIMUM_URL,
+        valueRatio: limit.provenance as NonNullable<FhirDosage["maxDosePerPeriod"]>[number],
+      });
+    }
+    if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
   } else {
     delete output.safety;
     delete output.maxDosePerPeriod;
     delete output.maxDosePerAdministration;
     delete output.maxDosePerLifetime;
     let periodLimits: NonNullable<FhirDosage["maxDosePerPeriod"]> | undefined;
+    // R6's inert source envelope is decoded above; R5 owns the Ratio itself.
+    const originalExtensions = output.extension as FhirExtension[] | undefined;
+    let extensions: FhirExtension[] | undefined;
+    for (let index = 0; index < (originalExtensions?.length ?? 0); index++) {
+      const marker = originalExtensions![index];
+      if (marker.url === R5_SOURCE_ONLY_MAXIMUM_URL && marker.valueRatio)
+        extensions ??= originalExtensions!.slice(0, index);
+      else if (extensions) extensions.push(marker);
+    }
+    if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
     for (const limit of a.limits ?? []) {
+      if (sourceOnlyR5Maximum(limit)) {
+        (periodLimits ??= []).push(limit.provenance as NonNullable<FhirDosage["maxDosePerPeriod"]>[number]);
+        continue;
+      }
       if (!limit.amount) continue;
       const amount = {
         ...limit.amount,
@@ -1456,32 +1540,15 @@ export function courseToR5(course: CanonicalCourse): FhirDosage[] {
   return projectNativeR5Course(course).dosages;
 }
 
-/** Boundary-only authored-source fast path. Returning a string unchanged does
- * not need native normalization or an editable ownership copy. These checks
- * inspect only source authority/presence, never dose interpretation or event
- * calculations; computed previews always enter the canonical formatter. */
+/** Source-only R6 instructions have no structured administration to preview.
+ * A nonempty header on a structured import is original text, not evidence
+ * that its dose/timing still agrees with the independently editable fields. */
 export function unchangedR6SourceDisplay(
   raw: FhirR6DosageInstructionInput,
   options?: FormatOptions
 ): string | undefined {
-  if (!raw.renderedInstruction || options?.realizationMode === "normalized") return undefined;
-  if (
-    !options ||
-    options.realizationMode === "roundtrip" ||
-    !raw.step?.length ||
-    raw.repeatCycle ||
-    raw.safety
-  )
-    return raw.renderedInstruction;
-  for (const step of raw.step ?? []) {
-    if (step.start || step.end || step.count !== undefined || step.safety) return raw.renderedInstruction;
-    for (const a of step.component) {
-      if (a.condition?.length || a.safety || a.site?.reference) return raw.renderedInstruction;
-      for (const amount of a.doseAndRate ?? [])
-        if (amount.doseExpression || amount.rateExpression) return raw.renderedInstruction;
-    }
-  }
-  return undefined;
+  return raw.renderedInstruction && !raw.step?.length && options?.realizationMode !== "normalized"
+    ? raw.renderedInstruction : undefined;
 }
 
 /** Explicit editable import for applications that already hold R5 rows.

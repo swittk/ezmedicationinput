@@ -1129,7 +1129,7 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   return { args };
 };
 const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, amount } = c;
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, relation, relationTargetEnd, amount } = c;
   const args = parsedArgs(amount);
   const amountEnd = amount?.span
     ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
@@ -1144,9 +1144,15 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
     parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
   ));
-  if (relIndex >= 0 && relIndex + 1 < segmentEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Destination, options
-  ));
+  if (relIndex >= 0 && relIndex + 1 < relationTargetEnd) {
+    const target = argumentFromParts(
+      parts, relIndex + 1, relationTargetEnd, input, AdviceArgumentRole.Destination, options
+    );
+    // Constructional relation ownership is independent of a noun's lexical
+    // role: saline and water may both be Substance, but only water fills WITH.
+    if (target) target.relation = relation;
+    pushArgument(args, target);
+  }
   return { args };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
@@ -3642,19 +3648,32 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
 
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  // Clinical substance concepts can fill the typed locative/accompaniment
-  // complement (e.g. disperse IN water), even when no Amount remains after
-  // a dose edit. Keep that independent complement in the selected template.
-  const relationTarget = c.destination ?? c.substance;
+  let targetArgument: AdviceArgument | undefined;
+  let materialArgument: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (arg.relation && arg.relation === c.frame.relation) {
+      targetArgument ??= arg;
+    } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
+        arg.role !== AdviceArgumentRole.Time && arg.role !== AdviceArgumentRole.Duration &&
+        arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
+      materialArgument ??= arg;
+    }
+  }
+  // The parser owns the relation daughter independently from lexical noun
+  // roles. Retain the role-based fallback for older structured frames.
+  const relationTarget = targetArgument
+    ? translatedArgument(targetArgument, c.locale) : c.destination ?? c.substance;
   const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   const destination = relation && relationTarget
     ? joinLocalizedTokens(c.locale, [relation, relationTarget])
     : undefined;
-  const materialValue = c.material ?? (!relation || c.destination ? c.substance : undefined);
+  const materialValue = targetArgument
+    ? materialArgument && translatedArgument(materialArgument, c.locale)
+    : c.material ?? (!relation || c.destination ? c.substance : undefined);
   const material = materialValue
-    ? joinLocalizedTokens(c.locale, [profile.materialPrefix || undefined, materialValue])
+    ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
   return renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
@@ -3678,8 +3697,10 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
       hasUntranslatedThaiArgument(frame, locale)) {
     return trimSemanticText(frame.sourceText);
   }
+  const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
+  for (const arg of frame.args) firstArguments[arg.role] ??= arg;
   const first = (role: AdviceArgumentRole): string | undefined => {
-    const arg = frame.args.filter((candidate) => candidate.role === role).slice(0, 1)[0];
+    const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
   const label = actionLabel(frame, locale, roundtripSafe);
@@ -3691,7 +3712,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const substance = first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
-  const timeArg = frame.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  const timeArg = firstArguments[AdviceArgumentRole.Time];
   const time = timeArg ? translatedArgument(timeArg, locale) : undefined;
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);

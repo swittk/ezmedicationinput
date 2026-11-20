@@ -999,14 +999,17 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
   if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit;
   if (schedule.duration === undefined)
-    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${schedule.durationUnit}`;
+    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
-  const qualifier = schedule.durationMax !== undefined &&
-    (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)
-      ? `${base}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}`
-      : base;
-  return `x${qualifier}${schedule.durationUnit}`;
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== schedule.durationUnit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
+    return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
+  }
+  return `x${base}${schedule.durationUnit}`;
 }
 
 function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1027,8 +1030,11 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
     return undefined;
   }
   const unit = schedule.durationUnit;
-  const label = (value: number): string => {
-    switch (unit) {
+  const upperUnit = schedule.durationMaxUnit ?? unit;
+  const label = (value: number, endpointUnit = unit): string => {
+    switch (endpointUnit) {
+      case FhirPeriodUnit.Second:
+        return value === 1 ? "second" : "seconds";
       case FhirPeriodUnit.Minute:
         return value === 1 ? "minute" : "minutes";
       case FhirPeriodUnit.Hour:
@@ -1042,15 +1048,17 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
       case FhirPeriodUnit.Year:
         return value === 1 ? "year" : "years";
       default:
-        return value === 1 ? "unit" : "units";
+        return endpointUnit;
     }
   };
   if (schedule.duration === undefined)
-    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!)}`;
+    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit)}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    return `for ${lower} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax)}`;
+      (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
+    return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
   }
   return `for ${lower} ${label(schedule.duration)}`;
 }
@@ -1933,7 +1941,8 @@ export function formatCanonicalClause(
       realizationMode: options?.realizationMode ?? "normalized",
       sitePlacement: options?.sitePlacement ??
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
-      formatDefault
+      formatDefault,
+      instructionActionMap: options?.instructionActionMap
     };
     return localization.formatShort(context);
   }

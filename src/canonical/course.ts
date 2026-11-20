@@ -203,6 +203,8 @@ export interface CanonicalAdministration {
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
   syntax?: CanonicalSigClause;
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
+    /** False when preserved wording has no agreement proof for current clinical facts. */
+    sourceTextVerified?: boolean;
     /** Original foreign fields retained inside an imported R5 row. Only
      * adapters inspect this source; execution reads the typed fields above. */
     retained?: Partial<import("../types").FhirR6Dosage> };
@@ -225,7 +227,9 @@ export interface CanonicalCourse {
   cycleCount?: number;
   safety?: CanonicalSafety;
   contextIssue?: "conflicting-course-phase" | "missing-course-context";
-  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown> };
+  provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
+    /** Source preservation is independent of authority to replay that wording. */
+    sourceTextVerified?: boolean };
 }
 export type CanonicalScheduleInput =
   | CanonicalCourse
@@ -259,6 +263,17 @@ export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDa
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
 
+/** Normalize equivalent count-unit labels before dimensional conversion. */
+export function normalizeQuantityCapUnit(unit: string): string {
+  const text = unit.trim().toLowerCase();
+  switch (text) {
+    case "tab": case "tabs": case "tablet": case "tablets": return "tab";
+    case "cap": case "caps": case "capsule": case "capsules": return "cap";
+    case "drop": case "drops": return "drop";
+    default: return text;
+  }
+}
+
 /** Intersect usable scoped maxima in the administration's quantity unit.
  * Incomplete or incomparable retained constraints do not erase another
  * known maximum. `multiple` records constraints still requiring evaluation. */
@@ -291,7 +306,9 @@ export function numericAdministrationLimits(
     }
     const current = limit.scope === "administration" ? administration : lifetime;
     const target = doseUnit || unitOf(current) || unitOf(bound);
-    const value = convertValue(bound.value, unitOf(bound), target, strength);
+    const source = unitOf(bound);
+    const value = normalizeQuantityCapUnit(source) === normalizeQuantityCapUnit(target)
+      ? bound.value : convertValue(bound.value, source, target, strength);
     if (value === null || !Number.isFinite(value)) {
       multiple = true;
       continue;

@@ -225,7 +225,7 @@ describe("multi-clause parsing", () => {
       includeTimesPerDaySummary: true
     } as const;
 
-    expect(formatSig(details, "long")).toBe("stale saved instruction");
+    expect(formatSig(details, "long")).not.toContain("stale saved instruction");
     const formatted = formatSig(details, "long", options);
     expect(formatted).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง");
     expect(formatted).not.toContain("stale saved instruction");
@@ -236,8 +236,9 @@ describe("multi-clause parsing", () => {
     expect(imported.fhirNext.renderedInstruction).toBe("stale saved instruction");
 
     const advanced = { ...details, repeatCycle: { value: 28, unit: "d" } };
-    expect(formatSig(advanced, "long", options)).toBe("stale saved instruction");
-    expect(fromFhir(advanced, options).longText).toBe("stale saved instruction");
+    expect(formatSig(advanced, "long", options)).not.toContain("stale saved instruction");
+    expect(fromFhir(advanced, options).longText).toBe(formatSig(advanced, "long", options));
+    expect(fromFhir(advanced, options).fhirNext.renderedInstruction).toBe("stale saved instruction");
   });
 
   it("parses plus-separated ocular clauses into multiple items", () => {

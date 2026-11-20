@@ -2574,7 +2574,7 @@ describe("November 16 PR #13: elapsed parallel component origin owns its calenda
       from: "2026-11-02T02:30:00-05:00", timeZone: "America/New_York",
       limit: 10, durationValue: 6, durationUnit: FhirPeriodUnit.Day };
     for (const datum of [concurrent, toFhirR5Dosages(concurrent)]) {
-      expect(nextDueDoses(datum, opts).slice(0, 4)).toEqual([
+      expect(nextDueDoses(datum, opts)).toEqual([
         "2026-11-02T06:00:00-05:00", "2026-11-03T04:00:00-05:00",
         "2026-11-03T06:00:00-05:00", "2026-11-04T06:00:00-05:00"
       ]);

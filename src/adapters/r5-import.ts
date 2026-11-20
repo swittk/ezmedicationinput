@@ -91,13 +91,16 @@ function stageFromFields(
 }
 function courseFromFields(
   fields: Omit<FhirR6DosageInstruction, "step">,
-  stages: CanonicalStage[]
+  stages: CanonicalStage[],
+  headerAgreement?: boolean
 ): CanonicalCourse {
   let contextIssue: CanonicalCourse["contextIssue"];
+  let sourceTextVerified: boolean | undefined = headerAgreement;
   for (const stage of stages)
     for (const a of stage.administrations) {
       if (a.contextIssue === "conflicting-course-phase") contextIssue = a.contextIssue;
       else if (a.contextIssue && !contextIssue) contextIssue = a.contextIssue;
+      if (headerAgreement === undefined && a.provenance?.sourceTextVerified === false) sourceTextVerified = false;
     }
   const course:CanonicalCourse={
     kind:"course",stages,instruction:fields.renderedInstruction,
@@ -108,6 +111,7 @@ function courseFromFields(
   // Set an optional typed scalar directly instead of creating spread
   // fragments/descriptors on every imported course in the ES6 build.
   if(contextIssue)course.contextIssue=contextIssue;
+  if(sourceTextVerified!==undefined)course.provenance!.sourceTextVerified=sourceTextVerified;
   return course;
 }
 function extensionFields(course: CanonicalCourse): FhirExtension[] {
@@ -117,6 +121,7 @@ function withExtensions(course: CanonicalCourse, extension: FhirExtension[]): Ca
   return {
     ...course,
     provenance: {
+      ...course.provenance,
       format: course.provenance?.format ?? "r5",
       data: { ...course.provenance?.data, extension },
     },
@@ -311,7 +316,7 @@ function restoreComponentDelta(
     }
   }
   if (delta?.doseAndRate) {
-    const matched = retainedDoseRateMatches(delta.doseAndRate, row.doseAndRate ?? []);
+    const matched = retainedDoseRateMatches(delta.doseAndRate, row.doseAndRate ?? [], local.baseline?.doseAndRate);
     const used = new Set<number>();
     let supersededExpression = false,
       supersededQuantity = false;
@@ -478,12 +483,15 @@ function instructionBaseline(marker: FhirExtension | undefined): {
   instruction: string | undefined;
   rows: Array<{ projection?: string; text?: string }>;
   complete: boolean;
+  sourceAgreement?: boolean;
 } {
+  let sourceAgreement: boolean | undefined;
   let instruction: string | undefined,
     instructionSeen = false,
     complete = true;
   const rows: Array<{ projection?: string; text?: string }> = [];
   for (const item of marker?.extension ?? []) {
+    if (item.url === "sourceAgreement" && typeof item.valueBoolean === "boolean") sourceAgreement = item.valueBoolean;
     if (item.url === "instruction" && !instructionSeen) {
       instructionSeen = true;
       instruction = item.valueString;
@@ -503,7 +511,7 @@ function instructionBaseline(marker: FhirExtension | undefined): {
     if (!row.projection || !row.text) complete = false;
     rows.push(row);
   }
-  return { instruction, rows, complete: complete && rows.length > 0 };
+  return { instruction, rows, complete: complete && rows.length > 0, sourceAgreement };
 }
 
 /** A returned draft baseline identifies the complete lifted membership list.
@@ -915,7 +923,10 @@ function reconcileNativeCompactCourse(
   };
   if (legacyCycleCount !== undefined && courseEdits.modifierExtension === undefined)
     setCourseCycleCount(currentHeader, legacyCycleCount);
-  const result = courseFromFields(currentHeader, steps);
+  const replacementOwnsHeader = instruction !== undefined &&
+    (renderedInstruction !== undefined || instruction !== savedInstruction);
+  const result = courseFromFields(currentHeader, steps,
+    replacementOwnsHeader ? true : parsedBaseline.sourceAgreement);
   if (savedInstruction !== undefined && !instructionMatches)
     addWarning(
       warnings,
@@ -923,7 +934,8 @@ function reconcileNativeCompactCourse(
     );
   return withPreservedSourceExtension(
     withReconciliationSources(withReconciliationWarnings(result, warnings), sources),
-    instructionMarker && (!instructionMatches || hasUnrecognizedEditMetadata(instructionMarker))
+    instructionMarker && (!instructionMatches ||
+      replacementOwnsHeader && instruction !== savedInstruction || hasUnrecognizedEditMetadata(instructionMarker))
       ? instructionMarker
       : undefined
   );
@@ -1331,7 +1343,7 @@ function reconcileNativeRetainedCourse(
             reference: (baseline as EzDosage).siteReference,
           }),
           doseAndRate: old.doseAndRate?.map((entry, index) => ({
-            ...(entry.doseExpression || entry.doseQuantity?.comparator
+            ...(entry.doseExpression || entry.doseQuantity || entry.doseRange
               ? {
                   dose: compactProjectionFingerprint({
                     doseQuantity: baseline.doseAndRate?.[index]?.doseQuantity,
@@ -1339,9 +1351,7 @@ function reconcileNativeRetainedCourse(
                   }),
                 }
               : {}),
-            ...(entry.rateExpression ||
-            entry.rateQuantity?.comparator ||
-            entry.rateRatio?.numerator?.comparator === "~"
+            ...(entry.rateExpression || entry.rateQuantity || entry.rateRange || entry.rateRatio
               ? {
                   rate: compactProjectionFingerprint({
                     rateQuantity: baseline.doseAndRate?.[index]?.rateQuantity,
@@ -1383,7 +1393,7 @@ function reconcileNativeRetainedCourse(
         ? { renderedInstruction: unchangedInstruction }
         : {}),
     },
-    steps
+    steps, editedInstruction !== undefined ? true : undefined
   );
   if (structuredChanged && editedInstruction === undefined && unchangedInstruction !== undefined) {
     addWarning(
@@ -1397,7 +1407,8 @@ function reconcileNativeRetainedCourse(
     for (const extension of retained.extension ?? [])
       if (extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)
         sourceFragments.push(...(extension.extension ?? []));
-  if ((structuredChanged || preserveRetainedMarkers) && retainedSource)
+  if ((structuredChanged || preserveRetainedMarkers ||
+      editedInstruction !== undefined && editedInstruction !== unchangedInstruction) && retainedSource)
     sourceFragments.unshift(sourceWithoutNestedHistory(retainedSource));
   return withReconciliationSources(withReconciliationWarnings(result, warnings), sourceFragments);
 }
@@ -1520,7 +1531,9 @@ export function courseFromR5(
   const replacementInstruction = explicitCourseInstruction ?? renderedInstruction ?? clinicianEditedText;
   const currentInstruction = replacementInstruction ?? preservedInstruction;
   const instructionSource =
-    instructionMarker && (!instructionStillMatches || hasUnrecognizedEditMetadata(instructionMarker))
+    instructionMarker && (!instructionStillMatches ||
+      replacementInstruction !== undefined && replacementInstruction !== savedInstruction ||
+      hasUnrecognizedEditMetadata(instructionMarker))
       ? instructionMarker
       : undefined;
   if (savedInstruction !== undefined && hasInstructionBaseline && !instructionStillMatches)
@@ -1671,7 +1684,7 @@ export function courseFromR5(
       );
     const result = courseFromFields(header, [
       { administrations: [administrationFromR5(row, sourceContext)] },
-    ]);
+    ], replacementInstruction !== undefined ? true : snapshot.sourceAgreement);
     return withPreservedSourceExtension(
       withReconciliationSources(withReconciliationWarnings(result, warnings), reconciliationSources),
       instructionSource
@@ -1714,7 +1727,8 @@ export function courseFromR5(
   const stages: CanonicalStage[] = [];
   for (const sequence of [...sequences].sort((a, b) => a - b))
     stages.push(stageFromFields(r6StepMetadata(metadata.get(sequence) ?? {}), groups.get(sequence) ?? []));
-  const result = courseFromFields(header, stages);
+  const result = courseFromFields(header, stages,
+    replacementInstruction !== undefined ? true : snapshot.sourceAgreement);
   return withPreservedSourceExtension(
     withReconciliationSources(withReconciliationWarnings(result, warnings), reconciliationSources),
     instructionSource

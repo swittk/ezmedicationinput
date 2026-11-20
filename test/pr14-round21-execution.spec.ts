@@ -1,8 +1,8 @@
 /** Independent quantity and timestamp oracles for review 21 execution. */
 import { describe, expect, it } from "vitest";
-import { calculateTotalUnits, nextDueDoses, toEzDosages } from "../src/index";
+import { calculateTotalUnits, nextDueDoses, toEzDosages, fromFhir, toFhirR5Dosages } from "../src/index";
 import type { CanonicalAdministration, CanonicalCourse } from "../src/canonical/course";
-import { EventTiming, FhirPeriodUnit as Unit, type FhirDosage } from "../src/types";
+import { EventTiming, FhirPeriodUnit as Unit, type FhirDosage, type FhirR6DosageInstruction } from "../src/types";
 
 const origin = "2026-01-01T00:00:00Z";
 const options = { from: origin, orderedAt: origin, timeZone: "UTC" };
@@ -267,4 +267,206 @@ describe("supply context applies to actual admission", () => {
     }
     expect(calculateTotalUnits(new Options()).totalUnits).toBe(1);
   });
+});
+
+
+describe("round23 execution families", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const options = { from: origin, orderedAt: origin, timeZone: "UTC" };
+  const relative = (value: number, unit = "d") => ({
+    anchor: "treatment-start" as const, displacement: { value, unit },
+  });
+  const dose = (value = 1): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00"] } },
+  });
+  const ranged = (low = 1.5, high = 2, maximum = 3, hours = 48): CanonicalAdministration => ({
+    ...dose(), amounts: [{ range: { low: { value: low, unit: "tab" }, high: { value: high, unit: "tab" } } }],
+    limits: [{ scope: "period", amount: { value: maximum, unit: "tab" }, period: { value: hours, unit: "h" } }],
+  });
+  const supply = (dosage: CanonicalAdministration | CanonicalCourse, days: number, extra = {}) =>
+    calculateTotalUnits({ ...options, dosage, durationValue: days, durationUnit: Unit.Day, ...extra });
+
+  describe("calendar and clock identity", () => {
+    it.each(["d", "wk", "mo", "a"])("keeps a zero-%s boundary at the second fall-back instant", unit => {
+      const member = dose(); member.schedule!.recurrence = { count: 1 };
+      const course: CanonicalCourse = { kind: "course", stages: [{ start: relative(0, unit), administrations: [member] }] };
+      const anchor = "2026-11-01T06:30:00Z";
+      const opts = { from: anchor, orderedAt: anchor, timeZone: "America/New_York", limit: 3 };
+      expect(nextDueDoses(course, opts)).toEqual(["2026-11-01T01:30:00-05:00"]);
+      expect(supply(course, 1, opts).totalUnits).toBe(1);
+    });
+    it("orders a midnight clock before the previous dinner's shifted clock", () => {
+      const member = dose(); member.schedule!.recurrence!.clocks = ["00:15:00"];
+      member.schedule!.recurrence!.anchors = [EventTiming["After Dinner"]];
+      const opts = { ...options, from: "2026-01-02T00:00:00Z", eventClock: { CV: "23:30" }, mealOffsets: { PCV: 60 } };
+      expect(nextDueDoses(member, { ...opts, limit: 1 })).toEqual(["2026-01-02T00:15:00+00:00"]);
+      expect(nextDueDoses(member, { ...opts, limit: 4 })).toEqual([
+        "2026-01-02T00:15:00+00:00", "2026-01-02T00:30:00+00:00",
+        "2026-01-03T00:15:00+00:00", "2026-01-03T00:30:00+00:00",
+      ]);
+      member.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
+      expect(nextDueDoses(member, { ...opts, limit: 2 })).toEqual([
+        "2026-01-02T00:15:00+00:00", "2026-01-03T00:15:00+00:00",
+      ]);
+    });
+    it("normalizes an extracted native active-window component like its complete course", () => {
+      const wire: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { frequency: 21, period: 28, periodUnit: Unit.Day,
+          startOffset: { value: 2, unit: "d", code: "d" }, endOffset: { value: 5, unit: "d", code: "d" } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      }] }] };
+      const batch = fromFhir(wire), native = batch.items[0].meta.canonical.administration!;
+      const anchor = "2026-11-02T00:00:00+07:00";
+      const opts = { from: anchor, orderedAt: anchor, timeZone: "Asia/Bangkok", limit: 3 };
+      for (const input of [wire, toFhirR5Dosages(wire), batch, native]) {
+        expect(nextDueDoses(input, opts)).toEqual([
+          "2026-11-04T00:00:00+07:00", "2026-11-05T00:00:00+07:00", "2026-11-06T00:00:00+07:00",
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...opts, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(0);
+        expect(calculateTotalUnits({ dosage: input, ...opts, durationValue: 28, durationUnit: Unit.Day }).totalUnits).toBe(21);
+      }
+    });
+  });
+
+  describe("quantity dimensions and scoped ceilings", () => {
+    it.each(["มิลลิลิตร", undefined])("keeps the coded rate-ratio numerator dimension with display %s", unit => {
+      const member = dose();
+      member.amounts = [{ rateRatio: { numerator: { value: 10, code: "mL", system: "http://unitsofmeasure.org", unit },
+        denominator: { value: 1, code: "h", system: "http://unitsofmeasure.org", unit: "hour" } } }];
+      member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day,
+        clocks: ["08:00:00", "20:00:00"], occurrenceDuration: 1, occurrenceDurationUnit: Unit.Hour };
+      member.limits = [{ scope: "period", amount: { value: 10, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+      expect(supply(member, 1).totalUnits).toBe(10);
+    });
+    it.each(["tablet ", " TABLETS", "tab"])("applies a range maximum expressed as %s", unit => {
+      const member = ranged(1, 3); member.limits = [{ scope: "administration", amount: { value: 2, unit } }];
+      expect(supply(member, 1).totalUnits).toBe(2);
+      member.limits = [{ scope: "lifetime", amount: { value: 2, unit } }];
+      expect(supply(member, 3).totalUnits).toBe(2);
+    });
+    it("retains an incompatible ceiling without treating it as a numeric tablet cap", () => {
+      const member = ranged(1, 3); member.limits = [{ scope: "administration", amount: { value: 2, unit: "mL" } }];
+      expect(supply(member, 1).totalUnits).toBe(3);
+      expect(supply(member, 1).explanation).toContain("could not be applied");
+      expect(member.limits[0].amount).toEqual({ value: 2, unit: "mL" });
+    });
+  });
+
+  describe("joint ranged allocation", () => {
+    it("allocates 1.5 plus 1.5 across two authored clocks", () => {
+      expect(supply(ranged(), 2).totalUnits).toBe(3);
+    });
+    it("jointly allocates across daily repeated phases", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+        stages: [{ start: relative(0), end: relative(1), administrations: [ranged()] }] };
+      expect(supply(course, 2).totalUnits).toBe(3);
+      expect(supply(course, 4).totalUnits).toBe(6);
+    });
+    it("maximizes total quantity separately from admitting the most feasible clocks", () => {
+      // Consecutive days share a 36-hour cap; day 1 and day 3 do not.
+      // Three 1-tablet doses are feasible, but the true maximum is 2 + 0 + 2.
+      expect(supply(ranged(1, 2, 2, 36), 3).totalUnits).toBe(4);
+    });
+    it("keeps the all-slot proof for a longer alternating quantity plan", () => {
+      expect(supply(ranged(1, 2, 3, 48), 50).totalUnits).toBe(75);
+    });
+    it("intersects multiple rolling windows while allocating the timed range", () => {
+      const member = ranged();
+      member.limits!.push({ scope: "period", amount: { value: 4.5, unit: "tab" }, period: { value: 72, unit: "h" } });
+      expect(supply(member, 4).totalUnits).toBe(6);
+    });
+    it("keeps a finite counted phase completion after joint quantity allocation", () => {
+      const member = ranged(); member.schedule!.recurrence!.count = 2;
+      const successor = dose(); successor.schedule!.recurrence!.clocks = ["09:00:00"];
+      successor.schedule!.recurrence!.count = 1;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 4, unit: "d" },
+        stages: [{ administrations: [member] }, { administrations: [successor] }] };
+      expect(supply(course, 2).totalUnits).toBe(4);
+    });
+    it("enforces strict upper endpoints on timed plans and accepts an interior optimum", () => {
+      const member = ranged(1, 2); member.amounts![0].range!.high!.comparator = "<";
+      expect(() => supply(member, 1)).toThrow(/no attainable maximum/);
+      expect(supply(member, 2).totalUnits).toBe(3);
+    });
+    it("deduplicates recorded ranged history in repeated chronological supply too", () => {
+      const member = ranged(1, 2, 6, 72); member.schedule!.recurrence!.count = 3;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [member] }] };
+      expect(supply(course, 1, { from: "2026-01-03T00:00:00Z",
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+    });
+    it("counts an actual administration once while replaying unmatched finite opportunities", () => {
+      const member = ranged(1, 2, 6, 72); member.schedule!.recurrence!.count = 3;
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorCount: 1,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(2);
+      expect(supply(member, 1, { from: "2026-01-03T00:00:00Z", priorCount: 3,
+        priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
+    });
+    it("distinguishes an unattained strict upper supremum from a smaller attainable maximum", () => {
+      const member = ranged(1, 2, 3, 24); member.asNeeded = true;
+      member.schedule!.recurrence = { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      member.amounts![0].range!.high!.comparator = "<";
+      expect(() => supply(member, 1)).toThrow(/no attainable maximum/);
+      member.amounts![0].range!.high!.comparator = "<=";
+      expect(supply(member, 1).totalUnits).toBe(2);
+      member.amounts![0].range!.high!.comparator = "<";
+      member.limits![0].amount!.value = 1.5;
+      expect(supply(member, 1).totalUnits).toBe(1.5);
+      member.limits = [{ scope: "administration", amount: { value: 1.5, unit: "tab" } },
+        { scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }];
+      expect(supply(member, 1).totalUnits).toBe(1.5);
+    });
+  });
+
+  describe("untimed capacity inside repeated windows", () => {
+    const prn = (): CanonicalAdministration => ({ ...dose(), asNeeded: true,
+      schedule: { recurrence: { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } } } });
+    it("retains seven daily PRN allowances without creating due times", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [prn()] }] };
+      expect(supply(course, 7)).toMatchObject({ totalUnits: 7, quantityKind: "maximum" });
+      expect(supply(course, 14).totalUnits).toBe(14);
+      expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
+    });
+    it.each([undefined, 1])("allocates untimed ranges jointly across windows with countMax %s", countMax => {
+      const member = ranged(); member.asNeeded = true;
+      member.schedule!.recurrence = { occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      member.schedule!.recurrence!.countMax = countMax;
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
+        stages: [{ start: relative(0), end: relative(1), administrations: [member] }] };
+      expect(supply(course, 2).totalUnits).toBe(3);
+      member.amounts![0].range!.low!.value = 1;
+      member.amounts![0].range!.high!.comparator = "<";
+      expect(supply(course, 2).totalUnits).toBe(3);
+      expect(nextDueDoses(course, { ...options, limit: 2 })).toEqual([]);
+    });
+    it("keeps each binding two-day count budget while maximizing ranged supply", () => {
+      const member = ranged(1.5, 2, 3, 96); member.asNeeded = true;
+      member.schedule!.recurrence = { countMax: 1, occurrenceCap: { max: 1, period: 1, periodUnit: Unit.Day } };
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 2, unit: "d" },
+        stages: [{ start: relative(0), end: relative(2), administrations: [member] }] };
+      const retained = JSON.stringify(course);
+      // One dose per source window: 1.5 in days 1–2 and 1.5 in days 3–4.
+      expect(supply(course, 4).totalUnits).toBe(3);
+      expect(supply(course, 2).totalUnits).toBe(2);
+      expect(supply(course, 4, { priorDoseTimes: ["2026-01-01T08:00:00Z"] }).totalUnits).toBe(0);
+      expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
+      expect(member.schedule?.recurrence?.countMax).toBe(1);
+      expect(JSON.stringify(course)).toBe(retained);
+    });
+    it("combines timed and untimed members in their resolved windows", () => {
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "wk" },
+        stages: [{ start: relative(0), end: relative(7), administrations: [prn(), dose(2)] }] };
+      expect(supply(course, 7)).toMatchObject({ totalUnits: 21, quantityKind: "maximum" });
+      expect(nextDueDoses(course, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      ]);
+    });
+  });
+
 });

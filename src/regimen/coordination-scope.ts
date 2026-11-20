@@ -163,7 +163,7 @@ const SCHEDULE_FEATURE_GROUPS = {
     'occurrenceCap', 'maxDosePerPeriod', 'eventWindow', 'clockWindow', 'weekdayOrdinal'
   ],
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
-  courseBounds: ['duration', 'durationMax', 'durationUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd'],
+  courseBounds: ['duration', 'durationMax', 'durationUnit', 'durationMaxUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd'],
   administrationDuration: [
     'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
   ],
@@ -187,7 +187,7 @@ void scheduleFeatureCoverage;
 
 const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
 const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
-  'duration', 'durationMax', 'durationUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd',
+  'duration', 'durationMax', 'durationUnit', 'durationMaxUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd',
   'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit',
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];

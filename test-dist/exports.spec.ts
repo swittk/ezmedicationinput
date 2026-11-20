@@ -156,7 +156,7 @@ describe("published package entrypoints", () => {
     });
   });
 
-  it("publishes roundtrip-safe TH/EN realization through the built entrypoint", () => {
+  it("publishes current TH/EN previews and retains source wording through the built entrypoint", () => {
     const result = runNode(
       ["--input-type=module"],
       `
@@ -172,13 +172,15 @@ describe("published package entrypoints", () => {
           parseSigType: typeof mod.parseSig,
           formatSigType: typeof mod.formatSig,
           roundTripText,
+          originalInstruction: parsed.fhirNext.renderedInstruction,
           roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
           roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
           longText: reparsed.longText
         }));
       `
     );
-    expect(result.roundTripText).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
+    expect(result.roundTripText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
+    expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);
   });

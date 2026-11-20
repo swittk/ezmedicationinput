@@ -93,7 +93,14 @@ export function registerMedicationDateResolver(resolver: MedicationDateResolver)
   if (!id) return;
   // Registration fixes the descriptor associated with this ID. Reusing a
   // caller's descriptor for another registration must not change this entry.
-  DATE_RESOLVERS.set(id, Object.assign({}, resolver, { id }));
+  const normalized: MedicationDateResolver = Object.assign({}, resolver);
+  normalized.id = id;
+  const prototype = Object.getPrototypeOf(resolver);
+  if (prototype !== Object.prototype && prototype !== null) {
+    normalized.resolveYear = resolver.resolveYear.bind(resolver);
+    normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
+  }
+  DATE_RESOLVERS.set(id, normalized);
 }
 
 /** Return the currently registered calendar resolver ids. */

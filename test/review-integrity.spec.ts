@@ -390,7 +390,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const after = toDosageDetails(updated);
     expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
     expect(after.renderedInstruction).toBe("2 tablets PO BID");
-    expect(formatSig(after)).toContain("2 tablets");
+    expect(formatSig(after, "long")).toContain("2 tablets");
     const resaved = toFhirR5Dosages(updated);
     const liveInstruction = resaved[0].extension?.find(e =>
       e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
@@ -412,12 +412,15 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it.each([
-    "apply 1 mL to scalp where affected",
-    "apply 1 mL to scalp where there is hair loss",
-    "1 tab PO BID",
-    "1 drop OU BID",
-    "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID"
-  ])("keeps exact source for an unchanged primary editable projection: %s", (source) => {
+    ["apply 1 mL to scalp where affected", ["Apply 1 mL to the scalp where affected."]],
+    ["apply 1 mL to scalp where there is hair loss", ["Apply 1 mL to the scalp where there is hair loss."]],
+    ["1 tab PO BID", ["Take 1 tablet orally twice daily."]],
+    ["1 drop OU BID", ["Instill 1 drop twice daily in both eyes."]],
+    ["1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID", [
+      "Days 1–7", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
+      "From 1 month after treatment start onward", "Instill 1 drop twice daily in the left eye",
+    ]],
+  ] as const)("retains exact source and previews current fields for an unchanged projection: %s", (source, expected) => {
     const parsed = parseSig(source);
     const marker = parsed.fhir[0].extension?.find(extension =>
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
@@ -442,7 +445,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[]
     );
     expect(unchanged.renderedInstruction).toBe(source);
-    expect(formatSig(unchanged, "long")).toBe(source);
+    const preview = formatSig(unchanged, "long");
+    for (const phrase of expected) expect(preview).toContain(phrase);
   });
 
   it.each([
@@ -498,7 +502,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
     expect(details.step[0].component[0].text).toBe(edited[0].text);
     expect(details.renderedInstruction).toBe(edited[0].text);
-    expect(formatSig(details, "long")).toBe(edited[0].text);
+    expect(formatSig(details, "long")).toBe("Take 2 tablets orally twice daily.");
     expect(details.extension?.find(extension =>
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
       child.url === "instruction")?.valueString).toBe(source);

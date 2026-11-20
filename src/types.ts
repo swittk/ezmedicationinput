@@ -497,12 +497,11 @@ export type FhirR6DoseLimit = FhirElement & {
   scope: "dosage" | "period" | "administration" | "lifetime";
   period?: FhirR6Quantity;
   text?: string;
-  _valueInteger?: FhirPrimitiveElement;
 } & (
-  | { valueQuantity: FhirR6Quantity; valueInteger?: never; valueExpression?: never }
-  | { valueInteger: number; valueQuantity?: never; valueExpression?: never }
+  | { valueQuantity: FhirR6Quantity; valueInteger?: never; _valueInteger?: never; valueExpression?: never }
+  | { valueInteger: number; _valueInteger?: FhirPrimitiveElement; valueQuantity?: never; valueExpression?: never }
   | { _valueInteger: FhirPrimitiveElement; valueInteger?: never; valueQuantity?: never; valueExpression?: never }
-  | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never }
+  | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never; _valueInteger?: never }
 );
 
 export interface FhirR6DosageSafety extends FhirBackboneElement {
@@ -1694,6 +1693,8 @@ export interface CanonicalScheduleExpr {
   duration?: number;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
+  /** Unit of the upper duration endpoint when distinct from durationUnit. */
+  durationMaxUnit?: FhirPeriodUnit;
   /** Typed qualifiers for the beginning/end of the prescribed duration.
    * They are independent for FHIR boundsRange, and R5 approximation uses
    * EMA Quantity Operator instead of an unsupported native "~". */

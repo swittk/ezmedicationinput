@@ -36,6 +36,7 @@ const report = {
   phase: "initializing",
   cases: [],
   newApiMeasurements: [],
+  unavailable: [],
   errors: [],
 };
 /** Save outside measured work. A timed-out run remains an explicitly
@@ -421,29 +422,50 @@ add(
   (m) => m.registerSigLocalization({ locale: "bench" }),
   "registration"
 );
-// A previous PR build already has the native helpers. Compare those directly
-// when available; only master-era baselines lack a corresponding API.
+// Each measured API owns its paired scenario. Import support is a fixture
+// dependency, never a gate that silently removes a different exported API.
 const nativeFixtures = new Map();
+const nativeFixtureErrors = new Map();
+const nativeUnavailable = new Map();
 const textlessWire = structuredClone(complex);
 delete textlessWire.renderedInstruction;
 for (const step of textlessWire.step) for (const a of step.component) delete a.text;
 for (const m of [baseline, candidate]) {
-  if (typeof m.importCanonicalCourse !== "function") continue;
-  nativeFixtures.set(m, {
-    source: m.importCanonicalCourse(complex),
-    textless: m.importCanonicalCourse(textlessWire),
-  });
+  if (typeof m.importCanonicalCourse !== "function") {
+    nativeFixtureErrors.set(m, "version has no importCanonicalCourse for a compatible native fixture");
+    continue;
+  }
+  try {
+    nativeFixtures.set(m, {
+      source: m.importCanonicalCourse(complex),
+      textless: m.importCanonicalCourse(textlessWire),
+    });
+  } catch (error) {
+    nativeFixtureErrors.set(m, String(error.message ?? error));
+  }
 }
-if (nativeFixtures.has(baseline)) {
-  add("importCanonicalCourse", "native/import-R6", (m) => m.importCanonicalCourse(complex));
-  add("importCanonicalCourse", "native/import-R5", (m) => m.importCanonicalCourse(parsed.eye.fhir));
-  add("projectCanonicalCourse", "native/project-both", (m) => m.projectCanonicalCourse(nativeFixtures.get(m).source));
-  add("formatCanonicalAdministration", "native/format-administration", (m) =>
-    m.formatCanonicalAdministration(nativeFixtures.get(m).textless.stages[0].administrations[0], "long", { locale: "th" }));
-  add("formatCanonicalCourse", "native/format-course", (m) =>
-    m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }));
-  add("projectEditableR5Course", "native/project-editable-R5", (m) => m.projectEditableR5Course(complex));
+function addNative(api, name, run, needsFixture = false) {
+  add(api, name, run);
+  if (typeof baseline[api] !== "function") return;
+  for (const [label, m] of [["baseline", baseline], ["candidate", candidate]]) {
+    if (typeof m[api] !== "function") {
+      nativeUnavailable.set(name, `${label} does not export ${api}`);
+      break;
+    }
+    if (needsFixture && !nativeFixtures.has(m)) {
+      nativeUnavailable.set(name, `${label}: ${nativeFixtureErrors.get(m)}`);
+      break;
+    }
+  }
 }
+addNative("importCanonicalCourse", "native/import-R6", (m) => m.importCanonicalCourse(complex));
+addNative("importCanonicalCourse", "native/import-R5", (m) => m.importCanonicalCourse(parsed.eye.fhir));
+addNative("projectCanonicalCourse", "native/project-both", (m) => m.projectCanonicalCourse(nativeFixtures.get(m).source), true);
+addNative("formatCanonicalAdministration", "native/format-administration", (m) =>
+  m.formatCanonicalAdministration(nativeFixtures.get(m).textless.stages[0].administrations[0], "long", { locale: "th" }), true);
+addNative("formatCanonicalCourse", "native/format-course", (m) =>
+  m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }), true);
+addNative("projectEditableR5Course", "native/project-editable-R5", (m) => m.projectEditableR5Course(complex));
 const newApis = new Set([
   "importCanonicalCourse",
   "projectCanonicalCourse",
@@ -518,23 +540,123 @@ async function calibratedIterations(test, modules, async) {
 // These edit cases have an independent clinical oracle. An older formatter
 // that returns the superseded quantity is doing different work; keep both
 // timings visible but apply the latency gate only when both render the edit.
+function completeThaiDose(output, action, unit, expected) {
+  if (typeof output !== "string") return false;
+  const number = "([+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))";
+  const verb = action === "หยอด" ? "หยอด(?:\\s*ตาขวา)?" : action;
+  const phrase = new RegExp(`${verb}\\s*(?:ครั้งละ\\s*)?${number}\\s*${unit}(?=$|[\\s.;,])`, "u").exec(output);
+  const quantities = [...output.matchAll(new RegExp(`(?<![\\d.])${number}\\s*${unit}(?=$|[\\s.;,])`, "gu"))];
+  return phrase !== null && Number(phrase[1]) === expected && quantities.length === 1 &&
+    Number(quantities[0][1]) === expected;
+}
 const equivalenceOracles = new Map([
-  ["formatSig/R5-roundtrip-edited-thai", output => /2\s*หยด/.test(output)],
-  ["formatSig/R5-roundtrip-added-dose-thai", output => /2\s*เม็ด/.test(output)],
+  ["formatSig/R5-roundtrip-edited-thai", output => completeThaiDose(output, "หยอด", "หยด", 2)],
+  ["formatSig/R5-roundtrip-added-dose-thai", output => completeThaiDose(output, "ดื่ม", "เม็ด", 2)],
 ]);
+// Source-bearing R6 fixtures used to return the saved input verbatim. The
+// current public contract generates requested previews from editable facts.
+// These ordered clinical phrases cover every phase, both eyes, and cadence;
+// keep raw latency visible when an older build does only source replay.
+const complexPreviewPhrases = {
+  en: [
+    "Days 1–7", "1 drop every 2 hours in the right eye", "1 drop four times daily in the left eye",
+    "From 7 days after treatment start until 1 month after treatment start",
+    "1 drop four times daily in the right eye", "1 drop four times daily in the left eye",
+    "From 1 month after treatment start onward", "1 drop four times daily in the right eye",
+    "1 drop twice daily in the left eye",
+  ],
+  th: [
+    "วันที่ 1–7", "หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
+    "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา",
+    "หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
+    "ตั้งแต่1 เดือนหลังเริ่มการรักษาเป็นต้นไป", "หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง",
+    "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 2 ครั้ง",
+  ],
+};
+function currentComplexPreview(output, locale) {
+  if (typeof output !== "string") return false;
+  const unit = locale === "en" ? "drops?\\b" : "หยด(?=$|[\\s.;,])";
+  const amounts = [...output.matchAll(new RegExp(
+    "(?<![\\d.])([+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))\\s*" + unit, "gu"))];
+  // Each of the three phases owns one right-eye and one left-eye dose.
+  // Ordered phrase presence alone would accept 11 as a suffix match for 1.
+  if (amounts.length !== 6 || amounts.some(amount => Number(amount[1]) !== 1)) return false;
+  let after = 0;
+  for (const phrase of complexPreviewPhrases[locale]) {
+    const position = output.indexOf(phrase, after);
+    if (position < 0) return false;
+    after = position + phrase.length;
+    if (/\d$/u.test(phrase) && /^(?:\d|\.\d)/u.test(output.slice(after))) return false;
+  }
+  return true;
+}
+for (const locale of ["en", "th"]) {
+  const exact = complexPreviewPhrases[locale].join(". ");
+  if (!currentComplexPreview(exact, locale))
+    throw new Error("Complex preview oracle rejected its six exact administrations");
+  for (const amount of ["11", "1.2", "-1", "2"])
+    if (currentComplexPreview(exact.replace(/1 (drop|หยด)/u, amount + " $1"), locale))
+      throw new Error("Complex preview oracle accepted a different numeric amount");
+  if (currentComplexPreview(exact + (locale === "en" ? ". 1 drop" : ". 1 หยด"), locale))
+    throw new Error("Complex preview oracle accepted an extra administration");
+  if (currentComplexPreview(exact.replace("1–7", "1–70"), locale))
+    throw new Error("Complex preview oracle accepted a numeric endpoint suffix");
+}
+const equivalenceDetails = new Map();
+const sourcePreviewDifference = {
+  classification: "different-preview-work",
+  reason: "Baseline replays saved source instead of generating the requested current-field preview; raw timings retained without a regression verdict",
+};
+for (const locale of ["en", "th"]) {
+  const formatName = `formatSig/R6-complex/${locale}`;
+  const importName = `fromFhir/complex/${locale}`;
+  equivalenceOracles.set(formatName, output => currentComplexPreview(output, locale));
+  equivalenceOracles.set(importName, output => currentComplexPreview(output?.longText, locale));
+  equivalenceDetails.set(formatName, sourcePreviewDifference);
+  equivalenceDetails.set(importName, sourcePreviewDifference);
+}
+equivalenceOracles.set("formatSig/R6-author-source", output =>
+  output === "Take 1 tablet orally twice daily for 3 days.");
+equivalenceDetails.set("formatSig/R6-author-source", sourcePreviewDifference);
+
+// Check the independent amount oracle outside the measured loops. A suffix
+// match, decimal, or a second superseded dose must never classify as correct.
+for (const [action, unit] of [["หยอด", "หยด"], ["ดื่ม", "เม็ด"]]) {
+  if (!completeThaiDose(`${action} 2 ${unit}.`, action, unit, 2))
+    throw new Error("Complete-dose oracle rejected its exact administration");
+  if (!completeThaiDose(`${action} 2.0 ${unit}.`, action, unit, 2))
+    throw new Error("Complete-dose oracle rejected an equal decimal amount");
+  for (const amount of ["12", "1.2", "2.5", "-2", "22"])
+    if (completeThaiDose(`${action} ${amount} ${unit}.`, action, unit, 2))
+      throw new Error("Complete-dose oracle accepted a different numeric amount");
+  if (completeThaiDose(`${action} 2 ${unit}; ${action} 1 ${unit}.`, action, unit, 2))
+    throw new Error("Complete-dose oracle accepted the superseded administration");
+}
+for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด."])
+  if (!completeThaiDose(text, "หยอด", "หยด", 2))
+    throw new Error("Complete-dose oracle rejected the authored site placement");
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
   if (typeof baseline[test.api] !== "function") continue;
+  if (nativeUnavailable.has(test.name)) {
+    const unavailable = { api: test.api, name: test.name, reason: nativeUnavailable.get(test.name) };
+    report.unavailable.push(unavailable);
+    console.error("UNAVAILABLE", test.name, unavailable.reason);
+    checkpoint();
+    continue;
+  }
   try {
     let left = test.run(baseline, 0), right = test.run(candidate, 0);
     const async = !!left?.then || !!right?.then;
     if (async) { left = await left; right = await right; }
     const oracle = equivalenceOracles.get(test.name);
-    if (oracle && !oracle(right)) throw new Error("Candidate failed the edited-dose output oracle");
+    if (oracle && !oracle(right)) throw new Error("Candidate failed the independent clinical preview oracle");
     const equivalentWork = !oracle || oracle(left);
     const equivalence = { equivalentWork, ...(equivalentWork ? {} : {
-      classification: "different-clinical-output",
-      reason: "Baseline does not render the edited dose; raw timings retained without a regression verdict",
+      ...(equivalenceDetails.get(test.name) ?? {
+        classification: "different-clinical-output",
+        reason: "Baseline does not render the edited dose; raw timings retained without a regression verdict",
+      }),
       output: { baseline: left, candidate: right },
     }) };
     if (smoke) {
@@ -597,7 +719,7 @@ for (const test of cases) {
 // New functions have no pre-refactor namesake. Measure them explicitly
 // rather than exempt their costs from visibility or invent a false baseline.
 // Clinical correctness of edits/projections is covered by native oracles.
-const { source: nativeSource, textless: nativeTextless } = nativeFixtures.get(candidate);
+const { source: nativeSource, textless: nativeTextless } = nativeFixtures.get(candidate) ?? {};
 const nativeCases = [
   ["getEmaQuantityComparator", "getEmaQuantityComparator", () => candidateEmaComparator(emaComparatorQuantity)],
   ["importCanonicalCourse", "native/import-R6", () => candidate.importCanonicalCourse(complex)],
@@ -666,7 +788,8 @@ console.log(
     cases: report.cases.length,
     passing: report.passing,
     failing: report.failing,
+    unavailable: report.unavailable,
     errors: report.errors,
   })
 );
-if (report.errors.length || report.failing) process.exitCode = 1;
+if (report.errors.length || report.failing || report.unavailable.length) process.exitCode = 1;

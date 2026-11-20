@@ -619,7 +619,7 @@ describe("source-less R6 treatment-relative step display", () => {
     expect(formatSigBatch(strict, "long")).toContain("Days 1–7");
     expect(formatSigBatch(strict, "long")).toContain(`Days ${secondStart + 1}–${secondStart + 7}`);
     const source = "keep the clinician-authored dosing text exactly";
-    expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(source);
+    expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(english);
   });
 });
 

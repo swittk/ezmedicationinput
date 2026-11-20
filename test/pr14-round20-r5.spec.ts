@@ -117,7 +117,9 @@ describe("R5 edit ownership and quantity boundaries", () => {
     if (scope === "period") edit.dosages[0].maxDosePerPeriod![0].numerator!.value = 2;
     else edit.dosages[0].maxDosePerLifetime!.value = 2;
     const output = toDosageDetails(edit.dosages, undefined, edit.course);
-    expect(output.step[0].component[0].safety!.doseLimit![0].valueQuantity!.value).toBe(2);
+    expect(output.step[0].component[0].safety!.doseLimit).toEqual([{
+      scope, valueQuantity: q(2), ...(scope === "period" ? { period: { value: 1, unit: "d", code: "d" } } : {}),
+    }]);
   });
 
   it("keeps an explicitly edited lifted safety value authoritative", () => {

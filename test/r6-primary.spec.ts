@@ -80,7 +80,8 @@ describe("EZMED extended R5 dosage and R6 projection", () => {
     expect(imported.fhirNext).toEqual(original);
     expect(imported.fhir.map(v => v.sequence)).toEqual([1, 2, 3]);
     expect(imported.count).toBe(3);
-    expect(formatSig(imported.fhirNext)).toBe(original.renderedInstruction);
+    expect(formatSig(imported.fhirNext, "long")).toMatch(/every 2 hours[\s\S]*four times daily[\s\S]*twice daily/iu);
+    expect(imported.fhirNext.renderedInstruction).toBe(original.renderedInstruction);
   });
 
   it("retains R6 conditional semantics and R5 modifier bridge", () => {
@@ -1862,7 +1863,8 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
     const batch = fromFhir(course, { locale: "en" });
     const text = formatParseBatch(batch, "long");
     expect(text).toContain("Days 1–7");
-    expect(text).toContain("No doses on days 8–14");
+    // Two seven-day stage iterations fill the entire fourteen-day cycle.
+    expect(text).not.toContain("No doses");
     expect(text).toMatch(/14 days/);
     expect(text).toMatch(/2 cycles/);
   });
@@ -1926,14 +1928,15 @@ describe("public batch displays preserve ordinary R5 stage ordering", () => {
   });
 });
 
-it("normalizes ordinary staged R5 batches by default without changing native course round-trip preference", () => {
+it("normalizes editable R5 and R6 course previews while retaining original wording", () => {
   const source = "1 drop OD q2h x1wk then qid x1wk";
   const parsed = parseSig(source);
   const r5 = toFhirR5Dosages(parsed.fhirNext);
   const text = formatSigBatch(r5, "long");
   expect(text).toMatch(/every 2 hours[\s\S]*four times daily/iu);
   expect(text).toContain("right eye");
-  expect(formatSig(parsed.fhirNext, "long")).toBe(source);
+  expect(formatSig(parsed.fhirNext, "long")).toMatch(/every 2 hours[\s\S]*four times daily/iu);
+  expect(parsed.fhirNext.renderedInstruction).toBe(source);
   expect(formatSigBatch(r5, "long", { locale: "th" })).toContain("ตาขวา");
 });
 
@@ -2953,15 +2956,33 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     }] }] };
     const anchor = "2026-11-02T00:00:00+07:00";
     const opts = { from: anchor, orderedAt: anchor, timeZone: "Asia/Bangkok", limit: 22 };
-    const first = "2026-11-04T00:00:00+07:00";
-    const last = "2026-11-24T00:00:00+07:00";
-    const next = "2026-12-02T00:00:00+07:00";
+    const expected = [
+      "2026-11-04T00:00:00+07:00",
+      "2026-11-05T00:00:00+07:00",
+      "2026-11-06T00:00:00+07:00",
+      "2026-11-07T00:00:00+07:00",
+      "2026-11-08T00:00:00+07:00",
+      "2026-11-09T00:00:00+07:00",
+      "2026-11-10T00:00:00+07:00",
+      "2026-11-11T00:00:00+07:00",
+      "2026-11-12T00:00:00+07:00",
+      "2026-11-13T00:00:00+07:00",
+      "2026-11-14T00:00:00+07:00",
+      "2026-11-15T00:00:00+07:00",
+      "2026-11-16T00:00:00+07:00",
+      "2026-11-17T00:00:00+07:00",
+      "2026-11-18T00:00:00+07:00",
+      "2026-11-19T00:00:00+07:00",
+      "2026-11-20T00:00:00+07:00",
+      "2026-11-21T00:00:00+07:00",
+      "2026-11-22T00:00:00+07:00",
+      "2026-11-23T00:00:00+07:00",
+      "2026-11-24T00:00:00+07:00",
+      "2026-12-02T00:00:00+07:00",
+    ];
     for (const input of [course, toFhirR5Dosages(course), fromFhir(course)]) {
       const due = nextDueDoses(input, opts);
-      expect(due).toHaveLength(22);
-      expect(due[0]).toBe(first);
-      expect(due[20]).toBe(last);
-      expect(due[21]).toBe(next);
+      expect(due).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...opts,
         durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
       expect(calculateTotalUnits({ dosage: input, ...opts,
@@ -3062,7 +3083,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(fromFhir(course, { locale: "en" }).items[0].longText).toBe(en);
     expect(fromFhir(course, { locale: "th" }).items[0].longText).toBe(th);
     const authored = { ...course, renderedInstruction: "Take as directed by prescriber." };
-    expect(formatSig(authored, "long")).toBe(authored.renderedInstruction);
+    expect(formatSig(authored, "long")).toBe(en);
+    expect(fromFhir(authored).fhirNext.renderedInstruction).toBe(authored.renderedInstruction);
   });
 
   it("does not restore approximate quantities over a clinician's new dose/rate expressions", () => {
@@ -3100,16 +3122,18 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }] }]
     };
     const imported = fromFhir(course);
-    expect(imported.longText).toBe(course.renderedInstruction);
+    expect(imported.longText).toContain("~1 tab");
+    expect(imported.fhirNext.renderedInstruction).toBe(course.renderedInstruction);
     expect(imported.items[0].longText).toContain("~1 tab");
     expect(imported.items[0].shortText).toContain("~1 tab");
-    // A component's own source is authoritative for its individual editor row.
+    // Component text remains source evidence while current quantity facts own the preview.
     const sourced: FhirR6DosageInstruction = {
       ...course, step: [{ component: [{
         ...course.step[0].component[0], text: "Approximately one tablet as directed."
       }] }]
     };
-    expect(fromFhir(sourced).items[0].longText).toBe("Approximately one tablet as directed.");
+    expect(fromFhir(sourced).items[0].longText).toContain("~1 tab");
+    expect(fromFhir(sourced).fhirNext.step[0].component[0].text).toBe("Approximately one tablet as directed.");
   });
 
   it("executes offset-trimmed weekly R6 schedules on the authored weekdays, not distributed intervening days", () => {
@@ -4505,7 +4529,9 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         };
         const expected = expression.expression ?? expression.reference ?? expression.description!;
         const imported = fromFhir(source);
-        expect(imported.longText).toBe(source.renderedInstruction);
+        expect(imported.longText).toContain(expected);
+        expect(imported.longText).toContain("unevaluated");
+        expect(imported.fhirNext.renderedInstruction).toBe(source.renderedInstruction);
         expect(imported.items[0].shortText).toContain(expected);
         expect(imported.items[0].longText).toContain(expected);
         expect(imported.items[0].longText).toContain("unevaluated");
@@ -4513,7 +4539,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         expect(imported.fhir[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
         expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
         source.step[0].component[0].text = "Clinician's own component wording";
-        expect(fromFhir(source).items[0].longText).toBe(source.step[0].component[0].text);
+        expect(fromFhir(source).items[0].longText).toContain(expected);
+        expect(fromFhir(source).fhirNext.step[0].component[0].text).toBe("Clinician's own component wording");
       }
     }
   });
@@ -5503,7 +5530,9 @@ describe("review 17: course history, imported rate ranges and civil-clock caps",
     expect(fromFhirDosage(r5, { locale }).longText).toContain(expected);
     expect(toDosageDetails([r5])).toEqual(source);
     source.step[0].component[0].text = "Infuse using the written rate plan";
-    expect(fromFhir(source, { locale }).items[0].longText)
+    expect(fromFhir(source, { locale }).items[0].longText).toContain(expected);
+    expect(fromFhir(source, { locale }).items[0].longText).toContain("500");
+    expect(fromFhir(source, { locale }).fhirNext.step[0].component[0].text)
       .toBe("Infuse using the written rate plan");
   });
 

@@ -277,10 +277,9 @@ describe("native ownership of source-encoded semantics", () => {
     expect(r.offset).toBe(0.5);
     r.offset = 1.5;
     const out = courseToR6(native);
-    expect(out.step[0].component[0].timing?.repeat?.extension).toContainEqual({
-      url: TIMING_OFFSET_EXACT_EXTENSION_URL,
-      valueDecimal: 1.5,
-    });
+    expect(out.step[0].component[0].timing?.repeat?.extension?.filter(
+      marker => marker.url === TIMING_OFFSET_EXACT_EXTENSION_URL
+    )).toEqual([{ url: TIMING_OFFSET_EXACT_EXTENSION_URL, valueDecimal: 1.5 }]);
     expect(courseFromR6(out).stages[0].administrations[0].schedule?.recurrence?.offset).toBe(1.5);
   });
   it("exports native target multiplicity once while retaining the source site identity", () => {
@@ -329,7 +328,15 @@ describe("typed native safety and coding ownership", () => {
       amount: { value: 2, unit: "tab" },
       period: { value: 1, unit: "d" }
     }]);
-    const r6 = projectCanonicalCourse(native).fhirNext.step[0].component[0].safety!;
+    const projected = projectCanonicalCourse(native);
+    const r5 = projected.fhir[0].maxDosePerPeriod![0];
+    expect(r5.numerator).toMatchObject({
+      value: 2, unit: "tab", system: "http://standardterms.edqm.eu", code: "15054000"
+    });
+    expect(r5.denominator).toMatchObject({
+      value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d"
+    });
+    const r6 = projected.fhirNext.step[0].component[0].safety!;
     expect(r6.doseLimit?.[0].valueQuantity).toMatchObject({
       value: 2, unit: "tab", system: "http://standardterms.edqm.eu", code: "15054000"
     });

@@ -1,5 +1,5 @@
 import lexicalClasses from "../lexical-classes.json";
-import { timingLexicalRule, timeOfDayRule } from "./timing-rules";
+import { timingLexicalRule, timeOfDayRule, isScheduleLead } from "./timing-rules";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -1091,7 +1091,15 @@ function comparativeDoseAt(
   const compactUnit = rawUnit ? normalizeUnit(rawUnit, context.options) : undefined;
   if (rawUnit && !compactUnit) return undefined;
   const unit = compactUnit ? undefined : unitAfter(context, numericIndex + 1);
-  if (!compactUnit && !unit || value === undefined || !Number.isFinite(value)) return undefined;
+  // A scheduled later phase may omit its repeated unit. A bare temporal
+  // noun ("approximately one week") or unknown object is not a dose: the
+  // ordinary typed timing lead must license a separate right-hand schedule.
+  if (!compactUnit && !unit) {
+    const next = context.tokens[numericIndex + 1];
+    if (!next || mapIntervalUnit(normalizeTokenLower(next)) ||
+        !isScheduleLead(context, numericIndex + 1)) return undefined;
+  }
+  if (value === undefined || !Number.isFinite(value)) return undefined;
   const tokens = tokensAvailable(context, start, numericIndex + 1 - start);
   if (!tokens) return undefined;
   const attached = unit ? [...tokens, ...unit.tokens] : tokens;

@@ -106,7 +106,7 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
-  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
+  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming, getDosageSourceTextAgreement,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
@@ -1105,7 +1105,9 @@ function appendSourceLessRateRanges(
     const range = entry.rateRange && rateRangePreview(rangeFromFhir(entry.rateRange)!);
     if (range) expressions.push(words.rateRangeLabel + range);
   }
-  return expressions.length ? joinGeneratedClauses([displayed, ...expressions]) : displayed;
+  return expressions.length
+    ? joinGeneratedClauses(displayed ? [displayed, ...expressions] : expressions)
+    : displayed;
 }
 
 export function formatSig(
@@ -1127,6 +1129,9 @@ export function formatSig(
     return formatCanonicalCourse(courseFromR6(oneOrCourse, true), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
+  if (getDosageSourceTextAgreement(dosage) === false)
+    return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style,
+      { ...options, realizationMode: "normalized" });
   const doseRange = dosage.doseAndRate?.[0]?.doseRange;
   // A compact clause range has one shared unit and no endpoint operators.
   // Only richer endpoints need the existing native range realizer.
@@ -1253,23 +1258,22 @@ export function fromFhir(
   // extended editable view in ONE component traversal; do not separately
   // lower this entire R6 course into R5 twice just to format native items.
   const native = courseFromR6(dosageDetails, true);
-  const projection = projectNativeR5Course(native,undefined,true,false,false,true);
-  if(!native.stages.some(stage=>stage.administrations.length))projection.dosages=[];
+  const projection = projectNativeR5Course(native,undefined,true,false,false,true,undefined,true);
+  const hasAdministrations = native.stages.some(stage => stage.administrations.length);
+  if (!hasAdministrations) projection.dosages = [];
   const course = projection.course;
   const strict = projection.strictDosages ?? projection.dosages;
   const normalizedStrict = strict.length
     ? normalizeEmittedSemanticMarkers(strict, projection.dosages === strict)
     : strict;
   const r5Rows = normalizedStrict.length
-    ? (dosageDetails.renderedInstruction === undefined || !projection.dosages.length
-      ? normalizedStrict
-      : withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction))
+    ? hasAdministrations
+      ? withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction, false)
+      : normalizedStrict
     : toFhirR5Dosages(dosageDetails); // zero-component text/safety carrier only
   const dosages = projection.dosages === normalizedStrict
     ? r5Rows
-    : dosageDetails.renderedInstruction === undefined
-      ? projection.dosages
-      : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction);
+    : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction, false);
   const compiled = new Map<CanonicalAdministration, CanonicalSigClause>();
   const items: ParseResult[] = [];
   let row = 0;
@@ -1377,13 +1381,20 @@ function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
 ): ParseResult {
+  const unverified = getDosageSourceTextAgreement(dosage) === false;
+  const native = unverified
+    ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
+    : undefined;
+  if (unverified && options?.realizationMode !== "normalized")
+    options = { ...options, realizationMode: "normalized" };
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
-  const maximumDoseSource = hasMaximumDose &&
+  const maximumDoseSource = !unverified && hasMaximumDose &&
       typeof dosage.text === "string" && dosage.text.trim().length > 0
     ? dosage.text
     : undefined;
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
-  const clause = canonicalFromFhir(dosage);
+  const clause = native ? clauseForAdministration(native) : canonicalFromFhir(dosage);
+  const compiled = native ? new Map([[native, clause]]) : undefined;
   // The saved fingerprint proves that a primary source dose still matches
   // its exported R5 clinical fields, even if the auxiliary instruction
   // graph contains no Amount. A removed dose also needs this ownership proof.
@@ -1392,14 +1403,14 @@ function fromFhirDosageInternal(
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0;
-  const exactSource = maximumDoseSource ?? (guarded && dosage.text ? dosage.text : undefined);
-  let shortText = suppressMaximumDisplay
+  const exactSource = maximumDoseSource ?? (!unverified && guarded && dosage.text ? dosage.text : undefined);
+  let shortText = native ? formatCanonicalAdministration(native, "short", options, compiled) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
-  let computedLong = suppressMaximumDisplay
+  let computedLong = native ? formatCanonicalAdministration(native, "long", options, compiled) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
-  if (!exactSource) {
+  if (!exactSource && !native) {
     const condition = getDosageCondition(dosage);
     const exclusions = getDosageExcludedDates(dosage);
     const excludedWeekdays = getDosageExcludedWeekdays(dosage);
@@ -1430,7 +1441,8 @@ function fromFhirDosageInternal(
       consumedTokens: [],
       normalized: buildNormalizedMetaFromClause(clause, dosage, options),
       canonical: {
-        clauses: [clause]
+        clauses: [clause],
+        ...(native ? { administration: native } : {})
       }
     }
   };

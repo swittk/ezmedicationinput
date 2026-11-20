@@ -2,7 +2,7 @@
  * and the existing grammar renderer, never FHIR rows or persistence markers.
  * Display stays separate from executable interpretation: unknown expressions
  * and boundaries remain visible without inventing values or event dates. */
-import type { FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause } from "../types";
+import type { FormatBatchOptions, FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause } from "../types";
 import type {
   CanonicalCourse,
   CanonicalAdministration,
@@ -394,6 +394,38 @@ function appendDoseLimits(
   return text ? joinGeneratedClauses([text, rendered]) : rendered;
 }
 
+/** Text and foreign Element metadata alone do not establish clinical facts
+ * that can replace an authored instruction with a generated preview. */
+function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
+  for (const amount of a.amounts ?? [])
+    if (amount.quantity || amount.range || amount.expression || amount.rate ||
+        amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
+  if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
+      a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction ||
+      a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
+      a.limits?.length || a.safety || a.choice || a.phaseOrigin || a.anchoredLength ||
+      a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
+  const timing = a.schedule;
+  if (timing?.explicitEvents?.length || timing?.code) return true;
+  const r = timing?.recurrence;
+  return !!r && (r.count !== undefined || r.countMax !== undefined || r.frequency !== undefined ||
+    r.frequencyMax !== undefined || r.period !== undefined || r.periodMax !== undefined || !!r.periodUnit ||
+    r.occurrenceDuration !== undefined || r.occurrenceDurationMax !== undefined || !!r.occurrenceDurationUnit ||
+    !!r.courseLength || !!r.courseLengthRange || !!r.calendarWindow || !!r.dayOfWeek?.length ||
+    !!r.clocks?.length || !!r.anchors?.length || r.offset !== undefined || r.offsetMin !== undefined ||
+    r.offsetMax !== undefined || !!r.monthDays?.length || r.weekdayOrdinal !== undefined ||
+    !!r.activityTiming?.length || !!r.occurrenceCap || !!r.clockWindow || !!r.eventWindow ||
+    !!r.startOffset || !!r.endOffset);
+}
+function courseHasClinicalFacts(course: CanonicalCourse): boolean {
+  if (course.cycleInterval || course.cycleCount !== undefined || course.safety) return true;
+  for (const stage of course.stages) {
+    if (stage.start || stage.end || stage.count !== undefined || stage.safety) return true;
+    for (const a of stage.administrations) if (administrationHasClinicalFacts(a)) return true;
+  }
+  return false;
+}
+
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
 function formatCanonicalBase(
@@ -403,6 +435,7 @@ function formatCanonicalBase(
   compiled?: CanonicalSigClause,
   environment?: CourseFormatEnvironment
 ): string {
+  if (a.text?.trim() && !administrationHasClinicalFacts(a)) return a.text;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
   const primary = a.amounts?.[0];
@@ -469,6 +502,13 @@ export function formatCanonicalAdministration(
   options?: FormatOptions,
   compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
 ): string {
+  // External R6 fields can be edited independently of their saved wording.
+  // Keep that wording in provenance, but preview the current clinical fields.
+  if ((a.provenance?.format === "r6" || a.provenance?.sourceTextVerified === false) &&
+      options?.realizationMode !== "normalized" && administrationHasClinicalFacts(a)) {
+    options = Object.assign({}, options);
+    options.realizationMode = "normalized";
+  }
   // A component's authored source is distinct from a course-wide instruction.
   if (
     options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
@@ -492,26 +532,27 @@ export function formatCanonicalAdministration(
 export function formatCanonicalCourse(
   oneOrCourse: CanonicalCourse,
   style: "short" | "long" = "long",
-  options?: FormatOptions,
+  options?: FormatBatchOptions,
   compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
 ): string {
-  // R6's renderedInstruction is the whole-course instruction. Do not
-  // accidentally reduce a taper to a single component or discard its
-  // boolean conditions in an English/Thai realization attempt. For an
-  // ordinary R5-compatible course, explicit format options request a fresh
-  // realization instead of the potentially stale saved display string.
+  // R6 imports preserve original text for interchange. Without an agreement
+  // proof it cannot override independently editable structured dose/timing.
+  // Parser-owned native courses and reconciled R5 imports retain source mode.
+  if (oneOrCourse.provenance?.format === "r6" || oneOrCourse.provenance?.sourceTextVerified === false) {
+    const hasFacts = courseHasClinicalFacts(oneOrCourse);
+    if (!hasFacts && oneOrCourse.instruction) return oneOrCourse.instruction;
+    if (hasFacts && options?.realizationMode !== "normalized") {
+      options = Object.assign({}, options);
+      options.realizationMode = "normalized";
+    }
+  }
   if (
     oneOrCourse.instruction &&
     (options === undefined ||
       options.realizationMode === "roundtrip" ||
       oneOrCourse.stages.length === 0 ||
       (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
-  ) {
-    // An explicitly requested round trip preserves the *original* source
-    // surface, not a normalized paraphrase. Edited R5 inputs have their
-    // stale source invalidated by the R5->R6 reconciliation first.
-    return oneOrCourse.instruction;
-  }
+  ) return oneOrCourse.instruction;
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length && !oneOrCourse.safety?.ifExceeded) return "";
   const environment = courseEnvironment(options),
     words = environment.words;
@@ -567,9 +608,23 @@ export function formatCanonicalCourse(
     const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
     const end = treatmentStepOffsetDays(step.end),
       window = { start, end };
-    priorEndDays = end;
+    let activeEnd = end;
+    let repetitionResolved = true;
+    if (step.count !== undefined && step.count !== 1) {
+      if (Number.isInteger(step.count) && step.count > 0 &&
+          start !== undefined && end !== undefined && end > start) {
+        activeEnd = start + (end - start) * step.count;
+      } else {
+        repetitionResolved = false;
+        activeEnd = undefined;
+      }
+    }
+    priorEndDays = activeEnd;
     windows.push(window);
-    if (step.administrations.length) activeWindows.push(window);
+    // The heading describes one stage iteration; global gaps must cover all
+    // iterations. An unresolved repeat cannot license a no-dose instruction.
+    if (step.administrations.length)
+      activeWindows.push({ start: repetitionResolved ? start : undefined, end: activeEnd });
   }
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
@@ -801,8 +856,9 @@ export function formatCanonicalCourse(
   } else if (oneOrCourse.cycleCount !== undefined) {
     stages.push(words.repeatCount(oneOrCourse.cycleCount));
   }
-  const rendered = stages.join(hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
-    ? " " : words.stageSeparator);
+  const rendered = stages.join(options?.separator ??
+    (hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
+      ? " " : words.stageSeparator));
   return oneOrCourse.safety
     ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded)
     : rendered;

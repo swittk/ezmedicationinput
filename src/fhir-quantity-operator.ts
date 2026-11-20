@@ -29,6 +29,9 @@ const emaCodeByComparator = {
   ad: "100000165006"
 } as const satisfies Record<NonNullable<FhirR6Quantity["comparator"]>, string>;
 
+// EMA exact equality is an active operator even without an HL7 comparator.
+const EMA_EQUALITY_OPERATOR_CODE = "100000000049";
+
 const comparatorByEmaCode: Record<string, NonNullable<FhirR6Quantity["comparator"]>> = {
   "100000000050": "<",
   "100000000052": "<=",
@@ -98,7 +101,7 @@ function editedOperator(
 ): FhirExtension {
   const coding = extension.valueCoding!;
   const { _display, i18n, ...current } = coding;
-  if (_display !== undefined || i18n !== undefined)
+  if (_display !== undefined || i18n !== undefined || coding.code === EMA_EQUALITY_OPERATOR_CODE)
     sources.push({ url: QUANTITY_OPERATOR_SOURCE_URL, valueCoding: coding });
   return { ...extension, valueCoding: {
     ...current, code: emaCodeByComparator[comparator],
@@ -125,7 +128,7 @@ export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
     const coding = ext.valueCoding;
     if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
         coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
-        !coding.code || !comparatorByEmaCode[coding.code]) return ext;
+        !coding.code || !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)) return ext;
     found = true;
     return coding.code === code ? ext : editedOperator(ext, comparator, sources);
   });
@@ -153,7 +156,7 @@ export function quantityForR5(quantity: FhirR6Quantity | undefined):
     const coding = ext.valueCoding;
     if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
         coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
-        !coding.code || !comparatorByEmaCode[coding.code] || coding.code === code) return ext;
+        !coding.code || !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE) || coding.code === code) return ext;
     changed = true;
     return editedOperator(ext, quantity.comparator!, sources);
   });

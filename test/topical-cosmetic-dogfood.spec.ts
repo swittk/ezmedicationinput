@@ -595,7 +595,7 @@ describe("topical and cosmetic clinician dogfood", () => {
     expect(parsed.longText).toBe(normal);
     expect(formatSig(r5, "long")).toBe(normal);
     expect(r6.renderedInstruction).toBe(input);
-    expect(formatSig(r6, "long")).toBe(input);
+    expect(formatSig(r6, "long")).toBe(normal);
     expect(r5.site?.coding?.[0]?.code).toBe("41695006");
     const predicateStart = input.indexOf(restrictionSource) + "where ".length;
     const restrictionExtension = {
