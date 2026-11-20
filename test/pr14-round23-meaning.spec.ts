@@ -139,6 +139,12 @@ describe("round 23: qualified unit ellipsis remains a typed dose continuation", 
     const parsed = parseSig("Take 2 tablets every morning, then ≤1 at night");
     expect(parsed.fhirNext.step).toHaveLength(1);
     expect(parsed.fhirNext.step[0].component).toHaveLength(2);
+    const [morning, night] = parsed.fhirNext.step![0].component;
+    expect(morning.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(morning.timing?.repeat?.when).toEqual([EventTiming.Morning]);
+    expect(night.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(getQuantityComparator(night.doseAndRate?.[0].doseQuantity)).toBe("<=");
+    expect(night.timing?.repeat?.when).toEqual([EventTiming.Night]);
     expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({
       value: 1, unit: "tab", comparator: "<="
     });
@@ -228,8 +234,16 @@ describe("round 23: duration endpoints retain their own units", () => {
       .toContain(`${low} นาที ถึง ${high} ชั่วโมง`);
     for (const locale of ["en", "th"])
       expect(formatCanonicalCourse(course, "short", { locale })).toContain(`x${low}min-${high}h`);
-    expect(courseToR6(course).step[0].component[0].timing?.repeat?.boundsRange)
-      .toEqual(raw.step[0].component[0].timing?.repeat?.boundsRange);
+    const wire = JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction;
+    const emitted = wire.step![0].component[0].timing?.repeat?.boundsRange;
+    expect(emitted?.low).toMatchObject({ value: low / 60, code: "h", unit: "hours" });
+    expect(emitted?.high).toMatchObject({ value: high, code: "h", unit: "hours" });
+    const reopened = courseFromR6(wire).stages[0].administrations[0];
+    expect(reopened.schedule?.recurrence?.courseLengthRange)
+      .toMatchObject(raw.step![0].component[0].timing!.repeat!.boundsRange!);
+    expect(clauseForAdministration(reopened).schedule).toMatchObject({
+      duration: low, durationUnit: "min", durationMax: high, durationMaxUnit: "h"
+    });
     expect(JSON.stringify(course)).toBe(original);
   });
 
@@ -248,11 +262,22 @@ describe("round 23: duration endpoints retain their own units", () => {
       .toContain(">=30 minutes to <=2 hours");
     expect(formatCanonicalClause(clause, "long", resolveSigLocalization("th")))
       .toContain(">=30 นาที ถึง <=2 ชั่วโมง");
-    const roundtrip = canonicalToFhir(clause).timing?.repeat?.boundsRange;
-    expect(roundtrip?.low).toMatchObject({ value: 30, code: "min" });
+    const wire = JSON.parse(JSON.stringify(canonicalToFhir(clause))) as FhirDosage;
+    const roundtrip = wire.timing?.repeat?.boundsRange;
+    // Strict Range endpoints share a unit; retained typed metadata keeps the
+    // author's independent endpoint units for the next canonical import.
+    expect(roundtrip?.low).toMatchObject({ value: 0.5, code: "h" });
     expect(roundtrip?.high).toMatchObject({ value: 2, code: "h" });
+    expect(roundtrip?.low?.unit).toBe(roundtrip?.high?.unit);
+    expect(roundtrip?.low?.system).toBe(roundtrip?.high?.system);
     expect(getQuantityComparator(roundtrip?.low)).toBe(">=");
     expect(getQuantityComparator(roundtrip?.high)).toBe("<=");
+    for (const reopened of [canonicalFromFhir(wire), parserStateFromFhir(wire).primaryClause]) {
+      expect(reopened.schedule).toMatchObject({
+        duration: 30, durationUnit: "min", durationMax: 2, durationMaxUnit: "h",
+        durationComparator: ">=", durationMaxComparator: "<="
+      });
+    }
   });
 });
 
@@ -673,5 +698,198 @@ describe("round 24: descriptor surface providers", () => {
     expect([...registered.segment("ⴲⴳ")]).toEqual([
       { segment: "ⴲ", index: 0 }, { segment: "ⴳ", index: 1 }
     ]);
+  });
+});
+
+describe("round 25: typed source owners survive independent clinical edits", () => {
+  const options: ParseOptions = { instructionActionMap: {
+    disperse: { code: "disperse", display: "Disperse", i18n: { th: "กระจาย" },
+      semanticClass: "procedure", procedural: true, acceptsAmount: true, definesDose: true,
+      argumentParser: "amount-material-destination", realizer: "amount-material-destination" }
+  } };
+
+  it("uses the custom preparation as the sole dose owner beside a rich primary action", () => {
+    const source = "Disperse 2 tablets in water, then swallow slowly with water";
+    const parsed = parseSig(source, options);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.primaryAdministrationSpan?.start).toBe(source.indexOf("swallow"));
+    expect(clause.instructionGraph?.actions).toHaveLength(2);
+    const saved = JSON.stringify(parsed.fhir[0]);
+    for (const locale of ["en", "th"]) {
+      const dose = locale === "en" ? "2 tablets" : "2 เม็ด";
+      for (const text of [
+        formatCanonicalClause(clause, "long", resolveSigLocalization(locale),
+          { ...options, realizationMode: "normalized" }),
+        formatSig(parsed.fhir[0], "long", { ...options, locale, realizationMode: "normalized" })
+      ]) {
+        expect(text.split(dose)).toHaveLength(2);
+        expect(text).toContain(locale === "en" ? "Disperse" : "กระจาย");
+        expect(text).toContain("slowly");
+      }
+    }
+    expect(JSON.stringify(parsed.fhir[0])).toBe(saved);
+  });
+
+  it.each([
+    ["Disperse 2 tablets in water, then drink slowly", "ช้าๆ"],
+    ["Disperse 2 tablets in water, then swallow slowly with water", "slowly"]
+  ])("replaces a custom preparation dose in normalized and roundtrip EN/TH: %s", (source, thaiManner) => {
+    const dosage: FhirDosage = JSON.parse(JSON.stringify(parseSig(source, options).fhir[0]));
+    dosage.doseAndRate![0].doseQuantity!.value = 3;
+    const saved = JSON.stringify(dosage);
+    for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const text = formatSig(dosage, "long", { ...options, locale, realizationMode });
+      expect(text).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+      expect(text).not.toMatch(/2 tablets|2 เม็ด/);
+      expect(text).toContain(locale === "en" ? "water" : "น้ำ");
+      expect(text).toContain(locale === "en" ? "slowly" : thaiManner);
+    }
+    expect(JSON.stringify(dosage)).toBe(saved);
+  });
+
+  it("retains an independent priming amount when the sole spanless dose definer is edited", () => {
+    const source = "Prime with 2 sprays, then spray 1 spray into each nostril";
+    const graph: CanonicalInstructionGraph = {
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source)
+    };
+    const dosage: FhirDosage = {
+      method: { text: "Spray", coding: [{ code: "spray" }] },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "spray" } }],
+      extension: [buildInstructionGraphExtension(graph)!]
+    };
+    dosage.doseAndRate![0].doseQuantity!.value = 3;
+    const saved = JSON.stringify(dosage), sourceGraph = JSON.stringify(graph);
+    for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const text = formatSig(dosage, "long", { locale, realizationMode });
+      expect(text).toContain(locale === "en" ? "Prime with 2 sprays" : "เตรียมอุปกรณ์พ่น 2 พ่น");
+      expect(text).toContain(locale === "en" ? "3 sprays" : "3 พ่น");
+      expect(text).toContain(locale === "en" ? "both nostrils" : "รูจมูกทั้งสองข้าง");
+      expect(text).not.toMatch(/1 spray|1 พ่น/);
+    }
+    expect(JSON.stringify(dosage)).toBe(saved);
+    expect(JSON.stringify(graph)).toBe(sourceGraph);
+  });
+
+  it("composes a typed before relation with its breakfast event before comparing live timing", () => {
+    const source = "Swallow 1 tablet slowly before breakfast";
+    const actions = parseInstructionActions(source);
+    actions[0].args = actions[0].args.map(arg =>
+      arg.role === AdviceArgumentRole.Time
+        ? { ...arg, normalized: EventTiming.Breakfast, relation: AdviceRelation.Before }
+        : arg.role === AdviceArgumentRole.Object
+        ? { role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly",
+            i18n: { en: "slowly", th: "ช้าๆ" } }
+        : arg);
+    const graph: CanonicalInstructionGraph = {
+      sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { start: 0, end: 7 }
+    };
+    const dosage = parseSig(source).fhir[0];
+    dosage.extension = [
+      ...(dosage.extension ?? []).filter(item => item.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL),
+      buildInstructionGraphExtension(graph)!
+    ];
+    delete dosage.additionalInstruction;
+    const sourceGraph = JSON.stringify(graph);
+    for (const event of [EventTiming["Before Breakfast"], EventTiming.Breakfast]) {
+      dosage.timing!.repeat!.when = [event];
+      const saved = JSON.stringify(dosage);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(dosage, "long", { locale, realizationMode: "roundtrip" });
+        if (event === EventTiming["Before Breakfast"]) {
+          expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+        } else {
+          expect(text).toContain(locale === "en" ? "with breakfast" : "พร้อมอาหารเช้า");
+          expect(text).not.toMatch(/before breakfast|ก่อนอาหารเช้า/);
+        }
+        expect(text).toContain(locale === "en" ? "slowly" : "ช้าๆ");
+      }
+      expect(JSON.stringify(dosage)).toBe(saved);
+    }
+    expect(JSON.stringify(graph)).toBe(sourceGraph);
+  });
+});
+
+describe("round 25: duration endpoints and course preview boundaries", () => {
+  it.each([
+    [undefined, ">=7", "at least 7", "อย่างน้อย 7"],
+    [">", ">7", ">7", ">7"],
+    [">=", ">=7", ">=7", ">=7"],
+    ["~", ">=~7", "at least ~7", "อย่างน้อย ~7"]
+  ] as const)("renders the lower-only duration comparator %s exactly once", (comparator, short, english, thai) => {
+    const dosage: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { boundsRange: { low: simpleQuantityForR5({
+        value: 7, unit: "days", system: "http://unitsofmeasure.org", code: "d", comparator
+      })! } } }
+    };
+    const saved = JSON.stringify(dosage);
+    for (const locale of ["en", "th"]) {
+      const options = { locale, realizationMode: "normalized" as const };
+      expect(formatSig(dosage, "short", options)).toContain("x" + short + "d");
+      expect(formatSig(dosage, "long", options))
+        .toContain(locale === "en" ? "for " + english + " days" : "เป็นเวลา " + thai + " วัน");
+    }
+    expect(JSON.stringify(dosage)).toBe(saved);
+  });
+
+  it.each([undefined, 1, 2] as const)("does not infer the next start from one calendar iteration when count is %s", count => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { count, end: { anchor: "treatment-start", displacement: { value: 1, unit: "mo" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { end: { anchor: "treatment-start", displacement: { value: 3, unit: "mo" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }] }
+    ] };
+    const saved = JSON.stringify(course);
+    for (const text of [
+      formatCanonicalCourse(course, "long", { locale: "en", realizationMode: "normalized" }),
+      formatSig(courseToR6(course), "long", { locale: "en", realizationMode: "normalized" })
+    ]) {
+      expect(text).toContain("3 months after treatment start");
+      expect(text).toContain("2 tablets");
+      if (count === 2) {
+        expect(text).toContain("Until 3 months after treatment start: Use 2 tablets");
+        expect(text).not.toContain("From 1 month after treatment start");
+      } else {
+        expect(text).toContain("From 1 month after treatment start until 3 months");
+      }
+    }
+    expect(JSON.stringify(course)).toBe(saved);
+  });
+
+  it("retains an exact start while an event-relative end still requires review", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-start", displacement: { value: 7, unit: "d" } },
+      end: { anchor: "coded-event", contextCode: { text: "follow-up visit" }, description: "follow-up visit" },
+      administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const saved = JSON.stringify(course);
+    for (const locale of ["en", "th"]) {
+      const text = formatCanonicalCourse(course, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "7 days after treatment start" : "7 วันหลังเริ่มการรักษา");
+      expect(text).toContain(locale === "en" ? "Timing requires review" : "ต้องตรวจสอบช่วงเวลา");
+      expect(text).toContain("follow-up visit");
+      expect(text).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
+    }
+    expect(JSON.stringify(course)).toBe(saved);
+  });
+
+  it("uses a requested separator within ordinary rows and grouped choice branches", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [
+      { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] },
+      { kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }
+    ] }] };
+    const ordinary = formatCanonicalCourse(course, "long", { locale: "en", separator: "\n" });
+    expect(ordinary).toBe("Use 1 tablet\nUse 2 tablets.");
+    course.stages[0].administrations[0].choice = { groupId: "choices", branchId: "pair" };
+    course.stages[0].administrations[1].choice = { groupId: "choices", branchId: "pair" };
+    course.stages[0].administrations.push(
+      { kind: "administration", amounts: [{ quantity: { value: 3, unit: "tab" } }],
+        choice: { groupId: "choices", branchId: "single" } },
+      { kind: "administration", amounts: [{ quantity: { value: 4, unit: "tab" } }] }
+    );
+    const grouped = formatCanonicalCourse(course, "long", { locale: "en", separator: "\n" });
+    expect(grouped).toBe("Choose one: (Use 1 tablet\nUse 2 tablets) or Use 3 tablets\nUse 4 tablets.");
+    expect(grouped).not.toContain(".\n");
   });
 });

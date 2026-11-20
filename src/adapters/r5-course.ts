@@ -22,7 +22,6 @@ import {
   stageMetadataToWire,
   courseMetadataToWire,
   safetyToWire,
-  r6RepresentableLimits,
 } from "./canonical-course";
 import { equalStructuredValues } from "../stable-structure";
 import { getStandardDoseUnitCoding } from "../maps";
@@ -77,7 +76,7 @@ function retentionForAdministration(
   const safety = safetyToWire(
     a.safety,
     raw?.safety ?? expandedSource?.safety,
-    r6RepresentableLimits(a.limits),
+    a.limits,
     !!a.syntax && (!a.provenance || a.provenance.format === "syntax")
   );
   const rawSite = raw?.site;

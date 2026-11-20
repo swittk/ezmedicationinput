@@ -448,12 +448,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     );
     expect(unchanged.renderedInstruction).toBe(source);
     const preview = formatSig(unchanged, "long");
-    let after = 0;
-    for (const phrase of expected) {
-      const position = preview.indexOf(phrase, after);
-      expect(position, "Missing ordered clinical phrase: " + phrase).toBeGreaterThanOrEqual(0);
-      after = position + phrase.length;
-    }
+    const complete = expected.length === 1 ? expected[0] :
+      expected[0] + ": " + expected[1] + "; " + expected[2] + ". " +
+      expected[3] + ": " + expected[4] + "; " + expected[5] + ". " +
+      expected[6] + ": " + expected[7] + "; " + expected[8] + ".";
+    expect(preview).toBe(complete);
   });
 
   it.each([

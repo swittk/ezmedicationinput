@@ -1009,7 +1009,8 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
     const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? ">=" : "";
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
   return `x${lowerBound}${base}${schedule.durationUnit}`;
 }
 
@@ -1061,7 +1062,8 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
     return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
   }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? "at least " : "";
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? "at least " : "";
   return `for ${lowerBound}${lower} ${label(schedule.duration)}`;
 }
 
@@ -1396,7 +1398,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? instructionGraphRichPrimaryAction(clause)
     : needsCurrentPrimary ? primaryGraphAction : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options)
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

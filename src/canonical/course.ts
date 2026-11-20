@@ -289,6 +289,7 @@ export function numericAdministrationLimits(
   let administration: CanonicalMeasure | undefined;
   let lifetime: CanonicalMeasure | undefined;
   let administrationValue = Infinity, lifetimeValue = Infinity;
+  let administrationUnit: string | undefined, lifetimeUnit: string | undefined;
   let multiple = false;
   let doseUnit: string | undefined;
   for (const limit of a.limits ?? []) {
@@ -304,8 +305,11 @@ export function numericAdministrationLimits(
       const amount = a.amounts?.[0];
       doseUnit = unitOf(amount?.quantity ?? amount?.range?.high ?? amount?.range?.low);
     }
-    const current = limit.scope === "administration" ? administration : lifetime;
-    const target = doseUnit || unitOf(current) || unitOf(bound);
+    // Keep every comparison in the same unit even when the winning original
+    // bound uses a different unit. Returning that original preserves metadata.
+    const target = limit.scope === "administration"
+      ? (administrationUnit ??= doseUnit || unitOf(bound))
+      : (lifetimeUnit ??= doseUnit || unitOf(bound));
     const source = unitOf(bound);
     const value = normalizeQuantityCapUnit(source) === normalizeQuantityCapUnit(target)
       ? bound.value : convertValue(bound.value, source, target, strength);

@@ -1823,7 +1823,8 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
     const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? ">=" : "";
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
   return `x${lowerBound}${base}${schedule.durationUnit}`;
 }
 
@@ -1875,7 +1876,8 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
     const lowerUnit = upperUnit !== unit ? " " + label() : "";
     return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(upperUnit)}`;
   }
-  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? "อย่างน้อย " : "";
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";
   return `เป็นเวลา ${lowerBound}${lower} ${label()}`;
 }
 
@@ -2305,7 +2307,7 @@ function formatLongThai(
     ? instructionGraphRoundTripPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options)
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)

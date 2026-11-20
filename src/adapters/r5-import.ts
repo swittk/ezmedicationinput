@@ -996,6 +996,7 @@ function reconcileNativeRetainedCourse(
   sourceContext = false,
   baselineInstruction?: string
 ): CanonicalCourse {
+  const retainedSteps = retained.step ?? [];
   const sourceRows = new Map<
     FhirR6Dosage,
     Map<number, { native: CanonicalAdministration; row: FhirDosage }>
@@ -1049,9 +1050,9 @@ function reconcileNativeRetainedCourse(
   let removedEmptyStage = false;
   const ownsEmptyMembership = ownsEmptyStageMembership(course);
   const retainedSequences: number[] = [];
-  for (let index = 0; index < retained.step.length; index++) {
+  for (let index = 0; index < retainedSteps.length; index++) {
     const sequence = index + 1;
-    if (ownsEmptyMembership && !retained.step[index].component.length &&
+    if (ownsEmptyMembership && !retainedSteps[index].component.length &&
         !metadata.has(sequence) && !groups.has(sequence)) removedEmptyStage = true;
     else retainedSequences.push(sequence);
   }
@@ -1063,7 +1064,7 @@ function reconcileNativeRetainedCourse(
   const sequences = [...sequenceSet].sort((a, b) => a - b);
   const liveSequences = [...groups.keys()].sort((a, b) => a - b);
   if (
-    liveSequences.length !== retained.step.length ||
+    liveSequences.length !== retainedSteps.length ||
     liveSequences.some((sequence, index) => sequence !== index + 1)
   ) {
     preserveRetainedMarkers = true;
@@ -1083,8 +1084,8 @@ function reconcileNativeRetainedCourse(
     }
     return value;
   };
-  for (let index = 0; index < retained.step.length; index++) {
-    const step = retained.step[index],
+  for (let index = 0; index < retainedSteps.length; index++) {
+    const step = retainedSteps[index],
       live = groups.get(index + 1) ?? [];
     if (live.length !== step.component.length) {
       projectionChanged = true;
@@ -1113,7 +1114,7 @@ function reconcileNativeRetainedCourse(
       "Edited R5 component fields were merged with retained R6 data; the raw source snapshot was also preserved for review."
     );
   }
-  const anyComponentCountChanged = retained.step.some(
+  const anyComponentCountChanged = retainedSteps.some(
     (step, index) => (groups.get(index + 1)?.length ?? 0) !== step.component.length
   );
   if (anyComponentCountChanged) {
@@ -1139,7 +1140,7 @@ function reconcileNativeRetainedCourse(
   );
   const steps: CanonicalStage[] = [];
   for (const sequence of sequences) {
-    const step = retained.step[sequence - 1];
+    const step = retainedSteps[sequence - 1];
     const live = groups.get(sequence) ?? [];
     const editedStep = metadata.get(sequence);
     const { component: _retainedComponents, ...retainedStepFields } = step ?? { component: [] };
@@ -1185,6 +1186,7 @@ function reconcileNativeRetainedCourse(
     const assigned: number[] = new Array(live.length).fill(-1);
     const originalIds = new Map<string, number>();
     const liveIdCounts = new Map<string, number>();
+    const liveSiteGroups = new Map<string, number[]>();
     // A unique alternative branch also supplies source identity when a
     // strict R5 editor changes and reorders rows without element IDs.
     // Repeated membership is not an identity: one branch may contain several
@@ -1203,7 +1205,14 @@ function reconcileNativeRetainedCourse(
         indices.set(key, indices.has(key) ? -1 : index);
       }
     }
-    for (const dosage of live) {
+    for (let index = 0; index < live.length; index++) {
+      const dosage = live[index];
+      if (dosage.site) {
+        const key = matchingProjectionFingerprint(dosage.site);
+        const group = liveSiteGroups.get(key);
+        if (group) group.push(index);
+        else liveSiteGroups.set(key, [index]);
+      }
       if (dosage.id) liveIdCounts.set(dosage.id, (liveIdCounts.get(dosage.id) ?? 0) + 1);
       const choice = getDosageAlternativeChoice(dosage);
       if (choice) {
@@ -1260,10 +1269,25 @@ function reconcileNativeRetainedCourse(
         group.add(i);
       }
     for (let j = 0; j < live.length; j++) {
-      if (assigned[j] >= 0 || !live[j].site) continue;
+      if (assigned[j] >= 0 || ambiguousLive.has(j) || !live[j].site) continue;
       const site = live[j].site,
-        group = siteGroups.get(matchingProjectionFingerprint(site));
+        key = matchingProjectionFingerprint(site),
+        group = siteGroups.get(key);
       if (!group) continue;
+      // A site identifies an edited source only when it is unique on both
+      // sides. An inserted same-site row must not acquire the old condition.
+      let shared = false;
+      for (const index of liveSiteGroups.get(key) ?? []) {
+        if (index === j || assigned[index] >= 0 || !equivalentProjection(site, live[index].site)) continue;
+        shared = true;
+        ambiguousLive.add(index);
+      }
+      if (shared) {
+        ambiguousLive.add(j);
+        for (const index of group)
+          if (equivalentProjection(site, step.component[index].site?.concept)) ambiguousSources.add(index);
+        continue;
+      }
       let match = -1;
       for (const index of group) {
         if (!equivalentProjection(site, step.component[index].site?.concept)) continue;
@@ -1350,7 +1374,7 @@ function reconcileNativeRetainedCourse(
       // Read this edited R5 row into the clinical model, then restore only
       // source-owned fields whose own live slot still matches its baseline.
       // This is the same native restoration rule as compact row imports.
-      const local: CompactCourseRow = { rowIndex: j, sequence, stepCount: retained.step.length };
+      const local: CompactCourseRow = { rowIndex: j, sequence, stepCount: retainedSteps.length };
       if (old && baseline) {
         local.component = old;
         local.baseline = {
@@ -1561,12 +1585,13 @@ export function courseFromR5(
       "Structured dosage fields changed; the previous rendered instruction was retained only as source provenance."
     );
   if (retained) {
+    const retainedSteps = retained.step ?? [];
     // A valid R6 course can have no steps. Its R5 representation is a
     // non-administration Dosage.text row carrying the complete typed source,
     // not an invented active dose. Restore it without manufacturing a step.
     const carrier = effectiveDosages[0];
     if (
-      retained.step.every((step) => !step.component.length) &&
+      retainedSteps.every((step) => !step.component.length) &&
       effectiveDosages.length === 1 &&
       carrier &&
       Object.keys(carrier).every((key) => {
@@ -1585,7 +1610,7 @@ export function courseFromR5(
       // Even an incomplete clinician-authored stage is live editable data.
       // This carrier has no administration: merge its explicit stage edits
       // without treating the carrier's Dosage.text as an active component.
-      const emptySteps = retained.step.map((step) => stageFromFields(step, []));
+      const emptySteps = retainedSteps.map((step) => stageFromFields(step, []));
       let edited = false;
       const editedSequences = new Set<number>();
       for (const item of course?.step ?? []) {

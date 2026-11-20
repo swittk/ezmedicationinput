@@ -1,6 +1,7 @@
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
-  getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays
+  getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
+  retainField, readRetainedField
 } from "./dosage-course";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
@@ -70,6 +71,7 @@ import {
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
+import { equalStructuredValues } from "./stable-structure";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
@@ -132,10 +134,47 @@ export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:Str
  * @returns The retained duration quantity or range, when supplied.
  */
 export function getAnchoredCourseDuration(
-  dosage: Pick<FhirDosage, "modifierExtension">
+  dosage: Pick<FhirDosage, "modifierExtension"> & { timing?: { repeat?: { boundsRange?: FhirRange } } }
 ): Pick<FhirExtension, "valueQuantity" | "valueRange"> | undefined {
-  return dosage.modifierExtension?.find(extension =>
+  const marker = dosage.modifierExtension?.find(extension =>
     extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  if (!marker?.extension) return marker;
+  const low = marker.extension.find(child => child.url === "low")?.valueQuantity;
+  const high = marker.extension.find(child => child.url === "high")?.valueQuantity;
+  if (!low || !high) return marker;
+  const projected = marker.extension.find(child => child.url === "projectedRange")?.valueRange;
+  if (projected && !equalStructuredValues(projected, dosage.timing?.repeat?.boundsRange)) return undefined;
+  const metadata = marker.extension.find(child => child.url === "rangeMetadata");
+  return { valueRange: {
+    ...(metadata ? readRetainedField(metadata) as FhirRange : undefined),
+    low: low as FhirSimpleQuantity, high: high as FhirSimpleQuantity,
+  } };
+}
+
+/** FHIR Range endpoints share one unit. Preserve authored endpoint units in
+ * the existing must-understand duration modifier, rather than flatten calendar
+ * months/years or let a normalized display change elapsed/calendar execution. */
+export function projectCourseDurationRange(range: FhirRange): { range: FhirRange; source?: FhirExtension } {
+  const { low, high, ...metadata } = range;
+  if (!low || !high || low.unit === high.unit && low.code === high.code && low.system === high.system)
+    return { range };
+  const lowUnit = parseFhirDurationUnit(low), highUnit = parseFhirDurationUnit(high);
+  const elapsed: Partial<Record<FhirPeriodUnit, number>> = {
+    [FhirPeriodUnit.Second]: 1, [FhirPeriodUnit.Minute]: 60, [FhirPeriodUnit.Hour]: 3600,
+    [FhirPeriodUnit.Day]: 86400, [FhirPeriodUnit.Week]: 604800,
+  };
+  const factor = lowUnit && highUnit && (lowUnit === highUnit ? 1 :
+    elapsed[lowUnit] && elapsed[highUnit] ? elapsed[lowUnit]! / elapsed[highUnit]! : undefined);
+  const projected: FhirRange = { ...metadata, high };
+  if (factor !== undefined && low.value !== undefined) projected.low = {
+    ...low, value: low.value * factor, unit: high.unit, system: high.system, code: high.code,
+  };
+  const children: FhirExtension[] = [
+    { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high },
+  ];
+  if (Object.keys(metadata).length) children.push(retainField("rangeMetadata", metadata));
+  children.push({ url: "projectedRange", valueRange: projected });
+  return { range: projected, source: { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: children } };
 }
 
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min";
@@ -1016,10 +1055,13 @@ function buildFhirBoundsRange(
   highComparator?: FhirR6Quantity["comparator"],
   highUnit: FhirPeriodUnit = unit
 ): FhirRange {
+  const displayUnit = describeDurationUnit(unit, high ?? low ?? 2);
   return {
     ...(low !== undefined ? { low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
+      ...(highUnit === unit ? { unit: displayUnit } : {}),
       ...(lowComparator ? { comparator: lowComparator } : {}) })! } : {}),
     ...(high !== undefined ? { high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, highUnit),
+      ...(highUnit === unit ? { unit: displayUnit } : {}),
       ...(highComparator ? { comparator: highComparator } : {}) })! } : {})
   };
 }
@@ -1075,7 +1117,7 @@ function extractCanonicalTimingBounds(
   const repeat = dosage.timing?.repeat;
   const retained = getAnchoredCourseDuration(dosage);
   const boundsDuration = repeat?.boundsDuration ?? retained?.valueQuantity;
-  const boundsRange = repeat?.boundsRange ?? retained?.valueRange;
+  const boundsRange = retained?.valueRange ?? repeat?.boundsRange;
   if (boundsDuration?.value !== undefined) {
     const durationUnit = parseFhirDurationUnit(boundsDuration);
     if (!durationUnit) {
@@ -1489,15 +1531,20 @@ export function serializeCanonicalSchedule(
     const range = ranged ? buildFhirBoundsRange(
       schedule.duration, schedule.durationMax, schedule.durationUnit,
       schedule.durationComparator, schedule.durationMaxComparator, schedule.durationMaxUnit) : undefined;
-    if (repeat.boundsPeriod) {
-      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
+    const projection = range && projectCourseDurationRange(range);
+    if (repeat.boundsPeriod || projection?.source) {
+      const source = projection?.source;
+      dosage.modifierExtension = [...(dosage.modifierExtension ?? []), source ? {
+        ...source, extension: repeat.boundsPeriod
+          ? source.extension!.filter(child => child.url !== "projectedRange") : source.extension,
+      } : {
         url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
-        ...(range ? { valueRange: range } : { valueQuantity: duration! })
+        ...(range ? { valueRange: range } : { valueQuantity: duration! }),
       }];
-    } else if (range) {
-      repeat.boundsRange = range;
-    } else {
-      repeat.boundsDuration = duration;
+    }
+    if (!repeat.boundsPeriod) {
+      if (projection) repeat.boundsRange = projection.range;
+      else repeat.boundsDuration = duration;
     }
     hasRepeat = true;
   }

@@ -3224,7 +3224,12 @@ describe("round 24 continuation course-window ownership", () => {
       toFhirR5Dosages(parsed.fhirNext).filter(row => row.sequence === 2),
     ]) {
       expect(rows).toHaveLength(2);
-      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value).sort()).toEqual([0.5, 1]);
+      expect(rows.map(row => ({
+        when: row.timing?.repeat?.when, dose: row.doseAndRate?.[0]?.doseQuantity?.value,
+      }))).toEqual(expect.arrayContaining([
+        { when: [EventTiming["Before Breakfast"]], dose: 1 },
+        { when: [EventTiming["Before Dinner"]], dose: 0.5 },
+      ]));
       for (const row of rows) {
         expect(row.timing?.repeat?.boundsDuration).toMatchObject({ value: 3, code: "d" });
         expect(row.timing?.repeat?.boundsDuration?.comparator).toBeUndefined();

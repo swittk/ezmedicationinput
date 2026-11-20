@@ -2,7 +2,7 @@ import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSource
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
-import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps, retainConflictingAmountChoices } from "./r6-editable-metadata";
+import { editableCourseSteps, retainedSingleStepSafety, liftSingleStepSafety, retainDraftSteps, retainConflictingAmountChoices, R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL } from "./r6-editable-metadata";
 /**
  * Interchange boundary for EZMED's canonical course.
  *
@@ -28,6 +28,7 @@ import type {
   FhirQuantity,
   FhirR6Quantity,
   FhirRange,
+  FhirRatio,
   ParseBatchResult,
   FhirCodeableConcept,
   FhirExtension,
@@ -53,6 +54,9 @@ import {
   DOSAGE_CONDITION_R5_URL,
   isExactConditionBridge,
   isRenderedInstructionMarker,
+  retainField,
+  readRetainedField,
+  DOSAGE_RECONCILIATION_SOURCE_URL,
   getDosageCondition,
   getDosageCalendarDayCondition,
   getDosageExcludedDates,
@@ -77,6 +81,7 @@ import {
   infusionCarrierMaterialExtension,
   getAdministrationOffsetMinutes,
   getAnchoredCourseDuration,
+  projectCourseDurationRange,
   getTimingClockWindow,
   getTimingMonthDays,
   getTimingWeekdayOrdinal,
@@ -120,21 +125,37 @@ import {
 /** An incomplete authored R5 maximum is retained source, not an invented R6 limit. */
 export const R5_SOURCE_ONLY_MAXIMUM_URL =
   "urn:ezmedicationinput:StructureDefinition:r5-source-only-maximum";
-function sourceOnlyR5Maximum(limit: CanonicalDoseLimit): boolean {
-  return limit.scope === "period" && !!limit.provenance && !("scope" in limit.provenance) &&
-    (limit.amount?.value === undefined || limit.period?.value === undefined);
+/** Source-only maxima are never executable limits. Their typed source can
+ * return to an R5 Ratio only when both endpoints (or neither) satisfy rat-1. */
+function sourceMaximumToR5(maximum: FhirRatio): boolean {
+  return maximum.numerator !== undefined && maximum.denominator !== undefined ||
+    maximum.numerator === undefined && maximum.denominator === undefined && !!maximum.extension?.length;
 }
-/** Share the unchanged list on the ordinary path; only incomplete R5 Ratios need filtering. */
-export function r6RepresentableLimits(limits: CanonicalDoseLimit[] | undefined): CanonicalDoseLimit[] | undefined {
-  if (!limits) return limits;
-  let kept: CanonicalDoseLimit[] | undefined;
-  for (let index = 0; index < limits.length; index++) {
-    const limit = limits[index];
-    if (sourceOnlyR5Maximum(limit)) {
-      kept ??= limits.slice(0, index);
-    } else if (kept) kept.push(limit);
+function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6"): FhirRatio[] | undefined {
+  const original = output.extension as FhirExtension[] | undefined;
+  let extensions: FhirExtension[] | undefined, maxima: FhirRatio[] | undefined;
+  for (let index = 0; index < (original?.length ?? 0); index++) {
+    const marker = original![index];
+    if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || !marker.valueRatio &&
+        !marker.extension?.some(child => child.url === "kind" && child.valueCode === "object")) {
+      if (extensions) extensions.push(marker);
+      continue;
+    }
+    const maximum = marker.valueRatio ?? readRetainedField(marker) as FhirRatio;
+    if (target === "r5" && sourceMaximumToR5(maximum)) {
+      (maxima ??= []).push(maximum);
+      extensions ??= original!.slice(0, index);
+      if (Object.keys(marker).some(key => key !== "url" && key !== "extension" && key !== "valueRatio"))
+        extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] });
+    } else if (marker.valueRatio) {
+      // Accept older source markers, but never re-emit a one-ended valueRatio.
+      extensions ??= original!.slice(0, index);
+      const { valueRatio: _ratio, ...metadata } = marker;
+      extensions.push({ ...metadata, ...retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum) });
+    } else if (extensions) extensions.push(marker);
   }
-  return kept ?? limits;
+  if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
+  return maxima;
 }
 
 const TREATMENT_START_SYSTEM = "http://hl7.org/fhir/evidence-variable-event";
@@ -506,9 +527,13 @@ function baseAdministration(
   for (const value of raw.doseAndRate ?? [])
     amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
   const sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
+  const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
+  const schedule = timing(raw.timing, format === "r5");
+  if (duration?.valueRange && raw.timing?.repeat?.boundsRange && schedule?.recurrence)
+    schedule.recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
   const output: CanonicalAdministration = {
     kind: "administration",
-    schedule: timing(raw.timing, format === "r5"),
+    schedule,
     amounts,
     stageOrdinal: format === "r5" ? input.sequence : undefined,
     asNeeded: raw.asNeeded,
@@ -534,22 +559,30 @@ function baseAdministration(
     delayMinutes: delayMarker
       ? getAdministrationOffsetMinutes({ modifierExtension: [delayMarker] })
       : undefined,
-    anchoredLength: anchored
-      ? { quantity: measureFromWire(anchored.valueQuantity), range: rangeFromFhir(anchored.valueRange) }
+    anchoredLength: duration && !raw.timing?.repeat?.boundsRange
+      ? { quantity: measureFromWire(duration.valueQuantity), range: rangeFromFhir(duration.valueRange) }
       : undefined,
     cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
     provenance: { format, data: record(raw) },
   };
   if (sourceTextVerified !== undefined) output.provenance!.sourceTextVerified = sourceTextVerified;
   if (format === "r5") {
-    let limits: CanonicalDoseLimit[] | undefined;
-    for (const maximum of input.maxDosePerPeriod ?? [])
+    let limits: CanonicalDoseLimit[] | undefined, sourceMaxima: FhirExtension[] | undefined;
+    for (const maximum of input.maxDosePerPeriod ?? []) {
+      if (maximum.numerator?.value === undefined || maximum.denominator?.value === undefined) {
+        (sourceMaxima ??= []).push(retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum));
+        continue;
+      }
       (limits ??= []).push({
         scope: "period",
         amount: measureFromR5(maximum.numerator),
         period: measureFromR5(maximum.denominator),
         provenance: maximum,
       });
+    }
+    if (sourceMaxima) output.provenance!.data = {
+      ...raw, extension: [...(raw.extension ?? []), ...sourceMaxima],
+    };
     if (input.maxDosePerAdministration)
       (limits ??= []).push({
         scope: "administration",
@@ -588,12 +621,6 @@ export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): 
       text: limit.text,
       provenance: limit,
     }));
-  }
-  for (const marker of raw.extension ?? []) {
-    if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || !marker.valueRatio) continue;
-    const maximum = marker.valueRatio;
-    (result.limits ??= []).push({ scope: "period", amount: measureFromR5(maximum.numerator),
-      period: measureFromR5(maximum.denominator), provenance: maximum });
   }
   return result;
 }
@@ -655,14 +682,20 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
  * course execution. A simple scalar needs no course reconstruction. */
 export function isR6DosageInstruction(input: object): input is FhirR6DosageInstructionInput {
   if ("step" in input || "renderedInstruction" in input || "repeatCycle" in input) return true;
-  // Header-only R6 instructions may carry just course safety. An extended
-  // R5 dosage still owns its dosage fields, even when it also carries safety.
-  return "safety" in input && !("text" in input || "sequence" in input ||
-    "doseAndRate" in input || "timing" in input || "route" in input ||
-    "site" in input || "method" in input || "condition" in input ||
-    "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
-    "patientInstruction" in input || "maxDosePerPeriod" in input ||
-    "maxDosePerAdministration" in input || "maxDosePerLifetime" in input);
+  // Header-only R6 instructions may carry just safety or known R6 source.
+  // An extended R5 dosage still owns its explicit dosage fields.
+  if ("text" in input || "sequence" in input || "doseAndRate" in input || "timing" in input ||
+      "route" in input || "site" in input || "method" in input || "condition" in input ||
+      "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
+      "patientInstruction" in input || "maxDosePerPeriod" in input ||
+      "maxDosePerAdministration" in input || "maxDosePerLifetime" in input) return false;
+  if ("safety" in input) return true;
+  for (const marker of (input as FhirR6DosageInstruction).extension ?? []) {
+    if (marker.url === R6_DRAFT_STEPS_SOURCE_URL || marker.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL) return true;
+    if (marker.url === DOSAGE_RECONCILIATION_SOURCE_URL && marker.extension?.some(child =>
+        child.url === R6_DRAFT_STEPS_SOURCE_URL || child.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL)) return true;
+  }
+  return false;
 }
 export function inputToCanonical(
   input:
@@ -999,6 +1032,32 @@ function administrationToWire(
     assign(wireTiming.repeat as Record<string, unknown>, "offset", scheduleMetadata.timing.repeat.offset);
   }
   wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
+  const currentRange = wireTiming?.repeat?.boundsRange ??
+    (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, Boolean(clause)) : undefined);
+  const modifiers = output.modifierExtension as FhirExtension[] | undefined;
+  const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
+  if (projection?.source || oldDuration?.extension?.some(child => child.url === "projectedRange") ||
+      a.anchoredLength?.range && !oldDuration) {
+    const replacement: FhirExtension | undefined = projection?.source
+      ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange ? projection.source.extension :
+          projection.source.extension!.filter(child => child.url !== "projectedRange") }
+      : a.anchoredLength?.range && projection
+        ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, valueRange: projection.range } : undefined;
+    const next = modifiers?.filter(item => item !== oldDuration) ?? [];
+    if (replacement) {
+      const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldDuration ?? {};
+      const unknown = priorChildren?.filter(child => child.url !== "low" && child.url !== "high" &&
+        child.url !== "projectedRange" && child.url !== "rangeMetadata");
+      next.push({ ...metadata, ...replacement,
+        ...(replacement.extension && unknown?.length
+          ? { extension: [...replacement.extension, ...unknown] } : {}) });
+    } else if (oldDuration) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [oldDuration] }];
+    assign(output, "modifierExtension", next.length ? next : undefined);
+  }
+  if (projection && wireTiming?.repeat?.boundsRange && projection.range !== currentRange)
+    wireTiming = { ...wireTiming, repeat: { ...wireTiming.repeat, boundsRange: projection.range } };
   assign(output, "timing", wireTiming);
   assign(output, "text", a.text);
   assign(output, "patientInstruction", a.patientInstruction);
@@ -1214,6 +1273,22 @@ function administrationToWire(
         : undefined
     );
   }
+  // A producer may leave unequal member delays after lifting the common
+  // stage start. Emit that current native fact even without a syntax view.
+  const previousDelay = getAdministrationOffsetMinutes(output as FhirDosage);
+  if (previousDelay !== a.delayMinutes) {
+    const previous = (output.modifierExtension as FhirExtension[] | undefined) ?? [];
+    const marker = previous.find(item => item.url === ADMINISTRATION_OFFSET_EXTENSION_URL);
+    const modifiers = previous.filter(item => item !== marker);
+    if (a.delayMinutes !== undefined) modifiers.push({
+      ...marker, url: ADMINISTRATION_OFFSET_EXTENSION_URL,
+      valueQuantity: { ...marker?.valueQuantity, value: a.delayMinutes,
+        unit: "minutes", system: "http://unitsofmeasure.org", code: "min" },
+    });
+    else if (marker) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] }];
+    assign(output, "modifierExtension", modifiers.length ? modifiers : undefined);
+  }
   if (a.calendarPredicate) setDosageCondition(output as FhirDosage, a.predicate, a.calendarPredicate);
   if (
     a.excludedDates?.length ||
@@ -1284,6 +1359,7 @@ function administrationToWire(
     }
     if (kept) assign(output, "extension", kept.length ? kept : undefined);
   }
+  const sourceMaxima = projectSourceMaxima(output, target);
   // No understood safety concept is serialized through a generic bag.
   // Unknown external annotations survive via the original wire provenance.
   if (target === "r6") {
@@ -1317,48 +1393,14 @@ function administrationToWire(
     // doseLimit. But an ordinary dosage with no authored safety must not
     // grow a synthetic empty R6 safety policy merely because limits=undefined.
     const limits = a.limits ?? (source?.safety?.doseLimit !== undefined ? [] : undefined);
-    assign(output, "safety", safetyToWire(a.safety, source?.safety, r6RepresentableLimits(limits), Boolean(clause)));
-    // A Ratio with an extension-only/missing endpoint has no R6 value[x]
-    // equivalent. Keep its original source as inert ordinary metadata.
-    const originalExtensions = output.extension as FhirExtension[] | undefined;
-    let extensions: FhirExtension[] | undefined;
-    let sourceMarkers: Map<object, FhirExtension> | undefined;
-    for (let index = 0; index < (originalExtensions?.length ?? 0); index++) {
-      const marker = originalExtensions![index];
-      if (marker.url === R5_SOURCE_ONLY_MAXIMUM_URL && marker.valueRatio) {
-        (sourceMarkers ??= new Map()).set(marker.valueRatio, marker);
-        extensions ??= originalExtensions!.slice(0, index);
-      } else if (extensions) extensions.push(marker);
-    }
-    for (const limit of limits ?? []) if (sourceOnlyR5Maximum(limit)) {
-      extensions ??= originalExtensions?.slice() ?? [];
-      extensions.push(sourceMarkers?.get(limit.provenance!) ?? {
-        url: R5_SOURCE_ONLY_MAXIMUM_URL,
-        valueRatio: limit.provenance as NonNullable<FhirDosage["maxDosePerPeriod"]>[number],
-      });
-    }
-    if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
+    assign(output, "safety", safetyToWire(a.safety, source?.safety, limits, Boolean(clause)));
   } else {
     delete output.safety;
     delete output.maxDosePerPeriod;
     delete output.maxDosePerAdministration;
     delete output.maxDosePerLifetime;
-    let periodLimits: NonNullable<FhirDosage["maxDosePerPeriod"]> | undefined;
-    // R6's inert source envelope is decoded above; R5 owns the Ratio itself.
-    const originalExtensions = output.extension as FhirExtension[] | undefined;
-    let extensions: FhirExtension[] | undefined;
-    for (let index = 0; index < (originalExtensions?.length ?? 0); index++) {
-      const marker = originalExtensions![index];
-      if (marker.url === R5_SOURCE_ONLY_MAXIMUM_URL && marker.valueRatio)
-        extensions ??= originalExtensions!.slice(0, index);
-      else if (extensions) extensions.push(marker);
-    }
-    if (extensions) assign(output, "extension", extensions.length ? extensions : undefined);
+    let periodLimits = sourceMaxima;
     for (const limit of a.limits ?? []) {
-      if (sourceOnlyR5Maximum(limit)) {
-        (periodLimits ??= []).push(limit.provenance as NonNullable<FhirDosage["maxDosePerPeriod"]>[number]);
-        continue;
-      }
       if (!limit.amount) continue;
       const amount = {
         ...limit.amount,
@@ -1453,6 +1495,8 @@ function serializeRange(value: CanonicalRange, duration = false, doseCoding = fa
     )!;
   const low = value.low ? q(value.low) : undefined;
   const high = value.high ? q(value.high) : undefined;
+  if (duration && low && high && low.code === high.code && low.system === high.system)
+    low.unit = high.unit;
   if (low === value.low && high === value.high) return value as FhirRange;
   return {
     ...value,
@@ -1517,7 +1561,8 @@ function projectCourseToR6(
     precedingDraftEnd = undefined;
     steps.push(Object.assign(metadata, { component }));
   }
-  const result: FhirR6DosageInstruction = Object.assign(courseMetadataToWire(course), { step: steps });
+  const result: FhirR6DosageInstruction = courseMetadataToWire(course);
+  if (steps.length) result.step = steps;
   liftSingleStepSafety(result);
   if (drafts || result.extension?.length) retainDraftSteps(result, drafts, synthesizedStarts);
   if (course.instruction !== undefined) result.renderedInstruction = course.instruction;

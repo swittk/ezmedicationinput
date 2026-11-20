@@ -28,7 +28,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     source.repeatCycle = { value: 7, unit: "d" };
     source.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3,
       id: "course-count" }, { url: "urn:test:count-note", valueString: "retain" }];
-    source.step[0].count = 2;
+    source.step![0].count = 2;
     const native = importCanonicalCourse(source);
     expect(native.cycleCount).toBe(3);
     expect(native.stages[0].count).toBe(2);
@@ -44,18 +44,18 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const source = course();
     source.repeatCycle = { value: 7, unit: "d" };
     source.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }];
-    source.step[0].count = 2;
+    source.step![0].count = 2;
     const edit = persisted(fromDosageDetails(source));
     edit.course.modifierExtension![0].valueInteger = 4;
     const changed = toDosageDetails(edit.dosages, undefined, edit.course);
     expect(getCourseCycleCount(changed)).toBe(4);
-    expect(changed.step[0].count).toBe(2);
+    expect(changed.step![0].count).toBe(2);
     const next = persisted(fromDosageDetails(changed));
     next.course.modifierExtension = [];
     const cleared = toDosageDetails(next.dosages, undefined, next.course);
     expect(getCourseCycleCount(cleared)).toBeUndefined();
     expect(importCanonicalCourse(cleared).cycleCount).toBeUndefined();
-    expect(cleared.step[0].count).toBe(2);
+    expect(cleared.step![0].count).toBe(2);
     expect(getCourseCycleCount(toDosageDetails(persisted(toFhirR5Dosages(cleared)))))
       .toBeUndefined();
   });
@@ -82,12 +82,14 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const edit = persisted(fromDosageDetails(wire));
     edit.course.step = [];
     const removed = toDosageDetails(edit.dosages, undefined, edit.course);
-    expect(removed.step).toEqual([]);
+    expect(removed.step).toBeUndefined();
     expect(importCanonicalCourse(removed).stages).toEqual([]);
-    expect(JSON.stringify(removed.extension)).toContain("urn:test:draft-source");
+    const annotation = { url: "urn:test:draft-source", valueString: "keep original" };
+    expect(JSON.stringify(removed.extension)).toContain(JSON.stringify(annotation));
     const saved = persisted(fromDosageDetails(removed));
-    expect(importCanonicalCourse(toDosageDetails(saved.dosages, undefined, saved.course)).stages)
-      .toEqual([]);
+    const reopened = toDosageDetails(saved.dosages, undefined, saved.course);
+    expect(importCanonicalCourse(reopened).stages).toEqual([]);
+    expect(JSON.stringify(reopened.extension)).toContain(JSON.stringify(annotation));
   });
 
   it.each([false, true])("applies edited R5 maxima when unchanged lifted safety remains (metadata %s)", rich => {
@@ -101,7 +103,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     };
     const edit = persisted(fromDosageDetails(course({ safety })));
     edit.dosages[0].maxDosePerAdministration!.value = 2;
-    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step[0].component[0].safety!;
+    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step![0].component[0].safety!;
     expect(actual.doseLimit!.find(limit => limit.scope === "administration")!.valueQuantity!.value).toBe(2);
     if (rich) {
       expect(actual.doseLimit).toContainEqual(safety.doseLimit[1]);
@@ -119,7 +121,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     if (scope === "period") edit.dosages[0].maxDosePerPeriod![0].numerator!.value = 2;
     else edit.dosages[0].maxDosePerLifetime!.value = 2;
     const output = toDosageDetails(edit.dosages, undefined, edit.course);
-    expect(output.step[0].component[0].safety!.doseLimit).toEqual([{
+    expect(output.step![0].component[0].safety!.doseLimit).toEqual([{
       scope, valueQuantity: q(2), ...(scope === "period" ? { period: { value: 1, unit: "d", code: "d" } } : {}),
     }]);
   });
@@ -130,7 +132,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     })));
     edit.dosages[0].maxDosePerAdministration!.value = 2;
     edit.dosages[0].safety!.doseLimit![0].valueQuantity!.value = 3;
-    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step[0].component[0];
+    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step![0].component[0];
     expect(actual.safety!.doseLimit![0].valueQuantity!.value).toBe(3);
   });
 
@@ -142,7 +144,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
       ] },
     })));
     delete edit.dosages[0].maxDosePerAdministration;
-    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step[0].component[0].safety!;
+    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step![0].component[0].safety!;
     expect(actual.doseLimit).toEqual([{ scope: "dosage", valueInteger: 3 }]);
     expect(actual.ifExceeded).toEqual("call");
   });
@@ -165,7 +167,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     "honors a live %s edit under the full retained-course bridge", field => {
       const row = legacyExpressionRow();
       row.doseAndRate![0][field] = { language: "text/fhirpath", expression: "%edited" };
-      const actual = toDosageDetails([row]).step[0].component[0].doseAndRate![0];
+      const actual = toDosageDetails([row]).step![0].component[0].doseAndRate![0];
       expect(actual[field]!.expression).toBe("%edited");
       const untouched = field === "doseExpression" ? "rateExpression" : "doseExpression";
       expect(actual[untouched]!.expression).toBe(field === "doseExpression" ? "%oldRate" : "%oldDose");
@@ -173,11 +175,11 @@ describe("R5 edit ownership and quantity boundaries", () => {
   );
   it("restores absent strict-R5 expressions while respecting an explicit editable clear", () => {
     const strict = legacyExpressionRow();
-    expect(toDosageDetails([strict]).step[0].component[0].doseAndRate![0]).toMatchObject({
+    expect(toDosageDetails([strict]).step![0].component[0].doseAndRate![0]).toMatchObject({
       doseExpression: { expression: "%oldDose" }, rateExpression: { expression: "%oldRate" },
     });
     strict.doseAndRate![0].doseExpression = undefined;
-    const cleared = toDosageDetails([strict]).step[0].component[0].doseAndRate![0];
+    const cleared = toDosageDetails([strict]).step![0].component[0].doseAndRate![0];
     expect(cleared.doseExpression).toBeUndefined();
     expect(cleared.rateExpression!.expression).toBe("%oldRate");
   });
@@ -186,7 +188,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
       doseAndRate: [{ doseExpression: { expression: "%dose" }, rateExpression: { expression: "%rate" } }],
     }] }] });
     edit.dosages[0].doseAndRate![0].doseExpression = undefined;
-    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step[0].component[0].doseAndRate![0];
+    const actual = toDosageDetails(edit.dosages, undefined, edit.course).step![0].component[0].doseAndRate![0];
     expect(actual.doseExpression).toBeUndefined();
     expect(actual.rateExpression!.expression).toBe("%rate");
   });
@@ -198,10 +200,10 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const edit = persisted(fromDosageDetails(source));
     delete edit.dosages[0].doseAndRate![0].doseExpression;
     const reopened = toDosageDetails(persisted(edit.dosages), undefined, edit.course);
-    expect(reopened.step[0].component[0].doseAndRate![0].doseExpression).toBeUndefined();
-    expect(reopened.step[0].component[0].doseAndRate![0].rateExpression!.expression).toBe("%rate");
+    expect(reopened.step![0].component[0].doseAndRate![0].doseExpression).toBeUndefined();
+    expect(reopened.step![0].component[0].doseAndRate![0].rateExpression!.expression).toBe("%rate");
     const strict = toDosageDetails(persisted(toFhirR5Dosages(source)));
-    expect(strict.step[0].component[0].doseAndRate![0].doseExpression!.expression).toBe("%dose");
+    expect(strict.step![0].component[0].doseAndRate![0].doseExpression!.expression).toBe("%dose");
   });
 
   it("does not combine stale row text with a current text-only edit", () => {
@@ -216,9 +218,9 @@ describe("R5 edit ownership and quantity boundaries", () => {
     edit.dosages[1].text = "Take one at bedtime";
     const actual = toDosageDetails(edit.dosages, undefined, edit.course);
     expect(actual.renderedInstruction).toBeUndefined();
-    expect(actual.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
-    expect(actual.step[0].component[0].text).toBeUndefined();
-    expect(actual.step[0].component[1].text).toBe("Take one at bedtime");
+    expect(actual.step![0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
+    expect(actual.step![0].component[0].text).toBeUndefined();
+    expect(actual.step![0].component[1].text).toBe("Take one at bedtime");
     const retiredRows: ReturnType<typeof decodeR5RetainedFields>[] = [];
     for (const item of actual.extension ?? []) if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL)
       for (const source of item.extension ?? []) if (source.url === DOSAGE_DETAILS_R5_URL)
@@ -246,13 +248,13 @@ describe("R5 edit ownership and quantity boundaries", () => {
     // Changing the live period retires offsets tied to its old window.
     changed[0].timing!.repeat!.period = 2;
     const output = toFhirR5Dosages(changed);
-    expect(toDosageDetails(output).step[0].component[0].timing!.repeat!.startOffset).toBeUndefined();
+    expect(toDosageDetails(output).step![0].component[0].timing!.repeat!.startOffset).toBeUndefined();
     // Returning to the earlier cadence later must not revive a retired marker.
     output[0].timing!.repeat!.period = 1;
-    const next = toDosageDetails(persisted(output)).step[0].component[0];
+    const next = toDosageDetails(persisted(output)).step![0].component[0];
     expect(next.timing!.repeat!.period).toBe(1);
     expect(next.timing!.repeat!.startOffset).toBeUndefined();
-    expect(toDosageDetails(rows).step[0].component[0].timing!.repeat!.startOffset).toMatchObject({ value: 8 });
+    expect(toDosageDetails(rows).step![0].component[0].timing!.repeat!.startOffset).toMatchObject({ value: 8 });
   });
 
   it.each([false, true])("retains a high-only approximate course length (anchored %s)", anchored => {
@@ -291,7 +293,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const reopened = toDosageDetails(persisted(toFhirR5Dosages(source)));
     expect(reopened).toEqual(source);
     expect(reopened.extension).toBeUndefined();
-    expect(reopened.step[0].component[0].doseAndRate![0].doseQuantity).not.toHaveProperty("comparator");
+    expect(reopened.step![0].component[0].doseAndRate![0].doseQuantity).not.toHaveProperty("comparator");
   });
 
   it("shows qualified R5 range endpoints in the clinician preview", () => {

@@ -115,15 +115,19 @@ export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
   FhirSimpleQuantity | undefined {
   if (!quantity) return undefined;
   const comparator = quantity.comparator;
-  if (!comparator) return quantity as FhirSimpleQuantity;
-  const { comparator: _r6Comparator, ...numeric } = quantity;
+  if (!comparator && quantity._comparator === undefined) return quantity as FhirSimpleQuantity;
+  const { comparator: _r6Comparator, _comparator, ...numeric } = quantity;
   const existing = numeric.extension ?? [];
+  const sources: FhirExtension[] = _comparator ? [{
+    url: QUANTITY_OPERATOR_SOURCE_URL,
+    ...(comparator ? { valueCode: comparator } : {}), _valueCode: _comparator,
+  }] : [];
+  if (!comparator) return { ...numeric, extension: [...existing, ...sources] };
   const code = emaCodeByComparator[comparator];
   let found = false;
   // An imported extension may carry id, display, or other authored metadata.
   // If the native comparator was edited, replace its recognized EMA code in
   // place. Appending a second active operator makes both interpretations fail.
-  const sources: FhirExtension[] = [];
   const extensions = existing.map(ext => {
     const coding = ext.valueCoding;
     if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||

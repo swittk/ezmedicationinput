@@ -19,7 +19,7 @@ import { administrationFromR5, courseFromR6 } from "../src/adapters/canonical-co
 
 const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const rowDose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
-const componentSafety = (course: FhirR6DosageInstruction) => course.step[0].component[0].safety;
+const componentSafety = (course: FhirR6DosageInstruction) => course.step![0].component[0].safety;
 function historicalRows(extra: FhirExtension[] = []): EzDosage[] {
   const marker: FhirExtension = { url: DOSAGE_DETAILS_R5_URL, extension: [{
     url: "dosageDetails", extension: [
@@ -86,7 +86,7 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(source).toBeDefined();
     expect(componentSafety(toDosageDetails(persist(toFhirR5Dosages(changed))))).toBeUndefined();
     expect(componentSafety(toDosageDetails(persist(fromDosageDetails(original).dosages))))
-      .toEqual(original.step[0].component[0].safety);
+      .toEqual(original.step![0].component[0].safety);
   });
 
   it("keeps independent R6 safety after deleting the only projected quantity limit", () => {
@@ -109,7 +109,7 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(toDosageDetails(rows).renderedInstruction).toBe("Take one tablet, two repeats.");
     const changed = toDosageDetails(rows, undefined, { renderedInstruction: "Take one tablet, two repeats.",
       step: [{ sequence: 1, count: 3 }] });
-    expect(changed.step[0].count).toBe(3);
+    expect(changed.step![0].count).toBe(3);
     expect(changed.renderedInstruction).toBeUndefined();
     expect(changed.extension?.some(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL)).toBe(true);
     expect(toDosageDetails(rows, undefined, { id: "revised-course" }).renderedInstruction).toBeUndefined();
@@ -153,14 +153,14 @@ describe("review round 21: persisted R5 ownership and retention", () => {
       expect(slot.extension?.[0].extension?.[0].valueExpression?.expression).toBe(index === 0 ? "%weight * 2" : "%rate");
     }
     const restored = toDosageDetails(rows);
-    expect(restored.step[0].component[0].doseAndRate).toEqual(source.step[0].component[0].doseAndRate);
-    expect(toDosageDetails(persist(toFhirR5Dosages(restored))).step[0].component[0].doseAndRate)
-      .toEqual(source.step[0].component[0].doseAndRate);
-    const scalar = fromR6Dosage(source.step[0].component[0], 1);
+    expect(restored.step![0].component[0].doseAndRate).toEqual(source.step![0].component[0].doseAndRate);
+    expect(toDosageDetails(persist(toFhirR5Dosages(restored))).step![0].component[0].doseAndRate)
+      .toEqual(source.step![0].component[0].doseAndRate);
+    const scalar = fromR6Dosage(source.step![0].component[0], 1);
     expect(scalar.doseAndRate?.[0].extension?.[0].extension?.[0].valueExpression)
-      .toEqual(source.step[0].component[0].doseAndRate![0].doseExpression);
+      .toEqual(source.step![0].component[0].doseAndRate![0].doseExpression);
     rows[0].doseAndRate![0].doseQuantity = { value: 7, unit: "mg" };
-    const replaced = toDosageDetails(rows).step[0].component[0].doseAndRate![0];
+    const replaced = toDosageDetails(rows).step![0].component[0].doseAndRate![0];
     expect(replaced.doseQuantity).toEqual({ value: 7, unit: "mg" });
     expect(replaced.doseExpression).toBeUndefined();
   });
@@ -171,13 +171,13 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     let source: FhirR6DosageInstruction = { step: [{ component: [{ ...persist(rowDose), site }] }] };
     for (let i = 0; i < 3; i++) {
       source = toDosageDetails(persist(toFhirR5Dosages(source)));
-      expect(source.step[0].component[0].site).toEqual(site);
+      expect(source.step![0].component[0].site).toEqual(site);
     }
     const rows = persist(toFhirR5Dosages(source));
     delete rows[0].site;
     const cleared = toDosageDetails(rows);
-    expect(cleared.step[0].component[0].site?.concept).toBeUndefined();
-    expect(toDosageDetails(persist(toFhirR5Dosages(cleared))).step[0].component[0].site?.concept).toBeUndefined();
+    expect(cleared.step![0].component[0].site?.concept).toBeUndefined();
+    expect(toDosageDetails(persist(toFhirR5Dosages(cleared))).step![0].component[0].site?.concept).toBeUndefined();
   });
 
   it.each(["simple", "general"] as const)("removes stale active operator translations in %s quantities and retains their original coding", kind => {
@@ -247,7 +247,7 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     }];
     const migrated = toDosageDetails(persist(saved));
     expect(getCourseCycleCount(migrated)).toBe(3);
-    expect(migrated.step[0].count).toBeUndefined();
+    expect(migrated.step![0].count).toBeUndefined();
     expect(migrated.extension).toContainEqual({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [saved[0].modifierExtension![0]] });
     const dates = nextDueDoses(migrated, { from: "2026-11-18T08:00:00Z", orderedAt: "2026-11-18T08:00:00Z", timeZone: "UTC", limit: 30 });
     expect(dates).toHaveLength(21);
@@ -262,7 +262,7 @@ describe("review round 21: persisted R5 ownership and retention", () => {
       expect(rows[0].modifierExtension?.find(item => item.url === DOSAGE_DETAILS_R5_URL)?.extension)
         .toContainEqual({ url: "countScope", valueCode: "step" });
       const restored = toDosageDetails(rows);
-      expect(restored.step[0].count).toBe(2);
+      expect(restored.step![0].count).toBe(2);
       expect(getCourseCycleCount(restored)).toBe(bounded ? 3 : undefined);
     }
   });

@@ -3798,7 +3798,8 @@ export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): str
  * replace the numeric administration text without the CURRENT dose.
  * This is a display-only frame copy, not an edit of source graph/provenance. */
 export function realizeRichPrimaryWithCanonicalDose(
-  frame: AdviceFrame, clause: CanonicalSigClause, locale: string
+  frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
+  options?: Pick<ParseOptions, "instructionActionMap">
 ): string {
   frame = frameWithoutSupersededTime(frame, clause);
   const dose = clause.dose;
@@ -3807,7 +3808,7 @@ export function realizeRichPrimaryWithCanonicalDose(
     (dose.value === undefined && !dose.range)) return realizeAction(frame, locale);
   // A preceding preparation already supplies the unchanged amount. Add the
   // live dose only when no independently rendered owner still supplies it.
-  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause) : undefined;
+  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
   if (owner && owner !== frame && !primaryActionAmountConflicts(owner, dose))
     return realizeAction(frame, locale);
   const { value, range, unit, comparator } = dose;
@@ -4138,11 +4139,11 @@ function timeArgumentCoveredBySchedule(
     return false;
   }
   const timing = arg.normalized as EventTiming;
-  if (clause.schedule.when.indexOf(timing) >= 0) return true;
-  const related = frame.relation
-    ? MEAL_TIMING_BY_RELATION.get(frame.relation as "before" | "after" | "with")?.get(timing)
+  const relation = arg.relation ?? frame.relation;
+  const related = relation
+    ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
     : undefined;
-  return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
+  return clause.schedule.when.indexOf(related ?? timing) >= 0;
 }
 
 const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
@@ -4179,7 +4180,8 @@ export function instructionGraphActionCoversSingleScheduledEvent(
   if (clause.schedule?.when?.length !== 1) return false;
   return frame.args.some((arg) => {
     if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
-    if (arg.role !== AdviceArgumentRole.Time) return false;
+    if (arg.role !== AdviceArgumentRole.Time ||
+        arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
     const words = normalizeActionSurface(arg.normalized ?? arg.text)
       .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
     for (let index = 0; index < words.length; index += 1) {
@@ -4321,7 +4323,7 @@ function primaryDoseAmountOwner(
     if(!earliest||action.span.start<earliest.span.start)earliest=action;
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
-    if(primary && action.span.end<=primary.start) {
+    if(!primary || action.span.end<=primary.start) {
       const custom=options?.instructionActionMap
         ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
       if((custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose) {
@@ -4330,10 +4332,10 @@ function primaryDoseAmountOwner(
     }
   }
   if(primary)return overlap??(earlierCount===1?earlier:undefined);
-  // A spanless saved graph uses its original first amount-bearing action.
-  // A LIVE method/unit edit cannot transfer that ownership to a later
-  // independent action, even when the latter is a registered dose definer.
-  return earliest;
+  // Source-declared dose ownership precedes device preparation in spanless
+  // saved graphs. Multiple independent dose definers keep the original first
+  // amount owner; a live method/unit edit never changes this source decision.
+  return earlierCount === 1 ? earlier : earliest;
 }
 
 /** Whole-source replay and action realization have the same amount owner.

@@ -25,6 +25,23 @@ const cap = { doseLimit: [{ scope: "period" as const,
 const normalized = { locale: "en", realizationMode: "normalized" as const };
 
 describe("review 21 current structured course preview", () => {
+
+  it("retains independently structured directions beside a live cap without replaying its opaque stale header", () => {
+    const raw: FhirR6DosageInstruction = {
+      renderedInstruction: "Take 1 tablet twice daily, maximum 3 tablets per day",
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" },
+        period: { value: 1, unit: "d" } }] },
+      step: [{ component: [{ doseAndRate: tablet.doseAndRate,
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } }] }]
+    };
+    const saved = JSON.stringify(raw);
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toContain("1 tablet twice daily");
+    expect(text).toContain("4 tab / 1 d");
+    expect(text).not.toContain("maximum 3");
+    expect(JSON.stringify(raw)).toBe(saved);
+  });
+
   it("keeps the shared course cap in batch preview and an ordinary custom separator", () => {
     const batch = fromFhir({ safety: cap, step: [{ component: [tablet] }] }, normalized);
     for (const style of ["short", "long"] as const) {

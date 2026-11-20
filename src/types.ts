@@ -23,6 +23,7 @@ export interface FhirExtension {
   url: string;
   extension?: FhirExtension[];
   valueCode?: string;
+  _valueCode?: FhirPrimitiveElement;
   valueString?: string;
   valueDate?: string;
   valueBoolean?: boolean;
@@ -61,6 +62,7 @@ export interface FhirQuantity extends FhirElement {
   value?: number;
   /** FHIR R5 Quantity comparator. 'ad' was added in R5. */
   comparator?: "<" | "<=" | ">=" | ">" | "ad";
+  _comparator?: FhirPrimitiveElement;
   unit?: string;
   system?: string;
   code?: string;
@@ -122,8 +124,9 @@ export interface EstimatedQuantity extends FhirQuantity {
 }
 
 /** FHIR SimpleQuantity: Quantity with the comparator constrained to absent. */
-export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator"> & {
+export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator" | "_comparator"> & {
   comparator?: never;
+  _comparator?: never;
 };
 
 /** FHIR R6 also supports the approximate (~) comparator in general Quantity. */
@@ -407,11 +410,10 @@ export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDurati
 }
 
 export interface FhirR6Timing extends Omit<FhirTiming, "repeat"> {
-  modifierExtension?: FhirExtension[];
   repeat?: FhirR6TimingRepeat;
 }
 
-export interface FhirTiming extends FhirElement {
+export interface FhirTiming extends FhirBackboneElement {
   event?: string[];
   /** Primitive metadata corresponding positionally to event. */
   _event?: FhirPrimitiveElement[];
@@ -625,14 +627,12 @@ export interface FhirR6DosageStep extends FhirElement {
 export interface FhirR6DosageInstruction extends FhirBackboneElement {
   renderedInstruction?: string;
   repeatCycle?: FhirR6Quantity;
-  step: FhirR6DosageStep[];
+  step?: FhirR6DosageStep[];
   safety?: FhirR6DosageSafety;
 }
 
-/** Current R6 wire inputs may omit the 0..* step field. Internally,
- * canonical course outputs always supply step[] for stable consumer APIs. */
-export type FhirR6DosageInstructionInput =
-  Omit<FhirR6DosageInstruction, "step"> & { step?: FhirR6DosageStep[] };
+/** Current R6 inputs and outputs share the optional 0..* wire shape. */
+export type FhirR6DosageInstructionInput = FhirR6DosageInstruction;
 
 export interface FhirDosage extends FhirBackboneElement {
   /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */

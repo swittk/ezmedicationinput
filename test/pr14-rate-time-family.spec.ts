@@ -40,17 +40,46 @@ describe("rate heads shared with inclusive quantity comparators", () => {
     expect(dose.doseQuantity).toBeUndefined();
   });
 
+  it.each([
+    ["IV, 100 mL/hr", undefined],
+    ["IV, approximately 100 mL/hr", "~"],
+    ["IV, at most 100 mL/hr", "<="],
+    ["approximately 100 mL/hr, IV", "~"],
+  ] as const)("retains a route-licensed rate through one comma: %s", (source, comparator) => {
+    const parsed = parseSig(source);
+    const component = parsed.fhirNext.step![0].component[0];
+    expect(component.route?.coding?.[0].code).toBe("47625008");
+    expect(component.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+    expect(getQuantityComparator(component.doseAndRate?.[0].rateQuantity)).toBe(comparator);
+    expect(component.doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].additionalInstructions).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps two explicit administrations separate across a numeric-headed comma", () => {
+    const parsed = parseSig("Give 5 mg IV in the morning, 10 mg IV at night");
+    const components = parsed.fhirNext.step![0].component;
+    expect(components).toHaveLength(2);
+    expect(components[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 5, unit: "mg" });
+    expect(components[0].timing?.repeat?.when).toEqual(["MORN"]);
+    expect(components[1].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 10, unit: "mg" });
+    expect(components[1].timing?.repeat?.when).toEqual(["NIGHT"]);
+  });
+
   it("retains scalar comparators and requires a rate head for unmarked rates", () => {
     const scalar = parseSig("Take at most 2 tablets daily").fhirNext.step[0].component[0].doseAndRate![0];
     expect(scalar.doseQuantity).toMatchObject({ value: 2, unit: "tab" });
     expect(getQuantityComparator(scalar.doseQuantity)).toBe("<=");
     expect(scalar.rateQuantity).toBeUndefined();
     const unmarked = parseSig("100 mL/hr");
-    for (const step of unmarked.fhirNext.step) for (const component of step.component)
-      for (const amount of component.doseAndRate ?? []) {
-        expect(amount.doseQuantity).toBeUndefined();
-        expect(amount.rateQuantity).toBeUndefined();
-      }
+    expect(unmarked.fhirNext.step).toHaveLength(1);
+    expect(unmarked.fhirNext.step![0].component).toHaveLength(1);
+    const retained = unmarked.fhirNext.step![0].component[0];
+    expect(retained.text).toBe("100 mL/hr");
+    expect(unmarked.fhirNext.renderedInstruction).toBe("100 mL/hr");
+    expect(retained.doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    expect(retained.doseAndRate?.[0]?.rateQuantity).toBeUndefined();
     expect(unmarked.input).toBe("100 mL/hr");
     const qualifiedTablet = parseSig("at most 2 tablets daily").fhirNext.step[0].component[0].doseAndRate![0];
     expect(qualifiedTablet.doseQuantity).toMatchObject({ value: 2, unit: "tab" });

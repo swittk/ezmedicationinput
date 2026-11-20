@@ -348,7 +348,7 @@ export function buildCanonicalParallelRegimen(
       if (phase) {
         components.push(...phase.members.map(item => ({
           ...item,
-          clause: componentClause(item.clause),
+          clause: phase.end ? componentClause(item.clause) : item.clause,
           phaseOrigin: phase.start
         })));
       }

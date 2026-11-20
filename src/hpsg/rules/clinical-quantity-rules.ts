@@ -513,7 +513,8 @@ function fixedRate(
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
-  const cue = context.tokens[phraseStart - 1];
+  const cue = context.tokens[phraseStart - 1]?.original === ","
+    ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
   const hasSeparateRateMarker = separateRateMarker(context, phraseStart) !== undefined;
   // An inclusive comparator can share AT with the rate head ("at most",
   // "at least"). Keep the entire qualifier owned by its quantity; only

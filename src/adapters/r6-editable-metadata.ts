@@ -55,7 +55,7 @@ export function retainDraftSteps(
   synthesizedStarts?: number[]
 ): void {
   if (drafts?.length)
-    replaceSource(output, R6_DRAFT_STEPS_SOURCE_URL, { drafts, synthesizedStarts, projected: output.step });
+    replaceSource(output, R6_DRAFT_STEPS_SOURCE_URL, { drafts, synthesizedStarts, projected: output.step ?? [] });
   else if (output.extension?.some(item => item.url === R6_DRAFT_STEPS_SOURCE_URL))
     retireSource(output, R6_DRAFT_STEPS_SOURCE_URL);
 }
@@ -122,7 +122,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
 }
 
 export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
-  const step = output.step.length === 1 ? output.step[0] : undefined;
+  const step = output.step?.length === 1 ? output.step[0] : undefined;
   const policy = step?.safety;
   if (!policy) {
     if (output.extension?.some(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL))

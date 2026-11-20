@@ -49,10 +49,14 @@ describe("repeated-course clinical chronology", () => {
       ]
     };
     const due = nextDueDoses(course, { ...options, limit: 20 });
-    expect(due).toContain("2026-01-01T08:00:00+00:00");
-    expect(due).toContain("2026-01-01T09:00:00+00:00");
-    expect(due).toContain("2026-01-02T09:00:00+00:00");
-    expect(due.some(value => value.startsWith("2026-01-04"))).toBe(true);
+    expect(due.slice(0, 6)).toEqual([
+      "2026-01-01T08:00:00+00:00",
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+      "2026-01-04T09:00:00+00:00",
+      "2026-01-05T09:00:00+00:00",
+    ]);
     const supply = calculateTotalUnits({
       ...options, dosage: course, durationValue: 5, durationUnit: FhirPeriodUnit.Day
     });

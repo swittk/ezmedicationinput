@@ -506,6 +506,7 @@ export function courseFromAdministrations(
           own?.unit === length.unit &&
           own?.code === length.code &&
           !own?.comparator &&
+          (a.delayMinutes ?? 0) === 0 &&
           !r?.calendarWindow?.start &&
           !r?.calendarWindow?.end
         );

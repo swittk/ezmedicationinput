@@ -96,8 +96,14 @@ whose profiles use the version label `6.0.0-snapshot1`. The
 the supported schema: `DosageInstruction.step[].component[]` contains R6
 `Dosage` values. Use `fromFhir(fhirNext)` to import that structure.
 The [published September 2026 snapshot](https://www.hl7.org/fhir/6.0.0-snapshot1/dosage.html)
-uses the same version label but defines `DosageDetails`; that different schema
-is not accepted by this importer.
+uses the same version label but defines `DosageDetails`; that schema is not a
+supported interchange target. The importer checks the current structural
+contract, not a datatype name or release tag absent from the JSON. A text-only
+object containing `renderedInstruction` is structurally valid in both schemas
+and is accepted; it cannot identify which release produced it.
+Empty R6 step lists are omitted on output. For a header containing only shared
+Element metadata (such as an ID and unknown extensions), use the explicit
+`fromFhir` boundary; mixed R5/R6 dispatch cannot infer a version from those fields.
 The R5 editing/export APIs are unchanged; the current reader accepts previously
 saved R5 rows without a downstream storage migration. New exports encode an
 approximation on `SimpleQuantity` using the EMA quantity-operator coding. The
@@ -941,15 +947,15 @@ These are supply-calculation results; the structured instruction and source
 remain available for parsing, display, persistence, and correction.
 
 ```ts
-import { calculateTotalUnits, parseSig } from "ezmedicationinput";
+import { calculateTotalUnits, parseSig, FhirPeriodUnit } from "ezmedicationinput";
 
-const { fhir } = parseSig("1x3 po pc");
+const { fhir } = parseSig("1 tab PO TID after meals");
 
 const result = calculateTotalUnits({
   dosage: fhir,
   from: "2024-01-01T08:00:00Z",
   durationValue: 7,
-  durationUnit: "d",
+  durationUnit: FhirPeriodUnit.Day,
   timeZone: "Asia/Bangkok",
   context: {
     containerValue: 30, // 30 tabs per bottle
@@ -971,7 +977,7 @@ calculateTotalUnits({
   dosage: parsed.fhir,
   from: "2024-01-01T08:00:00Z",
   durationValue: 7,
-  durationUnit: "d",
+  durationUnit: FhirPeriodUnit.Day,
   timeZone: "Asia/Bangkok"
 });
 

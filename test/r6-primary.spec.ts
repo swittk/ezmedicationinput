@@ -2782,8 +2782,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       assertWireKeys(step, permitted("DosageInstruction", "DosageInstruction.step"));
       for (const component of step.component) {
         assertWireKeys(component, permitted("Dosage", "Dosage"));
-        for (const rate of component.doseAndRate ?? [])
+        for (const rate of component.doseAndRate ?? []) {
           assertWireKeys(rate, permitted("Dosage", "Dosage.doseAndRate"));
+          expect(["doseQuantity", "doseRange", "doseExpression"].filter(key =>
+            Object.prototype.hasOwnProperty.call(rate, key))).toHaveLength(1);
+          expect(["rateQuantity", "rateRange", "rateRatio", "rateExpression"].filter(key =>
+            Object.prototype.hasOwnProperty.call(rate, key)).length).toBeLessThanOrEqual(1);
+        }
         if (component.timing?.repeat)
           assertWireKeys(component.timing.repeat, permitted("Timing", "Timing.repeat"));
       }
@@ -3178,7 +3183,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(result.fhir).toHaveLength(1);
     expect(result.fhir[0].text).toBe(input.renderedInstruction);
     expect(result.fhir[0].doseAndRate).toBeUndefined();
-    expect(result.fhirNext.step).toEqual([]);
+    expect(result.fhirNext.step).toBeUndefined();
     expect(result.fhirNext.renderedInstruction).toBe(input.renderedInstruction);
     expect(result.longText).toBe(input.renderedInstruction);
     expect(toDosageDetails(result.fhir)).toEqual(result.fhirNext);
@@ -3190,8 +3195,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       id: "course-note", renderedInstruction: "Call clinic for dose",
       extension: [{ url: "https://example.org/unknown-course", valueBoolean: false }],
       safety: { doseLimit: [{ scope: "administration",
-        valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] },
-      step: []
+        valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] }
     };
     const rows = toFhirR5Dosages(source);
     expect(rows).toHaveLength(1);
@@ -3224,7 +3228,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     edited[0].text = "Corrected directions";
     const afterEdit = toDosageDetails(edited);
     expect(afterEdit.renderedInstruction).toBe("Corrected directions");
-    expect(afterEdit.step).toEqual([]);
+    expect(afterEdit.step).toBeUndefined();
     expect(afterEdit.safety).toEqual(source.safety);
     expect(JSON.stringify(afterEdit.extension)).toContain("Call clinic for dose");
     expect(toFhirR5Dosages({ step: [] })).toEqual([]);
@@ -4203,8 +4207,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       id: "original", renderedInstruction: "Call for directions",
       extension: [{ url: "https://example.org/old-note", valueString: "retain" }],
       safety: { doseLimit: [{ scope: "administration",
-        valueQuantity: { value: 5, unit: "mg" } }] },
-      step: []
+        valueQuantity: { value: 5, unit: "mg" } }] }
     };
     const r5 = toFhirR5Dosages(old);
     const edited = toDosageDetails(r5, undefined, {
@@ -4213,7 +4216,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       safety: { doseLimit: [{ scope: "administration",
         valueQuantity: { value: 8, unit: "mg" } }] }
     });
-    expect(edited.step).toEqual([]);
+    expect(edited.step).toBeUndefined();
     expect(edited.id).toBe("corrected");
     expect(edited.safety?.doseLimit?.[0].valueQuantity?.value).toBe(8);
     expect(edited.extension).toContainEqual({
@@ -4767,11 +4770,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }] }] };
       for (const input of [source, toFhirR5Dosages(source), fromFhir(source)]) {
         const total = calculateTotalUnits({ dosage: input, ...opts });
-        const due = nextDueDoses(input, opts);
         expect(total.totalUnits).toBe(periodOperator === ">=" ? 4 : 2);
-        expect(due[1]).toBe(periodOperator === ">="
-          ? "2026-11-03T08:00:00+00:00" : "2026-11-04T08:00:00+00:00");
-        if (periodOperator === ">=") expect(total.explanation).toContain("could not be applied");
+        if (periodOperator === ">=") {
+          expect(() => nextDueDoses(input, opts)).toThrow(expect.objectContaining({ code: "unresolved-cap-period" }));
+          expect(total.explanation).toContain("could not be applied");
+        } else {
+          expect(nextDueDoses(input, opts)[1]).toBe("2026-11-04T08:00:00+00:00");
+        }
       }
       expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
     }
@@ -5144,8 +5149,7 @@ describe("cross-pass preservation and execution family audit", () => {
     ["ordinary exact dose", { step: [{ component: [ordinary] }] }],
     ["zero-step source, unknown metadata and approximate safety", {
       id: "source-only", renderedInstruction: "Call for directions", extension: [note("course")],
-      safety: { ifExceeded: "call", doseLimit: [{ scope: "administration", valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] },
-      step: []
+      safety: { ifExceeded: "call", doseLimit: [{ scope: "administration", valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] }
     }],
     ["dated phases with site and entry metadata", { id: "phases", extension: [note("course")], step: [
       { id: "early", end: day(7), extension: [note("phase")], component: [{ ...ordinary,
@@ -5331,7 +5335,7 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
       expect(rows[0].doseAndRate).toBeUndefined();
       rows[0].text = "version " + i;
       course = toDosageDetails(rows);
-      expect(course.step).toEqual([]);
+      expect(course.step).toBeUndefined();
       expect(course.id).toBe("text-only");
       expect(course.renderedInstruction).toBe("version " + i);
       expect(course.extension).toContainEqual(named("unknown-clinical-annotation"));
@@ -5504,7 +5508,7 @@ describe("review 17: course history, imported rate ranges and civil-clock caps",
         ? { extension: [{ url: "https://example.org/new-annotation", valueString: "new" }] }
         : undefined;
       course = toDosageDetails(JSON.parse(JSON.stringify(rows)), undefined, annotation);
-      expect(course.step).toEqual([]);
+      expect(course.step).toBeUndefined();
       expect(course.renderedInstruction).toBe("Version " + index);
       expect(course.safety?.doseLimit?.[0].valueQuantity?.value).toBe(5);
       const sources = course.extension?.filter(ext => ext.url.includes("reconciliation-source")) ?? [];
@@ -5677,7 +5681,7 @@ describe("review 18: empty stages, course header provenance, and inherited civil
       sequence: 1, id: "future-stage",
       start: { offsetDuration: { value: 2, unit: "d" } }
     }] });
-    expect(edited.step).toEqual([]);
+    expect(edited.step).toBeUndefined();
     const editableStages = importCanonicalCourse(edited).stages;
     expect(editableStages).toHaveLength(1);
     expect(editableStages[0].administrations).toEqual([]);
@@ -5692,12 +5696,12 @@ describe("review 18: empty stages, course header provenance, and inherited civil
     expect(carrier[0].doseAndRate).toBeUndefined();
     expect(carrier[0].timing).toBeUndefined();
     const reopened = toDosageDetails(JSON.parse(JSON.stringify(carrier)));
-    expect(reopened.step).toEqual([]);
+    expect(reopened.step).toBeUndefined();
     expect(importCanonicalCourse(reopened).stages[0].start?.displacement?.value).toBe(2);
     expect(importCanonicalCourse(reopened).stages[0].provenance?.id).toBe("future-stage");
     expect(reopened.renderedInstruction).toBe(source.renderedInstruction);
     const again = toDosageDetails(toFhirR5Dosages(reopened));
-    expect(again.step).toEqual([]);
+    expect(again.step).toBeUndefined();
     expect(importCanonicalCourse(again).stages[0].provenance?.id).toBe("future-stage");
 
     // Stage-only data also needs a carrier even with no whole-course text.
@@ -5709,7 +5713,7 @@ describe("review 18: empty stages, course header provenance, and inherited civil
     expect(stageRows).toHaveLength(1);
     expect(stageRows[0].doseAndRate).toBeUndefined();
     const stageOutput = toDosageDetails(stageRows);
-    expect(stageOutput.step).toEqual([]);
+    expect(stageOutput.step).toBeUndefined();
     const stageDraft = importCanonicalCourse(stageOutput).stages[0];
     expect(stageDraft.administrations).toEqual([]);
     expect(stageDraft.provenance?.id).toBe("pending");
@@ -6269,7 +6273,7 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
     const rebuilt = toDosageDetails(saved, undefined, {
       step: [{ sequence: 3, id: "new-stage" }]
     });
-    expect(rebuilt.step).toEqual([]);
+    expect(rebuilt.step).toBeUndefined();
     expect(importCanonicalCourse(rebuilt).stages).toHaveLength(1);
     expect(importCanonicalCourse(rebuilt).stages[0].provenance?.id).toBe("first");
     expect(JSON.stringify(rebuilt.extension)).toContain("new-stage");
@@ -6281,7 +6285,7 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
       const rebuilt = toDosageDetails(saved, undefined, {
         step: [{ sequence, id: "unassignable" }]
       });
-      expect(rebuilt.step).toEqual([]);
+      expect(rebuilt.step).toBeUndefined();
       expect(importCanonicalCourse(rebuilt).stages).toHaveLength(1);
       expect(importCanonicalCourse(rebuilt).stages[0].provenance?.id).toBe("first");
       expect(JSON.stringify(rebuilt.extension)).toContain("unassignable");
@@ -6310,7 +6314,7 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
     const rebuilt = toDosageDetails(toFhirR5Dosages(textOnly), undefined, {
       step: [{ sequence: 2, id: "second" }]
     });
-    expect(rebuilt.step).toEqual([]);
+    expect(rebuilt.step).toBeUndefined();
     expect(importCanonicalCourse(rebuilt).stages.map(stage => stage.provenance?.id)).toEqual(["first", "second"]);
   });
 });
@@ -6353,7 +6357,10 @@ describe("persisted edit fingerprint compatibility",()=>{
       timing:{repeat:{frequency:1,period:1,periodUnit:FhirPeriodUnit.Day}},
       doseAndRate:[{doseQuantity:simpleQuantityForR5({value:1,unit:"tab",comparator:"~"})!}]
     }]},{component:[{doseAndRate:[{doseQuantity:{value:2,unit:"tab"}}]}]}]});
-    for(const row of input){
+    // Frozen from the actual d0c8ba1 writer (2026-11-20), before this change.
+    const previousWriterFingerprints = ["42206e072188d125", "e5eaba93dceebb1b"];
+    for(const [index,row] of input.entries()){
+      expect(dosageProjectionFingerprint(row)).toBe(previousWriterFingerprints[index]);
       // Independent old encoding oracle: semantically active local fields are
       // hashed; original text and saved comparison fingerprints are excluded.
       const {text:_text,extension,modifierExtension,...clinical}=row;

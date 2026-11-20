@@ -32,10 +32,10 @@ function courseEnvironment(options?: FormatOptions): CourseFormatEnvironment {
   return { localization, words: resolveCourseLanguage(options?.locale, options?.i18n, localization) };
 }
 
-export function joinGeneratedClauses(clauses: readonly string[]): string {
+export function joinGeneratedClauses(clauses: readonly string[], separator = "; "): string {
   let result = "";
   for (let index = 0; index < clauses.length; index++) {
-    if (index) result += "; ";
+    if (index) result += separator;
     result += index < clauses.length - 1 ? clauses[index].replace(/\.\s*$/u, "") : clauses[index];
   }
   return result;
@@ -340,14 +340,14 @@ export function formatCourseChoices<T>(
     }
     let body = "";
     for (const branch of groups.get(slot.group)!.values()) {
-      const text = branch.join("; ");
+      const text = branch.join(separator);
       if (!text) continue;
       if (body) body += words.anySeparator;
       body += branch.length > 1 ? `(${text})` : text;
     }
     if (body) output.push(words.choicePrefix + body + ".");
   }
-  return groups.size ? output.join(separator) : joinGeneratedClauses(output);
+  return joinGeneratedClauses(output, separator);
 }
 /** Render the value and scope of each authored limit without evaluating it.
  * Member, stage and course owners share this value rendering; their enclosing
@@ -793,7 +793,8 @@ export function formatCanonicalCourse(
         return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
       },
       (member) => member.choice,
-      words
+      words,
+      options?.separator
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
@@ -813,7 +814,10 @@ export function formatCanonicalCourse(
           ? { value: 0, unit: "d" }
           : startDays !== undefined
           ? { value: startDays, unit: "d" }
-          : treatmentStepOffsetQuantity(oneOrCourse.stages[index - 1].end);
+          : oneOrCourse.stages[index - 1].count === undefined ||
+            oneOrCourse.stages[index - 1].count === 1
+          ? treatmentStepOffsetQuantity(oneOrCourse.stages[index - 1].end)
+          : undefined;
         const endQuantity = treatmentStepOffsetQuantity(step.end);
         if (
           (!step.start || startQuantity) &&
@@ -832,8 +836,12 @@ export function formatCanonicalCourse(
               : undefined;
             timing = words.calendarWindow(startRange ?? point(startQuantity), endRange ?? point(endQuantity));
           } else {
-            const source = [step.start?.description ?? startRange, step.end?.description ?? endRange]
-              .filter((value): value is string => Boolean(value?.trim())).join("; ");
+            const source = [
+              step.start?.description ?? startRange ??
+                (startQuantity ? formatCalendarStepWindow(startQuantity, undefined, words) : undefined),
+              step.end?.description ?? endRange ??
+                (endQuantity ? formatCalendarStepWindow(undefined, endQuantity, words) : undefined)
+            ].filter((value): value is string => Boolean(value?.trim())).join("; ");
             timing = words.reviewTiming(source || undefined);
           }
         }

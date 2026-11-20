@@ -56,7 +56,7 @@ const R5_STEP_MODIFIERS_R6_URL =
 export const R5_RATE_MODIFIERS_R6_URL =
   "urn:ezmedicationinput:StructureDefinition:r5-dose-and-rate-modifier-extensions";
 
-export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageInstruction["step"][number], "component"> {
+export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageStep, "component"> {
   const { sequence: _sequence, modifierExtension, extension, ...fields } = step;
   // R5's current modifier value supersedes any older embedded R6 wrapper.
   // A single wrapper can own this field; unrelated extensions stay intact.
@@ -64,14 +64,16 @@ export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageIn
   const modifiers = modifierExtension ?? existing?.extension;
   const native = extension?.filter(item => item.url !== R5_STEP_MODIFIERS_R6_URL) ?? [];
   const extensions = modifiers?.length
-    ? [...native, { url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers }] : native;
+    ? [...native, { ...existing, url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers }] : native;
+  if (!modifiers?.length && existing && hasOtherOwnField(existing, "extension"))
+    extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
   // Empty arrays are explicit edits, not missing metadata. Omitting them
   // here lets the retained step bring a cleared extension back to life.
   return { ...fields, ...(extensions.length || extension !== undefined ||
     modifierExtension !== undefined ? { extension: extensions } : {}) };
 }
 
-export function r5StepMetadata(step: Omit<FhirR6DosageInstruction["step"][number], "component">):
+export function r5StepMetadata(step: Omit<FhirR6DosageStep, "component">):
   Omit<EzCourseStep, "sequence"> {
   const { extension, ...fields } = step;
   let retained: FhirExtension | undefined;
@@ -79,6 +81,9 @@ export function r5StepMetadata(step: Omit<FhirR6DosageInstruction["step"][number
   for (const item of extension ?? []) {
     if (item.url === R5_STEP_MODIFIERS_R6_URL) {
       if (!retained) retained = item;
+      // The editable modifier list owns the children. Keep authored wrapper
+      // annotations so rebuilding that list cannot erase the source envelope.
+      if (hasOtherOwnField(item, "extension")) (extensions ??= []).push(item);
     } else (extensions ??= []).push(item);
   }
   return {
@@ -1394,8 +1399,11 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
   const result: T[] = new Array(dosages.length);
   const replaceMarker = (row: T, marker: FhirExtension): T => {
     const extension: FhirExtension[] = [];
-    for (const prior of row.extension ?? [])
+    for (const prior of row.extension ?? []) {
       if (!isRenderedInstructionMarker(prior) && !isCompactSourceAgreementMarker(prior)) extension.push(prior);
+      else if (hasUnrecognizedEditMetadata(prior))
+        extension.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [prior] });
+    }
     extension.push(marker);
     return Object.assign({}, row, { extension });
   };
@@ -1549,7 +1557,7 @@ export interface CompactCourseRow {
   stepCount: number;
   /** Current saved-row contract: step.count repeats only that step. */
   countScope?: "step";
-  step?: Omit<FhirR6DosageInstruction["step"][number], "component">;
+  step?: Omit<FhirR6DosageStep, "component">;
   component?: Partial<FhirR6Dosage>;
   /** R6 offsets are typed extension children, never R5 Extension.valueTiming. */
   timingOffsets?: Pick<FhirR6TimingRepeat, "startOffset" | "endOffset">;
@@ -1889,7 +1897,7 @@ export function getCourseContextIssue(
   course: FhirR6DosageInstruction
 ): "missing-course-context" | "conflicting-course-phase" | undefined {
   let missing = false;
-  for (const step of course.step) for (const component of step.component) {
+  for (const step of course.step ?? []) for (const component of step.component) {
     for (const extension of component.modifierExtension ?? []) {
       if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
       for (const child of extension.extension ?? []) {
@@ -2078,7 +2086,7 @@ PREDICATE.conditions = { fields: PREDICATE, repeated: true };
  * @param url The enclosing field name.
  * @param value The actual source value; no clinical interpretation is inferred.
  */
-function retainField(url: string, value: unknown): FhirExtension {
+export function retainField(url: string, value: unknown): FhirExtension {
   if (typeof value === "string") return { url, valueString: value };
   if (typeof value === "boolean") return { url, valueBoolean: value };
   if (typeof value === "number") return { url, valueDecimal: value };
@@ -2100,7 +2108,7 @@ function retainField(url: string, value: unknown): FhirExtension {
 /** Read retained fields without evaluating them or reparsing serialized text.
  * @param node One preserved field extension.
  */
-function readRetainedField(node: FhirExtension): unknown {
+export function readRetainedField(node: FhirExtension): unknown {
   if (node.valueString !== undefined) return node.valueString;
   if (node.valueBoolean !== undefined) return node.valueBoolean;
   if (node.valueDecimal !== undefined) return node.valueDecimal;

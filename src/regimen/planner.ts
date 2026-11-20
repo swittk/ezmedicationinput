@@ -1119,7 +1119,13 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         if (clockEnd(tokens, site.rightIndex) !== undefined) {
           proposals.push(keep('structure.clock-continuation', 500, 'right.type', 'clock'));
         } else if (right?.kind === LexKind.Number || right?.kind === LexKind.NumberRange) {
-          proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
+          // A typed route alone modifies the following quantity; it is not an
+          // independent administration before this comma. The prefix probe is
+          // shared with the grammatical proposals above.
+          const prefix = evidence.probe(start, site.start);
+          if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
+            proposals.push(keep('structure.route-complement', 500, 'left.typed-route-only', true));
+          } else proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
             evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
         } else if (LATERAL_MODIFIER_WORDS.has(lexeme(right)) && following?.kind !== LexKind.Number) {
           proposals.push(keep('structure.site-continuation', 500, 'right.type', 'lateral-modifier'));

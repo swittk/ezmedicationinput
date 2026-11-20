@@ -26,10 +26,12 @@ interface FreshDoseProof {
   low?: FreshDosePart;
   high?: FreshDosePart;
   timing?: ReturnType<typeof captureSourceReplayTiming>;
+  rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
+    numerator?: FreshDosePart; denominator?: FreshDosePart };
 }
 const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseProof>();
 function captureDosePart(
-  value: NonNullable<NonNullable<FhirDosage["doseAndRate"]>[number]["doseQuantity"]> | undefined
+  value: FhirQuantity | undefined
 ): FreshDosePart | undefined {
   return value ? {
     value: value.value, unit: value.unit, code: value.code, system: value.system,
@@ -38,7 +40,7 @@ function captureDosePart(
 }
 function sameDosePart(
   part: FreshDosePart | undefined,
-  live: NonNullable<NonNullable<FhirDosage["doseAndRate"]>[number]["doseQuantity"]> | undefined
+  live: FhirQuantity | undefined
 ): boolean {
   if (!part || !live) return part === undefined && live === undefined;
   return part.value === live.value && part.unit === live.unit &&
@@ -53,6 +55,13 @@ function captureFreshDose(dosage: FhirDosage): void {
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
     timing: captureSourceReplayTiming(dosage.timing),
+    rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
+      quantity: captureDosePart(first.rateQuantity),
+      low: captureDosePart(first.rateRange?.low),
+      high: captureDosePart(first.rateRange?.high),
+      numerator: captureDosePart(first.rateRatio?.numerator),
+      denominator: captureDosePart(first.rateRatio?.denominator),
+    } : undefined,
   });
 }
 function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
@@ -62,7 +71,27 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   return sameDosePart(original.quantity, first?.doseQuantity) &&
     sameDosePart(original.low, first?.doseRange?.low) &&
     sameDosePart(original.high, first?.doseRange?.high) &&
+    sameDosePart(original.rate?.quantity, first?.rateQuantity) &&
+    sameDosePart(original.rate?.low, first?.rateRange?.low) &&
+    sameDosePart(original.rate?.high, first?.rateRange?.high) &&
+    sameDosePart(original.rate?.numerator, first?.rateRatio?.numerator) &&
+    sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
     matchesSourceReplayTiming(dosage.timing, original.timing);
+}
+
+/** A rich-rate source shortcut needs the same live proof as graph replay.
+ * Only known edits require native rate realization; external text without
+ * saved provenance remains available under the existing source contract. */
+function hasEditedRateSource(dosage: FhirDosage): boolean {
+  const first = dosage.doseAndRate?.[0];
+  const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
+  if (!fresh?.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio) return false;
+  const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  if (matches !== false) return false;
+  // A clinician's explicit replacement text owns its display without
+  // certifying an old grammar graph. Only unchanged old wording is stale.
+  const originalText = getDosageSourceTextFingerprint(dosage);
+  return originalText === undefined || originalText === dosageTextFingerprint(dosage);
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -107,6 +136,7 @@ import {
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming, getDosageSourceTextAgreement,
+  getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
@@ -1129,7 +1159,7 @@ export function formatSig(
     return formatCanonicalCourse(courseFromR6(oneOrCourse, true), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
-  if (getDosageSourceTextAgreement(dosage) === false)
+  if (getDosageSourceTextAgreement(dosage) === false || hasEditedRateSource(dosage))
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style,
       { ...options, realizationMode: "normalized" });
   const doseRange = dosage.doseAndRate?.[0]?.doseRange;
@@ -1230,8 +1260,8 @@ export function formatSigBatch(
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
-  if(batch.fhirNext.step.length>1||batch.fhirNext.repeatCycle||batch.fhirNext.safety)return style==="short"?batch.shortText:batch.longText;
-  for(const step of batch.fhirNext.step)if(step.start||step.end||step.count!==undefined||step.safety)
+  if((batch.fhirNext.step?.length??0)>1||batch.fhirNext.repeatCycle||batch.fhirNext.safety)return style==="short"?batch.shortText:batch.longText;
+  for(const step of batch.fhirNext.step??[])if(step.start||step.end||step.count!==undefined||step.safety)
     return style==="short"?batch.shortText:batch.longText;
   const text:string[]=[];
   for(const item of batch.items){
@@ -1252,8 +1282,11 @@ export function fromFhir(
   options?: FormatOptions
 ): ParseBatchResult {
   const importWarnings = assertCurrentR6DosageInstruction(wire);
-  const dosageDetails: FhirR6DosageInstruction = wire.step === undefined
-    ? { ...wire, step: [] } : wire as FhirR6DosageInstruction;
+  let dosageDetails = wire;
+  if (wire.step?.length === 0) {
+    const { step: _emptyStep, ...header } = wire;
+    dosageDetails = header;
+  }
   // R5 is a public output only. Project its strict component view and
   // extended editable view in ONE component traversal; do not separately
   // lower this entire R6 course into R5 twice just to format native items.
@@ -1381,7 +1414,7 @@ function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
 ): ParseResult {
-  const unverified = getDosageSourceTextAgreement(dosage) === false;
+  const unverified = getDosageSourceTextAgreement(dosage) === false || hasEditedRateSource(dosage);
   const native = unverified
     ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
     : undefined;
