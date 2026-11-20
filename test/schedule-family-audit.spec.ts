@@ -2182,6 +2182,28 @@ describe("Thai additive and clock-target phase adjustments", () => {
     }
   });
 
+  it("keeps explicit twice-daily clocks consistent after a one-clock dose reduction", () => {
+    const source = "รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 วันละ 2 ครั้ง เป็นเวลา 7 วัน จากนั้นลดเฉพาะเวลา 20:00 เหลือครึ่งเม็ด เป็นเวลา 7 วัน";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.step[0].component[0].timing?.code?.coding?.map(coding => coding.code)).toContain("BID");
+    const changed = parsed.fhirNext.step[1].component;
+    expect(changed.map(component => [component.doseAndRate?.[0]?.doseQuantity?.value,
+      component.timing?.repeat?.timeOfDay])).toEqual(expect.arrayContaining([
+      [1, ["08:00:00"]], [0.5, ["20:00:00"]],
+    ]));
+    const morning = changed.find(component => component.timing?.repeat?.timeOfDay?.includes("08:00:00"));
+    expect(morning?.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    for (const component of changed)
+      expect(component.timing?.code?.coding?.map(coding => coding.code) ?? []).not.toContain("BID");
+    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(clocks(dosage, "2026-11-02")).toEqual(["08:00", "20:00"]);
+      expect(clocks(dosage, "2026-11-09")).toEqual(["08:00", "20:00"]);
+      expect(clocks(dosage, "2026-11-16")).toEqual([]);
+      expect(calculateTotalUnits({ dosage, ...base, from: base.orderedAt,
+        durationValue: 14, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(24.5);
+    }
+  });
+
   it("retains a continued seven-day duration after a Thai clock-target reduction", () => {
     const source = "รับประทาน 1 เม็ด เวลา 08:00 และ 20:00 เป็นเวลา 7 วัน จากนั้นลดเฉพาะเวลา 20:00 เหลือครึ่งเม็ดต่ออีก 7 วัน";
     const parsed = parseSig(source);
@@ -2839,16 +2861,16 @@ describe("review 2026-11-16 19h: count belongs to eligible successor administrat
 describe("November 17 review: point precision on valid timezone offsets", () => {
   it("keeps the UTC offset whole-minute when the source instant has 500 milliseconds", async () => {
     const { getOffset, formatZonedIso } = await import("../src/execution/calendar");
-    for (const [instant, zone, expected] of [
-      ["2026-11-02T12:00:00.500Z", "UTC", 0],
-      ["2026-11-02T12:00:00.500Z", "Asia/Bangkok", 420],
-      ["2026-11-02T12:00:00.500Z", "America/New_York", -300],
-      ["1969-12-31T23:59:59.500Z", "UTC", 0],
+    for (const [instant, zone, expected, suffix] of [
+      ["2026-11-02T12:00:00.500Z", "UTC", 0, "+00:00"],
+      ["2026-11-02T12:00:00.500Z", "Asia/Bangkok", 420, "+07:00"],
+      ["2026-11-02T12:00:00.500Z", "America/New_York", -300, "-05:00"],
+      ["1969-12-31T23:59:59.500Z", "UTC", 0, "+00:00"],
     ] as const) {
       const time = new Date(instant);
       expect(getOffset(time, zone)).toBe(expected);
       const display = formatZonedIso(time, zone);
-      expect(display).toMatch(/[+-]\d\d:\d\d$/u);
+      expect(display.endsWith(suffix)).toBe(true);
       expect(display).not.toContain(".008333");
     }
   });
@@ -2894,9 +2916,13 @@ describe("November 17 CodeRabbit scheduling root-family oracles", () => {
     expect(nextDueDoses(dose, { ...base, from: "2026-11-04T00:00:00+07:00" })).toEqual(expected.slice(1));
     // When the clinician/application supplied an exact prior-count history,
     // that history is authoritative; it must not be consumed twice.
+    expect(nextDueDoses(dose, { ...base, from: "2026-11-05T00:00:00+07:00" })).toEqual(expected.slice(2));
     expect(nextDueDoses(dose, { ...base, from: "2026-11-05T00:00:00+07:00", priorCount: 2 })).toEqual(
       expected.slice(2)
     );
+    expect(nextDueDoses(dose, { ...base, from: "2026-11-05T00:00:00+07:00", priorCount: 1 })).toEqual([
+      "2026-11-05T08:00:00+07:00", "2026-11-06T08:00:00+07:00",
+    ]);
     expect(
       calculateTotalUnits({ ...base, dosage: dose, durationValue: 4, durationUnit: FhirPeriodUnit.Day })
         .totalUnits
@@ -3157,5 +3183,54 @@ describe("PR14 new review: overlapping repeated-course chronological rolling all
       .toEqual(["2026-01-03T00:00:00+00:00"]);
     expect(calculateTotalUnits({...opts,from,dosage:course,durationValue:1,
       durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(0);
+  });
+});
+
+describe("round 24 continuation course-window ownership", () => {
+  it("copies a supported duration range into the unaffected meal administration", () => {
+    const source = "Take 1 tablet twice daily before breakfast and dinner for 7 days, then reduce only the dinner dose to half a tablet for 1-7 days.";
+    const parsed = parseSig(source);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    for (const rows of [
+      parsed.fhirNext.step[1].component,
+      toFhirR5Dosages(parsed.fhirNext).filter(row => row.sequence === 2),
+    ]) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value).sort()).toEqual([0.5, 1]);
+      for (const row of rows) {
+        expect(row.timing?.repeat?.boundsRange).toMatchObject({
+          low: { value: 1, code: "d" }, high: { value: 7, code: "d" },
+        });
+        expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+        expect(row.timing?.repeat?.when).toEqual([
+          row.doseAndRate?.[0]?.doseQuantity?.value === 1 ? EventTiming["Before Breakfast"] : EventTiming["Before Dinner"],
+        ]);
+      }
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it("replaces the donor's supported duration range with an exact continuation", () => {
+    const source = "Take 1 tablet twice daily before breakfast and dinner for 7-14 days, then reduce only the dinner dose to half a tablet for 3 days.";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      duration: 7, durationMax: 14, durationUnit: "d",
+    });
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.boundsRange)
+      .toMatchObject({ low: { value: 7, code: "d" }, high: { value: 14, code: "d" } });
+    for (const rows of [
+      parsed.fhirNext.step[1].component,
+      toFhirR5Dosages(parsed.fhirNext).filter(row => row.sequence === 2),
+    ]) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value).sort()).toEqual([0.5, 1]);
+      for (const row of rows) {
+        expect(row.timing?.repeat?.boundsDuration).toMatchObject({ value: 3, code: "d" });
+        expect(row.timing?.repeat?.boundsDuration?.comparator).toBeUndefined();
+        expect(row.timing?.repeat?.boundsRange).toBeUndefined();
+      }
+    }
+    expect(parsed.input).toBe(source);
   });
 });

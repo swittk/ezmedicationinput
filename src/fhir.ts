@@ -1,5 +1,5 @@
 import {
-  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays,
+  setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
@@ -1011,7 +1011,7 @@ function buildFhirDurationQuantity(
 }
 
 function buildFhirBoundsRange(
-  low: number | undefined, high: number, unit: FhirPeriodUnit,
+  low: number | undefined, high: number | undefined, unit: FhirPeriodUnit,
   lowComparator?: FhirR6Quantity["comparator"],
   highComparator?: FhirR6Quantity["comparator"],
   highUnit: FhirPeriodUnit = unit
@@ -1019,8 +1019,8 @@ function buildFhirBoundsRange(
   return {
     ...(low !== undefined ? { low: simpleQuantityForR5({ ...buildFhirDurationQuantity(low, unit),
       ...(lowComparator ? { comparator: lowComparator } : {}) })! } : {}),
-    high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, highUnit),
-      ...(highComparator ? { comparator: highComparator } : {}) })!
+    ...(high !== undefined ? { high: simpleQuantityForR5({ ...buildFhirDurationQuantity(high, highUnit),
+      ...(highComparator ? { comparator: highComparator } : {}) })! } : {})
   };
 }
 
@@ -1069,7 +1069,7 @@ function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUn
 
 function extractCanonicalTimingBounds(
   dosage: FhirDosage
-): { duration?: number; durationMax?: number; durationUnit?: FhirPeriodUnit; durationMaxUnit?: FhirPeriodUnit;
+): { duration?: number; durationMax?: number; durationIsRange?: true; durationUnit?: FhirPeriodUnit; durationMaxUnit?: FhirPeriodUnit;
   durationComparator?: FhirR6Quantity["comparator"];
   durationMaxComparator?: FhirR6Quantity["comparator"]; warning?: string } {
   const repeat = dosage.timing?.repeat;
@@ -1107,6 +1107,7 @@ function extractCanonicalTimingBounds(
   return {
     duration: low?.value,
     durationMax: high?.value,
+    durationIsRange: true,
     durationUnit,
     durationMaxUnit: highUnit,
     ...(lowComparator ? { durationComparator: lowComparator } : {}),
@@ -1478,7 +1479,7 @@ export function serializeCanonicalSchedule(
   // retain the authored duration/range as a typed modifier for exact execution
   // and editing, including partial days that have no date-only endpoint.
   if (schedule?.durationUnit && (schedule.duration !== undefined || schedule.durationMax !== undefined)) {
-    const ranged = schedule.durationMax !== undefined &&
+    const ranged = schedule.durationIsRange || schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration ||
         schedule.durationMaxUnit !== undefined && schedule.durationMaxUnit !== schedule.durationUnit ||
         schedule.durationComparator !== undefined ||
@@ -1486,7 +1487,7 @@ export function serializeCanonicalSchedule(
     const duration = ranged ? undefined : buildFhirDurationQuantity(
       schedule.duration!, schedule.durationUnit, schedule.durationComparator);
     const range = ranged ? buildFhirBoundsRange(
-      schedule.duration, schedule.durationMax!, schedule.durationUnit,
+      schedule.duration, schedule.durationMax, schedule.durationUnit,
       schedule.durationComparator, schedule.durationMaxComparator, schedule.durationMaxUnit) : undefined;
     if (repeat.boundsPeriod) {
       dosage.modifierExtension = [...(dosage.modifierExtension ?? []), {
@@ -1674,6 +1675,10 @@ export function canonicalToFhir(
   // value. Safety checks must never reparse and overwrite clinical dosage.
   if (clause.clinicalQuantity)
     projectHpsgClinicalQuantityToFhir(dosage, clause.clinicalQuantity);
+  if (clause.dose?.comparator || clause.clinicalQuantity?.numerator.comparator ||
+      clause.clinicalQuantity?.projectedDose?.comparator || clause.clinicalQuantity?.rateNumerator?.comparator ||
+      clause.clinicalQuantity?.administrationDuration?.comparator)
+    attachQualifiedR5AmountDetails(dosage);
 
   // The HPSG clinical scope is already resolved in CanonicalSigClause.
   // FHIR projects it exactly once; it must never decide which daughter
@@ -1952,6 +1957,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
       durationMax: timingBounds.durationMax,
+      durationIsRange: timingBounds.durationIsRange,
       durationUnit: timingBounds.durationUnit,
       durationMaxUnit: timingBounds.durationMaxUnit,
       durationComparator: timingBounds.durationComparator,
@@ -2033,10 +2039,11 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   state.duration = timingBounds.duration;
   state.durationMax = timingBounds.durationMax;
   state.durationUnit = timingBounds.durationUnit;
-  if (timingBounds.durationMaxUnit || timingBounds.durationComparator || timingBounds.durationMaxComparator) {
+  if (timingBounds.durationIsRange || timingBounds.durationMaxUnit || timingBounds.durationComparator || timingBounds.durationMaxComparator) {
     state.primaryClause.schedule = {
       ...state.primaryClause.schedule,
       durationMaxUnit: timingBounds.durationMaxUnit,
+      ...(timingBounds.durationIsRange ? { durationIsRange: true } : {}),
       ...(timingBounds.durationComparator
         ? { durationComparator: timingBounds.durationComparator } : {}),
       ...(timingBounds.durationMaxComparator

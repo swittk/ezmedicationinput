@@ -105,6 +105,7 @@ import {
   simpleQuantityForR5,
   quantityForR5 as generalQuantityForR5,
   quantityFromR5,
+  quantityForR6,
 } from "../fhir-quantity-operator";
 import { equalStructuredValues } from "../stable-structure";
 import { clauseForAdministration } from "../canonical/compile";
@@ -267,7 +268,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
     out.recurrence = {
       count: r.count,
       countMax: r.countMax,
-      frequency: annotations?.frequency ?? r.frequency,
+      frequency: r.frequency ?? annotations?.frequency,
       frequencyMax: r.frequencyMax,
       period: r.period,
       periodMax: r.periodMax,
@@ -397,19 +398,19 @@ export function safetyToWire(
       const common = {
         ...metadata,
         scope: limit.scope,
-        ...(period ? { period } : {}),
+        ...(period ? { period: quantityForR6(period) } : {}),
         ...(limit.text !== undefined ? { text: limit.text } : {}),
       };
       const amount = limit.amount;
       if (amount)
         return {
           ...common,
-          valueQuantity: {
+          valueQuantity: quantityForR6({
             ...amount,
             ...(inferCoding ? getStandardDoseUnitCoding(amount.unit) : undefined),
             ...(amount.system ? { system: amount.system } : {}),
             ...(amount.code ? { code: amount.code } : {}),
-          },
+          })!,
         } satisfies FhirR6DoseLimit;
       if (limit.count !== undefined)
         return { ...common, valueInteger: limit.count,
@@ -733,7 +734,7 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
     assign(output, "contextCode", b.contextCode);
   }
   assign(output, "text", b.description);
-  assign(output, "offsetDuration", b.displacement);
+  assign(output, "offsetDuration", quantityForR6(b.displacement));
   assign(output, "offsetRange", b.displacementRange ? serializeRange(b.displacementRange) : undefined);
   return output as FhirR6RelativeTime;
 }
@@ -747,7 +748,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     prior = original?.repeat;
   let repeat: FhirR6Timing["repeat"];
   if (r) {
-    const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : r.courseLength;
+    const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : quantityForR6(r.courseLength);
     const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange) : undefined;
     const start = target === "r6" ? simpleQuantityForR5(r.startOffset) : undefined;
     const end = target === "r6" ? simpleQuantityForR5(r.endOffset) : undefined;
@@ -1047,7 +1048,8 @@ function administrationToWire(
         original.doseExpression === value.expression &&
         original.rateExpression === value.rateExpression &&
         (target === "r6"
-          ? !Object.prototype.hasOwnProperty.call(original, "modifierExtension")
+          ? !Object.prototype.hasOwnProperty.call(original, "modifierExtension") &&
+            !(value.rateRatio?.numerator?.comparator && original.rateRatio?.numerator?.extension?.length)
           : !value.expression &&
             !value.rateExpression &&
             !value.quantity?.comparator &&
@@ -1128,7 +1130,7 @@ function administrationToWire(
                 numerator:
                   target === "r5"
                     ? generalQuantityForR5(code(value.rateRatio.numerator))
-                    : code(value.rateRatio.numerator),
+                    : quantityForR6(code(value.rateRatio.numerator)),
               }
             : {}),
           ...(value.rateRatio.denominator
@@ -1203,7 +1205,10 @@ function administrationToWire(
       output,
       "condition",
       conditionSource?.condition?.length && same(sourceCondition, a.predicate)
-        ? conditionSource.condition
+        ? conditionSource.condition.map(condition => {
+            const valueQuantity = quantityForR6(condition.valueQuantity);
+            return valueQuantity === condition.valueQuantity ? condition : { ...condition, valueQuantity };
+          })
         : a.predicate
         ? [conditionToR6(a.predicate)]
         : undefined
@@ -1464,7 +1469,7 @@ export function courseMetadataToWire(
     Object.assign({}, course.provenance?.data);
   delete out.step;
   delete out.renderedInstruction;
-  assign(out, "repeatCycle", course.cycleInterval);
+  assign(out, "repeatCycle", quantityForR6(course.cycleInterval));
   setCourseCycleCount(out, course.cycleCount);
   const raw = course.provenance?.data as Partial<FhirR6DosageInstruction> | undefined;
   assign(out, "safety", safetyToWire(course.safety, raw?.safety));
@@ -1547,7 +1552,9 @@ export function unchangedR6SourceDisplay(
   raw: FhirR6DosageInstructionInput,
   options?: FormatOptions
 ): string | undefined {
-  return raw.renderedInstruction && !raw.step?.length && options?.realizationMode !== "normalized"
+  return raw.renderedInstruction && !raw.step?.length && !raw.repeatCycle &&
+    !raw.safety?.doseLimit?.length && !raw.safety?.ifExceeded &&
+    getCourseCycleCount(raw) === undefined && options?.realizationMode !== "normalized"
     ? raw.renderedInstruction : undefined;
 }
 

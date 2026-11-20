@@ -1,3 +1,4 @@
+import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
@@ -969,6 +970,10 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (isInstructionSeparator(token) && bodyTokens.length) {
         break;
       }
+      // A separator may precede a rate whose own chart position is later.
+      // Resolve that typed owner once before admitting its tokens as advice.
+      if (cursor > start) clinicalQuantityAt(context, cursor);
+      if (context.clinicalCache.rateTokenIndices?.has(token.index)) break;
       if (!bodyTokens.length && isScheduleLead(context, cursor)) {
         return [];
       }

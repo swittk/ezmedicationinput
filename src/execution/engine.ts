@@ -992,6 +992,21 @@ function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined 
   const code = timing.code?.coding?.find((coding) => coding.code)?.code?.toUpperCase();
   return code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
 }
+/** A known daily code and an exact complete repeat both describe the same
+ * recurrence. Contradictory external facts have no unique executable cadence. */
+function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void {
+  const repeat = timing?.recurrence;
+  if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
+    return;
+  const daily = recognizedDailyTimingCode(timing);
+  if (daily === undefined ||
+      (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
+      (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) return;
+  const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
+  if (seconds && daily * repeat.period * seconds === repeat.frequency * 86400) return;
+  throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
+    "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
+}
 /** An occurrence ceiling without cadence cannot supply actual dose instants.
  * @param dosage Typed dose; explicit events and cadence remain authoritative.
  */
@@ -1610,6 +1625,24 @@ function isQuantityCapPeriodUnit(unit: string | undefined): boolean {
 const INFUSION_TIME_SECONDS: Readonly<Record<string, number>> = {
   s: 1, min: 60, h: 3600, d: 86400, wk: 604800,
 };
+/** A positive quotient reverses the denominator's inequality. Two qualified
+ * inputs determine a single bound only when their resulting directions agree. */
+function measuredRateComparator(
+  numerator: CanonicalMeasure["comparator"],
+  denominator: CanonicalMeasure["comparator"]
+): CanonicalMeasure["comparator"] {
+  const inverse = denominator === "<" ? ">" : denominator === "<=" ? ">="
+    : denominator === ">" ? "<" : denominator === ">=" ? "<=" : denominator;
+  if (!numerator) return inverse;
+  if (!inverse) return numerator;
+  if (numerator === "~" && inverse === "~") return "~";
+  if (numerator[0] === "<" && inverse[0] === "<")
+    return numerator === "<" || inverse === "<" ? "<" : "<=";
+  if (numerator[0] === ">" && inverse[0] === ">")
+    return numerator === ">" || inverse === ">" ? ">" : ">=";
+  throw new MedicationQuantityCalculationError("rate-ratio-bound-unresolved",
+    "The rate ratio's quantity bounds do not determine a usable dose bound. Retain the ratio and supply the applicable rate before calculating.");
+}
 function measuredRateQuantity(
   amount: CanonicalAmount,
   recurrence: CanonicalRecurrence | undefined
@@ -1647,7 +1680,7 @@ function measuredRateQuantity(
       unit = numerator.unit ?? numerator.code;
       code = numerator.code;
       system = numerator.system;
-      comparator = numerator.comparator ?? denominator.comparator;
+      comparator = measuredRateComparator(numerator.comparator, denominator.comparator);
     }
   }
   if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit)
@@ -2132,12 +2165,12 @@ function treatmentStepWindow(
           sourceClock,
           componentClock
         );
-    const stageStart = index === 0 && recurrence?.calendarWindow ? absoluteStart ?? start : implicitStart;
+    const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
+      ? absoluteStart ?? start : implicitStart;
     let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
     if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
     if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
     const countEligibilityStart =
-      successorFloor &&
       !cadence.hasPhaseOrigin &&
       eligibleFrom > cadence.origin &&
       hasDefiniteAdministrationCount(recurrence)
@@ -2379,11 +2412,18 @@ interface UncommittedCycleEvent extends ChronologicalEvent {
   key: string;
   member: CanonicalAdministration;
   quota: CycleEventQuota;
+  /** Actual PRN history, already charged to the quantity ledger. */
+  recorded?: true;
   /** Accepted total amount, including target multiplication, for ranged supply. */
   quantity?: number;
 }
 interface CycleEventQuota {
   remaining: number | undefined;
+  /** Only recorded use inside this PRN phase consumes its finite allowance. */
+  historyStart?: number;
+  historyEnd?: number;
+  recordedTimes?: number[];
+  recordedIndex?: number;
   /** Lazily advance a finite capped phase after its candidate is decided. */
   advance?: (at: number, accepted: boolean) => void;
 }
@@ -2554,6 +2594,10 @@ function scheduleTreatmentRelativeCourse(
         const quota: CycleEventQuota = {
           remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) : undefined,
         };
+        if (collect && original.asNeeded && quota.remaining !== undefined) {
+          quota.historyStart = member.eligibleFrom.getTime();
+          quota.historyEnd = effectiveEnd?.getTime();
+        }
         // Only the acceptor can spend an overlapping phase's count/caps.
         const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat)
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
@@ -2987,26 +3031,52 @@ function chronologicalRepeatedEvents(
   for (const stamp of options.priorDoseTimes ?? []) prior.push(coerceDate(stamp, "priorDoseTimes").getTime());
   if (prior.length > 1) prior.sort((a, b) => a - b);
   let serial = 0;
+  const actualReplay = prior.length ? new Map<string, Set<number>>() : undefined;
   const emit: EmitCycleOpportunity = (iso, key, member, quota) => {
     const at = Date.parse(iso);
-    if (!Number.isFinite(at) || (until && at >= until.getTime())) return;
-    queue.push({ at, iso, key, member, quota, serial: serial++ });
+    if (!Number.isFinite(at)) return;
+    if (actualReplay && quota.historyStart !== undefined) {
+      let unmatched = actualReplay.get(key);
+      if (!unmatched) actualReplay.set(key, unmatched = new Set(prior));
+      for (const recorded of unmatched) {
+        if (recorded < quota.historyStart || recorded >= from.getTime() ||
+            quota.historyEnd !== undefined && recorded >= quota.historyEnd) continue;
+        unmatched.delete(recorded);
+        (quota.recordedTimes ??= []).push(recorded);
+      }
+      // Select applicable history once per phase, never on every opportunity.
+      quota.historyStart = undefined;
+      quota.recordedIndex = 0;
+    }
+    if (quota.recordedTimes) {
+      while (quota.recordedIndex! < quota.recordedTimes.length) {
+        const recorded = quota.recordedTimes[quota.recordedIndex!++];
+        queue.push({ at: recorded, iso: formatZonedIso(new Date(recorded), zone),
+          key, member, quota, recorded: true, serial: serial++ });
+        // Deferred phases resume after the actual timestamp. Earlier unrecorded
+        // PRN clocks did not happen and must not complete the phase or spend uses.
+        if (quota.advance) return;
+      }
+      quota.recordedTimes = undefined;
+    }
+    if (!until || at < until.getTime())
+      queue.push({ at, iso, key, member, quota, serial: serial++ });
   };
   const accept = chronologicalCapAcceptor(prior, zone, context);
-  const actualReplay = prior.length ? new Map<string, Set<number>>() : undefined;
   const drain = (before: number): void => {
     let next = queue.first();
     while (next && next.at < before) {
       const event = queue.pop()!;
-      let actual = false;
-      if (actualReplay && event.at < from.getTime()) {
+      let actual = event.recorded === true;
+      if (!actual && actualReplay && event.at < from.getTime()) {
         let unmatched = actualReplay.get(event.key);
         if (!unmatched) actualReplay.set(event.key, unmatched = new Set(prior));
         actual = unmatched.delete(event.at);
       }
       // A recorded administration already occupies the rolling ledger. Its
       // matching replay spends its finite phase count, never another amount.
-      const accepted = actual || accept(event);
+      // Earlier PRN opportunities are not evidence of administration.
+      const accepted = actual || ((event.at >= from.getTime() || !event.member.asNeeded) && accept(event));
       if (actual && event.quota.remaining !== undefined && event.quota.remaining > 0) event.quota.remaining--;
       event.quota.advance?.(event.at, accepted);
       if (accepted && event.at >= from.getTime()) {
@@ -3437,6 +3507,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     return scheduleTreatmentRelativeCourse(course, options);
   }
   const one = dosage as CanonicalAdministration;
+  requireConsistentTimingCode(one.schedule);
   if (one.phaseOrigin || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return nextDueDoses(courseFromCanonicalRows([one]), options);
@@ -4117,8 +4188,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const treatAsInterval = usesIntervalCadence(repeat);
   const supportsDayFilteredInterval = isDayFilteredIntervalSupported(repeat, enforceDayFilter);
   if (treatAsInterval && supportsDayFilteredInterval) {
-    // True interval schedules advance from the order start in fixed units. The
-    // timing.code remains advisory so we only rely on the period/unit fields.
+    // Known code/repeat conflicts were rejected before dispatch. A compatible
+    // interval recurrence advances from the order start in fixed units.
     const candidates = generateIntervalSeries(
       baseTime,
       from,
@@ -5660,6 +5731,7 @@ function calculateTotalUnitsSingle(
   }
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
+  requireConsistentTimingCode(sourceDosage.schedule);
   requireResolvedCycleDays(sourceDosage);
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
@@ -6018,10 +6090,15 @@ function calculateTotalUnitsSingle(
     totalUnits = roundCalculatedUnits(Math.min(totalUnits, lifetimeMaximum));
   }
   const maximumExplanations: string[] = [];
-  if (sourceDosage.amounts?.[0]?.range)
+  if (sourceDosage.amounts?.[0]?.range) {
     maximumExplanations.push(rangePlan
       ? "the largest admissible amount within the prescribed dose range was used for each accepted administration"
       : "the upper bound of the prescribed dose range was used");
+    if ((supplyAccounting?.actualPriorCount ?? options.priorDoseTimes?.length ?? 0) > 0)
+      maximumExplanations.push(
+        `each recorded prior ranged administration was assumed to use the upper dose bound (${roundCalculatedUnits(doseQuantity * targetMultiplier)} ${doseUnitForLimits ?? "units"})`
+      );
+  }
   if (doseForLimits?.comparator === "<" || doseForLimits?.comparator === "<=")
     maximumExplanations.push("the prescribed upper dose bound was used");
   if (capacityCap)
@@ -6527,7 +6604,6 @@ function calculateCourseTotalUnits(
           },
         },
       };
-      const measured = prepareMeasuredDose(bounded, options);
       const key = rollingCycleKey(index, memberIndex);
       const weighted = rangeUsage && dosage.amounts?.[0]?.range && unscheduledOccurrenceCapacity(dosage);
       const rangeAccepted: SupplyAllocation[] | undefined = weighted ? [] : undefined;
@@ -6562,10 +6638,7 @@ function calculateCourseTotalUnits(
       }
       if (lifetimeUsage && hasLifetimeLimit(dosage))
         lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
-      entries.push({
-        total,
-        unit: measured.amounts?.[0]?.quantity?.unit ?? measured.amounts?.[0]?.quantity?.code,
-      });
+      entries.push({ total, unit: total.unit });
     }
   }
   const result = sumCourseUnits(entries, options);
@@ -6818,14 +6891,36 @@ function finiteAdministrationCompletion(
     dosage.phaseOrigin || dosage.phaseOriginIssue
       ? { ...dosage, phaseOrigin: undefined, phaseOriginIssue: undefined }
       : dosage;
-  const due = nextDueDoses(local, {
+  // Completion is a historical boundary, not the number of doses still due.
+  // Only records inside this phase can complete it; older records still belong
+  // to the rolling-cap history and can defer its first eligible opportunity.
+  const queryFrom = coerceDate(options.from, "from");
+  const actual: number[] = [];
+  for (const stamp of options.priorDoseTimes ?? []) {
+    const at = coerceDate(stamp, "priorDoseTimes").getTime();
+    if (at >= eligibleFrom.getTime() && at < queryFrom.getTime()) actual.push(at);
+  }
+  if (actual.length > 1) actual.sort((a, b) => a - b);
+  if (actual.length >= count)
+    return completionAfterAcceptedAdministration(dosage, new Date(actual[count - 1]), zone);
+  // A PRN phase cannot complete from unrecorded opportunities before this
+  // query. Its supplied prior count reduces only the remaining allowance.
+  const used = dosage.asNeeded ? options.priorCount ?? actual.length : actual.length;
+  const remaining = count - used;
+  if (remaining <= 0) return undefined;
+  const future = !!actual.length || !!dosage.asNeeded;
+  const probe = future ? {
+    ...local, schedule: { ...local.schedule, recurrence: { ...repeat, count: undefined, countMax: undefined } },
+  } : local;
+  const due = nextDueDoses(probe, {
     ...options,
-    from: eligibleFrom,
+    from: future && queryFrom > eligibleFrom ? queryFrom : eligibleFrom,
     orderedAt: start,
-    limit: count,
+    priorCount: undefined,
+    limit: remaining,
     ...(eligibleFrom > start ? { countEligibilityStart: eligibleFrom } : {}),
   } as PhaseCountOptions);
-  if (due.length !== count) return undefined;
+  if (due.length !== remaining) return undefined;
   return completionAfterAcceptedAdministration(dosage, new Date(due[due.length - 1]), zone);
 }
 

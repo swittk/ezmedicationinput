@@ -39,6 +39,7 @@ import {
   compactProjectionFingerprint,
   matchingProjectionFingerprint,
   offsetCadenceFingerprint,
+  matchesOffsetCadence,
   dosageProjectionFingerprint,
   dosageTextFingerprint,
   isRenderedInstructionMarker,
@@ -241,7 +242,7 @@ function restoreComponentDelta(
     }
   }
   if (local.timingOffsets) {
-    if (local.baseline?.timing === offsetCadenceFingerprint(row.timing))
+    if (matchesOffsetCadence(row.timing, local.baseline?.timing))
       fresh.schedule = {
         ...fresh.schedule,
         recurrence: {
@@ -308,10 +309,13 @@ function restoreComponentDelta(
         delta.site
       )
     ) {
+      // The wrapper's metadata is independent of the editable concept and
+      // reference. Keep it active without reviving either superseded value.
+      retained.site = { ...delta.site, concept: fresh.target, reference: fresh.siteReference };
       superseded = true;
       addWarning(
         warnings,
-        "Retained R6 site metadata was superseded by an edited R5 site and preserved only as source provenance."
+        "Retained R6 site values were superseded by an edited R5 site; original values remain source provenance."
       );
     }
   }
@@ -801,6 +805,8 @@ function reconcileNativeCompactCourse(
     else allTextsWereEdited = false;
     if (!projectionMatches) structuredWasEdited = true;
     if ((!projectionMatches && textMatches) || !dosage.text) allTexts = false;
+    if (!projectionMatches && textMatches && dosage.text !== undefined)
+      sources.push(retainedRowTextSource(dosage, sourceIndex));
     return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
@@ -939,6 +945,15 @@ function reconcileNativeCompactCourse(
       ? instructionMarker
       : undefined
   );
+}
+
+/** A stale row instruction is independent of the course header. Retire the
+ * exact text before clearing its active slot, using the existing typed source
+ * codec; fingerprints alone cannot recover the author's wording. */
+function retainedRowTextSource(row: FhirDosage, rowIndex: number): FhirExtension {
+  return { url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({
+    rowIndex, sequence: row.sequence ?? 1, component: { text: row.text },
+  }) };
 }
 
 /** Bucketed exact projection matching. Signatures narrow candidates, then
@@ -1234,6 +1249,7 @@ function reconcileNativeRetainedCourse(
       }
     }
     const siteGroups = new Map<string, Set<number>>();
+    const ambiguousSources = new Set<number>(), ambiguousLive = new Set<number>();
     for (let i = 0; i < step.component.length; i++)
       if (!usedOriginalIndices.has(i)) {
         const site = step.component[i].site?.concept;
@@ -1252,11 +1268,13 @@ function reconcileNativeRetainedCourse(
       for (const index of group) {
         if (!equivalentProjection(site, step.component[index].site?.concept)) continue;
         if (match >= 0) {
+          ambiguousSources.add(match);
+          ambiguousSources.add(index);
           match = -2;
-          break;
-        }
-        match = index;
+        } else if (match === -2) ambiguousSources.add(index);
+        else match = index;
       }
+      if (match === -2) ambiguousLive.add(j);
       if (match >= 0) {
         assigned[j] = match;
         usedOriginalIndices.add(match);
@@ -1268,8 +1286,8 @@ function reconcileNativeRetainedCourse(
     // survivor. Preserve unmatched original course data as provenance.
     const unclaimed: number[] = [],
       remainingLive: number[] = [];
-    for (let i = 0; i < step.component.length; i++) if (!usedOriginalIndices.has(i)) unclaimed.push(i);
-    for (let i = 0; i < live.length; i++) if (assigned[i] < 0) remainingLive.push(i);
+    for (let i = 0; i < step.component.length; i++) if (!usedOriginalIndices.has(i) && !ambiguousSources.has(i)) unclaimed.push(i);
+    for (let i = 0; i < live.length; i++) if (assigned[i] < 0 && !ambiguousLive.has(i)) remainingLive.push(i);
     if (!componentCountChanged || (unclaimed.length === 1 && remainingLive.length === 1)) {
       let unclaimedCursor = 0;
       for (const j of remainingLive) {
@@ -1510,6 +1528,7 @@ export function courseFromR5(
       if (!projectionMatches) structuredWasEdited = true;
       if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
       if (!projectionMatches && textMatches) {
+        if (dosage.text !== undefined) reconciliationSources.push(retainedRowTextSource(dosage, index));
         if (effectiveDosages === dosages) effectiveDosages = dosages.slice();
         (effectiveDosages as (FhirDosage | EzDosage)[])[index] = { ...dosage, text: undefined };
         allTexts = false;

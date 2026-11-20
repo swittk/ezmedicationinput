@@ -6,7 +6,7 @@
  * implemented in execution/engine, which has no import/export dependency.
  * Canonical callers bypass interchange completely.
  */
-import type { FhirDosage, FhirR6DosageInstruction, ParseBatchResult,
+import type { FhirDosage, FhirR6DosageInstructionInput, ParseBatchResult,
   NextDueDoseOptions, TotalUnitsOptions, TotalUnitsResult } from "./types";
 import type { CanonicalScheduleInput, CanonicalSupplyOptions } from "./canonical/course";
 import { inputToCanonical } from "./adapters/canonical-course";
@@ -15,7 +15,7 @@ import { nextDueDoses as executeDue, calculateTotalUnits as executeSupply,
 export { MedicationQuantityCalculationError };
 
 export function nextDueDoses(
-  input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstruction |
+  input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstructionInput |
     ParseBatchResult | CanonicalScheduleInput,
   options: NextDueDoseOptions
 ): string[] {

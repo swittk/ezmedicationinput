@@ -101,7 +101,7 @@ export function administrationFromClause(
   const s = clause.schedule;
   let recurrence: CanonicalRecurrence | undefined;
   if (s) {
-    const ranged =
+    const ranged = s.durationIsRange === true ||
       s.durationMax !== undefined && (s.durationMax !== s.duration || s.durationMaxComparator !== undefined ||
         s.durationMaxUnit !== undefined && s.durationMaxUnit !== s.durationUnit);
     recurrence = {
@@ -378,6 +378,7 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     schedule.administrationDuration=r?.occurrenceDuration;schedule.administrationDurationMax=r?.occurrenceDurationMax;
     schedule.administrationDurationUnit=r?.occurrenceDurationUnit;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
+    schedule.durationIsRange=range ? true : undefined;
     schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;
     schedule.durationMaxUnit=(range?.high?.code??range?.high?.unit) as typeof schedule.durationMaxUnit;
     schedule.durationComparator=length?.comparator??range?.low?.comparator;
@@ -425,7 +426,8 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     const same=a.target.text===base?.site?.text&&targetCode?.code===base?.site?.coding?.code;
     result.site=Object.assign({},same?base?.site:undefined,{text:a.target.text,administrationTargetCount:a.targetCount});
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
-  }else result.site=undefined;
+  }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
+  else result.site=undefined;
   let methodCode:NonNullable<NonNullable<typeof a.method>["coding"]>[number]|undefined;
   for(const code of a.method?.coding??[])if(code.code){methodCode=code;break;}
   if(a.method){
@@ -494,7 +496,7 @@ export function courseFromAdministrations(
       administrations.length > 1 &&
       length?.value !== undefined &&
       length.value > 0 &&
-      Number.isFinite(length.value) &&
+      Number.isInteger(length.value) &&
       !length.comparator &&
       administrations.every((a) => {
         const r = a.schedule?.recurrence,

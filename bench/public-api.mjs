@@ -28,6 +28,8 @@ const targetMs = Number(value("--target-ms", "12")),
   smoke = argv.includes("--smoke");
 if (!smoke && (!Number.isInteger(rounds) || rounds < 1))
   throw new Error("--rounds must be a positive integer for timed measurements");
+if (!smoke && (!Number.isFinite(targetMs) || targetMs <= 0))
+  throw new Error("--target-ms must be finite and greater than zero for timed measurements");
 const maxRegression = 0.04;
 const outputPath = value("--json", undefined);
 const report = {
@@ -559,11 +561,11 @@ const equivalenceOracles = new Map([
 // keep raw latency visible when an older build does only source replay.
 const complexPreviewPhrases = {
   en: [
-    "Days 1–7", "1 drop every 2 hours in the right eye", "1 drop four times daily in the left eye",
+    "Days 1–7", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
     "From 7 days after treatment start until 1 month after treatment start",
-    "1 drop four times daily in the right eye", "1 drop four times daily in the left eye",
-    "From 1 month after treatment start onward", "1 drop four times daily in the right eye",
-    "1 drop twice daily in the left eye",
+    "Instill 1 drop four times daily in the right eye", "Instill 1 drop four times daily in the left eye",
+    "From 1 month after treatment start onward", "Instill 1 drop four times daily in the right eye",
+    "Instill 1 drop twice daily in the left eye",
   ],
   th: [
     "วันที่ 1–7", "หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
@@ -573,34 +575,38 @@ const complexPreviewPhrases = {
     "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 2 ครั้ง",
   ],
 };
+function normalizeClinicalPreview(output) {
+  // Formatting separators/spacing do not change the fixture's meaning.
+  // Keep words, numeric signs, range dashes and comparison operators intact.
+  return output.replace(/\.(?=\s|$)/gu, "").replace(/[\s,;:]+/gu, "").toLowerCase();
+}
+const expectedComplexPreview = Object.fromEntries(
+  Object.entries(complexPreviewPhrases).map(([locale, phrases]) =>
+    [locale, normalizeClinicalPreview(phrases.join(" "))]));
 function currentComplexPreview(output, locale) {
-  if (typeof output !== "string") return false;
-  const unit = locale === "en" ? "drops?\\b" : "หยด(?=$|[\\s.;,])";
-  const amounts = [...output.matchAll(new RegExp(
-    "(?<![\\d.])([+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))\\s*" + unit, "gu"))];
-  // Each of the three phases owns one right-eye and one left-eye dose.
-  // Ordered phrase presence alone would accept 11 as a suffix match for 1.
-  if (amounts.length !== 6 || amounts.some(amount => Number(amount[1]) !== 1)) return false;
-  let after = 0;
-  for (const phrase of complexPreviewPhrases[locale]) {
-    const position = output.indexOf(phrase, after);
-    if (position < 0) return false;
-    after = position + phrase.length;
-    if (/\d$/u.test(phrase) && /^(?:\d|\.\d)/u.test(output.slice(after))) return false;
-  }
-  return true;
+  return typeof output === "string" &&
+    normalizeClinicalPreview(output) === expectedComplexPreview[locale];
 }
 for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
   if (!currentComplexPreview(exact, locale))
     throw new Error("Complex preview oracle rejected its six exact administrations");
-  for (const amount of ["11", "1.2", "-1", "2"])
+  for (const amount of ["11", "1.2", "-1", "2", ".1", "0.1", "1.0"])
     if (currentComplexPreview(exact.replace(/1 (drop|หยด)/u, amount + " $1"), locale))
       throw new Error("Complex preview oracle accepted a different numeric amount");
   if (currentComplexPreview(exact + (locale === "en" ? ". 1 drop" : ". 1 หยด"), locale))
     throw new Error("Complex preview oracle accepted an extra administration");
   if (currentComplexPreview(exact.replace("1–7", "1–70"), locale))
     throw new Error("Complex preview oracle accepted a numeric endpoint suffix");
+  const primary = complexPreviewPhrases[locale][1];
+  for (const changed of [
+    primary + (locale === "en" ? " as needed" : " ตามอาการ"),
+    (locale === "en" ? "Do not " : "ห้าม") + primary,
+  ])
+    if (currentComplexPreview(exact.replace(primary, changed), locale))
+      throw new Error("Complex preview oracle accepted a changed administration condition");
+  if (!currentComplexPreview(exact.replaceAll(". ", ";\n  "), locale))
+    throw new Error("Complex preview oracle rejected nonsemantic separators");
 }
 const equivalenceDetails = new Map();
 const sourcePreviewDifference = {
@@ -646,9 +652,13 @@ for (const test of cases) {
     continue;
   }
   try {
-    let left = test.run(baseline, 0), right = test.run(candidate, 0);
-    const async = !!left?.then || !!right?.then;
-    if (async) { left = await left; right = await right; }
+    // Complete each probe before starting the next. A rejected baseline
+    // must not leave an already-started candidate promise unhandled.
+    let left = test.run(baseline, 0);
+    let async = !!left?.then;
+    if (async) left = await left;
+    let right = test.run(candidate, 0);
+    if (right?.then) { async = true; right = await right; }
     const oracle = equivalenceOracles.get(test.name);
     if (oracle && !oracle(right)) throw new Error("Candidate failed the independent clinical preview oracle");
     const equivalentWork = !oracle || oracle(left);

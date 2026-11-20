@@ -14,6 +14,7 @@ import {
   projectCanonicalCourse,
 } from "../src/index";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
+import { clauseForAdministration } from "../src/canonical/compile";
 import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
@@ -312,7 +313,7 @@ describe("typed external boundary anchors", () => {
       const native = courseFromR6(input);
       expect(native.stages[0].start?.anchor).toBe(anchor);
       expect(courseToR6(native)).toEqual(input);
-      expect(() => nextDueDoses(native, options)).toThrow();
+      expect(() => nextDueDoses(native, options)).toThrow("Unsupported R6 step RelativeTime: requires a treatment-start offset");
     }
   });
 });
@@ -445,5 +446,120 @@ describe("November 17 review: typed course ownership without inferred exact boun
       expect(calculated.quantityKind).toBe("maximum");
       expect(calculated.explanation).toContain("could not be applied");
     }
+  });
+});
+
+
+describe("round 24: live projection and course boundaries", () => {
+  it("shows reference-only site display without inventing a coding or replacing the Reference", () => {
+    const reference = {
+      id: "external-site", reference: "BodyStructure/left", display: "left eye",
+      extension: [{ url: "urn:test:reference-detail", valueString: "preserved" }],
+    };
+    const wire: FhirR6DosageInstruction = {
+      renderedInstruction: "Instill one drop in the right eye twice daily.",
+      step: [{ component: [{
+        site: { reference },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "drop", code: "[drp]",
+          system: "http://unitsofmeasure.org" } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+      }] }],
+    };
+    const course = courseFromR6(wire);
+    const member = course.stages[0].administrations[0];
+    expect(member.target).toBeUndefined();
+    expect(member.siteReference).toEqual(reference);
+    expect(clauseForAdministration(member).site).toEqual({
+      text: "left eye", administrationTargetCount: undefined,
+    });
+    for (const preview of [
+      formatSig(wire, "long", { locale: "en" }),
+      fromFhir(wire, { locale: "en" }).longText,
+      formatCanonicalCourse(course, "long", { locale: "en" }),
+    ]) {
+      expect(preview).toContain("1 drop");
+      expect(preview).toContain("left eye");
+      expect(preview).not.toContain("right eye");
+    }
+    const saved = courseToR6(inputToCanonical(JSON.parse(JSON.stringify(courseToR5(course)))));
+    expect(saved.step[0].component![0].site?.reference).toEqual(reference);
+    expect(saved.step[0].component![0].site?.concept).toBeUndefined();
+
+    const conceptBacked = structuredClone(wire);
+    conceptBacked.step[0].component![0].site!.concept = { text: "left lower eyelid" };
+    expect(formatSig(conceptBacked, "long", { locale: "en" })).toContain("left lower eyelid");
+  });
+
+  it.each([
+    [1.5, [
+      "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      "2026-01-02T08:00:00+00:00",
+    ], 4],
+    [2, [
+      "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      "2026-01-02T08:00:00+00:00", "2026-01-02T20:00:00+00:00",
+    ], 6],
+  ] as const)("keeps a %s-day component course executable without an unsupported shared boundary", (days, due, total) => {
+    const parsed = parseSig(
+      "Take 1 tab at 08:00 for " + days + " days; take 2 tabs at 20:00 for " + days + " days",
+    );
+    const course = inputToCanonical(parsed);
+    expect(course.stages).toHaveLength(1);
+    expect(course.stages[0].administrations).toHaveLength(2);
+    if (days === 1.5) expect(course.stages[0].end).toBeUndefined();
+    else expect(course.stages[0].end?.displacement?.value).toBe(2);
+    for (const administration of course.stages[0].administrations)
+      expect(administration.schedule?.recurrence?.courseLength?.value).toBe(days);
+    const query = {
+      orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+      timeZone: "UTC", limit: 10,
+    };
+    for (const input of [parsed, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(input, query)).toEqual(due);
+      expect(calculateTotalUnits({
+        ...query, dosage: input, durationValue: 3, durationUnit: "d",
+      }).totalUnits).toBe(total);
+    }
+  });
+
+  it.each([undefined, []])("shows a live zero-step cap instead of stale header wording (steps=%s)", step => {
+    const wire = {
+      renderedInstruction: "maximum 3 administrations", step,
+      safety: { doseLimit: [{ scope: "dosage" as const, valueInteger: 2 }] },
+    };
+    for (const preview of [
+      formatSig(wire, "long", { locale: "en" }),
+      fromFhir(wire, { locale: "en" }).longText,
+    ]) {
+      expect(preview).toContain("max per dosage: 2");
+      expect(preview).not.toContain("3 administrations");
+    }
+    const saved = courseToR6(inputToCanonical(wire));
+    expect(saved.renderedInstruction).toBe("maximum 3 administrations");
+    expect(saved.safety?.doseLimit).toEqual([{ scope: "dosage", valueInteger: 2 }]);
+    expect(saved.step).toEqual([]);
+  });
+
+  it("keeps a genuine text-only R6 header literal", () => {
+    const wire = { renderedInstruction: "Follow the supplied instructions." };
+    expect(formatSig(wire, "long", { locale: "en" })).toBe(wire.renderedInstruction);
+    expect(fromFhir(wire, { locale: "en" }).longText).toBe(wire.renderedInstruction);
+  });
+
+  it("captures fresh timing ownership for a dose-less graph and retains its source after an external clock edit", () => {
+    const row = parseSig("Swallow slowly with water at 08:00").fhir[0];
+    const original = JSON.stringify(row.extension);
+    const authoredText = row.text;
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(row.doseAndRate).toBeUndefined();
+    expect(formatSig(row, "long", options)).toContain("08:00");
+    row.timing!.repeat!.timeOfDay = ["10:00:00"];
+    const preview = formatSig(row, "long", options);
+    expect(preview).toContain("10:00");
+    expect(preview).not.toContain("08:00");
+    expect(preview).toContain("slowly");
+    expect(preview).toContain("water");
+    expect(row.text).toBe(authoredText);
+    expect(JSON.stringify(row.extension)).toBe(original);
   });
 });

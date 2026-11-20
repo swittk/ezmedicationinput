@@ -293,8 +293,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const initial = calculateTotalUnits({ ...supply, dosage: edited });
     expect(initial.totalUnits).toBe(296);
     edited[3].timing!.repeat!.frequency = 3;
-    // The edited repeat is live data. The older QID code remains recoverable,
-    // but must not contribute four institution clock entries.
+    // Both external facts remain recoverable, but QID and a live TID repeat
+    // conflict. Execution requires resolving that contradiction explicitly.
     const reconciled = toDosageDetails(edited);
     expect(reconciled.step[1].component[1].timing?.repeat?.frequency).toBe(3);
     expect(reconciled.step[1].component[1].timing?.code?.coding?.[0]?.code).toBe("QID");
@@ -302,10 +302,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
       url: DOSAGE_RECONCILIATION_WARNING_URL
     }));
-    expect(calculateTotalUnits({ ...supply, dosage: edited }).totalUnits).toBe(273);
-    expect(nextDueDoses(edited, {
+    expect(() => calculateTotalUnits({ ...supply, dosage: edited }))
+      .toThrow("The timing code conflicts with the complete repeat recurrence");
+    expect(() => nextDueDoses(edited, {
       ...scheduler, from: "2026-10-27T08:00:00+07:00"
-    }).length).toBeGreaterThan(0);
+    })).toThrow("The timing code conflicts with the complete repeat recurrence");
     delete edited[3].timing!.code;
     edited[3].text = "1 drop OS TID after day 7";
     const updated = toDosageDetails(edited);
@@ -343,10 +344,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toEqual(["06:00:00", "10:00:00", "14:00:00", "18:00:00"]);
     const edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
     edited.timing!.repeat!.frequency = 3;
-    const changedWithRetainedCode = nextDueDoses(edited, options);
-    expect(changedWithRetainedCode).toHaveLength(8);
-    expect(changedWithRetainedCode.slice(0, 3).map(v => v.slice(11, 19)))
-      .toEqual(["08:00:00", "14:00:00", "20:00:00"]);
+    expect(() => nextDueDoses(edited, options))
+      .toThrow("The timing code conflicts with the complete repeat recurrence");
     expect(edited.timing?.code?.coding?.[0]?.code).toBe("QID");
     delete edited.timing!.code;
     const changed = nextDueDoses(edited, options);
@@ -418,7 +417,10 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     ["1 drop OU BID", ["Instill 1 drop twice daily in both eyes."]],
     ["1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID", [
       "Days 1–7", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
-      "From 1 month after treatment start onward", "Instill 1 drop twice daily in the left eye",
+      "From 7 days after treatment start until 1 month after treatment start",
+      "Instill 1 drop four times daily in the right eye", "Instill 1 drop four times daily in the left eye",
+      "From 1 month after treatment start onward",
+      "Instill 1 drop four times daily in the right eye", "Instill 1 drop twice daily in the left eye",
     ]],
   ] as const)("retains exact source and previews current fields for an unchanged projection: %s", (source, expected) => {
     const parsed = parseSig(source);
@@ -446,7 +448,12 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     );
     expect(unchanged.renderedInstruction).toBe(source);
     const preview = formatSig(unchanged, "long");
-    for (const phrase of expected) expect(preview).toContain(phrase);
+    let after = 0;
+    for (const phrase of expected) {
+      const position = preview.indexOf(phrase, after);
+      expect(position, "Missing ordered clinical phrase: " + phrase).toBeGreaterThanOrEqual(0);
+      after = position + phrase.length;
+    }
   });
 
   it.each([

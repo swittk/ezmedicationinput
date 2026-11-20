@@ -2831,8 +2831,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const edited = JSON.parse(JSON.stringify(rows)) as EzDosage[];
     edited[0].timing!.repeat!.frequency = 20;
     const adjusted = toDosageDetails(edited);
-    expect(adjusted.step[0].component[0].timing?.repeat).not.toHaveProperty("startOffset");
-    expect(adjusted.step[0].component[0].timing?.repeat).not.toHaveProperty("endOffset");
+    expect(adjusted.step[0].component[0].timing?.repeat).toEqual({
+      ...course.step[0].component[0].timing!.repeat, frequency: 20,
+    });
+    expect(adjusted.step[0].component[0].timing?.repeat).toMatchObject({
+      period: 28, periodUnit: FhirPeriodUnit.Day,
+      startOffset: { value: 2, code: "d" }, endOffset: { value: 5, code: "d" },
+    });
   });
 
   it("keeps scalar qualifiers and CodeableReference metadata through both FHIR projections", () => {
@@ -3051,7 +3056,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }] };
     const edited = toFhirR5Dosages(withOffset);
-    edited[0].timing!.repeat!.frequency = 20;
+    edited[0].timing!.repeat!.period = 30;
     const changed = toDosageDetails(edited);
     expect(changed.step[0].component[0].timing?.repeat?.startOffset).toBeUndefined();
     const offsetSources = changed.extension?.filter(entry =>
@@ -4316,11 +4321,15 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const numerator = nestedR5[0].doseAndRate?.[0].rateRatio?.numerator;
     const bounds = nestedR5[0].timing?.repeat?.boundsDuration;
     expect(numerator?.comparator).toBe(">=");
-    expect(getEmaQuantityComparator(numerator)).toBe(">=");
-    expect(numerator?.extension?.[0].valueCoding?.display).toBe("more than or equal to");
+    expect(getEmaQuantityComparator(numerator)).toBeUndefined();
+    expect(numerator?.extension).toContainEqual({
+      url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", extension: [prior],
+    });
     expect(bounds?.comparator).toBe("<=");
-    expect(getEmaQuantityComparator(bounds)).toBe("<=");
-    expect(bounds?.extension?.[0].valueCoding?.display).toBe("less than or equal to");
+    expect(getEmaQuantityComparator(bounds)).toBeUndefined();
+    expect(bounds?.extension).toContainEqual({
+      url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", extension: [prior],
+    });
     expect(toDosageDetails(nestedR5).step[0].component[0].doseAndRate?.[0]
       .rateRatio?.numerator?.comparator).toBe(">=");
   });
@@ -5057,7 +5066,11 @@ describe("review family contract: active native comparator owns imported quantit
       expect(getQuantityComparator(projected)).toBe(native);
       expect(projected.comparator).toBe(native === "~" ? undefined : native);
       expect(projected.extension?.filter(x => x.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL))
-        .toEqual([ema(expectedCode)]);
+        .toEqual(native === "~" ? [ema(expectedCode)] : []);
+      if (native !== "~" && retainedCode !== expectedCode)
+        expect(projected.extension).toContainEqual({
+          url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", extension: [ema(retainedCode)],
+        });
       expect(projected.extension).toContainEqual({ url: "https://example.org/keep", valueString: "authored" });
       expect(quantityFromR5(projected)?.comparator).toBe(native);
       // Conversion is not an in-place mutation of the user's original object.
@@ -5326,9 +5339,11 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
       const originalSources = course.extension?.filter(ext =>
         ext.url.includes("reconciliation-source")) ?? [];
       expect(originalSources).toHaveLength(i);
-      for (let previous = 0; previous < i; previous++) {
-        expect(JSON.stringify(originalSources)).toContain("version " + previous);
-      }
+      const instructions = originalSources.map(source => source.extension?.[0].extension
+        ?.find(field => field.url === "dosageDetails")?.extension
+        ?.find(field => field.url === "renderedInstruction")?.valueString);
+      expect(instructions.slice().sort()).toEqual(Array.from({ length: i }, (_, previous) => "version " + previous).sort());
+      expect(new Set(instructions).size).toBe(i);
       // Each previous source is one historical snapshot, with no nested
       // source-history child that would double storage on every save.
       expect(originalSources.every(source => source.extension?.length === 1 &&

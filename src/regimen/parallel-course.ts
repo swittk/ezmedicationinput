@@ -95,7 +95,9 @@ function durationPosition(clause: CanonicalSigClause): RegimenPosition | undefin
       schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined ||
       schedule.duration === undefined || schedule.duration <= 0 ||
       !Number.isInteger(schedule.duration) ||
-      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
+      schedule.durationIsRange && schedule.durationMax === undefined ||
+      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration ||
+      schedule.durationMaxUnit !== undefined && schedule.durationMaxUnit !== schedule.durationUnit) {
     return undefined;
   }
   switch (schedule.durationUnit) {
@@ -162,6 +164,8 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
     duration: _duration,
     durationMax: _durationMax,
     durationUnit: _durationUnit,
+    durationMaxUnit: _durationMaxUnit,
+    durationIsRange: _durationIsRange,
     ...cadence
   } = schedule;
   return { ...clause, schedule: cadence };

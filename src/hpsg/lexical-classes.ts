@@ -805,6 +805,9 @@ export function doseComparatorNumberAt(
   }
   if (!comparator) return undefined;
   let numericIndex = start + prefixLength;
+  // A dotted approximation is one lexical qualifier (e.g. "approx. 5 mg").
+  if (comparator === "~" && tokens[numericIndex]?.kind === LexKind.Separator &&
+      tokens[numericIndex].original === ".") numericIndex++;
   const token = numericIndex < limit ? tokens[numericIndex] : undefined;
   if (!token) return undefined;
   const word = token.canonical ?? token.lower;

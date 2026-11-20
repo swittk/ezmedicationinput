@@ -1823,7 +1823,8 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
     const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
-  return `x${base}${schedule.durationUnit}`;
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? ">=" : "";
+  return `x${lowerBound}${base}${schedule.durationUnit}`;
 }
 
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1874,7 +1875,8 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
     const lowerUnit = upperUnit !== unit ? " " + label() : "";
     return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(upperUnit)}`;
   }
-  return `เป็นเวลา ${lower} ${label()}`;
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? "อย่างน้อย " : "";
+  return `เป็นเวลา ${lowerBound}${lower} ${label()}`;
 }
 
 function describeAdministrationDurationThai(

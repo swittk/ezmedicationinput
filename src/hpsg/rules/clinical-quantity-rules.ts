@@ -608,81 +608,105 @@ function qualifyClinicalSign(
 
 /** Bounded dimensional quantity construction; unresolved weight amounts
  * remain typed rates instead of fabricated scalar administrations. */
+/** Instruction lookahead asks the same typed quantity owner before absorbing
+ * a later body token. Each start is matched once in this chart context; the
+ * normal lexical enumeration then reuses the sign, without a pre-scan. */
+export function clinicalQuantityAt(context: HpsgClauseContext, start: number): HpsgSign[] {
+  const matches = context.clinicalCache.quantityLookahead ??= new Map<number, HpsgSign[]>();
+  const cached = matches.get(start);
+  if (cached) return cached;
+  const result = matchClinicalQuantity(context, start);
+  matches.set(start, result);
+  return result;
+}
+
 export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
-  return lexicalRule("hpsg.lex.clinicalQuantity", (context, start) => {
-    const additive = additiveFractionDose(context, start);
-    if (additive) return [additive];
-    const division = dividedDoseCountSign(context, start);
-    if (division) return [division];
-    const token = context.tokens[start];
-    if (!token || !available(context, start)) return [];
-    let phraseStart = start;
-    let quantityToken = token;
-    const lower = token.kind === LexKind.Number ? "" : normalizeTokenLower(token);
-    const quantityLower = lower.startsWith("@") && lower.length > 1 ? lower.slice(1) : lower;
-    let qualified = token.kind === LexKind.Number ? undefined :
-      doseComparatorNumberAt(context.tokens, start, context.limit, quantityLower);
-    // AT is a rate head when its following quantity has a per-time unit.
-    // Start that constituent at AT, before the generic site rule can claim
-    // "at approximately" as an anatomical destination.
-    if (!qualified && (lower === "at" || lower === "@")) {
-      const next = context.tokens[start + 1];
-      if (next && available(context, start + 1)) {
-        phraseStart++;
-        quantityToken = next;
-        qualified = next.kind === LexKind.Number ? undefined :
-          doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
-      }
+  return lexicalRule("hpsg.lex.clinicalQuantity", (context, start) =>
+    context.clinicalCache.quantityLookahead?.get(start) ?? matchClinicalQuantity(context, start));
+}
+
+function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgSign[] {
+  const additive = additiveFractionDose(context, start);
+  if (additive) return [additive];
+  const division = dividedDoseCountSign(context, start);
+  if (division) return [division];
+  const token = context.tokens[start];
+  if (!token || !available(context, start)) return [];
+  let phraseStart = start;
+  let quantityToken = token;
+  const lower = token.kind === LexKind.Number ? "" : normalizeTokenLower(token);
+  const quantityLower = lower.startsWith("@") && lower.length > 1 ? lower.slice(1) : lower;
+  let qualified = token.kind === LexKind.Number ? undefined :
+    doseComparatorNumberAt(context.tokens, start, context.limit, quantityLower);
+  // AT is a rate head when its following quantity has a per-time unit.
+  // Start that constituent at AT, before the generic site rule can claim
+  // "at approximately" as an anatomical destination.
+  if (!qualified && (lower === "at" || lower === "@")) {
+    const next = context.tokens[start + 1];
+    if (next && available(context, start + 1)) {
+      phraseStart++;
+      quantityToken = next;
+      qualified = next.kind === LexKind.Number ? undefined :
+        doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
     }
-    const numericStart = qualified?.numericIndex ?? phraseStart;
-    // The general lower-case normalizer strips leading punctuation, but a
-    // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
-    // trailing sentence punctuation only; never turn .1 into 1.
-    const attached = !qualified && quantityToken.kind !== LexKind.Number
-      ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
-    const value = qualified?.value ??
-      (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
-    // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
-    // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
-    const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
-    if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
-    const comparator = qualified?.comparator;
-    const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
-      activeDoseInCarrierOverTime(context, numericStart, value, unit), comparator);
-    if (activeInCarrier) return [activeInCarrier];
-    const over = qualifyClinicalSign(context, phraseStart, numericStart,
-      fixedVolumeOverTime(context, numericStart, value, unit), comparator);
-    if (over) return [over];
-    const accepts = (candidate: string) =>
-      /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-      /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
-    const expression = compactUnitExpression(
-      context, numericStart + 1, accepts, unit ?? ""
-    );
-    if (!expression) return [];
-    const weight = qualifyClinicalSign(context, phraseStart, numericStart,
-      weightQuantity(context, numericStart, value, expression, phraseStart), comparator);
-    if (weight) {
-      // Weight rates own the same external AT/@ marker as fixed rates.
-      // Publish ownership before the site fallback examines that marker.
-      const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
-      for (const token of weight.tokens) owned.add(token.index);
-      return [weight];
+  }
+  const numericStart = qualified?.numericIndex ?? phraseStart;
+  // The general lower-case normalizer strips leading punctuation, but a
+  // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
+  // trailing sentence punctuation only; never turn .1 into 1.
+  const attached = !qualified && quantityToken.kind !== LexKind.Number
+    ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
+  const value = qualified?.value ??
+    (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
+  // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
+  // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
+  const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
+  if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
+  const comparator = qualified?.comparator;
+  const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
+    activeDoseInCarrierOverTime(context, numericStart, value, unit), comparator);
+  const volume = activeInCarrier ?? qualifyClinicalSign(context, phraseStart, numericStart,
+    fixedVolumeOverTime(context, numericStart, value, unit), comparator);
+  if (volume) {
+    // The volume-over-time construction owns its leading rate marker too.
+    const sign = phraseStart > start ? lexicalSign({
+      type: volume.type, rule: volume.evidence[0].rule,
+      tokens: [token, ...volume.tokens], synsem: volume.synsem,
+      warnings: volume.warnings, score: volume.score + 1
+    }) : volume;
+    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    for (const token of sign.tokens) owned.add(token.index);
+    return [sign];
+  }
+  const accepts = (candidate: string) =>
+    /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
+    /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
+  const expression = compactUnitExpression(
+    context, numericStart + 1, accepts, unit ?? ""
+  );
+  if (!expression) return [];
+  const weight = qualifyClinicalSign(context, phraseStart, numericStart,
+    weightQuantity(context, numericStart, value, expression, phraseStart), comparator);
+  if (weight) {
+    // Weight rates own the same external AT/@ marker as fixed rates.
+    // Publish ownership before the site fallback examines that marker.
+    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    for (const token of weight.tokens) owned.add(token.index);
+    return [weight];
+  }
+  const rate = qualifyClinicalSign(context, phraseStart, numericStart,
+    fixedRate(context, numericStart, value, expression, phraseStart), comparator);
+  if (rate) {
+    const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
+    for (const token of rate.tokens) owned.add(token.index);
+  } else {
+    // Unit morphology already established a per-time quantity. Without a
+    // licensed rate head it remains source text; its numeric daughter must
+    // not become a separate, unitless administration dose.
+    const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
+    for (let index = phraseStart; index < expression.end; index++) {
+      owned.add(context.tokens[index].index);
     }
-    const rate = qualifyClinicalSign(context, phraseStart, numericStart,
-      fixedRate(context, numericStart, value, expression, phraseStart), comparator);
-    if (rate) {
-      const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
-      for (const token of rate.tokens) owned.add(token.index);
-    } else {
-      // Unit morphology already established a per-time quantity. Without a
-      // licensed rate head it remains source text; its numeric daughter must
-      // not become a separate, unitless administration dose.
-      const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
-      for (let index = phraseStart; index < expression.end; index++) {
-        owned.add(context.tokens[index].index);
-      }
-    }
-    return rate ? [rate] : [];
-  });
+  }
+  return rate ? [rate] : [];
 }

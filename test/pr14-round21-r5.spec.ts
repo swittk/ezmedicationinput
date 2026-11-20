@@ -145,6 +145,8 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(rows[0].doseAndRate).toHaveLength(3);
     for (const index of [0, 2]) {
       const slot = rows[0].doseAndRate![index];
+      expect(slot).not.toHaveProperty("doseExpression");
+      expect(slot).not.toHaveProperty("rateExpression");
       expect(slot.doseQuantity).toBeUndefined();
       expect(slot.rateQuantity).toBeUndefined();
       expect(slot.extension?.[0].url).toBe(R5_EXPRESSION_SLOT_SOURCE_URL);
@@ -188,14 +190,20 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     }] };
     const write = kind === "simple" ? simpleQuantityForR5 : quantityForR5;
     const changed = write(quantity)!;
-    const active = changed.extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!.valueCoding!;
-    expect(active.code).toBe("100000000050");
-    expect(active._display).toBeUndefined();
-    expect(active.i18n).toBeUndefined();
+    const active = changed.extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)?.valueCoding;
+    if (kind === "simple") {
+      expect(active).toEqual({ system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050", display: "less than" });
+      expect(changed.extension).toContainEqual({
+        url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", valueCoding: originalCoding,
+      });
+    } else {
+      expect(active).toBeUndefined();
+      expect(changed.comparator).toBe("<");
+      expect(changed.extension).toContainEqual({
+        url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", extension: quantity.extension,
+      });
+    }
     expect(getQuantityComparator(changed)).toBe("<");
-    expect(changed.extension).toContainEqual({
-      url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", valueCoding: originalCoding,
-    });
     expect(write(persist(changed))!.extension).toEqual(changed.extension);
     expect(write({ ...quantity, comparator: "~" })!.extension?.[0].valueCoding).toEqual(originalCoding);
   });

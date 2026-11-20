@@ -1093,11 +1093,15 @@ function comparativeDoseAt(
   const unit = compactUnit ? undefined : unitAfter(context, numericIndex + 1);
   // A scheduled later phase may omit its repeated unit. A bare temporal
   // noun ("approximately one week") or unknown object is not a dose: the
-  // ordinary typed timing lead must license a separate right-hand schedule.
+  // ordinary typed timing or route lead must license the omitted dose unit.
   if (!compactUnit && !unit) {
     const next = context.tokens[numericIndex + 1];
-    if (!next || mapIntervalUnit(normalizeTokenLower(next)) ||
-        !isScheduleLead(context, numericIndex + 1)) return undefined;
+    if (!next || mapIntervalUnit(normalizeTokenLower(next))) return undefined;
+    // Either typed timing or an explicit route licenses an omitted dose unit.
+    // The ordinary route matcher owns multi-word and institution vocabulary;
+    // an opaque suffix after a recognized route cannot erase the qualifier.
+    if (!isScheduleLead(context, numericIndex + 1) &&
+        !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;
   const tokens = tokensAvailable(context, start, numericIndex + 1 - start);

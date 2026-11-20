@@ -1696,10 +1696,10 @@ function buildParseResult(
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
-  // Capture a freshly emitted authored amount whether its producer was
-  // the dose lexeme or the typed instruction action (for example Swish).
+  // Capture the live source projection for authored graph rows, including
+  // dose-less actions whose clock can later be edited on the external row.
   // Inferred defaults have no authored amount to protect from later removal.
-  if (clause.dose && !clause.dose.defaulted && clause.instructionGraph)
+  if (clause.instructionGraph && !clause.dose?.defaulted)
     captureFreshDose(fhir);
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
@@ -1827,6 +1827,7 @@ function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
   if (
     internal.dose === undefined &&
     internal.doseRange === undefined &&
+    !internal.primaryClause.clinicalQuantity &&
     (carry.dose !== undefined || carry.doseRange !== undefined) &&
     internal.unit &&
     internal.unit === carry.unit
@@ -1862,6 +1863,12 @@ function updateCarryForward(carry: SegmentCarry, internal: ParserState): void {
     // A newly authored exact dose explicitly supersedes the previous
     // comparator. Only an actually inherited amount inherits its qualifier.
     carry.comparator = internal.primaryClause.dose?.comparator;
+  } else if (internal.primaryClause.clinicalQuantity) {
+    // A rate-only phase supersedes the prior scalar amount. Subsequent
+    // elliptical phases cannot revive the earlier bolus as their dose.
+    carry.dose = undefined;
+    carry.doseRange = undefined;
+    carry.comparator = undefined;
   }
 }
 

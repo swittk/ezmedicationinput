@@ -229,6 +229,9 @@ describe("accepted-count and lifetime related families", () => {
     const source = JSON.stringify(member);
     expect(supply(dailyCourse(member), 2).totalUnits).toBe(4);
     expect(supply(dailyCourse(member), 4).totalUnits).toBe(6);
+    const withPrior = supply(dailyCourse(member), 4, { priorDoseTimes: ["2025-12-31T08:00:00Z"] });
+    expect(withPrior.totalUnits).toBe(4);
+    expect(withPrior.explanation).toContain("each recorded prior ranged administration was assumed to use the upper dose bound (2 tab)");
     expect(JSON.stringify(member)).toBe(source);
 
     const infusion: CanonicalAdministration = { ...member,
@@ -267,6 +270,10 @@ describe("repeated maximum-capacity history", () => {
     const course = dailyCourse(member);
     expect(supply(course, 2).totalUnits).toBe(4);
     expect(supply(course, 4).totalUnits).toBe(8);
+    const withRecordedRange = supply(course, 1, { priorDoseTimes: ["2025-12-31T08:00:00Z"] });
+    expect(withRecordedRange.totalUnits).toBe(2);
+    expect(withRecordedRange.explanation)
+      .toContain("each recorded prior ranged administration was assumed to use the upper dose bound (2 tab)");
     expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([]);
     member.schedule!.recurrence!.countMax = 1;
     expect(supply(course, 1).totalUnits).toBe(2);

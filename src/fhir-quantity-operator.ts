@@ -146,24 +146,30 @@ export function quantityForR5(quantity: FhirR6Quantity | undefined):
   FhirQuantity | undefined {
   if (!quantity?.comparator) return quantity as FhirQuantity | undefined;
   if (quantity.comparator === "~") return simpleQuantityForR5(quantity);
-  // Ordinary R5 comparisons are native, but imported enriched EMA metadata
-  // must not contradict an edited native comparator.
-  if (!quantity.extension?.length) return quantity as FhirQuantity;
-  const code = emaCodeByComparator[quantity.comparator];
+  return quantityForR6(quantity) as FhirQuantity;
+}
+
+/** A native Quantity operator has one active owner. Retain authored EMA
+ * annotations as inert source when writing that owner, so a subsequent edit
+ * of the external native comparator cannot revive a hidden duplicate. EMA-only
+ * input still owns its qualifier, and SimpleQuantity still writes active EMA. */
+export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quantity | undefined {
+  if (!quantity?.comparator || !quantity.extension?.length) return quantity;
   let changed = false;
-  const sources: FhirExtension[] = [];
-  const extension = quantity.extension.map(ext => {
-    const coding = ext.valueCoding;
-    if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
-        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
-        !coding.code || !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE) || coding.code === code) return ext;
+  const extension: FhirExtension[] = [];
+  for (const item of quantity.extension) {
+    const coding = item.valueCoding;
+    if (item.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
+        coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM || !coding.code ||
+        !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)) {
+      extension.push(item);
+      continue;
+    }
     changed = true;
-    return editedOperator(ext, quantity.comparator!, sources);
-  });
-  extension.push(...sources);
-  // A native R5 operator needs no generated fallback. Otherwise removing the
-  // active comparator later would unexpectedly revive it from our own marker.
-  return changed ? { ...quantity, extension } as FhirQuantity : quantity as FhirQuantity;
+    if (!exactGeneratedComparatorExtension(item, quantity.comparator))
+      extension.push({ url: QUANTITY_OPERATOR_SOURCE_URL, extension: [item] });
+  }
+  return changed ? { ...quantity, extension: extension.length ? extension : undefined } : quantity;
 }
 
 /** Recover the current R6 native comparator from the published EMA Coding.

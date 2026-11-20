@@ -11,7 +11,7 @@ import {
   MERIDIEM_TOKENS,
   POST_MERIDIEM_TOKENS
 } from "./lexical-classes";
-import { HpsgLexicalRule } from "./signature";
+import { HpsgLexicalRule, HpsgSign } from "./signature";
 import { HpsgProjectionDeps } from "./projection";
 import { HpsgUnificationContext } from "./unification";
 
@@ -23,6 +23,8 @@ export interface HpsgClauseContext {
   limit: number;
   deps: HpsgProjectionDeps & HpsgUnificationContext;
   clinicalCache: {
+    /** Existing lexical matches requested early by instruction body lookahead. */
+    quantityLookahead?: Map<number, HpsgSign[]>;
     medicationGuardScanned?: true;
     medicationGuard?: ParsedMedicationGuard;
     /** Tokens already owned by a dimensional rate constituent. Site/advice

@@ -637,7 +637,12 @@ export function expandRegimenAdjustmentPhases(
               if (!remaining.length && !schedule.when?.length) continue;
               schedule.timeOfDay = remaining;
               if (schedule.frequency === oldClocks.length && schedule.period === 1 &&
-                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+                  schedule.periodUnit === 'd') {
+                schedule.frequency = remaining.length;
+                // The surviving partition has its own cadence; the donor's
+                // coded frequency no longer describes this administration.
+                delete schedule.timingCode;
+              }
             }
           }
           if (schedule && replacedEvent && target.regimenAdjustment === "replace-target") {
@@ -647,12 +652,26 @@ export function expandRegimenAdjustmentPhases(
               if (!remaining.length && !schedule.timeOfDay?.length) continue;
               schedule.when = remaining;
               if (schedule.frequency === oldEvents.length && schedule.period === 1 &&
-                  schedule.periodUnit === 'd') schedule.frequency = remaining.length;
+                  schedule.periodUnit === 'd') {
+                schedule.frequency = remaining.length;
+                // The surviving partition has its own cadence; the donor's
+                // coded frequency no longer describes this administration.
+                delete schedule.timingCode;
+              }
             }
           }
           if (schedule) {
-            // The new phase keeps prior recurrence but has its own course window.
-            delete schedule.duration; delete schedule.durationMax; delete schedule.durationUnit;
+            // The new phase keeps prior recurrence but owns its complete
+            // course window, including open ranges and endpoint qualifiers.
+            Object.assign(schedule, {
+              duration: target.schedule?.duration,
+              durationMax: target.schedule?.durationMax,
+              durationUnit: target.schedule?.durationUnit,
+              durationMaxUnit: target.schedule?.durationMaxUnit,
+              durationComparator: target.schedule?.durationComparator,
+              durationMaxComparator: target.schedule?.durationMaxComparator,
+              durationIsRange: target.schedule?.durationIsRange,
+            });
             delete schedule.boundsStart; delete schedule.boundsEnd; delete schedule.calendarEvents;
             // Cloned continuation daughters take the explicit onset of THIS
             // phase, not the donor's old onset. Step.start is executable
@@ -660,11 +679,6 @@ export function expandRegimenAdjustmentPhases(
             delete schedule.treatmentStartOffsetDays;
             if (target.schedule?.treatmentStartOffsetDays !== undefined) {
               schedule.treatmentStartOffsetDays = target.schedule.treatmentStartOffsetDays;
-            }
-            if (target.schedule?.duration !== undefined) {
-              schedule.duration = target.schedule.duration;
-              schedule.durationUnit = target.schedule.durationUnit;
-              schedule.durationMax = target.schedule.durationMax;
             }
             if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
             if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;

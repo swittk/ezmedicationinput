@@ -1,5 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL } from "./fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -609,9 +609,10 @@ export function reconcileR5SafetyEdits(
     original: FhirR6Quantity | undefined,
     replacement: FhirR6Quantity | undefined
   ) => !!original && !!replacement &&
-    original.unit === replacement.unit &&
-    original.code === replacement.code &&
-    original.system === replacement.system;
+    (original.system && original.code && replacement.system && replacement.code
+      ? original.system === replacement.system && original.code === replacement.code
+      : original.unit === replacement.unit && original.code === replacement.code &&
+        original.system === replacement.system);
   for (const [scope, oldIndices] of oldByScope) {
     const liveIndices = liveByScope.get(scope);
     if (oldIndices.length !== 1 || liveIndices?.length !== 1) continue;
@@ -1127,6 +1128,7 @@ interface SourceTimingObservation {
   offsetExact?: number;
   offsetMin?: number;
   offsetMax?: number;
+  monthDays?: number[];
   events?: string[];
   clocks?: string[];
   weekdays?: FhirDayOfWeek[];
@@ -1179,18 +1181,21 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   if (!timing) return undefined;
   const repeat = timing.repeat, code = timing.code;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
+  let monthDays: number[] | undefined;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
     else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
     else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
+    else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined)
+      (monthDays ??= []).push(extension.valuePositiveInt);
   }
   return {
     original: timing, extension: timing.extension, repeat,
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
-    offsetExact, offsetMin, offsetMax,
+    offsetExact, offsetMin, offsetMax, monthDays,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1224,12 +1229,17 @@ export function matchesSourceReplayTiming(
   }
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
+  let monthDayIndex = 0;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
     else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
     else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
+    else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined) {
+      if (extension.valuePositiveInt !== proof.monthDays?.[monthDayIndex++]) return false;
+    }
   }
+  if (monthDayIndex !== (proof.monthDays?.length ?? 0)) return false;
   if (offsetExact !== proof.offsetExact || offsetMin !== proof.offsetMin || offsetMax !== proof.offsetMax) return false;
   return repeat === proof.repeat && repeat?.extension === prior?.extension &&
     repeat?.frequency === prior?.frequency && repeat?.frequencyMax === prior?.frequencyMax &&
@@ -1390,7 +1400,18 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     return Object.assign({}, row, { extension });
   };
   for (let index = 0; index < dosages.length; index++) {
-    const row = dosages[index], original = rowSources?.[index];
+    let row = dosages[index];
+    const original = rowSources?.[index];
+    // Clause-local qualifiers acquire their final row identity where the
+    // complete source baseline is written. Preserve every other typed child.
+    const compact = compactCourseMarker(row);
+    const position = compact?.extension?.find(child => child.url === "rowIndex");
+    if (position?.valueInteger !== undefined && position.valueInteger !== index) {
+      const marker = { ...compact!, extension: compact!.extension!.map(child =>
+        child === position ? { ...child, valueInteger: index } : child) };
+      row = Object.assign({}, row, { modifierExtension: row.modifierExtension!.map(child =>
+        child === compact ? marker : child) });
+    }
     result[index] = row;
     if (instruction === undefined && row.text === undefined) continue;
     const rowAgreement = original?.sourceAgreement ?? sourceAgreement;
@@ -1414,7 +1435,7 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
       ] });
   }
   if (instruction !== undefined)
-    result[0] = replaceMarker(dosages[0], { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: children });
+    result[0] = replaceMarker(result[0], { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: children });
   return result;
 }
 
@@ -1540,20 +1561,39 @@ export interface CompactCourseRow {
   missingContext?: string[];
 }
 
-/** Only the cadence period and frequency govern R6 period-offset
- * interpretation. Independent clock, weekday, and display edits must not
- * delete the original active/rest window. Used only for retained R6 offsets. */
+/** Period-local offsets are measured within the cadence period. A frequency
+ * edit does not change that window while the R6 frequency > 1 constraint holds. */
 export function offsetCadenceFingerprint(
   timing: FhirDosage["timing"] | FhirR6Dosage["timing"]
 ): string {
   const repeat = timing?.repeat;
-  return compactProjectionFingerprint({
-    frequency: repeat?.frequency,
-    frequencyMax: repeat?.frequencyMax,
-    period: repeat?.period,
-    periodMax: repeat?.periodMax,
-    periodUnit: repeat?.periodUnit
+  const period = "p:" + compactProjectionFingerprint({
+    period: repeat?.period, periodMax: repeat?.periodMax, periodUnit: repeat?.periodUnit
   });
+  // Incomplete external timing remains editable with its original offsets.
+  // Only that exceptional source needs its original cadence observation too.
+  return repeat?.frequency !== undefined && repeat.frequency > 1 && repeat.period !== undefined
+    ? period : period + ":c:" + completeOffsetCadenceFingerprint(timing);
+}
+function completeOffsetCadenceFingerprint(
+  timing: FhirDosage["timing"] | FhirR6Dosage["timing"]
+): string {
+  const repeat = timing?.repeat;
+  return compactProjectionFingerprint({
+    frequency: repeat?.frequency, frequencyMax: repeat?.frequencyMax,
+    period: repeat?.period, periodMax: repeat?.periodMax, periodUnit: repeat?.periodUnit
+  });
+}
+export function matchesOffsetCadence(
+  timing: FhirDosage["timing"] | FhirR6Dosage["timing"], baseline: string | undefined
+): boolean {
+  if (baseline?.startsWith("p:")) {
+    const current = offsetCadenceFingerprint(timing);
+    return baseline === current || !current.includes(":c:") && baseline.startsWith(current + ":c:");
+  }
+  // Persisted rows written before period-only observations still prove their
+  // unchanged cadence. Their hash cannot establish a changed period separately.
+  return baseline === completeOffsetCadenceFingerprint(timing);
 }
 
 /** Encode local phase metadata and unrepresentable component fields.
@@ -1575,6 +1615,30 @@ export function attachR5RetainedRow(row: FhirDosage | EzDosage, retained: Compac
   // there instead of copying the complete retained row just for one field.
   if (retained.countScope === undefined) extension.push({ url: "countScope", valueCode: "step" });
   replacementExtensions(row, DOSAGE_DETAILS_R5_URL, { url: DOSAGE_DETAILS_R5_URL, extension });
+}
+/** Qualifiers in SimpleQuantity cannot be ignored as exact numeric doses.
+ * The clause writer calls this only after finding a typed qualifier, using the
+ * same modifier and edit baseline as the direct native R5 writer. */
+export function attachQualifiedR5AmountDetails(row: FhirDosage): void {
+  const amounts = row.doseAndRate;
+  if (!amounts?.some(value =>
+    getEmaQuantityComparator(value.doseQuantity) || getEmaQuantityComparator(value.doseRange?.low) ||
+    getEmaQuantityComparator(value.doseRange?.high) || getEmaQuantityComparator(value.rateQuantity) ||
+    getEmaQuantityComparator(value.rateRange?.low) || getEmaQuantityComparator(value.rateRange?.high) ||
+    getEmaQuantityComparator(value.rateRatio?.denominator) ||
+    !value.rateRatio?.numerator?.comparator && getEmaQuantityComparator(value.rateRatio?.numerator))) return;
+  attachR5RetainedRow(row, {
+    rowIndex: 0, sequence: row.sequence ?? 1, stepCount: row.sequence ?? 1,
+    component: { doseAndRate: amounts },
+    baseline: { doseAndRate: amounts.map(value => ({
+      ...(value.doseQuantity || value.doseRange ? { dose: compactProjectionFingerprint({
+        doseQuantity: value.doseQuantity, doseRange: value.doseRange
+      }) } : {}),
+      ...(value.rateQuantity || value.rateRange || value.rateRatio ? { rate: compactProjectionFingerprint({
+        rateQuantity: value.rateQuantity, rateRange: value.rateRange, rateRatio: value.rateRatio
+      }) } : {})
+    })) }
+  });
 }
 /** A course with no administration has a source carrier, not a fabricated
  * dosage. Encode the header and empty-stage metadata directly into its R5
@@ -1971,7 +2035,8 @@ const COMPACT_ROW: BridgeShape = {
 };
 /** Inactive R6 wire stages and lifted safety use the same named datatype
  * codec as the external course bridge. No native model or serialized text is
- * stored in these source records. */
+ * stored in these source records. Typed wire leaves are detached while encoding
+ * the comparison snapshot, so an in-memory FHIR edit cannot mutate its baseline. */
 const R6_DRAFT_SOURCE: BridgeShape = {
   drafts: { repeated: true, fields: {
     index: { value: "valueInteger" }, step: { fields: STEP }
@@ -1986,7 +2051,7 @@ const R6_SINGLE_SAFETY_SOURCE: BridgeShape = {
 export function encodeR6SourceMetadata(
   url: string, value: object, kind: "drafts" | "safety"
 ): FhirExtension {
-  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE) };
+  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE, true) };
 }
 
 export function decodeR6SourceMetadata(
@@ -2060,7 +2125,7 @@ function readRetainedField(node: FhirExtension): unknown {
  * @param value Source object.
  * @param shape Declared semantic fields for this backbone.
  */
-function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
+function encodeFields(value: object, shape: BridgeShape, snapshot = false): FhirExtension[] {
   const children: FhirExtension[] = [];
   for (const key of Object.keys(value)) {
     const part = (value as Record<string, unknown>)[key];
@@ -2079,22 +2144,20 @@ function encodeFields(value: object, shape: BridgeShape): FhirExtension[] {
     const values = field.repeated && Array.isArray(part) ? part : [part];
     for (const item of values) {
       if (field.extension) {
-        children.push({ url: key, extension: [item as FhirExtension] });
+        children.push({ url: key, extension: [snapshot ? cloneStructuredValue(item as FhirExtension) : item as FhirExtension] });
       } else if (field.fields) {
-        children.push({ url: key, extension: encodeFields(item as object, field.fields) });
+        children.push({ url: key, extension: encodeFields(item as object, field.fields, snapshot) });
       } else if (field.quantity) {
         // General R5 Quantity supports <, <=, >, >=, ad natively.
         // SimpleQuantity roles require EMA for every operator; general
         // Quantity needs it only for approximation. The retained field's
         // declared role must survive decode/re-encode without false edits.
-        children.push({
-          url: key,
-          valueQuantity: field.quantity === "simple"
-            ? simpleQuantityForR5(item as FhirR6Quantity)
-            : generalQuantityForR5(item as FhirR6Quantity)
-        });
+        const quantity = field.quantity === "simple"
+          ? simpleQuantityForR5(item as FhirR6Quantity)
+          : generalQuantityForR5(item as FhirR6Quantity);
+        children.push({ url: key, valueQuantity: snapshot ? cloneStructuredValue(quantity) : quantity });
       } else if (field.value) {
-        children.push({ url: key, [field.value]: item });
+        children.push({ url: key, [field.value]: snapshot ? cloneStructuredValue(item) : item });
       }
     }
   }

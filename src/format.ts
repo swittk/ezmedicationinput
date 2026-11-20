@@ -1009,7 +1009,8 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
     const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
-  return `x${base}${schedule.durationUnit}`;
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? ">=" : "";
+  return `x${lowerBound}${base}${schedule.durationUnit}`;
 }
 
 function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1060,7 +1061,8 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
     return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
   }
-  return `for ${lower} ${label(schedule.duration)}`;
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined ? "at least " : "";
+  return `for ${lowerBound}${lower} ${label(schedule.duration)}`;
 }
 
 function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1373,9 +1375,26 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const richPrimaryGraphAction = options?.realizationMode !== "roundtrip"
-    ? instructionGraphRichPrimaryAction(clause)
+  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+    action.args.some((arg) =>
+      arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === clause.dose?.value &&
+      arg.quantity?.range?.low === clause.dose?.range?.low &&
+      arg.quantity?.range?.high === clause.dose?.range?.high &&
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
+    )
+  ));
+  const primaryGraphAction = roundTrip
+    ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
+  const needsCurrentPrimary = Boolean(primaryGraphAction && (
+    clause.sourceProjectionVerified === false ||
+    !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
+  ));
+  const richPrimaryGraphAction = !roundTrip
+    ? instructionGraphRichPrimaryAction(clause)
+    : needsCurrentPrimary ? primaryGraphAction : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en")
     : undefined;
@@ -1407,9 +1426,6 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     ? formatPatientInstructionSentence(
         [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ")
       )
-    : undefined;
-  const primaryGraphAction = roundTrip
-    ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
   const instructionPhrases: string[] = [];
   const codedWarningSources: string[] = [];
@@ -1677,16 +1693,6 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     : preGraphInstruction
       ? formatPatientInstructionSentence(preGraphInstruction)
       : undefined;
-  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
-    action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === clause.dose?.value &&
-      arg.quantity?.range?.low === clause.dose?.range?.low &&
-      arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit &&
-      arg.quantity?.comparator === clause.dose?.comparator
-    )
-  ));
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
@@ -1704,7 +1710,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
   );
   if (graphCanStandAlone) return trailingInstructionText as string;
-  const primarySourceSentence = primaryGraphAction
+  const primarySourceSentence = primaryGraphAction && !needsCurrentPrimary
     ? formatPatientInstructionSentence(primaryGraphAction.sourceText)
     : undefined;
   const primaryActionIndex = primaryGraphAction

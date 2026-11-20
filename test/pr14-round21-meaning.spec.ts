@@ -32,9 +32,16 @@ describe("review 21 current structured course preview", () => {
       expect(text).toContain("Across this course: max per period: 8 tab / 1 d");
       expect(text.match(/8 tab/g)).toHaveLength(1);
     }
-    const ordinary = fromFhir({ step: [{ component: [tablet, tablet] }] }, normalized);
-    expect(formatParseBatch(ordinary, "long", " | "))
-      .toBe(ordinary.items.map(item => item.longText).join(" | "));
+    const twoTablets: FhirR6Dosage = {
+      ...tablet, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
+    };
+    const ordinary = fromFhir({ step: [{ component: [tablet, twoTablets] }] }, normalized);
+    expect(ordinary.items).toHaveLength(2);
+    expect(ordinary.items[0].longText).toContain("1 tablet");
+    expect(ordinary.items[1].longText).toContain("2 tablets");
+    const joined = formatParseBatch(ordinary, "long", " | ");
+    expect(joined.split(" | ")).toHaveLength(2);
+    expect(joined).toBe(ordinary.items.map(item => item.longText).join(" | "));
   });
 
   it("uses the live R6 cadence and dose in normalized preview while retaining the authored source", () => {

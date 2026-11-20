@@ -76,6 +76,9 @@ describe("quantity accounting retains the meaning of the supplied constraints", 
     expect(supply(input, 1)).toMatchObject({ totalUnits: 10, unit: "mL" });
     input.limits = [{ scope: "period", amount: { value: 10, unit: "mL" }, period: { value: 24, unit: "h" } }];
     expect(supply(input, 1).totalUnits).toBe(10);
+    input.schedule!.recurrence!.occurrenceDuration = 2;
+    input.limits![0].amount.value = 30;
+    expect(supply(input, 1)).toMatchObject({ totalUnits: 20, unit: "mL" });
   });
 
   it.each([[10, 20], [20, 10], [10, 20, 30]])(
@@ -136,6 +139,22 @@ describe("step and cap planning", () => {
       "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
     ]);
     expect(supply(course, 5).totalUnits).toBe(7);
+  });
+
+  it.each([false, true])("defers capped loading before opening maintenance (repeated=%s)", repeated => {
+    const load = dose(2); load.schedule!.recurrence!.count = 1;
+    load.limits = [{ scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 24, unit: "h" } }];
+    const maintenance = dose(); maintenance.schedule!.recurrence!.clocks = ["09:00:00"];
+    maintenance.schedule!.recurrence!.courseLength = { value: 3, unit: "d" };
+    const course: CanonicalCourse = { kind: "course",
+      ...(repeated ? { cycleInterval: { value: 7, unit: "d" }, cycleCount: 1 } : {}),
+      stages: [{ administrations: [load] }, { administrations: [maintenance] }] };
+    // This record is before the loading phase. It blocks Jan 1's rolling cap,
+    // but cannot satisfy that phase's one required loading administration.
+    const priorDoseTimes = ["2025-12-31T20:00:00Z"];
+    expect(nextDueDoses(course, { ...options, priorDoseTimes, limit: 3 })).toEqual([
+      "2026-01-02T08:00:00+00:00", "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
   });
 
   it("retains accepted monthly-cap history that a later clamped cutoff includes again", () => {

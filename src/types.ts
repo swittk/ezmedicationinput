@@ -407,6 +407,7 @@ export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDurati
 }
 
 export interface FhirR6Timing extends Omit<FhirTiming, "repeat"> {
+  modifierExtension?: FhirExtension[];
   repeat?: FhirR6TimingRepeat;
 }
 
@@ -466,29 +467,88 @@ export type MedicationCondition =
   | { kind: "not"; condition: MedicationCondition }
   | { kind: "all" | "any"; conditions: MedicationCondition[] };
 
-/** FHIR R6 draft DosageCondition compatible subset. */
+/** The pinned R6 DosageCondition value[x] choices are accepted at the wire
+ * boundary. Uninterpreted complex values are retained as source data; accepting
+ * a choice here does not make it executable as a medication predicate. */
 export interface FhirR6DosageCondition extends FhirBackboneElement {
   code: FhirCodeableConcept;
   details?: FhirCodeableConcept;
   operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+  valueBase64Binary?: string;
+  _valueBase64Binary?: FhirPrimitiveElement;
   valueBoolean?: boolean;
-  valueQuantity?: FhirR6Quantity;
-  valueString?: string;
-  /** Current R6 condition value[x] also permits ordinary FHIR scalar,
-   * coded and complex types. Uninterpreted types stay intact on import. */
-  valueInteger?: number;
-  valueDecimal?: number;
-  valueDate?: string;
-  valueDateTime?: string;
-  valueTime?: string;
+  _valueBoolean?: FhirPrimitiveElement;
+  valueCanonical?: string;
+  _valueCanonical?: FhirPrimitiveElement;
   valueCode?: string;
-  valueCoding?: FhirCoding;
+  _valueCode?: FhirPrimitiveElement;
+  valueDate?: string;
+  _valueDate?: FhirPrimitiveElement;
+  valueDateTime?: string;
+  _valueDateTime?: FhirPrimitiveElement;
+  valueDecimal?: number;
+  _valueDecimal?: FhirPrimitiveElement;
+  valueId?: string;
+  _valueId?: FhirPrimitiveElement;
+  valueInstant?: string;
+  _valueInstant?: FhirPrimitiveElement;
+  valueInteger?: number;
+  _valueInteger?: FhirPrimitiveElement;
+  valueInteger64?: string;
+  _valueInteger64?: FhirPrimitiveElement;
+  valueMarkdown?: string;
+  _valueMarkdown?: FhirPrimitiveElement;
+  valueOid?: string;
+  _valueOid?: FhirPrimitiveElement;
+  valuePositiveInt?: number;
+  _valuePositiveInt?: FhirPrimitiveElement;
+  valueString?: string;
+  _valueString?: FhirPrimitiveElement;
+  valueTime?: string;
+  _valueTime?: FhirPrimitiveElement;
+  valueUnsignedInt?: number;
+  _valueUnsignedInt?: FhirPrimitiveElement;
+  valueUri?: string;
+  _valueUri?: FhirPrimitiveElement;
+  valueUrl?: string;
+  _valueUrl?: FhirPrimitiveElement;
+  valueUuid?: string;
+  _valueUuid?: FhirPrimitiveElement;
+  valueAddress?: Record<string, unknown>;
+  valueAge?: FhirR6Quantity;
+  valueAnnotation?: Record<string, unknown>;
+  valueAttachment?: Record<string, unknown>;
   valueCodeableConcept?: FhirCodeableConcept;
-  valueReference?: FhirReference;
-  valueExpression?: FhirExpression;
+  valueCodeableReference?: FhirCodeableReference;
+  valueCoding?: FhirCoding;
+  valueContactPoint?: Record<string, unknown>;
+  valueCount?: FhirR6Quantity;
+  valueDistance?: FhirR6Quantity;
+  valueDuration?: FhirR6Quantity;
+  valueHumanName?: Record<string, unknown>;
+  valueIdentifier?: NonNullable<FhirReference["identifier"]>;
+  valueMoney?: Record<string, unknown>;
+  valuePeriod?: FhirPeriod;
+  valueQuantity?: FhirR6Quantity;
   valueRange?: FhirRange;
   valueRatio?: FhirR6Ratio;
-  valuePeriod?: FhirPeriod;
+  valueRatioRange?: Record<string, unknown>;
+  valueReference?: FhirReference;
+  valueSampledData?: Record<string, unknown>;
+  valueSignature?: Record<string, unknown>;
+  valueTiming?: FhirR6Timing;
+  valueContactDetail?: Record<string, unknown>;
+  valueDataRequirement?: Record<string, unknown>;
+  valueExpression?: FhirExpression;
+  valueParameterDefinition?: Record<string, unknown>;
+  valueRelatedArtifact?: Record<string, unknown>;
+  valueTriggerDefinition?: Record<string, unknown>;
+  valueUsageContext?: Record<string, unknown>;
+  valueAvailability?: Record<string, unknown>;
+  valueExtendedContactDetail?: Record<string, unknown>;
+  valueVirtualServiceDetail?: Record<string, unknown>;
+  valueDosage?: FhirR6Dosage;
+  valueMeta?: Record<string, unknown>;
   text?: string;
 }
 
@@ -1692,6 +1752,8 @@ export interface CanonicalScheduleExpr {
   countMax?: number;
   duration?: number;
   durationMax?: number;
+  /** Preserve an authored duration range even when only one endpoint exists. */
+  durationIsRange?: true;
   durationUnit?: FhirPeriodUnit;
   /** Unit of the upper duration endpoint when distinct from durationUnit. */
   durationMaxUnit?: FhirPeriodUnit;
@@ -2088,7 +2150,7 @@ export interface TotalUnitsResult {
 }
 
 export interface TotalUnitsOptions extends NextDueDoseOptions {
-  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageInstruction | ParseBatchResult;
+  dosage: FhirDosage | readonly EzDosage[] | FhirR6DosageInstructionInput | ParseBatchResult;
   /** Required to resolve per-kg administered doses into an actual quantity. */
   patientWeightKg?: number;
   durationValue: number;

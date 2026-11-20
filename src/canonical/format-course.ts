@@ -343,7 +343,7 @@ export function formatCourseChoices<T>(
       const text = branch.join("; ");
       if (!text) continue;
       if (body) body += words.anySeparator;
-      body += text;
+      body += branch.length > 1 ? `(${text})` : text;
     }
     if (body) output.push(words.choicePrefix + body + ".");
   }
@@ -433,9 +433,10 @@ function formatCanonicalBase(
   style: "short" | "long",
   options?: FormatOptions,
   compiled?: CanonicalSigClause,
-  environment?: CourseFormatEnvironment
+  environment?: CourseFormatEnvironment,
+  source: CanonicalAdministration = a
 ): string {
-  if (a.text?.trim() && !administrationHasClinicalFacts(a)) return a.text;
+  if (a.text?.trim() && !administrationHasClinicalFacts(source)) return a.text;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
   const primary = a.amounts?.[0];
@@ -550,7 +551,7 @@ export function formatCanonicalCourse(
     oneOrCourse.instruction &&
     (options === undefined ||
       options.realizationMode === "roundtrip" ||
-      oneOrCourse.stages.length === 0 ||
+      (oneOrCourse.stages.length === 0 && !courseHasClinicalFacts(oneOrCourse)) ||
       (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
   ) return oneOrCourse.instruction;
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length && !oneOrCourse.safety?.ifExceeded) return "";
@@ -678,7 +679,8 @@ export function formatCanonicalCourse(
           style,
           options,
           display === component ? compiled?.get(component) : undefined,
-          environment
+          environment,
+          component
         );
         const expressions: string[] = [];
         if (hasOffsets && repeat) {
@@ -809,6 +811,8 @@ export function formatCanonicalCourse(
           ? treatmentStepOffsetQuantity(step.start)
           : index === 0
           ? { value: 0, unit: "d" }
+          : startDays !== undefined
+          ? { value: startDays, unit: "d" }
           : treatmentStepOffsetQuantity(oneOrCourse.stages[index - 1].end);
         const endQuantity = treatmentStepOffsetQuantity(step.end);
         if (

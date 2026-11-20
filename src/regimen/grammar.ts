@@ -445,7 +445,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),
-    constraint('left.dimensionalQuantity', f => Boolean(f.left.clause.clinicalQuantity)),
+    constraint('left.explicit-quantity', f => f.left.hasDose || Boolean(f.left.clause.clinicalQuantity)),
     constraint('right.dimensionalQuantity', f => Boolean(f.right.clause.clinicalQuantity)),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },

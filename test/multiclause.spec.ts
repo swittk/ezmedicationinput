@@ -225,9 +225,13 @@ describe("multi-clause parsing", () => {
       includeTimesPerDaySummary: true
     } as const;
 
-    expect(formatSig(details, "long")).not.toContain("stale saved instruction");
+    const defaultPreview = formatSig(details, "long");
+    expect(defaultPreview).toContain("Take 1 tablet orally after breakfast, after lunch and after dinner");
+    expect(defaultPreview).toContain("Take 2 tablets orally after breakfast, after lunch and after dinner");
+    expect(defaultPreview).not.toContain("stale saved instruction");
     const formatted = formatSig(details, "long", options);
     expect(formatted).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง");
+    expect(formatted).toContain("รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง");
     expect(formatted).not.toContain("stale saved instruction");
 
     const imported = fromFhir(details, options);
@@ -236,8 +240,12 @@ describe("multi-clause parsing", () => {
     expect(imported.fhirNext.renderedInstruction).toBe("stale saved instruction");
 
     const advanced = { ...details, repeatCycle: { value: 28, unit: "d" } };
-    expect(formatSig(advanced, "long", options)).not.toContain("stale saved instruction");
-    expect(fromFhir(advanced, options).longText).toBe(formatSig(advanced, "long", options));
+    const advancedPreview = formatSig(advanced, "long", options);
+    expect(advancedPreview).toContain("รับประทานครั้งละ 1 เม็ด วันละ 3 ครั้ง");
+    expect(advancedPreview).toContain("รับประทานครั้งละ 2 เม็ด วันละ 3 ครั้ง");
+    expect(advancedPreview).toContain("ทุก 28 วัน");
+    expect(advancedPreview).not.toContain("stale saved instruction");
+    expect(fromFhir(advanced, options).longText).toBe(advancedPreview);
     expect(fromFhir(advanced, options).fhirNext.renderedInstruction).toBe("stale saved instruction");
   });
 

@@ -132,7 +132,7 @@ describe("R5 source dose identity after live edits", () => {
     expect(dose?.value).toBe(1);
     dose!.value = 2;
     expect(display()).not.toBe(source);
-    expect(display()).toMatch(/(?:2|สอง)/u);
+    expect(display()).toMatch(/(?:^|[^\d])(?:2|สอง)\s*หยด/u);
     dose!.value = 1;
     expect(display()).toBe(source);
     const originalUnit = dose!.unit, originalCode = dose!.code;
@@ -400,7 +400,7 @@ describe("November 18 review: dose ranges own upper-bound rolling-cap quantity",
       ...options, dosage: course, durationValue: 2,
       durationUnit: FhirPeriodUnit.Day,
     });
-    expect(supply.quantityKind).toBe("maximum");
+    expect(supply).toMatchObject({ totalUnits: 12, unit: "tab", quantityKind: "maximum" });
     expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
     expect(course.stages[0].administrations[0].amounts[0].range.low.value).toBe(1);
   });

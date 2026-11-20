@@ -90,10 +90,14 @@ Use `items[0].fhir` when displaying or editing a single dosage, and
 accepts an array of dosages.
 
 The R5 array under `fhir` remains the compatibility/editing surface.
-The `fhirNext` object follows **FHIR R6 6.0.0-snapshot1 (November 13, 2026)**:
-`DosageInstruction.step[].component[]` contains R6 `Dosage` values.
-Use `fromFhir(fhirNext)` to import that **current R6** structure.
-Older R6 `DosageDetails` drafts are not supported by the R6 importer.
+The `fhirNext` object follows the **pinned HL7 R6 CI build dated November 13, 2026**,
+whose profiles use the version label `6.0.0-snapshot1`. The
+[checked-in contract](fhir/r6/official-snapshot1-20261113-contract.json) records
+the supported schema: `DosageInstruction.step[].component[]` contains R6
+`Dosage` values. Use `fromFhir(fhirNext)` to import that structure.
+The [published September 2026 snapshot](https://www.hl7.org/fhir/6.0.0-snapshot1/dosage.html)
+uses the same version label but defines `DosageDetails`; that different schema
+is not accepted by this importer.
 The R5 editing/export APIs are unchanged; the current reader accepts previously
 saved R5 rows without a downstream storage migration. New exports encode an
 approximation on `SimpleQuantity` using the EMA quantity-operator coding. The

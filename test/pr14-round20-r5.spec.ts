@@ -11,6 +11,8 @@ import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
 } from "../src/fhir-quantity-operator";
 
+import { DOSAGE_DETAILS_R5_URL, DOSAGE_RECONCILIATION_SOURCE_URL, decodeR5RetainedFields } from "../src/dosage-course";
+
 const persisted = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const q = (value: number) => ({ value, unit: "tab" });
 const course = (extras: Partial<FhirR6Dosage> = {}): FhirR6DosageInstruction => ({
@@ -204,7 +206,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
 
   it("does not combine stale row text with a current text-only edit", () => {
     const edit = persisted(fromDosageDetails({
-      renderedInstruction: "Take one in morning; take one in evening",
+      renderedInstruction: "Two administration times were prescribed",
       step: [{ component: [
         { text: "Take one in morning", doseAndRate: [{ doseQuantity: q(1) }] },
         { text: "Take one in evening", doseAndRate: [{ doseQuantity: q(1) }] },
@@ -217,7 +219,11 @@ describe("R5 edit ownership and quantity boundaries", () => {
     expect(actual.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
     expect(actual.step[0].component[0].text).toBeUndefined();
     expect(actual.step[0].component[1].text).toBe("Take one at bedtime");
-    expect(JSON.stringify(actual.extension)).toContain("Take one in morning");
+    const retiredRows: ReturnType<typeof decodeR5RetainedFields>[] = [];
+    for (const item of actual.extension ?? []) if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+      for (const source of item.extension ?? []) if (source.url === DOSAGE_DETAILS_R5_URL)
+        retiredRows.push(decodeR5RetainedFields(source));
+    expect(retiredRows).toContainEqual({ rowIndex: 0, sequence: 1, component: { text: "Take one in morning" } });
   });
   it("honors whole-course text-only edits while all row text remains current", () => {
     const edit = persisted(fromDosageDetails({
@@ -237,14 +243,14 @@ describe("R5 edit ownership and quantity boundaries", () => {
       frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, startOffset: { value: 8, unit: "h", code: "h" },
     } } }));
     const changed = persisted(rows);
-    // Changing the live cadence retires offsets tied to its old period.
-    changed[0].timing!.repeat!.frequency = 3;
+    // Changing the live period retires offsets tied to its old window.
+    changed[0].timing!.repeat!.period = 2;
     const output = toFhirR5Dosages(changed);
     expect(toDosageDetails(output).step[0].component[0].timing!.repeat!.startOffset).toBeUndefined();
     // Returning to the earlier cadence later must not revive a retired marker.
-    output[0].timing!.repeat!.frequency = 2;
+    output[0].timing!.repeat!.period = 1;
     const next = toDosageDetails(persisted(output)).step[0].component[0];
-    expect(next.timing!.repeat!.frequency).toBe(2);
+    expect(next.timing!.repeat!.period).toBe(1);
     expect(next.timing!.repeat!.startOffset).toBeUndefined();
     expect(toDosageDetails(rows).step[0].component[0].timing!.repeat!.startOffset).toMatchObject({ value: 8 });
   });
@@ -306,16 +312,17 @@ describe("R5 edit ownership and quantity boundaries", () => {
     delete projected.comparator;
     expect(quantityFromR5(projected)!.comparator).toBeUndefined();
   });
-  it("updates an existing enriched EMA annotation without adding a second operator", () => {
-    const projected = quantityForR5({ value: 7, comparator: "<=", extension: [
-      { url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL, id: "operator", valueCoding: {
-        system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055", display: "approximately equal to",
-      } },
-      { url: "urn:test:note", valueString: "keep" },
-    ] })!;
+  it("keeps a native operator active and its enriched previous EMA annotation inert", () => {
+    const authored = { url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL, id: "operator", valueCoding: {
+      system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055", display: "approximately equal to",
+    } };
+    const note = { url: "urn:test:note", valueString: "keep" };
+    const projected = quantityForR5({ value: 7, comparator: "<=", extension: [authored, note] })!;
     expect(projected.comparator).toBe("<=");
-    expect(projected.extension).toHaveLength(2);
-    expect(projected.extension![0]).toMatchObject({ id: "operator",
-      valueCoding: { code: "100000000052", display: "less than or equal to" } });
+    expect(projected.extension).toEqual([
+      { url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", extension: [authored] }, note,
+    ]);
+    delete projected.comparator;
+    expect(getQuantityComparator(projected)).toBeUndefined();
   });
 });

@@ -16,15 +16,15 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
   // Stateless script tests can safely reuse the registered expression.
   // Only /g or /y must lose their mutation-prone lastIndex behavior.
   const normalized: MedicationSurfaceSegmenter = Object.assign({}, segmenter);
+  // The typed provider may expose a non-enumerable script property.
+  const script = normalized.script ?? segmenter.script;
+  normalized.script = script.global || script.sticky
+    ? new RegExp(script.source, script.flags.replace(/[gy]/g, "")) : script;
   const prototype = Object.getPrototypeOf(segmenter);
   if (prototype !== Object.prototype && prototype !== null) {
     normalized.locale = segmenter.locale;
-    normalized.script = segmenter.script;
     normalized.segment = segmenter.segment.bind(segmenter);
   }
-  const script = normalized.script;
-  if (script.global || script.sticky)
-    normalized.script = new RegExp(script.source, script.flags.replace(/[gy]/g, ""));
   const locale = normalized.locale;
   const existing=SEGMENTER_INDEX.get(locale);
   if(existing!==undefined)SEGMENTERS[existing]=normalized;

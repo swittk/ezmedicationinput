@@ -154,11 +154,12 @@ function retentionForAdministration(
       if (value.expression) projected.doseExpression = value.expression;
       if (value.rateExpression) projected.rateExpression = value.rateExpression;
     }
-    const hasDose = !!(value.expression || value.quantity?.comparator);
+    const hasDose = !!(value.expression || value.quantity?.comparator ||
+      value.range?.low?.comparator || value.range?.high?.comparator);
     const hasRate = !!(
       value.rateExpression ||
-      value.rate?.comparator ||
-      value.rateRatio?.numerator?.comparator === "~"
+      value.rate?.comparator || value.rateRange?.low?.comparator || value.rateRange?.high?.comparator ||
+      value.rateRatio?.denominator?.comparator || value.rateRatio?.numerator?.comparator === "~"
     );
     if ((hasDose || hasRate) && !retained) {
       retained = [];
@@ -186,9 +187,13 @@ function retentionForAdministration(
       ...(value.role ? { type: value.role } : {}),
       ...(value.expression ? { doseExpression: value.expression } : {}),
       ...(value.quantity?.comparator ? { doseQuantity: simpleQuantityForR5(coded(value.quantity, compiled)) } : {}),
+      ...(value.range?.low?.comparator || value.range?.high?.comparator
+        ? { doseRange: projected?.doseRange } : {}),
       ...(value.rateExpression ? { rateExpression: value.rateExpression } : {}),
       ...(value.rate?.comparator ? { rateQuantity: simpleQuantityForR5(coded(value.rate, compiled)) } : {}),
-      ...(value.rateRatio?.numerator?.comparator === "~"
+      ...(value.rateRange?.low?.comparator || value.rateRange?.high?.comparator
+        ? { rateRange: projected?.rateRange } : {}),
+      ...(value.rateRatio?.denominator?.comparator || value.rateRatio?.numerator?.comparator === "~"
         ? {
             rateRatio: {
               ...value.rateRatio,
@@ -293,9 +298,9 @@ export function projectNativeR5Course(
         if (
           value.expression ||
           value.rateExpression ||
-          value.quantity?.comparator ||
-          value.rate?.comparator ||
-          value.rateRatio?.numerator?.comparator === "~"
+          value.quantity?.comparator || value.range?.low?.comparator || value.range?.high?.comparator ||
+          value.rate?.comparator || value.rateRange?.low?.comparator || value.rateRange?.high?.comparator ||
+          value.rateRatio?.denominator?.comparator || value.rateRatio?.numerator?.comparator === "~"
         ) {
           needsBridge = true;
           break;

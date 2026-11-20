@@ -1,3 +1,4 @@
+import { objectValues } from "./utils/object";
 import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
@@ -1144,14 +1145,25 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
     parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
   ));
-  if (relIndex >= 0 && relIndex + 1 < relationTargetEnd) {
+  let targetIndex = relIndex;
+  let targetEnd = relationTargetEnd;
+  let targetRelation = relation;
+  while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
     const target = argumentFromParts(
-      parts, relIndex + 1, relationTargetEnd, input, AdviceArgumentRole.Destination, options
+      parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
     );
-    // Constructional relation ownership is independent of a noun's lexical
-    // role: saline and water may both be Substance, but only water fills WITH.
-    if (target) target.relation = relation;
+    // Each local complement owns its relation, independently of noun role:
+    // saline WITH water TO 100 mL retains both targets.
+    if (target) target.relation = targetRelation;
     pushArgument(args, target);
+    if (targetEnd >= segmentEnd) break;
+    targetIndex = targetEnd;
+    targetRelation = actionArgumentRelation(key(parts[targetIndex]));
+    // Temporal and conditional daughters are composed by the shared frame parser.
+    if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
+        relationHasGrammarFeature(targetRelation, "conditionalTail")) break;
+    const next = relationIndex(parts, targetIndex + 1, segmentEnd);
+    targetEnd = next >= 0 ? next : segmentEnd;
   }
   return { args };
 };
@@ -3101,20 +3113,19 @@ function promoteDoseFromDefiningAction(
   options?: ParseOptions
 ): void {
   if (clause.dose?.value !== undefined || clause.dose?.range) return;
-  const candidates = actions
-    .filter((action) => resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose)
-    .map((action) => action.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity)
-    .filter((quantity): quantity is NonNullable<AdviceArgument["quantity"]> => Boolean(quantity));
-  if (!candidates.length) return;
-  const first = candidates[0];
-  const same = candidates.every((candidate) =>
-    candidate.value === first.value &&
-    candidate.unit === first.unit &&
-    candidate.comparator === first.comparator &&
-    candidate.range?.low === first.range?.low &&
-    candidate.range?.high === first.range?.high
-  );
-  if (!same) return;
+  let first: AdviceArgument["quantity"];
+  for (const action of actions) {
+    if (action.polarity === AdvicePolarity.Negate ||
+        !resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) continue;
+    const quantity = action.args.find(arg =>
+      arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity;
+    if (!quantity) continue;
+    if (!first) first = quantity;
+    else if (quantity.value !== first.value || quantity.unit !== first.unit ||
+        quantity.comparator !== first.comparator ||
+        quantity.range?.low !== first.range?.low || quantity.range?.high !== first.range?.high) return;
+  }
+  if (!first) return;
   clause.dose = {
     value: first.value,
     range: first.range ? { ...first.range } : undefined,
@@ -3666,9 +3677,19 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
-  const destination = relation && relationTarget
-    ? joinLocalizedTokens(c.locale, [relation, relationTarget])
-    : undefined;
+  const destinations: string[] = [];
+  if (relation && relationTarget) destinations.push(
+    joinLocalizedTokens(c.locale, [relation, relationTarget]));
+  for (const arg of c.frame.args) {
+    if (arg === targetArgument || !arg.relation ||
+        relationHasSemanticClass(arg.relation, "temporal") ||
+        relationHasGrammarFeature(arg.relation, "conditionalTail")) continue;
+    const text = translatedArgument(arg, c.locale);
+    if (text) destinations.push(joinLocalizedTokens(c.locale, [
+      localizeAdviceRelation(arg.relation, c.locale) ?? arg.relation, text
+    ]));
+  }
+  const destination = joinLocalizedTokens(c.locale, destinations);
   const materialValue = targetArgument
     ? materialArgument && translatedArgument(materialArgument, c.locale)
     : c.material ?? (!relation || c.destination ? c.substance : undefined);
@@ -3779,6 +3800,7 @@ export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): str
 export function realizeRichPrimaryWithCanonicalDose(
   frame: AdviceFrame, clause: CanonicalSigClause, locale: string
 ): string {
+  frame = frameWithoutSupersededTime(frame, clause);
   const dose = clause.dose;
   if (!dose || frame.args.some(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
@@ -4123,6 +4145,27 @@ function timeArgumentCoveredBySchedule(
   return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
 }
 
+const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
+
+/** Keep current event timing authoritative in a display-only primary frame.
+ * Opaque temporal wording remains source content; only a typed event that
+ * the edited schedule no longer covers is superseded. */
+function frameWithoutSupersededTime(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
+  if (clause.sourceProjectionVerified !== false ||
+      !actionMatchesCanonicalMethod(frame, clause)) return frame;
+  const args: AdviceArgument[] = [];
+  let changed = false;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Time && arg.normalized &&
+        KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
+        !timeArgumentCoveredBySchedule(frame, arg, clause)) changed = true;
+    else args.push(arg);
+  }
+  // The schedule may own a clock that is absent from the graph's Time slots.
+  // Failed source proof also forbids replaying that stale raw fallback.
+  return { ...frame, sourceText: "", args: changed ? args : frame.args };
+}
+
 /**
  * A rich administration frame and its canonical HPSG schedule can refer to
  * the same meal event using different typed relations: CM + before = ACM.
@@ -4209,25 +4252,37 @@ function frameWithoutSupersededAmount(
         !quantityCoveredByDose(arg, currentDose)) continue;
     if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
       const text = arg.text ?? "";
-      const old = superseded.find(amount => {
+      let sourceAmount: AdviceArgument | undefined;
+      let labelOffset = -1;
+      for (const amount of superseded) {
         const label = amount.text ?? "";
         const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
-        return at >= 0 &&
+        const hasLabel = at >= 0 &&
           (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
           (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length]));
-      });
-      if (old?.text) {
-        const offset = text.toLowerCase().indexOf(old.text.toLowerCase());
-        const remaining = (text.slice(0, offset) + " " +
-          text.slice(offset + old.text.length)).replace(/^\s*of\s+/i, "").trim();
+        // Disjoint source spans identify independent quantities even when
+        // their values and units happen to match.
+        const ownsSource = arg.span && amount.span
+          ? arg.span.start <= amount.span.start && arg.span.end >= amount.span.end
+          : hasLabel;
+        if (ownsSource) {
+          sourceAmount = amount;
+          labelOffset = hasLabel ? at : -1;
+          break;
+        }
+      }
+      if (sourceAmount) {
+        const remaining = labelOffset >= 0
+          ? (text.slice(0, labelOffset) + " " +
+              text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
+          : text;
         if (!remaining) continue;
-        const sharesSupersededQuantity = superseded.some(amount =>
-          amount.quantity && arg.quantity &&
-          amount.quantity.value === arg.quantity.value &&
-          amount.quantity.unit === arg.quantity.unit &&
-          amount.quantity.comparator === arg.quantity.comparator &&
-          amount.quantity.range?.low === arg.quantity.range?.low &&
-          amount.quantity.range?.high === arg.quantity.range?.high);
+        const quantity = sourceAmount.quantity;
+        const sharesSupersededQuantity = quantity && arg.quantity &&
+          quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
+          quantity.comparator === arg.quantity.comparator &&
+          quantity.range?.low === arg.quantity.range?.low &&
+          quantity.range?.high === arg.quantity.range?.high;
         args.push({ ...arg,
           ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
           text: remaining, normalized: remaining, i18n: undefined });
