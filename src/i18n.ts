@@ -158,8 +158,8 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
   if (cached?.exact === exact && cached.base === base) return cached.localization;
   const resolved: SigLocalization = {
     locale: exact.locale,
-    formatShort: exact.formatShort ?? base.formatShort,
-    formatLong: exact.formatLong ?? base.formatLong,
+    formatShort: exact.formatShort?.bind(exact) ?? base.formatShort?.bind(base),
+    formatLong: exact.formatLong?.bind(exact) ?? base.formatLong?.bind(base),
     course: exact.course ?? base.course,
   };
   RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {

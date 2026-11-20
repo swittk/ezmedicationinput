@@ -8,12 +8,12 @@ import {
 } from "../src/index";
 import { courseFromR6, courseToR6, courseToR5, importCanonicalCourse } from "../src/adapters/canonical-course";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5 } from "../src/fhir-quantity-operator";
-import { R6_DRAFT_STEPS_SOURCE_URL } from "../src/adapters/r6-editable-metadata";
+import { R6_DRAFT_STEPS_SOURCE_URL, R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 import { numericAdministrationLimits, type CanonicalCourse } from "../src/canonical/course";
 import { EventTiming, FhirPeriodUnit, type EzCourseMetadata, type FhirDosage, type FhirR6DosageInstruction, type FhirR6DosageSafety, type FhirR6DosageCondition, type FormatOptions, type FhirR6DoseLimit } from "../src/types";
 
 import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL } from "../src/fhir";
-import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
+import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, decodeR6SourceMetadata } from "../src/dosage-course";
 import { getSuggestLocaleAdapter, registerSuggestLocaleAdapter } from "../src/suggest-locale-adapter";
 
 const tablet = () => ({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] });
@@ -654,4 +654,34 @@ it("keeps a metadata-only R6 header at the explicit interchange boundary", () =>
   expect(wire.step).toEqual([]);
   expect(courseFromR6(imported.fhirNext).stages).toEqual([]);
   expect(toDosageDetails(persist(toFhirR5Dosages(imported.fhirNext)))).toEqual(metadata);
+});
+
+
+describe("round26 single-step safety modifier scope", () => {
+  it.each(["step", "course", "both"] as const)("keeps %s policy modifiers active without qualifying the other policy", scope => {
+    const courseModifier = { url: "urn:test:course-policy-qualifier", valueString: "course policy only" };
+    const stepModifier = { url: "urn:test:step-policy-qualifier", valueString: "step policy only" };
+    const courseSafety: FhirR6DosageSafety = { id: "course-policy", ifExceeded: "Call clinic",
+      doseLimit: [{ id: "course-limit", scope: "period", valueQuantity: { value: 8, unit: "tab" }, period: { value: 1, unit: "d" } }],
+      ...(scope !== "step" ? { modifierExtension: [courseModifier] } : {}),
+    };
+    const stepSafety: FhirR6DosageSafety = { id: "step-policy", ifExceeded: "Hold next dose",
+      doseLimit: [{ id: "step-limit", scope: "administration", valueQuantity: { value: 2, unit: "tab" } }],
+      ...(scope !== "course" ? { modifierExtension: [stepModifier] } : {}),
+    };
+    let wire = toDosageDetails([{ ...tablet(), sequence: 1 }], undefined,
+      { safety: courseSafety, step: [{ sequence: 1, safety: stepSafety }] });
+    for (let save = 0; save < 3; save++) {
+      expect(wire.step![0].safety).toBeUndefined();
+      expect(wire.safety!.doseLimit).toEqual([...courseSafety.doseLimit!, ...stepSafety.doseLimit!]);
+      expect(wire.safety!.modifierExtension).toHaveLength(1);
+      const active = wire.safety!.modifierExtension![0];
+      expect(active.url).toBe(R6_SCOPED_SAFETY_MODIFIER_URL);
+      expect(decodeR6SourceMetadata(active, "safety")).toEqual({ course: courseSafety, step: stepSafety });
+      const edit = fromDosageDetails(persist(wire));
+      expect(edit.course.safety).toEqual(courseSafety);
+      expect(edit.course.step![0].safety).toEqual(stepSafety);
+      wire = toDosageDetails(edit.dosages, undefined, edit.course);
+    }
+  });
 });

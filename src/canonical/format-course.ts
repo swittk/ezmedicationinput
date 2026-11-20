@@ -10,8 +10,9 @@ import type {
   CanonicalRange,
   CanonicalExpression,
   CanonicalDoseLimit,
+  RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { getDoseQuantityUnit } from "../maps";
 import { formatCanonicalClause } from "../format";
@@ -137,6 +138,15 @@ function exactCourseDays(quantity: CanonicalMeasure | undefined): number | undef
   return days !== undefined && Number.isInteger(days) ? days : undefined;
 }
 
+/** Adapt exact display offsets to the shared conservative phase ordering. */
+function treatmentPosition(quantity: CanonicalMeasure): RegimenPosition | undefined {
+  const days = exactCourseDays(quantity);
+  if (days !== undefined) return { unit: "d", value: days };
+  const unit = quantity.code ?? quantity.unit, value = quantity.value;
+  return value !== undefined && Number.isInteger(value) && value >= 0 && (unit === "mo" || unit === "a")
+    ? { unit: "mo", value: unit === "a" ? value * 12 : value } : undefined;
+}
+
 /** Find gaps in the union of all typed course windows, not between adjacent rows.
  * An open-ended or unresolved parallel stage cannot license a global withholding instruction.
  * @param windows Resolved treatment-day windows for every nonempty step.
@@ -246,6 +256,32 @@ function treatmentBoundaryRangeText(
     : lower ? (low?.comparator ? "" : ">=") + lower
     : high?.comparator ? upper! : words.upTo(upper!);
   return words.afterTreatmentStart(range);
+}
+
+/** Show a known external event and displacement without inventing its date. */
+function boundaryEventText(
+  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
+): string | undefined {
+  if (!boundary || boundary.anchor === "treatment-start") return undefined;
+  const event = boundary.contextCode?.text ?? boundary.contextCode?.coding?.[0]?.display ??
+    boundary.contextReference?.display ?? boundary.contextReference?.reference ??
+    boundary.contextDefinition ?? boundary.contextPath;
+  const quantity = boundary.displacement;
+  if (quantity) {
+    const before = quantity.value !== undefined && quantity.value < 0 && !getQuantityComparator(quantity);
+    const offset = formatCourseTimeQuantity(before ? { ...quantity, value: -quantity.value! } : quantity, words);
+    if (offset) return words.relativeEvent(offset, event, before);
+  }
+  const range = boundary.displacementRange;
+  if (range) {
+    const lower = range.low && formatCourseTimeQuantity(range.low, words);
+    const upper = range.high && formatCourseTimeQuantity(range.high, words);
+    const offset = lower && upper ? lower + " – " + upper
+      : lower ? (range.low?.comparator ? "" : ">=") + lower
+      : upper ? (range.high?.comparator ? "" : "<=") + upper : undefined;
+    if (offset) return words.relativeEvent(offset, event, false);
+  }
+  return event;
 }
 
 function formatCalendarStepWindow(
@@ -403,7 +439,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
-      a.limits?.length || a.safety || a.choice || a.phaseOrigin || a.anchoredLength ||
+      a.limits?.length || a.safety || a.choice || a.phaseOrigin || a.phaseStart || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
   const timing = a.schedule;
   if (timing?.explicitEvents?.length || timing?.code) return true;
@@ -554,11 +590,17 @@ export function formatCanonicalCourse(
       (oneOrCourse.stages.length === 0 && !courseHasClinicalFacts(oneOrCourse)) ||
       (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
   ) return oneOrCourse.instruction;
-  if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length && !oneOrCourse.safety?.ifExceeded) return "";
+  if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length &&
+      !oneOrCourse.safety?.ifExceeded && !oneOrCourse.cycleInterval &&
+      oneOrCourse.cycleCount === undefined) return "";
   const environment = courseEnvironment(options),
     words = environment.words;
-  if (oneOrCourse.stages.length === 0)
-    return appendDoseLimits("", oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
+  if (oneOrCourse.stages.length === 0) {
+    const repetition = oneOrCourse.cycleInterval
+      ? formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount)
+      : oneOrCourse.cycleCount === undefined ? "" : words.repeatCount(oneOrCourse.cycleCount);
+    return appendDoseLimits(repetition, oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
+  }
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
   if (
@@ -569,6 +611,7 @@ export function formatCanonicalCourse(
     only.count === undefined &&
     !oneOrCourse.cycleInterval &&
     oneOrCourse.cycleCount === undefined &&
+    !administration.phaseStart && !administration.phaseOrigin?.value &&
     !administration.choice
   ) {
     const recurrence = administration.schedule?.recurrence;
@@ -650,14 +693,14 @@ export function formatCanonicalCourse(
           } = display.schedule.recurrence;
           display = { ...display, schedule: { ...display.schedule, recurrence: rest } };
         }
-        // R5 consumers must see the numeric value, but an R6 display must
-        // not first state an exact dose and then its qualified "~" dose.
-        // Suppress only that duplicate in this temporary display projection.
+        // The clause owns the first dose, including its qualifier and target.
+        // Supplemental entries and rate qualifiers are rendered below without
+        // duplicating an unqualified value in the clause.
         if (
           display.amounts &&
           component.amounts?.some(
-            (amount) =>
-              amount.quantity?.comparator ||
+            (amount, index) =>
+              index > 0 && amount.quantity?.comparator ||
               amount.rate?.comparator ||
               amount.rateRatio?.numerator?.comparator === "~"
           )
@@ -667,7 +710,7 @@ export function formatCanonicalCourse(
             amounts: display.amounts.map((amount, i) => {
               const source = component.amounts?.[i];
               const clean = { ...amount };
-              if (source?.quantity?.comparator) delete clean.quantity;
+              if (i > 0 && source?.quantity?.comparator) delete clean.quantity;
               if (source?.rate?.comparator) delete clean.rate;
               if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
               return clean;
@@ -735,11 +778,12 @@ export function formatCanonicalCourse(
             expressions.push(words.endsWithinPeriod(offset, periodContext));
           }
         }
-        for (const amount of component.amounts ?? []) {
+        for (let amountIndex = 0; amountIndex < (component.amounts?.length ?? 0); amountIndex++) {
+          const amount = component.amounts![amountIndex];
           // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
           // Keep their actual amount visible in source-less R6 suggestions,
           // without introducing invalid R5 dose/rate choices.
-          if (amount.quantity?.comparator && amount.quantity.value !== undefined) {
+          if (amountIndex > 0 && amount.quantity?.comparator && amount.quantity.value !== undefined) {
             expressions.push(
               words.doseLabel +
                 amount.quantity.comparator +
@@ -790,7 +834,25 @@ export function formatCanonicalCourse(
           if (amount.rateExpression)
             expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate", words));
         }
-        return joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+        const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+        let memberTiming = component.phaseStart
+          ? words.reviewTiming(component.phaseStart.description ?? boundaryEventText(component.phaseStart, words))
+          : undefined;
+        const origin = component.phaseOrigin;
+        if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
+          const stageOrigin = treatmentStepOffsetQuantity(step.start);
+          let stageCoversOrigin = false;
+          if (stageOrigin && !getQuantityComparator(stageOrigin) && !getQuantityComparator(origin)) {
+            const memberPosition = treatmentPosition(origin), stagePosition = treatmentPosition(stageOrigin);
+            const order = memberPosition && stagePosition ? compareRegimenPositions(stagePosition, memberPosition) : undefined;
+            stageCoversOrigin = order === 0 || order === 1 ||
+              (stageOrigin.code ?? stageOrigin.unit) === (origin.code ?? origin.unit) &&
+              stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
+          }
+          if (!stageCoversOrigin) memberTiming = words.calendarWindow(
+            words.afterTreatmentStart(formatCourseTimeQuantity(origin, words)), undefined);
+        }
+        return memberTiming ? memberTiming + ": " + body : body;
       },
       (member) => member.choice,
       words,
@@ -837,9 +899,9 @@ export function formatCanonicalCourse(
             timing = words.calendarWindow(startRange ?? point(startQuantity), endRange ?? point(endQuantity));
           } else {
             const source = [
-              step.start?.description ?? startRange ??
+              step.start?.description ?? startRange ?? boundaryEventText(step.start, words) ??
                 (startQuantity ? formatCalendarStepWindow(startQuantity, undefined, words) : undefined),
-              step.end?.description ?? endRange ??
+              step.end?.description ?? endRange ?? boundaryEventText(step.end, words) ??
                 (endQuantity ? formatCalendarStepWindow(undefined, endQuantity, words) : undefined)
             ].filter((value): value is string => Boolean(value?.trim())).join("; ");
             timing = words.reviewTiming(source || undefined);

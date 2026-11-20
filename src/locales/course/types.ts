@@ -38,6 +38,7 @@ export interface CourseLanguage {
   startsWithinPeriod(offset: string, context: string): string;
   endsWithinPeriod(offset: string, context: string): string;
   afterTreatmentStart(offset: string): string;
+  relativeEvent(offset: string, event: string | undefined, before: boolean): string;
   calendarWindow(start?: string, end?: string): string;
   calendarEvents(events: readonly string[]): string;
   reviewTiming(source?: string): string;

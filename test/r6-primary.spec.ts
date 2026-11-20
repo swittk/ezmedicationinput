@@ -27,6 +27,7 @@ import {
   setDosageAlternativeChoice, buildDosageAlternativeChoiceStructureDefinition
 } from "../src/dosage-course";
 
+import { COURSE_CYCLE_COUNT_EXTENSION_URL } from "../src/fhir-course-cycle-count";
 import { getQuantityComparator, quantityForR5, quantityFromR5, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 
 describe("EZMED extended R5 dosage and R6 projection", () => {
@@ -2876,10 +2877,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     });
     expect(JSON.stringify(rows)).not.toContain('"comparator":"~"');
     expect(JSON.stringify(rows)).toContain('"100000000055"');
-    expect(formatSig(course, "long", { locale: "en" })).toContain("Dose: ~1 tab");
-    expect(fromFhir(course, { locale: "en" }).items[0].longText).toContain("Dose: ~1 tab");
+    expect(formatSig(course, "long", { locale: "en" })).toContain("approximately 1 tablet");
+    expect(fromFhir(course, { locale: "en" }).items[0].longText).toContain("approximately 1 tablet");
     expect(formatSig(course, "long", { locale: "en" })).toContain("Rate: >=4 mL/h");
-    expect(fromFhir(course, { locale: "th" }).longText).toContain("~1 tab");
+    expect(fromFhir(course, { locale: "th" }).longText).toContain("ประมาณ 1 เม็ด");
     expect(toDosageDetails(rows)).toEqual(course);
     const edited = cloneStructuredValue(rows);
     edited[0].doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
@@ -3132,17 +3133,17 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }] }]
     };
     const imported = fromFhir(course);
-    expect(imported.longText).toContain("~1 tab");
+    expect(imported.longText).toContain("approximately 1 tablet");
     expect(imported.fhirNext.renderedInstruction).toBe(course.renderedInstruction);
-    expect(imported.items[0].longText).toContain("~1 tab");
-    expect(imported.items[0].shortText).toContain("~1 tab");
+    expect(imported.items[0].longText).toContain("approximately 1 tablet");
+    expect(imported.items[0].shortText).toMatch(/~1\s*(?:tab|tablet)/u);
     // Component text remains source evidence while current quantity facts own the preview.
     const sourced: FhirR6DosageInstruction = {
       ...course, step: [{ component: [{
         ...course.step[0].component[0], text: "Approximately one tablet as directed."
       }] }]
     };
-    expect(fromFhir(sourced).items[0].longText).toContain("~1 tab");
+    expect(fromFhir(sourced).items[0].longText).toContain("approximately 1 tablet");
     expect(fromFhir(sourced).fhirNext.step[0].component[0].text).toBe("Approximately one tablet as directed.");
   });
 
@@ -4159,7 +4160,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const native: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, unit: "tab", comparator: "~" })! }]
     }] }] };
-    expect(fromFhir(native).items[0].longText).toContain("~1 tab");
+    expect(fromFhir(native).items[0].longText).toContain("approximately 1 tablet");
   });
 
   it("keeps weekday-filtered weekly supply aligned to dates and R6 period offsets effective", () => {
@@ -4355,7 +4356,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(formatSig(course, "long", { locale: "en" })).toContain(text);
       expect(fromFhir(course).items[0].longText).toContain(text);
     }
-    expect(formatSig(mixed, "long", { locale: "en" })).toContain("Dose: ~500 mL");
+    expect(formatSig(mixed, "long", { locale: "en" })).toContain("approximately 500 mL");
     expect(formatSig(mixed, "long", { locale: "en" })).not.toContain("undefined");
   });
 
@@ -5128,12 +5129,18 @@ describe("review family contract: active native comparator owns imported quantit
     expect(getQuantityComparator(component.doseAndRate?.[0].doseQuantity)).toBe(comparator);
     expect(getQuantityComparator(component.doseAndRate?.[0].rateQuantity)).toBe(comparator);
     expect(component.timing?.repeat?.boundsDuration?.comparator).toBe(comparator);
-    expect(component.safety?.doseLimit?.every(x => x.valueQuantity?.comparator === comparator)).toBe(true);
+    expect(component.safety?.doseLimit).toHaveLength(3);
+    for (const scope of ["administration", "period", "lifetime"]) {
+      expect(component.safety?.doseLimit?.find(x => x.scope === scope)?.valueQuantity)
+        .toMatchObject({ value: 5, unit: "mg", comparator });
+    }
     expect(component.safety?.doseLimit?.find(x => x.scope === "period")?.period?.comparator).toBe(comparator);
     const back = toFhirR5Dosages({ step: [{ component: [component] }] })[0];
     expect(back.doseAndRate?.[0].doseQuantity?.value).toBe(5);
     expect(getQuantityComparator(back.doseAndRate?.[0].doseQuantity)).toBe(comparator);
     expect(getQuantityComparator(back.maxDosePerAdministration)).toBe(comparator);
+    expect(back.maxDosePerLifetime).toMatchObject({ value: 5, unit: "mg" });
+    expect(getQuantityComparator(back.maxDosePerLifetime)).toBe(comparator);
   });
 });
 
@@ -6404,5 +6411,54 @@ describe("November 17 review: historical retained rateRatio bridge", () => {
     };
     const rebuilt = decodeCourseDetails(encoded);
     expect(rebuilt?.step[0].component[0].doseAndRate?.[0].rateRatio).toEqual(ratio);
+  });
+});
+
+
+describe("review 26 scoped safety and cycle controls", () => {
+  it.each(["~", "<="] as const)("reopens an unchanged annotated %s sole-step safety at its stage", comparator => {
+    const source: FhirR6DosageInstruction = { step: [{
+      safety: { doseLimit: [{ scope: "administration", valueQuantity: {
+        value: 2, unit: "tab", comparator,
+        _comparator: { id: "authored-qualifier", extension: [{ url: "urn:test:qualifier", valueString: "authored" }] }
+      } }] },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const normalized = toDosageDetails([{ sequence: 1, doseAndRate: source.step![0].component[0].doseAndRate }],
+      undefined, { step: [{ sequence: 1, safety: source.step![0].safety }] });
+    expect(normalized.step![0].safety).toBeUndefined();
+    const saved = JSON.parse(JSON.stringify(normalized));
+    const restored = importCanonicalCourse(saved);
+    expect(restored.safety?.limits).toBeUndefined();
+    expect(restored.stages[0].safety?.limits?.[0].amount)
+      .toMatchObject({ value: 2, unit: "tab", comparator });
+    expect(fromFhir(saved).fhirNext.safety?.doseLimit?.[0].valueQuantity?._comparator)
+      .toEqual(source.step![0].safety!.doseLimit![0].valueQuantity!._comparator);
+    saved.safety.doseLimit[0].valueQuantity.value = 3;
+    const edited = importCanonicalCourse(saved);
+    expect(edited.stages[0].safety?.limits).toBeUndefined();
+    expect(edited.safety?.limits?.[0].amount?.value).toBe(3);
+  });
+
+  it("does not attach a superseded comparator annotation to an edited EMA operator", () => {
+    const wire = simpleQuantityForR5({ value: 2, unit: "tab", comparator: "~", _comparator: { id: "approximate" } })!;
+    wire.extension!.find(x => x.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!.valueCoding!.code = "100000000052";
+    const restored = quantityFromR5(wire)!;
+    expect(restored.comparator).toBe("<=");
+    expect(restored._comparator).toBeUndefined();
+    expect(JSON.stringify(restored.extension)).toContain("approximate");
+  });
+
+  it("shows the whole-course count beside its interval independently of the local step count", () => {
+    const source: FhirR6DosageInstruction = {
+      repeatCycle: { value: 3, unit: "d", code: "d" },
+      modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 4 }],
+      step: [{ count: 2, component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }]
+    };
+    for (const input of [source, toDosageDetails(toFhirR5Dosages(source))]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("Repeat this schedule every 3 days for 4 cycles");
+      expect(formatSig(input, "long", { locale: "en" })).toContain("for 2 cycles");
+      expect(input.step![0].count).toBe(2);
+    }
   });
 });

@@ -9719,3 +9719,1170 @@ New-API scenarios measured: getEmaQuantityComparator, native/import-R6, native/i
 Reproduction uses the committed bench/public-api.mjs with the frozen master path, --rounds 21 --target-ms 35, and the exact five-name confirmation set with --rounds 41 --target-ms 100. Complete raw samples and log manifests are retained in /tmp/ezmed14-round25-master-full.json, /tmp/ezmed14-round25-master-confirm.json, /tmp/ezmed14-round25-previous-smoke.json and /tmp/ezmed14-round25-validation.json; the complete per-case outcomes and all finding gates are committed here.
 
 <!-- /round25-validation -->
+
+
+## 2026-11-21 — PR #14 review round 26: inventory and acceptance gates
+
+The round starts at 44a2b4dd0de6b6c0d4ba531693787c090c05fbe9. The new review contains 20 inline, 3 outside-diff, 17 minor and 2 nitpick findings. Four older-thread follow-ups are included (two request verification of already-fixed behavior). The full PR has exactly 100 changed paths against the merge base with freshly fetched origin/master 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. Keep the total at or below 100; retain all existing cases when consolidating a new-in-PR suite.
+
+Product gate: realistic clinician-reviewed parsing and externally edited R5/current pinned R6; native objects remain internal and unstable. Preserve independently recognized meaning, raw source and unknown structured fields. No second semantic parser, no generic mutation-defense layer and no common-path cost without evidence. The final per-finding record must state requirement, harm, typed owner, cost, preservation, and independent oracle. Changes require source tests, strict selected type checks, compiled entrypoints/build, and paired public-function performance against fresh master with no reproducible per-scenario regression above 4%. Replies are concise and only in the original threads. No top-level comment or new full-review request.
+
+### Complete finding inventory
+
+| ID | Owner | Location | Finding |
+| --- | --- | --- | --- |
+| 1 | r5 | src/adapters/r5-import.ts | Keep the migrated course cycle limit when an edit changes only unrelated modifiers. |
+| 2 | r5 | src/adapters/r6-editable-metadata.ts | Keep step safety modifiers active when lifting the policy. |
+| 3 | execution | src/canonical/compile.ts | Keep the PRN indication when the R6 flag is absent. |
+| 4 | meaning | src/canonical/format-course.ts | Show the known event and offset in the stage timing note. |
+| 5 | root | src/dosage-course.ts | Make the source-replay proof observe the weekday ordinal. |
+| 6 | execution | src/execution/engine.ts | Honor `priorCount` on the rolling-cap course route. |
+| 7 | execution | src/execution/engine.ts | Resolve the weight-based dose before chronological cap admission. |
+| 8 | r5 | src/fhir.ts | Preserve the unedited duration endpoint when the upper bound changes. |
+| 9 | r5 | src/fhir.ts | Store the projected duration baseline separately from the live range. |
+| 10 | meaning | src/hpsg/lexical-classes.json | Map `no greater than` to the `<=` comparator. |
+| 11 | root | src/i18n.ts | Preserve the callback receiver when composing regional locales. |
+| 12 | root | src/index.ts | Check the saved R5 projection before the rate-less shortcut returns for reloaded rows. |
+| 13 | root | src/index.ts | Keep dose endpoint qualifiers in `fromFhirDosage` previews. |
+| 14 | meaning | src/instruction-graph.ts | Keep the BEFORE tail of a dilution instruction in the structured preview. |
+| 15 | meaning | src/instruction-graph.ts | Apply timing cleanup before rendering surviving graph frames. |
+| 16 | meaning | src/canonical/format-course.ts | Keep qualified nasal doses scoped to each nostril. |
+| 17 | execution | src/execution/engine.ts | Use the absolute start's clock for a calendar-bound duration cap. |
+| 18 | meaning | src/format.ts | Keep the live offset when the rich primary covers the event. |
+| 19 | meaning | src/hpsg/rules/clinical-quantity-rules.ts | Read the exact infusion head with the million multiplier. |
+| 20 | root | src/index.ts | Keep each eye's transition boundary separate in the unresolved fallback. |
+| 21 | root | src/dosage-course.ts | Invalidate source replay after an in-place clock-window edit. |
+| 22 | r5 | src/adapters/canonical-course.ts | Keep an explicitly cleared R6 condition inactive after saving. |
+| 23 | execution | src/regimen/regimen.ts | Do not derive an exact calendar end from an approximate duration. |
+| 24 | r5 | src/types.ts | Accept Element metadata on R6 `valuePeriod`. |
+| 25 | r5 | test/pr14-round20-r5.spec.ts | Assert that the old maximum is no longer active. |
+| 26 | r5 | test/pr14-round23-r5.spec.ts | Use a cap that changes the supply result. |
+| 27 | root | test/r6-primary.spec.ts | Assert that the lifetime limit survives. |
+| 28 | meaning | test/pr14-rate-time-family.spec.ts | Check every wire entry for an unintended scalar dose. |
+| 29 | meaning | test/pr14-round20-meaning.spec.ts | Require the unchanged 08:00 dose time in the Thai preview. |
+| 30 | meaning | test/pr14-round21-meaning.spec.ts | Require unheaded rate text to survive in the suggestion. |
+| 31 | meaning | test/instruction-graph.spec.ts | Check that Thai output retains the independent actions. |
+| 32 | meaning | test/hpsg-clinical-quantity.spec.ts | Check the derived rate after reopening the stored R5 row. |
+| 33 | meaning | test/pr14-round23-meaning.spec.ts | Assert that the superseded amoxicillin dose is absent. |
+| 34 | meaning | src/canonical/format-course.ts | Display a known repeat interval on a zero-step course. |
+| 35 | execution | src/schedule.ts | Preserve getter-backed options through capped scheduling. |
+| 36 | execution | src/execution/engine.ts | Split monthly cap searches at a skipped midnight. |
+| 37 | execution | src/execution/engine.ts | Apply the PRN history fence from the effective course start. |
+| 38 | execution | src/execution/engine.ts | Emit distributed clock candidates in chronological order before applying `limit`. |
+| 39 | root | src/dosage-course.ts | Restore comparator metadata when decoding R6 single-step safety snapshots. |
+| 40 | root | test-dist/exports.spec.ts | Declare `originalInstruction` in the `runNode` return type. |
+| 41 | root | test/r6-primary.spec.ts | Assert the whole-course count in this preview test. |
+| 42 | execution | test/schedule-family-audit.spec.ts | Add an overlapping-administration case that a clipping engine would fail. |
+| 43 | r5 | src/fhir.ts | Honor a replacement boundsRange after anchored boundsPeriod |
+| 44 | meaning | src/instruction-graph.ts | Assert preparation and administration actions after a dose edit |
+| 45 | execution | src/canonical/compile.ts | Verify mixed-member delay regression and report local test evidence |
+| 46 | execution | test/r6-primary.spec.ts | Verify qualified cap-period regression and report committed guidance |
+
+Implementation dispositions and all final validation evidence follow below when established. No pending item is represented as verified.
+
+### Per-finding decisions and acceptance evidence
+
+The review is PRR_kwDOQAcO1M8AAAABZaE8rA (6000032940), submitted 2026-11-20T22:08:08Z, with continuation6000043345. The42 current-review findings and4 prior-thread follow-ups are accounted for:32 implementation/type corrections,12 strengthened clinical test oracles and2 verification-only follow-ups. No top-level GitHub comment or full-review request is part of this work.
+
+Two test-suite consolidations retain all 51 moved cases while keeping the full PR at 100 changed paths, including tests, documentation and configuration.
+
+- The new-in-PR display/replay suite moved into the existing canonical-course suite. All 30 cases and their helpers moved intact. This freed one path for the typed Dilute/Swallow lexical entries in the existing terminology file.
+- The new-in-PR test/pr14-rate-time-family.spec.ts suite moved into test/hpsg-clinical-quantity.spec.ts under a scoped describe. All 21 cases moved with their bodies unchanged; the existing 202 cases plus those 21 produced a confirmed 223/223 passing target suite. The consolidation manifest records the original and unchanged-body hashes and the existing imports reused. This freed one path for the independent-track oracles in test/parallel-regimens.spec.ts.
+
+The suite count decreases because cases share existing files, not because any of these 51 cases was deleted. Final integrated validation and performance after all source corrections are recorded separately below.
+
+#### 1. Keep the migrated course cycle limit when an edit changes only unrelated modifiers.
+
+**Disposition:** fixed.
+
+- **Requirement:** Supported saved unversioned R5 course migration and partial edits must preserve finite whole-course repetition.
+
+- **Harm:** An unrelated nonempty modifier edit silently removed a three-cycle limit.
+
+- **Typed owner:** R5 retained-course migration in reconcileNativeCompactCourse, using the shared course-count modifier vocabulary.
+
+- **Change:** Apply the migrated count after a partial nonempty modifier edit that does not mention the count. A supplied count entry owns replacement; [] explicitly clears all legacy modifiers. Reopen through fromDosageDetails to expose the current count entry, then remove only that entry for a targeted clear with other modifiers retained. Current-marker removal semantics remain unchanged.
+
+- **Cost:** Only the already-detected legacy migration branch scans the supplied modifier list; no extra parse or ordinary current-row traversal.
+
+- **Preservation:** Legacy source marker remains in existing reconciliation provenance; unrelated modifiers survive.
+
+- **Independent oracle:** The literal previous-writer fixture stays at count3 with unrelated policy, changes to4 with explicit replacement, clears with[], and clears only count after current edit-view reopen while retaining other modifier through persistence. Existing21-dose/three-cycle independent schedule assertion remains.
+
+
+
+#### 2. Keep step safety modifiers active when lifting the policy.
+
+**Disposition:** fixed.
+
+- **Requirement:** A must-understand safety modifier must remain active and retain its original policy scope when strict R6 forbids sole-step safety.
+
+- **Harm:** Merging course and sole-step limits kept step modifiers only in ignorable source metadata; naively flattening them would qualify unrelated course limits.
+
+- **Typed owner:** R6 sole-step safety boundary serializer and matching snapshot restoration, without native grammar changes.
+
+- **Change:** When either merged policy has modifiers, active safety receives urn:ezmedicationinput:r6-scoped-safety-policy as a modifierExtension. Its typed course/step policy children preserve each qualifier with its own complete limit/action scope. Core merged limits/actions remain visible. Matching snapshot import now restores original course safety provenance as well as its clinical facts, avoiding propagation/nesting of the merged wrapper on later saves.
+
+- **Cost:** Additional typed serialization only when a sole-step/course policy merge contains modifiers; ordinary administrations and unmodified safety use existing paths.
+
+- **Preservation:** Both complete policy payloads, modifier IDs/children, limits and actions remain in active scoped representation and existing lossless source snapshot. No parser refusal or unknown-modifier deletion.
+
+- **Independent oracle:** Step-only, course-only and both-policy modifier cases keep core limits8/day and2/administration, exactly one active scoped wrapper, no forbidden step.safety, and exact original policies on reopen across3 saves.
+
+
+
+#### 3. Keep the PRN indication when the R6 flag is absent.
+
+**Disposition:** fix.
+
+- **Requirement:** Pinned R6 permits asNeededFor without asNeeded; a stated PRN indication must remain useful in normalized previews and execution. Explicitfalse remains distinct.
+
+- **Harm:** Reason-only R6 preview omitted as-needed pain; the native no-source-context execution sibling treated unadministered opportunities as past actual doses.
+
+- **Typed owner:** clauseForAdministration uses existing typed PRN syntax when native boolean is absent. Adapter worker derives native PRN from reason-only input and preserves original absent boolean on unchanged wire projection. Engine continues using native asNeeded only.
+
+- **Cost:** One boolean/undefined branch in existing clause view; no second parse or graph walk. Adapter sibling handled at import.
+
+- **Preservation:** Complete reason list and original missing/false/true boolean retained in R6; no caller input mutation.
+
+- **Independent oracle:** Reason-only and true previews say as needed for pain; false does not. Daily count2 orderedJan1/queryJan3 allows Jan3/Jan4 and maximum2 supply for PRN; actual Jan1 history leaves Jan3 only. False and no-reason/no-flag cases have zero remaining scheduled doses. Direct R6 and sourceContext=false native inputs agree.
+
+
+
+#### 4. Show the known event and offset in the stage timing note.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Current R6 may specify an event context and displacement without prose.
+
+- **Harm:** A known follow-up event and its two-day offset disappear from a reviewable suggestion.
+
+- **Typed owner:** CanonicalBoundary preview and locale-owned CourseLanguage.relativeEvent.
+
+- **Cost:** Only the existing unresolved-boundary branch reads the known event/offset; no resolver, parse pass, or date inference.
+
+- **Preservation:** Source boundary and wire object remain unchanged. Exact negative offsets use before; ranges retain their authored endpoints.
+
+- **Independent oracle:** R6 +2/-2/0-day event offsets and a2–3-day range retain event, magnitude and review status in EN/TH; no calendar date; empty context retains generic fallback.
+
+
+
+#### 5. Make the source-replay proof observe the weekday ordinal.
+
+**Disposition:** fixed.
+
+- **Requirement:** A supported external R5 weekday-ordinal edit must invalidate authored graph replay.
+
+- **Harm:** A saved first-Monday Swallow instruction continued to display first Monday after its live ordinal became2.
+
+- **Typed owner:** Existing typed SourceTimingObservation capture/comparison in dosage-course.ts, consumed by fresh and persisted source proof.
+
+- **Cost:** One recognized extension branch during the existing timing scan; no extra parse, full graph copy or walk.
+
+- **Preservation:** Live ordinal wins; original graph/source remain recoverable; restoring ordinal1 restores unchanged source behavior.
+
+- **Independent oracle:** Frozen44a2b4d public saved-row preview stayed first Monday after ordinal2. Fresh and JSON-persisted Swallow1tabletwhole regressions now require secondMonday, retained1tablet and no firstMonday; restored1 control remains.
+
+
+
+#### 6. Honor `priorCount` on the rolling-cap course route.
+
+**Disposition:** execution-contract-fix.
+
+- **Requirement:** A caller-supplied used count cannot be silently discarded when repeated phases/cycles route through a chronological rolling-cap ledger.
+
+- **Harm:** Count-only history could restore full finite allowance. Assigning that count to a specific cycle/phase or a rolling expiry without dates would fabricate history.
+
+- **Typed owner:** chronologicalRepeatedEvents rejects supplied positive priorCount with repeated-course-history-needs-timestamps; caller supplies dated priorDoseTimes without priorCount on that route. Scalar and simple course count handling remains existing.
+
+- **Cost:** One positive-count branch only on chronological repeated route; no validation pass or synthetic ledger.
+
+- **Preservation:** Error is execution-only; course, instructions, limits and source remain unchanged. No parser/formatter refusal.
+
+- **Independent oracle:** Repeated PRN stage/count2 plus priorCount1 throws the named error in due and supply; dated Jan1 history returns Jan2/Jan3/Jan4; scalar priorCount1 returns Jan2 only; zero-count control remains executable; serialized input unchanged.
+
+
+
+#### 7. Resolve the weight-based dose before chronological cap admission.
+
+**Disposition:** fix.
+
+- **Requirement:** Resolved patient weight must determine the same per-administration quantity during rolling admission and final supply arithmetic.
+
+- **Harm:** 70kg x1mg/kg=70mg with100mg/24h cap admitted5 administrations/350mg instead of3/210mg across overlapping daily cycles.
+
+- **Typed owner:** maximumChronologicalSupplyCourse invokes existing prepareMeasuredDose for a capped member when patientWeightKg is supplied, alongside the existing range branch. Covers scalar, ranged, rate and ratio forms without a second quantity algorithm.
+
+- **Cost:** Cheap range/weight test precedes hasPeriodLimits; ordinary scalar no-weight course avoids the added scan. Reuses existing supply conversion on the affected branch.
+
+- **Preservation:** Source per-kg quantities/rates and missing-weight normalized output remain intact, originalOf still maps projection back to source.
+
+- **Independent oracle:** Quantity1mg/kg, range0.5–1mg/kg, rate0.5mg/kg/h for2h and ratio1mg/kg per2h for2h each produce210mg at70kg under100mg/24h cap across3days; absent weight stays mg/kg; source JSON unchanged.
+
+
+
+#### 8. Preserve the unedited duration endpoint when the upper bound changes.
+
+**Disposition:** fixed.
+
+- **Requirement:** Editing one duration endpoint must preserve the other independently known endpoint, especially nonconvertible calendar units.
+
+- **Harm:** Editing upper1month to2months discarded retained lower3weeks; upper-only edits also converted away authored lower48hours semantics.
+
+- **Typed owner:** Shared duration modifier reader, used by independent R5/R6 import paths.
+
+- **Change:** Compare each endpoint against its projected baseline separately while live choice remains boundsRange. Keep authored endpoint only when its own projection is unchanged; explicit removal of a projected endpoint remains a removal.
+
+- **Cost:** Two bounded endpoint comparisons replace the whole-range decision only when the duration marker exists. No calendar unit averaging, broad scan, new parser pass or native-edit hardening.
+
+- **Preservation:** Independent endpoints and Range/quantity metadata remain; edited endpoint takes current values. The nonprojectable missing low remains its authored3weeks until a live low is supplied.
+
+- **Independent oracle:** 3weeks–1month edited upper2months retains3weeks over3 R5/R6 saves; 48hours–3days edited upper4days retains elapsed48hours and adds expected March10 due date; explicit projected-low removal stays absent; literal prior valueRange baseline remains readable.
+
+
+
+#### 9. Store the projected duration baseline separately from the live range.
+
+**Disposition:** fixed.
+
+- **Requirement:** Caller-owned external FHIR copies must expose their current duration values on reimport; the saved comparison baseline cannot be the live editable Range.
+
+- **Harm:** structuredClone preserved the writer-created alias, so editing lower2days to2.5days also changed its baseline and revived old48hours.
+
+- **Typed owner:** Mixed-unit external duration projection serialization, not internal canonical editing.
+
+- **Change:** Serialize projectedRange through existing retainField/readRetainedField codec instead of assigning the same Range object into valueRange. Keep reading the previous valueRange baseline format.
+
+- **Cost:** Serialization is confined to mixed-unit duration projection and reuses the existing source codec. No generic clone/freeze layer or whole-course snapshot was added.
+
+- **Preservation:** Nested quantity qualifiers/Element data are included in the independent serialized baseline; actual endpoint edits remain current while untouched authored endpoints survive.
+
+- **Independent oracle:** Caller-owned structured copies of clause, native R5 and native R6 output all reopen edited2.5day lower endpoint. Unchanged control restores48hours; nested EMA qualifier edit renders live2days/< rather than old48hours; prior serialized baseline fixture works.
+
+
+
+#### 10. Map `no greater than` to the `<=` comparator.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** No greater than and not greater than are ordinary inclusive upper limits.
+
+- **Harm:** A100mL/h maximum was parsed as greater-than100, reversing the cap.
+
+- **Typed owner:** Existing doseComparatorWordings lexical inventory and clinical quantity sign.
+
+- **Cost:** Two static phrase entries; no new recognizer or scan.
+
+- **Preservation:** Full source, rate units and qualifier remain present through R5/R6.
+
+- **Independent oracle:** At the no/not token, the sign owns <=100mL; whole parse and saved-R5 reopen contain one<=100mL/h rate with no scalar dose or leftover no.
+
+
+
+#### 11. Preserve the callback receiver when composing regional locales.
+
+**Disposition:** fixed.
+
+- **Requirement:** Language-pack callbacks retain the supplying registration as their receiver when regional facets compose.
+
+- **Harm:** A base class method reading a private field throws when invoked on a composed regional object.
+
+- **Typed owner:** Cached partial regional locale view in i18n.ts; complete registrations retain their existing identity.
+
+- **Cost:** Bind delegates once when exact/base identities change; formatting reuses the existing cache without per-call allocation.
+
+- **Preservation:** Regional short override, base long fallback and course facet remain independent; explicit base reregistration refreshes correctly.
+
+- **Independent oracle:** Private-field base+regional classes render Base long/Regional short, then Replacement long after reregistration. Repeated resolve returns same cached view and complete base registration remains identical.
+
+
+
+#### 12. Check the saved R5 projection before the rate-less shortcut returns for reloaded rows.
+
+**Disposition:** fixed.
+
+- **Requirement:** Known edits on reloaded R5 clinical projections must be considered before a source-text shortcut, including complete rate deletion.
+
+- **Harm:** Removing the only5mL/h rate left stale5mL/h wording visible beside an unchanged10mL maximum.
+
+- **Typed owner:** Shared sourceDisplayEdit facade and propagation of the existing cached source proof at the R5 adapter boundary.
+
+- **Cost:** Fresh graph-backed rows compare captured text directly; saved rows compare their existing text fingerprint. Clinical projection comparison uses its existing cache. Explicit replacement is handled before normalization; no second semantic parse.
+
+- **Preservation:** Current caps and independent instructions remain; explicitly replaced clinician text keeps authority in roundtrip/default display, including rows that also require native range or phase-origin realization. Normalized display uses current structured facts. Historical text stays retained.
+
+- **Independent oracle:** Warm-preview JSON-persisted row, delete only rateQuantity, require both formatSig/fromFhirDosage to omit5mL/h and retain10mL. Replacement-text control remains exact. Related graph timing edits use the same adapter-established mismatch. Additional fresh/persisted text-only edits preserve clinician prose through both preview entrypoints; normalized mode uses live fields and an explicit text clear cannot replay the replacement. A qualified 2 mg to strictly less than 5 mg range with replacement clinician prose must produce exactly that replacement in both short/long fromFhirDosage and formatSig roundtrip output, while native range metadata still records the high-end < qualifier.
+
+
+
+#### 13. Keep dose endpoint qualifiers in `fromFhirDosage` previews.
+
+**Disposition:** fixed.
+
+- **Requirement:** Both public R5 display entrypoints preserve endpoint qualifiers and dimensions.
+
+- **Harm:** A2mg to strictly<5mg range became an unqualified2–5mg preview through fromFhirDosage.
+
+- **Typed owner:** Shared rich-range predicate in index.ts routes only rich endpoints to existing native range realization. When that rich native clause intentionally omits a compact dose, public result metadata reuses the existing extractCanonicalDoseRange helper for its numeric bounds, unit and established warning; the native administration remains the owner of endpoint qualifiers.
+
+- **Cost:** One bounded first-amount inspection; unqualified same-unit compact path stays unchanged. Rich metadata extraction reuses the existing converter only on the affected native range path, with no duplicate converter or additional parse.
+
+- **Preservation:** Underlying FHIR endpoints/operators unchanged; source-less EN/TH preview retains each bound.
+
+- **Independent oracle:** EMA less-than high endpoint on2..5mg must retain<5 in short/long fromFhirDosage and match formatSig; returned doseAndRate exactly preserves input. The replacement-text control also requires the returned native high endpoint to remain 5 mg with comparator <; normalized display still includes <5.
+
+
+
+#### 14. Keep the BEFORE tail of a dilution instruction in the structured preview.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Dilution with a diluent, final volume and before/after-each-dose instruction is ordinary procedural language.
+
+- **Harm:** The bounded material-complement loop stopped at the temporal tail without handing it to the frame owner; the event vanished. Built-in Dilute also lacked its established typed complement configuration.
+
+- **Typed owner:** ParsedActionArguments tailRelationIndex; shared temporal Time/Activity composition; built-in Dilute lexical argument/realizer configuration.
+
+- **Cost:** The complement loop returns the already-visited tail index; realization collects an independent temporal adjunct during its existing argument scan. No second parser.
+
+- **Preservation:** Graph/source stays intact and event remains on the same action. Independent volume/diluent complements remain separate.
+
+- **Independent oracle:** Before/after variants each yield one action with1mL, WITH saline, TO10mL and typed each-dose tail; normalized EN/TH on R5/R6 shows all four facts.
+
+
+
+#### 15. Apply timing cleanup before rendering surviving graph frames.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Externally edited persisted R5 timing is authoritative while its ancillary graph remains retained source.
+
+- **Harm:** A surviving primary frame could replay obsolete bedtime beside the current morning schedule.
+
+- **Typed owner:** Shared graph primary-owner selection and frameWithoutSupersededTime; adapter proof propagation coordinated with root/R5 owner.
+
+- **Cost:** Reuses the existing frame traversal, applies cleanup before coverage/replay, and scopes it to the primary/amount owner. Source-context R5 import reuses the existing projection proof; sourceContext=false execution imports and direct native/parser paths acquire no new proof work. Ordinary unchanged frames return themselves.
+
+- **Preservation:** Original graph is never modified; independent later actions keep their own timing. Reconciliation stripping stale row text is not an explicit replacement and cannot certify the old graph. Actual replacement text remains separately authoritative through the public facade, while stale text remains recoverable as source.
+
+- **Independent oracle:** Saved R5 bedtime→morning removes old bedtime in normalized/roundtrip EN/TH; an independent later2-tablet bedtime action survives; unchanged and clinician-replaced text controls.
+
+
+
+#### 16. Keep qualified nasal doses scoped to each nostril.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Qualified source-less R6 nasal dose applies per nostril.
+
+- **Harm:** Removing the first quantity before clause rendering detached approximately1spray from each-nostril scope.
+
+- **Typed owner:** Native course component display delegates the qualified primary quantity to the existing clause renderer.
+
+- **Cost:** Qualified first amount stays in the original display component, avoiding the old clone/map when no secondary qualifier/rate needs suppression. Only later qualified entries use supplemental label; no extra pass.
+
+- **Preservation:** Qualifiers and targets remain typed; later amounts still display independently. Input remains unchanged.
+
+- **Independent oracle:** Approximate and lower-bound1spray keep each-nostril wording EN/TH and one dose occurrence; later<2mg remains labeled; short styles retain their localized qualifier.
+
+
+
+#### 17. Use the absolute start's clock for a calendar-bound duration cap.
+
+**Disposition:** fix.
+
+- **Requirement:** A calendar-bound duration ends at the absolute start civil clock, not the whole-course midnight clock.
+
+- **Harm:** Jan1 09:00 plus1 civil day endedJan2 00:00 and lostJan2 08:00 administration. Frozen44a baseline returns no due doses/0tablets for the repeated-course fixture.
+
+- **Typed owner:** treatmentStepWindow supplies absolute-start clock to existing duration-cap resolver only when a cycle source clock would otherwise override it; treatment-relative clock ownership unchanged.
+
+- **Cost:** Extra civil-clock lookup only when an absolute calendar start and inherited cadence clock coexist; no common scalar scheduling scan.
+
+- **Preservation:** Existing source origin, duration and calendar start remain untouched.
+
+- **Independent oracle:** Two-day repeated-course interval/count1, absoluteJan1 09:00, clock08:00, duration1day => exactlyJan2 08:00 and1tablet over2days,0 overfirstday.
+
+
+
+#### 18. Keep the live offset when the rich primary covers the event.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** A clinician can add/edit a meal offset on a persisted rich administration.
+
+- **Harm:** Coverage recognized breakfast but not its30-minute offset, suppressing the live schedule phrase.
+
+- **Typed owner:** Shared rich-primary event cleanup/coverage used by both EN and TH. Built-in Swallow now owns its typed amount and primary dose.
+
+- **Cost:** Only an authored offset yields its typed Time argument to the schedule renderer; no text parser. Swallow uses established lexical amount/dose capabilities.
+
+- **Preservation:** Rich manner and source graph remain; current event plus offset appear once. Amountless post-preparation controls remain in corpus.
+
+- **Independent oracle:** Persisted Swallow1tabletwhole before-breakfast row with live30-minute offset displays offset,event,manner and dose exactly once in both modes/locales.
+
+
+
+#### 19. Read the exact infusion head with the million multiplier.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** An exact one-million-unit infusion rate uses the same numeric multiplier as qualified rates.
+
+- **Harm:** The exact head stopped at1, leaving million to a scalar rule and inventing an administration amount.
+
+- **Typed owner:** Existing millionDoseNumberAt plus clinical quantity sign token ownership. The exact branch also reads the existing DOSE_FRACTION_WORDS lexicon.
+
+- **Cost:** Exact heads reuse one shared numeric/fraction lookup and bounded million-multiplier lookahead. Prefix sign allocation occurs only on multi-token numeric heads; no parser pass. Root owns full per-case performance gate.
+
+- **Preservation:** The sign retains its leading numeral and complete multiplier span; no scalar dose is emitted.
+
+- **Independent oracle:** Exact and approximate1million units/hour each yield one1,000,000[iU]/h rate with full source-token coverage and no leftover; compact1M/decimal0.5million probe controls pass. Exact/approximate half-a-million rate is500,000[iU]/h; scalar Inject half-a-million units remains a500,000U dose.
+
+
+
+#### 20. Keep each eye's transition boundary separate in the unresolved fallback.
+
+**Disposition:** implemented and verified, including the final dated-track inferred-cutover correction.
+
+- **Requirement:** Independent treatment tracks keep their own transition origins, durations and already-established dated cutovers even when another track prevents one complete global phase order.
+
+- **Harm:** Grouping unresolved tracks by graph depth gave unrelated transitions one shared boundary; a known seven-day right-eye transition could be delayed or lost. Mixed four-week/one-month tracks could also acquire a false sequential dependency. The final audit additionally found that rebuilding raw dated phases could discard an end already inferred from the next dated start when an unrelated track lacked a cutover.
+
+- **Typed owner:** The partial parallel-regimen fallback composes one concurrent stage of independent members. Each concrete member origin uses the existing phaseOrigin field; an unknown origin uses phaseStart with anchor unresolved. That unresolved boundary does not repeat the complete dose instruction in its description: original text remains on the member/course. The existing phase-origin modifier carries numeric valueQuantity or a structured RelativeTime start through the established STEP codec. Execution consumes these typed member origins through parallelComponentCadence and treatmentRelativeInstant; locale facets own timing notes.
+
+- **Cost:** Only the unresolved global-order fallback builds this representation from already-parsed clauses. Known numeric origins keep their established path. Exact-range resolution uses the existing scalar/calendar resolver for the two endpoints only on a ranged boundary. No second parser, independent scheduler, generic mutation defense, new marker URL, or averaged month/year conversion is introduced.
+
+- **Preservation:** Every phase keeps its dose, eye, cadence, authored duration and original source through native, R6 and persisted R5 forms. Symbolic origins remain typed and non-executable until resolved, while independently complete extracted tracks retain their own executable origins. Existing wrapper IDs, unknown children, RelativeTime metadata and live external event/offset edits are retained. The shared calendar-phase normalizer retains inferred per-track ends separately from the authored clause; the partial compiler applies that end only to its newly owned native execution window.
+
+- **Independent oracle:** The public missing-cutover case retains the other eye's exact seven-day QID transition in native, R6 and persisted R5 previews and extracted-track execution. Separate typed compiler fixtures retain approximate 10-day and 10–14-day durations; they are not evidence that new approximate/ranged-duration phrases were added to the public grammar. From January 1, four-week and one-month tracks transition on January 29 and February 1, respectively, with 20 right-eye plus 16 left-eye drops over January 29–February 3. Whole uncertain courses use the existing unresolved RelativeTime execution error. Exact/approximate event-origin boundary fixtures retain annotations through three R5/R6 saves and read a later laboratory-review/three-day edit without restoring the old event.
+
+- **Exact-range audit:** A member or step boundary can produce an exact timestamp only when both complete endpoints resolve to the same instant at the actual treatment anchor. Unequal 7–10-day ranges and one-sided ranges remain unresolved; 7 days–7 days, 1 week–7 days and scalar 7 days agree. One month–28 days agrees from February 1 but not from January 1. The four added range controls were recorded failing before and passing after the shared-resolver correction. Both endpoints and source remain preserved when execution declines an unresolved boundary.
+
+- **Display audit:** Member-label suppression uses the shared typed compareRegimenPositions comparison conservatively. A one-month enclosing stage can suppress an earlier seven-day label; an ambiguous 30-day member label and a later 35-day label remain visible. The unknown member keeps its review note without duplicating a full dose description. No calendar duration is converted using an average month.
+
+- **Dated-track audit:** Both track-order regressions failed before the fix because the October 31 inferred end was missing. The resolved and partial paths now share the existing calendar-phase normalization loop, preserving source clauses and applying effective ends only to owned execution windows. All 36 parallel-regimen cases pass. All four members and source survive native, R6, persisted R5 and strict R5; the complete extracted track produces only November 1–2 at 08:00 and 20:00 (4 drops over two days), and October 25–November 3 totals 32 drops. A clinician's November 15 source end remains in native syntax while the effective execution end is October 31. Existing source-bound assertions were retained unchanged. Final integrated validation and performance for this later tree are recorded below.
+
+
+
+#### 21. Invalidate source replay after an in-place clock-window edit.
+
+**Disposition:** fixed.
+
+- **Requirement:** Repeated previews of externally edited clock windows must observe current endpoints/inclusivity.
+
+- **Harm:** Changing persisted infusion08:00–18:00 to09:00 kept old08:00 source because only extension identity was observed.
+
+- **Typed owner:** Existing SourceTimingObservation recognized timing-extension scan in dosage-course.ts.
+
+- **Cost:** Three primitive window fields observed only when that typed window exists; comparison allocates no window/graph.
+
+- **Preservation:** Unchanged row reuses wording; rate and unedited endpoint remain; changed endpoints/flag remain in original structured input.
+
+- **Independent oracle:** Two unchanged public previews control cached authority, then09:00 replaces08:00 while18:00 and5mL/h remain; subsequent17:00 endpoint is current; live proof rejects inclusivity edit.
+
+
+
+#### 22. Keep an explicitly cleared R6 condition inactive after saving.
+
+**Disposition:** fixed.
+
+- **Requirement:** Explicit condition:[] on supported external R6 must remain inactive after save/reopen without losing annotated original data.
+
+- **Harm:** Removing empty core array while retaining an active authored/calendar condition modifier resurrected the deleted restriction.
+
+- **Typed owner:** Shared administration projection at both R5/R6 boundaries.
+
+- **Change:** Only an explicit external empty condition array retires recognized condition modifiers into existing reconciliation source before either projection. Unchanged annotated condition remains active.
+
+- **Cost:** A small modifier-list pass only for explicit empty native condition arrays; no ordinary parse cost and no direct canonical mutation support.
+
+- **Preservation:** Complete original modifier, IDs and calendar child payload remain inert under DOSAGE_RECONCILIATION_SOURCE_URL.
+
+- **Independent oracle:** Authored BP condition starts active; clearing it leaves no predicate/calendar predicate or active modifier across3 direct R6 saves and3 R6→R5→R6 saves, for ordinary and calendar-annotated wrappers; full original marker remains present as source.
+
+
+
+#### 23. Do not derive an exact calendar end from an approximate duration.
+
+**Disposition:** fix.
+
+- **Requirement:** Approximate, inequality or incomplete/ranged durations do not state an exact calendar stop.
+
+- **Harm:** Approximately7days startingDec1 became a hardDec7 inclusive cutoff; sibling minimum-only and same-number/different-unit ranges could also assert false exactness.
+
+- **Typed owner:** anchoredScheduleDurationEnd only materializes an exact duration: existing typed duration qualifiers, range endpoint presence, values and units own the decision.
+
+- **Cost:** Constant-time field checks before existing date construction; no parser additions.
+
+- **Preservation:** Start and all duration qualifiers/endpoints remain unchanged; only unsupported inferred end is omitted.
+
+- **Independent oracle:** With typed duration input, exactly 7 days from December 1 produces December 7; approximate or inequality-qualified 7 days produces no exact inferred end. A one-week minimum or a 1-week–1-month range produces no exact end; 1 week–1 week produces December 7. Existing broader execution and calendar tests retain ordinary outputs. These compiler/calendar cases do not claim new approximate/ranged-duration grammar support.
+
+
+
+#### 24. Accept Element metadata on R6 `valuePeriod`.
+
+**Disposition:** fixed.
+
+- **Requirement:** Valid FHIR Period in R6 condition values supports Element and primitive metadata in the public type.
+
+- **Harm:** Inline valid annotated valuePeriod was rejected by TypeScript despite runtime retention.
+
+- **Typed owner:** Shared FhirPeriod type.
+
+- **Change:** Extend FhirElement and declare optional _start/_end primitive elements.
+
+- **Cost:** Type-only; zero runtime work.
+
+- **Preservation:** Annotated Period ID, extension and both date primitive annotations survive native R6 saves.
+
+- **Independent oracle:** Strict selected test-type compilation accepts inline Period with id/extension/_start/_end; three saves retain the exact supplied condition array.
+
+
+
+#### 25. Assert that the old maximum is no longer active.
+
+**Disposition:** test strengthened.
+
+- **Requirement:** An edited maximum must replace, not merely precede, its stale counterpart.
+
+- **Harm:** The former find-based oracle could miss a second active old4-tablet maximum.
+
+- **Typed owner:** Existing R5 maximum edit regression.
+
+- **Change:** Assert the complete ordered active limit array with2-tablet administration cap and exactly the independent dosage limit when present.
+
+- **Cost:** Test-only; zero runtime change.
+
+- **Preservation:** Existing ID/annotation/ifExceeded assertions remain, as does independent dosage cap.
+
+- **Independent oracle:** Full expected limit list excludes stale4-tablet cap; rich fixture keeps independent3-administration cap and authored metadata.
+
+
+
+#### 26. Use a cap that changes the supply result.
+
+**Disposition:** test strengthened.
+
+- **Requirement:** A cap-preservation test must prove the cap changes numeric supply.
+
+- **Harm:** Two daily one-tablet doses already fit a3-tablet/day cap, so ignoring cap still passed4-tablet total.
+
+- **Typed owner:** Existing strict-wire/incomplete-maximum supply regression.
+
+- **Change:** Use1tablet/day against BID schedule over2days; retain unsupported-period explanation sibling.
+
+- **Cost:** Test-only; zero runtime change.
+
+- **Preservation:** Incomplete maximum remains source-only and valid limit remains independently executable.
+
+- **Independent oracle:** Exactly2tablets, quantityKind maximum and no cannot-apply note with or without incomplete maximum; extra unresolved-period cap still yields2tablets and its distinct explanation.
+
+
+
+#### 27. Assert that the lifetime limit survives.
+
+**Disposition:** oracle-strengthened.
+
+- **Requirement:** Lossless EMA safety tests must require administration,period and lifetime limits individually.
+
+- **Harm:** every() accepted a list missing the lifetime cap.
+
+- **Typed owner:** Existing r6-primary clinical roundtrip oracle.
+
+- **Cost:** Test only.
+
+- **Preservation:** All3 active scopes, value5mg and each operator must survive; period qualifier and strictR5 lifetime cap checked.
+
+- **Independent oracle:** Exact list length3 plus positive scope-specific quantity/comparator assertions; strict export explicitly requires maxDosePerLifetime5mg and correct comparator.
+
+
+
+#### 28. Check every wire entry for an unintended scalar dose.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Rate-only input must not produce an extra scalar administration anywhere.
+
+- **Harm:** Checking entry0 could miss an invented scalar dose in another wire entry.
+
+- **Typed owner:** Existing rate-time family tests, now consolidated intact into test/hpsg-clinical-quantity.spec.ts under a scoped describe.
+
+- **Cost:** Test-only nested iteration over complete wire entries.
+
+- **Preservation:** Positive rate and original-source assertions retained.
+
+- **Independent oracle:** Every entry before export and after saved-R5 reopen has no doseQuantity while the intended 100 mL/h rate remains. The destination suite passed 223/223 cases, comprising its prior 202 cases plus all 21 moved cases.
+
+
+
+#### 29. Require the unchanged 08:00 dose time in the Thai preview.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Editing only the evening clock leaves the morning clock unchanged.
+
+- **Harm:** The old oracle allowed08:00 to disappear from the Thai preview.
+
+- **Typed owner:** Existing Thai source replay regression.
+
+- **Cost:** Test-only assertion.
+
+- **Preservation:** Keeps retained22:00 and rejected20:00 assertions.
+
+- **Independent oracle:** All three Thai clinical forms show08:00 and22:00, not20:00.
+
+
+
+#### 30. Require unheaded rate text to survive in the suggestion.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Unheaded qualified rate text remains useful/editable even when it does not license a numeric rate.
+
+- **Harm:** An empty suggestion could pass a negative no-invented-dose oracle.
+
+- **Typed owner:** Existing unlicensed clinical quantity source test.
+
+- **Cost:** Test-only positive preserved-text assertion.
+
+- **Preservation:** Retains all existing no invented dose/rate checks.
+
+- **Independent oracle:** Complete phrase is present in renderedInstruction or component source text, including approximately100units/hr.
+
+
+
+#### 31. Check that Thai output retains the independent actions.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Independent preparation/administration actions must display in Thai after a dose edit.
+
+- **Harm:** Graph storage alone did not prove Thai still showed drinking5mL or preparation.
+
+- **Typed owner:** Existing action-graph dose ownership tests.
+
+- **Cost:** Test-only clinically positive localized verbs and amounts.
+
+- **Preservation:** Preserves graph immutability and rejected old-dose assertions.
+
+- **Independent oracle:** Thai must show dissolve, water, drink5mL, stir/drink or independent2-tablet action as applicable, in both realization modes.
+
+
+
+#### 32. Check the derived rate after reopening the stored R5 row.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** A fixed-volume infusion retains its derived rate after persistence.
+
+- **Harm:** Checking only reopened dose missed lost rate numerator or comparator.
+
+- **Typed owner:** Existing qualified clinical quantity tests.
+
+- **Cost:** Test-only full reopened ratio assertions.
+
+- **Preservation:** Retains initial native/R5 dose and rate checks.
+
+- **Independent oracle:** Reopened ratio has500mL numerator with the exact expected qualifier and2h denominator; exact form has no qualifier.
+
+
+
+#### 33. Assert that the superseded amoxicillin dose is absent.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Dose replacement must remove superseded medication amount while preserving a separate equal-unit material.
+
+- **Harm:** New2-tablet amoxicillin plus old1-tablet amoxicillin could pass if saline also remained.
+
+- **Typed owner:** Existing source-owned Object regression.
+
+- **Cost:** Test-only occurrence count in both locales.
+
+- **Preservation:** Retains positive new dose, drug name, independent1-tablet saline and immutable source graph.
+
+- **Independent oracle:** Exactly one1-tablet amount remains and it belongs to saline.
+
+
+
+#### 34. Display a known repeat interval on a zero-step course.
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Pinned R6 allows repeatCycle without active steps.
+
+- **Harm:** Zero-step preview returned empty before known repeat interval rendering.
+
+- **Typed owner:** Native zero-step course preview and existing locale repeat renderer.
+
+- **Cost:** Zero-step branch only; ordinary course fast path unchanged.
+
+- **Preservation:** Does not invent a dose/stage; text-only and cap-only headers keep existing output.
+
+- **Independent oracle:** 28-day interval appears EN/TH; imported stages remain empty; source step remains absent; text-only/cap-only controls pass.
+
+
+
+#### 35. Preserve getter-backed options through capped scheduling.
+
+**Disposition:** fix.
+
+- **Requirement:** Declared NextDueDoseOptions may be supplied through instance getters as well as enumerable own properties.
+
+- **Harm:** Capped recursion spread dropped timeZone and threw while uncapped identical options worked; clocks/offset getters could likewise disappear.
+
+- **Typed owner:** Public schedule.ts facade snapshots declared option fields once before input execution, as the existing supply facade does; internal engine recursion receives a plain typed options object.
+
+- **Cost:** One fixed option object at existing public normalization boundary, no reflective enumeration or recursive copy; full public benchmark remains root delivery gate.
+
+- **Preservation:** Every declared due option preserved; nonpositive limit still returns before conversion or option snapshot.
+
+- **Independent oracle:** Getter zoneUTC/dinner18:00/offset30 => cappedJan1/Jan3 18:30, uncappedJan1/Jan2 18:30; prior zero-limit tests pass.
+
+
+
+#### 36. Split monthly cap searches at a skipped midnight.
+
+**Disposition:** fix.
+
+- **Requirement:** Calendar-month cap release must inspect DST transitions at the first actual instant of a day, including skipped midnight.
+
+- **Harm:** SantiagoOct6 00:10–01:10 query missed a valid00:20 release because targetSep6 first01:00 already followed transition.
+
+- **Typed owner:** calendarQuantityWindowCuts starts its existing target offset probe one millisecond before targetDay; existing monotone-piece search and calendar arithmetic remain sole owners.
+
+- **Cost:** One Date object on monthly/yearly release search only; probe count and ordinary scalar path unchanged.
+
+- **Preservation:** Original timestamps/cap metadata remain untouched; constant-offset and prior intraday DST controls retained.
+
+- **Independent oracle:** 1tab/month with priorSep6 01:20-03, queryOct6 00:10-03 for1h =>1tab; existing target-gap/source-fold/clamped-month family passes.
+
+
+
+#### 37. Apply the PRN history fence from the effective course start.
+
+**Disposition:** fix.
+
+- **Requirement:** Only actual PRN use from the effective authored course start spends finite recurrence allowance.
+
+- **Harm:** OrderJan1/startJan3 with recordedJan2 dose incorrectly exhausted one-use PRN course before it began.
+
+- **Typed owner:** nextDueDosesSingle moves existing PRN history loop after bounds resolution and uses effectiveOrderedAt or known boundsStart, matching supply origin.
+
+- **Cost:** Same single history scan, moved after existing boundary calculation; ordinary non-PRN behavior unaffected.
+
+- **Preservation:** History and source calendar window remain intact; out-of-phase records excluded from this quota only.
+
+- **Independent oracle:** Count1 daily withJan3start andJan2record =>Jan3 09:00/1tablet; Jan3record queriedJan4 =>no remaining due. Existing explicit priorCount and previous PRN history controls pass.
+
+
+
+#### 38. Emit distributed clock candidates in chronological order before applying `limit`.
+
+**Disposition:** fix.
+
+- **Requirement:** Distributed explicit clocks whose day shifts interlace must be ordered before result limits or caps consume them.
+
+- **Harm:** 4 administrations/2days with00:15 and dinner+60min=nextday00:30 returned00:30 before00:15; negative day shifts had symmetric reversal.
+
+- **Typed owner:** generateFrequencyPerPeriodSeries uses existing typed ChronologicalQueue only when clock shifts differ; drains events earlier than the earliest possible unvisited cycle anchor. Equal-shift/direct schedules retain direct insertion.
+
+- **Cost:** Ordering queue allocated only for actual interlacing clock family; existing shift scan determines branch, no broad sort or second calendar enumerator.
+
+- **Preservation:** Original schedule/events unchanged; actual-time bounds, deduplication and source-cycle ownership remain.
+
+- **Independent oracle:** Limit1=>Jan2 00:15;limit4=>Jan2 00:15/00:30,Jan3 00:15/00:30.1/day cap keeps00:15 on each day. Negative bedtime shift orders23:30 before23:45 onJan2/Jan3.
+
+
+
+#### 39. Restore comparator metadata when decoding R6 single-step safety snapshots.
+
+**Disposition:** fixed.
+
+- **Requirement:** Single-step safety snapshot decoding must restore primitive comparator metadata so unchanged scope comparison is exact.
+
+- **Harm:** Approximate annotated limit did not match saved projection and incorrectly remained at course scope.
+
+- **Typed owner:** Shared quantityFromR5 decoder consumes only exact generated operator-source metadata whose valueCode matches the live EMA comparator.
+
+- **Cost:** Existing qualified-quantity decode loop; ordinary quantities return before it. No generic cloning or schema walk.
+
+- **Preservation:** Authored primitive ID/extensions restored; changed EMA operator leaves superseded annotation in inactive source instead of attaching it to a different qualifier.
+
+- **Independent oracle:** Supported R5 course-metadata projection lifts sole-step safety to conformantR6; persisted unchanged~and<= limits restorestage scope and exact primitive metadata. Live amount2→3 remainscourse-owned; ~→<= EMA edit does not inherit old approximate annotation.
+
+
+
+#### 40. Declare `originalInstruction` in the `runNode` return type.
+
+**Disposition:** type-fix.
+
+- **Requirement:** Compiled-entrypoint test return type declares every consumed optional result field.
+
+- **Harm:** Editors/type checks including the dist test saw missing originalInstruction.
+
+- **Typed owner:** test-dist/exports.spec.ts runNode structural return type.
+
+- **Cost:** Type-only optional field; no runtime change.
+
+- **Preservation:** Existing output values and all four distribution assertions unchanged.
+
+- **Independent oracle:** Declared originalInstruction?:string matches the existing optional JSON result read; distribution suite remains part of full gate.
+
+
+
+#### 41. Assert the whole-course count in this preview test.
+
+**Disposition:** oracle-strengthened.
+
+- **Requirement:** Whole-course repeat count preview must be checked independently of local step.count.
+
+- **Harm:** Existing fixture set only local count, so it could not detect missing course-wide count wording.
+
+- **Typed owner:** Existing r6-primary course repeat preview tests using shared COURSE_CYCLE_COUNT_EXTENSION_URL.
+
+- **Cost:** Test only.
+
+- **Preservation:** Localstep2 and wholecourse4 remain distinct through JSON-compatible R5/R6 projections.
+
+- **Independent oracle:** Interval3days/coursecount4/localcount2 explicitly requires Repeat this schedule every3days for4cycles plus localfor2cycles across directR6 and reopenedR5.
+
+
+
+#### 42. Add an overlapping-administration case that a clipping engine would fail.
+
+**Disposition:** test-oracle.
+
+- **Requirement:** Overlap regression must distinguish retained cross-cycle tails from clipped cycles.
+
+- **Harm:** Prior1day-cycle oracle could pass despite clipping because a newer cycle emitted each relevant day.
+
+- **Typed owner:** Existing schedule-family-audit overlapping course suite; no production behavior change required.
+
+- **Cost:** Test-only independent case in existing file.
+
+- **Preservation:** No source change for this finding; original overlap cases remain.
+
+- **Independent oracle:** 2day cycles, administrations atcycle0/+3d, rolling1tab/3days =>Jan1,Jan4,Jan7; Jan3 blocked, Jan4 must survive first-cycle tail.4day supply=2; clipped firstcycle would incorrectly selectJan5.
+
+
+
+#### 43. Honor a replacement boundsRange after anchored boundsPeriod
+
+**Disposition:** fixed.
+
+- **Requirement:** Changing a live bounds choice owns the current duration without inheriting obsolete anchored endpoints.
+
+- **Harm:** Replacing boundsPeriod with5–7day boundsRange revived old48hour–3day modifier range.
+
+- **Typed owner:** Anchored duration reader plus external modifier reconciliation on projection.
+
+- **Change:** A marker without projectedRange baseline belongs to absolute bounds; live boundsRange/boundsDuration replacement supersedes it. Retire old duration modifier as inactive source when emitting current bounds.
+
+- **Cost:** Constant presence checks only when known duration modifier exists; reuse current projection/reconciliation path.
+
+- **Preservation:** Old complete anchored modifier remains recoverable in reconciliation source; current bounds are the sole active duration.
+
+- **Independent oracle:** Unchanged absolute-start control retains48hours; replacing with5–7days or5day quantity stays current over3 R5/R6 saves, anchoredLength remains absent, old modifier inactive, old48 value recoverable.
+
+
+
+#### 44. Assert preparation and administration actions after a dose edit
+
+**Disposition:** implemented-verified.
+
+- **Requirement:** Dose edit must retain the preparation and administration actions around that dose.
+
+- **Harm:** Water/manner assertions alone did not prove Disperse then drink/swallow stayed visible.
+
+- **Typed owner:** Existing custom preparation source-owner regression.
+
+- **Cost:** Test-only explicit action assertions.
+
+- **Preservation:** Original R5/source graph stays unchanged; superseded dose remains rejected.
+
+- **Independent oracle:** Both modes/locales require Disperse and drink/swallow, new3-tablet dose, water/manner, and absence of old2-tablet dose.
+
+
+
+#### 45. Verify mixed-member delay regression and report local test evidence
+
+**Disposition:** verified-existing-fix.
+
+- **Requirement:** Provide reproducible local test evidence for prior mixed-member-delay fix without inventing remote CI.
+
+- **Harm:** No new functional defect alleged; reviewer could not independently run tests.
+
+- **Typed owner:** Existing round25 independently delayed member regression in round21 execution suite; compiled native,R5,R6 paths.
+
+- **Cost:** No new production code or duplicate test.
+
+- **Preservation:** Committed AGENTS/DIRECTIONALITY/HPSG guides remain unchanged.
+
+- **Independent oracle:** Ordinary/repeated full course14administrations/21tablets, first7days17tablets; explicit4day end6administrations/8tablets acrossnative/R5/R6; covered by the execution worker’s recorded focused run; the final integrated gate is recorded below. Do not describe local Vitest as GitHub CI.
+
+
+
+#### 46. Verify qualified cap-period regression and report committed guidance
+
+**Disposition:** verified-existing-fix.
+
+- **Requirement:** Provide local test proof and committed guidance reference for prior qualified cap-period fix.
+
+- **Harm:** No new defect claimed; reviewer environment omitted committed guidance and could not execute tests.
+
+- **Typed owner:** Existing round25 qualified-cap-period tests and committed AGENTS contract allowing execution-only refusal while preserving suggestions/data.
+
+- **Cost:** No new production change for this follow-up.
+
+- **Preservation:** Four inequality comparators retained, supply explains unresolved cap; source JSON unchanged.
+
+- **Independent oracle:** <,<=,>,>= period qualifiers throw unresolved-cap-period for due in scalar/repeated course;4day supply remains4 with maximum/explanation; exact/~ controls enforceJan1/Jan3 and2tablets. Covered by the execution worker’s recorded focused run; the final integrated gate is recorded below.
+
+
+
+### Coordinated boundary corrections
+
+The partial-track change uses one concurrent stage with independent member origins. Concrete origins retain the existing numeric phaseOrigin fast path; genuinely unknown starts are CanonicalBoundary values with anchor unresolved. The unknown boundary carries no duplicate full-dose description: member/course source text remains intact. Both forms share the existing phase-origin modifier URL, and the established STEP metadata codec carries symbolic starts. Execution consumes only the typed native fields. R5 scalar/array and whole-batch facades select this native meaning when compact clauses cannot represent it. This is a composition/interchange correction over existing typed facts, not an addition of approximate or ranged duration grammar.
+
+Source agreement passes from the existing saved projection proof through R5 import provenance into the compiled realization view. Stripping stale text during reconciliation is not treated as a clinician-authored replacement. Actual replacement strings own roundtrip/default display in both formatSig and fromFhirDosage, including rich ranges and member origins; normalized mode continues to show current clinical facts. Explicit text clears cannot replay discarded wording. Native range metadata remains available even when replacement text is displayed.
+
+Rich range result metadata reuses the existing extractCanonicalDoseRange helper for compact numeric bounds, unit and warnings instead of adding a second converter. The rich native administration keeps each endpoint's qualifier, and the original FHIR row remains unchanged. This separates the established compact metadata view from the fuller native facts without losing either.
+
+The shared RelativeTime resolver compares both complete range endpoints at the actual treatment anchor before promising an exact timestamp. Equal calendar/elapsed results may execute; unequal or missing endpoints remain unresolved while their source is retained. Ordinary scalar resolution is unchanged. Display-label comparisons are likewise conservative across calendar and elapsed units, using the existing typed position comparison without approximating month or year lengths.
+
+Merged sole-step/course safety with modifiers uses an active scoped safety-policy modifier. Its typed course and step policy children retain each qualifier with its own limits/actions. Core merged limits remain visible, and unchanged scope restoration uses the matching saved projection. The wrapper is must-understand; no step policy modifier is demoted to ignorable provenance.
+
+The duration baseline is independently serialized through the existing typed source codec. Reconciliation compares endpoints individually, preserving an unchanged authored endpoint while accepting the current edited one. Replacing the bounds choice retires the obsolete anchored duration into source; explicit endpoint removal remains a removal. Older valueRange baselines remain readable.
+
+All 46 finding records have explicit requirement, harm, typed owner, cost, preservation and independent-oracle gates. The final dated-track inferred-cutover correction under finding 20 is integrated and covered by failing-before/passing-after tests. The earlier performance attempt was stopped after 62 scenarios with no flags when this additional correctness issue was found; that incomplete run is not used for final acceptance. Final source tests, artifact hashes and performance below apply to the subsequent corrected tree.
+
+### Performance-gate follow-up: SNOMED marker comparisons
+
+- **Requirement:** The owner requires no reproducible per-scenario regression above 4% against freshly fetched master across all public functions.
+- **Evidence and harm:** The first complete paired run measured parseSnomedBodySiteLateralityPostcoordinationCode at +4.3097%; the prescribed longer confirmation measured +4.2689%. The two other initial flags cleared in confirmation. This result fails the threshold even though the absolute latency is small.
+- **Rejected experiment:** Replacing the temporary marker substring with startsWith preserved behavior but measured +21.38% to +22.33% across the three siblings in the 41-round, 100 ms focused check. That trial was rejected and is not included in the delivered implementation.
+- **Typed owner and final correction:** Restore src/snomed-postcoordination.ts byte-for-byte from freshly fetched master. Its existing native marker search followed by the first-colon ownership check already provides the required semantics; the PR's alternate marker-comparison optimization is removed.
+- **Cost:** The established baseline implementation has no added parser pass, metadata traversal, cache or defensive layer. Whole-site and returned-value processing are unchanged.
+- **Preservation:** Accepted strings, trimming, returned field names, nested finding-site expressions and absent/empty rejection remain unchanged. Existing semantic requirements stay enforced by the first-colon check.
+- **Independent oracle:** Existing terminology-coverage tests assert the returned parts for all three helpers, reject a wrong first marker followed by an embedded requested relation, and retain a nested finding-site expression. These behavioral assertions remain unchanged; no implementation-shaped test was added.
+- **Gate:** The confirmed failing artifact and rejected experiment are retained as prior measurements. Final source/build evidence and all-public-function timing below use the restored implementation. Removing this otherwise unnecessary PR difference reduces the full PR to 99 changed paths.
+
+### Final validation and delivery
+
+Final validation completed on 2026-11-21 (Asia/Bangkok) with source frozen. All 46 review items are accounted for: 32 implementation/type corrections, 12 strengthened independent oracles and 2 existing fixes reverified. Related audit corrections and the performance restoration are documented above.
+
+- Source and selected strict-type gate: 4,940/4,940 tests across 57 suites passed.
+- ESM, CJS and declarations built successfully; distribution checks: 4/4 passed.
+- Whitespace check passed. Final full-PR merge-base diff: 99 changed paths, within the 100-file limit.
+- Both test consolidations retained all 51 original cases; no accepted test was removed to reduce the path count.
+- Final source SHA-256: 195920bd230176edd8b78f1b0477a6d835e9fc4d2e2c03c5f443b045e07cdb0e.
+- Tested and benchmarked dist/index.js SHA-256: abad7771b58c2a478152a7cbd111e26b9fd1c7ad18ddd2de8b97f54b792d5a3a.
+
+#### Performance acceptance
+
+Freshly fetched origin/master was 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. The paired harness covers 117/117 public functions, 181 paired scenarios and 7 additional measurements for APIs without a master counterpart. Of the paired scenarios, 174 have equivalent clinical work; 7 different-output scenarios retain raw timings without a regression verdict.
+
+The complete run used 21 rounds at a 35 ms target, alternating baseline/candidate order. Every initial flag (parseSnomedBodySiteTopographicalModifierPostcoordinationCode, getAdviceLocaleAdapter, parseMedicationDateListAt, registerAdviceLocaleAdapter, registerSigLocalization) was selected mechanically for one 41-round, 100 ms confirmation together with the fixed parseSig/ordinary and fromFhir/simple/en controls. No source or artifact changed between full, confirmation and previous-head smoke runs. Rows marked confirmation below use that predeclared follow-up; the other rows use the complete run.
+
+All 174 comparable scenarios meet the 4% per-scenario limit. The largest accepted paired-median change is 3.4108% for parseSnomedFindingSitePostcoordinationCode. Changes are medians of paired ratios, not ratios of the displayed marginal medians. The previous PR head 44a2b4dd0de6b6c0d4ba531693787c090c05fbe9 passed all 188 compatibility-smoke scenarios with no errors; the smoke run is not a latency measurement.
+
+The restored SNOMED family separately passed its 41-round, 100 ms comparison on this same artifact: finding site -0.3485%, laterality -0.3010%, and topographical modifier -1.5519%. The earlier failed artifacts are excluded from acceptance.
+
+| Scenario | Master median µs | Candidate median µs | Paired change | Evidence |
+| --- | ---: | ---: | ---: | --- |
+| parseSig/ordinary | 1616.557 | 1437.565 | -8.8449% | confirmation |
+| parseSigAsync/ordinary | 1624.961 | 1509.032 | -6.6167% | full run |
+| lintSig/ordinary | 1472.698 | 1365.626 | -6.4199% | full run |
+| parseSig/thai | 6587.349 | 6094.186 | -6.7350% | full run |
+| parseSigAsync/thai | 6257.212 | 5675.359 | -7.6214% | full run |
+| lintSig/thai | 5665.127 | 5224.181 | -4.8592% | full run |
+| parseSig/eye | 6342.208 | 6432.605 | +0.9378% | full run |
+| parseSigAsync/eye | 6681.016 | 6354.371 | -3.5497% | full run |
+| lintSig/eye | 5915.612 | 5872.803 | -7.2365% | full run |
+| parseSig/staged | 9232.140 | 8677.493 | -4.7167% | full run |
+| parseSigAsync/staged | 9477.703 | 9025.810 | -2.1990% | full run |
+| lintSig/staged | 9403.440 | 8790.059 | -6.2644% | full run |
+| parseSig/guard | 3894.874 | 3406.824 | -12.5306% | full run |
+| parseSigAsync/guard | 3867.460 | 3307.197 | -13.1377% | full run |
+| lintSig/guard | 3645.672 | 3152.321 | -13.4947% | full run |
+| parseSig/action | 9348.577 | 8152.584 | -13.0390% | full run |
+| parseSigAsync/action | 9419.114 | 8107.437 | -13.1060% | full run |
+| lintSig/action | 9312.165 | 7813.574 | -15.4968% | full run |
+| suggestSig/empty | 11.185 | 11.208 | +0.0135% | full run |
+| suggestSig/1x | 20.236 | 4.713 | -77.8557% | full run |
+| suggestSig/1 tab po q | 955.801 | 860.784 | -10.4972% | full run |
+| suggestSig/5 m | 39.181 | 19.620 | -51.7359% | full run |
+| suggestSig/0.5 tab | 599.644 | 537.760 | -10.6300% | full run |
+| suggestSig/1 tab po prn a | 52.067 | 20.739 | -61.9914% | full run |
+| suggestSig/1 tab po morn hs | 3322.018 | 3077.788 | -6.2858% | full run |
+| suggestSig/1 poc | 33.303 | 17.414 | -45.8699% | full run |
+| suggestSig/1- | 21.138 | 6.977 | -67.3180% | full run |
+| suggestSig/1 drop to od q2h | 3741.063 | 3443.886 | -5.9679% | full run |
+| suggestSig/500 mg po q4-6h prn pain | 2855.988 | 2640.308 | -7.0440% | full run |
+| suggestSig/500 millig | 37.601 | 19.353 | -47.7272% | full run |
+| suggestSig/at 14:3 | 18.751 | 4.452 | -77.0904% | full run |
+| suggestSig/กิน | 836.490 | 608.631 | -27.2079% | full run |
+| suggestSig/กิน ครั้งล | 4654.825 | 3786.755 | -17.6049% | full run |
+| suggestSig/ทา | 686.960 | 592.550 | -15.7093% | full run |
+| suggestSig/รับประทาน 1 เม็ด เมื่อมีอาการปว | 68.246 | 56.315 | -18.2236% | full run |
+| suggestSig/รับประทาน 1 เม | 2200.121 | 1872.455 | -14.4735% | full run |
+| suggestSig/รับประทาน 1 เม็ด ว | 2557.545 | 2142.969 | -17.8104% | full run |
+| suggestSig/รับประทาน 1 เม็ด ก่อนอ | 61.753 | 15.589 | -75.1766% | full run |
+| suggestSig/ทาบริเวณผ | 307.680 | 291.816 | -6.5575% | full run |
+| suggestSig/apply to right e | 90.692 | 65.258 | -29.3828% | full run |
+| suggestSig/1 drop to o | 84.161 | 58.948 | -31.5814% | full run |
+| suggestSig/1 tab po b | 917.083 | 834.131 | -9.2212% | full run |
+| suggestSig/take | 695.737 | 495.591 | -28.5971% | full run |
+| suggestSig/apply | 548.352 | 461.437 | -14.8807% | full run |
+| suggestSig/take 1 tab bef | 1442.752 | 1118.224 | -21.9422% | full run |
+| suggestSig/zzzz | 543.157 | 524.033 | -4.7933% | full run |
+| formatSig/R5/en | 16.098 | 15.420 | -11.8334% | full run |
+| formatSig/R6/en | 23.442 | 17.958 | -25.5273% | full run |
+| formatSig/R6-source-less/en | 27.245 | 19.172 | -28.0858% | full run |
+| formatSig/R6-complex/en | 0.333 | 171.846 | +50443.7469% | different clinical output; no regression verdict |
+| fromFhir/simple/en | 129.164 | 69.650 | -46.4869% | confirmation |
+| fromFhir/complex/en | 912.538 | 825.591 | -7.3241% | different clinical output; no regression verdict |
+| fromFhirDosage/en | 17.565 | 14.828 | -22.1288% | full run |
+| formatSigBatch/en | 294.691 | 231.632 | -23.7701% | full run |
+| formatSig/R5/th | 39.376 | 30.247 | -22.6609% | full run |
+| formatSig/R6/th | 49.810 | 39.168 | -21.0442% | full run |
+| formatSig/R6-source-less/th | 55.477 | 40.881 | -29.0422% | full run |
+| formatSig/R6-complex/th | 0.467 | 386.928 | +84436.8859% | different clinical output; no regression verdict |
+| fromFhir/simple/th | 213.652 | 117.331 | -42.7213% | full run |
+| fromFhir/complex/th | 1409.959 | 1508.272 | +4.2070% | different clinical output; no regression verdict |
+| fromFhirDosage/th | 41.525 | 36.142 | -17.2048% | full run |
+| formatSigBatch/th | 318.607 | 231.906 | -25.9164% | full run |
+| formatSig/R5-roundtrip-unchanged-thai | 169.826 | 115.565 | -31.3211% | full run |
+| formatSig/R5-roundtrip-edited-thai | 179.752 | 524.076 | +196.3618% | different clinical output; no regression verdict |
+| formatSig/R5-roundtrip-added-dose-thai | 83.267 | 326.945 | +276.8164% | different clinical output; no regression verdict |
+| formatSig/R6-author-source | 0.204 | 20.785 | +9246.0970% | different clinical output; no regression verdict |
+| formatParseBatch/ordinary | 0.195 | 0.150 | -26.4536% | full run |
+| formatParseBatch/staged | 0.031 | 0.032 | -0.3312% | full run |
+| nextDueDoses/scalar | 353.847 | 57.698 | -83.5468% | full run |
+| calculateTotalUnits/scalar | 518.034 | 64.440 | -85.2962% | full run |
+| nextDueDoses/parallel-array | 3874.609 | 998.176 | -74.3186% | full run |
+| calculateTotalUnits/parallel-array | 2444.177 | 648.633 | -73.3484% | full run |
+| nextDueDoses/native-R6 | 3546.554 | 642.890 | -81.9663% | full run |
+| calculateTotalUnits/native-R6 | 2008.455 | 321.755 | -83.8494% | full run |
+| nextDueDoses/varied-calendars | 439.345 | 77.991 | -83.4950% | full run |
+| toDosageDetails/simple | 25.589 | 20.594 | -16.8215% | full run |
+| toFhirR5Dosages/R5-simple | 56.894 | 41.923 | -27.1351% | full run |
+| toEzDosages/simple | 0.041 | 0.024 | -38.0499% | full run |
+| toDosageDetails/complex | 302.917 | 262.374 | -12.1706% | full run |
+| toFhirR5Dosages/R5-complex | 641.475 | 482.466 | -29.3313% | full run |
+| toEzDosages/complex | 0.528 | 0.145 | -71.6601% | full run |
+| toFhirR5Dosages/R6-simple | 31.525 | 20.918 | -33.3775% | full run |
+| fromDosageDetails/simple | 34.005 | 26.336 | -23.6291% | full run |
+| toFhirR5Dosages/R6-complex | 295.585 | 239.608 | -17.1593% | full run |
+| fromDosageDetails/complex | 297.904 | 221.126 | -24.2072% | full run |
+| parseStrength | 0.350 | 0.348 | -0.9477% | full run |
+| parseStrengthIntoRatio | 0.360 | 0.343 | +2.9719% | full run |
+| parseStrengthComponents | 1.015 | 0.993 | -4.2468% | full run |
+| evaluateMedicationCondition | 0.025 | 0.025 | -0.9543% | full run |
+| getDosageCondition | 0.707 | 0.130 | -82.0558% | full run |
+| getDosageExcludedDates | 0.213 | 0.216 | -0.1733% | full run |
+| getDosageExcludedWeekdays | 0.073 | 0.073 | +1.9217% | full run |
+| getDosageAlternativeChoice | 0.054 | 0.051 | -5.5667% | full run |
+| getTimingOccurrenceCap | 0.070 | 0.067 | -8.0938% | full run |
+| setDosageCondition | 1.321 | 1.249 | -4.1053% | full run |
+| setDosageExcludedDates | 0.293 | 0.258 | -13.3409% | full run |
+| setDosageExcludedWeekdays | 0.198 | 0.179 | -13.0850% | full run |
+| setDosageAlternativeChoice | 0.213 | 0.168 | -17.4272% | full run |
+| getDoseUnitApproximation | 0.079 | 0.034 | -57.6838% | full run |
+| getDoseUnitKind | 0.072 | 0.034 | -52.5153% | full run |
+| getDoseUnitSemantics | 0.155 | 0.059 | -63.5163% | full run |
+| listDoseUnitTerminology | 192.033 | 191.975 | +1.3522% | full run |
+| lookupBodySite | 6.853 | 3.660 | -45.0285% | full run |
+| lookupBodySiteAsync | 10.893 | 7.196 | -33.0807% | full run |
+| getBodySiteCode | 7.130 | 3.795 | -45.9536% | full run |
+| getBodySiteCodeAsync | 12.900 | 9.293 | -27.5862% | full run |
+| getBodySiteText | 313.626 | 41.388 | -86.5482% | full run |
+| getBodySiteTextAsync | 318.541 | 49.267 | -84.8248% | full run |
+| suggestBodySites | 1482.594 | 781.045 | -47.9000% | full run |
+| suggestBodySiteText | 1501.862 | 768.522 | -46.7307% | full run |
+| listSupportedBodySiteText | 6864.995 | 3284.211 | -54.2123% | full run |
+| listSupportedBodySiteGrammar | 24.592 | 24.388 | -0.8289% | full run |
+| buildBodySiteTopographicalModifierCoding | 0.238 | 0.061 | -73.3252% | full run |
+| buildBodySiteAdministrationTargetCountExtension | 0.030 | 0.028 | -6.8390% | full run |
+| parseBodySiteAdministrationTargetCountExtension | 0.029 | 0.023 | -20.8030% | full run |
+| getBodySiteAdministrationTargetCount | 0.066 | 0.037 | -42.2540% | full run |
+| buildBodySiteSpatialRelationExtension | 0.094 | 0.089 | -8.3058% | full run |
+| buildBodySiteSpatialRelationExtensions | 0.095 | 0.090 | -5.6722% | full run |
+| parseBodySiteSpatialRelationExtension | 0.252 | 0.130 | -48.4670% | full run |
+| cloneBodySiteSpatialRelation | 0.058 | 0.045 | -23.8731% | full run |
+| buildSnomedFindingSitePostcoordinationCode | 0.085 | 0.086 | -2.6046% | full run |
+| parseSnomedFindingSitePostcoordinationCode | 0.134 | 0.154 | +3.4108% | full run |
+| hasSnomedFindingSitePostcoordination | 0.056 | 0.052 | -3.8579% | full run |
+| buildSnomedBodySiteLateralityPostcoordinationCode | 0.050 | 0.051 | -1.1340% | full run |
+| parseSnomedBodySiteLateralityPostcoordinationCode | 0.134 | 0.131 | +1.4572% | full run |
+| hasSnomedBodySiteLateralityPostcoordination | 0.055 | 0.054 | +1.9937% | full run |
+| buildSnomedBodySiteTopographicalModifierPostcoordinationCode | 0.049 | 0.048 | -1.7967% | full run |
+| parseSnomedBodySiteTopographicalModifierPostcoordinationCode | 0.117 | 0.115 | -2.7031% | confirmation |
+| hasSnomedTopographicalModifierPostcoordination | 0.054 | 0.054 | +0.1424% | full run |
+| buildSnomedFindingSiteCoding | 0.117 | 0.122 | +0.2390% | full run |
+| parseInstructionActions | 413.880 | 354.252 | -13.0333% | full run |
+| realizeInstructionGraph | 22.207 | 8.591 | -58.7234% | full run |
+| buildInstructionGraphExtension | 4.067 | 1.427 | -66.0691% | full run |
+| parseInstructionGraphExtension | 10.763 | 2.666 | -74.5751% | full run |
+| getMedicationInstructionAction | 0.433 | 0.025 | -94.1837% | full run |
+| resolveMedicationInstructionAction | 2.371 | 0.218 | -90.7786% | full run |
+| resolveMedicationInstructionSequenceAction | 1.565 | 1.510 | -0.4811% | full run |
+| getMedicationInstructionConcept | 0.256 | 0.032 | -87.2535% | full run |
+| resolveMedicationInstructionConcept | 0.462 | 0.210 | -54.7139% | full run |
+| listMedicationInstructionActions | 102.265 | 0.020 | -99.9806% | full run |
+| listMedicationInstructionConcepts | 29.295 | 0.016 | -99.9448% | full run |
+| buildMedicationInstructionActionCodeSystem | 5.772 | 3.402 | -40.8429% | full run |
+| buildMedicationInstructionConceptCodeSystem | 2.096 | 1.626 | -22.4292% | full run |
+| buildInfusionCarrierMaterialStructureDefinition | 0.428 | 0.424 | +0.4261% | full run |
+| buildDosageAlternativeChoiceStructureDefinition | 0.684 | 0.683 | -0.0960% | full run |
+| listSymptomDefinitions | 272.468 | 262.819 | +0.9555% | full run |
+| listAdviceRelationDefinitions | 111.633 | 110.547 | -0.1979% | full run |
+| listBodySiteRelationDefinitions | 155.645 | 151.481 | -0.0501% | full run |
+| getRegisteredSigLocalizations | 0.054 | 0.055 | +3.1781% | full run |
+| listMedicationSurfaceSegmenters | 0.345 | 0.035 | -89.9612% | full run |
+| listMedicationDateResolvers | 0.051 | 0.050 | -0.4969% | full run |
+| normalizeSymptomKey | 0.286 | 0.027 | -90.2897% | full run |
+| resolveSymptomDefinition | 3.296 | 2.871 | -11.1052% | full run |
+| findSymptomDefinitionByCoding | 2.981 | 2.919 | -0.5711% | full run |
+| getAdviceRelationDefinition | 7.132 | 7.062 | -1.2851% | full run |
+| getBodySiteRelationDefinition | 6.246 | 6.069 | -2.7728% | full run |
+| getBodySiteRelationRealization | 1.025 | 0.912 | -10.3999% | full run |
+| localizeAdviceRelation | 0.726 | 0.638 | -12.9785% | full run |
+| normalizeBodySiteRelation | 0.161 | 0.046 | -72.3501% | full run |
+| resolveActionRelationSurface | 0.156 | 0.042 | -72.7154% | full run |
+| resolveAdviceRelationSurface | 0.142 | 0.034 | -76.5971% | full run |
+| getAdviceLocaleAdapter | 0.250 | 0.240 | -1.0276% | confirmation |
+| getInstructionActionLocaleAdapter | 0.252 | 0.027 | -89.5076% | full run |
+| getSuggestLocaleAdapter | 0.238 | 0.235 | -1.4102% | full run |
+| getMedicationLexerLocalePack | 0.245 | 0.256 | +2.9227% | full run |
+| listMedicationLocaleLexemes | 494.221 | 349.803 | -31.4000% | full run |
+| resolveSigLocalization | 0.068 | 0.052 | -21.8552% | full run |
+| resolveSigTranslation | 0.062 | 0.049 | -22.7066% | full run |
+| inferMedicationLocale | 0.054 | 0.053 | -1.3082% | full run |
+| findMedicationDateListSpans | 56.546 | 56.987 | -2.8304% | full run |
+| parseMedicationDateListAt | 30.102 | 30.239 | -0.4949% | confirmation |
+| MedicationQuantityCalculationError | 42.782 | 42.241 | -0.5122% | full run |
+| registerAdviceLocaleAdapter | 0.239 | 0.241 | +1.0803% | confirmation |
+| registerInstructionActionLocaleAdapter | 0.370 | 0.369 | +2.3409% | full run |
+| registerSuggestLocaleAdapter | 0.395 | 0.391 | -0.3951% | full run |
+| registerMedicationLexerLocalePack | 1.514 | 1.505 | -0.4193% | full run |
+| registerMedicationLocaleDetector | 2.327 | 0.360 | -84.3690% | full run |
+| registerMedicationSurfaceSegmenter | 1.510 | 0.163 | -89.1127% | full run |
+| registerIntlMedicationSurfaceSegmenter | 11.970 | 0.284 | -97.7192% | full run |
+| registerMedicationDateResolver | 1.233 | 0.153 | -87.1185% | full run |
+| registerSigLocalization | 0.049 | 0.045 | -9.5640% | confirmation |
+
+| API without master counterpart | Candidate median µs |
+| --- | ---: |
+| getEmaQuantityComparator | 0.028 |
+| native/import-R6 | 19.834 |
+| native/import-R5 | 293.875 |
+| native/project-both | 232.052 |
+| native/format-administration | 57.455 |
+| native/format-course | 338.962 |
+| native/project-editable-R5 | 96.770 |
+
+Delivery targets are the existing PR head branch and the clean primary worktree. After the verified commit is pushed, the 20 new inline review threads and 4 older followups receive concise commit-specific replies in their original threads. Addressed threads are resolved after replies. Remote head, full-PR changed-file count, reply bodies and resolved state are verified; no top-level comment or additional full-review request is part of this delivery.

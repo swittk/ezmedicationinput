@@ -3,7 +3,7 @@ import { fromDosageDetails } from '../dosage-course';
 import { type FhirProjectionOptions } from '../fhir';
 import { courseFromParallel } from '../canonical/compile';
 import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
-import type { CanonicalCourse } from '../canonical/course';
+import { compareRegimenPositions, type CanonicalCourse, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, type RegimenGraph } from './regimen';
@@ -14,8 +14,7 @@ import type {
   FhirR6DosageInstruction
 } from '../types';
 
-/** Treatment-relative positions retain calendar months as a distinct unit. */
-export interface RegimenPosition { unit: 'd' | 'mo'; value: number }
+export type { RegimenPosition } from '../canonical/course';
 
 export interface CanonicalParallelComponent {
   member: number;
@@ -47,7 +46,7 @@ export interface CanonicalParallelStage {
 
 export type CanonicalParallelRegimen =
   | { kind: 'not-parallel' }
-  | { kind: 'unresolved'; reason: string }
+  | { kind: 'unresolved'; reason: string; tracks?: CanonicalParallelTrack[] }
   | {
       kind: 'resolved';
       tracks: CanonicalParallelTrack[];
@@ -130,28 +129,41 @@ function advance(start: RegimenPosition, duration: RegimenPosition): RegimenPosi
   return { unit: start.unit, value: start.value + duration.value };
 }
 
-function comparePositions(
-  left: RegimenPosition,
-  right: RegimenPosition
-): -1 | 0 | 1 | undefined {
-  if (left.value === 0 && right.value === 0) return 0;
-  if (left.value === 0) return -1;
-  if (right.value === 0) return 1;
-  if (left.unit === right.unit) {
-    return left.value < right.value ? -1 : left.value > right.value ? 1 : 0;
-  }
-  const leftMin = left.unit === 'mo' ? left.value * 28 : left.value;
-  const leftMax = left.unit === 'mo' ? left.value * 31 : left.value;
-  const rightMin = right.unit === 'mo' ? right.value * 28 : right.value;
-  const rightMax = right.unit === 'mo' ? right.value * 31 : right.value;
-  return leftMax < rightMin ? -1 : rightMax < leftMin ? 1 : undefined;
-}
 
 function withCalendarEnd(clause: CanonicalSigClause, boundsEnd: string): CanonicalSigClause {
   return {
     ...clause,
     schedule: { ...clause.schedule, boundsEnd }
   };
+}
+
+/** Normalize one already calendar-bound phase using its own successor.
+ * Both complete and partial parallel courses retain these same known cuts. */
+function calendarPhaseMembers(
+  members: readonly CanonicalParallelComponent[],
+  nextStarts: readonly (string | undefined)[] | undefined
+): CanonicalParallelComponent[] | string {
+  if (nextStarts?.some(value => !value)) return 'parallel-regimen-next-calendar-start-required';
+  const nextStart = nextStarts?.reduce<string>((earliest, value) =>
+    value && value < earliest ? value : earliest, nextStarts[0]!);
+  const inferredEnd = nextStart ? precedingCalendarDay(nextStart) : undefined;
+  const normalized: CanonicalParallelComponent[] = [];
+  for (const item of members) {
+    const schedule = item.clause.schedule!;
+    const durationEnd = anchoredScheduleDurationEnd(schedule);
+    const durationCutsEarlier = Boolean(durationEnd && schedule.boundsEnd &&
+      durationEnd < schedule.boundsEnd);
+    const effectiveEnd = durationCutsEarlier ? durationEnd : schedule.boundsEnd ?? inferredEnd;
+    if ((nextStart && (!effectiveEnd || !orderedCalendarBounds(effectiveEnd, nextStart))) ||
+        (effectiveEnd && schedule.boundsStart && orderedCalendarBounds(effectiveEnd, schedule.boundsStart)))
+      return 'parallel-regimen-calendar-phase-overlap';
+    normalized.push(!effectiveEnd || effectiveEnd === schedule.boundsEnd ? item : {
+      ...item,
+      effectiveBoundsEnd: effectiveEnd,
+      boundsEndBasis: durationCutsEarlier ? 'anchored-duration' : 'next-phase-start'
+    });
+  }
+  return normalized;
 }
 
 /** A global step owns its window, so its component keeps cadence but not the
@@ -169,6 +181,42 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
     ...cadence
   } = schedule;
   return { ...clause, schedule: cadence };
+}
+
+/** Keep independent phase ownership when global cuts cannot be ordered.
+ * This rare fallback reuses typed phase durations; it never assigns one
+ * track's uncertain completion to another track's known transition. */
+function partialParallelRegimen(
+  sourceTracks: readonly RegimenGraph["phases"][],
+  clauses: readonly CanonicalSigClause[],
+  reason: string
+): Extract<CanonicalParallelRegimen, { kind: "unresolved" }> {
+  const tracks: CanonicalParallelTrack[] = [];
+  for (const source of sourceTracks) {
+    const phases: CanonicalParallelPhase[] = [];
+    let at: RegimenPosition | undefined = ZERO;
+    for (let index = 0; index < source.length; index++) {
+      const phase = source[index];
+      let members = phase.members.map(member => ({ member, clause: clauses[member] }));
+      const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);
+      if (calendar && members.every(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd)) {
+        const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member =>
+          clauses[member].schedule?.boundsStart));
+        if (typeof normalized !== "string") members = normalized;
+      }
+      const first = members[0] && durationPosition(members[0].clause);
+      const exact = first && members.every(item => {
+        const duration = durationPosition(item.clause);
+        return duration && compareRegimenPositions(duration, first) === 0;
+      });
+      const end: RegimenPosition | undefined = !calendar && at && exact ? advance(at, first) : undefined;
+      phases.push({ kind: calendar ? "calendar" : "relative", members,
+        ...(!calendar && at ? { start: at } : {}), ...(end ? { end } : {}) });
+      at = end;
+    }
+    tracks.push({ phases });
+  }
+  return { kind: "unresolved", reason, tracks };
 }
 
 /**
@@ -231,41 +279,16 @@ export function buildCanonicalParallelRegimen(
         !item.clause.schedule ||
         !(item.clause.schedule.boundsStart || item.clause.schedule.boundsEnd) ||
         item.clause.schedule.duration !== undefined && !item.clause.schedule.boundsEnd)) {
-        return { kind: 'unresolved', reason: 'parallel-regimen-mixed-track-bounds' };
+        return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-mixed-track-bounds');
       }
       const phases: CanonicalParallelPhase[] = sourcePhases.map(members => ({
         kind: 'calendar',
         members
       }));
       for (let index = 0; index < phases.length; index++) {
-        const nextStarts = phases[index + 1]?.members.map(item =>
-          item.clause.schedule?.boundsStart);
-        if (nextStarts?.some(value => !value)) {
-          return { kind: 'unresolved', reason: 'parallel-regimen-next-calendar-start-required' };
-        }
-        const nextStart = nextStarts?.reduce<string>((earliest, value) =>
-          value && value < earliest ? value : earliest, nextStarts[0]!);
-        const inferredEnd = nextStart ? precedingCalendarDay(nextStart) : undefined;
-        const normalized: CanonicalParallelComponent[] = [];
-        for (const item of phases[index].members) {
-          const schedule = item.clause.schedule!;
-          const durationEnd = anchoredScheduleDurationEnd(schedule);
-          const durationCutsEarlier = Boolean(durationEnd && schedule.boundsEnd &&
-            durationEnd < schedule.boundsEnd);
-          const effectiveEnd = durationCutsEarlier
-            ? durationEnd
-            : schedule.boundsEnd ?? inferredEnd;
-          if ((nextStart && (!effectiveEnd || !orderedCalendarBounds(effectiveEnd, nextStart))) ||
-              (effectiveEnd && schedule.boundsStart &&
-              orderedCalendarBounds(effectiveEnd, schedule.boundsStart))) {
-            return { kind: 'unresolved', reason: 'parallel-regimen-calendar-phase-overlap' };
-          }
-          normalized.push(!effectiveEnd || effectiveEnd === schedule.boundsEnd ? item : {
-            ...item,
-            effectiveBoundsEnd: effectiveEnd,
-            boundsEndBasis: durationCutsEarlier ? 'anchored-duration' : 'next-phase-start'
-          });
-        }
+        const normalized = calendarPhaseMembers(phases[index].members,
+          phases[index + 1]?.members.map(item => item.clause.schedule?.boundsStart));
+        if (typeof normalized === "string") return partialParallelRegimen(trackPhases, clauses, normalized);
         phases[index] = { ...phases[index], members: normalized };
       }
       tracks.push({ phases });
@@ -287,7 +310,7 @@ export function buildCanonicalParallelRegimen(
     for (let index = 0; index < sourcePhases.length; index++) {
       const members = sourcePhases[index];
       if (!members.length || members.some(item => !hasRepeatSchedule(item.clause))) {
-        return { kind: 'unresolved', reason: 'parallel-regimen-incomplete-dose' };
+        return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-incomplete-dose');
       }
       const durations = members.map(item => durationPosition(item.clause));
       const concrete = durations.filter(
@@ -296,16 +319,16 @@ export function buildCanonicalParallelRegimen(
       let end: RegimenPosition | undefined;
       if (concrete.length) {
         if (concrete.length !== members.length ||
-            concrete.some(value => comparePositions(value, concrete[0]) !== 0)) {
-          return { kind: 'unresolved', reason: 'parallel-regimen-conflicting-duration' };
+            concrete.some(value => compareRegimenPositions(value, concrete[0]) !== 0)) {
+          return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-conflicting-duration');
         }
         end = advance(at, concrete[0]);
         if (!end) {
-          return { kind: 'unresolved', reason: 'parallel-regimen-mixed-relative-duration' };
+          return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-mixed-relative-duration');
         }
         boundaries.push(end);
       } else if (index + 1 < sourcePhases.length) {
-        return { kind: 'unresolved', reason: 'parallel-regimen-missing-transition-duration' };
+        return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-missing-transition-duration');
       }
       phases.push({ kind: 'relative', members, start: at, ...(end ? { end } : {}) });
       if (end) at = end;
@@ -316,12 +339,12 @@ export function buildCanonicalParallelRegimen(
 
   const ordered: RegimenPosition[] = [];
   for (const position of boundaries) {
-    if (ordered.some(existing => comparePositions(existing, position) === 0)) continue;
+    if (ordered.some(existing => compareRegimenPositions(existing, position) === 0)) continue;
     let before = ordered.length;
     for (let index = 0; index < ordered.length; index++) {
-      const comparison = comparePositions(position, ordered[index]);
+      const comparison = compareRegimenPositions(position, ordered[index]);
       if (comparison === undefined) {
-        return { kind: 'unresolved', reason: 'parallel-regimen-calendar-order-ambiguous' };
+        return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-calendar-order-ambiguous');
       }
       if (comparison < 0) {
         before = index;
@@ -331,7 +354,7 @@ export function buildCanonicalParallelRegimen(
     ordered.splice(before, 0, position);
   }
   if (ordered.length < 2 && !calendarComponents.length) {
-    return { kind: 'unresolved', reason: 'parallel-regimen-no-phase-cut' };
+    return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-no-phase-cut');
   }
 
   const stages: CanonicalParallelStage[] = [];
@@ -341,8 +364,8 @@ export function buildCanonicalParallelRegimen(
     const components: CanonicalParallelComponent[] = [];
     for (const phases of relativeTracks) {
       const phase = phases.find(candidate => {
-        const begins = comparePositions(candidate.start!, start);
-        const finishes = candidate.end ? comparePositions(start, candidate.end) : -1;
+        const begins = compareRegimenPositions(candidate.start!, start);
+        const finishes = candidate.end ? compareRegimenPositions(start, candidate.end) : -1;
         return (begins === -1 || begins === 0) && finishes === -1;
       });
       if (phase) {
@@ -356,7 +379,7 @@ export function buildCanonicalParallelRegimen(
     for (const calendarTrack of calendarComponents) components.push(...calendarTrack);
     if (!components.length) {
       if (index === ordered.length - 1) break;
-      return { kind: 'unresolved', reason: 'parallel-regimen-empty-step' };
+      return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-empty-step');
     }
     stages.push({ sequence: index + 1, start, ...(end ? { end } : {}), components });
   }

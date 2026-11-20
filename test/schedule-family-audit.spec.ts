@@ -3141,6 +3141,17 @@ describe("PR14 new review: overlapping repeated-course chronological rolling all
     expect(calculateTotalUnits({...opts,dosage:course,durationValue:6,
       durationUnit:FhirPeriodUnit.Day}).totalUnits).toBe(3);
   });
+  it("retains the first cycle's day-three tail when the intervening cycle is capped", () => {
+    const tail = { ...member, limits: [{ scope: "period" as const,
+      amount: { value: 1, unit: "tab" }, period: { value: 3, unit: "d" } }] };
+    const overlapping = { ...course, cycleInterval: { value: 2, unit: "d" },
+      stages: [{ administrations: [tail] }] };
+    expect(nextDueDoses(overlapping, { ...opts, limit: 3 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-04T00:00:00+00:00", "2026-01-07T00:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...opts, dosage: overlapping,
+      durationValue: 4, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+  });
   it("keeps prior overlapped history across an arbitrary mid-window query",()=>{
     const from="2026-01-04T00:00:00Z";
     expect(nextDueDoses(course,{...opts,from,limit:2}))

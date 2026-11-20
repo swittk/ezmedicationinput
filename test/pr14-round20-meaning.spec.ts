@@ -262,6 +262,7 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     expect(row.timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
     row.timing!.repeat!.timeOfDay![1] = "22:00:00";
     const text = formatSig(row, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(text).toContain("08:00");
     expect(text).toContain("22:00");
     expect(text).not.toContain("20:00");
     expect(text).not.toBe("");

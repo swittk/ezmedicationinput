@@ -525,6 +525,9 @@
     {
       "code": "dilute",
       "semanticClass": "prepare",
+      "acceptsAmount": true,
+      "argumentParser": "amount-material-destination",
+      "realizer": "amount-material-destination",
       "display": "Dilute",
       "i18n": {
         "th": "เจือจาง"
@@ -814,6 +817,8 @@
     {
       "code": "swallow",
       "semanticClass": "ingest",
+      "acceptsAmount": true,
+      "definesDose": true,
       "display": "Swallow",
       "i18n": {
         "th": "กลืน"

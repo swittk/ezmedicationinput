@@ -186,7 +186,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(imported.fhir.timing).toEqual(original.timing);
       expect(imported.fhir.modifierExtension).toEqual([modifier]);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
-      expect(imported.longText).toContain("1 tablet");
+      expect(imported.longText).toBe(text);
       const course: FhirR6DosageInstruction = {
         step: [{ component: [{ ...original }] }]
       };

@@ -2134,11 +2134,16 @@ describe("source-owned action amounts remain editable across the whole graph", (
         for (const phrase of retained) {
           if (locale === "en") expect(text.toLowerCase()).toContain(phrase.toLowerCase());
           else {
-            // Untranslated medication names remain intact; localized verbs
-            // and independent actions need not retain English wording.
-            if (phrase === "amoxicillin") expect(text).toContain("amoxicillin");
+            const expected: Record<string, RegExp> = {
+              water: /น้ำ/, "drink 5 mL": /ดื่ม\s*5\s*มิลลิลิตร/,
+              amoxicillin: /amoxicillin/, "take 2 tablets": /รับประทาน\s*2\s*เม็ด/,
+              stir: /คน/, drink: /ดื่ม/
+            };
+            expect(text).toMatch(expected[phrase]);
           }
         }
+        if (source.startsWith("Dissolve"))
+          expect(text.toLowerCase()).toContain(locale === "en" ? "dissolve" : "ละลาย");
         for (const phrase of removed)
           expect(text.toLowerCase()).not.toContain(phrase.toLowerCase());
       }

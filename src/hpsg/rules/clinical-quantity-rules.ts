@@ -6,10 +6,12 @@ import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-con
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
+  millionDoseNumberAt,
   additiveDoseNumberAt,
   attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_NUMBER_WORDS,
+  DOSE_FRACTION_WORDS,
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS
 } from "../lexical-classes";
@@ -581,7 +583,14 @@ function qualifyClinicalSign(
   sign: HpsgSign | undefined,
   comparator: HpsgClinicalQuantityFeature["numerator"]["comparator"]
 ): HpsgSign | undefined {
-  if (!comparator) return sign;
+  if (!comparator) {
+    if (!sign || phraseStart === numericStart) return sign;
+    return lexicalSign({ type: sign.type, rule: sign.evidence[0].rule,
+      tokens: [...context.tokens.slice(phraseStart, numericStart), ...sign.tokens]
+        .sort((a, b) => a.index - b.index),
+      synsem: sign.synsem, warnings: sign.warnings,
+      score: sign.score + numericStart - phraseStart });
+  }
   const dose = sign?.synsem.head.dose;
   const quantity = dose?.clinicalQuantity;
   if (!sign || !dose || !quantity) return undefined;
@@ -651,14 +660,18 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
         doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
     }
   }
-  const numericStart = qualified?.numericIndex ?? phraseStart;
+  const exactNumber = qualified ? undefined : quantityToken.kind === LexKind.Number
+    ? quantityToken.value : DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
+  const exactMillion = exactNumber !== undefined
+    ? millionDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
+  const numericStart = qualified?.numericIndex ?? exactMillion?.numericIndex ?? phraseStart;
   // The general lower-case normalizer strips leading punctuation, but a
   // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
   // trailing sentence punctuation only; never turn .1 into 1.
   const attached = !qualified && quantityToken.kind !== LexKind.Number
     ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
-  const value = qualified?.value ??
-    (quantityToken.kind === LexKind.Number ? quantityToken.value : attached?.value);
+  const value = qualified?.value ?? exactMillion?.value ??
+    exactNumber ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
   const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");

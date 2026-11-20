@@ -1070,7 +1070,8 @@ const cuts = [begin, stop];
     cuts.push(sourceTransition);
   const target = new Date(quantityCapWindowStart(new Date(begin), cap, zone));
   const targetDay = startOfLocalDay(target, zone), targetNext = addLocalDays(targetDay, 1, zone);
-  const targetTransition = calendarOffsetTransition(targetDay, targetNext, zone);
+  // The first instant of a skipped-midnight day is already after its gap.
+  const targetTransition = calendarOffsetTransition(new Date(targetDay.getTime() - 1), targetNext, zone);
   if (targetTransition !== undefined) {
     // A target gap's shifted clocks jump back at the end of its gap;
     // a target fold has two possible offsets. Place both wall-clock
@@ -1907,8 +1908,21 @@ function treatmentRelativeInstant(
   sourceClock?: TreatmentWallClock
 ): Date {
   const knownAnchor = relative.anchor === "treatment-start";
-  const duration =
-    relative.displacement ?? relative.displacementRange?.low ?? relative.displacementRange?.high;
+  const duration = relative.displacement;
+  if (!duration && relative.displacementRange) {
+    const range = relative.displacementRange;
+    const unresolved = "Unsupported R6 step RelativeTime: range endpoints must resolve to the same treatment-start offset";
+    if (!range.low || !range.high) throw new Error(unresolved);
+    // A range names one exact boundary only when both endpoints resolve to
+    // the same instant at this treatment anchor. Reuse civil/calendar
+    // arithmetic; never average a month or silently choose a lower bound.
+    const low = treatmentRelativeInstant({ anchor: relative.anchor, displacement: range.low },
+      orderedAt, timeZone, sourceClock);
+    const high = treatmentRelativeInstant({ anchor: relative.anchor, displacement: range.high },
+      orderedAt, timeZone, sourceClock);
+    if (low.getTime() !== high.getTime()) throw new Error(unresolved);
+    return low;
+  }
   const quantity = duration?.value;
   const unit = duration?.code ?? duration?.unit;
   if (
@@ -1975,7 +1989,7 @@ function stageCalendarClock(
  * Without a marker the caller's established stage clock is unchanged.
  * Discover the marker once instead of filtering the extension array. */
 function parallelComponentCadence(
-  dosage: Pick<CanonicalAdministration, "phaseOrigin" | "phaseOriginIssue">,
+  dosage: Pick<CanonicalAdministration, "phaseOrigin" | "phaseOriginIssue" | "phaseStart">,
   treatmentStart: Date,
   timeZone: string,
   fallback: Date,
@@ -1988,14 +2002,18 @@ function parallelComponentCadence(
 } {
   if (dosage.phaseOriginIssue) throw new Error("Parallel component phase origin is malformed or conflicting");
   const offset = dosage.phaseOrigin;
-  if (!offset) return { origin: fallback, capClock: stageClock, hasPhaseOrigin: false };
+  const boundary = dosage.phaseStart;
+  if (!offset && !boundary) return { origin: fallback, capClock: stageClock, hasPhaseOrigin: false };
   const origin = treatmentRelativeInstant(
-    { anchor: "treatment-start", displacement: offset },
+    boundary ?? { anchor: "treatment-start", displacement: offset },
     treatmentStart,
     timeZone,
     sourceClock
   );
-  const unit = offset.code ?? offset.unit;
+  const displacement = boundary
+    ? boundary.displacement ?? boundary.displacementRange?.low ?? boundary.displacementRange?.high
+    : offset;
+  const unit = displacement?.code ?? displacement?.unit;
   const elapsed = unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour;
   return {
     origin,
@@ -2147,7 +2165,7 @@ function treatmentStepWindow(
       ? start
       : successorIntervalStart(administration, predecessorPoint, start, timeZone);
     const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
-    const cadence = recurrence?.calendarWindow
+    const cadence = recurrence?.calendarWindow && !administration.phaseStart
       ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
       : parallelComponentCadence(
           administration,
@@ -2172,7 +2190,9 @@ function treatmentStepWindow(
     const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
     let endExclusive = earlierDate(
       resolveRepeatDurationCapEnd(administration, durationOrigin, timeZone,
-        delay ? getTimeParts(durationOrigin, timeZone) : cadence.capClock),
+        delay ? getTimeParts(durationOrigin, timeZone)
+          : cadence.capClock && recurrence?.calendarWindow && absoluteStart ? getTimeParts(absoluteStart, timeZone)
+          : cadence.capClock),
       absoluteEnd
     );
     let completionPoint: Date | undefined;
@@ -2461,7 +2481,7 @@ function definitelyNonOverlappingCycle(course: CanonicalCourse, cycle?: Canonica
   if (stage.start || stage.end || (stage.count !== undefined && stage.count !== 1)) return false;
   for (const member of stage.administrations) {
     const repeat = member.schedule?.recurrence;
-    if (member.phaseOrigin || member.phaseOriginIssue ||
+    if (member.phaseOrigin || member.phaseStart || member.phaseOriginIssue ||
         member.anchoredLength || member.delayMinutes ||
         repeat?.calendarWindow?.end || repeat?.calendarWindow?.start ||
         (repeat?.count !== undefined && !unscheduledOccurrenceCapacity(member)) ||
@@ -2598,7 +2618,7 @@ function scheduleTreatmentRelativeCourse(
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
           : originalRepeat;
         const execution: CanonicalAdministration = {
-          ...original, phaseOrigin: undefined, phaseOriginIssue: undefined,
+          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
           ...(collect && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
@@ -3007,6 +3027,9 @@ function chronologicalRepeatedEvents(
   resultLimit: number,
   context?: MedicationContext
 ): UncommittedCycleEvent[] {
+  if (options.priorCount !== undefined && options.priorCount > 0)
+    throw new MedicationQuantityCalculationError("repeated-course-history-needs-timestamps",
+      "A prior count cannot identify which repeated phase or cycle was administered or when its rolling cap expires. Supply priorDoseTimes without priorCount for this course; its instructions and limits remain unchanged.");
   const from = coerceDate(options.from, "from"),
     anchor = options.orderedAt === undefined ? from : coerceDate(options.orderedAt, "orderedAt");
   const advance = durationStepper(course.cycleInterval, zone, anchor);
@@ -3499,7 +3522,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const single = stage?.administrations.length === 1 ? stage.administrations[0] : undefined;
     // A one-administration course has no inter-stage relationship to
     // resolve. This is a proven scalar fast path, not another course model.
-    if (single && (stage?.count === undefined || stage.count === 1) && !stage?.start && !stage?.end && !single.phaseOrigin && !single.phaseOriginIssue)
+    if (single && (stage?.count === undefined || stage.count === 1) && !stage?.start && !stage?.end && !single.phaseOrigin && !single.phaseStart && !single.phaseOriginIssue)
       return nextDueDoses(single, options);
     if (zone && hasRepeatedStep(course) && hasRollingCycleLimit(course)) {
       const events = chronologicalRepeatedEvents(course, options, zone, undefined, options.limit ?? 10);
@@ -3509,7 +3532,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   }
   const one = dosage as CanonicalAdministration;
   requireConsistentTimingCode(one.schedule);
-  if (one.phaseOrigin || one.phaseOriginIssue ||
+  if (one.phaseOrigin || one.phaseStart || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return nextDueDoses(courseFromCanonicalRows([one]), options);
   // The successor's cadence can be anchored to its predecessor's last
@@ -3892,12 +3915,6 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const prnCountCapped =
     !!dosage.asNeeded &&
     (dosage.schedule?.recurrence?.count !== undefined || dosage.schedule?.recurrence?.countMax !== undefined);
-  if (prnCountCapped && orderedAt && from > orderedAt && priorCountInput === undefined) {
-    for (const stamp of options.priorDoseTimes ?? []) {
-      const actual = coerceDate(stamp, "priorDoseTimes");
-      if (actual >= orderedAt && actual < from) priorCount++;
-    }
-  }
   const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt && !dosage.asNeeded;
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
@@ -3978,6 +3995,13 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     from = boundsStart;
   }
   const effectiveOrderedAt = orderedAt && boundsStart && boundsStart > orderedAt ? boundsStart : orderedAt;
+  const historyOrigin = effectiveOrderedAt ?? boundsStart;
+  if (prnCountCapped && historyOrigin && from > historyOrigin && priorCountInput === undefined) {
+    for (const stamp of options.priorDoseTimes ?? []) {
+      const actual = coerceDate(stamp, "priorDoseTimes");
+      if (actual >= historyOrigin && actual < from) priorCount++;
+    }
+  }
   const baseCandidate = effectiveOrderedAt ?? boundsStart ?? from;
   const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
   const courseEnd =
@@ -4683,11 +4707,16 @@ function generateFrequencyPerPeriodSeries(
   const seen = new Set<string>();
   let earliestDayShift = 0;
   let latestDayShift = 0;
-  for (const entry of clocks)
-    if (typeof entry === "object") {
-      earliestDayShift = Math.min(earliestDayShift, entry.dayShift);
-      latestDayShift = Math.max(latestDayShift, entry.dayShift);
-    }
+  const firstShift = typeof clocks[0] === "object" ? clocks[0].dayShift : 0;
+  let interlacingClocks = false;
+  for (const entry of clocks) {
+    const shift = typeof entry === "object" ? entry.dayShift : 0;
+    earliestDayShift = Math.min(earliestDayShift, shift);
+    latestDayShift = Math.max(latestDayShift, shift);
+    interlacingClocks ||= shift !== firstShift;
+  }
+  const pending = interlacingClocks ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
+  let serial = 0;
   let cycleStart = baseTime;
   if (!normalizedCalendarInterval(period, periodUnit)) {
     const firstEnd = advanceCycle(baseTime);
@@ -4798,12 +4827,22 @@ function generateFrequencyPerPeriodSeries(
       const iso = formatZonedIso(candidate, timeZone);
       if (!seen.has(iso)) {
         seen.add(iso);
-        results.push(iso);
+        if (pending) pending.push({ at: candidate.getTime(), iso, serial: serial++ });
+        else results.push(iso);
       }
     }
     cycleStart = cycleEnd;
+    if (pending) {
+      // An unvisited cycle can only emit on or after its earliest shifted
+      // anchor day. Drain proven earlier events before spending result slots.
+      const before = startOfLocalDay(earliestDayShift
+        ? addLocalDays(cycleStart, earliestDayShift, timeZone) : cycleStart, timeZone).getTime();
+      while (pending.first() && pending.first()!.at < before && results.length < effectiveLimit)
+        results.push(pending.pop()!.iso);
+    }
     guard += 1;
   }
+  while (pending?.first() && results.length < effectiveLimit) results.push(pending.pop()!.iso);
   return results;
 }
 /**
@@ -5437,10 +5476,12 @@ function maximumChronologicalSupplyCourse(
       // numeric supply. A range has no scalar amount until its applicable
       // maximum is selected; otherwise overlapping cycles bypass the cap
       // while the final measurement still multiplies by the upper dose.
-      // Use the existing supply measurer ONLY for this capped range branch.
-      // The original authored range stays on the source member.
+      // A supplied patient weight must resolve scalar and infusion amounts
+      // before admission too. Reuse the final supply measurer; original
+      // amounts and their per-kg units remain on the source member.
       const amounts = generated.amounts;
-      if (amounts?.length === 1 && !amounts[0].quantity && amounts[0].range &&
+      if (amounts?.length === 1 &&
+          ((!amounts[0].quantity && amounts[0].range) || options.patientWeightKg !== undefined) &&
           hasPeriodLimits(generated))
         generated = prepareMeasuredDose(generated, options);
       if (maximal.frequencyMaximum && !preserveClocks) {
@@ -6292,7 +6333,7 @@ function calculateChronologicalCourseUnits(
       for(const [key, group] of byMember){
         const dosage:CanonicalAdministration={
           ...group.member,
-          delayMinutes:undefined,phaseOrigin:undefined,phaseOriginIssue:undefined,
+          delayMinutes:undefined,phaseOrigin:undefined,phaseStart:undefined,phaseOriginIssue:undefined,
           // Retain authored period limits for the final supply explanation.
           // The acceptedEventCount path never re-enforces them; any cap that
           // could NOT be executed in the chronological ledger must still be
@@ -6437,7 +6478,7 @@ function calculateCourseTotalUnits(
     for (const [key, plan] of collected) {
       plan.windows.sort((a, b) => a.start - b.start);
       const source = plan.dosage;
-      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseOriginIssue: undefined,
+      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
         schedule: { ...source.schedule, recurrence: { ...source.schedule?.recurrence,
           count: undefined, countMax: undefined,
           courseLength: undefined, courseLengthRange: undefined, calendarWindow: undefined } } };
@@ -6625,6 +6666,7 @@ function calculateCourseTotalUnits(
       const bounded: CanonicalAdministration = {
         ...dosage,
         phaseOrigin: undefined,
+        phaseStart: undefined,
         phaseOriginIssue: undefined,
         schedule: {
           ...dosage.schedule,
@@ -6714,7 +6756,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     return calculateCourseTotalUnits(input as CanonicalCourse, options);
   if (Array.isArray(input)) return calculateCourseTotalUnits(courseFromCanonicalRows(input), options);
   const one = input as CanonicalAdministration;
-  if (one.phaseOrigin || one.phaseOriginIssue ||
+  if (one.phaseOrigin || one.phaseStart || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return calculateCourseTotalUnits(courseFromCanonicalRows([one]), options);
   const choice = executionChoice(one);
@@ -6890,7 +6932,7 @@ function explicitAdministrationCompletion(
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
   const raw = withoutOccurrenceCap({
-    ...dosage, phaseOrigin: undefined, phaseOriginIssue: undefined,
+    ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
     limits: dosage.limits?.filter(limit => limit.scope !== "period"),
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
@@ -6925,8 +6967,8 @@ function finiteAdministrationCompletion(
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
   const local =
-    dosage.phaseOrigin || dosage.phaseOriginIssue
-      ? { ...dosage, phaseOrigin: undefined, phaseOriginIssue: undefined }
+    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseOriginIssue
+      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined }
       : dosage;
   // Completion is a historical boundary, not the number of doses still due.
   // Only records inside this phase can complete it; older records still belong

@@ -196,6 +196,8 @@ export interface CanonicalAdministration {
   choice?: CanonicalChoice;
   choiceIssue?: boolean;
   phaseOrigin?: CanonicalMeasure;
+  /** A member phase whose event origin is not a concrete treatment offset. */
+  phaseStart?: CanonicalBoundary;
   phaseOriginIssue?: boolean;
   delayMinutes?: number;
   anchoredLength?: { quantity?: CanonicalMeasure; range?: CanonicalRange };
@@ -342,4 +344,25 @@ export function singleNumericLimit(
 }
 export function hasPeriodLimits(a: CanonicalAdministration): boolean {
   return a.limits?.some((limit) => limit.scope === "period") ?? false;
+}
+
+/** Nonnegative treatment-relative positions keep calendar months distinct
+ * from civil days. Cross-unit order is known only when conservative calendar
+ * bounds do not overlap; these bounds never become an executable duration. */
+export interface RegimenPosition { unit: 'd' | 'mo'; value: number }
+export function compareRegimenPositions(
+  left: RegimenPosition,
+  right: RegimenPosition
+): -1 | 0 | 1 | undefined {
+  if (left.value === 0 && right.value === 0) return 0;
+  if (left.value === 0) return -1;
+  if (right.value === 0) return 1;
+  if (left.unit === right.unit) {
+    return left.value < right.value ? -1 : left.value > right.value ? 1 : 0;
+  }
+  const leftMin = left.unit === 'mo' ? left.value * 28 : left.value;
+  const leftMax = left.unit === 'mo' ? left.value * 31 : left.value;
+  const rightMin = right.unit === 'mo' ? right.value * 28 : right.value;
+  const rightMax = right.unit === 'mo' ? right.value * 31 : right.value;
+  return leftMax < rightMin ? -1 : rightMax < leftMin ? 1 : undefined;
 }

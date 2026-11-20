@@ -496,6 +496,7 @@ describe("round 24: current facts and independent source wording", () => {
       expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
       expect(text).toContain("amoxicillin");
       expect(text).toContain(locale === "en" ? "1 tablet saline" : "saline 1 เม็ด");
+      expect(text.match(locale === "en" ? /1 tablet\b/g : /1 เม็ด/g)).toHaveLength(1);
     }
     expect(JSON.stringify(dosage)).toBe(saved);
   });
@@ -743,6 +744,9 @@ describe("round 25: typed source owners survive independent clinical edits", () 
       expect(text).not.toMatch(/2 tablets|2 เม็ด/);
       expect(text).toContain(locale === "en" ? "water" : "น้ำ");
       expect(text).toContain(locale === "en" ? "slowly" : thaiManner);
+      expect(text.toLowerCase()).toContain(locale === "en" ? "disperse" : "กระจาย");
+      const action = source.includes("drink") ? ["drink", "ดื่ม"] : ["swallow", "กลืน"];
+      expect(text.toLowerCase()).toContain(action[locale === "en" ? 0 : 1]);
     }
     expect(JSON.stringify(dosage)).toBe(saved);
   });
@@ -892,4 +896,234 @@ describe("round 25: duration endpoints and course preview boundaries", () => {
     expect(grouped).toBe("Choose one: (Use 1 tablet\nUse 2 tablets) or Use 3 tablets\nUse 4 tablets.");
     expect(grouped).not.toContain(".\n");
   });
+});
+
+
+describe("round 26: known timing and quantity stay attached to their clinical owner", () => {
+  it.each([2, -2, 0])("retains an unresolved event and its %s-day displacement without assigning a date", value => {
+    const wire: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { text: "follow-up visit" }, offsetDuration: { value, code: "d" } },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const saved = JSON.stringify(wire);
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("follow-up visit");
+      expect(text).toContain(String(Math.abs(value)));
+      expect(text).toContain(locale === "en" ? (value < 0 ? "before" : "after") : (value < 0 ? "ก่อน" : "หลัง"));
+      expect(text).toContain(locale === "en" ? "requires review" : "ต้องตรวจสอบ");
+      expect(text).not.toMatch(/2026|Days 1|วันที่ 1/);
+    }
+    expect(JSON.stringify(wire)).toBe(saved);
+  });
+
+  it("shows a bounded event offset and retains the generic fallback with no event facts", () => {
+    const wire: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { text: "follow-up visit" },
+        offsetRange: { low: { value: 2, code: "d" }, high: { value: 3, code: "d" } } },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const text = formatSig(wire, "long", { realizationMode: "normalized" });
+    expect(text).toContain("2 days – 3 days after follow-up visit");
+    const unknown: FhirR6DosageInstruction = { step: [{ start: {}, component: wire.step![0].component }] };
+    expect(formatSig(unknown, "long", { realizationMode: "normalized" }))
+      .toContain("Stage timing requires review");
+  });
+
+  it.each(["~", ">="] as const)("keeps the %s primary spray dose scoped to each nostril", comparator => {
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      route: { text: "intranasal" }, site: { concept: { text: "both nostrils" } },
+      doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, unit: "spray", comparator })! },
+        { doseQuantity: simpleQuantityForR5({ value: 2, unit: "mg", comparator: "<" })! }]
+    }] }] };
+    const saved = JSON.stringify(wire);
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "each nostril" : "ข้างละ");
+      expect(text).toContain(locale === "en" ? comparator === "~" ? "approximately 1 spray" : "at least 1 spray"
+        : comparator === "~" ? "ประมาณ 1" : "อย่างน้อย 1");
+      expect(text).toContain("<2 mg");
+      expect(text.match(locale === "en" ? /1 spray/g : /1 ครั้ง/g)).toHaveLength(1);
+      const short = formatSig(wire, "short", { locale, realizationMode: "normalized" });
+      expect(short).toContain("1");
+      expect(short).toContain(locale === "en" ? comparator : comparator === "~" ? "ประมาณ" : "อย่างน้อย");
+    }
+    expect(JSON.stringify(wire)).toBe(saved);
+  });
+
+  it("shows a zero-step cycle interval without manufacturing an active administration", () => {
+    const wire: FhirR6DosageInstruction = { repeatCycle: { value: 28, code: "d" } };
+    expect(courseFromR6(wire).stages).toEqual([]);
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(wire, "long", { locale });
+      expect(text).toContain(locale === "en" ? "every 28 days" : "ทุก 28 วัน");
+      expect(text).not.toMatch(/tablet|เม็ด|Take|รับประทาน/);
+    }
+    expect(formatSig({ renderedInstruction: "Keep this instruction" }, "long")).toBe("Keep this instruction");
+    expect(formatSig({ safety: { doseLimit: [{ scope: "lifetime", valueInteger: 3 }] } }, "long"))
+      .toContain("3 administrations");
+    expect(wire.step).toBeUndefined();
+  });
+
+  it.each(["before", "after"])("composes the %s dose event after all dilution complements", relation => {
+    const source = "Dilute 1 mL with saline to 10 mL " + relation + " each dose";
+    const parsed = parseSig(source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions).toHaveLength(1);
+    const frame = graph.actions[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+      .toMatchObject({ value: 1, unit: "mL" });
+    expect(frame.args.filter(arg => arg.relation).map(arg => [arg.relation, arg.text]))
+      .toEqual([[AdviceRelation.With, "saline"], [AdviceRelation.To, "10 mL"], [relation, "each dose"]]);
+    const saved = JSON.stringify(graph);
+    for (const wire of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      const english = formatSig(wire, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain("Dilute 1 mL with saline to 10 mL " + relation + " each dose");
+      const thai = formatSig(wire, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("เจือจาง");
+      expect(thai).toContain("1 มิลลิลิตร");
+      expect(thai).toContain("10 มิลลิลิตร");
+      expect(thai).toContain((relation === "before" ? "ก่อน" : "หลัง") + "การให้ยาแต่ละครั้ง");
+    }
+    expect(JSON.stringify(graph)).toBe(saved);
+  });
+
+  it("cleans a surviving primary frame after an external bedtime-to-morning edit", () => {
+    const source = "Take 1 tablet at bedtime";
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
+    row.extension = [...(row.extension ?? []), buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source)
+    })!];
+    const originalGraph = JSON.stringify(row.extension);
+    for (const locale of ["en", "th"]) {
+      expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" }))
+        .toContain(locale === "en" ? "bedtime" : "ก่อนนอน");
+    }
+    row.timing!.repeat!.when = [EventTiming.Morning];
+    for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const text = formatSig(row, "long", { locale, realizationMode });
+      expect(text).toContain(locale === "en" ? "morning" : "ตอนเช้า");
+      expect(text).not.toMatch(/bedtime|sleep|นอน/);
+      expect(text.match(locale === "en" ? /1 tablet/g : /1 เม็ด/g)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row.extension)).toBe(originalGraph);
+  });
+
+  it("keeps the independent later action's bedtime when only the primary schedule changes", () => {
+    const source = "Take 1 tablet at bedtime";
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
+    const first = parseInstructionActions(source)[0];
+    const later = parseInstructionActions("Take 2 tablets at bedtime", 40)[0];
+    later.sequenceIndex = 1;
+    row.extension = [...(row.extension ?? []), buildInstructionGraphExtension({
+      sourceText: source + "; Take 2 tablets at bedtime", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 4 }, actions: [first, later]
+    })!];
+    row.timing!.repeat!.when = [EventTiming.Morning];
+    const text = formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+    expect(text).toContain("1 tablet orally in the morning");
+    expect(text).toContain("Take 2 tablets at bedtime");
+    expect(text).not.toContain("Take 1 tablet at bedtime");
+  });
+
+  it("preserves an explicitly replaced instruction text beside the edited schedule", () => {
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig("Swallow 1 tablet whole at bedtime").fhir[0]));
+    row.timing!.repeat!.when = [EventTiming.Morning];
+    row.text = "Swallow 1 tablet whole in the morning after discussion with the clinician.";
+    const saved = JSON.stringify(row);
+    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    expect(JSON.stringify(row)).toBe(saved);
+  });
+
+  it("renders the live meal offset exactly once beside the rich primary action", () => {
+    const source = "Swallow 1 tablet whole before breakfast";
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
+    row.timing!.repeat!.offset = 30;
+    const saved = JSON.stringify(row);
+    for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const text = formatSig(row, "long", { locale, realizationMode });
+      expect(text).toContain(locale === "en" ? "30 minutes before breakfast" : "ก่อนอาหารเช้า 30 นาที");
+      expect(text).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
+      expect(text.match(locale === "en" ? /breakfast/g : /อาหารเช้า/g)).toHaveLength(1);
+      expect(text.match(locale === "en" ? /1 tablet/g : /1 เม็ด/g)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(saved);
+  });
+});
+
+describe("round 26: quantity grammar owns the complete comparative or scaled head", () => {
+  it.each(["no greater than", "not greater than"])("keeps %s as an inclusive infusion upper limit", qualifier => {
+    const source = "Infuse " + qualifier + " 100 mL per hour";
+    const tokens = tokenize(source);
+    const context: HpsgClauseContext = { state: new ParserState(source, tokens), tokens,
+      limit: tokens.length, dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"] };
+    const start = tokens.findIndex(token => token.lower === qualifier.split(" ")[0]);
+    const signs = clinicalQuantityLexicalRule().match(context, start);
+    expect(signs).toHaveLength(1);
+    expect(signs[0].synsem.head.dose?.clinicalQuantity?.numerator)
+      .toMatchObject({ value: 100, unit: "mL", comparator: "<=" });
+    const parsed = parseSig(source);
+    for (const wire of [parsed.fhirNext, toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))))]) {
+      const amounts = wire.step!.flatMap(step => step.component.flatMap(component => component.doseAndRate ?? []));
+      expect(amounts).toHaveLength(1);
+      expect(amounts[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+      expect(getQuantityComparator(amounts[0].rateQuantity)).toBe("<=");
+      expect(amounts[0].doseQuantity).toBeUndefined();
+    }
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each(["", "approximately "])("uses the shared fraction head in '%shalf a million units per hour'", qualifier => {
+    const source = "Infuse " + qualifier + "half a million units per hour";
+    const parsed = parseSig(source);
+    const amounts = parsed.fhirNext.step!.flatMap(step => step.component.flatMap(component => component.doseAndRate ?? []));
+    expect(amounts).toHaveLength(1);
+    expect(amounts[0].rateQuantity).toMatchObject({ value: 500_000, unit: "[iU]/h" });
+    expect(getQuantityComparator(amounts[0].rateQuantity)).toBe(qualifier ? "~" : undefined);
+    expect(amounts[0].doseQuantity).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const scalar = parseSig("Inject half a million units once").fhirNext.step![0].component[0].doseAndRate![0];
+    expect(scalar.doseQuantity).toMatchObject({ value: 500_000, unit: "U" });
+    expect(scalar.rateQuantity).toBeUndefined();
+  });
+
+  it.each(["", "approximately "])("keeps '%s1 million units per hour' as one owned rate", qualifier => {
+    const source = "Infuse " + qualifier + "1 million units per hour";
+    const tokens = tokenize(source);
+    const context: HpsgClauseContext = { state: new ParserState(source, tokens), tokens,
+      limit: tokens.length, dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"] };
+    const start = tokens.findIndex(token => token.original === (qualifier ? "approximately" : "1"));
+    const signs = clinicalQuantityLexicalRule().match(context, start);
+    expect(signs).toHaveLength(1);
+    expect(signs[0].tokens.map(token => token.original).join(" "))
+      .toBe(qualifier + "1 million units per hour");
+    const parsed = parseSig(source);
+    const amounts = parsed.fhirNext.step!.flatMap(step => step.component.flatMap(component => component.doseAndRate ?? []));
+    expect(amounts).toHaveLength(1);
+    expect(amounts[0].rateQuantity).toMatchObject({ value: 1_000_000, unit: "[iU]/h" });
+    expect(getQuantityComparator(amounts[0].rateQuantity)).toBe(qualifier ? "~" : undefined);
+    expect(amounts[0].doseQuantity).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+describe("round 26: member-origin labels respect conservative calendar ordering", () => {
+  it.each([[7, false], [30, true], [35, true]] as const)(
+    "shows the %s-day origin under a one-month stage only when it adds timing information",
+    (days, needsMemberNote) => {
+      const native: CanonicalCourse = { kind: "course", stages: [{
+        start: { anchor: "treatment-start", displacement: { value: 1, unit: "mo" } },
+        administrations: [{ kind: "administration", phaseOrigin: { value: days, unit: "d" },
+          amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+      }] };
+      const wire = courseToR6(native);
+      for (const input of [native, wire]) {
+        const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(text).toContain("From 1 month after treatment start onward");
+        expect(text.includes("From " + days + " days after treatment start onward")).toBe(needsMemberNote);
+        expect(text.match(/1 tablet/g)).toHaveLength(1);
+      }
+    }
+  );
 });

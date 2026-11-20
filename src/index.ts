@@ -1,10 +1,11 @@
 import { courseFromR5 } from "./adapters/r5-import";
+import { extractCanonicalDoseRange } from "./fhir";
 import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
   rateRangePreview, formatCourseChoices } from "./canonical/format-course";
-import { administrationFromClause, courseFromAdministrations, courseFromParallel, clauseForAdministration } from "./canonical/compile";
+import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel, clauseForAdministration } from "./canonical/compile";
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
@@ -22,6 +23,7 @@ interface FreshDosePart {
 }
 interface FreshDoseProof {
   length: number;
+  text?: string;
   quantity?: FreshDosePart;
   low?: FreshDosePart;
   high?: FreshDosePart;
@@ -51,6 +53,7 @@ function captureFreshDose(dosage: FhirDosage): void {
   const first = dosage.doseAndRate?.[0];
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     length: dosage.doseAndRate?.length ?? 0,
+    text: dosage.text,
     quantity: captureDosePart(first?.doseQuantity),
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
@@ -79,19 +82,17 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
     matchesSourceReplayTiming(dosage.timing, original.timing);
 }
 
-/** A rich-rate source shortcut needs the same live proof as graph replay.
- * Only known edits require native rate realization; external text without
- * saved provenance remains available under the existing source contract. */
-function hasEditedRateSource(dosage: FhirDosage): boolean {
+/** Source edits are separate from clinical edits: replacement clinician text
+ * owns roundtrip display, while a clear or stale projection uses live facts. */
+function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const first = dosage.doseAndRate?.[0];
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
-  if (!fresh?.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio) return false;
-  const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
-  if (matches !== false) return false;
-  // A clinician's explicit replacement text owns its display without
-  // certifying an old grammar graph. Only unchanged old wording is stale.
-  const originalText = getDosageSourceTextFingerprint(dosage);
-  return originalText === undefined || originalText === dosageTextFingerprint(dosage);
+  const originalText = fresh ? undefined : getDosageSourceTextFingerprint(dosage);
+  const textChanged = fresh ? fresh.text !== dosage.text
+    : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
+  if (textChanged) return dosage.text?.trim() ? dosage.text : true;
+  if (fresh && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio) return false;
+  return (fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage)) === false;
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -137,7 +138,7 @@ import {
   withDosageEditProvenance,
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
-  DOSAGE_DETAILS_R5_URL,
+  DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
@@ -946,12 +947,14 @@ function finishParsedBatch(
   const { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences } =
     composeParsedStates(input, boundaryPlan, segments, states);
   const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
+  const hasParallel = canonicalParallel.kind === "resolved" ||
+    canonicalParallel.kind === "unresolved" && Boolean(canonicalParallel.tracks);
   const rawResults: ParseResult[] = [];
   const projectedBatches: ParseResult[][] = [];
 
   for (let index = 0; index < outputSegments.length; index += 1) {
     const projected = buildParseResults(outputStates[index], options, phaseSequences[index],
-      canonicalParallel.kind !== "resolved");
+      !hasParallel);
     projectedBatches.push(projected);
     rawResults.push(...projected);
   }
@@ -961,9 +964,10 @@ function finishParsedBatch(
   // do not serialize R6/R5 here and then serialize them a second time in the
   // whole-course result builder.
   const parallel = canonicalParallel.kind === "resolved"
-    ? { kind: "resolved" as const, canonical: courseFromParallel(
-      canonicalParallel, rawResults.map(result => result.longText), input) }
-    : canonicalParallel;
+    ? courseFromParallel(canonicalParallel, rawResults.map(result => result.longText), input)
+    : canonicalParallel.kind === "unresolved" && canonicalParallel.tracks
+      ? courseFromPartialParallel(canonicalParallel, rawResults.map(result => result.longText), input)
+      : undefined;
   for (let index = 0; index < projectedBatches.length; index += 1) {
     const shiftedSpans = new WeakSet<object>();
     for (const result of projectedBatches[index]) {
@@ -972,11 +976,10 @@ function finishParsedBatch(
   }
 
   const results = rawResults;
-  applyRegimenAlternativeMembership(results, boundaryPlan,
-    parallel.kind === "resolved" ? parallel.canonical : undefined);
+  applyRegimenAlternativeMembership(results, boundaryPlan, parallel);
   const primary = resolvePrimaryParseResult(results, input, options);
   return buildWholeCourseResult(input, results, primary, segments, regimenGraph, options,
-    parallel.kind === "resolved" ? parallel : undefined);
+    parallel ? { canonical: parallel } : undefined);
 }
 
 export function parseSig(input: string, options?: ParseOptions): ParseBatchResult {
@@ -1140,6 +1143,17 @@ function appendSourceLessRateRanges(
     : displayed;
 }
 
+/** Compact clauses cannot carry independent phase origins or qualified ranges. */
+function needsNativeR5Preview(dosage: FhirDosage): boolean {
+  if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
+    return true;
+  const range = dosage.doseAndRate?.[0]?.doseRange;
+  return Boolean(range && (getQuantityComparator(range.low) || getQuantityComparator(range.high) ||
+    range.low?.value !== undefined && range.high?.value !== undefined &&
+    (range.low.unit ?? getDoseQuantityUnit(range.low)) !==
+    (range.high.unit ?? getDoseQuantityUnit(range.high))));
+}
+
 export function formatSig(
   input: FhirDosage | FhirR6DosageInstructionInput | readonly EzDosage[] | CanonicalCourse | CanonicalAdministration,
   style: "short" | "long" = "short",
@@ -1159,16 +1173,12 @@ export function formatSig(
     return formatCanonicalCourse(courseFromR6(oneOrCourse, true), style, options);
   }
   const dosage = oneOrCourse as EzDosage;
-  if (getDosageSourceTextAgreement(dosage) === false || hasEditedRateSource(dosage))
+  const edit = sourceDisplayEdit(dosage);
+  if (typeof edit === "string" && options?.realizationMode !== "normalized") return edit;
+  if (getDosageSourceTextAgreement(dosage, false) === false || edit !== false)
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style,
       { ...options, realizationMode: "normalized" });
-  const doseRange = dosage.doseAndRate?.[0]?.doseRange;
-  // A compact clause range has one shared unit and no endpoint operators.
-  // Only richer endpoints need the existing native range realizer.
-  if (doseRange && (getQuantityComparator(doseRange.low) || getQuantityComparator(doseRange.high) ||
-      doseRange.low?.value !== undefined && doseRange.high?.value !== undefined &&
-      (doseRange.low.unit ?? getDoseQuantityUnit(doseRange.low)) !==
-      (doseRange.high.unit ?? getDoseQuantityUnit(doseRange.high))))
+  if (needsNativeR5Preview(dosage))
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style, options ?? {});
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
   let displayCondition = dosage.condition?.length
@@ -1247,7 +1257,8 @@ export function formatSigBatch(
   // repeat a whole-array scan for each independent classification flag.
   for(const dosage of dosages){
     if((dosage.sequence??1)!==sequence)hasCourse=true;
-    for(const e of dosage.modifierExtension??[])if(e.url===DOSAGE_DETAILS_R5_URL)hasCourse=true;
+    for(const e of dosage.modifierExtension??[])
+      if(e.url===DOSAGE_DETAILS_R5_URL||e.url===PARALLEL_COMPONENT_PHASE_ORIGIN_URL)hasCourse=true;
     if(!hasChoice&&getDosageAlternativeChoice(dosage))hasChoice=true;
   }
   if(hasCourse)return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,options??{});
@@ -1264,8 +1275,12 @@ export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="sh
   for(const step of batch.fhirNext.step??[])if(step.start||step.end||step.count!==undefined||step.safety)
     return style==="short"?batch.shortText:batch.longText;
   const text:string[]=[];
+  const members=batch.meta.canonical.course?.stages[0]?.administrations;
+  let memberIndex=0;
   for(const item of batch.items){
-    if(getDosageAlternativeChoice(item.fhir))return style==="short"?batch.shortText:batch.longText;
+    const member=members?.[memberIndex++];
+    if(member?.phaseOrigin||member?.phaseStart||getDosageAlternativeChoice(item.fhir))
+      return style==="short"?batch.shortText:batch.longText;
     const value=style==="short"?item.shortText:item.longText;if(value?.trim())text.push(value);
   }
   return text.join(separator);
@@ -1414,8 +1429,11 @@ function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
 ): ParseResult {
-  const unverified = getDosageSourceTextAgreement(dosage) === false || hasEditedRateSource(dosage);
-  const native = unverified
+  const edit = sourceDisplayEdit(dosage);
+  const replacementText = typeof edit === "string" && options?.realizationMode !== "normalized" ? edit : undefined;
+  const unverified = replacementText === undefined &&
+    (getDosageSourceTextAgreement(dosage, false) === false || edit !== false);
+  const native = unverified || needsNativeR5Preview(dosage)
     ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
     : undefined;
   if (unverified && options?.realizationMode !== "normalized")
@@ -1436,13 +1454,13 @@ function fromFhirDosageInternal(
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0;
-  const exactSource = maximumDoseSource ?? (!unverified && guarded && dosage.text ? dosage.text : undefined);
-  let shortText = native ? formatCanonicalAdministration(native, "short", options, compiled) : suppressMaximumDisplay
+  const exactSource = replacementText ?? maximumDoseSource ?? (!unverified && guarded && dosage.text ? dosage.text : undefined);
+  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
-    : exactSource ?? formatCanonicalClause(clause, "short", localization, options);
-  let computedLong = native ? formatCanonicalAdministration(native, "long", options, compiled) : suppressMaximumDisplay
+    : exactSource ?? formatCanonicalClause(clause, "short", localization, options));
+  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
-    : exactSource ?? formatCanonicalClause(clause, "long", localization, options);
+    : exactSource ?? formatCanonicalClause(clause, "long", localization, options));
   if (!exactSource && !native) {
     const condition = getDosageCondition(dosage);
     const exclusions = getDosageExcludedDates(dosage);
@@ -1465,6 +1483,18 @@ function fromFhirDosageInternal(
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];
+  // Native range realization owns endpoint units/operators. The established
+  // compact clause metadata still retains its known numeric source bounds;
+  // its warning and the native amount expose any richer endpoint meaning.
+  let metadataClause = clause;
+  const rangeSource = native && !clause.dose ? dosage.doseAndRate?.[0]?.doseRange : undefined;
+  if (rangeSource) {
+    const extracted = extractCanonicalDoseRange(rangeSource);
+    if (extracted.warning && warnings.indexOf(extracted.warning) < 0) warnings.push(extracted.warning);
+    if (extracted.range) metadataClause = { ...clause,
+      dose: { range: extracted.range, unit: extracted.unit },
+      ...(warnings.length ? { warnings } : {}) };
+  }
   return {
     fhir: dosage,
     shortText,
@@ -1472,9 +1502,9 @@ function fromFhirDosageInternal(
     warnings,
     meta: {
       consumedTokens: [],
-      normalized: buildNormalizedMetaFromClause(clause, dosage, options),
+      normalized: buildNormalizedMetaFromClause(metadataClause, dosage, options),
       canonical: {
-        clauses: [clause],
+        clauses: [metadataClause],
         ...(native ? { administration: native } : {})
       }
     }

@@ -45,6 +45,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   startsWithinPeriod: (offset, context) => `Dosing starts ${offset} after the period begins${context}`,
   endsWithinPeriod: (offset, context) => `No doses during the final ${offset} of each period${context}`,
   afterTreatmentStart: (offset) => `${offset} after treatment start`,
+  relativeEvent: (offset, event, before) => `${offset} ${before ? "before" : "after"} ${event ?? "the event"}`,
   calendarWindow: (start, end) =>
     start && end ? `From ${start} until ${end}` : start ? `From ${start} onward` : end ? `Until ${end}` : "",
   calendarEvents: (events) => "Scheduled events: " + events.join(", "),

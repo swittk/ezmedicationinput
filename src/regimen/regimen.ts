@@ -105,7 +105,10 @@ export function anchoredScheduleDurationEnd(
   schedule: CanonicalSigClause['schedule']
 ): string | undefined {
   if (!schedule?.boundsStart || schedule.duration === undefined ||
-      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) return undefined;
+      schedule.durationComparator || schedule.durationMaxComparator ||
+      schedule.durationIsRange && schedule.durationMax === undefined ||
+      schedule.durationMax !== undefined && (schedule.durationMax !== schedule.duration ||
+        schedule.durationMaxUnit && schedule.durationMaxUnit !== schedule.durationUnit)) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.boundsStart) || schedule.duration <= 0) {
     return undefined;
   }

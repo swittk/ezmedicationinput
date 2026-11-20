@@ -1,5 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "./fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -1134,6 +1134,8 @@ interface SourceTimingObservation {
   offsetMin?: number;
   offsetMax?: number;
   monthDays?: number[];
+  weekdayOrdinal?: number;
+  clockWindow?: { start?: string; end?: string; endInclusive?: boolean };
   events?: string[];
   clocks?: string[];
   weekdays?: FhirDayOfWeek[];
@@ -1186,7 +1188,8 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   if (!timing) return undefined;
   const repeat = timing.repeat, code = timing.code;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
-  let monthDays: number[] | undefined;
+  let monthDays: number[] | undefined, weekdayOrdinal: number | undefined;
+  let clockWindow: SourceTimingObservation["clockWindow"];
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1194,13 +1197,22 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
     else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined)
       (monthDays ??= []).push(extension.valuePositiveInt);
+    else if (extension.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL) weekdayOrdinal ??= extension.valueInteger;
+    else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindow) {
+      clockWindow = {};
+      for (const part of extension.extension ?? []) {
+        if (part.url === "start") clockWindow.start ??= part.valueTime;
+        else if (part.url === "end") clockWindow.end ??= part.valueTime;
+        else if (part.url === "endInclusive") clockWindow.endInclusive ??= part.valueBoolean;
+      }
+    }
   }
   return {
     original: timing, extension: timing.extension, repeat,
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
-    offsetExact, offsetMin, offsetMax, monthDays,
+    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1234,7 +1246,8 @@ export function matchesSourceReplayTiming(
   }
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
-  let monthDayIndex = 0;
+  let monthDayIndex = 0, weekdayOrdinal: number | undefined;
+  let clockWindowSeen = false;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1242,8 +1255,21 @@ export function matchesSourceReplayTiming(
     else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
     else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined) {
       if (extension.valuePositiveInt !== proof.monthDays?.[monthDayIndex++]) return false;
+    } else if (extension.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL) weekdayOrdinal ??= extension.valueInteger;
+    else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindowSeen) {
+      clockWindowSeen = true;
+      if (!proof.clockWindow) return false;
+      let start: string | undefined, end: string | undefined, endInclusive: boolean | undefined;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "start") start ??= part.valueTime;
+        else if (part.url === "end") end ??= part.valueTime;
+        else if (part.url === "endInclusive") endInclusive ??= part.valueBoolean;
+      }
+      if (start !== proof.clockWindow.start || end !== proof.clockWindow.end ||
+          endInclusive !== proof.clockWindow.endInclusive) return false;
     }
   }
+  if (weekdayOrdinal !== proof.weekdayOrdinal || clockWindowSeen !== Boolean(proof.clockWindow)) return false;
   if (monthDayIndex !== (proof.monthDays?.length ?? 0)) return false;
   if (offsetExact !== proof.offsetExact || offsetMin !== proof.offsetMin || offsetMax !== proof.offsetMax) return false;
   return repeat === proof.repeat && repeat?.extension === prior?.extension &&
@@ -2057,18 +2083,18 @@ const R6_SINGLE_SAFETY_SOURCE: BridgeShape = {
 };
 
 export function encodeR6SourceMetadata(
-  url: string, value: object, kind: "drafts" | "safety"
+  url: string, value: object, kind: "drafts" | "safety" | "step"
 ): FhirExtension {
-  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE, true) };
+  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE, true) };
 }
 
 export function decodeR6SourceMetadata(
-  marker: FhirExtension, kind: "drafts" | "safety"
+  marker: FhirExtension, kind: "drafts" | "safety" | "step"
 ): Record<string, unknown> | undefined {
   if (!marker.extension || marker.valueString !== undefined) return undefined;
   // Source snapshots are compared with live R6 wire objects. SimpleQuantity
   // keeps its EMA extension here; ordinary R5 reconciliation still decodes it.
-  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : R6_SINGLE_SAFETY_SOURCE, true);
+  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE, true);
 }
 
 const PREDICATE: Record<string, BridgeField> = {

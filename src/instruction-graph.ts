@@ -1006,7 +1006,7 @@ interface ActionArgumentParseContext {
   duration?: AdviceArgument;
   separableParticleIndex?: number;
 }
-interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; }
+interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; tailRelationIndex?: number; }
 type ActionArgumentParser = (context: ActionArgumentParseContext) => ParsedActionArguments;
 function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgument[] {
   const args: AdviceArgument[] = [];
@@ -1148,6 +1148,7 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let targetIndex = relIndex;
   let targetEnd = relationTargetEnd;
   let targetRelation = relation;
+  let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
     const target = argumentFromParts(
       parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
@@ -1161,11 +1162,14 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
     targetRelation = actionArgumentRelation(key(parts[targetIndex]));
     // Temporal and conditional daughters are composed by the shared frame parser.
     if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
-        relationHasGrammarFeature(targetRelation, "conditionalTail")) break;
+        relationHasGrammarFeature(targetRelation, "conditionalTail")) {
+      tailRelationIndex = targetIndex;
+      break;
+    }
     const next = relationIndex(parts, targetIndex + 1, segmentEnd);
     targetEnd = next >= 0 ? next : segmentEnd;
   }
-  return { args };
+  return { args, tailRelationIndex };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const activity = c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
@@ -1653,17 +1657,21 @@ function buildActionFrame(
   // Not every temporal/conditional connector licenses an Activity.
   // PRN WHEN is a condition daughter, never a "when symptoms" executable
   // activity that can duplicate medication dose and schedule realization.
-  const nextTemporal = nextRelationIndex >= 0 &&
-    relationHasSemanticClass(nextRelation, "temporal") &&
-    relationHasGrammarFeature(nextRelation, "activityFallback")
-      ? nextRelation : undefined;
-  if (nextTemporal && nextRelationIndex >= 0) {
-    const eventStart = nextRelationIndex + 1;
+  const temporalIndex = parsed.tailRelationIndex ?? nextRelationIndex;
+  const temporalRelation = temporalIndex === nextRelationIndex ? nextRelation
+    : actionArgumentRelation(key(parts[temporalIndex]), definition.preferredRelationSemanticClasses);
+  const nextTemporal = temporalIndex >= 0 &&
+    relationHasSemanticClass(temporalRelation, "temporal") &&
+    relationHasGrammarFeature(temporalRelation, "activityFallback")
+      ? temporalRelation : undefined;
+  if (nextTemporal && temporalIndex >= 0) {
+    const eventStart = temporalIndex + 1;
     const sourceEvent = trimSemanticText(sourceFor(parts, eventStart, segmentEnd, input));
     let event = argumentFromParts(
       parts, eventStart, segmentEnd, input, AdviceArgumentRole.Activity, options
     );
-    if (event?.role !== AdviceArgumentRole.Activity || !event.conceptId) {
+    if ((event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) ||
+        !event.conceptId) {
       const target = resolveMedicationInstructionAction(key(parts[eventStart]), options);
       // Only an EXPLICIT declared event-activity concept licenses semantic
       // normalization. A method-coded verb is insufficient evidence:
@@ -1674,7 +1682,7 @@ function buildActionFrame(
         ? internalArgument(implicit, sourceEvent, options) : undefined;
       if (declared?.role === AdviceArgumentRole.Activity) {
         event = declared;
-      } else if (event?.role !== AdviceArgumentRole.Activity) {
+      } else if (event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) {
         event = undefined;
       }
     }
@@ -3719,7 +3727,15 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     return trimSemanticText(frame.sourceText);
   }
   const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
-  for (const arg of frame.args) firstArguments[arg.role] ??= arg;
+  let temporalAdjunct: AdviceArgument | undefined;
+  const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
+  for (const arg of frame.args) {
+    if (independentTemporal && arg.relation &&
+        (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time) &&
+        relationHasSemanticClass(arg.relation, "temporal")) {
+      temporalAdjunct ??= arg;
+    } else firstArguments[arg.role] ??= arg;
+  }
   const first = (role: AdviceArgumentRole): string | undefined => {
     const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
@@ -3759,13 +3775,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
-  const temporalAdjunct = frame.args.find((arg) =>
-    arg.role === AdviceArgumentRole.Activity && arg.relation &&
-    relationHasSemanticClass(arg.relation, "temporal")
-  );
-  const temporalRelation = temporalAdjunct?.relation && (
-    !frame.relation || !relationHasSemanticClass(frame.relation, "temporal")
-  ) ? temporalAdjunct.relation : undefined;
+  const temporalRelation = temporalAdjunct?.relation;
   // Avoid duplicating an event already entailed by an explicitly registered
   // compound noun ("before first use"). It remains a fully typed independent
   // action argument in source and FHIR; only redundant display is omitted.
@@ -4152,14 +4162,17 @@ const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
  * Opaque temporal wording remains source content; only a typed event that
  * the edited schedule no longer covers is superseded. */
 function frameWithoutSupersededTime(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
-  if (clause.sourceProjectionVerified !== false ||
+  const schedule = clause.schedule;
+  const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined;
+  if ((clause.sourceProjectionVerified !== false && !hasOffset) ||
       !actionMatchesCanonicalMethod(frame, clause)) return frame;
   const args: AdviceArgument[] = [];
   let changed = false;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Time && arg.normalized &&
         KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
-        !timeArgumentCoveredBySchedule(frame, arg, clause)) changed = true;
+        (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) changed = true;
     else args.push(arg);
   }
   // The schedule may own a clock that is absent from the graph's Time slots.
@@ -4177,7 +4190,8 @@ export function instructionGraphActionCoversSingleScheduledEvent(
   frame: AdviceFrame,
   clause: CanonicalSigClause
 ): boolean {
-  if (clause.schedule?.when?.length !== 1) return false;
+  if (clause.schedule?.when?.length !== 1 || clause.schedule.offset !== undefined ||
+      clause.schedule.offsetMin !== undefined || clause.schedule.offsetMax !== undefined) return false;
   return frame.args.some((arg) => {
     if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
     if (arg.role !== AdviceArgumentRole.Time ||
@@ -4195,13 +4209,14 @@ function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
   clause: CanonicalSigClause,
-  selectedOwner?: AdviceFrame
+  selectedOwner?: AdviceFrame,
+  sourceFrame: AdviceFrame = frame
 ): boolean {
   if (!actionMatchesCanonicalMethod(frame, clause)) return false;
   if (selectedOwner) {
     // An explicit primary source span owns the canonical dose, even when a
     // different earlier administration happens to use the same verb.
-    if (frame !== selectedOwner) return false;
+    if (sourceFrame !== selectedOwner) return false;
   } else {
     // Without a selected source owner, retain the historical first-matching
     // method behavior. A single scan avoids sorting/cloning the actions.
@@ -4214,7 +4229,7 @@ function primaryActionCoveredByCanonicalClause(
         first = candidate;
       }
     }
-    if (first !== frame) return false;
+    if (first !== sourceFrame) return false;
   }
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
@@ -4634,22 +4649,29 @@ export function realizeInstructionGraph(
     if (position === "pre") return end <= primary.start;
     return start >= primary.start;
   };
-  const frames = graph.actions.filter((frame) => {
-    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) return false;
-    const frameSource = normalizedInstructionSurface(frame.sourceText);
+  const frames: AdviceFrame[] = [];
+  let displayedAmountOwner = amountOwner;
+  for (const sourceFrame of graph.actions) {
+    const ownsPrimary = sourceFrame === amountOwner ||
+      primaryAction >= 0 && sourceFrame === graph.actions[primaryAction];
+    const frame = ownsPrimary && options?.omitCanonicalAdministration
+      ? frameWithoutSupersededTime(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
+    if (sourceFrame === amountOwner) displayedAmountOwner = frame;
+    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) continue;
+    const frameSource = normalizedInstructionSurface(sourceFrame.sourceText);
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
-    if (frameSource && omittedSources.indexOf(frameSource) >= 0) return false;
+    if (frameSource && omittedSources.indexOf(frameSource) >= 0) continue;
     if (options?.omitCanonicalAdministration &&
       // A later, independent action may now happen to match the clinician's
       // EDITED method and dose. Only the source-backed amount owner may be
       // removed as the canonical administration; other quantified actions
       // keep their separate meaning and original temporal relationship.
       (!frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
-        amountOwner === frame) &&
+        amountOwner === sourceFrame) &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
-        primary ? amountOwner : undefined)) {
-      return false;
+        primary ? amountOwner : undefined, sourceFrame)) {
+      continue;
     }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     if (
@@ -4662,12 +4684,12 @@ export function realizeInstructionGraph(
       frame.span.end <= primary.start &&
       primary.start - frame.span.end <= 1
     ) {
-      return false;
+      continue;
     }
     const warning = frame.polarity === AdvicePolarity.Negate;
-    if (options?.onlyWarnings) return warning;
-    return options?.includeWarnings !== false || !warning;
-  });
+    if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
+    frames.push(frame);
+  }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
   const nodes: Array<{
     start: number;
@@ -4683,7 +4705,7 @@ export function realizeInstructionGraph(
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
   for (const sourceFrame of frames) {
     const currentDose = options?.omitCanonicalAdministration?.dose;
-    const editedPrimary = Boolean(amountOwner === sourceFrame &&
+    const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
       primaryActionAmountConflicts(sourceFrame, currentDose,
         !currentDose && options?.omitCanonicalAdministration?.sourceProjectionVerified === false));
     // The canonical body owns the edited dose. Preserve the original graph

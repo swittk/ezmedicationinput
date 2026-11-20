@@ -20,7 +20,16 @@ export function nextDueDoses(
   options: NextDueDoseOptions
 ): string[] {
   if (options.limit !== undefined && options.limit <= 0) return [];
-  return executeDue(inputToCanonical(input), options);
+  // Capture declared options once; recursive capped scheduling must keep
+  // prototype-backed getters as well as ordinary own properties.
+  return executeDue(inputToCanonical(input), {
+    from: options.from, orderedAt: options.orderedAt, limit: options.limit,
+    priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
+    timeZone: options.timeZone, config: options.config,
+    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition,
+    eventClock: options.eventClock, mealOffsets: options.mealOffsets,
+    frequencyDefaults: options.frequencyDefaults,
+  });
 }
 export function calculateTotalUnits(options: TotalUnitsOptions | CanonicalSupplyOptions): TotalUnitsResult {
   if (!options || !options.dosage)

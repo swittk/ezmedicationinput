@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
-  toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition
+  toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition, importCanonicalCourse
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { shiftCanonicalSigClauses } from "../src/ir";
@@ -274,6 +274,13 @@ describe("concurrent independent treatment sequences", () => {
       duration: 7,
       durationUnit: "d"
     });
+    const partialSource = input.replace("OD QID x7d", "OD QID");
+    const partial = parseSig(partialSource);
+    const partialLeft = partial.meta.canonical.course!.stages[0].administrations
+      .find(member => member.target?.text === "left eye")!;
+    expect(partialLeft.syntax?.schedule?.boundsEnd).toBe("2026-11-15");
+    expect(partialLeft.schedule?.recurrence?.calendarWindow?.end).toBe("2026-10-31");
+    expect(partial.fhirNext.renderedInstruction).toBe(partialSource);
   });
 
   it("separates two independently dosed semicolon clauses without leaking site inheritance", () => {
@@ -551,6 +558,49 @@ describe("concurrent independent treatment sequences", () => {
     }
   });
 
+  it.each([false, true])("retains a dated track's inferred end beside an unknown cutover (dated first %s)", datedFirst => {
+    const unknown = "1 drop OD QID then BID";
+    const dated = "1 drop OS QID from 2026-10-25 then BID from 2026-11-01";
+    const source = (datedFirst ? [dated, unknown] : [unknown, dated]).join("; ");
+    const parsed = parseSig(source);
+    const strict = toFhirR5Dosages(parsed.fhirNext);
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    const authoredLeft = parsed.meta.canonical.course!.stages[0].administrations
+      .find(member => member.target?.text === "left eye")!;
+    expect(authoredLeft.syntax?.schedule?.boundsEnd).toBeUndefined();
+    const courses = [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhirNext),
+      importCanonicalCourse(JSON.parse(JSON.stringify(parsed.fhir))),
+      importCanonicalCourse(JSON.parse(JSON.stringify(strict)))];
+    for (const course of courses) {
+      expect(course.instruction).toBe(source);
+      const members = course.stages.flatMap(stage => stage.administrations);
+      expect(members).toHaveLength(4);
+      const right = members.filter(member => member.target?.text === "right eye");
+      const left = members.filter(member => member.target?.text === "left eye");
+      expect(right).toHaveLength(2); expect(left).toHaveLength(2);
+      expect(right[1].phaseStart?.anchor).toBe("unresolved");
+      expect(left[0].schedule?.recurrence?.calendarWindow).toEqual({ start: "2026-10-25", end: "2026-10-31" });
+      expect(left[1].schedule?.recurrence?.calendarWindow).toEqual({ start: "2026-11-01" });
+      expect(() => nextDueDoses(course, options("2026-11-01T00:00:00+07:00", 4)))
+        .toThrow(/treatment-start offset/);
+      const complete = { kind: "course" as const, stages: [{ administrations: left }] };
+      expect(nextDueDoses(complete, options("2026-11-01T00:00:00+07:00", 4))).toEqual([
+        "2026-11-01T08:00:00+07:00", "2026-11-01T20:00:00+07:00",
+        "2026-11-02T08:00:00+07:00", "2026-11-02T20:00:00+07:00",
+      ]);
+      expect(nextDueDoses(complete, options("2026-10-31T00:00:00+07:00", 6))).toEqual([
+        "2026-10-31T08:00:00+07:00", "2026-10-31T12:00:00+07:00",
+        "2026-10-31T16:00:00+07:00", "2026-10-31T20:00:00+07:00",
+        "2026-11-01T08:00:00+07:00", "2026-11-01T20:00:00+07:00",
+      ]);
+      expect(calculateTotalUnits({ ...options("2026-11-01T00:00:00+07:00"), dosage: complete,
+        durationValue: 2, durationUnit: "d" }).totalUnits).toBe(4);
+      expect(calculateTotalUnits({ ...options("2026-10-25T00:00:00+07:00"), dosage: complete,
+        durationValue: 9, durationUnit: "d" }).totalUnits).toBe(32);
+    }
+  });
+
   it("derives successive calendar phase dates from an anchored duration", () => {
     const text =
       "1 drop OD QID x7d then BID; 1 drop OS QID from 2026-10-25 for 7 days then BID x7d";
@@ -692,11 +742,16 @@ describe("concurrent independent treatment sequences", () => {
       .toMatchObject({ value: 4, code: "wk" });
     expect(parsed.items[2].fhir.timing?.repeat?.boundsDuration)
       .toMatchObject({ value: 1, code: "mo" });
-    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([2, 2]);
+    expect(parsed.fhirNext.step.map(step => step.component.length)).toEqual([4]);
+    const origins = parsed.meta.canonical.course!.stages[0].administrations.map(member => member.phaseOrigin);
+    expect(origins).toEqual([
+      expect.objectContaining({ value: 0, code: "d" }), expect.objectContaining({ value: 28, code: "d" }),
+      expect.objectContaining({ value: 0, code: "d" }), expect.objectContaining({ value: 1, code: "mo" })
+    ]);
     expect(lintSig(input).issues).toEqual([]);
   });
 
-  it("preserves an unbounded transition for editing and schedules only the known prefix", () => {
+  it("preserves an unresolved transition and independently schedules the complete other track", () => {
     const input = "1 drop OD q2h then QID; 1 drop OS QID x1mo then BID";
     const parsed = parseSig(input);
     expect(parsed.warnings).toEqual([]);
@@ -706,15 +761,15 @@ describe("concurrent independent treatment sequences", () => {
     expect(parsed.items.map(item => item.fhir.timing?.code?.text))
       .toEqual(["Q2H", "QID", "QID", "BID"]);
     expect(lintSig(input).issues).toEqual([]);
-    expect(nextDueDoses(parsed, options(orderedAt))).toEqual([
-      "2026-10-19T08:00:00+07:00",
-      "2026-10-19T08:00:00+07:00",
-      "2026-10-19T10:00:00+07:00",
-      "2026-10-19T12:00:00+07:00",
-      "2026-10-19T12:00:00+07:00",
-      "2026-10-19T14:00:00+07:00",
-      "2026-10-19T16:00:00+07:00",
-      "2026-10-19T16:00:00+07:00"
+    expect(parsed.meta.canonical.course!.stages[0].administrations[1].phaseStart?.anchor).toBe("unresolved");
+    expect(() => nextDueDoses(parsed, options(orderedAt))).toThrow(/treatment-start offset/u);
+    const knownTrack = { ...parsed.fhirNext, step: parsed.fhirNext.step.map(step => ({ ...step,
+      component: step.component.filter(member => member.site?.concept?.text === "left eye") })) };
+    expect(nextDueDoses(knownTrack, options(orderedAt))).toEqual([
+      "2026-10-19T08:00:00+07:00", "2026-10-19T12:00:00+07:00",
+      "2026-10-19T16:00:00+07:00", "2026-10-19T20:00:00+07:00",
+      "2026-10-20T08:00:00+07:00", "2026-10-20T12:00:00+07:00",
+      "2026-10-20T16:00:00+07:00", "2026-10-20T20:00:00+07:00"
     ]);
   });
 

@@ -373,9 +373,11 @@ export enum FhirDayOfWeek {
   Sunday = "sun"
 }
 
-export interface FhirPeriod {
+export interface FhirPeriod extends FhirElement {
   start?: string;
+  _start?: FhirPrimitiveElement;
   end?: string;
+  _end?: FhirPrimitiveElement;
 }
 
 export interface FhirTimingRepeat extends FhirElement {

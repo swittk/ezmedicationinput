@@ -35,6 +35,7 @@ function runNode(args: string[], code: string): {
   roundTripText?: string;
   roundTripSiteCode?: string;
   roundTripFrequency?: number;
+  originalInstruction?: string;
   longText: string;
 } {
   const output = execFileSync(process.execPath, [...args, "-e", code], {

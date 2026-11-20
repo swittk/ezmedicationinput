@@ -316,6 +316,9 @@ describe("review 21 dimensional quantity grammar", () => {
           expect(amount.rateQuantity).toBeUndefined();
         }
       expect(parsed.input).toBe(source);
+      const displayedSource = [parsed.fhirNext.renderedInstruction,
+        ...(parsed.fhirNext.step ?? []).flatMap(step => step.component.map(component => component.text))];
+      expect(displayedSource).toContain(source);
     }
   );
 
@@ -360,8 +363,10 @@ describe("review 21 locale facets and grammar number", () => {
     registerSigLocalization({ locale: "th-TH", course: THAI_COURSE });
     const regional = resolveSigLocalization("th-TH")!;
     const base = resolveSigLocalization("th")!;
-    expect(regional.formatLong).toBe(base.formatLong);
-    expect(regional.formatShort).toBe(base.formatShort);
+    const dose = { step: [{ component: [tablet] }] };
+    for (const style of ["short", "long"] as const)
+      expect(formatSig(dose, style, { locale: regional.locale }))
+        .toBe(formatSig(dose, style, { locale: base.locale }));
     expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th-TH" })).toContain("เม็ด");
   });
 
@@ -377,8 +382,10 @@ describe("review 21 locale facets and grammar number", () => {
     });
     registerSigLocalization({ locale: "zz-ZZ", formatShort: regionalShort });
     const initial = resolveSigLocalization("zz-ZZ")!;
-    expect(initial.formatLong).toBe(before);
-    expect(initial.formatShort).toBe(regionalShort);
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "zz-ZZ" }))
+      .toContain("Before ");
+    expect(formatSig({ step: [{ component: [tablet] }] }, "short", { locale: "zz-ZZ" }))
+      .toContain("Short ");
     expect(initial.course).toBe(ENGLISH_COURSE);
     registerSigLocalization({
       locale: "zz",
@@ -388,8 +395,10 @@ describe("review 21 locale facets and grammar number", () => {
     });
     const updated = resolveSigLocalization("zz-ZZ")!;
     expect(updated).not.toBe(initial);
-    expect(updated.formatLong).toBe(after);
-    expect(updated.formatShort).toBe(regionalShort);
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "zz-ZZ" }))
+      .toContain("After ");
+    expect(formatSig({ step: [{ component: [tablet] }] }, "short", { locale: "zz-ZZ" }))
+      .toContain("Short ");
     expect(updated.course).toBe(ENGLISH_COURSE);
   });
 
@@ -397,12 +406,14 @@ describe("review 21 locale facets and grammar number", () => {
     const formatLong = () => "LOCAL DOSE.";
     registerSigLocalization({ locale: "th-extra", formatLong });
     const localization = resolveSigLocalization("th-extra")!;
-    expect(localization.formatLong).toBe(formatLong);
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th-extra" }))
+      .toBe("LOCAL DOSE.");
     expect(localization.course).toBe(THAI_COURSE);
     expect(formatSig({ safety: cap, step: [{ component: [tablet] }] }, "long", { locale: "th-extra" }))
       .toContain("ตลอดแผนการใช้ยานี้:");
     registerSigLocalization({ locale: "th-extra", course: ENGLISH_COURSE });
-    expect(resolveSigLocalization("th-extra")?.formatLong).toBe(resolveSigLocalization("th")?.formatLong);
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th-extra" }))
+      .toBe(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "th" }));
   });
 
   it("uses singular administration for one and plural wording for multiple/ranged/limited counts", () => {

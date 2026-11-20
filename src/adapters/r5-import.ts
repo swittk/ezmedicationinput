@@ -25,7 +25,7 @@ import {
   administrationToR5,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
-import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
 import { quantityFromR5, simpleQuantityForR5, quantityForR5 } from "../fhir-quantity-operator";
 import {
@@ -927,7 +927,14 @@ function reconcileNativeCompactCourse(
     ...courseEdits,
     ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
   };
-  if (legacyCycleCount !== undefined && courseEdits.modifierExtension === undefined)
+  // Legacy rows have no course-count entry for a partial modifier edit to
+  // remove. Preserve their migrated count unless the caller clears all
+  // modifiers with [] or explicitly supplies the course-count entry. Once
+  // reopened through fromDosageDetails, removing that visible entry uses the
+  // ordinary current-marker clear semantics above.
+  if (legacyCycleCount !== undefined && (courseEdits.modifierExtension === undefined ||
+      courseEdits.modifierExtension.length > 0 && !courseEdits.modifierExtension.some(item =>
+        item.url === COURSE_CYCLE_COUNT_EXTENSION_URL)))
     setCourseCycleCount(currentHeader, legacyCycleCount);
   const replacementOwnsHeader = instruction !== undefined &&
     (renderedInstruction !== undefined || instruction !== savedInstruction);

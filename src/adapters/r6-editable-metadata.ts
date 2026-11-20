@@ -14,6 +14,7 @@ import { encodeR6SourceMetadata, decodeR6SourceMetadata, DOSAGE_RECONCILIATION_S
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
+export const R6_SCOPED_SAFETY_MODIFIER_URL = "urn:ezmedicationinput:r6-scoped-safety-policy";
 
 function replaceSource(owner: { extension?: FhirExtension[] }, url: string, value: object | undefined): void {
   const extensions = owner.extension?.filter(item => item.url !== url) ?? [];
@@ -137,6 +138,13 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
       projected.doseLimit = [...(course.doseLimit ?? []), ...(policy.doseLimit ?? [])];
     if (policy.ifExceeded && policy.ifExceeded !== course.ifExceeded)
       projected.ifExceeded = course.ifExceeded ? course.ifExceeded + "\n" + policy.ifExceeded : policy.ifExceeded;
+    if (course.modifierExtension?.length || policy.modifierExtension?.length) {
+      // R6 cannot carry sole-step safety. A must-understand wrapper keeps
+      // each policy's modifiers scoped to its own limits/actions; flattening
+      // either modifier list would qualify unrelated limits in the merge.
+      projected.modifierExtension = [encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
+        { course, step: policy }, "safety")];
+    }
     // Distinct source IDs/annotations stay in the source record below. The
     // active policy includes every known limit and both authored actions.
   }

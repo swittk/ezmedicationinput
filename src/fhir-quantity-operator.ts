@@ -185,11 +185,21 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
   if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
   const comparator = getEmaQuantityComparator(quantity);
   if (!comparator) return quantity;
-  const remaining = quantity.extension?.filter(ext =>
-    !exactGeneratedComparatorExtension(ext, comparator)) ?? [];
+  const remaining: FhirExtension[] = [];
+  let primitive = quantity._comparator;
+  for (const ext of quantity.extension ?? []) {
+    if (exactGeneratedComparatorExtension(ext, comparator)) continue;
+    // The primitive annotation belongs to this exact operator. A live EMA
+    // edit must not inherit the prior operator's ID or extensions.
+    if (primitive === undefined && ext.url === QUANTITY_OPERATOR_SOURCE_URL &&
+        ext.valueCode === comparator && ext._valueCode && Object.keys(ext).length === 3) {
+      primitive = ext._valueCode;
+    } else remaining.push(ext);
+  }
   return {
     ...quantity,
     comparator,
+    ...(primitive ? { _comparator: primitive } : {}),
     ...(remaining.length ? { extension: remaining } : { extension: undefined })
   };
 }

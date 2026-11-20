@@ -56,6 +56,11 @@ import {
   isRenderedInstructionMarker,
   retainField,
   readRetainedField,
+  encodeR6SourceMetadata,
+  decodeR6SourceMetadata,
+  dosageMatchesSavedProjection,
+  getDosageSourceTextFingerprint,
+  dosageTextFingerprint,
   DOSAGE_RECONCILIATION_SOURCE_URL,
   getDosageCondition,
   getDosageCalendarDayCondition,
@@ -475,6 +480,7 @@ function baseAdministration(
   const input = raw as EzDosage;
   const target = format === "r6" ? (raw as FhirR6Dosage).site?.concept : input.site;
   let phaseOrigin: CanonicalMeasure | undefined,
+    phaseStart: CanonicalBoundary | undefined,
     phaseOriginIssue = false,
     seenOrigin = false;
   let anchored: FhirExtension | undefined,
@@ -488,9 +494,13 @@ function baseAdministration(
   for (const e of raw.modifierExtension ?? [])
     switch (e.url) {
       case PARALLEL_COMPONENT_PHASE_ORIGIN_URL:
-        if (seenOrigin || !e.valueQuantity) phaseOriginIssue = true;
+        if (seenOrigin) phaseOriginIssue = true;
         seenOrigin = true;
-        phaseOrigin = measureFromWire(e.valueQuantity);
+        if (e.valueQuantity) phaseOrigin = measureFromWire(e.valueQuantity);
+        else {
+          phaseStart = boundaryFromR6(decodeR6SourceMetadata(e, "step")?.start as FhirR6RelativeTime | undefined);
+          if (!phaseStart) phaseOriginIssue = true;
+        }
         break;
       case ANCHORED_COURSE_DURATION_EXTENSION_URL:
         if (!anchored) anchored = e;
@@ -526,7 +536,15 @@ function baseAdministration(
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
     amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
-  const sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
+  let sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
+  if (format === "r5" && sourceContext && sourceTextVerified !== false && raw.extension?.length &&
+      dosageMatchesSavedProjection(input) === false) {
+    const originalText = getDosageSourceTextFingerprint(raw);
+    // A cached clinical mismatch invalidates old graph wording, while an
+    // explicitly replaced external text still owns its current display.
+    if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
+      sourceTextVerified = false;
+  }
   const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
   const schedule = timing(raw.timing, format === "r5");
   if (duration?.valueRange && raw.timing?.repeat?.boundsRange && schedule?.recurrence)
@@ -536,7 +554,7 @@ function baseAdministration(
     schedule,
     amounts,
     stageOrdinal: format === "r5" ? input.sequence : undefined,
-    asNeeded: raw.asNeeded,
+    asNeeded: raw.asNeeded ?? (raw.asNeededFor?.length ? true : undefined),
     target,
     targetCount: getBodySiteAdministrationTargetCount(target),
     siteReference: format === "r6" ? (raw as FhirR6Dosage).site?.reference : input.siteReference,
@@ -555,6 +573,7 @@ function baseAdministration(
     choice,
     choiceIssue: !choice && Boolean(choiceMarker),
     phaseOrigin,
+    phaseStart,
     phaseOriginIssue,
     delayMinutes: delayMarker
       ? getAdministrationOffsetMinutes({ modifierExtension: [delayMarker] })
@@ -671,7 +690,8 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
     cycleCount: getCourseCycleCount(raw),
     safety: safetyFromWire(retainedSafety ? retainedSafety.course : raw.safety, true),
     contextIssue: raw.step ? getCourseContextIssue(raw as FhirR6DosageInstruction) : undefined,
-    provenance: { format: "r6", data: record(raw) },
+    provenance: { format: "r6", data: record(retainedSafety
+      ? { ...raw, safety: retainedSafety.course } : raw) },
   };
   if (stages.length) course.provenance!.sourceTextVerified = false;
   // No defensive copy. Re-reading an externally changed FHIR input should
@@ -993,6 +1013,10 @@ function administrationToWire(
   const output: Record<string, unknown> = clause
     ? Object.assign({}, context)
     : Object.assign({}, a.provenance?.data, a.provenance?.retained);
+  const source =
+    a.provenance?.format === "r6"
+      ? (a.provenance.data as FhirR6Dosage)
+      : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
   delete output.sequence;
   let wireTiming = timingToWire(a.schedule, target);
   if (clause && wireTiming) {
@@ -1037,7 +1061,8 @@ function administrationToWire(
   const modifiers = output.modifierExtension as FhirExtension[] | undefined;
   const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
-  if (projection?.source || oldDuration?.extension?.some(child => child.url === "projectedRange") ||
+  if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
+      oldDuration?.extension?.some(child => child.url === "projectedRange") ||
       a.anchoredLength?.range && !oldDuration) {
     const replacement: FhirExtension | undefined = projection?.source
       ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange ? projection.source.extension :
@@ -1080,7 +1105,10 @@ function administrationToWire(
     });
   }
   assign(output, "additionalInstruction", additionalInstructions);
-  assign(output, "asNeeded", a.asNeeded);
+  // A supplied indication already expresses PRN meaning. Keep an absent
+  // external boolean absent while execution consumes the typed native fact.
+  assign(output, "asNeeded", a.asNeeded === true && source?.asNeeded === undefined &&
+    source?.asNeededFor?.length ? undefined : a.asNeeded);
   assign(
     output,
     "doseAndRate",
@@ -1241,16 +1269,22 @@ function administrationToWire(
     assign(site, "reference", a.siteReference);
     output.site = site;
   } else delete output.site;
-  const source =
-    a.provenance?.format === "r6"
-      ? (a.provenance.data as FhirR6Dosage)
-      : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
   // A retained R6 delta is sparse; unrelated live lifted R5 fields remain
   // authoritative. In particular, a safety-only delta must not hide the
   // original authored condition coding/text on the R5 row.
   const sourceRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
   const conditionSource = sourceRow?.condition?.length ? sourceRow : source;
   const sourceCondition = conditionSource ? getDosageCondition(conditionSource as EzDosage) : undefined;
+  if (conditionSource?.condition?.length === 0 && output.modifierExtension) {
+    const kept: FhirExtension[] = [], retired: FhirExtension[] = [];
+    for (const marker of output.modifierExtension as FhirExtension[])
+      (marker.url === DOSAGE_CONDITION_R5_URL ? retired : kept).push(marker);
+    if (retired.length) {
+      assign(output, "modifierExtension", kept.length ? kept : undefined);
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired }];
+    }
+  }
   if (target === "r5") {
     delete output.condition;
     if (a.predicate || sourceCondition || conditionSource?.condition !== undefined ||
@@ -1319,13 +1353,15 @@ function administrationToWire(
       ...(a.cycleDays ? [cycleDayConstraintExtension(a.cycleDays)] : []),
     ];
   if (
-    a.phaseOrigin ||
+    a.phaseOrigin || a.phaseStart ||
     (source &&
       !a.phaseOriginIssue &&
       source.modifierExtension?.some((e) => e.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
   ) {
     const existing = (output.modifierExtension as FhirDosage["modifierExtension"]) ?? [];
     const phaseOrigin = simpleQuantityForR5(a.phaseOrigin);
+    const phaseStart = a.phaseStart ? boundaryToWire(a.phaseStart) : undefined;
+    let generatedStart: FhirExtension | undefined;
     let found = false;
     let changed: FhirExtension[] | undefined;
     for (let index = 0; index < existing.length; index++) {
@@ -1335,14 +1371,35 @@ function administrationToWire(
         continue;
       }
       found = true;
-      const replacement = phaseOrigin
-        ? marker.valueQuantity === phaseOrigin ? marker : { ...marker, valueQuantity: phaseOrigin }
-        : undefined;
+      let replacement: FhirExtension | undefined;
+      if (phaseStart) {
+        const previous = marker.valueQuantity ? undefined : decodeR6SourceMetadata(marker, "step")?.start;
+        if (equalStructuredValues(previous, phaseStart)) replacement = marker;
+        else {
+          generatedStart ??= encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start: phaseStart }, "step");
+          const { valueQuantity: _oldOrigin, extension: children, ...metadata } = marker;
+          const previousStart = children?.find(child => child.url === "start");
+          replacement = { ...metadata, extension: [
+            { ...previousStart, ...generatedStart.extension![0] },
+            ...(children?.filter(child => child.url !== "start") ?? []),
+          ] };
+        }
+      } else if (phaseOrigin) {
+        if (marker.valueQuantity === phaseOrigin) replacement = marker;
+        else {
+          const { extension: children, ...metadata } = marker;
+          replacement = { ...metadata, valueQuantity: phaseOrigin };
+          if (children?.length) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+            { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] }];
+        }
+      }
       if (replacement !== marker && !changed) changed = existing.slice(0, index);
       if (changed && replacement) changed.push(replacement);
     }
-    if (phaseOrigin && !found)
-      (changed ??= existing.slice()).push({ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin });
+    if (!found && (phaseOrigin || phaseStart))
+      (changed ??= existing.slice()).push(phaseStart
+        ? generatedStart ?? encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start: phaseStart }, "step")
+        : { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin });
     if (changed) assign(output, "modifierExtension", changed.length ? changed : undefined);
   }
   // Whole-course display baselines belong to the FINAL output, never to

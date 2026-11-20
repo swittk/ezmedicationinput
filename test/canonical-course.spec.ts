@@ -9,19 +9,29 @@ import {
   calculateTotalUnits,
   parseSig,
   fromFhir,
+  fromFhirDosage,
   formatSig,
 
   projectCanonicalCourse,
+  toFhirR5Dosages,
+  toDosageDetails,
 } from "../src/index";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
 import { clauseForAdministration, courseFromAdministrations } from "../src/canonical/compile";
 import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
+  TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
+  TIMING_CLOCK_WINDOW_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
 } from "../src/fhir";
 import { cloneStructuredValue } from "../src/stable-structure";
-import { FhirPeriodUnit, type FhirR6DosageInstruction } from "../src/types";
+import { dosageMatchesSavedProjection, withDosageEditProvenance } from "../src/dosage-course";
+import { registerMedicationLocaleDetector, inferMedicationLocale } from "../src/locale-detection";
+import { registerSigLocalization, resolveSigLocalization } from "../src/i18n";
+import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/fhir-quantity-operator";
+import { ENGLISH_COURSE } from "../src/locales/course/en";
+import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type FhirDosage, type FhirR6Dosage, type FhirR6DosageInstruction, type FhirR6DoseLimit } from "../src/types";
 import type { CanonicalAdministration, CanonicalCourse, CanonicalScheduleInput } from "../src/canonical/course";
 
 const source: FhirR6DosageInstruction = {
@@ -660,3 +670,416 @@ describe("compiled clinical facts and source units survive projection", () => {
 });
 
 }
+
+
+describe("display and replay family boundaries", () => {
+
+const tablet: FhirR6Dosage = {
+  doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+  timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day } },
+};
+const daily = { value: 1, unit: "d" };
+
+describe("source-less limit wording retains value and ownership", () => {
+  it("shows an integer period cap alongside the four-times-daily instruction", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, safety: { doseLimit: [{ scope: "period", valueInteger: 2, period: daily }] },
+    }] }] };
+    const course = courseFromR6(raw);
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("four times daily");
+    expect(text).toContain("max per period: 2 administrations / 1 d");
+    expect(course.stages[0].administrations[0].limits?.[0].count).toBe(2);
+    expect(fromFhir(raw, { locale: "en" }).longText)
+      .toContain("max per period: 2 administrations / 1 d");
+  });
+
+  it.each(["period", "administration", "dosage", "lifetime"] as const)(
+    "retains the %s scope for quantity, integer and unevaluated expression limits",
+    (scope) => {
+      const limits: FhirR6DoseLimit[] = [
+        { scope, valueQuantity: { value: 8, unit: "tab" }, ...(scope === "period" ? { period: daily } : {}) },
+        { scope, valueInteger: 2, ...(scope === "period" ? { period: daily } : {}) },
+        { scope, valueExpression: { language: "text/fhirpath", expression: "weight * 2" },
+          ...(scope === "period" ? { period: daily } : {}) },
+      ];
+      const course = courseFromR6({ step: [{ component: [{ ...tablet, safety: { doseLimit: limits } }] }] });
+      const text = formatCanonicalCourse(course, "long", { locale: "en" });
+      const label = scope === "period" ? "max per period:" :
+        scope === "administration" ? "max per administration:" :
+        scope === "dosage" ? "max per dosage:" : "max lifetime:";
+      expect(text).toContain(label + " 8 tab");
+      expect(text).toContain(label + " 2 administrations");
+      expect(text).toContain(label + " unevaluated dose expression: weight * 2");
+    },
+  );
+
+  it("shows a course-wide quantity cap exactly once for a simple course", () => {
+    const course = courseFromR6({
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 8, unit: "tab" }, period: daily }] },
+      step: [{ component: [tablet] }],
+    });
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("Across this course: max per period: 8 tab / 1 d");
+    expect(text.split("8 tab").length - 1).toBe(1);
+    expect(course.stages[0].administrations[0].limits).toBeUndefined();
+  });
+
+  it("keeps course and stage caps outside member wording in a multi-stage plan", () => {
+    const course = courseFromR6({
+      safety: { doseLimit: [{ scope: "lifetime", valueInteger: 12 }] },
+      step: [
+        { component: [tablet, tablet], safety: {
+          doseLimit: [{ scope: "period", valueInteger: 2, period: daily }],
+        } },
+        { component: [tablet] },
+      ],
+    });
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("Within this stage: max per period: 2 administrations / 1 d");
+    expect(text).toContain("Across this course: max lifetime: 12 administrations");
+    expect(text.split("max per period:").length - 1).toBe(1);
+    expect(text.split("max lifetime:").length - 1).toBe(1);
+  });
+
+  it("keeps the new scope labels and counts behind the existing locale facet", () => {
+    registerSigLocalization({
+      locale: "limit-family",
+      formatLong: () => "Dose locale.",
+      course: { ...ENGLISH_COURSE,
+        courseLimitsLabel: "Cours: ", stageLimitsLabel: "Étape: ",
+        maxPeriodLabel: "Plafond: ", administrations: (value) => value + " prises",
+      },
+    });
+    const course = courseFromR6({
+      safety: { doseLimit: [{ scope: "period", valueInteger: 2, period: daily }] },
+      step: [{ component: [tablet] }],
+    });
+    expect(formatCanonicalCourse(course, "long", { locale: "limit-family" }))
+      .toContain("Cours: Plafond: 2 prises / 1 d");
+    expect(formatCanonicalCourse(course, "long", { locale: "th" }))
+      .toContain("ตลอดแผนการใช้ยานี้: max per period: ให้ยา 2 ครั้ง / 1 d");
+  });
+});
+
+describe("partial explicit calendar events remain visible", () => {
+  it("retains year/month precision without fabricating a full date", () => {
+    const course = courseFromR6({ step: [{ component: [{
+      doseAndRate: tablet.doseAndRate,
+      timing: { event: ["2026", "2026-11", "2026-11-20"] },
+    }] }] });
+    expect(formatCanonicalCourse(course, "long", { locale: "en" }))
+      .toContain("Scheduled events: 2026, 2026-11");
+    expect(formatCanonicalCourse(course, "long", { locale: "th" }))
+      .toContain("วันที่กำหนด: 2026 และ 2026-11");
+    for (const locale of ["en", "th"]) {
+      const text = formatCanonicalCourse(course, "long", { locale });
+      expect(text).not.toMatch(/2026-00|2026-11-00|2026-00-00/u);
+      expect(text).not.toContain("NaN");
+    }
+    expect(course.stages[0].administrations[0].schedule?.explicitEvents)
+      .toEqual(["2026", "2026-11", "2026-11-20"]);
+  });
+});
+
+function savedRow(): FhirDosage {
+  const row: FhirDosage = {
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", code: "tab", system: "urn:unit" } }],
+    timing: {
+      event: ["2026-11-20T08:00:00Z", "2026-11-21T08:00:00Z"],
+      code: { text: "BID", coding: [{ code: "BID", system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation" }] },
+      repeat: {
+        frequency: 1, frequencyMax: 2, period: 1, periodMax: 2,
+        periodUnit: FhirPeriodUnit.Day, count: 3, countMax: 4,
+        duration: 1, durationMax: 2, durationUnit: FhirPeriodUnit.Hour,
+        dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Wednesday], timeOfDay: ["08:00:00", "20:00:00"],
+        when: [EventTiming["Before Breakfast"], EventTiming["Before Dinner"]], offset: 15,
+        boundsDuration: { value: 7, unit: "d" },
+      },
+    },
+  };
+  return withDosageEditProvenance([row], "Original source")[0];
+}
+describe("saved R5 source replay observes all live timing values", () => {
+  const edits: Array<[string, (row: FhirDosage) => void]> = [
+    ["later clock", row => { row.timing!.repeat!.timeOfDay![1] = "22:00:00"; }],
+    ["later weekday", row => { row.timing!.repeat!.dayOfWeek![1] = FhirDayOfWeek.Friday; }],
+    ["later event", row => { row.timing!.event![1] = "2026-11-22T08:00:00Z"; }],
+    ["later meal anchor", row => { row.timing!.repeat!.when![1] = EventTiming["After Dinner"]; }],
+    ["timing abbreviation", row => { row.timing!.code!.coding![0].code = "TID"; }],
+    ["timing description", row => { row.timing!.code!.text = "three times daily"; }],
+    ["frequency maximum", row => { row.timing!.repeat!.frequencyMax = 3; }],
+    ["period maximum", row => { row.timing!.repeat!.periodMax = 3; }],
+    ["period unit", row => { row.timing!.repeat!.periodUnit = FhirPeriodUnit.Week; }],
+    ["count maximum", row => { row.timing!.repeat!.countMax = 5; }],
+    ["duration", row => { row.timing!.repeat!.duration = 2; }],
+    ["duration maximum", row => { row.timing!.repeat!.durationMax = 3; }],
+    ["duration unit", row => { row.timing!.repeat!.durationUnit = FhirPeriodUnit.Minute; }],
+    ["meal offset", row => { row.timing!.repeat!.offset = 30; }],
+    ["course length", row => { row.timing!.repeat!.boundsDuration!.value = 14; }],
+    ["dose unit system", row => { row.doseAndRate![0].doseQuantity!.system = "urn:other-unit"; }],
+  ];
+  it.each(edits)("invalidates replay after changing the %s in place", (_, edit) => {
+    const row = savedRow();
+    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    edit(row);
+    expect(dosageMatchesSavedProjection(row)).toBe(false);
+  });
+
+  it.each(["fresh", "persisted"] as const)(
+    "invalidates the %s authored Thai source after editing its second clock", (kind) => {
+    const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด เวลา 08:00 และ 20:00 แล้วหลับตา";
+    const parsed = parseSig(source, { locale: "th" });
+    const row = kind === "fresh" ? parsed.items[0].fhir
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const options = { locale: "th", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toBe(source);
+    row.timing!.repeat!.timeOfDay![1] = "22:00:00";
+    const edited = formatSig(row, "long", options);
+    expect(edited).toContain("22:00");
+    expect(edited).not.toContain("20:00");
+    expect(edited).toContain("1 หยด");
+    row.timing!.repeat!.timeOfDay![1] = "20:00:00";
+    expect(formatSig(row, "long", options)).toBe(source);
+  });
+
+  it("does not replay BID source after a code-only R5 schedule is edited to TID", () => {
+    const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด bid แล้วหลับตา";
+    const parsed = structuredClone(parseSig(source, { locale: "th" }).fhir[0]);
+    // A code-only Timing is valid R5. Keep this fixture free of an intentionally
+    // contradictory old numeric frequency so the expected new cadence is clear.
+    delete parsed.timing!.repeat;
+    const row = withDosageEditProvenance([parsed], source)[0];
+    const options = { locale: "th", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toBe(source);
+    row.timing!.code!.coding![0].code = "TID";
+    row.timing!.code!.text = "TID";
+    const edited = formatSig(row, "long", options);
+    expect(edited).not.toBe(source);
+    expect(edited).toContain("3 ครั้ง");
+    expect(edited).not.toContain("bid");
+  });
+
+  it("shows the changed second clock through the public formatter and allows restoration", () => {
+    const row = JSON.parse(JSON.stringify(parseSig("Take 1 tablet at 08:00 and 20:00").items[0].fhir));
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    const original = formatSig(row, "long", options);
+    row.timing.repeat.timeOfDay[1] = "22:00:00";
+    expect(formatSig(row, "long", options)).toContain("10:00 pm");
+    expect(formatSig(row, "long", options)).not.toContain("8:00 pm");
+    row.timing.repeat.timeOfDay[1] = "20:00:00";
+    expect(formatSig(row, "long", options)).toBe(original);
+  });
+});
+
+describe("locale detector registration has stable provider identity", () => {
+  it("retains the registered snapshot while allowing an explicit replacement", () => {
+    const detector = { locale: "aa", priority: 10, test: (value: string) => value === "__locale_aa__" };
+    registerMedicationLocaleDetector(detector);
+    detector.locale = "bb";
+    detector.test = value => value === "__locale_changed__";
+    expect(inferMedicationLocale("__locale_aa__")).toBe("aa");
+    expect(inferMedicationLocale("__locale_changed__", "fallback")).toBe("fallback");
+    registerMedicationLocaleDetector({ locale: "cc", priority: 20, test: value => value === "__locale_cc__" });
+    registerMedicationLocaleDetector({ locale: "aa", priority: 30, test: value => value === "__locale_aa_new__" });
+    expect(inferMedicationLocale("__locale_cc__")).toBe("cc");
+    expect(inferMedicationLocale("__locale_aa_new__")).toBe("aa");
+    expect(inferMedicationLocale("__locale_changed__", "fallback")).toBe("fallback");
+  });
+});
+});
+
+
+describe("review 26 external display ownership", () => {
+  it.each(["fresh", "persisted"] as const)("uses the edited weekday ordinal in a %s graph-backed row", kind => {
+    const source = "Swallow 1 tablet whole on the first Monday of each month";
+    const parsed = parseSig(source);
+    const row = kind === "fresh" ? parsed.items[0].fhir
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toContain("first Monday");
+    const ordinal = row.timing!.repeat!.extension!.find(x => x.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL)!;
+    expect(ordinal.valueInteger).toBe(1);
+    ordinal.valueInteger = 2;
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toMatch(/second Monday|2nd Monday/iu);
+      expect(text).not.toContain("first Monday");
+      expect(text).toContain("1 tablet");
+    }
+    ordinal.valueInteger = 1;
+    expect(formatSig(row, "long", options)).toContain("first Monday");
+  });
+
+  it("uses current clock-window endpoints on a second preview of a persisted infusion", () => {
+    const source = "Infuse 5 mL/h between 08:00 and 18:00";
+    const row = JSON.parse(JSON.stringify(withDosageEditProvenance([{
+      text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
+      timing: { repeat: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Hour,
+        extension: [{ url: TIMING_CLOCK_WINDOW_EXTENSION_URL, extension: [
+          { url: "start", valueTime: "08:00:00" }, { url: "end", valueTime: "18:00:00" },
+          { url: "endInclusive", valueBoolean: true }
+        ] }] } }
+    }], source)[0])) as FhirDosage;
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toBe(source);
+    expect(formatSig(row, "long", options)).toBe(source);
+    const window = row.timing!.repeat!.extension![0].extension!;
+    window[0].valueTime = "09:00:00";
+    const text = formatSig(row, "long", options);
+    expect(text).toMatch(/09:00|9:00 am/u);
+    expect(text).toMatch(/18:00|6:00 pm/u);
+    expect(text).not.toMatch(/08:00|8:00 am/u);
+    expect(text).toContain("5 mL/h");
+    window[1].valueTime = "17:00:00";
+    expect(formatSig(row, "long", options)).toMatch(/17:00|5:00 pm/u);
+    expect(formatSig(row, "long", options)).not.toMatch(/18:00|6:00 pm/u);
+    window[2].valueBoolean = false;
+    expect(dosageMatchesSavedProjection(row)).toBe(false);
+  });
+
+  it("does not replay a removed persisted rate beside an unchanged maximum", () => {
+    const source = "Infuse 5 mL/h, maximum 10 mL per administration";
+    const row = JSON.parse(JSON.stringify(withDosageEditProvenance([{
+      text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
+      maxDosePerAdministration: { value: 10, unit: "mL" }
+    }], source)[0])) as FhirDosage;
+    expect(formatSig(row, "long")).toBe(source);
+    delete row.doseAndRate![0].rateQuantity;
+    for (const text of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
+      expect(text).not.toContain("5 mL/h");
+      expect(text).toContain("10 mL");
+    }
+    row.text = "Clinician replacement instruction: maximum 10 mL";
+    expect(formatSig(row, "long")).toBe(row.text);
+  });
+
+  it.each(["en", "th"])("keeps a strict high dose endpoint in both %s public previews", locale => {
+    const row: FhirDosage = { doseAndRate: [{ doseRange: {
+      low: { value: 2, unit: "mg" }, high: { value: 5, unit: "mg", extension: [{
+        url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" }
+      }] }
+    } }] };
+    const text = formatSig(row, "long", { locale });
+    expect(text).toContain("<5");
+    const reopened = fromFhirDosage(row, { locale });
+    expect(reopened.longText).toBe(text);
+    expect(reopened.shortText).toContain("<5");
+    expect(reopened.fhir.doseAndRate).toEqual(row.doseAndRate);
+  });
+
+  it("binds partial regional callbacks to the registration that owns their private state", () => {
+    class BasePack {
+      readonly locale = "rx";
+      readonly course = ENGLISH_COURSE;
+      #long = "Base long";
+      formatLong() { return this.#long; }
+      formatShort() { return "Base short"; }
+    }
+    class RegionalPack {
+      readonly locale = "rx-XX";
+      #short = "Regional short";
+      formatShort() { return this.#short; }
+    }
+    const base = new BasePack();
+    registerSigLocalization(base);
+    registerSigLocalization(new RegionalPack());
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    expect(formatSig(row, "long", { locale: "rx-XX" })).toBe("Base long");
+    expect(formatSig(row, "short", { locale: "rx-XX" })).toBe("Regional short");
+    const first = resolveSigLocalization("rx-XX");
+    expect(resolveSigLocalization("rx-XX")).toBe(first);
+    expect(resolveSigLocalization("rx")).toBe(base);
+    class ReplacementPack extends BasePack {
+      #replacement = "Replacement long";
+      formatLong() { return this.#replacement; }
+    }
+    registerSigLocalization(new ReplacementPack());
+    expect(formatSig(row, "long", { locale: "rx-XX" })).toBe("Replacement long");
+    expect(formatSig(row, "short", { locale: "rx-XX" })).toBe("Regional short");
+  });
+});
+
+
+describe("review 26 independent partial phase boundaries", () => {
+  it("keeps the other eye's exact transition beside a missing cutover", () => {
+    const source = "1 drop OS QID then BID; 1 drop OD BID for 7 days then QID";
+    const parsed = parseSig(source);
+    const native = parsed.meta.canonical.course!;
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const course of [native, courseFromR6(parsed.fhirNext), courseFromR6(toDosageDetails(saved))]) {
+      expect(course.stages).toHaveLength(1);
+      const right = course.stages[0].administrations.filter(a => a.target?.text === "right eye");
+      const left = course.stages[0].administrations.filter(a => a.target?.text === "left eye");
+      expect(right).toHaveLength(2);
+      expect(left).toHaveLength(2);
+      expect(right[0].phaseOrigin).toMatchObject({ value: 0, code: "d" });
+      const length = right[0].schedule?.recurrence?.courseLength;
+      expect(length?.value).toBe(7);
+      expect(length?.code ?? length?.unit).toBe("d");
+      expect(right[1].phaseOrigin).toMatchObject({ value: 7, code: "d" });
+      expect(right[1].schedule?.recurrence?.frequency).toBe(4);
+      expect(left[1].phaseOrigin).toBeUndefined();
+      expect(left[1].phaseStart?.anchor).toBe("unresolved");
+    }
+    const options = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-08T00:00:00Z",
+      timeZone: "UTC", limit: 4 };
+    expect(() => nextDueDoses(parsed.fhirNext, options)).toThrow(/relative|resolv|anchor/iu);
+    // A clinician can still use the independently complete right-eye track.
+    const rightOnly = { ...parsed.fhirNext, step: parsed.fhirNext.step!.map(step => ({ ...step,
+      component: step.component.filter(a => a.site?.concept?.text === "right eye") })) };
+    expect(nextDueDoses(rightOnly, options)).toHaveLength(4);
+    expect(calculateTotalUnits({ dosage: rightOnly, ...options,
+      durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 4, unit: "drop" });
+    for (const view of [native, parsed.fhirNext, saved]) {
+      const preview = formatSig(view, "long", { locale: "en", realizationMode: "normalized" });
+      expect(preview).toContain("7 days after treatment start");
+      expect(preview).toContain("Stage timing requires review");
+      expect(preview).toContain("right eye");
+      expect(preview).toContain("left eye");
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(parsed.longText).toMatch(/right eye|OD/u);
+    expect(parsed.longText).toMatch(/left eye|OS/u);
+  });
+});
+
+
+it.each(["fresh", "persisted"] as const)("keeps %s clinician text edits and honors an explicit text clear", kind => {
+  const parsed = parseSig("Swallow 1 tablet whole at bedtime");
+  const row = kind === "fresh" ? parsed.items[0].fhir
+    : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+  const options = { locale: "en", realizationMode: "roundtrip" as const };
+  const replacement = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
+  row.text = replacement;
+  expect(formatSig(row, "long", options)).toBe(replacement);
+  expect(fromFhirDosage(row, options).longText).toBe(replacement);
+  const normalized = formatSig(row, "long", { ...options, realizationMode: "normalized" });
+  expect(normalized).toContain("1 tablet");
+  expect(normalized).toMatch(/bedtime|on sleep/u);
+  expect(normalized).not.toContain("discussion with the clinician");
+  row.text = "";
+  expect(formatSig(row, "long", options)).not.toBe(replacement);
+  expect(formatSig(row, "long", options)).toContain("1 tablet");
+});
+
+
+it("keeps replacement text authoritative on a qualified range while preserving rich structured metadata", () => {
+  const row = withDosageEditProvenance([{
+    text: "Use 2 mg to less than 5 mg",
+    doseAndRate: [{ doseRange: { low: { value: 2, unit: "mg" }, high: {
+      value: 5, unit: "mg", extension: [{ url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" } }]
+    } } }]
+  }], "Use 2 mg to less than 5 mg")[0];
+  const persisted = JSON.parse(JSON.stringify(row)) as FhirDosage;
+  persisted.text = "Use 2 mg to less than 5 mg after discussing the plan with the clinician.";
+  const options = { locale: "en", realizationMode: "roundtrip" as const };
+  expect(formatSig(persisted, "long", options)).toBe(persisted.text);
+  const imported = fromFhirDosage(persisted, options);
+  expect(imported.longText).toBe(persisted.text);
+  expect(imported.shortText).toBe(persisted.text);
+  expect(imported.meta.canonical.administration?.amounts?.[0].range?.high)
+    .toMatchObject({ value: 5, unit: "mg", comparator: "<" });
+  expect(fromFhirDosage(persisted, { ...options, realizationMode: "normalized" }).longText).toContain("<5");
+});

@@ -134,16 +134,34 @@ export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:Str
  * @returns The retained duration quantity or range, when supplied.
  */
 export function getAnchoredCourseDuration(
-  dosage: Pick<FhirDosage, "modifierExtension"> & { timing?: { repeat?: { boundsRange?: FhirRange } } }
+  dosage: Pick<FhirDosage, "modifierExtension"> & {
+    timing?: { repeat?: { boundsRange?: FhirRange; boundsDuration?: FhirR6Quantity } }
+  }
 ): Pick<FhirExtension, "valueQuantity" | "valueRange"> | undefined {
   const marker = dosage.modifierExtension?.find(extension =>
     extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
-  if (!marker?.extension) return marker;
+  if (!marker) return undefined;
+  const repeat = dosage.timing?.repeat;
+  const projectedMarker = marker.extension?.find(child => child.url === "projectedRange");
+  // Without a range projection this modifier accompanies absolute bounds.
+  // Replacing that bounds choice owns the new duration, not the old source.
+  if (!projectedMarker && (repeat?.boundsRange || repeat?.boundsDuration)) return undefined;
+  if (!marker.extension) return marker;
   const low = marker.extension.find(child => child.url === "low")?.valueQuantity;
   const high = marker.extension.find(child => child.url === "high")?.valueQuantity;
   if (!low || !high) return marker;
-  const projected = marker.extension.find(child => child.url === "projectedRange")?.valueRange;
-  if (projected && !equalStructuredValues(projected, dosage.timing?.repeat?.boundsRange)) return undefined;
+  if (projectedMarker) {
+    const current = repeat?.boundsRange;
+    if (!current) return undefined;
+    const projected = projectedMarker.valueRange ?? readRetainedField(projectedMarker) as FhirRange | undefined;
+    if (!projected) return undefined;
+    // Each live endpoint owns its edit. An omitted projected endpoint still
+    // retains its authored unit until the clinician actually supplies it.
+    return { valueRange: { ...current,
+      low: equalStructuredValues(projected.low, current.low) ? low as FhirSimpleQuantity : current.low,
+      high: equalStructuredValues(projected.high, current.high) ? high as FhirSimpleQuantity : current.high,
+    } };
+  }
   const metadata = marker.extension.find(child => child.url === "rangeMetadata");
   return { valueRange: {
     ...(metadata ? readRetainedField(metadata) as FhirRange : undefined),
@@ -173,7 +191,9 @@ export function projectCourseDurationRange(range: FhirRange): { range: FhirRange
     { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high },
   ];
   if (Object.keys(metadata).length) children.push(retainField("rangeMetadata", metadata));
-  children.push({ url: "projectedRange", valueRange: projected });
+  // The serialized baseline must not alias live editable Range nodes. The
+  // existing source codec also detaches nested operator/Element metadata.
+  children.push(retainField("projectedRange", projected));
   return { range: projected, source: { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: children } };
 }
 
@@ -1157,7 +1177,7 @@ function extractCanonicalTimingBounds(
   };
 }
 
-function extractCanonicalDoseRange(
+export function extractCanonicalDoseRange(
   range: FhirRange
 ): { range?: CanonicalDoseRange; unit?: string; warning?: string } {
   const canonicalRange: CanonicalDoseRange = {};

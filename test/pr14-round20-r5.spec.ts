@@ -104,7 +104,9 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const edit = persisted(fromDosageDetails(course({ safety })));
     edit.dosages[0].maxDosePerAdministration!.value = 2;
     const actual = toDosageDetails(edit.dosages, undefined, edit.course).step![0].component[0].safety!;
-    expect(actual.doseLimit!.find(limit => limit.scope === "administration")!.valueQuantity!.value).toBe(2);
+    expect(actual.doseLimit).toEqual([
+      { ...safety.doseLimit[0], valueQuantity: q(2) }, ...safety.doseLimit.slice(1),
+    ]);
     if (rich) {
       expect(actual.doseLimit).toContainEqual(safety.doseLimit[1]);
       expect(actual.ifExceeded).toEqual(safety.ifExceeded);

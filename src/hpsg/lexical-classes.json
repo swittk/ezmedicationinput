@@ -751,7 +751,7 @@
   "doseComparatorWordings": {
     "~": [["about"], ["approximately"], ["approx"], ["around"], ["roughly"], ["ประมาณ"], ["ราว"]],
     ">=": [["at", "least"], ["no", "less", "than"], ["not", "less", "than"], ["greater", "than", "or", "equal", "to"], ["more", "than", "or", "equal", "to"], ["อย่างน้อย"], ["อย่าง", "น้อย"], ["ไม่ต่ำกว่า"], ["ไม่", "ต่ำ", "กว่า"]],
-    "<=": [["at", "most"], ["no", "more", "than"], ["not", "more", "than"], ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"], ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]],
+    "<=": [["at", "most"], ["no", "more", "than"], ["no", "greater", "than"], ["not", "greater", "than"], ["not", "more", "than"], ["less", "than", "or", "equal", "to"], ["up", "to"], ["ไม่เกิน"], ["ไม่", "เกิน"], ["อย่างมาก"], ["อย่าง", "มาก"]],
     ">": [["greater", "than"], ["more", "than"], ["มากกว่า"], ["มาก", "กว่า"]],
     "<": [["less", "than"], ["น้อยกว่า"], ["น้อย", "กว่า"]]
   },

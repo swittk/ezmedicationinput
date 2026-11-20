@@ -245,6 +245,23 @@ describe("review round 21: persisted R5 ownership and retention", () => {
         { url: "row", extension: [{ url: "projectionFingerprint", valueString: "4346df4e5678f52b" }, { url: "textFingerprint", valueString: "dab22a241c7d0f4f" }] },
       ] }],
     }];
+    const unrelated = { url: "urn:test:course-modifier", valueString: "retain policy" };
+    const unrelatedEdit = toDosageDetails(persist(saved), undefined, { modifierExtension: [unrelated] });
+    expect(getCourseCycleCount(unrelatedEdit)).toBe(3);
+    expect(unrelatedEdit.modifierExtension).toContainEqual(unrelated);
+    expect(unrelatedEdit.step![0].count).toBeUndefined();
+    expect(getCourseCycleCount(toDosageDetails(persist(saved), undefined, {
+      modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 4 }, unrelated],
+    }))).toBe(4);
+    // [] explicitly clears all legacy course modifiers. To clear only this
+    // count, reopen the migrated public edit view and remove its visible entry.
+    expect(getCourseCycleCount(toDosageDetails(persist(saved), undefined, { modifierExtension: [] }))).toBeUndefined();
+    const edit = persist(fromDosageDetails(unrelatedEdit));
+    edit.course.modifierExtension = edit.course.modifierExtension!.filter(e => e.url !== COURSE_CYCLE_COUNT_EXTENSION_URL);
+    const clear = toDosageDetails(edit.dosages, undefined, edit.course);
+    expect(getCourseCycleCount(clear)).toBeUndefined();
+    expect(clear.modifierExtension).toContainEqual(unrelated);
+    expect(getCourseCycleCount(toDosageDetails(persist(toFhirR5Dosages(clear))))).toBeUndefined();
     const migrated = toDosageDetails(persist(saved));
     expect(getCourseCycleCount(migrated)).toBe(3);
     expect(migrated.step![0].count).toBeUndefined();

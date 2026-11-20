@@ -257,6 +257,36 @@ export function courseFromParallel(
   return { kind: "course", instruction, stages };
 }
 
+/** Preserve independent member origins when global stage cuts are unresolved.
+ * Each member retains its own course length; an uncertain transition never
+ * supplies the origin or end of another track. */
+export function courseFromPartialParallel(
+  regimen: Extract<CanonicalParallelRegimen, { kind: "unresolved" }>,
+  clauseTexts: readonly (string | undefined)[],
+  instruction: string
+): CanonicalCourse {
+  const administrations: CanonicalAdministration[] = [];
+  for (const track of regimen.tracks ?? []) {
+    for (let index = 0; index < track.phases.length; index++) {
+      const phase = track.phases[index];
+      for (const item of phase.members) {
+        const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
+        a.sourceMember = item.member;
+        // Keep the authored clause in syntax; only this owned execution window
+        // receives the calendar end inferred within its independent track.
+        const calendar = a.schedule?.recurrence?.calendarWindow;
+        if (calendar && item.effectiveBoundsEnd) calendar.end = item.effectiveBoundsEnd;
+        if (phase.kind === "relative" && phase.start)
+          a.phaseOrigin = clinicalBoundary(phase.start).displacement;
+        else if (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart)
+          a.phaseStart = { anchor: "unresolved" };
+        administrations.push(a);
+      }
+    }
+  }
+  return { kind: "course", instruction, stages: [{ administrations }] };
+}
+
 /** An unchanged source date keeps its calendar/provenance. Edited native
  * ISO dates supply their own date parts; a source calendar must not reinterpret
  * a replacement date. This is a structural display view, not a date parser. */
@@ -358,6 +388,8 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     kind:"administration",rawText,raw:{text:rawText,start:0,end:rawText.length,tokenIndices:[]},
     leftovers:[],evidence:[],confidence:1
   };
+  if (a.provenance?.sourceTextVerified !== undefined)
+    result.sourceProjectionVerified = a.provenance.sourceTextVerified;
   const r=a.schedule?.recurrence;
   const length=r?.courseLength??a.anchoredLength?.quantity;
   const range=r?.courseLengthRange??a.anchoredLength?.range;
@@ -407,7 +439,7 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   result.patientInstruction=a.patientInstruction;
   if (a.additionalInstructions || base?.additionalInstructions)
     result.additionalInstructions=additionalInstructionsForAdministration(a);
-  result.prn=a.asNeeded?Object.assign({},base?.prn,{enabled:true}):undefined;
+  result.prn=a.asNeeded===false?undefined:a.asNeeded?Object.assign({},base?.prn,{enabled:true}):base?.prn;
   let routeCode:RouteCode|undefined;
   for(const coding of a.route?.coding??[]){
     if(!coding.code || coding.system && coding.system!=="http://snomed.info/sct")continue;
