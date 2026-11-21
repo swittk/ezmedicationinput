@@ -1,5 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "./fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -139,14 +139,49 @@ export function setDosageAlternativeChoice(
   dosage: Pick<FhirDosage, "modifierExtension">,
   choice: DosageAlternativeChoice | undefined
 ): void {
-  replacementExtensions(dosage, DOSAGE_ALTERNATIVE_CHOICE_URL, choice ? {
-    url: DOSAGE_ALTERNATIVE_CHOICE_URL,
-    extension: [
+  const original = dosage.modifierExtension;
+  let found = false, updated: FhirExtension[] | undefined;
+  for (let index = 0; index < (original?.length ?? 0); index++) {
+    const marker = original![index];
+    if (marker.url !== DOSAGE_ALTERNATIVE_CHOICE_URL) { updated?.push(marker); continue; }
+    if (!choice || found) { updated ??= original!.slice(0, index); continue; }
+    found = true;
+    let fields: FhirExtension[] | undefined, seen = 0;
+    const children = marker.extension ?? [];
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      const bit = child.url === "groupId" ? 1 : child.url === "branchId" ? 2 :
+        child.url === "selectionBehavior" ? 4 : 0;
+      let next = child;
+      if (bit && !(seen & bit)) {
+        seen |= bit;
+        const value = bit === 1 ? choice.groupId : bit === 2 ? choice.branchId : choice.selectionBehavior;
+        if ((bit === 4 ? child.valueCode : child.valueString) !== value)
+          next = bit === 4 ? { ...child, valueCode: value } : { ...child, valueString: value };
+      }
+      if (next !== child) fields ??= children.slice(0, childIndex);
+      fields?.push(next);
+    }
+    if (seen !== 7) {
+      fields ??= children.slice();
+      if (!(seen & 1)) fields.push({ url: "groupId", valueString: choice.groupId });
+      if (!(seen & 2)) fields.push({ url: "branchId", valueString: choice.branchId });
+      if (!(seen & 4)) fields.push({ url: "selectionBehavior", valueCode: choice.selectionBehavior });
+    }
+    if (fields) {
+      updated ??= original!.slice(0, index);
+      updated.push({ ...marker, extension: fields });
+    } else updated?.push(marker);
+  }
+  if (choice && !found) {
+    updated ??= original?.slice() ?? [];
+    updated.push({ url: DOSAGE_ALTERNATIVE_CHOICE_URL, extension: [
       { url: "groupId", valueString: choice.groupId },
       { url: "branchId", valueString: choice.branchId },
-      { url: "selectionBehavior", valueCode: choice.selectionBehavior }
-    ]
-  } : undefined);
+      { url: "selectionBehavior", valueCode: choice.selectionBehavior },
+    ] });
+  }
+  if (updated) dosage.modifierExtension = updated.length ? updated : undefined;
 }
 
 /** Machine-readable declaration of the local alternative-choice modifier.
@@ -1291,7 +1326,7 @@ function matchesReplayPredicate(proof: SourcePredicateObservation[] | undefined)
   }
   return true;
 }
-function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): SourceConditionObservation | undefined {
+export function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): SourceConditionObservation | undefined {
   const modifier = dosage.modifierExtension?.find(item => item.url === DOSAGE_CONDITION_R5_URL);
   const conditions = (dosage as EzDosage).condition;
   if (!modifier && !conditions?.length) return undefined;
@@ -1305,7 +1340,7 @@ function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): SourceCond
   }
   return { modifier, predicate: captureReplayPredicate(modifier), native };
 }
-function matchesSourceReplayCondition(dosage: FhirDosage | EzDosage, proof: SourceConditionObservation | undefined): boolean {
+export function matchesSourceReplayCondition(dosage: FhirDosage | EzDosage, proof: SourceConditionObservation | undefined): boolean {
   const modifier = dosage.modifierExtension?.find(item => item.url === DOSAGE_CONDITION_R5_URL);
   const conditions = (dosage as EzDosage).condition;
   if (!proof) return !modifier && !conditions?.length;
@@ -1348,6 +1383,8 @@ interface SourceTimingObservation {
   weekdayOrdinal?: number;
   clockWindow?: { start?: string; end?: string; endInclusive?: boolean };
   occurrenceCap?: { max?: number; period?: SourceMeasureObservation };
+  activities?: Array<{ relation?: string; activity?: SourceConceptObservation;
+    offset?: SourceMeasureObservation; offsetMin?: SourceMeasureObservation; offsetMax?: SourceMeasureObservation }>;
   events?: string[];
   clocks?: string[];
   weekdays?: FhirDayOfWeek[];
@@ -1403,6 +1440,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   let monthDays: number[] | undefined, weekdayOrdinal: number | undefined;
   let clockWindow: SourceTimingObservation["clockWindow"];
   let occurrenceCap: SourceTimingObservation["occurrenceCap"];
+  let activities: SourceTimingObservation["activities"];
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1421,6 +1459,17 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
         }
       }
     }
+    else if (extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL) {
+      const activity: NonNullable<SourceTimingObservation["activities"]>[number] = {};
+      for (const part of extension.extension ?? []) {
+        if (part.url === "relation") activity.relation ??= part.valueCode;
+        else if (part.url === "activity") activity.activity ??= captureSourceReplayConcept(part.valueCodeableConcept);
+        else if (part.url === "offset") activity.offset ??= capturedReplayMeasure(part.valueQuantity);
+        else if (part.url === "offsetMin") activity.offsetMin ??= capturedReplayMeasure(part.valueQuantity);
+        else if (part.url === "offsetMax") activity.offsetMax ??= capturedReplayMeasure(part.valueQuantity);
+      }
+      (activities ??= []).push(activity);
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindow) {
       clockWindow = {};
       for (const part of extension.extension ?? []) {
@@ -1435,7 +1484,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
-    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, occurrenceCap,
+    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, occurrenceCap, activities,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1470,7 +1519,7 @@ export function matchesSourceReplayTiming(
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let monthDayIndex = 0, weekdayOrdinal: number | undefined;
-  let clockWindowSeen = false, occurrenceCapSeen = false;
+  let clockWindowSeen = false, occurrenceCapSeen = false, activityIndex = 0;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1490,6 +1539,22 @@ export function matchesSourceReplayTiming(
       }
       if (max !== proof.occurrenceCap.max || !unchangedReplayMeasure(period, proof.occurrenceCap.period)) return false;
     }
+    else if (extension.url === TIMING_ACTIVITY_WINDOW_EXTENSION_URL) {
+      const activity = proof.activities?.[activityIndex++];
+      if (!activity) return false;
+      let relation: string | undefined, concept: FhirCodeableConcept | undefined;
+      let offset: FhirQuantity | undefined, offsetMin: FhirQuantity | undefined, offsetMax: FhirQuantity | undefined;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "relation") relation ??= part.valueCode;
+        else if (part.url === "activity") concept ??= part.valueCodeableConcept;
+        else if (part.url === "offset") offset ??= part.valueQuantity;
+        else if (part.url === "offsetMin") offsetMin ??= part.valueQuantity;
+        else if (part.url === "offsetMax") offsetMax ??= part.valueQuantity;
+      }
+      if (relation !== activity.relation || !matchesSourceReplayConcept(concept, activity.activity) ||
+          !unchangedReplayMeasure(offset, activity.offset) || !unchangedReplayMeasure(offsetMin, activity.offsetMin) ||
+          !unchangedReplayMeasure(offsetMax, activity.offsetMax)) return false;
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindowSeen) {
       clockWindowSeen = true;
       if (!proof.clockWindow) return false;
@@ -1505,7 +1570,7 @@ export function matchesSourceReplayTiming(
   }
   if (weekdayOrdinal !== proof.weekdayOrdinal || clockWindowSeen !== Boolean(proof.clockWindow) ||
       occurrenceCapSeen !== Boolean(proof.occurrenceCap)) return false;
-  if (monthDayIndex !== (proof.monthDays?.length ?? 0)) return false;
+  if (monthDayIndex !== (proof.monthDays?.length ?? 0) || activityIndex !== (proof.activities?.length ?? 0)) return false;
   if (offsetExact !== proof.offsetExact || offsetMin !== proof.offsetMin || offsetMax !== proof.offsetMax) return false;
   return repeat === proof.repeat && repeat?.extension === prior?.extension &&
     repeat?.frequency === prior?.frequency && repeat?.frequencyMax === prior?.frequencyMax &&
@@ -2374,16 +2439,20 @@ const R6_SINGLE_SAFETY_SOURCE: BridgeShape = {
 export function encodeR6SourceMetadata(
   url: string, value: object, kind: "drafts" | "safety" | "step"
 ): FhirExtension {
-  return { url, extension: encodeFields(value, kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE, true) };
+  return { url, extension: encodeFields(value,
+    kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE,
+    true, kind !== "step") };
 }
 
 export function decodeR6SourceMetadata(
   marker: FhirExtension, kind: "drafts" | "safety" | "step"
 ): Record<string, unknown> | undefined {
   if (!marker.extension || marker.valueString !== undefined) return undefined;
-  // Source snapshots are compared with live R6 wire objects. SimpleQuantity
-  // keeps its EMA extension here; ordinary R5 reconciliation still decodes it.
-  return decodeFields(marker.extension, kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE, true);
+  // Source snapshots are compared with live R6 wire objects. Every Quantity
+  // keeps its supplied EMA/native spelling; ordinary R5 imports normalize it.
+  return decodeFields(marker.extension,
+    kind === "drafts" ? R6_DRAFT_SOURCE : kind === "step" ? STEP : R6_SINGLE_SAFETY_SOURCE,
+    kind === "step" ? "simple" : true);
 }
 
 const PREDICATE: Record<string, BridgeField> = {
@@ -2448,7 +2517,9 @@ export function readRetainedField(node: FhirExtension): unknown {
  * @param value Source object.
  * @param shape Declared semantic fields for this backbone.
  */
-function encodeFields(value: object, shape: BridgeShape, snapshot = false): FhirExtension[] {
+function encodeFields(
+  value: object, shape: BridgeShape, snapshot = false, preserveQuantityWire = false
+): FhirExtension[] {
   const children: FhirExtension[] = [];
   for (const key of Object.keys(value)) {
     const part = (value as Record<string, unknown>)[key];
@@ -2469,16 +2540,20 @@ function encodeFields(value: object, shape: BridgeShape, snapshot = false): Fhir
       if (field.extension) {
         children.push({ url: key, extension: [snapshot ? cloneStructuredValue(item as FhirExtension) : item as FhirExtension] });
       } else if (field.fields) {
-        children.push({ url: key, extension: encodeFields(item as object, field.fields, snapshot) });
+        children.push({ url: key, extension: encodeFields(item as object, field.fields, snapshot, preserveQuantityWire) });
       } else if (field.quantity) {
         // General R5 Quantity supports <, <=, >, >=, ad natively.
         // SimpleQuantity roles require EMA for every operator; general
         // Quantity needs it only for approximation. The retained field's
         // declared role must survive decode/re-encode without false edits.
-        const quantity = field.quantity === "simple"
+        const quantity = preserveQuantityWire ? item as FhirR6Quantity : field.quantity === "simple"
           ? simpleQuantityForR5(item as FhirR6Quantity)
           : generalQuantityForR5(item as FhirR6Quantity);
-        children.push({ url: key, valueQuantity: snapshot ? cloneStructuredValue(quantity) : quantity });
+        // A source record keeps the supplied R6 spelling, including "~";
+        // the shared Extension leaf type is narrower than retained wire data.
+        // Only active R5 clinical projections normalize through the converters.
+        children.push({ url: key, valueQuantity:
+          (snapshot ? cloneStructuredValue(quantity) : quantity) as FhirQuantity | undefined });
       } else if (field.value) {
         children.push({ url: key, [field.value]: snapshot ? cloneStructuredValue(item) : item });
       }
@@ -2494,7 +2569,7 @@ function encodeFields(value: object, shape: BridgeShape, snapshot = false): Fhir
  * @param shape Declared semantic fields for this backbone.
  */
 function decodeFields(
-  children: readonly FhirExtension[], shape: BridgeShape, preserveSimpleWire = false
+  children: readonly FhirExtension[], shape: BridgeShape, preserveQuantityWire: boolean | "simple" = false
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const child of children) {
@@ -2524,12 +2599,13 @@ function decodeFields(
       // Older saved rateRatio bridges used FHIR Extension.valueRatio.
       // New nested field shapes take precedence when both are present.
       value = child.extension
-        ? decodeFields(child.extension, field.fields, preserveSimpleWire)
+        ? decodeFields(child.extension, field.fields, preserveQuantityWire)
         : child.url === "rateRatio" && child.valueRatio
           ? child.valueRatio : undefined;
     }
     else if (field.quantity) {
-      value = child.valueQuantity && (preserveSimpleWire && field.quantity === "simple"
+      value = child.valueQuantity && (preserveQuantityWire === true ||
+        preserveQuantityWire === "simple" && field.quantity === "simple"
         ? cloneStructuredValue(child.valueQuantity)
         : quantityFromR5(cloneStructuredValue(child.valueQuantity)));
       if (!value && child.extension) {

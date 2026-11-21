@@ -86,6 +86,8 @@ import {
   medicationInstructionActionLocaleRealizerConfig,
   normalizeActionSurface,
   resolveMedicationInstructionAction,
+  resolveMedicationInstructionActionByMethod,
+  resolveMedicationInstructionActionForMethod,
   resolveMedicationInstructionSequenceAction,
   resolveMedicationInstructionSeparableAction,
   medicationInstructionActionSpanLimit
@@ -1076,11 +1078,13 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     const complement = time ?? relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
     );
-    const accompanyingQuantity = !time && !relationDuration &&
-      relationHasGrammarFeature(relation, "accompanimentComplement")
+    const accompaniment = relationHasGrammarFeature(relation, "accompanimentComplement");
+    const accompanyingQuantity = !time && !relationDuration && accompaniment
       ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
           AdviceArgumentRole.Substance, options) : undefined;
-    pushArgument(args, accompanyingQuantity?.quantity ? accompanyingQuantity : complement);
+    const argument = accompanyingQuantity?.quantity ? accompanyingQuantity : complement;
+    if (argument && accompaniment) argument.relation = relation;
+    pushArgument(args, argument);
   }
   return { args };
 };
@@ -1684,7 +1688,13 @@ function buildActionFrame(
     relationHasSemanticClass(temporalRelation, "temporal") &&
     relationHasGrammarFeature(temporalRelation, "activityFallback")
       ? temporalRelation : undefined;
-  if (nextTemporal && temporalIndex >= 0) {
+  if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
+    const result = argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
+    if (result) {
+      result.relation = temporalRelation;
+      pushArgument(args, result);
+    }
+  } else if (nextTemporal && temporalIndex >= 0) {
     const eventStart = temporalIndex + 1;
     const sourceEvent = trimSemanticText(sourceFor(parts, eventStart, segmentEnd, input));
     let event = argumentFromParts(
@@ -3575,13 +3585,25 @@ type ActionRealizationContext = InstructionActionRealizationInput;
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
 const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
-  const objectArgs = c.frame.args.filter((arg) =>
-    arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-    arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance
-  );
-  const object = c.theme ?? c.site ?? c.substance;
-  const objectArg = objectArgs[0];
-  const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
+  let objectArg: AdviceArgument | undefined;
+  let relationTargetArg: AdviceArgument | undefined;
+  let amountArg: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
+    else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) {
+      // A WITH daughter remains an accompaniment when the medication object
+      // is implicit. A bare substance without that relation can be the object.
+      if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
+          arg.role === AdviceArgumentRole.Substance &&
+            relationHasSemanticClass(c.frame.relation, "accompaniment"))
+        relationTargetArg ??= arg;
+      else if (!objectArg) objectArg = arg;
+      else relationTargetArg ??= arg;
+    }
+  }
+  const object = !objectArg ? undefined : objectArg.role === AdviceArgumentRole.Site ? c.site
+    : objectArg.role === AdviceArgumentRole.Substance ? c.substance : c.theme;
   const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
   const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
   const amount = objectSource && amountSource && objectSource.includes(amountSource)
@@ -3598,8 +3620,8 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     return `${base}${base ? profile.quantitySeparator : ""}${phrase}`;
   };
 
-  const relationTargetArg = objectArgs.length > 1 ? objectArgs[1] : undefined;
   const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
+  const targetRelation = relationTargetArg?.relation ?? c.frame.relation;
   const materialArgument = relationTargetArg && (
     relationTargetArg.role === AdviceArgumentRole.Substance ||
     relationTargetArg.role === AdviceArgumentRole.Material ||
@@ -3607,11 +3629,11 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     // of WITH (e.g. wipe excess with clean tissue). Treat its existing
     // semantic relation as the licence; do not silently discard it.
     (relationTargetArg.role === AdviceArgumentRole.Object &&
-      relationHasSemanticClass(c.frame.relation, "accompaniment"))
+      relationHasSemanticClass(targetRelation, "accompaniment"))
   );
-  const withTarget = materialArgument && c.frame.relation &&
-    (relationHasSemanticClass(c.frame.relation, "accompaniment") ||
-      relationHasSemanticClass(c.frame.relation, "locative"))
+  const withTarget = materialArgument && targetRelation &&
+    (relationHasSemanticClass(targetRelation, "accompaniment") ||
+      relationHasSemanticClass(targetRelation, "locative"))
     ? relationTarget : undefined;
   const activityRelation = c.activity && relationHasGrammarFeature(c.frame.relation, "activityFallback")
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
@@ -3646,10 +3668,10 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
-  if (withTarget && c.frame.relation) {
+  if (withTarget && targetRelation) {
     const materialRelation = localizeAdviceRelation(
-      c.frame.relation, c.locale, "complement"
-    ) ?? c.frame.relation;
+      targetRelation, c.locale, "complement"
+    ) ?? targetRelation;
     text = appendLocale(text, joinLocalizedTokens(c.locale, [materialRelation, withTarget]));
   }
   text = appendLocale(text, activityPhrase);
@@ -3761,7 +3783,8 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
     if (independentTemporal && arg.relation &&
-        (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time) &&
+        (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
+          arg.role === AdviceArgumentRole.Result) &&
         relationHasSemanticClass(arg.relation, "temporal")) {
       temporalAdjunct ??= arg;
     } else firstArguments[arg.role] ??= arg;
@@ -3798,7 +3821,8 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const negated = frame.polarity === AdvicePolarity.Negate;
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const genericRealizer = ACTION_REALIZERS[realizerKey];
-  const realized = negated ? adapter.renderNegated(input) : genericRealizer
+  const realized = negated ? adapter.renderNegated(input,
+    realizerKey === "amount-material-destination" ? genericRealizer?.(input) : undefined) : genericRealizer
     ? genericRealizer(input)
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
@@ -3838,6 +3862,22 @@ export function realizeRichPrimaryWithCanonicalDose(
   options?: Pick<ParseOptions, "instructionActionMap">
 ): string {
   frame = frameWithoutSupersededTime(frame, clause);
+  if (clause.method && !actionMatchesCanonicalMethod(frame, clause)) {
+    const method = clause.method;
+    const definition = resolveMedicationInstructionActionForMethod(method, options);
+    const sourceRealizer = frame.predicate.realizer ??
+      getMedicationInstructionAction(frame.predicate.lemma)?.realizer ?? "default";
+    // The current method replaces only the action head. Its independent typed
+    // dose, material, manner and event daughters remain attached to that action.
+    frame = { ...frame, sourceText: "", predicate: definition ? {
+      lemma: definition.code, display: definition.display, i18n: definition.i18n,
+      semanticClass: definition.semanticClass, realizer: sourceRealizer,
+      realizerConfig: frame.predicate.realizerConfig, codings: medicationInstructionActionCodings(definition)
+    } : { lemma: method.text ?? method.coding?.display ?? method.coding?.code ?? "",
+      display: method.text ?? method.coding?.display, realizer: sourceRealizer,
+      realizerConfig: frame.predicate.realizerConfig,
+      codings: method.coding ? [method.coding] : undefined } };
+  }
   const dose = clause.dose;
   if (!dose || frame.args.some(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
@@ -4106,8 +4146,11 @@ function actionMatchesCanonicalMethod(
 ): boolean {
   const method = clause.method;
   if (!method) return false;
-  if (method.coding?.code && frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) {
-    return true;
+  if (method.coding?.code) {
+    if (frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) return true;
+    const declared = getMedicationInstructionAction(frame.predicate.lemma)?.administrationMethod;
+    if (declared && codingEquivalent(declared, method.coding)) return true;
+    if (resolveMedicationInstructionActionByMethod(method.coding)) return false;
   }
   const methodText = normalizeActionSurface(method.text ?? "");
   if (!methodText) return false;
@@ -4488,7 +4531,8 @@ export function instructionGraphRoundTripPrimaryAction(
     // editing/provenance; it must not overwrite a clinician's new quantity.
     const conflictingAmount = primaryActionAmountConflicts(action, clause.dose,
       !clause.dose && clause.sourceProjectionVerified === false);
-    return !conflictingAmount && (hasLocalRelation || hasRichArgument);
+    return !conflictingAmount && (!clause.method || actionMatchesCanonicalMethod(action, clause)) &&
+      (hasLocalRelation || hasRichArgument);
   });
 }
 

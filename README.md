@@ -119,7 +119,9 @@ last occupied treatment day. The scheduler derives that date from the completed
 phase, including admitted doses and administration durations, so delayed starts,
 count limits, and daylight-saving changes retain their meaning. Any supplied
 `offsetDuration` or exact `offsetRange` is applied from that midnight. The
-preceding phase must remain available; removing it leaves the relation unresolved.
+relation binds to the current preceding step in the ordered course. Reordering or
+removing a step changes that predecessor; a first step has no predecessor and
+leaves the relation unresolved.
 The existing R5 course metadata preserves this boundary and its annotations
 through saves. Patient-facing wording comes from the course language facet.
 
@@ -339,12 +341,12 @@ registerSigLocalization({
 });
 
 // An explicit treatment-day window uses both clause and course wording.
-const treatmentStart = { coding: [{
-  system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+const treatmentDayStart = { coding: [{
+  system: "urn:ezmedicationinput:CodeSystem:course-phase-event", code: "treatment-day-start",
 }] };
 const nativeCourse = importCanonicalCourse({ step: [{
-  start: { contextCode: treatmentStart, offsetDuration: { value: 0, unit: "d" } },
-  end: { contextCode: treatmentStart, offsetDuration: { value: 3, unit: "d" } },
+  start: { contextCode: treatmentDayStart, offsetDuration: { value: 0, unit: "d" } },
+  end: { contextCode: treatmentDayStart, offsetDuration: { value: 3, unit: "d" } },
   component: [{
     doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
     timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },

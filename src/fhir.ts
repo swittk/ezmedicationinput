@@ -1,3 +1,4 @@
+import { resolveMedicationInstructionActionForMethod, selectMedicationInstructionMethodCoding } from "./instruction-action-terminology";
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
@@ -71,7 +72,8 @@ import {
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
-import { equalStructuredValues } from "./stable-structure";
+import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
+import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
@@ -101,8 +103,10 @@ export function getCycleDayConstraint(dosage: FhirDosage): CanonicalCycleDayCons
 /** Preserve the source-decided cycle restriction as a genuine dosage modifier.
  * @param constraint Recognized cycle ordinals and the unresolved calendar dependency.
  */
-export function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstraint): FhirExtension {
-  return {
+export function cycleDayConstraintExtension(
+  constraint: CanonicalCycleDayConstraint, previous?: FhirExtension
+): FhirExtension {
+  const generated: FhirExtension = {
     url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL,
     extension: [
       ...constraint.days.map(day => ({ url: "day", valueInteger: day })),
@@ -113,6 +117,39 @@ export function cycleDayConstraintExtension(constraint: CanonicalCycleDayConstra
       { url: "source", valueString: constraint.sourceText }
     ]
   };
+  if (!previous) return generated;
+  // Each declared child owns only its value. Keep wrapper/child annotations
+  // and unfamiliar children while updating the existing typed cycle facts.
+  const owned = new Map<string, FhirExtension[]>();
+  for (const child of generated.extension!) {
+    const entries = owned.get(child.url);
+    if (entries) entries.push(child); else owned.set(child.url, [child]);
+  }
+  const positions = new Map<string, number>();
+  const children: FhirExtension[] = [];
+  let changed = false;
+  for (const child of previous.extension ?? []) {
+    if (child.url !== "day" && child.url !== "periodDays" && child.url !== "cycles" &&
+        child.url !== "anchor" && child.url !== "reason" && child.url !== "source") {
+      children.push(child); continue;
+    }
+    const position = positions.get(child.url) ?? 0;
+    positions.set(child.url, position + 1);
+    const next = owned.get(child.url)?.[position];
+    if (!next) { changed = true; continue; }
+    if (child.valueInteger === next.valueInteger && child.valueString === next.valueString &&
+        child.valueCode === next.valueCode) children.push(child);
+    else { children.push({ ...child, ...next }); changed = true; }
+  }
+  for (const [url, entries] of owned) {
+    // Decoder defaults are not newly authored source fields.
+    if (!positions.has(url) && (url === "reason" && constraint.reason === "unresolved-cycle-eligibility" ||
+        url === "source" && !constraint.sourceText)) continue;
+    for (let index = positions.get(url) ?? 0; index < entries.length; index++) {
+      children.push(entries[index]); changed = true;
+    }
+  }
+  return changed ? { ...previous, extension: children } : previous;
 }
 
 export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-frequency-min";
@@ -208,7 +245,8 @@ export function projectCourseDurationRange(range: FhirRange): { range: FhirRange
     if (low.system !== high.system) delete projected.low._system;
   }
   const children: FhirExtension[] = [
-    { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high },
+    { url: "low", valueQuantity: cloneStructuredValue(low) },
+    { url: "high", valueQuantity: cloneStructuredValue(high) },
   ];
   if (Object.keys(metadata).length) children.push(retainField("rangeMetadata", metadata));
   // The serialized baseline must not alias live editable Range nodes. The
@@ -475,13 +513,6 @@ function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 const UCUM_SYSTEM = "http://unitsofmeasure.org";
-const FHIR_GTS_TIMING_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
-// R5 preferred TimingAbbreviation expansion, not arbitrary local Q12H/Q24H.
-const FHIR_GTS_TIMING_CODES = new Set([
-  "BID", "TID", "QID", "AM", "PM", "QD", "QOD",
-  "Q1H", "Q2H", "Q3H", "Q4H", "Q6H", "Q8H",
-  "BED", "WK", "MO"
-]);
 
 function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
@@ -1883,11 +1914,14 @@ export function deserializeCanonicalContext(
     };
   }
 
-  const methodCoding = selectFirstCodingWithCode(dosage.method);
+  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding);
   if (dosage.method?.text || dosage.method?._text || methodCoding?.code) {
+    const methodText = resolveMedicationInstructionActionForMethod({
+      text: dosage.method?.text, coding: methodCoding
+    })?.display ?? dosage.method?.text ?? methodCoding?.display;
     clause.method = {
-      text: dosage.method?.text,
-      _text: clonePrimitiveElement(dosage.method?._text),
+      text: methodText,
+      _text: methodText === dosage.method?.text ? clonePrimitiveElement(dosage.method?._text) : undefined,
       coding: methodCoding?.code
         ? {
           code: methodCoding.code,
@@ -2284,7 +2318,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     state.siteSource = "text";
   }
 
-  const methodCoding = selectFirstCodingWithCode(dosage.method);
+  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding);
   if (methodCoding?.code) {
     state.methodCoding = {
       code: methodCoding.code,

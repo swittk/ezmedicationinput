@@ -36,6 +36,7 @@ interface FreshDoseProof {
   high?: FreshDosePart;
   timing?: ReturnType<typeof captureSourceReplayTiming>;
   maxima?: ReturnType<typeof captureSourceReplayMaxima>;
+  condition?: ReturnType<typeof captureSourceReplayCondition>;
   rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
     numerator?: FreshDosePart; denominator?: FreshDosePart };
 }
@@ -74,6 +75,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
     high: captureDosePart(first?.doseRange?.high),
     timing: captureSourceReplayTiming(dosage.timing),
     maxima: captureSourceReplayMaxima(dosage),
+    condition: captureSourceReplayCondition(dosage),
     rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
       quantity: captureDosePart(first.rateQuantity),
       low: captureDosePart(first.rateRange?.low),
@@ -102,7 +104,8 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
     sameDosePart(original.rate?.numerator, first?.rateRatio?.numerator) &&
     sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
     matchesSourceReplayTiming(dosage.timing, original.timing) &&
-    matchesSourceReplayMaxima(dosage, original.maxima);
+    matchesSourceReplayMaxima(dosage, original.maxima) &&
+    matchesSourceReplayCondition(dosage, original.condition);
 }
 
 /** Source edits are separate from clinical edits: replacement clinician text
@@ -114,10 +117,15 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const textChanged = fresh ? fresh.text !== dosage.text
     : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
-  if (fresh && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
+  if (fresh && !fresh.condition && !dosage.modifierExtension?.length &&
+      !(dosage as EzDosage).condition?.length && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
       !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
     return false;
-  return (fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage)) === false;
+  const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  // A persisted standalone item can have no source fingerprint. Its explicit
+  // live guard still owns clinical display; unverified narrative is provenance.
+  return matches === false || (matches === undefined && Boolean((dosage as EzDosage).condition?.length ||
+    dosage.modifierExtension?.some(item => item.url === DOSAGE_CONDITION_R5_URL)));
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -163,10 +171,11 @@ import {
   withDosageEditProvenance,
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
   captureSourceReplayMaxima, matchesSourceReplayMaxima,
+  captureSourceReplayCondition, matchesSourceReplayCondition,
   captureSourceReplayConcept, matchesSourceReplayConcept,
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
-  DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+  DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";

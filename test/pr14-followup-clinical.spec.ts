@@ -184,7 +184,7 @@ describe("R5 source dose identity after live edits", () => {
       changedUnit, "long", resolveSigLocalization("en"), { realizationMode: "roundtrip" }
     );
     expect(changedUnitText).not.toBe(source);
-    expect(changedUnitText).toMatch(/drop/iu);
+    expect(changedUnitText).toMatch(/(?<![\w.+-])(?:1|one)\s+drop\b/iu);
   });
 });
 

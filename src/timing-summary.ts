@@ -1,5 +1,19 @@
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type ParseOptions } from "./types";
 
+/** Exact standard timing identities shared by native compilation and wire
+ * projection. Local codes remain text unless this vocabulary recognizes them. */
+export const FHIR_GTS_TIMING_SYSTEM = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+export const FHIR_GTS_TIMING_CODES = new Set([
+  "BID", "TID", "QID", "AM", "PM", "QD", "QOD",
+  "Q1H", "Q2H", "Q3H", "Q4H", "Q6H", "Q8H",
+  "BED", "WK", "MO"
+]);
+
+/** Recognized daily cadence, independent of configured clock realization. */
+export const TIMING_CODE_DAILY_FREQUENCIES: Readonly<Record<string, number>> = {
+  QD: 1, QOD: 0.5, AM: 1, PM: 1, BID: 2, TID: 3, QID: 4
+};
+
 export interface TimingSummaryOptions {
   /** Scoped vocabulary in the original parse/format request. Do not build
    * any second registry or retain it on the canonical clinical course. */

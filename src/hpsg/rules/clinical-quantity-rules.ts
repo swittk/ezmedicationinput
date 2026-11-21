@@ -12,6 +12,7 @@ import {
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_NUMBER_WORDS,
   DOSE_FRACTION_WORDS,
+  DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS
 } from "../lexical-classes";
@@ -674,10 +675,18 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
   const exactMixed = exactNumber !== undefined
     ? additiveDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
+  // A cardinal and fraction head form one numeric daughter: "three
+  // quarters" owns both words before the dimensional unit is attached.
+  const denominator = exactNumber !== undefined && !exactMixed && available(context, phraseStart + 1)
+    ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[phraseStart + 1])) : undefined;
+  const exactFraction = denominator !== undefined
+    ? { value: exactNumber! * denominator, numericIndex: phraseStart + 1 } : undefined;
   const exactMillion = !exactMixed && exactNumber !== undefined
-    ? millionDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
-  const numericStart = qualified?.numericIndex ?? exactMixed?.numericIndex ?? exactMillion?.numericIndex ?? phraseStart;
-  if (exactMixed) for (let index = phraseStart + 1; index <= numericStart; index++) {
+    ? millionDoseNumberAt(context.tokens, exactFraction?.numericIndex ?? phraseStart,
+      context.limit, exactFraction?.value ?? exactNumber) : undefined;
+  const numericStart = qualified?.numericIndex ?? exactMixed?.numericIndex ??
+    exactMillion?.numericIndex ?? exactFraction?.numericIndex ?? phraseStart;
+  if (exactMixed || exactFraction || exactMillion) for (let index = phraseStart + 1; index <= numericStart; index++) {
     if (!available(context, index)) return [];
   }
   // The general lower-case normalizer strips leading punctuation, but a
@@ -686,7 +695,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const attached = !qualified && quantityToken.kind !== LexKind.Number
     ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
   const value = qualified?.value ?? exactMixed?.value ?? exactMillion?.value ??
-    exactNumber ?? attached?.value;
+    exactFraction?.value ?? exactNumber ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
   const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");

@@ -934,6 +934,9 @@ describe("review 26 external display ownership", () => {
     window[1].valueTime = "17:00:00";
     expect(formatSig(row, "long", options)).toMatch(/17:00|5:00 pm/u);
     expect(formatSig(row, "long", options)).not.toMatch(/18:00|6:00 pm/u);
+    window[0].valueTime = "08:00:00";
+    window[1].valueTime = "18:00:00";
+    expect(dosageMatchesSavedProjection(row)).toBe(true);
     window[2].valueBoolean = false;
     expect(dosageMatchesSavedProjection(row)).toBe(false);
   });

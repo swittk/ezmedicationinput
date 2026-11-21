@@ -255,13 +255,19 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     }))).toBe(4);
     // [] explicitly clears all legacy course modifiers. To clear only this
     // count, reopen the migrated public edit view and remove its visible entry.
-    expect(getCourseCycleCount(toDosageDetails(persist(saved), undefined, { modifierExtension: [] }))).toBeUndefined();
+    const clearedAll = toDosageDetails(persist(saved), undefined, { modifierExtension: [] });
+    expect(getCourseCycleCount(clearedAll)).toBeUndefined();
+    expect(clearedAll.step![0].count).toBeUndefined();
+    expect(toDosageDetails(persist(toFhirR5Dosages(clearedAll))).step![0].count).toBeUndefined();
     const edit = persist(fromDosageDetails(unrelatedEdit));
     edit.course.modifierExtension = edit.course.modifierExtension!.filter(e => e.url !== COURSE_CYCLE_COUNT_EXTENSION_URL);
     const clear = toDosageDetails(edit.dosages, undefined, edit.course);
     expect(getCourseCycleCount(clear)).toBeUndefined();
+    expect(clear.step![0].count).toBeUndefined();
     expect(clear.modifierExtension).toContainEqual(unrelated);
-    expect(getCourseCycleCount(toDosageDetails(persist(toFhirR5Dosages(clear))))).toBeUndefined();
+    const reopenedClear = toDosageDetails(persist(toFhirR5Dosages(clear)));
+    expect(getCourseCycleCount(reopenedClear)).toBeUndefined();
+    expect(reopenedClear.step![0].count).toBeUndefined();
     const migrated = toDosageDetails(persist(saved));
     expect(getCourseCycleCount(migrated)).toBe(3);
     expect(migrated.step![0].count).toBeUndefined();

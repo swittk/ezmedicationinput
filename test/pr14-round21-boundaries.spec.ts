@@ -119,8 +119,9 @@ describe("round 21 external boundary preservation", () => {
     const ratio = { id: "maximum-ratio", extension: [{ url: "urn:test:ratio-note", valueString: "retain" }],
       numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } };
     const source: FhirDosage = { ...tablet(), maxDosePerPeriod: [ratio] };
-    const native = importCanonicalCourse(source);
-    native.stages[0].administrations[0].limits![0].amount!.value = 3;
+    const edited = persist(source);
+    edited.maxDosePerPeriod![0].numerator!.value = 3;
+    const native = importCanonicalCourse(edited);
     const r5 = courseToR5(native);
     expect(r5[0].maxDosePerPeriod?.[0]).toEqual({ ...ratio, numerator: { value: 3, unit: "tab" } });
     const r6 = courseToR6(native);
@@ -340,7 +341,7 @@ describe("round 23 public boundary corrections", () => {
     }] };
     const text = formatSig(row, "short");
     expect(text).not.toMatch(/^\s*[;,]/u);
-    expect(text).toMatch(/5.*10.*mL\/h/u);
+    expect(text).toMatch(/(?<![\d.])5–10 mL\/h(?![\w/])/u);
     if (withDose) expect(text).toMatch(/2 mg; /u);
   });
 
@@ -519,14 +520,14 @@ describe("provider registration and explicit cloning preserve owned data", () =>
   });
 
   it("keeps distinct registered segmenter slots when a descriptor is reused", () => {
-    const provider = { locale: "test-first", script: /[A]/u, segment: (input: string) => [{ segment: input, index: 0 }] };
+    const provider = { locale: "test-first", script: /[\uE100]/u, segment: (input: string) => [{ segment: input, index: 0 }] };
     registerMedicationSurfaceSegmenter(provider);
     provider.locale = "test-second";
-    provider.script = /[B]/u;
+    provider.script = /[\uE101]/u;
     registerMedicationSurfaceSegmenter(provider);
     const entries = listMedicationSurfaceSegmenters();
-    expect(entries.find(e => e.locale === "test-first")?.script.source).toBe("[A]");
-    expect(entries.find(e => e.locale === "test-second")?.script.source).toBe("[B]");
+    expect(entries.find(e => e.locale === "test-first")?.script.source).toBe("[\\uE100]");
+    expect(entries.find(e => e.locale === "test-second")?.script.source).toBe("[\\uE101]");
   });
 
   it("keeps a date resolver's registered year interpretation", () => {

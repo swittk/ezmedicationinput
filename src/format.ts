@@ -1,3 +1,4 @@
+import { TIMING_ABBREVIATIONS } from "./maps";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
@@ -57,6 +58,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
+  TIMING_CODE_DAILY_FREQUENCIES,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
   type TimingSummaryOptions
@@ -1120,6 +1122,23 @@ function shouldSuppressRoutePhrase(
   }
 }
 
+/** A timing abbreviation is shorthand only while its typed recurrence agrees. */
+function timingCodeMatchesRecurrence(schedule: CanonicalScheduleExpr): boolean {
+  const code = schedule.timingCode;
+  if (!code) return true;
+  const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
+  const interval = daily === undefined ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
+  if (daily === undefined && interval?.period === undefined) return true;
+  const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
+  const period = code === "QOD" ? 2 : interval?.period ?? 1;
+  const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;
+  return (schedule.frequency === undefined || schedule.frequency === frequency) &&
+    (schedule.frequencyMax === undefined || schedule.frequencyMax === frequency) &&
+    (schedule.period === undefined || schedule.period === period) &&
+    (schedule.periodMax === undefined || schedule.periodMax === period) &&
+    (schedule.periodUnit === undefined || schedule.periodUnit === unit);
+}
+
 function formatShort(clause: CanonicalSigClause): string {
   const schedule = scheduleOf(clause);
   const parts: string[] = [];
@@ -1145,7 +1164,7 @@ function formatShort(clause: CanonicalSigClause): string {
   }
   if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
-  } else if (schedule.timingCode) {
+  } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (
     schedule.frequency !== undefined &&
@@ -1173,6 +1192,7 @@ function formatShort(clause: CanonicalSigClause): string {
   if (schedule.when?.length) {
     parts.push(schedule.when.join(" "));
   }
+  if (schedule.activityTiming?.length) parts.push(...formatActivityTimingEnglish(schedule));
   if (schedule.dayOfMonth?.length) {
     parts.push(describeDayOfMonth(schedule)!);
   }
@@ -1400,7 +1420,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     clause.sourceProjectionVerified === false ||
     !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
   ));
-  const richPrimaryGraphAction = !roundTrip
+  const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
     ? instructionGraphRichPrimaryAction(clause)
     : needsCurrentPrimary ? primaryGraphAction : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction

@@ -2930,7 +2930,8 @@ function nextDayScheduleSign(context: HpsgClauseContext, start: number): HpsgSig
   return lexicalSign({
     type: "schedule-sign", rule: NEXT_DAY_SCHEDULE_RULE, tokens: members,
     synsem: { head: { schedule: {
-      treatmentStartOffsetDays: 1, ...(event ? { when: [event] } : {})
+      treatmentStartOffsetDays: 1, phaseStartReference: "treatment-day-start",
+      ...(event ? { when: [event] } : {})
     } }, valence: {}, cont: { clauseKind: "administration" } },
     score: 60 + members.length
   });

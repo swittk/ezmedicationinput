@@ -543,12 +543,23 @@ function reconcileNativeCompactCourse(
     number,
     { step: NonNullable<CompactCourseRow["step"]>; rowIndex: number; marker?: FhirExtension }
   >();
-  const localRows = dosages.map((dosage) => {
+  let historicalRows: Array<FhirDosage | EzDosage> | undefined;
+  let historicalIndices: number[] | undefined;
+  const localRows = dosages.map((dosage, index) => {
     const marker = compactCourseMarker(dosage);
+    let historical = false;
     for (const extension of dosage.modifierExtension ?? []) {
-      if (extension.url === DOSAGE_DETAILS_R5_URL && extension !== marker) sources.push(extension);
+      if (extension.url !== DOSAGE_DETAILS_R5_URL || extension === marker) continue;
+      sources.push(extension);
+      if (!marker && extension.extension?.some(child => child.url === "dosageDetails")) historical = true;
     }
-    if (!marker) return undefined;
+    if (!marker) {
+      if (historical) {
+        (historicalRows ??= []).push(dosage);
+        (historicalIndices ??= []).push(index);
+      }
+      return undefined;
+    }
     const decoded = decodeR5RetainedFields(marker);
     if (
       typeof decoded.rowIndex !== "number" ||
@@ -640,6 +651,31 @@ function reconcileNativeCompactCourse(
       metadata.set(value.sequence, { step, rowIndex: value.rowIndex, marker });
     return { value, marker };
   });
+  // Mixed saved rows keep their own boundary codec. Reconcile the historical
+  // subset once; never let the presence of an unrelated compact row erase a
+  // reference-only site or other known row fact from its full source marker.
+  let historicalMembers: Map<number, CanonicalAdministration> | undefined;
+  if (historicalRows) {
+    const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext);
+    const cursors = new Map<number, number>();
+    const membersBySequence = new Map<number, readonly CanonicalAdministration[]>();
+    for (const stage of restored.stages) {
+      const first = stage.administrations[0];
+      if (first) membersBySequence.set(first.stageOrdinal ?? 1, stage.administrations);
+    }
+    historicalMembers = new Map();
+    for (let index = 0; index < historicalRows.length; index++) {
+      const requested = historicalRows[index].sequence ?? 1;
+      const sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
+      const cursor = cursors.get(sequence) ?? 0;
+      const member = membersBySequence.get(sequence)?.[cursor];
+      if (member) historicalMembers.set(historicalIndices![index], member);
+      cursors.set(sequence, cursor + 1);
+    }
+    for (const extension of extensionFields(restored))
+      if (extension.url === DOSAGE_RECONCILIATION_WARNING_URL && extension.valueString)
+        addWarning(warnings, extension.valueString);
+  }
   // A separately persisted .course object can restore the same shared owner.
   // Match the declared context; an unrelated partial object cannot erase a cycle.
   if (editedCourse) {
@@ -846,7 +882,8 @@ function reconcileNativeCompactCourse(
       );
     const local = localRows[index];
     const restored = local ? restoreComponentDelta(dosage, local.value, warnings, sourceContext) : undefined;
-    const liveComponent = restored?.dosage ?? administrationFromR5(dosage, sourceContext);
+    const liveComponent = restored?.dosage ?? historicalMembers?.get(index) ??
+      administrationFromR5(dosage, sourceContext);
     const component =
       local && conflictingPhases.has(local.value.sequence)
         ? withMissingCourseContext(liveComponent, [CONFLICTING_PHASE_CONTEXT])
@@ -1323,6 +1360,7 @@ function reconcileNativeRetainedCourse(
       remainingLive: number[] = [];
     for (let i = 0; i < step.component.length; i++) if (!usedOriginalIndices.has(i) && !ambiguousSources.has(i)) unclaimed.push(i);
     for (let i = 0; i < live.length; i++) if (assigned[i] < 0 && !ambiguousLive.has(i)) remainingLive.push(i);
+    let positionOnly: Set<number> | undefined;
     if (!componentCountChanged || (!ambiguousSources.size && !ambiguousLive.size &&
         unclaimed.length === 1 && remainingLive.length === 1)) {
       let unclaimedCursor = 0;
@@ -1331,6 +1369,7 @@ function reconcileNativeRetainedCourse(
         if (next !== undefined) {
           assigned[j] = next;
           usedOriginalIndices.add(next);
+          if (step.component[next].site?.reference) (positionOnly ??= new Set()).add(j);
         }
       }
     }
@@ -1388,7 +1427,10 @@ function reconcileNativeRetainedCourse(
       // This is the same native restoration rule as compact row imports.
       const local: CompactCourseRow = { rowIndex: j, sequence, stepCount: retainedSteps.length };
       if (old && baseline) {
-        local.component = old;
+        local.component = positionOnly?.has(j) && old.site?.reference
+          ? { ...old, site: { ...old.site, reference: undefined } } : old;
+        if (positionOnly?.has(j)) addWarning(warnings,
+          "A site reference without established row identity was retained as source provenance rather than attached by position.");
         local.baseline = {
           condition: compactProjectionFingerprint(r5ConditionBaseline(baseline)),
           safety: compactProjectionFingerprint(r5SafetyBaseline(baseline)),

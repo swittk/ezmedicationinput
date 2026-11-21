@@ -162,7 +162,7 @@ describe("review family: course preview preserves partial clinical bounds", () =
       end: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } },
       administrations: [tablet()] }] };
     const text = formatCanonicalCourse(course, "long", { locale: "en" });
-    expect(text).toContain("for 3 cycles");
+    expect(text).toContain("Perform this phase 3 times");
     expect(text).not.toContain("Repeat this schedule every");
   });
 
@@ -173,7 +173,7 @@ describe("review family: course preview preserves partial clinical bounds", () =
         end: { anchor: "treatment-start", displacement: { value: 1, unit: "d" } },
         administrations: [tablet()] }] };
     const text = formatCanonicalCourse(course, "long", { locale });
-    expect(text).toContain(locale === "en" ? "for 2 cycles" : "2 รอบ");
+    expect(text).toContain(locale === "en" ? "Perform this phase 2 times" : "ทำซ้ำระยะนี้รวม 2 ครั้ง");
     expect(text).toContain(locale === "en" ? "Repeat this schedule every 3 days for 4 cycles" : "ทุก 3 วัน จำนวน 4 รอบ");
   });
 

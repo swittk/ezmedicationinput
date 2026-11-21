@@ -1,7 +1,9 @@
 import source from "./instruction-action-terminology.json";
 import { localizedConfig } from "./localization";
+import { SNOMED_SYSTEM } from "./snomed";
 import {
   AdviceArgument,
+  CanonicalMethodExpr,
   FhirCoding,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionInput,
@@ -67,9 +69,40 @@ const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefiniti
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
+const DEFAULT_BY_METHOD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
+
+function sameMethodCoding(left: FhirCoding | undefined, right: FhirCoding): boolean {
+  return Boolean(left?.code && left.code === right.code &&
+    (left.system ?? SNOMED_SYSTEM) === (right.system ?? SNOMED_SYSTEM));
+}
+
+/** A shared generic method chooses its canonical action, not a specialized
+ * action that merely uses that method (Apply rather than Reapply, for example).
+ * Ranking runs only while the existing default vocabulary index is built. */
+function methodActionRank(definition: MedicationInstructionActionDefinition, coding: FhirCoding): number {
+  const exactName = definition.administrationMethod?.display?.toLowerCase() === definition.display.toLowerCase();
+  const ownCoding = sameMethodCoding(definition.coding, coding) ||
+    definition.externalCodings?.some(value => sameMethodCoding(value, coding));
+  return (exactName ? 2 : 0) + (ownCoding ? 1 : 0);
+}
+
+function indexMethodCoding(coding: FhirCoding | undefined, definition: MedicationInstructionActionDefinition): void {
+  if (!coding?.code) return;
+  const system = coding.system ?? SNOMED_SYSTEM;
+  let byCode = DEFAULT_BY_METHOD.get(system);
+  if (!byCode) DEFAULT_BY_METHOD.set(system, (byCode = new Map()));
+  const current = byCode.get(coding.code);
+  if (!current || methodActionRank(definition, coding) > methodActionRank(current, coding))
+    byCode.set(coding.code, definition);
+}
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
+  if (definition.administrationMethod) {
+    indexMethodCoding(definition.administrationMethod, definition);
+    indexMethodCoding(definition.coding, definition);
+    for (const coding of definition.externalCodings ?? []) indexMethodCoding(coding, definition);
+  }
   const aliases = [
     definition.code, definition.display, ...(definition.aliases ?? []),
     ...flattenLocaleAliases(definition.localeAliases)
@@ -483,6 +516,56 @@ export function resolveMedicationInstructionAction(
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeActionSurface(surface));
   return definition;
+}
+
+/** Resolve a declared administration method by exact code identity. Known
+ * codings own the verb even when an external edit leaves stale display text.
+ * Unknown identities return undefined for the caller's existing text fallback. */
+export function resolveMedicationInstructionActionByMethod(
+  coding: FhirCoding | undefined,
+  options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  if (!coding?.code) return undefined;
+  if (coding.display && options?.instructionActionMap) {
+    const custom = customDefinitionForSurface(coding.display, options);
+    if (custom && sameMethodCoding(custom.administrationMethod, coding)) return custom;
+  }
+  return DEFAULT_BY_METHOD.get(coding.system ?? SNOMED_SYSTEM)?.get(coding.code);
+}
+
+/** A translated coding can precede the known method in a CodeableConcept.
+ * Select its recognized identity in one pass and retain the first code as
+ * the fallback for wholly unfamiliar concepts. The source array is untouched. */
+export function selectMedicationInstructionMethodCoding(
+  codings: readonly FhirCoding[] | undefined
+): FhirCoding | undefined {
+  if (!codings?.length) return undefined;
+  if (codings.length === 1) return codings[0].code ? codings[0] : undefined;
+  let fallback: FhirCoding | undefined;
+  for (const coding of codings) {
+    if (!coding.code) continue;
+    if (!fallback) fallback = coding;
+    if (resolveMedicationInstructionActionByMethod(coding)) return coding;
+  }
+  return fallback;
+}
+
+/** Keep compatible authored verbs (Drink and Swallow share a method), while
+ * a recognized edited code replaces an incompatible retained verb. */
+export function resolveMedicationInstructionActionForMethod(
+  method: CanonicalMethodExpr | undefined,
+  options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  if (!method) return undefined;
+  const authored = method.text ? resolveMedicationInstructionAction(method.text, options) : undefined;
+  const coding = method.coding;
+  // An unfamiliar authored phrase can add useful qualification beyond the
+  // recognized method. Only a known conflicting verb is superseded by code.
+  if (!authored && method.text?.trim() && method.text.trim() !== coding?.code) return undefined;
+  if (authored && (!coding?.code || sameMethodCoding(authored.administrationMethod, coding) ||
+      sameMethodCoding(authored.coding, coding) ||
+      authored.externalCodings?.some(value => sameMethodCoding(value, coding)))) return authored;
+  return resolveMedicationInstructionActionByMethod(coding, options) ?? authored;
 }
 
 export function getMedicationInstructionAction(

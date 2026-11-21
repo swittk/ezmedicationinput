@@ -62,6 +62,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   throughDay: (last) => `Through day ${last}`,
   noDoseDays: (first, last) => `No doses on days ${first}–${last}.`,
   noDoseWindow: (start, end) => `No doses from ${start} until ${end}.`,
+  phaseCount: (count) => `Perform this phase ${count} ${count === 1 ? "time" : "times"}`,
   repeatCount: (count) => `for ${count} ${count === 1 ? "cycle" : "cycles"}`,
   repeatCycle: (interval, exact, count) => {
     const iterations = count === undefined ? "" : ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;

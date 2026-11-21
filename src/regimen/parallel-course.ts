@@ -187,13 +187,14 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
 
 /** A phase's authored treatment onset owns its origin; an exact prior end is
  * only the default when this phase omits an onset. Coordinated members must
- * agree before one origin can represent their complete phase. */
-function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): RegimenPosition | undefined {
+ * agree before one origin can represent their complete phase. Null marks
+ * conflicting authored onsets; undefined means no onset was supplied. */
+function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): RegimenPosition | null | undefined {
   let value: number | undefined;
   for (const member of members) {
     const onset = member.clause.schedule?.treatmentStartOffsetDays;
     if (onset === undefined) continue;
-    if (value !== undefined && value !== onset) return undefined;
+    if (value !== undefined && value !== onset) return null;
     value = onset;
   }
   return value === undefined ? undefined : { unit: 'd', value };
@@ -356,6 +357,8 @@ export function buildCanonicalParallelRegimen(
         return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-incomplete-dose');
       }
       const authoredStart = authoredPhaseStart(members);
+      if (authoredStart === null)
+        return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-conflicting-onsets');
       if (authoredStart) {
         at = authoredStart;
         boundaries.push(at);

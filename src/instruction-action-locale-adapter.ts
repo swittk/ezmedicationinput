@@ -45,7 +45,7 @@ export interface InstructionActionLocaleAdapter {
   // A language can select its verb form from an already typed complement.
   selectLexicalRealization?(input: InstructionActionRealizationInput): InstructionActionRealizationInput;
   render(realizer: MedicationInstructionActionRealizer, input: InstructionActionRealizationInput): string | undefined;
-  renderNegated(input: InstructionActionRealizationInput): string;
+  renderNegated(input: InstructionActionRealizationInput, completeAction?: string): string;
   applyPositiveModality(text: string, frame: AdviceFrame): string;
   parseConditionPersistence(body: string): { body: string; persists: boolean };
   renderConditionBody(base: string, conditionForm: string | undefined, persists: boolean): string;
@@ -154,7 +154,12 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         arg.role === AdviceArgumentRole.Material || (withComplement &&
           (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
       const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
-      const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
+      const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
+      const substance = substanceArg
+        ? substanceArg.quantity && !substanceQuantity
+          ? substanceArg.text || substanceArg.normalized
+          : c.translateArgumentConcept(substanceArg)
+        : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
       // One object can be both the named theme and the parsed dose.
@@ -173,7 +178,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
           themeArg.quantity.value === amountArg.quantity.value &&
           themeArg.quantity.unit === amountArg.quantity.unit &&
           themeArg.text.includes(amountArg.text.trim())));
-      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity)
+      const substanceAmount = substanceArg?.quantity ? substanceQuantity
         : amountAlreadyInTheme ? undefined : c.amount;
       const themeText = theme
         ? ` ${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
@@ -318,7 +323,12 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         arg.role === AdviceArgumentRole.Material || (withComplement &&
           (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
       const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
-      const substance = substanceArg ? c.translateArgumentConcept(substanceArg) : c.substance;
+      const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
+      const substance = substanceArg
+        ? substanceArg.quantity && !substanceQuantity
+          ? substanceArg.text || substanceArg.normalized
+          : c.translateArgumentConcept(substanceArg)
+        : c.substance;
       const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
       const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
       // c.amount already uses the typed quantity when numeric, or the
@@ -333,7 +343,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
           themeArg.quantity.value === amountArg.quantity.value &&
           themeArg.quantity.unit === amountArg.quantity.unit &&
           themeArg.text.includes(amountArg.text.trim())));
-      const substanceAmount = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity)
+      const substanceAmount = substanceArg?.quantity ? substanceQuantity
         : amountAlreadyInTheme ? undefined : c.amount;
       const themeText = theme ? (coextensiveAmount ??
         `${theme}${themeAmount ? ` ${themeAmount}` : ""}`) : "";
@@ -435,10 +445,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
 const EN_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "en",
   render: renderEnglish,
-  renderNegated(c) {
+  renderNegated(c, completeAction) {
     const object = c.site ?? c.theme ?? c.substance ?? c.material;
     const relationTarget = c.activity ?? c.time;
     const prefix = (c.frame.modality && EN_NEGATED_MODALITY_PREFIX[c.frame.modality]) ?? "Do not ";
+    if (completeAction) return prefix + lowerInitial(completeAction);
     if (c.site && !c.frame.relation &&
         (c.definition?.code === "apply" || c.definition?.code === "reapply")) {
       return `${prefix}${c.label.toLowerCase()} to ${c.site}`;
@@ -512,10 +523,11 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
     };
   },
   render: renderThai,
-  renderNegated(c) {
+  renderNegated(c, completeAction) {
     const object = c.site ?? c.theme ?? c.substance ?? c.material;
     const relationTarget = c.activity ?? c.time;
     const prefix = (c.frame.modality && TH_NEGATED_MODALITY_PREFIX[c.frame.modality]) ?? "ห้าม";
+    if (completeAction) return prefix + completeAction;
     if (object && relationHasGrammarFeature(c.frame.relation, "negatedObjectAttachment")) {
       const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
       const attachment = negatedAttachmentArguments(c);

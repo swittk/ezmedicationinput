@@ -1867,7 +1867,7 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
     // Two seven-day stage iterations fill the entire fourteen-day cycle.
     expect(text).not.toContain("No doses");
     expect(text).toMatch(/14 days/);
-    expect(text).toMatch(/2 cycles/);
+    expect(text).toContain("Perform this phase 2 times");
   });
 });
 
@@ -4659,7 +4659,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(calculateTotalUnits({ dosage: toFhirR5Dosages(source), ...opts }).totalUnits).toBe(6);
   });
 
-  it("shows known cycle counts with qualified, unknown-unit and exact intervals", () => {
+  it("shows known phase repeats with qualified, unknown-unit and exact course intervals", () => {
     const ema = (code: string) => [{ url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
       valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code } }];
     for (const cycle of [
@@ -4676,11 +4676,11 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         const en = formatSig(input, "long", { locale: "en" });
         const th = formatSig(input, "long", { locale: "th" });
         if (count !== undefined) {
-          expect(en).toContain(`for ${count} ${count === 1 ? "cycle" : "cycles"}`);
-          expect(th).toContain(`จำนวน ${count} รอบ`);
+          expect(en).toContain(`Perform this phase ${count} ${count === 1 ? "time" : "times"}`);
+          expect(th).toContain(`ทำซ้ำระยะนี้รวม ${count} ครั้ง`);
         } else {
-          expect(en).not.toContain("for 6 cycles");
-          expect(th).not.toContain("จำนวน");
+          expect(en).not.toContain("Perform this phase");
+          expect(th).not.toContain("ทำซ้ำระยะนี้");
         }
         const op = getQuantityComparator(cycle);
         if (op) expect(en).toContain(op + "28 days");
@@ -6454,7 +6454,7 @@ describe("review 26 scoped safety and cycle controls", () => {
     expect(JSON.stringify(restored.extension)).toContain("approximate");
   });
 
-  it("shows the whole-course count beside its interval independently of the local step count", () => {
+  it("round29 shows the whole-course count beside its interval independently of the local step count", () => {
     const source: FhirR6DosageInstruction = {
       repeatCycle: { value: 3, unit: "d", code: "d" },
       modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 4 }],
@@ -6462,7 +6462,9 @@ describe("review 26 scoped safety and cycle controls", () => {
     };
     for (const input of [source, toDosageDetails(toFhirR5Dosages(source))]) {
       expect(formatSig(input, "long", { locale: "en" })).toContain("Repeat this schedule every 3 days for 4 cycles");
-      expect(formatSig(input, "long", { locale: "en" })).toContain("for 2 cycles");
+      expect(formatSig(input, "long", { locale: "en" })).toContain("Perform this phase 2 times");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ทำซ้ำระยะนี้รวม 2 ครั้ง");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("จำนวน 4 รอบ");
       expect(input.step![0].count).toBe(2);
     }
   });
@@ -6650,5 +6652,67 @@ describe("round 28 phase-window and offset previews", () => {
           : (qualifier === "at most" ? "at most " : qualifier === "at least" ? "at least " : "approximately ") + "2");
       }
     }
+  });
+});
+
+
+describe("round29 typed course display scope", () => {
+  const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+
+  it("short and long previews both follow the live recurrence while preserving source timing", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      ...dose, timing: { code: { coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID"
+      }] }, repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const before = JSON.stringify(source);
+    expect(formatSig(source, "short")).toBe("1 tab 1x/d");
+    expect(formatSig(source, "long")).toContain("once daily");
+    expect(JSON.stringify(source)).toBe(before);
+    source.step![0].component[0].timing!.repeat!.frequency = 2;
+    expect(formatSig(source, "short")).toBe("1 tab BID");
+    delete source.step![0].component[0].timing!.repeat;
+    expect(formatSig(source, "short")).toBe("1 tab BID");
+    for (const code of ["QOD", "Q6H", "WK", "MO"]) {
+      source.step![0].component[0].timing!.code!.coding![0].code = code;
+      source.step![0].component[0].timing!.repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+      expect(formatSig(source, "short")).toBe("1 tab 1x/d");
+      delete source.step![0].component[0].timing!.repeat;
+      expect(formatSig(source, "short")).toBe("1 tab " + code);
+    }
+  });
+
+  it("keeps the administration condition before the independent limit response", () => {
+    const source = parseSig("1 tab only if SBP > 160").fhirNext;
+    source.step![0].component[0].safety = {
+      doseLimit: [{ scope: "administration", valueQuantity: { value: 2, unit: "tab" } }],
+      ifExceeded: "Call the clinic"
+    };
+    const before = JSON.stringify(source);
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(source, "long", { locale, realizationMode: "normalized" });
+      expect(text).toMatch(/(?:1|one|หนึ่ง)\s*(?:tablet|เม็ด)/u);
+      expect(text).toMatch(/>\s*160\b/u);
+      expect(text).toContain("Call the clinic");
+      expect(text.indexOf("160")).toBeLessThan(text.indexOf("Call the clinic"));
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("does not extrapolate a successor date from repeated bounds with different origins", () => {
+    const source: FhirR6DosageInstruction = { step: [{
+      count: 2,
+      start: { contextCode: { coding: [{ system: "urn:ezmedicationinput:CodeSystem:course-phase-event",
+        code: "treatment-day-start" }] }, offsetDuration: { value: 1, unit: "d", code: "d" } },
+      end: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
+        code: "treatment-start" }] }, offsetDuration: { value: 2, unit: "d", code: "d" } },
+      component: [dose]
+    }, { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] }] }] };
+    const before = JSON.stringify(source);
+    const en = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+    expect(en).toContain("Perform this phase 2 times");
+    expect(en).toMatch(/After the previous phase: .*2 tablets/u);
+    expect(en).not.toContain("3 days after treatment start onward");
+    expect(JSON.stringify(source)).toBe(before);
   });
 });

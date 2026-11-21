@@ -517,6 +517,7 @@ function formatCanonicalBase(
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
+  if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   // The clause's calendar view needs a complete civil date. Partial FHIR
@@ -531,7 +532,6 @@ function formatCanonicalBase(
     for (const event of events) if (!represented.has(event)) remaining.push(event);
     if (remaining.length) rendered = joinGeneratedClauses([rendered, words.calendarEvents(remaining)]);
   }
-  if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.excludedDates?.length)
     rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options, env);
   if (a.excludedWeekdays?.length)
@@ -686,7 +686,7 @@ export function formatCanonicalCourse(
     let repetitionResolved = true;
     if (step.count !== undefined && step.count !== 1) {
       if (Number.isInteger(step.count) && step.count > 0 &&
-          start !== undefined && end !== undefined && end > start) {
+          start !== undefined && end !== undefined && end > start && startAnchor === endAnchor) {
         activeEnd = start + (end - start) * step.count;
       } else {
         repetitionResolved = false;
@@ -984,7 +984,7 @@ export function formatCanonicalCourse(
           : words.afterPreviousPhase;
       }
     }
-    const stageCount = step.count !== undefined ? words.repeatCount(step.count) : "";
+    const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");
     stages.push(heading ? `${heading}: ${rendered}` : rendered);
   }

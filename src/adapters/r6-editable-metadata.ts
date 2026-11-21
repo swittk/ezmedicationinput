@@ -8,7 +8,7 @@ import type {
   FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio,
 } from "../types";
-import { equalStructuredValues } from "../stable-structure";
+import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
 
@@ -167,16 +167,42 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
             if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
           return sourceCount === 1 ? replacement : undefined;
         };
+        // Exact-equal anonymous limits still have distinct scope ownership.
+        // Count each equality bucket once on both sides before assigning it;
+        // one surviving copy cannot inherit two independent policy qualifiers.
+        type ExactLimits = { sample: FhirR6DoseLimit; sourceCount: number;
+          live: FhirR6DoseLimit[]; cursor: number };
+        const exactBuckets = new Map<number, ExactLimits[]>();
+        const sourceGroups = new Map<FhirR6DoseLimit, ExactLimits>();
+        const exactGroup = (limit: FhirR6DoseLimit): ExactLimits => {
+          const key = hashStructuredValue(limit);
+          let bucket = exactBuckets.get(key);
+          if (!bucket) exactBuckets.set(key, bucket = []);
+          for (const group of bucket) if (equalStructuredValues(group.sample, limit)) return group;
+          const group = { sample: limit, sourceCount: 0, live: [], cursor: 0 };
+          bucket.push(group);
+          return group;
+        };
+        for (const limit of current) exactGroup(limit).live.push(limit);
+        for (const policy of [saved.course, saved.step])
+          for (const limit of policy?.doseLimit ?? []) {
+            const group = exactGroup(limit);
+            group.sourceCount++;
+            sourceGroups.set(limit, group);
+          }
         const reconcile = (policy: FhirR6DosageSafety | undefined) => {
           if (!policy) return policy;
           let changed = false;
           const limits: FhirR6DoseLimit[] = [];
           for (const limit of policy.doseLimit ?? []) {
-            // Exact unchanged values are unambiguous without IDs. An external
-            // ID keeps its policy association when its live value is edited.
-            const unchanged = current.find(value => equalStructuredValues(value, limit));
+            const group = sourceGroups.get(limit)!;
+            const unchanged = group.sourceCount === group.live.length
+              ? group.live[group.cursor++] : undefined;
             if (unchanged) { limits.push(unchanged); continue; }
             changed = true;
+            // A changed multiplicity is not an amount edit. Neither an ID
+            // fallback nor shape matching can prove which identical copy won.
+            if (group.live.length) continue;
             if (limit.id) {
               const matches = current.filter(value => value.id === limit.id);
               if (matches.length === 1) limits.push(matches[0]);

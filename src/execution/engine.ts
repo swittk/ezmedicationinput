@@ -76,6 +76,7 @@ import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units
 import { parseStrengthIntoRatio } from "../utils/strength";
 import { getDoseQuantityUnit } from "../maps";
 import { getDoseUnitSemantics } from "../unit-lexicon";
+import { TIMING_CODE_DAILY_FREQUENCIES } from "../timing-summary";
 
 /** A canonical stage array already owns order; only the compatibility array
  * input needs grouping. No retained wire metadata is read by these helpers. */
@@ -115,18 +116,6 @@ const DEFAULT_FREQUENCY_DEFAULTS: Required<FrequencyFallbackTimes> = {
     "freq:4/d": ["08:00", "12:00", "16:00", "20:00"],
   },
 };
-/** Numeric meanings of common institution-clock codes. Reuse one map:
- * this executes for every frequency-only schedule, including supply counts.
- */
-const DAILY_FREQUENCY_BY_TIMING_CODE: Readonly<Record<string, number>> = {
-  QD: 1,
-  QOD: 0.5,
-  AM: 1,
-  PM: 1,
-  BID: 2,
-  TID: 3,
-  QID: 4,
-};
 const MINUTES_PER_DAY = 24 * 60;
 const TOTAL_UNITS_PRECISION = 1000000000000;
 interface ExpandedTime {
@@ -147,7 +136,8 @@ function getAdministrationTargetMultiplier(
   dosage: CanonicalAdministration,
   context: MedicationContext | undefined
 ): number {
-  const doseUnit = dosage.amounts?.[0]?.quantity?.unit;
+  if (dosage.targetCount === undefined || dosage.targetCount === 1) return 1;
+  const doseUnit = getDoseQuantityUnit(dosage.amounts?.[0]?.quantity);
   if (!doseUnitSupportsPerTargetMultiplication(doseUnit, context)) {
     return 1;
   }
@@ -453,11 +443,13 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
   // needs an operational copy when a range is actually present.
   if (repeat.countMax === undefined && repeat.frequencyMax === undefined && repeat.periodMax === undefined)
     return dosage;
+  const code = executionTimingCode(timing);
+  const codedDaily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
   const explicitAnchors = Boolean(
     timing.explicitEvents?.length ||
       repeat.clocks?.length ||
       repeat.anchors?.length ||
-      recognizedDailyTimingCode(timing) !== undefined
+      codedDaily !== undefined && codedDaily >= 1
   );
   const frequency = positiveInteger(repeat.frequency);
   const frequencyMax = positiveInteger(repeat.frequencyMax);
@@ -483,7 +475,13 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
   };
   return {
     ...dosage,
-    schedule: { ...timing, recurrence: nextRepeat },
+    schedule: { ...timing,
+      // The original ranged cadence was checked before projection. Its code
+      // cannot become an exact claim about a different chosen endpoint.
+      code: codedDaily !== undefined && nextRepeat.frequency !== undefined &&
+        nextRepeat.period !== undefined && nextRepeat.periodUnit &&
+        !matchesDailyCodeCadence(codedDaily, nextRepeat) ? undefined : timing.code,
+      recurrence: nextRepeat },
   };
 }
 /** A once-daily frequency uses the institution/default administration clock;
@@ -942,6 +940,19 @@ function inferDailyFrequencyClocks(frequency: number): string[] {
   }
   return Array.from(clocks).sort();
 }
+/** Known cadence wins over unrelated coding translations. Keep the existing
+ * code-keyed, system-optional institution map contract; unfamiliar first codes
+ * remain a clock-map fallback only when no known clinical code is present. */
+function executionTimingCode(timing: CanonicalTiming): string | undefined {
+  let fallback: string | undefined;
+  for (const coding of timing.code?.coding ?? []) {
+    const code = coding.code?.toUpperCase();
+    if (!code) continue;
+    if (TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return code;
+    if (fallback === undefined) fallback = code;
+  }
+  return fallback;
+}
 /** Resolves fallback clock arrays for frequency-only schedules. */
 function resolveFrequencyClocks(timing: CanonicalTiming, config: NextDueDoseConfig): string[] {
   const defaults: Required<FrequencyFallbackTimes> = {
@@ -955,10 +966,9 @@ function resolveFrequencyClocks(timing: CanonicalTiming, config: NextDueDoseConf
     },
   };
   const collected = new Set<string>();
-  const code = timing.code?.coding?.find((coding) => coding.code)?.code;
-  const normalizedCode = code?.toUpperCase();
+  const normalizedCode = executionTimingCode(timing);
   const repeat = timing.recurrence;
-  const codeFrequency = normalizedCode ? DAILY_FREQUENCY_BY_TIMING_CODE[normalizedCode] : undefined;
+  const codeFrequency = normalizedCode ? TIMING_CODE_DAILY_FREQUENCIES[normalizedCode] : undefined;
   const liveDailyFrequency =
     repeat?.frequency !== undefined && repeat.period === 1 && repeat.periodUnit === "d"
       ? repeat.frequency
@@ -988,9 +998,13 @@ function resolveFrequencyClocks(timing: CanonicalTiming, config: NextDueDoseConf
   return Array.from(collected).sort();
 }
 function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined {
-  const code = timing.code?.coding?.find((coding) => coding.code)?.code?.toUpperCase();
-  const daily = code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
+  const code = executionTimingCode(timing);
+  const daily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
   return daily !== undefined && daily >= 1 ? daily : undefined;
+}
+function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): boolean {
+  const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
+  return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
 }
 /** A known daily code and an exact complete repeat both describe the same
  * recurrence. Contradictory external facts have no unique executable cadence. */
@@ -998,13 +1012,12 @@ function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void 
   const repeat = timing?.recurrence;
   if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
     return;
-  const code = timing.code.coding?.find((coding) => coding.code)?.code?.toUpperCase();
-  const daily = code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
+  const code = executionTimingCode(timing);
+  const daily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
   if (daily === undefined ||
       (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
       (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) return;
-  const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
-  if (seconds && daily * repeat.period * seconds === repeat.frequency * 86400) return;
+  if (matchesDailyCodeCadence(daily, repeat)) return;
   throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
     "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
 }
@@ -5541,8 +5554,9 @@ function calculationHorizon(options: CanonicalSupplyOptions, zone: string): Date
     );
   return end;
 }
-function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
+function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCadence = false): {
   dosage: CanonicalAdministration;
+  maximumRecurrence?: CanonicalRecurrence;
   countMaximum: boolean;
   frequencyMaximum: boolean;
   periodMinimum: boolean;
@@ -5565,7 +5579,9 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
   const count = positiveInteger(repeat.count);
   const countMax = positiveInteger(repeat.countMax);
   if (countMax && (!count || countMax >= count) && countMax !== count) {
-    nextRepeat = { ...nextRepeat, count: countMax, countMax: undefined };
+    // A maximum without an authored count limits admissions but cannot
+    // promise stage completion. The acceptor already owns its quota.
+    if (count) nextRepeat = { ...nextRepeat, count: countMax, countMax: undefined };
     countMaximum = true;
   }
   const frequency = positiveInteger(repeat.frequency);
@@ -5578,7 +5594,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
     positiveNumber(repeat.period ?? repeat.periodMax) &&
     repeat.periodUnit
   ) {
-    nextRepeat = {
+    if (!preserveCadence) nextRepeat = {
       ...nextRepeat,
       frequency: frequencyMax,
       frequencyMax: undefined,
@@ -5591,7 +5607,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
     // The lower/shorter period produces the maximum number of opportunities.
     // If only the upper endpoint is executable, it is still more useful than
     // discarding the entire cadence.
-    nextRepeat = { ...nextRepeat, period: period ?? periodMax, periodMax: undefined };
+    if (!preserveCadence) nextRepeat = { ...nextRepeat, period: period ?? periodMax, periodMax: undefined };
     periodMinimum = true;
   }
   const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
@@ -5610,7 +5626,22 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
       infusionDurationMaximum = true;
     }
   }
+  // Keep the authored cadence/code for its concrete clock plan. Construct
+  // the inferred cadence once; both scalar and ranged supply reuse it.
+  let maximumRecurrence = nextRepeat;
+  if (preserveCadence && (frequencyMaximum || periodMinimum)) {
+    maximumRecurrence = { ...nextRepeat };
+    if (frequencyMaximum) {
+      maximumRecurrence.frequency = frequencyMax;
+      maximumRecurrence.frequencyMax = undefined;
+    }
+    if (periodMinimum) {
+      maximumRecurrence.period = period ?? periodMax;
+      maximumRecurrence.periodMax = undefined;
+    }
+  }
   return {
+    maximumRecurrence,
     dosage:
       nextRepeat === repeat
         ? dosage
@@ -5717,7 +5748,7 @@ function maximumChronologicalSupplyCourse(
     let members: CanonicalAdministration[] | undefined;
     for (let j = 0; j < stage.administrations.length; j++) {
       const source = stage.administrations[j];
-      const maximal = prepareMaximumSupplyTiming(source);
+      const maximal = prepareMaximumSupplyTiming(source, preserveClocks);
       let generated = maximal.dosage;
       // The cap ledger must count the same per-administration quantity as
       // numeric supply. A range has no scalar amount until its applicable
@@ -5731,15 +5762,16 @@ function maximumChronologicalSupplyCourse(
           ((!amounts[0].quantity && amounts[0].range) || options.patientWeightKg !== undefined) &&
           hasPeriodLimits(generated))
         generated = prepareMeasuredDose(generated, options);
-      if (maximal.frequencyMaximum && !preserveClocks) {
+      if ((maximal.frequencyMaximum || maximal.periodMinimum) && !preserveClocks) {
         const repeat = generated.schedule!.recurrence!;
-        hasClockAlternative ||= !!(repeat.clocks?.length || repeat.anchors?.length || generated.schedule!.code);
+        hasClockAlternative ||= !!(generated.schedule!.code ||
+          maximal.frequencyMaximum && (repeat.clocks?.length || repeat.anchors?.length));
         generated = {
           ...generated,
           schedule: {
             ...generated.schedule!,
             code: undefined,
-            recurrence: { ...repeat, clocks: undefined, anchors: undefined },
+            recurrence: maximal.frequencyMaximum ? { ...repeat, clocks: undefined, anchors: undefined } : repeat,
           },
         };
       }
@@ -6086,7 +6118,7 @@ function calculateTotalUnitsSingle(
   // Validate single-dosage horizons exactly like whole-course horizons,
   // before unrelated dose details can mask an invalid dispensing window.
   let endDay = calculationHorizon(options, timeZone);
-  const maximalTiming = prepareMaximumSupplyTiming(sourceDosage);
+  const maximalTiming = prepareMaximumSupplyTiming(sourceDosage, true);
   const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
   const rangePlan = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, context) : undefined;
   const strength = measuredStrengthRatio(context);
@@ -6245,10 +6277,12 @@ function calculateTotalUnitsSingle(
   } else if (rangePlan) {
     const concrete = measureRangedSchedule(dosage, options, countFrom, endDay, baseTime, timeZone);
     let selected = concrete;
-    if (maximalTiming.frequencyMaximum && dosage.schedule?.recurrence) {
+    if ((maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
       const maximum: CanonicalAdministration = { ...dosage, schedule: {
         ...dosage.schedule, code: undefined,
-        recurrence: { ...dosage.schedule.recurrence, clocks: undefined, anchors: undefined },
+        recurrence: maximalTiming.frequencyMaximum
+          ? { ...maximalTiming.maximumRecurrence!, clocks: undefined, anchors: undefined }
+          : maximalTiming.maximumRecurrence,
       } };
       const upper = measureRangedSchedule(maximum, options, countFrom, endDay, baseTime, timeZone);
       if (upper.quantity > concrete.quantity) selected = upper;
@@ -6334,14 +6368,15 @@ function calculateTotalUnitsSingle(
             options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
           );
   }
-  if (acceptedEventCount === undefined && !rangePlan && maximalTiming.frequencyMaximum && dosage.schedule?.recurrence) {
+  if (acceptedEventCount === undefined && !rangePlan &&
+      (maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
     // Scheduling keeps every stated clock/code as the concrete partial plan.
     // Numeric supply can still report the prescribed upper bound without
     // mutating or deleting those anchors on the caller's FHIR object.
     const maximumRepeat: CanonicalRecurrence = {
-      ...dosage.schedule.recurrence,
-      clocks: undefined,
-      anchors: undefined,
+      ...maximalTiming.maximumRecurrence!,
+      clocks: maximalTiming.frequencyMaximum ? undefined : dosage.schedule.recurrence.clocks,
+      anchors: maximalTiming.frequencyMaximum ? undefined : dosage.schedule.recurrence.anchors,
       calendarWindow: {
         ...(dosage.schedule.recurrence.calendarWindow?.start
           ? { start: dosage.schedule.recurrence.calendarWindow.start }

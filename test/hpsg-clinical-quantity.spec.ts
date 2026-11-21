@@ -1734,9 +1734,10 @@ describe("November 16 qualified glued tablet fractions", () => {
   });
   it.each(["≤1/0 tablet", "≥2/0 tablet"])("never produces a non-finite dose: %s", sig => {
     const parsed = parsePublicSig(sig, { context: { dosageForm: "tablet" } });
-    expect(parsed.meta.canonical.clauses[0]?.dose?.value).not.toBe(Infinity);
-    expect(parsed.meta.canonical.clauses[0]?.dose?.value).not.toBe(NaN);
-    expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value).not.toBe(Infinity);
+    for (const value of [parsed.meta.canonical.clauses[0]?.dose?.value,
+      parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value]) {
+      expect(value === undefined || Number.isFinite(value)).toBe(true);
+    }
   });
 });
 

@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, formatSig, toDosageDetails, toFhirR5Dosages,
-  registerMedicationDateResolver, nextDueDoses
+  registerMedicationDateResolver, nextDueDoses, calculateTotalUnits
 } from "../src/index";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
-import { administrationFromClause, clauseForAdministration, courseFromAdministrations, courseFromPartialParallel } from "../src/canonical/compile";
+import { administrationFromClause, clauseForAdministration, courseFromAdministrations, courseFromPartialParallel, courseFromParallel } from "../src/canonical/compile";
 import { courseFromR6, courseToR6 } from "../src/adapters/canonical-course";
 import type { CanonicalCourse, CanonicalBoundary } from "../src/canonical/course";
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization, type SigFormatContext } from "../src/i18n";
 import { parseInstructionActions, realizeInstructionAction } from "../src/instruction-graph";
+import { resolveMedicationInstructionActionByMethod } from "../src/instruction-action-terminology";
 import { buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
 import { tokenize, parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
@@ -298,7 +299,7 @@ describe("round 23: no-dose gaps include repeated stage coverage", () => {
   it("leaves only day 3 empty after a one-day stage repeated twice", () => {
     const source = course(2), before = JSON.stringify(source);
     const english = formatCanonicalCourse(source, "long", { locale: "en" });
-    expect(english).toContain("From treatment start until 1 day after treatment start; for 2 cycles");
+    expect(english).toContain("From treatment start until 1 day after treatment start; Perform this phase 2 times");
     expect(english).toContain("No doses from 2 days after treatment start until 3 days after treatment start");
     expect(english).not.toContain("No doses from 1 day after treatment start");
     const thai = formatCanonicalCourse(source, "long", { locale: "th" });
@@ -1596,9 +1597,202 @@ describe("round 28: dirty PRN previews preserve authored reason qualifiers", () 
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const text = formatSig(row, "long", { locale: "en", realizationMode });
       expect(text).toContain("severe breakthrough pain when standing");
-      expect(text).toMatch(/3\s*(?:tab|tablet)/iu);
+      expect(text).toContain("max per period: 3 tab / 1 d");
     }
     expect(JSON.stringify(row)).toBe(edited);
     expect(row.text).toBe(source);
+  });
+});
+
+
+describe("round 29: typed onsets and complete numeric daughters", () => {
+  it.each([3, 9])("keeps terminal parallel member onset %s independent of its sibling", later => {
+    const source = "1 drop OD daily for 3 days then 2 drops OD at 06:00 daily and 3 drops OD at 07:00 daily; 1 drop OS at 08:00 daily";
+    const plan = createBoundaryPlan(source);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    expect(graph.phases.map(phase => phase.members)).toEqual([[0], [1, 2], [3]]);
+    // These are input facts to the regimen compiler, before a course exists.
+    states[1].primaryClause.schedule!.treatmentStartOffsetDays = 3;
+    states[2].primaryClause.schedule!.treatmentStartOffsetDays = later;
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+    expect(regimen.kind).toBe(later === 3 ? "resolved" : "unresolved");
+    if (regimen.kind === "not-parallel") throw new Error("Expected independent tracks");
+    const native = regimen.kind === "resolved"
+      ? courseFromParallel(regimen, plan.segments.map(segment => segment.text), source)
+      : courseFromPartialParallel(regimen, plan.segments.map(segment => segment.text), source);
+    const r6 = courseToR6(native);
+    const expected = later === 3 ? [
+      "2026-11-24T06:00:00+00:00", "2026-11-24T07:00:00+00:00", "2026-11-24T08:00:00+00:00"
+    ] : [
+      "2026-11-24T06:00:00+00:00", "2026-11-24T08:00:00+00:00",
+      "2026-11-25T06:00:00+00:00", "2026-11-25T08:00:00+00:00",
+      "2026-11-26T06:00:00+00:00", "2026-11-26T08:00:00+00:00",
+      "2026-11-27T06:00:00+00:00", "2026-11-27T08:00:00+00:00",
+      "2026-11-28T06:00:00+00:00", "2026-11-28T08:00:00+00:00",
+      "2026-11-29T06:00:00+00:00", "2026-11-29T08:00:00+00:00",
+      "2026-11-30T06:00:00+00:00", "2026-11-30T07:00:00+00:00", "2026-11-30T08:00:00+00:00"
+    ];
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
+        from: "2026-11-24T00:00:00Z", timeZone: "UTC", limit: expected.length })).toEqual(expected);
+    }
+  });
+
+  it.each([0, 7])("ends each seven-day member relative to its own onset (%s)", onsetDays => {
+    const native = courseFromAdministrations([
+      { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          courseLength: { value: 7, unit: "d" }, clocks: ["09:00:00"] } } },
+      { kind: "administration", ...(onsetDays ? { onsetDays } : {}),
+        amounts: [{ quantity: { value: 2, unit: "tab" } }],
+        schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          courseLength: { value: 7, unit: "d" }, clocks: ["09:00:00"] } } }
+    ], "Two seven-day member courses with independently authored starts");
+    if (onsetDays) expect(native.stages[0].end).toBeUndefined();
+    else expect(native.stages[0].end).toMatchObject({ displacement: { value: 7, unit: "d" } });
+    const expected = Array.from({ length: 14 }, (_, index) =>
+      new Date(Date.UTC(2026, 10, 21 + (onsetDays ? index : Math.floor(index / 2)), 9))
+        .toISOString().replace(".000Z", "+00:00"));
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const context = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC" };
+      expect(nextDueDoses(input, { ...context, limit: 20 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...context,
+        durationValue: 15, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+    }
+  });
+
+  it("retains QID coding and uses configured code clocks across all projections", () => {
+    const parsed = parseSig("1 tab PO QID");
+    const coding = { system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QID" };
+    expect(parsed.meta.canonical.course!.stages[0].administrations[0].schedule?.code?.coding).toEqual([coding]);
+    const options = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
+      timeZone: "UTC", limit: 4, frequencyDefaults: {
+        byCode: { QID: ["05:00", "11:00", "17:00", "23:00"] },
+        byFrequency: { "freq:4/d": ["06:00", "12:00", "18:00", "22:00"] }
+      } };
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+        JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, options)).toEqual([
+        "2026-11-21T05:00:00+00:00", "2026-11-21T11:00:00+00:00",
+        "2026-11-21T17:00:00+00:00", "2026-11-21T23:00:00+00:00"
+      ]);
+    }
+  });
+
+  it.each([true, false])("uses the preceding phase's authored onset before an inferred one (%s)", authored => {
+    const source = "Take 1 tablet daily for 3 days, then " + (authored ? "from day 10 " : "") +
+      "take 2 tablets daily for 2 days, then take 1 tablet at 06:00 the next morning";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.treatmentStartOffsetDays).toBe(authored ? 11 : 5);
+    const day = authored ? "2026-12-02" : "2026-11-26";
+    for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
+        from: day + "T00:00:00Z", timeZone: "UTC", limit: 1 })).toEqual([day + "T06:00:00+00:00"]);
+    }
+  });
+
+  it("copies the complete target onset onto continued ADD members", () => {
+    const parsed = parseSig("Take 1 tablet at 08:00 daily for 3 days then from day 5 add 1 tablet at 06:00 daily");
+    expect(parsed.meta.canonical.course!.stages[1].start).toMatchObject({
+      anchor: "treatment-day-start", displacement: { value: 4, unit: "d" }
+    });
+    for (const clause of parsed.meta.canonical.clauses.slice(1)) expect(clause.schedule).toMatchObject({
+      treatmentStartOffsetDays: 4, phaseStartReference: "treatment-day-start"
+    });
+    for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T12:00:00Z",
+        from: "2026-11-25T00:00:00Z", timeZone: "UTC", limit: 4 })).toEqual([
+        "2026-11-25T06:00:00+00:00", "2026-11-25T08:00:00+00:00",
+        "2026-11-26T06:00:00+00:00", "2026-11-26T08:00:00+00:00"
+      ]);
+    }
+  });
+
+  it.each([
+    ["UTC", "2026-11-21T15:00:00Z", "2026-11-22T06:00:00+00:00"],
+    ["Asia/Bangkok", "2026-11-21T15:00:00+07:00", "2026-11-22T06:00:00+07:00"]
+  ])("anchors a standalone next morning to the next local day in %s", (timeZone, orderedAt, expected) => {
+    const parsed = parseSig("Take 1 tablet the next morning");
+    expect(parsed.meta.canonical.course!.stages[0].start).toMatchObject({
+      anchor: "treatment-day-start", displacement: { value: 1, unit: "d" }
+    });
+    for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, { orderedAt, from: orderedAt, timeZone,
+        eventClock: { MORN: "06:00" }, limit: 1 })).toEqual([expected]);
+    }
+  });
+
+  it.each([
+    ["three quarters", 0.75, undefined],
+    ["3 quarters", 0.75, undefined],
+    ["approximately three quarters", 0.75, "~"],
+    ["three quarters million", 750000, undefined]
+  ] as const)("keeps the complete %s quantity in a rate", (phrase, value, comparator) => {
+    const unit = phrase.includes("million") ? "units" : "mL";
+    const source = "Infuse " + phrase + " " + unit + " per hour";
+    const tokens = tokenize(source);
+    const context: HpsgClauseContext = { state: new ParserState(source, tokens), tokens,
+      limit: tokens.length, dateSpans: [], clinicalCache: {}, deps: {} as HpsgClauseContext["deps"] };
+    const signs = clinicalQuantityLexicalRule().match(context, 1);
+    expect(signs).toHaveLength(1);
+    expect(signs[0].tokens.map(token => token.original).join(" ")).toBe(phrase + " " + unit + " per hour");
+    expect(signs[0].synsem.head.dose?.clinicalQuantity?.numerator).toMatchObject({ value });
+    const parsed = parseSig(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.numerator.value).toBe(value);
+    for (const wire of [parsed.fhirNext, toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))))]) {
+      const rate = wire.step![0].component[0].doseAndRate![0].rateQuantity;
+      expect(rate).toMatchObject({ value, unit: unit === "mL" ? "mL/h" : "[iU]/h" });
+      expect(getQuantityComparator(rate)).toBe(comparator);
+    }
+  });
+});
+
+
+describe("round 29: method coding index", () => {
+  it.each([
+    ["738992009", "chew"],
+    ["738995006", "swallow"],
+    ["738991002", "apply"],
+    ["785900008", "wash"],
+    ["738990001", "administer"],
+    ["419747000", "chew"],
+  ])("resolves %s to its own administration action %s", (code, expected) => {
+    for (const system of [undefined, "http://snomed.info/sct"]) {
+      const coding = { system, code, display: "Superseded action wording" };
+      const source = JSON.stringify(coding);
+      expect(resolveMedicationInstructionActionByMethod(coding)?.code).toBe(expected);
+      expect(JSON.stringify(coding)).toBe(source);
+    }
+  });
+
+  it("does not infer a known method from another system or an unknown code's display", () => {
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "urn:clinic:method", code: "738992009", display: "Chew"
+    })).toBeUndefined();
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "http://snomed.info/sct", code: "unknown-method", display: "Chew"
+    })).toBeUndefined();
+  });
+
+  it("uses a custom displayed method only when its exact declared identity agrees", () => {
+    const options: ParseOptions = { instructionActionMap: {
+      masticate: { code: "clinic-chew", display: "Masticate", i18n: { th: "เคี้ยวช้าๆ" },
+        administrationMethod: { system: "urn:clinic:method", code: "chew-slowly" } }
+    } };
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "urn:clinic:method", code: "chew-slowly", display: "Masticate"
+    }, options)).toMatchObject({ code: "clinic-chew", display: "Masticate", i18n: { th: "เคี้ยวช้าๆ" } });
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "urn:clinic:other-method", code: "chew-slowly", display: "Masticate"
+    }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "urn:clinic:method", code: "chew-slowly"
+    }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionByMethod({
+      system: "urn:clinic:method", code: "unknown", display: "Masticate"
+    }, options)).toBeUndefined();
   });
 });

@@ -1,3 +1,4 @@
+import { resolveMedicationInstructionActionForMethod, selectMedicationInstructionMethodCoding } from "../instruction-action-terminology";
 /** Compile the EXISTING scoped HPSG clause/regimen into the native clinical
  * course. No FHIR serialization or reconstruction occurs in this module.
  * Source grammar is interpreted once; numerical execution consumes only
@@ -21,6 +22,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
+import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM } from "../timing-summary";
 import type { RouteCode } from "../types";
 
 const quantity = (
@@ -171,6 +173,7 @@ export function administrationFromClause(
     recurrence!.courseLength = undefined;
     recurrence!.courseLengthRange = undefined;
   }
+  const timingCode = s?.timingCode?.toUpperCase();
   const target = clause.site
     ? {
         text: clause.site.text,
@@ -196,7 +199,9 @@ export function administrationFromClause(
     schedule: s
       ? {
           recurrence,
-          ...(s.timingCode ? { code: { text: s.timingCode } } : {}),
+          ...(s.timingCode ? { code: timingCode && FHIR_GTS_TIMING_CODES.has(timingCode)
+            ? { text: s.timingCode, coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: timingCode }] }
+            : { text: s.timingCode } } : {}),
           ...(s.calendarEvents?.length
             ? {
                 explicitEvents: s.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate),
@@ -534,11 +539,13 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
   }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
   else result.site=undefined;
-  let methodCode:NonNullable<NonNullable<typeof a.method>["coding"]>[number]|undefined;
-  for(const code of a.method?.coding??[])if(code.code){methodCode=code;break;}
+  const methodCode=selectMedicationInstructionMethodCoding(a.method?.coding);
   if(a.method){
-    const same=a.method.text===base?.method?.text&&methodCode?.code===base?.method?.coding?.code;
-    result.method=Object.assign({},same?base?.method:undefined,{text:a.method.text});
+    const liveMethod={text:a.method.text,coding:methodCode};
+    const text=resolveMedicationInstructionActionForMethod(liveMethod)?.display ??
+      a.method.text ?? methodCode?.display;
+    const same=text===base?.method?.text&&methodCode?.code===base?.method?.coding?.code;
+    result.method=Object.assign({},same?base?.method:undefined,{text});
     if(methodCode)result.method.coding=methodCode;
   }else result.method=undefined;
   return result;
@@ -623,6 +630,7 @@ export function courseFromAdministrations(
           own?.code === length.code &&
           !own?.comparator &&
           (a.delayMinutes ?? 0) === 0 &&
+          !a.phaseOrigin && !a.phaseStart &&
           !r?.calendarWindow?.start &&
           !r?.calendarWindow?.end
         );

@@ -2299,7 +2299,7 @@ function formatLongThai(
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const richPrimaryGraphAction = options?.realizationMode === "roundtrip"
-    ? instructionGraphRoundTripPrimaryAction(clause)
+    ? instructionGraphRoundTripPrimaryAction(clause) ?? instructionGraphRichPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options)

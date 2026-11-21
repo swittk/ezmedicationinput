@@ -76,7 +76,10 @@ function wireCoding(value: FhirCoding): FhirCoding {
   if(value.system!==undefined)result.system=value.system;
   if(value.version!==undefined)result.version=value.version;
   if(value.code!==undefined)result.code=value.code;
+  if(value._code!==undefined)result._code=value._code;
   if(value.display!==undefined)result.display=value.display;
+  if(value.userSelected!==undefined)result.userSelected=value.userSelected;
+  if(value._userSelected!==undefined)result._userSelected=value._userSelected;
   if(value.extension?.length)result.extension=value.extension;
   if(displayPrimitive)result._display=displayPrimitive;
   return result;

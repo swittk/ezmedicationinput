@@ -317,9 +317,11 @@ export function scopeSequentialPhaseSemantics(
     const authoredPriorStarts = prior.map(index => states[index]?.primaryClause.schedule?.treatmentStartOffsetDays)
       .filter((value): value is number => value !== undefined);
     const recordedStart = relativePhaseStarts.get(edge.from);
-    const priorStart = recordedStart !== undefined ? recordedStart :
-      authoredPriorStarts.length && authoredPriorStarts.every(value => value === authoredPriorStarts[0])
-        ? authoredPriorStarts[0] : 0;
+    const authoredPriorStart = authoredPriorStarts.length &&
+      authoredPriorStarts.every(value => value === authoredPriorStarts[0])
+        ? authoredPriorStarts[0] : undefined;
+    const priorStart = authoredPriorStart !== undefined ? authoredPriorStart :
+      recordedStart !== undefined ? recordedStart : 0;
     let nextDayRelation = false;
     let contextualNextDay = false;
     let localNextDay = false;
@@ -350,9 +352,13 @@ export function scopeSequentialPhaseSemantics(
           value?.count !== undefined || value?.countMax !== undefined ||
           value?.phaseStartReference === 'previous-phase-next-day');
       }
-      const authoredOffset = contextualPredecessor && schedule.evidence.some(item => item.rule !== NEXT_DAY_SCHEDULE_RULE &&
+      const authoredOffset = schedule.evidence.some(item => item.rule !== NEXT_DAY_SCHEDULE_RULE &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
         item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
+      // A standalone NEXT starts at the next civil day. In a sequence this
+      // provisional anchor is replaced by the predecessor's own boundary.
+      if (!authoredOffset && schedule.phaseStartReference === "treatment-day-start")
+        delete schedule.phaseStartReference;
       // An independent source onset remains its own owner. Remove only the
       // provisional relative-day offset when an authored calendar start owns it.
       if (contextualPredecessor && (authoredOffset || schedule.boundsStart || schedule.calendarEvents?.length)) {
@@ -803,9 +809,12 @@ export function expandRegimenAdjustmentPhases(
             // phase, not the donor's old onset. Step.start is executable
             // only when all new phase members agree on that source feature.
             delete schedule.treatmentStartOffsetDays;
+            delete schedule.phaseStartReference;
             if (target.schedule?.treatmentStartOffsetDays !== undefined) {
               schedule.treatmentStartOffsetDays = target.schedule.treatmentStartOffsetDays;
             }
+            if (target.schedule?.phaseStartReference)
+              schedule.phaseStartReference = target.schedule.phaseStartReference;
             if (target.schedule?.boundsStart) schedule.boundsStart = target.schedule.boundsStart;
             if (target.schedule?.boundsEnd) schedule.boundsEnd = target.schedule.boundsEnd;
           }

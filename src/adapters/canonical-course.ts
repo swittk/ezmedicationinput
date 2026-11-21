@@ -1421,13 +1421,20 @@ function administrationToWire(
       infusionCarrierMaterialExtension(clause.clinicalQuantity.carrierMaterial),
     ];
   }
-  if (a.cycleDays || (source && getCycleDayConstraint(source as FhirDosage)))
-    output.modifierExtension = [
-      ...((output.modifierExtension as FhirDosage["modifierExtension"]) ?? []).filter(
-        (e) => e.url !== CYCLE_DAY_ELIGIBILITY_EXTENSION_URL
-      ),
-      ...(a.cycleDays ? [cycleDayConstraintExtension(a.cycleDays)] : []),
-    ];
+  if (a.cycleDays || (source && getCycleDayConstraint(source as FhirDosage))) {
+    const previous = output.modifierExtension as FhirDosage["modifierExtension"];
+    let found = false;
+    const modifiers: FhirExtension[] = [];
+    for (const marker of previous ?? []) {
+      if (marker.url !== CYCLE_DAY_ELIGIBILITY_EXTENSION_URL) modifiers.push(marker);
+      else if (!found) {
+        found = true;
+        if (a.cycleDays) modifiers.push(cycleDayConstraintExtension(a.cycleDays, marker));
+      }
+    }
+    if (!found && a.cycleDays) modifiers.push(cycleDayConstraintExtension(a.cycleDays));
+    output.modifierExtension = modifiers.length ? modifiers : undefined;
+  }
   const phaseParticipant = a.phasePredecessors !== undefined && a.sourceMember !== undefined;
   if (
     a.phaseOrigin || a.phaseStart || phaseParticipant ||
