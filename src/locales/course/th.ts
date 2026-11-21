@@ -11,6 +11,9 @@ const UNITS: Readonly<Record<string, string>> = {
   mo: "เดือน",
   a: "ปี",
 };
+const MEASUREMENT_NAMES: Readonly<Record<string, string>> = {
+  bp: "BP", sbp: "SBP", dbp: "DBP", hr: "HR", spo2: "SpO2",
+};
 export const THAI_COURSE: CourseLanguage = {
   notPrefix: "ไม่ ",
   allSeparator: " และ ",
@@ -37,6 +40,7 @@ export const THAI_COURSE: CourseLanguage = {
   courseLimitsLabel: "ตลอดแผนการใช้ยานี้: ",
   stageLimitsLabel: "ในขั้นตอนนี้: ",
   weekdayName: (day) => THAI_DAY_NAMES[day] ?? day,
+  measurementName: (name) => MEASUREMENT_NAMES[name] ?? name,
   joinList: (items) => joinLocalizedList(items,"และ"),
   timeUnit: (unit) => UNITS[unit],
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
@@ -46,6 +50,8 @@ export const THAI_COURSE: CourseLanguage = {
   periodContext: (period) => ` (รอบละ ${period})`,
   startsWithinPeriod: (offset, context) => `เริ่มให้ยาหลังเริ่มรอบ ${offset}${context}`,
   endsWithinPeriod: (offset, context) => `งดยาในช่วง ${offset}สุดท้ายของแต่ละรอบ${context}`,
+  treatmentDayStart: "ต้นวันแรกของการรักษา",
+  afterPreviousPhase: "หลังขั้นตอนก่อนหน้า",
   nextDayAfterPreviousPhase: "วันถัดจากวันสุดท้ายของขั้นตอนก่อนหน้า",
   afterTreatmentStart: (offset) => `${offset}หลังเริ่มการรักษา`,
   relativeEvent: (offset, event, before) => `${offset}${before ? "ก่อน" : "หลัง"}${event ?? "เหตุการณ์"}`,
@@ -63,11 +69,12 @@ export const THAI_COURSE: CourseLanguage = {
   fromDay: (first) => `ตั้งแต่วันที่ ${first} เป็นต้นไป`,
   throughDay: (last) => `ถึงวันที่ ${last}`,
   noDoseDays: (first, last) => `งดยาในวันที่ ${first}–${last}.`,
+  noDoseWindow: (start, end) => `งดยาตั้งแต่${start}จนถึง${end}.`,
   repeatCount: (count) => `จำนวน ${count} รอบ`,
   repeatCycle: (interval, exact, count) => {
     const iterations = count === undefined ? "" : ` จำนวน ${count} รอบ`;
     return exact
-      ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับวันที่ใหม่ในแต่ละรอบ).`
+      ? `ทำซ้ำแผนการใช้ยานี้ทุก ${interval}${iterations} (นับระยะเวลาจากจุดเริ่มต้นของแต่ละรอบ).`
       : `ระยะรอบการใช้ยา: ${interval}${iterations}.`;
   },
 };

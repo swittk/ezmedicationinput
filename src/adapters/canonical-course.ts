@@ -84,6 +84,7 @@ import {
   deserializeCanonicalContext,
   cycleDayConstraintExtension,
   infusionCarrierMaterialExtension,
+  clinicalCarrierQuantityFromFhir,
   getAdministrationOffsetMinutes,
   getAnchoredCourseDuration,
   projectCourseDurationRange,
@@ -332,12 +333,13 @@ const PREVIOUS_PHASE_NEXT_DAY_CODE = "previous-phase-next-day";
 
 export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoundary | undefined {
   if (!b) return undefined;
-  let recognized: "treatment-start" | "previous-phase-next-day" | undefined;
+  let recognized: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | undefined;
   if (!b.contextReference && !b.contextDefinition && !b.contextPath) {
     for (const coding of b.contextCode?.coding ?? []) {
       const event = coding.system === TREATMENT_START_SYSTEM && coding.code === "treatment-start"
         ? "treatment-start" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === PREVIOUS_PHASE_NEXT_DAY_CODE
-        ? "previous-phase-next-day" : undefined;
+        ? "previous-phase-next-day" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === "treatment-day-start"
+        ? "treatment-day-start" : undefined;
       if (!event) continue;
       // Conflicting understood anchors are retained as a coded event. Unknown
       // foreign equivalents do not supply a different executable meaning.
@@ -497,6 +499,7 @@ function baseAdministration(
     phaseStart: CanonicalBoundary | undefined,
     phaseOriginIssue = false,
     seenOrigin = false;
+  let sourceMember: number | undefined, phasePredecessors: number[] | undefined;
   let missingContexts: string[] | undefined,
     contextIssue: CanonicalAdministration["contextIssue"];
   let anchored: FhirExtension | undefined,
@@ -525,10 +528,22 @@ function baseAdministration(
       case PARALLEL_COMPONENT_PHASE_ORIGIN_URL:
         if (seenOrigin) phaseOriginIssue = true;
         seenOrigin = true;
+        // Identity is sparse: only members of a real dependency carry it.
+        // Original source member IDs must survive wire reorder and deletion.
+        for (const child of e.extension ?? []) {
+          if (child.url === "sourceMember" && child.valueInteger !== undefined)
+            sourceMember = child.valueInteger;
+        }
+        if (sourceMember !== undefined) {
+          phasePredecessors = [];
+          for (const child of e.extension ?? [])
+            if (child.url === "predecessor" && child.valueInteger !== undefined)
+              phasePredecessors.push(child.valueInteger);
+        }
         if (e.valueQuantity) phaseOrigin = measureFromWire(e.valueQuantity);
         else {
           phaseStart = boundaryFromR6(decodeR6SourceMetadata(e, "step")?.start as FhirR6RelativeTime | undefined);
-          if (!phaseStart) phaseOriginIssue = true;
+          if (!phaseStart && sourceMember === undefined) phaseOriginIssue = true;
         }
         break;
       case ANCHORED_COURSE_DURATION_EXTENSION_URL:
@@ -575,7 +590,20 @@ function baseAdministration(
       sourceTextVerified = false;
   }
   const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
-  const schedule = timing(raw.timing, format === "r5");
+  let schedule = timing(raw.timing, format === "r5");
+  const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
+  if (denominator && raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator)) {
+    // Only an explicitly recognized carrier/self-carrier infusion supplies an
+    // administration duration. An arbitrary rate denominator is not a dose time.
+    const administrationDuration = clinicalCarrierQuantityFromFhir(raw as FhirDosage)?.administrationDuration;
+    if (administrationDuration?.comparator) {
+      schedule ??= {};
+      const recurrence = schedule.recurrence ??= {};
+      recurrence.occurrenceDuration = administrationDuration.value;
+      recurrence.occurrenceDurationUnit = administrationDuration.unit;
+      recurrence.occurrenceDurationComparator = administrationDuration.comparator;
+    }
+  }
   if (duration?.valueRange && raw.timing?.repeat?.boundsRange && schedule?.recurrence)
     schedule.recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
   const output: CanonicalAdministration = {
@@ -613,6 +641,12 @@ function baseAdministration(
     cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
     provenance: { format, data: record(raw) },
   };
+  // Keep sparse dependency identities off the ordinary import allocation
+  // path; an object spread here emits ES6 descriptor-copy helpers per dose.
+  if (phasePredecessors !== undefined) {
+    output.sourceMember = sourceMember;
+    output.phasePredecessors = phasePredecessors;
+  }
   if (missingContexts) {
     output.missingContexts = missingContexts;
     output.contextIssue = contextIssue;
@@ -808,14 +842,14 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
       output.contextCode = {
         coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }],
       };
-    else if (b.anchor === "previous-phase-next-day")
+    else if (b.anchor === "previous-phase-next-day" || b.anchor === "treatment-day-start")
       output.contextCode = {
-        coding: [{ system: COURSE_PHASE_EVENT_SYSTEM, code: PREVIOUS_PHASE_NEXT_DAY_CODE }],
+        coding: [{ system: COURSE_PHASE_EVENT_SYSTEM, code: b.anchor }],
       };
   }
   // Understood external anchor types stay typed, including in native edits.
   // These are preserved but not considered executable without an event/source resolver.
-  if (b.anchor !== "treatment-start" && b.anchor !== "previous-phase-next-day") {
+  if (b.anchor !== "treatment-start" && b.anchor !== "treatment-day-start" && b.anchor !== "previous-phase-next-day") {
     assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
     assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
     assign(output, "contextPath",
@@ -846,6 +880,11 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     // their typed extensions. Reuse and reconstruction must compare the same
     // positiveInt/unsignedInt-compatible wire values.
     const frequency = r.frequency === 0 ? undefined : r.frequency;
+    // Qualified infusion duration remains in its typed rate denominator;
+    // Timing.duration has no comparator and must not assert false exactness.
+    const occurrenceDuration = r.occurrenceDurationComparator ? undefined : r.occurrenceDuration;
+    const occurrenceDurationMax = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationMax;
+    const occurrenceDurationUnit = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationUnit;
     const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
       ? r.offset : undefined;
     if (
@@ -859,9 +898,9 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       prior.periodUnit === r.periodUnit &&
       prior.dayOfWeek === r.dayOfWeek &&
       prior.offset === offset &&
-      prior.duration === r.occurrenceDuration &&
-      prior.durationMax === r.occurrenceDurationMax &&
-      prior.durationUnit === r.occurrenceDurationUnit &&
+      prior.duration === occurrenceDuration &&
+      prior.durationMax === occurrenceDurationMax &&
+      prior.durationUnit === occurrenceDurationUnit &&
       prior.boundsDuration === duration &&
       prior.boundsRange === lengthRange &&
       prior.boundsPeriod === r.calendarWindow &&
@@ -882,9 +921,9 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       assign(value, "periodUnit", r.periodUnit);
       assign(value, "dayOfWeek", r.dayOfWeek);
       assign(value, "offset", offset);
-      assign(value, "duration", r.occurrenceDuration);
-      assign(value, "durationMax", r.occurrenceDurationMax);
-      assign(value, "durationUnit", r.occurrenceDurationUnit);
+      assign(value, "duration", occurrenceDuration);
+      assign(value, "durationMax", occurrenceDurationMax);
+      assign(value, "durationUnit", occurrenceDurationUnit);
       assign(value, "boundsDuration", duration);
       assign(value, "boundsRange", lengthRange);
       assign(value, "boundsPeriod", r.calendarWindow);
@@ -1389,13 +1428,27 @@ function administrationToWire(
       ),
       ...(a.cycleDays ? [cycleDayConstraintExtension(a.cycleDays)] : []),
     ];
+  const phaseParticipant = a.phasePredecessors !== undefined && a.sourceMember !== undefined;
   if (
-    a.phaseOrigin || a.phaseStart ||
+    a.phaseOrigin || a.phaseStart || phaseParticipant ||
     (source &&
       !a.phaseOriginIssue &&
       source.modifierExtension?.some((e) => e.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
   ) {
     const existing = (output.modifierExtension as FhirDosage["modifierExtension"]) ?? [];
+    const withPhaseIdentity = (marker: FhirExtension): FhirExtension => {
+      if (!phaseParticipant) return marker;
+      const children = marker.extension ?? [];
+      const identity = children.find(child => child.url === "sourceMember");
+      const predecessors = children.filter(child => child.url === "predecessor");
+      if (identity?.valueInteger === a.sourceMember && predecessors.length === a.phasePredecessors!.length &&
+          predecessors.every((child, index) => child.valueInteger === a.phasePredecessors![index])) return marker;
+      const retained = children.filter(child => child.url !== "sourceMember" && child.url !== "predecessor");
+      retained.push({ ...identity, url: "sourceMember", valueInteger: a.sourceMember });
+      for (let index = 0; index < a.phasePredecessors!.length; index++)
+        retained.push({ ...predecessors[index], url: "predecessor", valueInteger: a.phasePredecessors![index] });
+      return { ...marker, extension: retained };
+    };
     const phaseOrigin = simpleQuantityForR5(a.phaseOrigin);
     const phaseStart = a.phaseStart ? boundaryToWire(a.phaseStart) : undefined;
     let generatedStart: FhirExtension | undefined;
@@ -1429,14 +1482,19 @@ function administrationToWire(
           if (children?.length) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
             { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] }];
         }
+      } else if (phaseParticipant) {
+        const { valueQuantity: _oldOrigin, ...metadata } = marker;
+        replacement = { ...metadata, extension: marker.extension?.filter(child => child.url !== "start") };
       }
+      if (replacement) replacement = withPhaseIdentity(replacement);
       if (replacement !== marker && !changed) changed = existing.slice(0, index);
       if (changed && replacement) changed.push(replacement);
     }
-    if (!found && (phaseOrigin || phaseStart))
-      (changed ??= existing.slice()).push(phaseStart
+    if (!found && (phaseOrigin || phaseStart || phaseParticipant))
+      (changed ??= existing.slice()).push(withPhaseIdentity(phaseStart
         ? generatedStart ?? encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start: phaseStart }, "step")
-        : { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin });
+        : phaseOrigin ? { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: phaseOrigin }
+        : { url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL }));
     if (changed) assign(output, "modifierExtension", changed.length ? changed : undefined);
   }
   // Whole-course display baselines belong to the FINAL output, never to
@@ -1464,7 +1522,26 @@ function administrationToWire(
       const kept: FhirExtension[] = [];
       for (const extension of oldModifiers) {
         if (extension.url === DOSAGE_DETAILS_R5_URL) continue;
-        if (extension.url === DOSAGE_CONDITION_R5_URL && isExactConditionBridge(extension)) continue;
+        if (extension.url === DOSAGE_CONDITION_R5_URL) {
+          if (isExactConditionBridge(extension)) continue;
+          const nativeCondition = Boolean((output.condition as FhirR6Dosage["condition"])?.length);
+          let predicate = false, calendar = false;
+          for (const child of extension.extension ?? []) {
+            if (child.url === "predicate") predicate = true;
+            else if (child.url === "calendarDayPredicate") calendar = true;
+          }
+          // Once condition[] owns the predicate, an annotated R5 copy is
+          // source, not a second active owner that can revive a later deletion.
+          if (nativeCondition && predicate || !a.predicate && calendar && !predicate) {
+            output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+              { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [extension] }];
+            if (nativeCondition) {
+              const children = extension.extension?.filter(child => child.url !== "predicate");
+              if (children?.length) kept.push({ ...extension, extension: children });
+            }
+            continue;
+          }
+        }
         kept.push(extension);
       }
       assign(output, "modifierExtension", kept.length ? kept : undefined);

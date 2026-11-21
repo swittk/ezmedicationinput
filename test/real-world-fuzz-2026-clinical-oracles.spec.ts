@@ -607,17 +607,17 @@ describe("source-less R6 treatment-relative step display", () => {
         component: [component(2)] }
     ] };
     const english = formatSig(course, "long");
-    expect(english).toContain("Days 1–7");
-    expect(english).toContain(`Days ${secondStart + 1}–${secondStart + 7}`);
-    if (secondStart === 14) expect(english).toContain("No doses on days 8–14");
+    expect(english).toContain("From treatment start until 7 days after treatment start");
+    expect(english).toContain(`From ${secondStart} days after treatment start until ${secondStart + 7} days after treatment start`);
+    if (secondStart === 14) expect(english).toContain("No doses from 7 days after treatment start until 14 days after treatment start");
     else expect(english).not.toContain("No doses");
     const thai = formatSig(course, "long", { locale: "th" });
-    expect(thai).toContain("วันที่ 1–7");
-    expect(thai).toContain(`วันที่ ${secondStart + 1}–${secondStart + 7}`);
+    expect(thai).toContain("ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา");
+    expect(thai).toContain(`ตั้งแต่${secondStart} วันหลังเริ่มการรักษาจนถึง${secondStart + 7} วันหลังเริ่มการรักษา`);
     if (secondStart === 14) expect(thai).toContain("งดยา");
     const strict = toFhirR5Dosages(course);
-    expect(formatSigBatch(strict, "long")).toContain("Days 1–7");
-    expect(formatSigBatch(strict, "long")).toContain(`Days ${secondStart + 1}–${secondStart + 7}`);
+    expect(formatSigBatch(strict, "long")).toContain("From treatment start until 7 days after treatment start");
+    expect(formatSigBatch(strict, "long")).toContain(`From ${secondStart} days after treatment start until ${secondStart + 7} days after treatment start`);
     const source = "keep the clinician-authored dosing text exactly";
     expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(english);
   });

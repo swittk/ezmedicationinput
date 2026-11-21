@@ -19,13 +19,14 @@ import {
 } from "../src/canonical/format-course";
 import type { CanonicalCourse } from "../src/canonical/course";
 
+// Day-number wording is valid only for an explicitly local-day origin.
 const boundaries: CanonicalCourse = {
   kind: "course",
   cycleInterval: { value: 7, unit: "d" },
   stages: [
     {
-      start: { anchor: "treatment-start", displacement: { value: 0, unit: "d" } },
-      end: { anchor: "treatment-start", displacement: { value: 3, unit: "d" } },
+      start: { anchor: "treatment-day-start", displacement: { value: 0, unit: "d" } },
+      end: { anchor: "treatment-day-start", displacement: { value: 3, unit: "d" } },
       administrations: [
         {
           kind: "administration",
@@ -188,4 +189,96 @@ describe("course locale boundary", () => {
     expect(source).not.toMatch(/[ก-๙]/u);
     expect(resolveSigLocalization("th")?.course).toBeDefined();
   });
+});
+
+
+describe("round 28 complete-value locale facets", () => {
+  it("passes a complete count and period to a suffix-language upper-bound template", () => {
+    registerSigLocalization({
+      locale: "course-suffix-bound",
+      formatLong: () => "Dose locale.",
+      course: { ...ENGLISH_COURSE, upTo: value => value + "以下" }
+    });
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequencyMax: 2, periodMax: 3, periodUnit: "d",
+        startOffset: { value: 1, unit: "h" } } }
+    }] }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "course-suffix-bound" });
+    expect(text).toContain("2以下 administrations per 3 days以下");
+    expect(text).not.toMatch(/以下2|以下3/);
+  });
+
+  it("does not assert a global pause by comparing elapsed and civil origins", () => {
+    const mixed: CanonicalCourse = { kind: "course", stages: [
+      { start: { anchor: "treatment-start", displacement: { value: 0, unit: "d" } },
+        end: { anchor: "treatment-start", displacement: { value: 2, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { start: { anchor: "treatment-day-start", displacement: { value: 4, unit: "d" } },
+        end: { anchor: "treatment-day-start", displacement: { value: 6, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }] }
+    ] };
+    const text = formatCanonicalCourse(mixed, "long", { locale: "en" });
+    expect(text).toContain("From treatment start until 2 days after treatment start");
+    expect(text).toContain("Days 5–6");
+    expect(text).not.toContain("No doses");
+  });
+});
+
+
+describe("round 28 origin-aware member and ranged windows", () => {
+  it("renders an executable local-day member without a review warning", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [
+      { kind: "administration", phaseStart: { anchor: "treatment-day-start",
+          displacement: { value: 4, code: "d" } },
+        amounts: [{ quantity: { value: 1, unit: "tab" } }] }
+    ] }] };
+    const en = formatCanonicalCourse(course, "long", { locale: "en" });
+    const th = formatCanonicalCourse(course, "long", { locale: "th" });
+    expect(en).toContain("From day 5 onward");
+    expect(en).not.toContain("requires review");
+    expect(th).toContain("ตั้งแต่วันที่ 5 เป็นต้นไป");
+    expect(th).not.toContain("ต้องตรวจสอบ");
+  });
+
+  it("keeps an elapsed member floor visible inside an equal-number local-day stage", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-day-start", displacement: { value: 4, code: "d" } },
+      end: { anchor: "treatment-day-start", displacement: { value: 6, code: "d" } },
+      administrations: [{ kind: "administration", phaseOrigin: { value: 4, code: "d" },
+        amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("Days 5–6");
+    expect(text).toContain("From 4 days after treatment start onward");
+  });
+
+  it("uses the same local-day origin for scalar and ranged sides of a window", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-day-start", displacement: { value: 4, code: "d" } },
+      end: { anchor: "treatment-day-start",
+        displacementRange: { low: { value: 6, code: "d" }, high: { value: 8, code: "d" } } },
+      administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("From 4 days after the start of the first treatment day until 6 days – 8 days after the start of the first treatment day");
+    expect(text).not.toContain("4 days after treatment start");
+    // The known leading gap is still exact; the ranged end licenses no
+    // invented trailing pause.
+    expect(text).toContain("No doses on days 1–4.");
+    expect(text.match(/No doses/g)).toHaveLength(1);
+  });
+});
+
+
+it("uses locale-owned measurement labels with live values and retained old source text", () => {
+  const condition = { kind: "measurement" as const, name: "bp", operation: "gt" as const,
+    value: 150, text: "BP > 160" };
+  const source = JSON.stringify(condition);
+  expect(appendMedicationConditionText("Dose.", condition, { locale: "en" })).toBe("Dose only if BP > 150.");
+  expect(appendMedicationConditionText("ยา.", condition, { locale: "th" })).toBe("ยา เฉพาะเมื่อ BP > 150.");
+  expect(JSON.stringify(condition)).toBe(source);
+  expect(appendMedicationConditionText("Dose.", { ...condition, name: "custom pressure" }, { locale: "en" }))
+    .toBe("Dose only if custom pressure > 150.");
 });

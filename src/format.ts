@@ -1076,9 +1076,10 @@ function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefi
       : unit === FhirPeriodUnit.Second ? (value === 1 ? "second" : "seconds")
         : unit === FhirPeriodUnit.Day ? (value === 1 ? "day" : "days") : unit;
   const max = schedule?.administrationDurationMax;
+  const lower = quantityComparatorText(schedule?.administrationDurationComparator, "en") + stripTrailingZero(value);
   return max !== undefined && max !== value
-    ? `over ${stripTrailingZero(value)} to ${stripTrailingZero(max)} ${label}`
-    : `over ${stripTrailingZero(value)} ${label}`;
+    ? `over ${lower} to ${stripTrailingZero(max)} ${label}`
+    : `over ${lower} ${label}`;
 }
 
 function shouldUseGenericMedicationObject(clause: CanonicalSigClause): boolean {
@@ -1137,6 +1138,10 @@ function formatShort(clause: CanonicalSigClause): string {
     }
   } else if (routeText) {
     parts.push(routeText);
+  }
+  if (clause.site) {
+    const site = formatSite(clause, resolveRouteGrammar(clause));
+    if (site) parts.push(site);
   }
   if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
@@ -1202,9 +1207,10 @@ function formatShort(clause: CanonicalSigClause): string {
   }
   if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
+    const lower = (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
     const duration = max !== undefined && max !== schedule.administrationDuration
-      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
-      : stripTrailingZero(schedule.administrationDuration);
+      ? `${lower}-${stripTrailingZero(max)}`
+      : lower;
     parts.push(`over${duration}${schedule.administrationDurationUnit}`);
   }
   const durationShort = formatDurationShort(schedule);

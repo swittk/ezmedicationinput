@@ -120,6 +120,7 @@ const DEFAULT_FREQUENCY_DEFAULTS: Required<FrequencyFallbackTimes> = {
  */
 const DAILY_FREQUENCY_BY_TIMING_CODE: Readonly<Record<string, number>> = {
   QD: 1,
+  QOD: 0.5,
   AM: 1,
   PM: 1,
   BID: 2,
@@ -604,6 +605,13 @@ function hasDefiniteAdministrationCount(
 } {
   return repeat?.count !== undefined && (repeat.countMax === undefined || repeat.countMax === repeat.count);
 }
+/** Exact phase completion includes the implicit single immediate dose.
+ * Keep the ordinary explicit-count predicate separate for count eligibility. */
+function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number | undefined {
+  const count = repeat?.count ?? (repeat?.anchors && arrayIncludes(repeat.anchors, TimingEvent.Immediate) ? 1 : undefined);
+  return count !== undefined && Number.isInteger(count) && count > 0 &&
+    (repeat?.countMax === undefined || repeat.countMax === count) ? count : undefined;
+}
 function isSingleAdministrationRepeat(repeat: CanonicalRecurrence): boolean {
   return (
     repeatOccurrenceCap(repeat) === 1 &&
@@ -981,7 +989,8 @@ function resolveFrequencyClocks(timing: CanonicalTiming, config: NextDueDoseConf
 }
 function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined {
   const code = timing.code?.coding?.find((coding) => coding.code)?.code?.toUpperCase();
-  return code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
+  const daily = code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
+  return daily !== undefined && daily >= 1 ? daily : undefined;
 }
 /** A known daily code and an exact complete repeat both describe the same
  * recurrence. Contradictory external facts have no unique executable cadence. */
@@ -989,7 +998,8 @@ function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void 
   const repeat = timing?.recurrence;
   if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
     return;
-  const daily = recognizedDailyTimingCode(timing);
+  const code = timing.code.coding?.find((coding) => coding.code)?.code?.toUpperCase();
+  const daily = code ? DAILY_FREQUENCY_BY_TIMING_CODE[code] : undefined;
   if (daily === undefined ||
       (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
       (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) return;
@@ -1621,9 +1631,10 @@ const INFUSION_TIME_SECONDS: Readonly<Record<string, number>> = {
  * inputs determine a single bound only when their resulting directions agree. */
 function measuredRateComparator(
   numerator: CanonicalMeasure["comparator"],
-  denominator: CanonicalMeasure["comparator"]
+  denominator: CanonicalMeasure["comparator"],
+  product = false
 ): CanonicalMeasure["comparator"] {
-  const inverse = denominator === "<" ? ">" : denominator === "<=" ? ">="
+  const inverse = product ? denominator : denominator === "<" ? ">" : denominator === "<=" ? ">="
     : denominator === ">" ? "<" : denominator === ">=" ? "<=" : denominator;
   if (!numerator) return inverse;
   if (!inverse) return numerator;
@@ -1677,6 +1688,8 @@ function measuredRateQuantity(
   }
   if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit)
     return undefined;
+  if (recurrence?.occurrenceDurationComparator)
+    comparator = measuredRateComparator(comparator, recurrence.occurrenceDurationComparator, true);
   return { value, unit, ...(code ? { code } : {}), ...(system ? { system } : {}),
     ...(comparator ? { comparator } : {}) };
 }
@@ -1910,7 +1923,8 @@ function treatmentRelativeInstant(
   timeZone: string,
   sourceClock?: TreatmentWallClock
 ): Date {
-  const knownAnchor = relative.anchor === "treatment-start";
+  const dayStart = relative.anchor === "treatment-day-start";
+  const knownAnchor = relative.anchor === "treatment-start" || dayStart;
   const duration = relative.displacement;
   if (!duration && relative.displacementRange) {
     const range = relative.displacementRange;
@@ -1926,8 +1940,8 @@ function treatmentRelativeInstant(
     if (low.getTime() !== high.getTime()) throw new Error(unresolved);
     return low;
   }
-  const quantity = duration?.value;
-  const unit = duration?.code ?? duration?.unit;
+  const quantity = duration?.value ?? (dayStart ? 0 : undefined);
+  const unit = duration?.code ?? duration?.unit ?? (dayStart ? "d" : undefined);
   if (
     !knownAnchor ||
     getQuantityComparator(duration) ||
@@ -1936,6 +1950,10 @@ function treatmentRelativeInstant(
     quantity < 0
   ) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
+  }
+  if (dayStart) {
+    orderedAt = addLocalDays(orderedAt, 0, timeZone);
+    sourceClock = LOCAL_DAY_START_CLOCK;
   }
   switch (unit) {
     case "s":
@@ -1992,8 +2010,9 @@ function stageCalendarClock(
 ): TreatmentWallClock | undefined {
   const startBoundary = course.stages[index].start;
   const nextDay = startBoundary?.anchor === "previous-phase-next-day";
-  if (!sourceClock && !nextDay) return undefined;
   const relative = startBoundary ?? (index > 0 ? course.stages[index - 1].end : undefined);
+  const dayStart = relative?.anchor === "treatment-day-start";
+  if (!sourceClock && !nextDay && !dayStart) return undefined;
   if (!relative) {
     // An implicit successor inherits the predecessor's logical clock, not
     // the original course's clock or a gap-shifted physical timestamp.
@@ -2003,7 +2022,7 @@ function stageCalendarClock(
   const unit = offset?.code ?? offset?.unit;
   if (unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour)
     return getTimeParts(start, timeZone);
-  return nextDay ? LOCAL_DAY_START_CLOCK : sourceClock;
+  return nextDay || dayStart ? LOCAL_DAY_START_CLOCK : sourceClock;
 }
 /** Each component phase marker owns BOTH its cadence start and the civil
  * clock used by its calendar duration cap. Elapsed offsets create a fresh
@@ -2045,8 +2064,8 @@ function parallelComponentCadence(
     origin,
     capClock: elapsed
       ? getTimeParts(origin, timeZone)
-      : nextDay ? LOCAL_DAY_START_CLOCK
-      : stageClock ?? sourceClock ?? getTimeParts(treatmentStart, timeZone),
+      : nextDay || boundary?.anchor === "treatment-day-start" ? LOCAL_DAY_START_CLOCK
+      : sourceClock ?? getTimeParts(treatmentStart, timeZone),
     hasPhaseOrigin: true,
   };
 }
@@ -2127,6 +2146,21 @@ interface ResolvedAdministrationWindow {
   countEligibilityStart?: Date;
   capClock?: TreatmentWallClock;
   completionPending?: boolean;
+  /** Only dependency-bearing stages can resolve members out of source order. */
+  sourceIndex?: number;
+}
+interface PendingPhaseAdministration {
+  administration: CanonicalAdministration;
+  sourceIndex: number;
+  remaining: number;
+}
+interface PhaseDependencies {
+  completed: Map<number, AcceptedStageCompletion>;
+  waiting: Map<number, PendingPhaseAdministration[]>;
+  members: Set<number>;
+  pending: number;
+  resolve: (administration: CanonicalAdministration, sourceIndex: number,
+    predecessorEnd: Date) => ResolvedAdministrationWindow;
 }
 interface TreatmentStepWindow {
   start: Date;
@@ -2135,6 +2169,154 @@ interface TreatmentStepWindow {
   capClock?: TreatmentWallClock;
   administrations: ResolvedAdministrationWindow[];
   completionPending?: boolean;
+  dependencies?: PhaseDependencies;
+}
+/** Shared component window resolution for initial planning and accepted
+ * same-track continuations. Dependency resumption supplies only its own
+ * predecessor endpoint; cadence, bounds and caps remain owned here. */
+function resolveAdministrationWindow(
+  administration: CanonicalAdministration, stage: CanonicalStage, index: number,
+  anchor: Date, start: Date, previousEnd: Date, timeZone: string,
+  sourceClock: TreatmentWallClock | undefined, capClock: TreatmentWallClock | undefined,
+  options: NextDueDoseOptions | undefined, predecessorPoint: Date | undefined,
+  successorFloor: Date | undefined, deferFiniteCompletion: boolean,
+  capContext?: MedicationContext, ownPredecessorEnd?: Date
+): ResolvedAdministrationWindow {
+  const recurrence = administration.schedule?.recurrence;
+  const absoluteStart = resolveRepeatBoundsStart(recurrence, timeZone);
+  const absoluteEnd = resolveRepeatBoundsEndExclusive(recurrence, timeZone);
+  if (recurrence?.calendarWindow?.start && !absoluteStart)
+    throw new MedicationQuantityCalculationError(
+      "invalid-calendar-bounds",
+      "A calendar-bound dosage has an invalid start date; correct the date before execution."
+    );
+  if (recurrence?.calendarWindow?.end && !absoluteEnd)
+    throw new MedicationQuantityCalculationError(
+      "invalid-calendar-bounds",
+      "A calendar-bound dosage has an invalid end date; correct the date before execution."
+    );
+  if (absoluteStart && absoluteEnd && absoluteEnd <= absoluteStart)
+    throw new MedicationQuantityCalculationError(
+      "invalid-calendar-order",
+      "Absolute calendar component end precedes its start: the calendar-bound dosage ends before its stated start date; correct the date interval."
+    );
+  const implicitStart = stage.start
+    ? start
+    : successorIntervalStart(administration, predecessorPoint, start, timeZone);
+  const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
+  const cadence = recurrence?.calendarWindow && !administration.phaseStart
+    ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
+    : parallelComponentCadence(
+        administration,
+        anchor,
+        timeZone,
+        implicitStart,
+        sourceClock,
+        componentClock,
+        ownPredecessorEnd ?? (index > 0 ? previousEnd : undefined)
+      );
+  const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
+    ? absoluteStart ?? start : implicitStart;
+  let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
+  if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
+  if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
+  const countEligibilityStart =
+    !cadence.hasPhaseOrigin &&
+    eligibleFrom > cadence.origin &&
+    hasDefiniteAdministrationCount(recurrence)
+      ? eligibleFrom
+      : undefined;
+  const delay = getAdministrationOffsetMinutes(administration);
+  const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
+  let endExclusive = earlierDate(
+    resolveRepeatDurationCapEnd(administration, durationOrigin, timeZone,
+      delay ? getTimeParts(durationOrigin, timeZone)
+        : cadence.capClock && recurrence?.calendarWindow && absoluteStart ? getTimeParts(absoluteStart, timeZone)
+        : cadence.capClock),
+    absoluteEnd
+  );
+  let completionPoint: Date | undefined;
+  if (administration.schedule?.explicitEvents?.length) {
+    // A finite authored event list owns its last possible administration.
+    // Its future events may extend beyond the next cycle's default clip.
+    const completion = explicitAdministrationCompletion(administration, cadence.origin,
+      eligibleFrom, options ?? { from: cadence.origin, timeZone }, timeZone);
+    if (completion) {
+      const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
+      if (!endExclusive || fence <= endExclusive) {
+        endExclusive = fence;
+        if (completion.point) completionPoint = completion.end;
+      }
+    }
+  }
+  // Overlapping capped cycles cannot close an exact-count phase using
+  // its LOCAL pre-cap completion point: earlier accepted administrations
+  // from another cycle may defer this component's third actual dose.
+  // The shared chronological acceptor owns count completion ONLY when this
+  // component has a cap shared across cycles. An uncapped counted loading
+  // component still completes locally, even when a later maintenance
+  // component triggers chronological collection for its own rolling cap.
+  const hasCountCompletion = finiteCompletionCount(recurrence) !== undefined;
+  const deferCount = deferFiniteCompletion && hasCountCompletion &&
+    Boolean(getTimingOccurrenceCap(recurrence) || (hasPeriodLimits(administration) &&
+      (executableDoseRange(administration, capContext)?.caps.length ??
+        executableQuantityCaps(administration, capContext).length)));
+  if (hasCountCompletion && !deferCount) {
+    const completion = finiteAdministrationCompletion(
+      administration,
+      cadence.origin,
+      options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
+      timeZone,
+      countEligibilityStart ?? cadence.origin
+    );
+    if (completion) {
+      const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
+      if (!endExclusive || fence <= endExclusive) {
+        endExclusive = fence;
+        if (completion.point) completionPoint = completion.end;
+      }
+    }
+  }
+  return {
+    administration,
+    recurrenceOrigin: cadence.origin,
+    eligibleFrom,
+    endExclusive,
+    completionPoint,
+    countEligibilityStart,
+    capClock: cadence.capClock,
+    ...(deferCount ? { completionPending: true } : {}),
+  };
+}
+/** Publish actual/known completion and wake only its explicit same-track
+ * successors. Each edge is visited once; ordinary stages allocate no graph. */
+function completePhaseDependency(
+  dependencies: PhaseDependencies, sourceMember: number, completion: AcceptedStageCompletion
+): ResolvedAdministrationWindow[] | undefined {
+  if (dependencies.completed.has(sourceMember)) return undefined;
+  const completions = [{ sourceMember, completion }];
+  let ready: ResolvedAdministrationWindow[] | undefined;
+  for (let index = 0; index < completions.length; index++) {
+    const item = completions[index];
+    dependencies.completed.set(item.sourceMember, item.completion);
+    const waiting = dependencies.waiting.get(item.sourceMember);
+    if (!waiting) continue;
+    dependencies.waiting.delete(item.sourceMember);
+    for (const pending of waiting) {
+      if (--pending.remaining > 0) continue;
+      dependencies.pending--;
+      let latest = item.completion.end;
+      for (const predecessor of pending.administration.phasePredecessors!)
+        if (dependencies.completed.get(predecessor)!.end > latest)
+          latest = dependencies.completed.get(predecessor)!.end;
+      const window = dependencies.resolve(pending.administration, pending.sourceIndex, latest);
+      (ready ??= []).push(window);
+      if (!window.completionPending && window.endExclusive && window.administration.sourceMember !== undefined)
+        completions.push({ sourceMember: window.administration.sourceMember,
+          completion: { end: window.endExclusive, point: window.completionPoint } });
+    }
+  }
+  return ready;
 }
 /** Resolve clinical phase semantics ONCE for both event enumeration and
  * numerical supply. No caller is allowed to reconstruct a second onset/cap
@@ -2171,117 +2353,81 @@ function treatmentStepWindow(
   let latest: { end: Date; point?: Date } | undefined;
   const successorFloor =
     predecessorPoint && !stage.start ? new Date(predecessorPoint.getTime() + 1) : undefined;
-  for (const administration of stage.administrations) {
-    const recurrence = administration.schedule?.recurrence;
-    const absoluteStart = resolveRepeatBoundsStart(recurrence, timeZone);
-    const absoluteEnd = resolveRepeatBoundsEndExclusive(recurrence, timeZone);
-    if (recurrence?.calendarWindow?.start && !absoluteStart)
-      throw new MedicationQuantityCalculationError(
-        "invalid-calendar-bounds",
-        "A calendar-bound dosage has an invalid start date; correct the date before execution."
-      );
-    if (recurrence?.calendarWindow?.end && !absoluteEnd)
-      throw new MedicationQuantityCalculationError(
-        "invalid-calendar-bounds",
-        "A calendar-bound dosage has an invalid end date; correct the date before execution."
-      );
-    if (absoluteStart && absoluteEnd && absoluteEnd <= absoluteStart)
-      throw new MedicationQuantityCalculationError(
-        "invalid-calendar-order",
-        "Absolute calendar component end precedes its start: the calendar-bound dosage ends before its stated start date; correct the date interval."
-      );
-    const implicitStart = stage.start
-      ? start
-      : successorIntervalStart(administration, predecessorPoint, start, timeZone);
-    const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
-    const cadence = recurrence?.calendarWindow && !administration.phaseStart
-      ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
-      : parallelComponentCadence(
-          administration,
-          anchor,
-          timeZone,
-          implicitStart,
-          sourceClock,
-          componentClock,
-          index > 0 ? previousEnd : undefined
-        );
-    const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
-      ? absoluteStart ?? start : implicitStart;
-    let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
-    if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
-    if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
-    const countEligibilityStart =
-      !cadence.hasPhaseOrigin &&
-      eligibleFrom > cadence.origin &&
-      hasDefiniteAdministrationCount(recurrence)
-        ? eligibleFrom
-        : undefined;
-    const delay = getAdministrationOffsetMinutes(administration);
-    const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
-    let endExclusive = earlierDate(
-      resolveRepeatDurationCapEnd(administration, durationOrigin, timeZone,
-        delay ? getTimeParts(durationOrigin, timeZone)
-          : cadence.capClock && recurrence?.calendarWindow && absoluteStart ? getTimeParts(absoluteStart, timeZone)
-          : cadence.capClock),
-      absoluteEnd
-    );
-    let completionPoint: Date | undefined;
-    if (administration.schedule?.explicitEvents?.length) {
-      // A finite authored event list owns its last possible administration.
-      // Its future events may extend beyond the next cycle's default clip.
-      const completion = explicitAdministrationCompletion(administration, cadence.origin,
-        eligibleFrom, options ?? { from: cadence.origin, timeZone }, timeZone);
-      if (completion) {
-        const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
-        if (!endExclusive || fence <= endExclusive) {
-          endExclusive = fence;
-          if (completion.point) completionPoint = completion.end;
-        }
+  let dependencies: PhaseDependencies | undefined;
+  for (let sourceIndex = 0; sourceIndex < stage.administrations.length; sourceIndex++) {
+    const administration = stage.administrations[sourceIndex];
+    const predecessors = administration.phasePredecessors;
+    if (predecessors?.length && !dependencies) {
+      dependencies = {
+        completed: new Map(), waiting: new Map(), members: new Set(), pending: 0,
+        resolve: (member, memberIndex, predecessorEnd) => {
+          const resolved = resolveAdministrationWindow(member, stage, index, anchor, start, previousEnd,
+            timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
+            deferFiniteCompletion, capContext, predecessorEnd);
+          resolved.sourceIndex = memberIndex;
+          return resolved;
+        },
+      };
+      // The first edge can follow its parents. Retain their already-resolved
+      // endpoints instead of rerunning cadence or finite-count execution.
+      for (let prior = 0; prior < administrations.length; prior++) {
+        const window = administrations[prior], id = window.administration.sourceMember;
+        window.sourceIndex = prior;
+        if (id === undefined) continue;
+        dependencies.members.add(id);
+        if (!window.completionPending && window.endExclusive)
+          dependencies.completed.set(id, { end: window.endExclusive, point: window.completionPoint });
       }
     }
-    // Overlapping capped cycles cannot close an exact-count phase using
-    // its LOCAL pre-cap completion point: earlier accepted administrations
-    // from another cycle may defer this component's third actual dose.
-    // The shared chronological acceptor owns count completion ONLY when this
-    // component has a cap shared across cycles. An uncapped counted loading
-    // component still completes locally, even when a later maintenance
-    // component triggers chronological collection for its own rolling cap.
-    const hasCountCompletion = recurrence?.count !== undefined ||
-      arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate);
-    const deferCount = deferFiniteCompletion && hasCountCompletion &&
-      Boolean(getTimingOccurrenceCap(recurrence) || (hasPeriodLimits(administration) &&
-        (executableDoseRange(administration, capContext)?.caps.length ??
-          executableQuantityCaps(administration, capContext).length)));
-    if (deferCount) completionPending = true;
-    if (hasCountCompletion && !deferCount) {
-      const completion = finiteAdministrationCompletion(
-        administration,
-        cadence.origin,
-        options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
-        timeZone,
-        countEligibilityStart ?? cadence.origin
-      );
-      if (completion) {
-        const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
-        if (!endExclusive || fence <= endExclusive) {
-          endExclusive = fence;
-          if (completion.point) completionPoint = completion.end;
+    const sourceMember = administration.sourceMember;
+    if (dependencies && sourceMember !== undefined) dependencies.members.add(sourceMember);
+    let ownPredecessorEnd: Date | undefined;
+    if (predecessors?.length) {
+      const pending: PendingPhaseAdministration = { administration, sourceIndex, remaining: 0 };
+      for (const predecessor of predecessors) {
+        const completed = dependencies!.completed.get(predecessor);
+        if (completed) {
+          if (!ownPredecessorEnd || completed.end > ownPredecessorEnd) ownPredecessorEnd = completed.end;
+        } else {
+          pending.remaining++;
+          const waiting = dependencies!.waiting.get(predecessor);
+          if (waiting) waiting.push(pending);
+          else dependencies!.waiting.set(predecessor, [pending]);
         }
       }
+      if (pending.remaining) { dependencies!.pending++; continue; }
     }
-    administrations.push({
-      administration,
-      recurrenceOrigin: cadence.origin,
-      eligibleFrom,
-      endExclusive,
-      completionPoint,
-      countEligibilityStart,
-      capClock: cadence.capClock,
-      ...(deferCount ? { completionPending: true } : {}),
-    });
-    if (!endExclusive) allFinite = false;
-    else if (!latest || endExclusive > latest.end) latest = { end: endExclusive, point: completionPoint };
-    else if (endExclusive.getTime() === latest.end.getTime() && !completionPoint) latest.point = undefined;
+    const window = resolveAdministrationWindow(administration, stage, index, anchor, start, previousEnd,
+      timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
+      deferFiniteCompletion, capContext, ownPredecessorEnd);
+    if (dependencies) window.sourceIndex = sourceIndex;
+    administrations.push(window);
+    completionPending ||= Boolean(window.completionPending);
+    if (!window.endExclusive) allFinite = false;
+    else if (!latest || window.endExclusive > latest.end)
+      latest = { end: window.endExclusive, point: window.completionPoint };
+    else if (window.endExclusive.getTime() === latest.end.getTime() && !window.completionPoint)
+      latest.point = undefined;
+    if (dependencies && sourceMember !== undefined && !window.completionPending && window.endExclusive) {
+      const ready = completePhaseDependency(dependencies, sourceMember,
+        { end: window.endExclusive, point: window.completionPoint });
+      for (const resolved of ready ?? []) {
+        administrations.push(resolved);
+        completionPending ||= Boolean(resolved.completionPending);
+        if (!resolved.endExclusive) allFinite = false;
+        else if (!latest || resolved.endExclusive > latest.end)
+          latest = { end: resolved.endExclusive, point: resolved.completionPoint };
+        else if (resolved.endExclusive.getTime() === latest.end.getTime() && !resolved.completionPoint)
+          latest.point = undefined;
+      }
+    }
+  }
+  if (dependencies?.pending) {
+    allFinite = false;
+    for (const predecessor of dependencies.waiting.keys())
+      if (!dependencies.members.has(predecessor))
+        throw new MedicationQuantityCalculationError("previous-phase-required",
+          "The same-track predecessor is missing; retain that phase before executing its dependent dosage.");
   }
   let end = stage.end ? treatmentRelativeInstant(stage.end, anchor, timeZone, sourceClock) : undefined;
   let completionPoint: Date | undefined;
@@ -2300,7 +2446,8 @@ function treatmentStepWindow(
       "R6 treatment step end must be after its start"
     );
   return { start, end, completionPoint, capClock, administrations,
-    ...(!stage.end && completionPending ? { completionPending: true } : {}) };
+    ...(!stage.end && completionPending ? { completionPending: true } : {}),
+    ...(dependencies ? { dependencies } : {}) };
 }
 /** A repeated step keeps its authored civil duration when both boundaries
  * use a compatible calendar unit. Other resolved spans remain elapsed; an
@@ -2309,7 +2456,10 @@ function stepRepeatSpan(stage: CanonicalStage, window: TreatmentStepWindow, impl
   if (!window.end || window.completionPoint) return undefined;
   const start = stage.start?.displacement;
   const end = stage.end?.displacement;
-  if (end && !end.comparator && (!start || !start.comparator)) {
+  const sameAnchor = stage.end?.anchor === "treatment-start"
+    ? !stage.start || stage.start.anchor === "treatment-start"
+    : stage.end?.anchor === "treatment-day-start" && stage.start?.anchor === "treatment-day-start";
+  if (end && !end.comparator && sameAnchor && (!start || !start.comparator)) {
     const unit = parseBoundsDurationUnit(end), startUnit = parseBoundsDurationUnit(start);
     const z = normalizedCalendarInterval(end.value, unit);
     const a = (start?.value === 0 || (!stage.start && implicitTreatmentStart)) && z
@@ -2605,18 +2755,20 @@ function scheduleTreatmentRelativeCourse(
       // All members must complete before an implicit successor can begin.
       // Only genuinely finite counted members can resolve a deferred end;
       // an unbounded member remains unbounded, not a fabricated transition.
-      let pending = 0, canComplete = Boolean(collect && (window.completionPending || !window.end));
+      const dependencies = window.dependencies;
+      let pending = dependencies?.pending ?? 0,
+        canComplete = Boolean(collect && (window.completionPending || !window.end));
       let latest: AcceptedStageCompletion | undefined;
       if (canComplete) {
         for (const member of window.administrations) {
-          if (member.completionPending && hasDefiniteAdministrationCount(member.administration.schedule?.recurrence)) {
+          if (member.completionPending && finiteCompletionCount(member.administration.schedule?.recurrence) !== undefined) {
             pending++;
           } else if (member.endExclusive) {
             if (!latest || member.endExclusive > latest.end)
               latest = { end: member.endExclusive, point: member.completionPoint };
             else if (member.endExclusive.getTime() === latest.end.getTime() && !member.completionPoint)
               latest.point = undefined;
-          } else if (hasDefiniteAdministrationCount(member.administration.schedule?.recurrence)) {
+          } else if (finiteCompletionCount(member.administration.schedule?.recurrence) !== undefined) {
             pending++;
           } else { canComplete = false; break; }
         }
@@ -2628,19 +2780,27 @@ function scheduleTreatmentRelativeCourse(
           latest.point = undefined;
         if (--pending === 0 && latest) consume(planner.next(latest));
       };
-      for (let memberIndex = 0; memberIndex < window.administrations.length; memberIndex++) {
-        const member = window.administrations[memberIndex];
-        const key = rollingCycleKey(index, memberIndex);
-        const deferred = canComplete && (member.completionPending || !member.endExclusive);
+      const scheduleMember = (member: ResolvedAdministrationWindow, memberIndex: number, resumed = false): void => {
+        const key = rollingCycleKey(index, member.sourceIndex ?? memberIndex);
+        const trackCompletion = dependencies && member.administration.sourceMember !== undefined &&
+          dependencies.waiting.has(member.administration.sourceMember) &&
+          finiteCompletionCount(member.administration.schedule?.recurrence) !== undefined;
+        const deferred = Boolean(collect && (canComplete || trackCompletion) &&
+          (member.completionPending || !member.endExclusive) &&
+          finiteCompletionCount(member.administration.schedule?.recurrence) !== undefined);
         const effectiveEnd = earlierDate(window.end ?? null, member.endExclusive) ??
           (deferred ? undefined : cycleDefaultEnd);
-        if (effectiveEnd && from >= effectiveEnd) continue;
-        const effectiveFrom = from > member.eligibleFrom ? from : member.eligibleFrom;
+        if (effectiveEnd && from >= effectiveEnd) return;
         const original = member.administration;
-        if (collect && unscheduledOccurrenceCapacity(original)) continue;
+        const prnFrom = original.asNeeded ? (options as PhaseCountOptions).prnOpportunityFrom : undefined;
+        const requestedFrom = prnFrom && prnFrom > from ? prnFrom : from;
+        const effectiveFrom = requestedFrom > member.eligibleFrom ? requestedFrom : member.eligibleFrom;
+        if (effectiveEnd && effectiveFrom >= effectiveEnd) return;
+        if (collect && unscheduledOccurrenceCapacity(original)) return;
         const originalRepeat = original.schedule?.recurrence;
         const quota: CycleEventQuota = {
-          remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) : undefined,
+          remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
+            (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
         if (collect && original.asNeeded && quota.remaining !== undefined) {
           quota.historyStart = member.eligibleFrom.getTime();
@@ -2677,23 +2837,31 @@ function scheduleTreatmentRelativeCourse(
           ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
         } as PhaseCountOptions;
         if (deferred && collect) {
+          const completeMember = (completion: AcceptedStageCompletion) => {
+            if (canComplete) finishMember(completion);
+            if (dependencies && original.sourceMember !== undefined) {
+              const ready = completePhaseDependency(dependencies, original.sourceMember, completion);
+              for (const resolved of ready ?? []) scheduleMember(resolved, resolved.sourceIndex!, true);
+            }
+          };
           const emitNext = (after: Date) => {
             if (collect(undefined, key, original, quota)) return;
             const next = nextDueDoses(execution, { ...localOptions, from: after, limit: 1 })[0];
             if (next && (!effectiveEnd || Date.parse(next) < effectiveEnd.getTime()))
               collect(next, key, original, quota);
-            else if (effectiveEnd) finishMember({ end: effectiveEnd });
+            else if (effectiveEnd) completeMember({ end: effectiveEnd });
           };
           quota.advance = (at, accepted) => {
             if (accepted && quota.remaining === 0) {
               const completion = completionAfterAcceptedAdministration(original, new Date(at), timeZone);
+              if (!completion) return;
               const end = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
-              finishMember(effectiveEnd && end > effectiveEnd ? { end: effectiveEnd } :
+              completeMember(effectiveEnd && end > effectiveEnd ? { end: effectiveEnd } :
                 { end, point: completion.point ? completion.end : undefined });
             } else emitNext(new Date(at + 1));
           };
           emitNext(effectiveFrom);
-          continue;
+          return;
         }
         const times = nextDueDoses(execution, { ...localOptions, limit });
         let history = rollingUsage?.get(key);
@@ -2708,7 +2876,11 @@ function scheduleTreatmentRelativeCourse(
             }
           }
         }
-      }
+        if (resumed && canComplete && member.endExclusive)
+          finishMember({ end: member.endExclusive, point: member.completionPoint });
+      };
+      for (let memberIndex = 0; memberIndex < window.administrations.length; memberIndex++)
+        scheduleMember(window.administrations[memberIndex], memberIndex);
       if (suspended) return;
       planned = planner.next();
     }
@@ -3276,6 +3448,7 @@ function scheduleRepeatedCourse(
           // Earlier administrations are history for a rolling limit, not
           // results requested by the caller. Only capped courses do this.
           from: rollingUsage ? cycleStart : from > cycleStart ? from : cycleStart,
+          ...(rollingUsage ? { prnOpportunityFrom: from } : {}),
           orderedAt: cycleStart,
           priorCount: undefined,
           limit: rollingUsage ? 10000 : limit,
@@ -3553,6 +3726,8 @@ function executionCourseWithPeriodOffsets(course: CanonicalCourse): CanonicalCou
  * eligible administration. This never becomes public options or FHIR state. */
 type PhaseCountOptions = NextDueDoseOptions & {
   countEligibilityStart?: Date;
+  /** Nominal replay may consume scheduled history, never unrecorded PRN use. */
+  prnOpportunityFrom?: Date;
   /** Actual doses already owned by history, excluded before nominal replay admission. */
   countedActualTimes?: ReadonlySet<number>;
   /** Numeric supply has an explanation field for retained unevaluated caps. */
@@ -5430,7 +5605,8 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration): {
       repeat.occurrenceDurationUnit &&
       durationMax !== duration
     ) {
-      nextRepeat = { ...nextRepeat, occurrenceDuration: durationMax, occurrenceDurationMax: undefined };
+      nextRepeat = { ...nextRepeat, occurrenceDuration: durationMax,
+        occurrenceDurationComparator: undefined, occurrenceDurationMax: undefined };
       infusionDurationMaximum = true;
     }
   }
@@ -5841,9 +6017,13 @@ function sumCourseUnits(
           value: useEstimate ? estimateValue! : roundCalculatedUnits(totalUnits * context.containerValue),
           unit: containerUnit,
         };
-    } else if (commonUnit && containerUnit && commonUnit.toLowerCase() === containerUnit.toLowerCase()) {
-      result.totalContainers = Math.ceil(totalUnits / context.containerValue);
-      result.totalContainerQuantity = { value: totalUnits, unit: containerUnit };
+    } else if (commonUnit && containerUnit) {
+      const containerQuantity = commonUnit.toLowerCase() === containerUnit.toLowerCase()
+        ? totalUnits : convertValue(totalUnits, commonUnit, containerUnit, measuredStrengthRatio(context));
+      if (containerQuantity !== null) {
+        result.totalContainers = Math.ceil(containerQuantity / context.containerValue);
+        result.totalContainerQuantity = { value: containerQuantity, unit: containerUnit };
+      }
     }
   }
   return result;
@@ -6315,7 +6495,7 @@ function calculateTotalUnitsSingle(
   const containerValue = context?.containerValue;
   const containerUnit = context?.containerUnit;
   const packageUnit = context?.packageUnit;
-  const doseUnit = dosage.amounts?.[0]?.quantity?.unit;
+  const doseUnit = doseUnitForLimits;
   const unitSemantics = getDoseUnitSemantics(doseUnit, context);
   if (unitSemantics?.approximateQuantity) {
     const approximation = unitSemantics.approximateQuantity;
@@ -6386,7 +6566,8 @@ function calculateTotalUnitsSingle(
 function calculateChronologicalCourseUnits(
   course: CanonicalCourse, originalOf: Map<CanonicalAdministration, CanonicalAdministration>,
   options: CanonicalSupplyOptions, zone: string, queryStart: Date, queryEnd: Date,
-  anchor: Date, lifetimeUsage?: LifetimeCycleUsage
+  anchor: Date, lifetimeUsage?: LifetimeCycleUsage,
+  memberTotals?: Map<string, TotalUnitsResult>
 ): TotalUnitsResult {
       const events=chronologicalRepeatedEvents(course,{
         ...options,from:queryStart,orderedAt:anchor,limit:10000
@@ -6435,6 +6616,7 @@ function calculateChronologicalCourseUnits(
         if (lifetimeUsage && hasLifetimeLimit(group.member))
           lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
         entries.push({total,unit:total.unit});
+        memberTotals?.set(key, total);
       }
       return sumCourseUnits(entries,options);
 }
@@ -6466,8 +6648,33 @@ function attainedChronologicalSupplyBound(
   }
   return false;
 }
-/** Compare complete feasible supply plans; inferred upper-frequency clocks
- * cannot erase larger authored-clock quantities in a short query window. */
+function largerSupplyPlan(
+  first: TotalUnitsResult, second: TotalUnitsResult, context?: MedicationContext
+): TotalUnitsResult {
+  const comparable = first.unit === second.unit || !first.totalUnits || !second.totalUnits
+    ? second.totalUnits : first.unit && second.unit
+      ? convertValue(second.totalUnits, second.unit, first.unit, measuredStrengthRatio(context))
+      : null;
+  if (comparable === null)
+    throw new MedicationQuantityCalculationError("incompatible-dose-units",
+      "Alternative supply plans have incompatible quantity units; provide a product strength before comparing them.");
+  return comparable > first.totalUnits ? second : first;
+}
+/** A single parallel stage with independently owned limits can choose each
+ * member's feasible clock plan separately. Shared caps and phase dependencies
+ * couple those choices and must retain a joint course plan. */
+function hasIndependentClockAlternatives(course: CanonicalCourse): boolean {
+  if (course.stages.length !== 1 || course.safety ||
+      (course.cycleInterval && course.cycleCount !== 1)) return false;
+  const stage = course.stages[0];
+  if (stage.safety || (stage.count !== undefined && stage.count !== 1) ||
+      stage.administrations.length < 2) return false;
+  for (const member of stage.administrations)
+    if (member.phasePredecessors?.length) return false;
+  return true;
+}
+/** Compare feasible supply plans; inferred upper-frequency clocks cannot
+ * erase larger authored-clock quantities in a short query window. */
 function maximumChronologicalTimedCourseUnits(
   course: CanonicalCourse, options: CanonicalSupplyOptions, zone: string,
   queryStart: Date, queryEnd: Date, anchor: Date, lifetimeUsage?: LifetimeCycleUsage
@@ -6475,9 +6682,11 @@ function maximumChronologicalTimedCourseUnits(
   const maximum = maximumChronologicalSupplyCourse(course, options);
   if (!maximum.hasClockAlternative) return calculateChronologicalCourseUnits(
     maximum.course, maximum.originalOf, options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
+  const independent = hasIndependentClockAlternatives(course);
+  const upperMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
   const upperUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
   const upper = calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
-    options, zone, queryStart, queryEnd, anchor, upperUsage);
+    options, zone, queryStart, queryEnd, anchor, upperUsage, upperMembers);
   if (attainedChronologicalSupplyBound(maximum.course, upper, options, queryStart, queryEnd)) {
     if (lifetimeUsage && upperUsage) {
       lifetimeUsage.clear();
@@ -6487,17 +6696,28 @@ function maximumChronologicalTimedCourseUnits(
   }
   const authored = maximumChronologicalSupplyCourse(course, options, true);
   const authoredUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
+  const authoredMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
   const concrete = calculateChronologicalCourseUnits(authored.course, authored.originalOf,
-    options, zone, queryStart, queryEnd, anchor, authoredUsage);
-  const concreteInUpperUnits = concrete.unit === upper.unit || !concrete.totalUnits
-    ? concrete.totalUnits : !upper.totalUnits ? concrete.totalUnits
-      : concrete.unit && upper.unit
-        ? convertValue(concrete.totalUnits, concrete.unit, upper.unit, measuredStrengthRatio(options.context))
-        : null;
-  if (concreteInUpperUnits === null)
-    throw new MedicationQuantityCalculationError("incompatible-dose-units",
-      "Alternative supply plans have incompatible quantity units; provide a product strength before comparing them.");
-  const selected = concreteInUpperUnits > upper.totalUnits ? concrete : upper;
+    options, zone, queryStart, queryEnd, anchor, authoredUsage, authoredMembers);
+  const selected = largerSupplyPlan(upper, concrete, options.context);
+  if (upperMembers && authoredMembers) {
+    const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
+    for (const [key, upperTotal] of upperMembers) {
+      const authoredTotal = authoredMembers.get(key);
+      const total = authoredTotal ? largerSupplyPlan(upperTotal, authoredTotal, options.context) : upperTotal;
+      entries.push({ total, unit: total.unit });
+      const usage = total === authoredTotal ? authoredUsage : upperUsage;
+      if (lifetimeUsage && usage?.has(key)) lifetimeUsage.set(key, usage.get(key)!);
+    }
+    for (const [key, total] of authoredMembers) {
+      if (upperMembers.has(key)) continue;
+      entries.push({ total, unit: total.unit });
+      if (lifetimeUsage && authoredUsage?.has(key)) lifetimeUsage.set(key, authoredUsage.get(key)!);
+    }
+    // Preserve the established whole-plan units/explanation when independently
+    // choosing clocks does not increase the feasible supply.
+    return largerSupplyPlan(selected, sumCourseUnits(entries, options), options.context);
+  }
   const selectedUsage = selected === concrete ? authoredUsage : upperUsage;
   if (lifetimeUsage && selectedUsage) {
     lifetimeUsage.clear();
@@ -6640,7 +6860,8 @@ function calculateCourseTotalUnits(
       return qualifyCourseSupply(course, maximumChronologicalCourseUnits(course, options, zone,
         queryStart, queryEnd, anchor, lifetimeUsage));
     }
-    if (priorCycleUsage) options = withActualReplayHistory(options, queryStart);
+    if (priorCycleUsage) options = { ...withActualReplayHistory(options, queryStart),
+      prnOpportunityFrom: queryStart } as CanonicalSupplyOptions & PhaseCountOptions;
     let cycleStart = anchor;
     let guard = 0;
     while (
@@ -6706,8 +6927,9 @@ function calculateCourseTotalUnits(
     if (!window.end && index + 1 < course.stages.length) assumedOpenTransition = true;
     for (let memberIndex=0;memberIndex<window.administrations.length;memberIndex++) {
       const member = window.administrations[memberIndex];
-      const dosage = member.administration,
-        begin = member.eligibleFrom;
+      const dosage = member.administration;
+      const prnFrom = dosage.asNeeded ? (options as PhaseCountOptions).prnOpportunityFrom : undefined;
+      const begin = prnFrom && prnFrom > member.eligibleFrom ? prnFrom : member.eligibleFrom;
       if (capacityOnly && !unscheduledOccurrenceCapacity(dosage)) continue;
       const nativeEnd = earlierDate(window.end ?? null, member.endExclusive);
       const end = minDate(queryEnd, nativeEnd ?? cycleDefaultEnd ?? null);
@@ -6724,7 +6946,7 @@ function calculateCourseTotalUnits(
         if (count === undefined || (options.priorCount === undefined &&
             ((dosage.amounts?.[0]?.range && hasPeriodLimits(dosage)) ||
              (!options.priorDoseTimes?.length && buckets * cap.max <= count)))) {
-          const key = rollingCycleKey(index, memberIndex);
+          const key = rollingCycleKey(index, member.sourceIndex ?? memberIndex);
           let plan = capacityWindows.get(key);
           if (!plan) capacityWindows.set(key, plan = { dosage, windows: [] });
           plan.windows.push({ start: Math.max(begin.getTime(), queryStart.getTime()), end: end.getTime(),
@@ -6760,7 +6982,7 @@ function calculateCourseTotalUnits(
           },
         },
       };
-      const key = rollingCycleKey(index, memberIndex);
+      const key = rollingCycleKey(index, member.sourceIndex ?? memberIndex);
       const weighted = rangeUsage && dosage.amounts?.[0]?.range && unscheduledOccurrenceCapacity(dosage);
       const rangeAccepted: SupplyAllocation[] | undefined = weighted ? [] : undefined;
       const rangePrior = weighted ? rangeUsage!.get(key) : undefined;
@@ -7035,14 +7257,8 @@ function finiteAdministrationCompletion(
   | undefined {
   const repeat = dosage.schedule?.recurrence;
   if (!repeat) return undefined;
-  const count = repeat.count ?? (arrayIncludes(repeat.anchors ?? [], TimingEvent.Immediate) ? 1 : undefined);
-  if (
-    count === undefined ||
-    !Number.isInteger(count) ||
-    count <= 0 ||
-    (repeat.countMax !== undefined && repeat.countMax !== count)
-  )
-    return undefined;
+  const count = finiteCompletionCount(repeat);
+  if (count === undefined) return undefined;
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
@@ -7087,8 +7303,9 @@ function finiteAdministrationCompletion(
  * finite phases and the chronological ledger use this same completion rule. */
 function completionAfterAcceptedAdministration(
   dosage: CanonicalAdministration, last: Date, zone: string
-): { end: Date; point: boolean } {
+): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
+  if (repeat?.occurrenceDurationComparator) return undefined;
   if (repeat?.occurrenceDuration && repeat.occurrenceDurationUnit) {
     const advance = createIntervalStepper(
       { period: repeat.occurrenceDuration, periodUnit: repeat.occurrenceDurationUnit },

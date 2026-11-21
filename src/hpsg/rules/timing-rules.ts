@@ -2945,6 +2945,7 @@ function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number):
     type: "schedule-sign", rule: "hpsg.lex.schedule.treatmentRelativePeriod", tokens: members,
     synsem: { head: { schedule: {
       treatmentStartOffsetDays: header.offsetDays,
+      phaseStartReference: "treatment-day-start",
       ...(header.bounded ? { duration: 1, durationUnit: header.unit } : {})
     } }, valence: {}, cont: { clauseKind: "administration" } },
     score: 52 + members.length

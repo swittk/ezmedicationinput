@@ -30,6 +30,8 @@ export interface CanonicalParallelPhase {
   kind: 'relative' | 'calendar';
   members: CanonicalParallelComponent[];
   start?: RegimenPosition;
+  /** Origin of the known relative start; absent retains elapsed semantics. */
+  startReference?: "treatment-day-start";
   end?: RegimenPosition;
 }
 
@@ -209,9 +211,18 @@ function partialParallelRegimen(
   for (const source of sourceTracks) {
     const phases: CanonicalParallelPhase[] = [];
     let at: RegimenPosition | undefined = ZERO;
+    let atReference: CanonicalParallelPhase["startReference"];
     for (let index = 0; index < source.length; index++) {
       const phase = source[index];
-      let members = phase.members.map(member => ({ member, clause: clauses[member] }));
+      let hasAuthoredDayStart = false, hasAuthoredElapsedStart = false;
+      let members = phase.members.map(member => {
+        const clause = clauses[member], schedule = clause.schedule;
+        if (schedule?.treatmentStartOffsetDays !== undefined) {
+          if (schedule.phaseStartReference === "treatment-day-start") hasAuthoredDayStart = true;
+          else hasAuthoredElapsedStart = true;
+        }
+        return { member, clause };
+      });
       const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);
       if (calendar && members.every(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd)) {
         const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member =>
@@ -223,11 +234,21 @@ function partialParallelRegimen(
         const duration = durationPosition(item.clause);
         return duration && compareRegimenPositions(duration, first) === 0;
       });
-      const start: RegimenPosition | undefined = calendar ? undefined : authoredPhaseStart(members) ?? at;
-      const end: RegimenPosition | undefined = start && exact ? advance(start, first) : undefined;
-      phases.push({ kind: calendar ? "calendar" : "relative", members,
-        ...(start ? { start } : {}), ...(end ? { end } : {}) });
+      const authoredStart = authoredPhaseStart(members);
+      const hasAuthoredStart = hasAuthoredDayStart || hasAuthoredElapsedStart;
+      const start: RegimenPosition | undefined = calendar ? undefined
+        : authoredStart ?? (hasAuthoredStart ? undefined : at);
+      const startReference = authoredStart
+        ? hasAuthoredDayStart && !hasAuthoredElapsedStart ? "treatment-day-start" : undefined
+        : hasAuthoredStart ? undefined : atReference;
+      const end: RegimenPosition | undefined = start && exact &&
+        !(hasAuthoredDayStart && hasAuthoredElapsedStart) ? advance(start, first) : undefined;
+      const planned: CanonicalParallelPhase = { kind: calendar ? "calendar" : "relative", members,
+        ...(start ? { start } : {}), ...(end ? { end } : {}) };
+      if (start && startReference) planned.startReference = startReference;
+      phases.push(planned);
       at = end;
+      atReference = end ? startReference : undefined;
     }
     tracks.push({ phases });
   }
@@ -284,10 +305,17 @@ export function buildCanonicalParallelRegimen(
       clause: clauses[member]
     })));
     const allMembers: CanonicalParallelComponent[] = [];
-    for (const members of sourcePhases) allMembers.push(...members);
-    const calendarBounded = allMembers.some(item => Boolean(
-      item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd
-    ));
+    let calendarBounded = false;
+    for (const members of sourcePhases) {
+      for (const item of members) {
+        // Civil treatment days cannot share elapsed-time global cuts. Keep
+        // the existing track representation and each member's typed anchor.
+        if (item.clause.schedule?.phaseStartReference === "treatment-day-start")
+          return partialParallelRegimen(trackPhases, clauses, "parallel-regimen-local-day-origin");
+        allMembers.push(item);
+        calendarBounded ||= Boolean(item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);
+      }
+    }
 
     if (calendarBounded) {
       if (allMembers.some(item =>

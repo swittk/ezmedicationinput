@@ -1905,3 +1905,40 @@ describe("round 27: numeric constituents own dimensional continuations", () => {
     expect(getQuantityComparator(entry.rateRatio?.denominator)).toBe(comparator);
   });
 });
+
+
+describe("round 28: qualified infusion durations keep their clinical operator", () => {
+  it.each([
+    ["Infuse 500 mL over at most 2 hours", "<="],
+    ["Infuse 500 mL IV over at most 2 hours", "<="],
+    ["Infuse 500 mL over at least 2 hours", ">="],
+    ["Infuse 20 mg in 500 mL saline over at most 2 hours", "<="],
+    ["Infuse 20 mg in 500 mL saline over at least 2 hours", ">="],
+    ["Infuse 500 mL over 2 hours", undefined],
+    ["Infuse 20 mg in 500 mL saline over 2 hours", undefined]
+  ] as const)("preserves the duration in %s", (source, comparator) => {
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity?.administrationDuration).toMatchObject({
+      value: 2, unit: "h", ...(comparator ? { comparator } : {})
+    });
+    expect(clause.schedule?.administrationDurationComparator).toBe(comparator);
+    expect(parsed.meta.canonical.course!.stages[0].administrations[0]
+      .schedule?.recurrence?.occurrenceDurationComparator).toBe(comparator);
+    for (const input of [parsed.fhirNext, toDosageDetails(toFhirR5Dosages(parsed.fhirNext))]) {
+      const component = input.step![0].component[0];
+      expect(component.doseAndRate![0].rateRatio!.denominator)
+        .toMatchObject({ value: 2, code: "h" });
+      expect(getQuantityComparator(component.doseAndRate![0].rateRatio!.denominator)).toBe(comparator);
+      expect(component.timing?.repeat?.duration).toBe(comparator ? undefined : 2);
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z",
+        from: "2026-11-21T08:00:00Z", timeZone: "UTC", limit: 1 }))
+        .toEqual(["2026-11-21T08:00:00+00:00"]);
+    }
+    for (const row of toFhirR5Dosages(parsed.fhirNext)) {
+      expect(canonicalFromFhir(row).schedule?.administrationDurationComparator).toBe(comparator);
+      expect(row.timing?.repeat?.duration).toBe(comparator ? undefined : 2);
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+  });
+});

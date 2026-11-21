@@ -1323,7 +1323,8 @@ function reconcileNativeRetainedCourse(
       remainingLive: number[] = [];
     for (let i = 0; i < step.component.length; i++) if (!usedOriginalIndices.has(i) && !ambiguousSources.has(i)) unclaimed.push(i);
     for (let i = 0; i < live.length; i++) if (assigned[i] < 0 && !ambiguousLive.has(i)) remainingLive.push(i);
-    if (!componentCountChanged || (unclaimed.length === 1 && remainingLive.length === 1)) {
+    if (!componentCountChanged || (!ambiguousSources.size && !ambiguousLive.size &&
+        unclaimed.length === 1 && remainingLive.length === 1)) {
       let unclaimedCursor = 0;
       for (const j of remainingLive) {
         const next = unclaimed[unclaimedCursor++];

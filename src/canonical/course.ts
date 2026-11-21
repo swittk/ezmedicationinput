@@ -107,6 +107,7 @@ export interface CanonicalRecurrence {
   occurrenceDuration?: number;
   occurrenceDurationMax?: number;
   occurrenceDurationUnit?: DurationUnit;
+  occurrenceDurationComparator?: CanonicalMeasure["comparator"];
   courseLength?: CanonicalMeasure;
   courseLengthRange?: CanonicalRange;
   calendarWindow?: { start?: string; end?: string };
@@ -138,9 +139,11 @@ export interface CanonicalTiming {
 export interface CanonicalBoundary {
   /** The previous-phase-next-day anchor denotes local midnight following
    * the predecessor's final occupied day, derived from its exclusive end.
+   * treatment-day-start denotes midnight of the order's local calendar day,
+   * before applying its day displacement. treatment-start retains the clock.
    * Other non-treatment anchors need an external resolver; never reinterpret
    * them as treatment-relative dates. */
-  anchor: "treatment-start" | "previous-phase-next-day" | "coded-event" | "resource-reference" |
+  anchor: "treatment-start" | "treatment-day-start" | "previous-phase-next-day" | "coded-event" | "resource-reference" |
     "definition" | "path" | "unresolved";
   contextCode?: CanonicalConcept;
   contextReference?: CanonicalReference;
@@ -178,8 +181,11 @@ export interface CanonicalAdministration {
   stageOrdinal?: number;
   /** Typed parser member identity, independent of external dose sequence. */
   sourceMember?: number;
+  /** Same-track phase dependencies by sourceMember identity. Presence marks
+   * participating nodes; an empty list retains a referenced root identity. */
+  phasePredecessors?: number[];
   onsetDays?: number;
-  onsetReference?: "previous-phase-next-day";
+  onsetReference?: "previous-phase-next-day" | "treatment-day-start";
   asNeeded?: boolean;
   targetCount?: number;
   target?: CanonicalConcept;

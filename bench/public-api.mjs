@@ -436,20 +436,22 @@ const textlessWire = structuredClone(complex);
 delete textlessWire.renderedInstruction;
 for (const step of textlessWire.step) for (const a of step.component) delete a.text;
 for (const m of [baseline, candidate]) {
-  if (typeof m.importCanonicalCourse !== "function") {
-    nativeFixtureErrors.set(m, "version has no importCanonicalCourse for a compatible native fixture");
-    continue;
+  const fixtures = {}, errors = {};
+  for (const [name, input] of [["source", complex], ["textless", textlessWire]]) {
+    if (typeof m.importCanonicalCourse !== "function") {
+      errors[name] = "version has no importCanonicalCourse for a compatible native fixture";
+      continue;
+    }
+    try {
+      fixtures[name] = m.importCanonicalCourse(input);
+    } catch (error) {
+      errors[name] = String(error.message ?? error);
+    }
   }
-  try {
-    nativeFixtures.set(m, {
-      source: m.importCanonicalCourse(complex),
-      textless: m.importCanonicalCourse(textlessWire),
-    });
-  } catch (error) {
-    nativeFixtureErrors.set(m, String(error.message ?? error));
-  }
+  nativeFixtures.set(m, fixtures);
+  nativeFixtureErrors.set(m, errors);
 }
-function addNative(api, name, run, needsFixture = false) {
+function addNative(api, name, run, needsFixture) {
   add(api, name, run);
   if (typeof baseline[api] !== "function") return;
   for (const [label, m] of [["baseline", baseline], ["candidate", candidate]]) {
@@ -457,19 +459,19 @@ function addNative(api, name, run, needsFixture = false) {
       nativeUnavailable.set(name, `${label} does not export ${api}`);
       break;
     }
-    if (needsFixture && !nativeFixtures.has(m)) {
-      nativeUnavailable.set(name, `${label}: ${nativeFixtureErrors.get(m)}`);
+    if (needsFixture && nativeFixtures.get(m)?.[needsFixture] === undefined) {
+      nativeUnavailable.set(name, label + ": " + nativeFixtureErrors.get(m)?.[needsFixture]);
       break;
     }
   }
 }
 addNative("importCanonicalCourse", "native/import-R6", (m) => m.importCanonicalCourse(complex));
 addNative("importCanonicalCourse", "native/import-R5", (m) => m.importCanonicalCourse(parsed.eye.fhir));
-addNative("projectCanonicalCourse", "native/project-both", (m) => m.projectCanonicalCourse(nativeFixtures.get(m).source), true);
+addNative("projectCanonicalCourse", "native/project-both", (m) => m.projectCanonicalCourse(nativeFixtures.get(m).source), "source");
 addNative("formatCanonicalAdministration", "native/format-administration", (m) =>
-  m.formatCanonicalAdministration(nativeFixtures.get(m).textless.stages[0].administrations[0], "long", { locale: "th" }), true);
+  m.formatCanonicalAdministration(nativeFixtures.get(m).textless.stages[0].administrations[0], "long", { locale: "th" }), "textless");
 addNative("formatCanonicalCourse", "native/format-course", (m) =>
-  m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }), true);
+  m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }), "textless");
 addNative("projectEditableR5Course", "native/project-editable-R5", (m) => m.projectEditableR5Course(complex));
 const newApis = new Set([
   "importCanonicalCourse",
@@ -532,13 +534,16 @@ async function measure(test, module, iterations, async) {
  * Calibrate to the slower side: a 100x speedup must not force 100x-longer
  * baseline batches merely to give the faster implementation a long sample. */
 async function calibratedIterations(test, modules, async) {
+  // Scale the ceiling with the requested duration so tiny cached getters can
+  // reach it. A fixed million calls truncated 100 ms confirmations to 20 ms.
+  const maxIterations = Math.max(1000000, Math.ceil(targetMs * 1000 / 0.005));
   let iterations = 4;
   for (let attempt = 0; attempt < 7; attempt++) {
     let slowest = 0;
     for (const module of modules) slowest = Math.max(slowest, await measure(test, module, iterations, async));
-    if (slowest * iterations >= targetMs * 800 || iterations >= 1000000) return iterations;
+    if (slowest * iterations >= targetMs * 800 || iterations >= maxIterations) return iterations;
     const required = Math.ceil((targetMs * 1000) / Math.max(slowest, 0.005));
-    iterations = Math.min(1000000, Math.max(iterations * 2, Math.min(iterations * 16, required)));
+    iterations = Math.min(maxIterations, Math.max(iterations * 2, Math.min(iterations * 16, required)));
   }
   return iterations;
 }
@@ -549,8 +554,14 @@ function completeThaiDose(output, action, unit, expected) {
   if (typeof output !== "string") return false;
   const number = "([+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))";
   const verb = action === "หยอด" ? "หยอด(?:\\s*ตาขวา)?" : action;
-  const phrase = new RegExp(`${verb}\\s*(?:ครั้งละ\\s*)?${number}\\s*${unit}(?=$|[\\s.;,])`, "u").exec(output);
-  const quantities = [...output.matchAll(new RegExp(`(?<![\\d.])${number}\\s*${unit}(?=$|[\\s.;,])`, "gu"))];
+  // These two fixtures retain their authored preparation before the dose.
+  // Accept that complete prefix, never an arbitrary substring after a negator.
+  const preparation = action === "หยอด" ? "ล้างมือก่อนหยอดตา" : "ผสมน้ำ";
+  const lead = "^\\s*(?:" + preparation + "\\s*(?:[.;,]\\s*|จากนั้น\\s*|แล้ว\\s*)?)?";
+  const phrase = new RegExp(lead + verb + "\\s*(?:ครั้งละ\\s*)?" +
+    number + "\\s*" + unit + "(?=$|[\\s.;,])", "u").exec(output);
+  const quantities = [...output.matchAll(new RegExp("(?<![\\d.])" + number +
+    "\\s*" + unit + "(?=$|[\\s.;,])", "gu"))];
   return phrase !== null && Number(phrase[1]) === expected && quantities.length === 1 &&
     Number(quantities[0][1]) === expected;
 }
@@ -568,14 +579,14 @@ const equivalenceOracles = new Map([
 // keep raw latency visible when an older build does only source replay.
 const complexPreviewPhrases = {
   en: [
-    "Days 1–7", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
+    "From treatment start until 7 days after treatment start", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
     "From 7 days after treatment start until 1 month after treatment start",
     "Instill 1 drop four times daily in the right eye", "Instill 1 drop four times daily in the left eye",
     "From 1 month after treatment start onward", "Instill 1 drop four times daily in the right eye",
     "Instill 1 drop twice daily in the left eye",
   ],
   th: [
-    "วันที่ 1–7", "หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
+    "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา", "หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
     "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา",
     "หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง", "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง",
     "ตั้งแต่1 เดือนหลังเริ่มการรักษาเป็นต้นไป", "หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง",
@@ -585,7 +596,8 @@ const complexPreviewPhrases = {
 function normalizeClinicalPreview(output) {
   // Formatting separators/spacing do not change the fixture's meaning.
   // Keep words, numeric signs, range dashes and comparison operators intact.
-  return output.replace(/\.(?=\s|$)/gu, "").replace(/[\s,;:]+/gu, "").toLowerCase();
+  return output.replace(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)/gu, token => String(Number(token)))
+    .replace(/\.(?=\s|$)/gu, "").replace(/[\s,;:]+/gu, "").toLowerCase();
 }
 const expectedComplexPreview = Object.fromEntries(
   Object.entries(complexPreviewPhrases).map(([locale, phrases]) =>
@@ -598,13 +610,15 @@ for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
   if (!currentComplexPreview(exact, locale))
     throw new Error("Complex preview oracle rejected its six exact administrations");
-  for (const amount of ["11", "1.2", "-1", "2", ".1", "0.1", "1.0"])
+  for (const amount of ["11", "1.2", "-1", "2", ".1", "0.1"])
     if (currentComplexPreview(exact.replace(/1 (drop|หยด)/u, amount + " $1"), locale))
       throw new Error("Complex preview oracle accepted a different numeric amount");
   if (currentComplexPreview(exact + (locale === "en" ? ". 1 drop" : ". 1 หยด"), locale))
     throw new Error("Complex preview oracle accepted an extra administration");
-  if (currentComplexPreview(exact.replace("1–7", "1–70"), locale))
+  if (currentComplexPreview(exact.replace(locale === "th" ? "7 วัน" : "7 days", locale === "th" ? "70 วัน" : "70 days"), locale))
     throw new Error("Complex preview oracle accepted a numeric endpoint suffix");
+  if (!currentComplexPreview(exact.replace(/1 (drop|หยด)/u, "1.0 $1"), locale))
+    throw new Error("Complex preview oracle rejected an equal decimal amount");
   const primary = complexPreviewPhrases[locale][1];
   for (const changed of [
     primary + (locale === "en" ? " as needed" : " ตามอาการ"),
@@ -645,12 +659,18 @@ for (const [action, unit] of [["หยอด", "หยด"], ["ดื่ม", "�
   if (completeThaiDose(`${action} 2 ${unit}; ${action} 1 ${unit}.`, action, unit, 2))
     throw new Error("Complete-dose oracle accepted the superseded administration");
 }
-for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด.", "หยอด 2 หยด ตาขวา."])
+for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด.", "หยอด 2 หยด ตาขวา.",
+  "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วหลับตา.",
+  "ล้างมือก่อนหยอดตา จากนั้นหยอดตาขวา ครั้งละ 2 หยด จากนั้นหลับตา."])
   if (!completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle rejected the authored site placement");
-for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด."])
+for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
+  "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา."])
   if (completeThaiRightEyeDose(text))
-    throw new Error("Complete-dose oracle accepted a missing or conflicting eye");
+    throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");
+if (!completeThaiDose("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด.", "ดื่ม", "เม็ด", 2) ||
+    completeThaiDose("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด.", "ดื่ม", "เม็ด", 2))
+  throw new Error("Complete-dose oracle lost the preparation or negation boundary");
 const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
@@ -743,34 +763,6 @@ for (const test of cases) {
 // New functions have no pre-refactor namesake. Measure them explicitly
 // rather than exempt their costs from visibility or invent a false baseline.
 // Clinical correctness of edits/projections is covered by native oracles.
-const { source: nativeSource, textless: nativeTextless } = nativeFixtures.get(candidate) ?? {};
-const nativeCases = [
-  ["getEmaQuantityComparator", "getEmaQuantityComparator", () => candidateEmaComparator(emaComparatorQuantity)],
-  ["importCanonicalCourse", "native/import-R6", () => candidate.importCanonicalCourse(complex)],
-  ["importCanonicalCourse", "native/import-R5", () => candidate.importCanonicalCourse(parsed.eye.fhir)],
-
-  ["projectCanonicalCourse", "native/project-both", () => candidate.projectCanonicalCourse(nativeSource)],
-  [
-    "formatCanonicalAdministration",
-    "native/format-administration",
-    () =>
-      candidate.formatCanonicalAdministration(nativeTextless.stages[0].administrations[0], "long", {
-        locale: "th",
-      }),
-  ],
-  [
-    "formatCanonicalCourse",
-    "native/format-course",
-    () => candidate.formatCanonicalCourse(nativeTextless, "long", { locale: "th" }),
-  ],
-  ["projectEditableR5Course", "native/project-editable-R5", () => candidate.projectEditableR5Course(complex)],
-];
-const candidateOnlyNames = new Set(candidateOnlyCases.map(test => test.name));
-for (const [api, name, run] of nativeCases) {
-  if (!filter.test(name) || typeof baseline[api] === "function" || candidateOnlyNames.has(name)) continue;
-  candidateOnlyCases.push({ api, name, run });
-  candidateOnlyNames.add(name);
-}
 for (const test of candidateOnlyCases) {
   const { api, name } = test;
   try {

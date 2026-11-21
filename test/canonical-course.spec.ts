@@ -1117,7 +1117,7 @@ describe("review 27 live clinical source proofs and language receivers", () => {
   it.each(["period", "administration", "lifetime"] as const)("invalidates a warm saved %s maximum proof", scope => {
     const suffix = scope === "period" ? "per day" : "per " + scope;
     const text = "Take 1 tablet as needed, max 4 tablets " + suffix;
-    const raw: FhirDosage = { text, asNeededBoolean: true,
+    const raw: FhirDosage = { text, asNeeded: true,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       ...(scope === "period" ? { maxDosePerPeriod: [{ numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }] }
         : scope === "administration" ? { maxDosePerAdministration: { value: 4, unit: "tab" } }
@@ -1131,6 +1131,7 @@ describe("review 27 live clinical source proofs and language receivers", () => {
     for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
       expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
       expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
+      expect(text).toMatch(/as needed|when needed/iu);
     }
     if (scope === "period") {
       row.maxDosePerPeriod![0].denominator!.value = 2;
@@ -1236,8 +1237,121 @@ it("retains an independent member onset beside a completion-relative member over
     expect(members).toHaveLength(2);
     expect(members[0]).toMatchObject({ phaseStart: { anchor: "previous-phase-next-day" },
       amounts: [{ quantity: { value: 2, unit: "tab" } }] });
-    expect(members[1]).toMatchObject({ phaseOrigin: { value: 9, unit: "d" },
+    expect(members[1]).toMatchObject({ phaseStart: { anchor: "treatment-day-start", displacement: { value: 9, unit: "d" } },
       amounts: [{ quantity: { value: 3, unit: "tab" } }] });
     wire = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(wire))));
+  }
+});
+
+
+describe("round 28 live capped source concepts", () => {
+  for (const saved of [false, true]) {
+    it.each(["replace", "nested-code"] as const)(
+      "uses the live eye in both previews after a %s edit (saved=" + saved + ")",
+      edit => {
+        const batch = parseSig("1 drop OD BID max 2 drops/day");
+        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
+          : batch.items[0].fhir;
+        const source = row.text;
+        expect(row.maxDosePerPeriod?.[0].numerator?.value).toBe(2);
+        expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }))
+          .toMatch(/right eye|\bOD\b/iu);
+        if (edit === "replace")
+          row.site = { text: "left eye", coding: [{
+            system: "http://snomed.info/sct", code: "1290031003",
+            display: "Structure of left eye proper"
+          }] };
+        else row.site!.coding![0].code = "1290031003";
+        for (const mode of ["roundtrip", "normalized"] as const) {
+          const options = { locale: "en", realizationMode: mode };
+          const imported = fromFhirDosage(row, options);
+          for (const text of [formatSig(row, "short", options), formatSig(row, "long", options),
+            imported.shortText, imported.longText]) {
+            expect(text).toMatch(/left eye|\bOS\b/iu);
+            expect(text).not.toMatch(/right eye|\bOD\b/iu);
+          }
+        }
+        expect(row.text).toBe(source);
+        expect(row.site?.coding?.[0].code).toBe("1290031003");
+      }
+    );
+    it.each(["route", "method", "prn"] as const)(
+      "invalidates the capped source for a live %s edit (saved=" + saved + ")",
+      field => {
+        const batch = parseSig("Take 1 tablet PO daily max 2 tablets/day");
+        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
+          : batch.items[0].fhir;
+        const source = row.text;
+        expect(row.maxDosePerPeriod?.[0].numerator?.value).toBe(2);
+        formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+        if (field === "prn") row.asNeeded = true;
+        else if (field === "route") {
+          row.route!.text = "sublingual";
+          Object.assign(row.route!.coding![0], { code: "37839007", display: "Sublingual route" });
+        } else {
+          row.method!.text = "Chew";
+          Object.assign(row.method!.coding![0], { code: "738992009", display: "Chew" });
+        }
+        const options = { locale: "en", realizationMode: "roundtrip" as const };
+        const imported = fromFhirDosage(row, options);
+        for (const text of [formatSig(row, "long", options), imported.longText]) {
+          if (field === "route") {
+            expect(text).toMatch(/sublingual|\bSL\b/iu);
+            expect(text).not.toMatch(/by mouth|\bPO\b/iu);
+          } else if (field === "method") expect(text).toMatch(/\bchew\b/iu);
+          else expect(text).toMatch(/as needed|when needed|\bPRN\b/iu);
+        }
+        expect(row.text).toBe(source);
+      }
+    );
+  }
+});
+
+
+describe("round 28 live source concept lists", () => {
+  for (const saved of [false, true]) {
+    it.each(["replace", "nested", "coding", "remove"] as const)(
+      "updates a capped PRN reason after %s (saved=" + saved + ")", edit => {
+        const batch = parseSig("Take 1 tablet PO daily as needed for pain max 2 tablets/day");
+        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.items[0].fhir;
+        const source = row.text;
+        expect(row.asNeeded).toBe(true);
+        expect(row.asNeededFor?.[0].text).toBe("pain");
+        expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toMatch(/pain/i);
+        if (edit === "replace") row.asNeededFor = [{ text: "nausea" }];
+        else if (edit === "nested") {
+          row.asNeededFor![0].text = "nausea";
+          row.asNeededFor![0].coding = undefined;
+        } else if (edit === "coding") row.asNeededFor![0].coding![0].code = "422587007";
+        else row.asNeededFor = [];
+        const edited = JSON.stringify(row);
+        for (const realizationMode of ["roundtrip", "normalized"] as const) {
+          const options = { locale: "en", realizationMode };
+          const imported = fromFhirDosage(row, options);
+          for (const text of [formatSig(row, "long", options), imported.longText]) {
+            expect(text).toMatch(/as needed|when needed/iu);
+            expect(text).not.toMatch(/\bpain\b/iu);
+            if (edit !== "remove") expect(text).toMatch(/\bnausea\b/iu);
+          }
+        }
+        expect(JSON.stringify(row)).toBe(edited);
+        expect(row.text).toBe(source);
+      }
+    );
+
+    it("shows newly supplied advice beside the current cap (saved=" + saved + ")", () => {
+      const batch = parseSig("Take 1 tablet PO daily max 2 tablets/day");
+      const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.items[0].fhir;
+      const source = row.text;
+      formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+      row.additionalInstruction = [{ text: "Avoid grapefruit" }];
+      const edited = JSON.stringify(row);
+      for (const text of [
+        formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }),
+        fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText
+      ]) expect(text).toContain("Avoid grapefruit");
+      expect(JSON.stringify(row)).toBe(edited);
+      expect(row.text).toBe(source);
+    });
   }
 });

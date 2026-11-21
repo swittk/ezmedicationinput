@@ -177,7 +177,7 @@ describe("R5 source dose identity after live edits", () => {
       changed, "long", resolveSigLocalization("en"), {realizationMode: "roundtrip"}
     );
     expect(text).not.toBe(original);
-    expect(text).toMatch(/(?:2|two)/iu);
+    expect(text).toMatch(/(?<![\w.+-])(?:2|two)\s+tablets?\b/iu);
     const changedUnit = { ...clause, dose: { ...clause.dose!, unit: "drop" } };
     expect(instructionGraphSourceConflictsWithDose(changedUnit)).toBe(true);
     const changedUnitText = formatCanonicalClause(

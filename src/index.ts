@@ -25,6 +25,12 @@ interface FreshDoseProof {
   length: number;
   text?: string;
   defaulted?: boolean;
+  site?: ReturnType<typeof captureSourceReplayConcept>;
+  route?: ReturnType<typeof captureSourceReplayConcept>;
+  method?: ReturnType<typeof captureSourceReplayConcept>;
+  asNeeded?: FhirDosage["asNeeded"];
+  reasons?: ReturnType<typeof captureSourceReplayConceptList>;
+  instructions?: ReturnType<typeof captureSourceReplayConceptList>;
   quantity?: FreshDosePart;
   low?: FreshDosePart;
   high?: FreshDosePart;
@@ -57,6 +63,12 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
     length: dosage.doseAndRate?.length ?? 0,
     text: dosage.text,
     defaulted,
+    site: captureSourceReplayConcept(dosage.site),
+    route: captureSourceReplayConcept(dosage.route),
+    method: captureSourceReplayConcept(dosage.method),
+    asNeeded: dosage.asNeeded,
+    reasons: captureSourceReplayConceptList(dosage.asNeededFor),
+    instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
     quantity: captureDosePart(first?.doseQuantity),
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
@@ -75,7 +87,13 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   const current = dosage.doseAndRate;
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
-  return sameDosePart(original.quantity, first?.doseQuantity) &&
+  return dosage.asNeeded === original.asNeeded &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons) &&
+    matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
+    matchesSourceReplayConcept(dosage.site, original.site) &&
+    matchesSourceReplayConcept(dosage.route, original.route) &&
+    matchesSourceReplayConcept(dosage.method, original.method) &&
+    sameDosePart(original.quantity, first?.doseQuantity) &&
     sameDosePart(original.low, first?.doseRange?.low) &&
     sameDosePart(original.high, first?.doseRange?.high) &&
     sameDosePart(original.rate?.quantity, first?.rateQuantity) &&
@@ -118,7 +136,7 @@ function markOriginalGraphSource(
   if (clause.dose) clause.dose.sourceDoseVerified = verified;
 }
 
-/** Native editing/projection API. Existing .fhir / .fhirNext fields retain
+/** Internal native import/projection helpers. Existing .fhir / .fhirNext fields retain
  * their established versions; canonical is the internal source of meaning. */
 export type { CanonicalCourse, CanonicalStage, CanonicalAdministration,
   CanonicalRecurrence, CanonicalTiming, CanonicalBoundary, CanonicalAmount,
@@ -144,7 +162,9 @@ import {
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
-  captureSourceReplayMaxima, matchesSourceReplayMaxima, getDosageSourceTextAgreement,
+  captureSourceReplayMaxima, matchesSourceReplayMaxima,
+  captureSourceReplayConcept, matchesSourceReplayConcept,
+  captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
@@ -1152,10 +1172,16 @@ function appendSourceLessRateRanges(
 }
 
 /** Compact clauses cannot carry independent phase origins or qualified ranges. */
-function needsNativeR5Preview(dosage: FhirDosage): boolean {
+function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolean {
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
     return true;
-  const range = dosage.doseAndRate?.[0]?.doseRange;
+  const primary = dosage.doseAndRate?.[0];
+  // Explicit normalization uses the existing rich native realizer; source
+  // replay must not hide a retained infusion qualifier or requested locale.
+  if (options?.realizationMode === "normalized" &&
+      (primary?.rateQuantity || primary?.rateRatio || primary?.rateRange ||
+       primary?.doseExpression || primary?.rateExpression)) return true;
+  const range = primary?.doseRange;
   return Boolean(range && (getQuantityComparator(range.low) || getQuantityComparator(range.high) ||
     range.low?.value !== undefined && range.high?.value !== undefined &&
     (range.low.unit ?? getDoseQuantityUnit(range.low)) !==
@@ -1183,10 +1209,15 @@ export function formatSig(
   const dosage = oneOrCourse as EzDosage;
   const edit = sourceDisplayEdit(dosage);
   if (typeof edit === "string" && options?.realizationMode !== "normalized") return edit;
-  if (getDosageSourceTextAgreement(dosage, false) === false || edit !== false)
-    return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style,
-      { ...options, realizationMode: "normalized" });
-  if (needsNativeR5Preview(dosage))
+  if (getDosageSourceTextAgreement(dosage, false) === false || edit !== false) {
+    const course = courseFromR5([dosage], undefined, undefined, undefined, true);
+    // The fresh primitive proof can reject source that has no saved
+    // fingerprint. Carry that already-known result into the generated view.
+    const administration = course.stages[0]?.administrations[0];
+    if (administration?.provenance) administration.provenance.sourceTextVerified = false;
+    return formatCanonicalCourse(course, style, { ...options, realizationMode: "normalized" });
+  }
+  if (needsNativeR5Preview(dosage, options))
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style, options ?? {});
   const hasModifiers = Boolean(dosage.modifierExtension?.length);
   let displayCondition = dosage.condition?.length
@@ -1444,9 +1475,10 @@ function fromFhirDosageInternal(
   const replacementText = typeof edit === "string" && options?.realizationMode !== "normalized" ? edit : undefined;
   const unverified = replacementText === undefined &&
     (getDosageSourceTextAgreement(dosage, false) === false || edit !== false);
-  const native = unverified || needsNativeR5Preview(dosage)
+  const native = unverified || needsNativeR5Preview(dosage, options)
     ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
     : undefined;
+  if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
   if (unverified && options?.realizationMode !== "normalized")
     options = { ...options, realizationMode: "normalized" };
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
@@ -1857,6 +1889,19 @@ function buildParseResults(
 }
 
 function applyCarryForward(internal: ParserState, carry: SegmentCarry): void {
+  const routeChanged = internal.routeCode && carry.routeCode
+    ? internal.routeCode !== carry.routeCode
+    : Boolean(internal.routeText && carry.routeText && internal.routeText !== carry.routeText);
+  if (routeChanged) {
+    // An explicit new route starts a new site-inheritance scope. Only the
+    // donor carry is cleared; a locally authored recipient site stays intact.
+    carry.siteText = undefined;
+    carry.siteI18n = undefined;
+    carry.siteSource = undefined;
+    carry.siteCoding = undefined;
+    carry.siteSpatialRelation = undefined;
+    carry.administrationTargetGroup = undefined;
+  }
   if (!internal.routeCode && !internal.routeText) {
     if (carry.routeCode) {
       internal.routeCode = carry.routeCode;

@@ -19,6 +19,8 @@ export interface CourseLanguage {
   readonly rateRangeLabel: string;
   readonly unspecified: string;
   readonly treatmentStart: string;
+  readonly treatmentDayStart: string;
+  readonly afterPreviousPhase: string;
   readonly nextDayAfterPreviousPhase: string;
   readonly incompleteInterpretation: string;
   readonly retainedStructure: string;
@@ -29,6 +31,7 @@ export interface CourseLanguage {
   readonly courseLimitsLabel: string;
   readonly stageLimitsLabel: string;
   weekdayName(day: string): string;
+  measurementName(name: string): string;
   joinList(items: readonly string[]): string;
   timeUnit(unit: string, value: number | undefined): string | undefined;
   expression(kind: "dose" | "rate", detail: string | undefined): string;
@@ -47,6 +50,7 @@ export interface CourseLanguage {
   fromDay(first: number): string;
   throughDay(last: number): string;
   noDoseDays(first: number, last: number): string;
+  noDoseWindow(start: string, end: string): string;
   repeatCount(count: number): string;
   repeatCycle(interval: string, exact: boolean, count?: number): string;
 }

@@ -79,6 +79,7 @@ function applySchedule(
   if (schedule.treatmentStartOffsetDays !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.treatmentStartOffsetDays = schedule.treatmentStartOffsetDays;
+    target.phaseStartReference = schedule.phaseStartReference;
   }
   if (schedule.timingReference !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
@@ -594,6 +595,7 @@ export function projectHpsgSignToState(
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.administrationDuration = clinicalDuration.value;
     target.administrationDurationUnit = clinicalDuration.unit;
+    target.administrationDurationComparator = clinicalDuration.comparator;
     // Duration qualifies each infusion. It is never regimen boundsDuration;
     // a single-occurrence count is only appropriate without a recurrence.
     // Keep a separately owned course duration (for example, daily for three

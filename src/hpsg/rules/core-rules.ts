@@ -8,7 +8,7 @@ import {
   normalizeBodySiteKey,
   ROUTE_TEXT
 } from "../../maps";
-import { getRouteMeaning } from "../../lexer/meaning";
+import { getRouteMeaning, getDayOfWeekMeaning } from "../../lexer/meaning";
 import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
@@ -31,6 +31,7 @@ import {
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
+  EVENT_PREPOSITIONS,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
@@ -1103,7 +1104,11 @@ function comparativeDoseAt(
     // Either typed timing or an explicit route licenses an omitted dose unit.
     // The ordinary route matcher owns multi-word and institution vocabulary;
     // an opaque suffix after a recognized route cannot erase the qualifier.
-    if (!isScheduleLead(context, numericIndex + 1) &&
+    const weekday = context.tokens[numericIndex + 2];
+    const weekdayLead = EVENT_PREPOSITIONS.has(normalizeTokenLower(next)) &&
+      numericIndex + 2 < context.limit && weekday && !context.state.consumed.has(weekday.index) &&
+      getDayOfWeekMeaning(weekday);
+    if (!weekdayLead && !isScheduleLead(context, numericIndex + 1) &&
         !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;

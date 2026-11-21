@@ -158,8 +158,8 @@ export function getAnchoredCourseDuration(
     // Each live endpoint owns its edit. An omitted projected endpoint still
     // retains its authored unit until the clinician actually supplies it.
     return { valueRange: { ...current,
-      low: equalStructuredValues(projected.low, current.low) ? low as FhirSimpleQuantity : current.low,
-      high: equalStructuredValues(projected.high, current.high) ? high as FhirSimpleQuantity : current.high,
+      low: reconcileDurationEndpoint(low, projected.low, current.low),
+      high: reconcileDurationEndpoint(high, projected.high, current.high),
     } };
   }
   const metadata = marker.extension.find(child => child.url === "rangeMetadata");
@@ -167,6 +167,19 @@ export function getAnchoredCourseDuration(
     ...(metadata ? readRetainedField(metadata) as FhirRange : undefined),
     low: low as FhirSimpleQuantity, high: high as FhirSimpleQuantity,
   } };
+}
+
+/** A projected number/unit edit owns a new endpoint. Other edits keep the
+ * original elapsed/calendar quantity while applying current annotations and
+ * qualifier; changing > alone must not turn 48 elapsed hours into two days. */
+function reconcileDurationEndpoint(
+  source: FhirR6Quantity, projected: FhirSimpleQuantity | undefined, current: FhirSimpleQuantity | undefined
+): FhirSimpleQuantity | undefined {
+  if (equalStructuredValues(projected, current)) return source as FhirSimpleQuantity;
+  if (!projected || !current || projected.value !== current.value || projected.unit !== current.unit ||
+      projected.system !== current.system || projected.code !== current.code) return current;
+  return { ...source, ...current, value: source.value, unit: source.unit, code: source.code, system: source.system,
+    comparator: current.comparator, _comparator: current._comparator, extension: current.extension } as FhirSimpleQuantity;
 }
 
 /** FHIR Range endpoints share one unit. Preserve authored endpoint units in
@@ -392,7 +405,7 @@ function nonRegenerableUnitCoding(quantity: FhirQuantity | undefined):
 /** Reconstitute dimensional R5 meaning only where the role and amount were
  * explicitly supplied. Other external rateRatio dosages remain untouched.
  */
-function clinicalCarrierQuantityFromFhir(
+export function clinicalCarrierQuantityFromFhir(
   dosage: FhirDosage
 ): HpsgClinicalQuantityFeature | undefined {
   const material = infusionCarrierMaterialFromFhir(dosage);
@@ -1536,7 +1549,8 @@ export function serializeCanonicalSchedule(
     repeat.countMax = schedule.countMax;
     hasRepeat = true;
   }
-  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit &&
+      !schedule.administrationDurationComparator) {
     repeat.duration = schedule.administrationDuration;
     repeat.durationUnit = schedule.administrationDurationUnit;
     if (schedule.administrationDurationMax !== undefined) {
@@ -2086,7 +2100,16 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   }
 
   const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
-  if (carrierQuantity) clause.clinicalQuantity = carrierQuantity;
+  if (carrierQuantity) {
+    clause.clinicalQuantity = carrierQuantity;
+    const duration = carrierQuantity.administrationDuration;
+    if (duration?.comparator && repeat?.duration === undefined) {
+      const schedule = clause.schedule ??= {};
+      schedule.administrationDuration = duration.value;
+      schedule.administrationDurationUnit = duration.unit;
+      schedule.administrationDurationComparator = duration.comparator;
+    }
+  }
 
 
   return clause;
@@ -2364,7 +2387,16 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   }
 
   const carrierQuantity = clinicalCarrierQuantityFromFhir(dosage);
-  if (carrierQuantity) state.primaryClause.clinicalQuantity = carrierQuantity;
+  if (carrierQuantity) {
+    state.primaryClause.clinicalQuantity = carrierQuantity;
+    const duration = carrierQuantity.administrationDuration;
+    if (duration?.comparator && dosage.timing?.repeat?.duration === undefined) {
+      const schedule = state.primaryClause.schedule ??= {};
+      schedule.administrationDuration = duration.value;
+      schedule.administrationDurationUnit = duration.unit;
+      schedule.administrationDurationComparator = duration.comparator;
+    }
+  }
 
   return state;
 }

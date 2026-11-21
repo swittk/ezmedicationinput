@@ -11,6 +11,9 @@ const UNITS: Readonly<Record<string, readonly [string, string]>> = {
   mo: ["month", "months"],
   a: ["year", "years"],
 };
+const MEASUREMENT_NAMES: Readonly<Record<string, string>> = {
+  bp: "BP", sbp: "SBP", dbp: "DBP", hr: "HR", spo2: "SpO2",
+};
 export const ENGLISH_COURSE: CourseLanguage = {
   notPrefix: "not ",
   allSeparator: " and ",
@@ -35,6 +38,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   courseLimitsLabel: "Across this course: ",
   stageLimitsLabel: "Within this stage: ",
   weekdayName: (day) => ENGLISH_DAY_NAMES[day] ?? day,
+  measurementName: (name) => MEASUREMENT_NAMES[name] ?? name,
   joinList: (items) => joinLocalizedList(items,"and"),
   timeUnit: (unit, value) => UNITS[unit]?.[value === 1 ? 0 : 1],
   expression: (kind, detail) => `unevaluated ${kind} expression${detail ? ": " + detail : ""}`,
@@ -44,6 +48,8 @@ export const ENGLISH_COURSE: CourseLanguage = {
   periodContext: (period) => ` (each period lasts ${period})`,
   startsWithinPeriod: (offset, context) => `Dosing starts ${offset} after the period begins${context}`,
   endsWithinPeriod: (offset, context) => `No doses during the final ${offset} of each period${context}`,
+  treatmentDayStart: "the start of the first treatment day",
+  afterPreviousPhase: "After the previous phase",
   nextDayAfterPreviousPhase: "the day after the previous phase",
   afterTreatmentStart: (offset) => `${offset} after treatment start`,
   relativeEvent: (offset, event, before) => `${offset} ${before ? "before" : "after"} ${event ?? "the event"}`,
@@ -55,11 +61,12 @@ export const ENGLISH_COURSE: CourseLanguage = {
   fromDay: (first) => `From day ${first} onward`,
   throughDay: (last) => `Through day ${last}`,
   noDoseDays: (first, last) => `No doses on days ${first}–${last}.`,
+  noDoseWindow: (start, end) => `No doses from ${start} until ${end}.`,
   repeatCount: (count) => `for ${count} ${count === 1 ? "cycle" : "cycles"}`,
   repeatCycle: (interval, exact, count) => {
     const iterations = count === undefined ? "" : ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
     return exact
-      ? `Repeat this schedule every ${interval}${iterations} (days are numbered within each cycle).`
+      ? `Repeat this schedule every ${interval}${iterations} (offsets are measured from each cycle start).`
       : `Repeat-cycle interval: ${interval}${iterations}.`;
   },
 };

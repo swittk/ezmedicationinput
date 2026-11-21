@@ -416,7 +416,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     ["1 tab PO BID", ["Take 1 tablet orally twice daily."]],
     ["1 drop OU BID", ["Instill 1 drop twice daily in both eyes."]],
     ["1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID", [
-      "Days 1–7", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
+      "From treatment start until 7 days after treatment start", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
       "From 7 days after treatment start until 1 month after treatment start",
       "Instill 1 drop four times daily in the right eye", "Instill 1 drop four times daily in the left eye",
       "From 1 month after treatment start onward",

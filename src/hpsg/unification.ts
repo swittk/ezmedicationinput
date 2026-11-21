@@ -519,6 +519,7 @@ function mergeSchedule(
     !sameOptionalScalar(left.timingCode, right.timingCode) ||
     !sameOptionalScalar(left.timingReference, right.timingReference) ||
     !sameOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays) ||
+    !sameOptionalScalar(left.phaseStartReference, right.phaseStartReference) ||
     !sameOptionalScalar(left.count, right.count) ||
     !sameOptionalScalar(left.countMax, right.countMax) ||
     !sameOptionalScalar(left.duration, right.duration) ||
@@ -553,6 +554,7 @@ function mergeSchedule(
     timingCode: mergeOptionalScalar(left.timingCode, right.timingCode),
     timingReference: mergeOptionalScalar(left.timingReference, right.timingReference),
     treatmentStartOffsetDays: mergeOptionalScalar(left.treatmentStartOffsetDays, right.treatmentStartOffsetDays),
+    phaseStartReference: mergeOptionalScalar(left.phaseStartReference, right.phaseStartReference),
     count: mergeOptionalScalar(left.count, right.count),
     countMax: mergeOptionalScalar(left.countMax, right.countMax),
     duration: mergeOptionalScalar(left.duration, right.duration),

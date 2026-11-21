@@ -362,10 +362,10 @@ describe("source-less multi-administration treatment course realization", () => 
     for (const representation of [course, reopened]) {
       const en = formatSig(representation, "long", { locale: "en" });
       const th = formatSig(representation, "long", { locale: "th" });
-      for (const period of ["days 1–7", "days 8–14", "days 15–21"]) {
+      for (const period of ["from treatment start until 7 days after treatment start", "from 7 days after treatment start until 14 days after treatment start", "from 14 days after treatment start until 21 days after treatment start"]) {
         expect(en.toLowerCase()).toContain(period);
       }
-      for (const period of ["วันที่ 1–7", "วันที่ 8–14", "วันที่ 15–21"]) {
+      for (const period of ["ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา", "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา", "ตั้งแต่14 วันหลังเริ่มการรักษาจนถึง21 วันหลังเริ่มการรักษา"]) {
         expect(th).toContain(period);
       }
       expect(en).toContain("0.5 tablet");
@@ -374,8 +374,8 @@ describe("source-less multi-administration treatment course realization", () => 
       expect(th).toContain("22:00");
     }
     const strictR5Text = formatSigBatch(rows, "long", { locale: "en" });
-    expect(strictR5Text.toLowerCase()).toContain("days 8–14");
-    expect(strictR5Text.toLowerCase()).toContain("days 15–21");
+    expect(strictR5Text.toLowerCase()).toContain("from 7 days after treatment start until 14 days after treatment start");
+    expect(strictR5Text.toLowerCase()).toContain("from 14 days after treatment start until 21 days after treatment start");
   });
 
   it("exposes a full seven-day no-medication interval between complex schedules", () => {
@@ -413,15 +413,15 @@ describe("source-less multi-administration treatment course realization", () => 
     for (const representation of [course, toDosageDetails(rows)]) {
       const en = formatSig(representation, "long", { locale: "en" });
       const th = formatSig(representation, "long", { locale: "th" });
-      expect(en.toLowerCase()).toContain("days 1–7");
-      expect(en.toLowerCase()).toContain("no doses on days 8–14");
-      expect(en.toLowerCase()).toContain("days 15–21");
-      expect(th).toContain("วันที่ 1–7");
-      expect(th).toContain("งดยาในวันที่ 8–14");
-      expect(th).toContain("วันที่ 15–21");
+      expect(en.toLowerCase()).toContain("from treatment start until 7 days after treatment start");
+      expect(en.toLowerCase()).toContain("no doses from 7 days after treatment start until 14 days after treatment start");
+      expect(en.toLowerCase()).toContain("from 14 days after treatment start until 21 days after treatment start");
+      expect(th).toContain("ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา");
+      expect(th).toContain("งดยาตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา");
+      expect(th).toContain("ตั้งแต่14 วันหลังเริ่มการรักษาจนถึง21 วันหลังเริ่มการรักษา");
     }
     expect(formatSigBatch(rows, "long", { locale: "en" }).toLowerCase())
-      .toContain("no doses on days 8–14");
+      .toContain("no doses from 7 days after treatment start until 14 days after treatment start");
   });
 
   it("renders calendar-bounded unequal clock dosages without original text", () => {

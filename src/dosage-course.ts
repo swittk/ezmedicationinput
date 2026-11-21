@@ -6,11 +6,11 @@ import {projectNativeR5Course} from "./adapters/r5-course";
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
-  getEmaQuantityComparator, quantityFromR5, quantityForR5 as generalQuantityForR5,
+  getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5,
   simpleQuantityForR5
 } from "./fhir-quantity-operator";
 import {
-  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTiming, FhirCoding, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
+  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTiming, FhirCoding, FhirCodeableConcept, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction,
   FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety,
   FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
@@ -669,7 +669,11 @@ export function reconcileR5SafetyEdits(
     // Unmatched cardinality alone is not identity: deleting 5 mg/day and
     // adding 5 mL/30 days must NOT transfer the old ID or extension.
     // A numeric edit retains the same units and period window.
-    if (scope === "period" && original.id !== candidate.id ||
+    const firstId = original.id === undefined &&
+      original.valueQuantity?.value === candidate.valueQuantity?.value &&
+      (original.valueQuantity?.comparator ?? getEmaQuantityComparator(original.valueQuantity)) ===
+        (candidate.valueQuantity?.comparator ?? getEmaQuantityComparator(candidate.valueQuantity));
+    if (scope === "period" && original.id !== candidate.id && !firstId ||
         !sameUnit(original.valueQuantity, candidate.valueQuantity) ||
         (original.period || candidate.period) &&
         (!sameUnit(original.period, candidate.period) ||
@@ -784,12 +788,14 @@ export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] 
       for (const limit of safety.doseLimit ?? []) {
         const retained = { ...limit };
         if (limit.valueQuantity) {
-          retained.valueQuantity = cloneStructuredValue(limit.valueQuantity);
-          limit.valueQuantity = cloneStructuredValue(limit.valueQuantity);
+          const quantity = quantityForR6(limit.valueQuantity)!;
+          retained.valueQuantity = cloneStructuredValue(quantity);
+          limit.valueQuantity = cloneStructuredValue(quantity);
         }
         if (limit.period) {
-          retained.period = cloneStructuredValue(limit.period);
-          limit.period = cloneStructuredValue(limit.period);
+          const period = quantityForR6(limit.period)!;
+          retained.period = cloneStructuredValue(period);
+          limit.period = cloneStructuredValue(period);
         }
         retainedLimits.push(retained);
       }
@@ -839,7 +845,7 @@ export function hasUnrecognizedEditMetadata(marker:FhirExtension):boolean {
       if(typeof field.valueBoolean!=="boolean"||Object.keys(field).some(key=>key!=="url"&&key!=="valueBoolean"))return true;
       continue;
     }
-    if(field.url==="instruction"||field.url==="textFingerprint"){if(hasOtherOwnField(field,"valueString"))return true;continue;}
+    if(field.url==="instruction"||field.url==="textFingerprint"||field.url==="projectionFingerprint"){if(hasOtherOwnField(field,"valueString"))return true;continue;}
     if(field.url!=="row"||hasOtherOwnField(field,"extension"))return true;
     for(const part of field.extension??[]) {
       if(part.url==="sourceAgreement") {
@@ -1160,7 +1166,7 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
  * would violate the project's throughput contract.
  */
 interface SourceMeasureObservation {
-  original: FhirQuantity;
+  original: FhirR6Quantity;
   value?: number;
   unit?: string;
   code?: string;
@@ -1183,12 +1189,152 @@ interface SourceMaximaObservation {
   administration?: SourceMeasureObservation;
   lifetime?: SourceMeasureObservation;
 }
+interface SourceConceptObservation {
+  original: FhirCodeableConcept;
+  text?: string;
+  codings: Array<{ original: FhirCoding; system?: string; version?: string;
+    code?: string; display?: string; userSelected?: boolean }>;
+}
+/** Observe only the editable clinical concept, never opaque source metadata. */
+export function captureSourceReplayConcept(value: FhirCodeableConcept | undefined): SourceConceptObservation | undefined {
+  if (!value) return undefined;
+  const codings: SourceConceptObservation["codings"] = [];
+  for (const original of value.coding ?? []) codings.push({
+    original, system: original.system, version: original.version, code: original.code,
+    display: original.display, userSelected: original.userSelected,
+  });
+  return { original: value, text: value.text, codings };
+}
+export function matchesSourceReplayConcept(
+  value: FhirCodeableConcept | undefined, proof: SourceConceptObservation | undefined
+): boolean {
+  if (!value || !proof) return !value && !proof;
+  if (value !== proof.original || value.text !== proof.text || (value.coding?.length ?? 0) !== proof.codings.length)
+    return false;
+  for (let index = 0; index < proof.codings.length; index++) {
+    const current = value.coding![index], previous = proof.codings[index];
+    if (current !== previous.original || current.system !== previous.system || current.version !== previous.version ||
+        current.code !== previous.code || current.display !== previous.display || current.userSelected !== previous.userSelected)
+      return false;
+  }
+  return true;
+}
+/** Observe an ordered clinical concept list only when one is supplied. */
+export function captureSourceReplayConceptList(
+  value: readonly FhirCodeableConcept[] | undefined
+): SourceConceptObservation[] | undefined {
+  if (!value) return undefined;
+  const proof: SourceConceptObservation[] = new Array(value.length);
+  for (let index = 0; index < value.length; index++)
+    proof[index] = captureSourceReplayConcept(value[index])!;
+  return proof;
+}
+export function matchesSourceReplayConceptList(
+  value: readonly FhirCodeableConcept[] | undefined,
+  proof: readonly SourceConceptObservation[] | undefined
+): boolean {
+  if (!value || !proof) return value === undefined && proof === undefined;
+  if (value.length !== proof.length) return false;
+  for (let index = 0; index < proof.length; index++)
+    if (!matchesSourceReplayConcept(value[index], proof[index])) return false;
+  return true;
+}
+interface SourcePredicateObservation {
+  original: FhirExtension;
+  valueString?: string;
+  children?: FhirExtension[];
+  fields: Array<{ original: FhirExtension; url: string; value: string | number | boolean | undefined }>;
+}
+interface SourceConditionObservation {
+  modifier?: FhirExtension;
+  predicate?: SourcePredicateObservation[];
+  native: Array<{ original: FhirR6DosageCondition; operation?: FhirR6DosageCondition["operation"];
+    text?: string; valueBoolean?: boolean; quantity?: SourceMeasureObservation;
+    code?: SourceConceptObservation; details?: SourceConceptObservation;
+    logic?: FhirExtension; predicate?: SourcePredicateObservation[] }>;
+}
+function predicateScalar(field: FhirExtension): string | number | boolean | undefined {
+  switch (field.url) {
+    case "kind": case "operation": return field.valueCode;
+    case "name": case "unit": case "text": return field.valueString;
+    case "value": return field.valueDecimal;
+    case "expected": return field.valueBoolean;
+    default: return undefined;
+  }
+}
+/** Observe the declared Boolean predicate only. Foreign annotation children
+ * remain opaque, and the flat work list avoids recursive provenance walks. */
+function captureReplayPredicate(root: FhirExtension | undefined): SourcePredicateObservation[] | undefined {
+  if (!root) return undefined;
+  const pending = [root], observations: SourcePredicateObservation[] = [];
+  for (let index = 0; index < pending.length; index++) {
+    const original = pending[index];
+    const fields: SourcePredicateObservation["fields"] = [];
+    for (const field of original.extension ?? []) {
+      fields.push({ original: field, url: field.url, value: predicateScalar(field) });
+      if (field.url === "predicate" || field.url === "calendarDayPredicate" ||
+          field.url === "condition" || field.url === "conditions") pending.push(field);
+    }
+    observations.push({ original, valueString: original.valueString, children: original.extension, fields });
+  }
+  return observations;
+}
+function matchesReplayPredicate(proof: SourcePredicateObservation[] | undefined): boolean {
+  for (const node of proof ?? []) {
+    const current = node.original;
+    if (current.valueString !== node.valueString || current.extension !== node.children ||
+        (current.extension?.length ?? 0) !== node.fields.length) return false;
+    for (let index = 0; index < node.fields.length; index++) {
+      const field = current.extension![index], prior = node.fields[index];
+      if (field !== prior.original || field.url !== prior.url || predicateScalar(field) !== prior.value) return false;
+    }
+  }
+  return true;
+}
+function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): SourceConditionObservation | undefined {
+  const modifier = dosage.modifierExtension?.find(item => item.url === DOSAGE_CONDITION_R5_URL);
+  const conditions = (dosage as EzDosage).condition;
+  if (!modifier && !conditions?.length) return undefined;
+  const native: SourceConditionObservation["native"] = [];
+  for (const original of conditions ?? []) {
+    const logic = original.extension?.find(item => item.url === DOSAGE_CONDITION_R6_LOGIC_URL);
+    native.push({ original, operation: original.operation, text: original.text,
+      valueBoolean: original.valueBoolean, quantity: capturedReplayMeasure(original.valueQuantity),
+      code: captureSourceReplayConcept(original.code), details: captureSourceReplayConcept(original.details),
+      logic, predicate: captureReplayPredicate(logic) });
+  }
+  return { modifier, predicate: captureReplayPredicate(modifier), native };
+}
+function matchesSourceReplayCondition(dosage: FhirDosage | EzDosage, proof: SourceConditionObservation | undefined): boolean {
+  const modifier = dosage.modifierExtension?.find(item => item.url === DOSAGE_CONDITION_R5_URL);
+  const conditions = (dosage as EzDosage).condition;
+  if (!proof) return !modifier && !conditions?.length;
+  if (modifier !== proof.modifier || !matchesReplayPredicate(proof.predicate) ||
+      (conditions?.length ?? 0) !== proof.native.length) return false;
+  for (let index = 0; index < proof.native.length; index++) {
+    const current = conditions![index], previous = proof.native[index];
+    if (current !== previous.original || current.operation !== previous.operation || current.text !== previous.text ||
+        current.valueBoolean !== previous.valueBoolean ||
+        !unchangedReplayMeasure(current.valueQuantity, previous.quantity) ||
+        !matchesSourceReplayConcept(current.code, previous.code) ||
+        !matchesSourceReplayConcept(current.details, previous.details) ||
+        current.extension?.find(item => item.url === DOSAGE_CONDITION_R6_LOGIC_URL) !== previous.logic ||
+        !matchesReplayPredicate(previous.predicate)) return false;
+  }
+  return true;
+}
 interface SourceReplayProof {
   matches: boolean;
   top: Array<[string, unknown]>;
   amounts: SourceDoseObservation[];
   maxima?: SourceMaximaObservation;
+  condition?: SourceConditionObservation;
   timing?: SourceTimingObservation;
+  site?: SourceConceptObservation;
+  route?: SourceConceptObservation;
+  method?: SourceConceptObservation;
+  asNeededFor?: SourceConceptObservation[];
+  additionalInstructions?: SourceConceptObservation[];
 }
 interface SourceTimingObservation {
   original: FhirTiming;
@@ -1218,7 +1364,7 @@ interface SourceTimingObservation {
 }
 const SOURCE_REPLAY_PROOFS = new WeakMap<FhirDosage | EzDosage, SourceReplayProof>();
 
-function capturedReplayMeasure(quantity: FhirQuantity | undefined): SourceMeasureObservation | undefined {
+function capturedReplayMeasure(quantity: FhirR6Quantity | undefined): SourceMeasureObservation | undefined {
   return quantity ? {
     original: quantity,
     value: quantity.value,
@@ -1230,7 +1376,7 @@ function capturedReplayMeasure(quantity: FhirQuantity | undefined): SourceMeasur
   } : undefined;
 }
 function unchangedReplayMeasure(
-  quantity: FhirQuantity | undefined,
+  quantity: FhirR6Quantity | undefined,
   proof: SourceMeasureObservation | undefined
 ): boolean {
   if (!quantity || !proof) return quantity === undefined && proof === undefined;
@@ -1425,7 +1571,11 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
     });
   }
   return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
-    timing: captureSourceReplayTiming(dosage.timing) };
+    timing: captureSourceReplayTiming(dosage.timing), condition: captureSourceReplayCondition(dosage),
+    site: captureSourceReplayConcept(dosage.site), route: captureSourceReplayConcept(dosage.route),
+    method: captureSourceReplayConcept(dosage.method),
+    asNeededFor: captureSourceReplayConceptList(dosage.asNeededFor),
+    additionalInstructions: captureSourceReplayConceptList(dosage.additionalInstruction) };
 }
 function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplayProof): boolean {
   const raw = dosage as Record<string, unknown>;
@@ -1449,7 +1599,13 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
       !unchangedReplayMeasure(row.rateRatio?.denominator, prior.ratioDenominator)
     ) return false;
   }
-  return matchesSourceReplayMaxima(dosage, proof.maxima) &&
+  return matchesSourceReplayConcept(dosage.site, proof.site) &&
+    matchesSourceReplayConcept(dosage.route, proof.route) &&
+    matchesSourceReplayConcept(dosage.method, proof.method) &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor) &&
+    matchesSourceReplayConceptList(dosage.additionalInstruction, proof.additionalInstructions) &&
+    matchesSourceReplayCondition(dosage, proof.condition) &&
+    matchesSourceReplayMaxima(dosage, proof.maxima) &&
     matchesSourceReplayTiming(dosage.timing, proof.timing);
 }
 
@@ -1483,12 +1639,13 @@ export function getDosageSourceTextAgreement(
 }
 export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
   if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL || Object.keys(marker).length !== 2 ||
-      !marker.extension?.length || marker.extension.length > 2) return false;
+      !marker.extension?.length || marker.extension.length > 3) return false;
   let fields = 0;
   for (const field of marker.extension) {
     if (Object.keys(field).length !== 2) return false;
     if (field.url === "sourceAgreement" && typeof field.valueBoolean === "boolean" && !(fields & 1)) fields |= 1;
     else if (field.url === "textFingerprint" && typeof field.valueString === "string" && !(fields & 2)) fields |= 2;
+    else if (field.url === "projectionFingerprint" && typeof field.valueString === "string" && !(fields & 4)) fields |= 4;
     else return false;
   }
   return Boolean(fields & 1);
@@ -1507,6 +1664,11 @@ export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boo
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
     for (const row of marker.extension ?? []) {
+      if (row.url === "projectionFingerprint") {
+        const matches = row.valueString === dosageProjectionFingerprint(dosage);
+        SOURCE_REPLAY_PROOFS.set(dosage, capturedReplayProof(dosage, matches));
+        return matches;
+      }
       if (row.url !== "row") continue;
       for (const field of row.extension ?? [])
         if (field.url === "projectionFingerprint") {
@@ -1571,10 +1733,13 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     const rowAgreement = original?.sourceAgreement ?? sourceAgreement;
     const currentText = dosageTextFingerprint(row);
     const sourceText = original?.textFingerprint ?? currentText;
+    const localReplay = row.text !== undefined && Boolean(row.maxDosePerPeriod?.length ||
+      row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety);
+    const projection = instruction !== undefined || localReplay ? dosageProjectionFingerprint(row) : undefined;
     if (instruction !== undefined) {
       if (index === 0 && !rowAgreement) children.push({ url: "textFingerprint", valueString: sourceText });
       const baseline: FhirExtension[] = [
-        { url: "projectionFingerprint", valueString: dosageProjectionFingerprint(row) },
+        { url: "projectionFingerprint", valueString: projection },
         { url: "textFingerprint", valueString: currentText },
       ];
       if (!sourceAgreement || rowSources) baseline.push({ url: "sourceAgreement", valueBoolean: rowAgreement });
@@ -1582,10 +1747,11 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     }
     // Later/scalar rows need only local source authority, not another course
     // baseline. Preserve the original text fingerprint across explicit edits.
-    if (row.text !== undefined && (!rowAgreement || !sourceAgreement) && (index > 0 || instruction === undefined))
+    if (row.text !== undefined && (!rowAgreement || !sourceAgreement || localReplay) && (index > 0 || instruction === undefined))
       result[index] = replaceMarker(row, { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
         { url: "sourceAgreement", valueBoolean: rowAgreement },
         { url: "textFingerprint", valueString: sourceText },
+        ...(localReplay ? [{ url: "projectionFingerprint", valueString: projection }] : []),
       ] });
   }
   if (instruction !== undefined)

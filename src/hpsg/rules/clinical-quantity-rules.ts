@@ -312,20 +312,11 @@ function activeDoseInCarrierOverTime(
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(routeToken)));
   if (markedIV) cursor++;
   const overToken = context.tokens[cursor];
-  const durationStart = cursor + 1;
-  const durationToken = context.tokens[durationStart];
-  if (!overToken || !durationToken || !available(context, durationStart) ||
-      !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
-  const qualifiedDuration = durationToken.kind === LexKind.Number ? undefined :
-    doseComparatorNumberAt(context.tokens, durationStart, context.limit, normalizeTokenLower(durationToken));
-  const durationUnitIndex = (qualifiedDuration?.numericIndex ?? durationStart) + 1;
-  const durationUnitToken = context.tokens[durationUnitIndex];
-  const durationValue = qualifiedDuration?.value ?? clinicalDurationNumber(durationToken);
-  const durationUnit = qualifiedDuration?.rawUnit ? timeUnit(qualifiedDuration.rawUnit) :
-    durationUnitToken && available(context, durationUnitIndex) ? timeUnit(normalizeTokenLower(durationUnitToken)) : undefined;
-  if (durationValue === undefined || durationValue <= 0 || !durationUnit) return undefined;
-  const durationEnd = durationUnitIndex + (qualifiedDuration?.rawUnit ? 0 : 1);
-  const durationQualifier = qualifiedDuration ? { comparator: qualifiedDuration.comparator } : {};
+  if (!overToken || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
+  const duration = infusionDurationAt(context, cursor + 1);
+  if (!duration || duration.value <= 0) return undefined;
+  const durationValue = duration.value, durationUnit = duration.unit, durationEnd = duration.end;
+  const durationQualifier = duration.comparator ? { comparator: duration.comparator } : {};
 
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
@@ -361,6 +352,22 @@ function activeDoseInCarrierOverTime(
   );
 }
 
+/** Shared elapsed-duration daughter of both infusion constructions. */
+function infusionDurationAt(context: HpsgClauseContext, start: number) {
+  const token = context.tokens[start];
+  if (!token || !available(context, start)) return undefined;
+  const qualified = token.kind === LexKind.Number ? undefined :
+    doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
+  const unitIndex = (qualified?.numericIndex ?? start) + 1;
+  const unitToken = context.tokens[unitIndex];
+  const value = qualified?.value ?? clinicalDurationNumber(token);
+  const unit = qualified?.rawUnit ? timeUnit(qualified.rawUnit) :
+    unitToken && available(context, unitIndex) ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
+  if (value === undefined || !unit) return undefined;
+  return { value, unit, comparator: qualified?.comparator,
+    end: unitIndex + (qualified?.rawUnit ? 0 : 1) };
+}
+
 function fixedVolumeOverTime(
   context: HpsgClauseContext,
   start: number,
@@ -378,37 +385,33 @@ function fixedVolumeOverTime(
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(possibleRouteToken)));
   const shift = (markedIV ? 1 : 0) + unitShift;
   const overToken = context.tokens[start + 2 + shift];
-  const durationToken = context.tokens[start + 3 + shift];
-  const durationUnitToken = context.tokens[start + 4 + shift];
-  if (!unit || !overToken || !durationToken || !durationUnitToken ||
-      !available(context, start + 4 + shift) || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
+  if (!unit || !overToken || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
   const numerator = volumeOrMassTerm(value, unit);
-  const durationValue = clinicalDurationNumber(durationToken);
-  const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
+  const duration = infusionDurationAt(context, start + 3 + shift);
   const durationLead = normalizeTokenLower(overToken);
-  if (!numerator || numerator.dimension !== "volume" ||
-      durationValue === undefined || !durationUnit ||
+  if (!numerator || numerator.dimension !== "volume" || !duration ||
       // `volume over elapsed-time` is itself a bounded dimensional
       // constituent. It can therefore be the complement of an inherited
       // administration head in a later regimen phase. In contrast, `for`
       // remains ambiguous with course duration and requires a local head.
       durationLead !== "over" && !hasAdministrationCue(context, start)) return undefined;
+  const durationQualifier = duration.comparator ? { comparator: duration.comparator } : {};
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
     status: "resolved",
     numerator,
-    denominators: [{ value: durationValue, unit: durationUnit, dimension: "time" }],
+    denominators: [{ value: duration.value, unit: duration.unit, dimension: "time", ...durationQualifier }],
     projectedDose: { value, unit: numerator.unit },
-    administrationDuration: { value: durationValue, unit: durationUnit }
+    administrationDuration: { value: duration.value, unit: duration.unit, ...durationQualifier }
   };
   return clinicalSign(
     context,
     "hpsg.lex.clinicalQuantity.fixedVolumeOverTime",
-    Array.from({ length: 5 + shift }, (_, offset) => start + offset),
+    Array.from({ length: duration.end - start }, (_, offset) => start + offset),
     clinicalQuantity,
     clinicalQuantity.projectedDose,
     { sourceRanges: [{
-      start: overToken.sourceStart, end: durationUnitToken.sourceEnd
+      start: overToken.sourceStart, end: context.tokens[duration.end - 1].sourceEnd
     }] },
     undefined,
     markedIV ? RouteCode["Intravenous route"] : undefined

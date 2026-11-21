@@ -324,8 +324,10 @@ export interface HpsgScheduleFeature {
   /** Weekday occurrence in each month; -1 denotes the last occurrence. */
   weekdayOrdinal?: -1 | 1 | 2 | 3 | 4 | 5;
   timingReference?: "previous" | "previous-weekday-complement";
-  /** Source-relative phase onset, in elapsed days from treatment start. */
+  /** Source-relative phase onset; the reference distinguishes civil days. */
   treatmentStartOffsetDays?: number;
+  /** Local civil-day origin or completion of the preceding phase. */
+  phaseStartReference?: "treatment-day-start" | "previous-phase-next-day";
   attachmentClass?: "administration" | "procedure";
   /** Exact source owned by this schedule construction, retained for generic attachment arbitration. */
   sourceRanges?: TextRange[];

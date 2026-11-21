@@ -285,7 +285,7 @@ describe("parseSig core scenarios", () => {
       periodUnit: "min",
       count: 8
     });
-    expect(result.shortText).toBe("1 drop OPH Q15MIN x8");
+    expect(result.shortText).toBe("1 drop OPH in both eyes Q15MIN x8");
     expect(result.longText).toBe("Instill 1 drop every 15 minutes for 8 doses in both eyes.");
   });
 
@@ -4286,7 +4286,7 @@ describe("internationalization", () => {
 
     it("includes minute interval wording together with count information in Thai", () => {
       const result = parseSig("1 drop ou q15min x 8 doses", { locale: "th" });
-      expect(result.shortText).toBe("1 หยด OPH ทุก 15 นาที x8");
+      expect(result.shortText).toBe("1 หยด OPH ที่ตาทั้งสองข้าง ทุก 15 นาที x8");
       expect(result.longText).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง.");
       expect(result.fhir.text).toBe("หยอดตาทั้งสองข้าง ครั้งละ 1 หยด ทุก 15 นาที จำนวน 8 ครั้ง.");
     });

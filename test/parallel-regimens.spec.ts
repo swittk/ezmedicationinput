@@ -5,7 +5,7 @@ import {
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { shiftCanonicalSigClauses } from "../src/ir";
-import { courseFromPartialParallel } from "../src/canonical/compile";
+import { administrationFromClause, courseFromAdministrations, courseFromPartialParallel } from "../src/canonical/compile";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen
@@ -874,8 +874,20 @@ it("round 27: resolves next-day onset against a typed nonzero phase origin", () 
   const graph = buildRegimenGraph(plan, plan.segments);
   states[0].primaryClause.schedule!.treatmentStartOffsetDays = 4;
   scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
-  expect(states.map(state => state.primaryClause.schedule?.treatmentStartOffsetDays)).toEqual([4, 5, 6]);
+  expect(states.map(state => state.primaryClause.schedule?.treatmentStartOffsetDays)).toEqual([4, undefined, undefined]);
+  expect(states.slice(1).map(state => state.primaryClause.schedule?.phaseStartReference))
+    .toEqual(["previous-phase-next-day", "previous-phase-next-day"]);
   expect(states.map(state => state.primaryClause.schedule?.timeOfDay)).toEqual([
     ["22:00:00"], ["06:00:00"], ["07:00:00"]
+  ]);
+  const course = courseFromAdministrations(states.map((state, index) =>
+    administrationFromClause(state.primaryClause, plan.segments[index].text, index + 1)), source);
+  expect(nextDueDoses(course, { orderedAt: "2026-11-21T00:00:00Z",
+    from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 })).toEqual([
+    "2026-11-25T22:00:00+00:00", "2026-11-26T06:00:00+00:00", "2026-11-27T07:00:00+00:00"
+  ]);
+  expect(nextDueDoses(course, { orderedAt: "2026-11-21T23:00:00Z",
+    from: "2026-11-21T23:00:00Z", timeZone: "UTC", limit: 3 })).toEqual([
+    "2026-11-26T22:00:00+00:00", "2026-11-27T06:00:00+00:00", "2026-11-28T07:00:00+00:00"
   ]);
 });

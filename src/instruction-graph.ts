@@ -3492,7 +3492,17 @@ function translatedArgument(arg: AdviceArgument, locale: string): string {
   // a fabricated valueless "at most mg" quantity.
   if (arg.quantity) {
     if (arg.quantity.value !== undefined || arg.quantity.range?.low !== undefined ||
-        arg.quantity.range?.high !== undefined) return translatedQuantity(arg.quantity, locale);
+        arg.quantity.range?.high !== undefined) {
+      const amount = translatedQuantity(arg.quantity, locale);
+      // A measured nominal keeps its entity; a bare quantity's normalized
+      // unit is already part of the amount realization.
+      const nominal = arg.normalized;
+      const entity = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme;
+      return entity && nominal && nominal !== arg.quantity.unit && !normalizeUnit(nominal)
+        ? joinLocalizedTokens(locale, [amount, translatedArgumentConcept(arg, locale)])
+        : amount;
+    }
     return arg.text || arg.normalized || "";
   }
   const looseQuantity = (arg.text ?? arg.normalized ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s+(.+)$/u);

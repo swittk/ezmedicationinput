@@ -9,7 +9,7 @@ import type {
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio,
 } from "../types";
 import { equalStructuredValues } from "../stable-structure";
-import { quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
+import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
@@ -140,6 +140,33 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
         const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
         const combinedAction = stepAction && stepAction !== courseAction
           ? courseAction ? courseAction + "\n" + stepAction : stepAction : courseAction;
+        const sameShape = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean => {
+          const a = left.valueQuantity, b = right.valueQuantity, ap = left.period, bp = right.period;
+          return left.scope === right.scope && (a !== undefined) === (b !== undefined) &&
+            (left.valueInteger !== undefined) === (right.valueInteger !== undefined) &&
+            (left.valueExpression !== undefined) === (right.valueExpression !== undefined) &&
+            a?.system === b?.system && a?.code === b?.code &&
+            (a?.system && a.code ? true : a?.unit === b?.unit) &&
+            ap?.value === bp?.value && ap?.system === bp?.system && ap?.code === bp?.code &&
+            (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
+            getQuantityComparator(ap) === getQuantityComparator(bp);
+        };
+        const shapeMatch = (limit: FhirR6DoseLimit): FhirR6DoseLimit | undefined => {
+          // Only unmatched anonymous edits need this short clinical comparison.
+          // No object serialization or opaque metadata participates in identity.
+          let replacement: FhirR6DoseLimit | undefined;
+          for (const item of current) if (sameShape(limit, item)) {
+            if (replacement) return undefined;
+            replacement = item;
+          }
+          if (!replacement) return undefined;
+          let sourceCount = 0;
+          for (const item of saved.course?.doseLimit ?? [])
+            if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
+          for (const item of saved.step?.doseLimit ?? [])
+            if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
+          return sourceCount === 1 ? replacement : undefined;
+        };
         const reconcile = (policy: FhirR6DosageSafety | undefined) => {
           if (!policy) return policy;
           let changed = false;
@@ -153,6 +180,9 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
             if (limit.id) {
               const matches = current.filter(value => value.id === limit.id);
               if (matches.length === 1) limits.push(matches[0]);
+            } else {
+              const replacement = shapeMatch(limit);
+              if (replacement) limits.push(replacement);
             }
           }
           const action = policy.ifExceeded;

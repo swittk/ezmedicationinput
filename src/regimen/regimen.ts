@@ -137,6 +137,16 @@ function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedul
   const durationEnd = anchoredScheduleDurationEnd(schedule);
   if (durationEnd) schedule.boundsEnd = durationEnd;
 }
+/** An exact fixed-day phase can establish a later relative origin. */
+function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): number | undefined {
+  if (!schedule || schedule.duration === undefined || schedule.durationComparator ||
+      schedule.durationMaxComparator || schedule.durationIsRange && schedule.durationMax === undefined ||
+      schedule.durationMax !== undefined && (schedule.durationMax !== schedule.duration ||
+        schedule.durationMaxUnit && schedule.durationMaxUnit !== schedule.durationUnit)) return undefined;
+  return schedule.durationUnit === "d" ? schedule.duration :
+    schedule.durationUnit === "wk" ? schedule.duration * 7 : undefined;
+}
+
 /** Half-open phase endpoint derived from explicit dates, end bounds, or anchored duration. */
 function phaseEndExclusive(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule) return undefined;
@@ -293,7 +303,7 @@ export function scopeSequentialPhaseSemantics(
       note: "The target inherits this administration's arguments and base schedule with the explicit intervening wait."
     });
   }
-  const relativePhaseStarts = new Map<number, number>();
+  const relativePhaseStarts = new Map<number, number | null>();
   for (const edge of graph.sequences) {
     const prior = graph.phases[edge.from].members;
     const next = graph.phases[edge.to].members;
@@ -306,19 +316,40 @@ export function scopeSequentialPhaseSemantics(
       : undefined;
     const authoredPriorStarts = prior.map(index => states[index]?.primaryClause.schedule?.treatmentStartOffsetDays)
       .filter((value): value is number => value !== undefined);
-    const priorStart = relativePhaseStarts.get(edge.from) ??
-      (authoredPriorStarts.length && authoredPriorStarts.every(value => value === authoredPriorStarts[0])
-        ? authoredPriorStarts[0] : 0);
+    const recordedStart = relativePhaseStarts.get(edge.from);
+    const priorStart = recordedStart !== undefined ? recordedStart :
+      authoredPriorStarts.length && authoredPriorStarts.every(value => value === authoredPriorStarts[0])
+        ? authoredPriorStarts[0] : 0;
     let nextDayRelation = false;
     let contextualNextDay = false;
+    let localNextDay = false;
     let contextualPredecessor: boolean | undefined;
+    let singleClockPredecessor: number | undefined;
     let relativeNextDay: number | null | undefined;
     for (const member of next) {
       const clause = states[member]?.primaryClause;
       const schedule = clause?.schedule;
       if (!clause || !schedule?.evidence?.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) continue;
-      contextualPredecessor ??= schedules.some(value => value?.count !== undefined ||
-        value?.countMax !== undefined || value?.phaseStartReference === 'previous-phase-next-day');
+      if (contextualPredecessor === undefined) {
+        const preceding = prior.length === 1 ? schedules[0] : undefined;
+        // A sequential next-morning construction closes one explicitly
+        // clocked administration. Its actual occurrence, which can move to
+        // tomorrow after a late order, owns the following local day.
+        const onceDaily = preceding?.frequency === 1 && preceding.period === 1 &&
+          preceding.periodUnit === FhirPeriodUnit.Day;
+        if (preceding?.timeOfDay?.length === 1 && preceding.count === undefined &&
+            preceding.countMax === undefined && preceding.duration === undefined &&
+            preceding.durationMax === undefined && preceding.durationUnit === undefined &&
+            (onceDaily || preceding.frequency === undefined && preceding.period === undefined) &&
+            preceding.frequencyMax === undefined && preceding.periodMax === undefined &&
+            !preceding.dayOfWeek?.length && !preceding.dayOfMonth?.length &&
+            preceding.weekdayOrdinal === undefined && !preceding.repeatCycle &&
+            !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length)
+          singleClockPredecessor = prior[0];
+        contextualPredecessor = singleClockPredecessor !== undefined || schedules.some(value =>
+          value?.count !== undefined || value?.countMax !== undefined ||
+          value?.phaseStartReference === 'previous-phase-next-day');
+      }
       const authoredOffset = contextualPredecessor && schedule.evidence.some(item => item.rule !== NEXT_DAY_SCHEDULE_RULE &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
         item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
@@ -329,6 +360,14 @@ export function scopeSequentialPhaseSemantics(
         continue;
       }
       nextDayRelation = true;
+      if (singleClockPredecessor !== undefined) {
+        const predecessor = states[singleClockPredecessor].primaryClause;
+        predecessor.schedule!.count = 1;
+        predecessor.evidence.push({ rule: "hpsg.regimen.single-clock-before-next-day", spans: [],
+          scheduleFields: ["count"],
+          note: "The next-morning continuation follows this one explicitly clocked administration." });
+        singleClockPredecessor = undefined;
+      }
       if (contextualPredecessor) {
         contextualNextDay = true;
         delete schedule.treatmentStartOffsetDays;
@@ -342,34 +381,36 @@ export function scopeSequentialPhaseSemantics(
         if (relativeNextDay === undefined) {
           // A finite phase owns every authored day before its successor. The
           // following day starts at its exclusive end, not origin + one.
-          const lengths = schedules.map(value => {
-            if (!value || value.duration === undefined || value.durationComparator ||
-                value.durationMaxComparator || value.durationIsRange && value.durationMax === undefined ||
-                value.durationMax !== undefined && (value.durationMax !== value.duration ||
-                  value.durationMaxUnit && value.durationMaxUnit !== value.durationUnit)) return undefined;
-            return value.durationUnit === 'd' ? value.duration :
-              value.durationUnit === 'wk' ? value.duration * 7 : undefined;
-          });
-          if (lengths.length && lengths.every((value): value is number => value !== undefined)) {
+          const lengths = schedules.map(exactPhaseDurationDays);
+          if (priorStart !== null && lengths.length &&
+              lengths.every((value): value is number => value !== undefined)) {
             const pauses = prior.map(index => terminalTreatmentPauseDays(states[index].primaryClause))
               .filter((days): days is number => days !== undefined);
             relativeNextDay = priorStart + Math.max(...lengths) + (pauses.length === 1 ? pauses[0] : 0);
+            localNextDay = schedules.every(value => value?.phaseStartReference === "treatment-day-start");
           } else {
             // Calendar/uncertain course lengths keep their sequential duration
             // owner; they cannot be replaced by a fabricated treatment day2.
-            relativeNextDay = schedules.some(value => value?.duration !== undefined || value?.durationUnit !== undefined)
+            relativeNextDay = priorStart === null ||
+              schedules.some(value => value?.duration !== undefined || value?.durationUnit !== undefined)
               ? null : priorStart + 1;
+            localNextDay = relativeNextDay !== null;
           }
         }
         if (relativeNextDay === null) delete schedule.treatmentStartOffsetDays;
-        else schedule.treatmentStartOffsetDays = relativeNextDay;
+        else {
+          schedule.treatmentStartOffsetDays = relativeNextDay;
+          if (localNextDay) schedule.phaseStartReference = "treatment-day-start";
+        }
       }
       clause.evidence.push({ rule: 'hpsg.regimen.next-day-onset', spans: [],
-        scheduleFields: schedule.phaseStartReference ? ['phaseStartReference'] :
-          start ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
+        scheduleFields: schedule.phaseStartReference === "treatment-day-start"
+          ? ["phaseStartReference", "treatmentStartOffsetDays"]
+          : schedule.phaseStartReference ? ['phaseStartReference'] :
+            start ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
         note: 'The next-day daughter follows the complete preceding phase, retaining its authored endpoint or origin.' });
     }
-    if (contextualNextDay) {
+    if (contextualNextDay || localNextDay) {
       // Coordination already established one successor phase. Its onset scopes
       // over daughters that omit an onset, while independently authored dates
       // and treatment offsets remain local to their own administrations.
@@ -380,9 +421,11 @@ export function scopeSequentialPhaseSemantics(
         if (schedule?.phaseStartReference || schedule?.treatmentStartOffsetDays !== undefined ||
             schedule?.boundsStart || schedule?.calendarEvents?.length) continue;
         clause.schedule ??= {};
-        clause.schedule.phaseStartReference = 'previous-phase-next-day';
+        clause.schedule.phaseStartReference = contextualNextDay ? 'previous-phase-next-day' : "treatment-day-start";
+        if (localNextDay && relativeNextDay !== null && relativeNextDay !== undefined)
+          clause.schedule.treatmentStartOffsetDays = relativeNextDay;
         clause.evidence.push({ rule: 'hpsg.regimen.shared-next-day-onset', spans: [],
-          scheduleFields: ['phaseStartReference'],
+          scheduleFields: localNextDay ? ["phaseStartReference", "treatmentStartOffsetDays"] : ['phaseStartReference'],
           note: 'The coordinated successor shares the phase onset while retaining its local dose and clock.' });
       }
     }
@@ -391,7 +434,7 @@ export function scopeSequentialPhaseSemantics(
     const typedChange = next.some(index => Boolean(states[index]?.primaryClause.regimenAdjustment));
     const explicitStart = !contextualNextDay && (typedChange || nextDayRelation) && explicitStarts.length &&
       explicitStarts.every(value => value === explicitStarts[0]) ? explicitStarts[0] : undefined;
-    if (explicitStart !== undefined && explicitStart > priorStart) {
+    if (explicitStart !== undefined && priorStart !== null && explicitStart > priorStart) {
       // An explicit source-relative ADD/REPLACE onset closes the preceding
       // phase. Never derive this from unrelated lowered parallel members.
       for (const member of prior) {
@@ -410,13 +453,9 @@ export function scopeSequentialPhaseSemantics(
       // Do not erase it after bounding the predecessor: R6/R5 lowering must
       // still emit the exact treatment-relative date on the next phase.
     } else if (!contextualNextDay) {
-      const lengths = prior.map(index => {
-        const schedule = states[index]?.primaryClause.schedule;
-        return schedule?.duration !== undefined &&
-          (schedule.durationUnit === 'd' || schedule.durationUnit === 'wk')
-          ? schedule.duration * (schedule.durationUnit === 'wk' ? 7 : 1) : undefined;
-      });
-      if (lengths.length && lengths.every((value): value is number => value !== undefined)) {
+      const lengths = schedules.map(exactPhaseDurationDays);
+      if (priorStart !== null && lengths.length &&
+          lengths.every((value): value is number => value !== undefined)) {
         const pauses = prior.map(index =>
           states[index]?.primaryClause && terminalTreatmentPauseDays(states[index].primaryClause))
           .filter((days): days is number => days !== undefined);
@@ -440,8 +479,8 @@ export function scopeSequentialPhaseSemantics(
             });
           }
         }
-      }
-    }
+      } else relativePhaseStarts.set(edge.to, null);
+    } else relativePhaseStarts.set(edge.to, null);
     const shared = schedules[0];
     const sharedAnchors = schedules.every(schedule =>
       sameSet(schedule?.when, shared?.when) &&

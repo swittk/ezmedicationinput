@@ -2,7 +2,7 @@
  * course. No FHIR serialization or reconstruction occurs in this module.
  * Source grammar is interpreted once; numerical execution consumes only
  * these normalized facts and preserves syntax as read-only evidence. */
-import type { CanonicalSigClause, CanonicalCalendarEventExpr } from "../types";
+import type { CanonicalSigClause, CanonicalCalendarEventExpr, CanonicalPrnReasonExpr } from "../types";
 import type {
   CanonicalAdministration,
   CanonicalAmount,
@@ -15,7 +15,12 @@ import type {
 } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { getBodySiteAdministrationTargetCount } from "../body-site-target";
-import { ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit } from "../maps";
+import { getBodySiteText } from "../body-site-lookup";
+import {
+  ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit,
+  DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
+} from "../maps";
+import { SNOMED_SYSTEM } from "../snomed";
 import type { RouteCode } from "../types";
 
 const quantity = (
@@ -115,6 +120,7 @@ export function administrationFromClause(
       occurrenceDuration: s.administrationDuration,
       occurrenceDurationMax: s.administrationDurationMax,
       occurrenceDurationUnit: s.administrationDurationUnit,
+      occurrenceDurationComparator: s.administrationDurationComparator,
       ...(ranged
         ? {
             courseLengthRange: {
@@ -235,6 +241,12 @@ export function clinicalBoundary(
     },
   };
 }
+function boundaryForOnset(a: CanonicalAdministration): CanonicalBoundary {
+  const boundary: CanonicalBoundary = { anchor: a.onsetReference! };
+  if (a.onsetReference === "treatment-day-start" && a.onsetDays !== undefined)
+    boundary.displacement = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
+  return boundary;
+}
 export function courseFromParallel(
   regimen: Extract<CanonicalParallelRegimen, { kind: "resolved" }>,
   clauseTexts: readonly (string | undefined)[],
@@ -268,8 +280,11 @@ export function courseFromPartialParallel(
 ): CanonicalCourse {
   const administrations: CanonicalAdministration[] = [];
   for (const track of regimen.tracks ?? []) {
+    let priorStart = administrations.length, priorEnd = priorStart;
     for (let index = 0; index < track.phases.length; index++) {
       const phase = track.phases[index];
+      const phaseStart = administrations.length;
+      let predecessors: number[] | undefined;
       for (const item of phase.members) {
         const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
         a.sourceMember = item.member;
@@ -277,12 +292,30 @@ export function courseFromPartialParallel(
         // receives the calendar end inferred within its independent track.
         const calendar = a.schedule?.recurrence?.calendarWindow;
         if (calendar && item.effectiveBoundsEnd) calendar.end = item.effectiveBoundsEnd;
-        if (phase.kind === "relative" && phase.start)
-          a.phaseOrigin = clinicalBoundary(phase.start).displacement;
-        else if (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart)
+        if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
+        else if (a.onsetReference === "previous-phase-next-day" && index > 0) {
+          a.phaseStart = boundaryForOnset(a);
+          if (!predecessors) {
+            predecessors = [];
+            for (let parent = priorStart; parent < priorEnd; parent++) {
+              const previous = administrations[parent];
+              previous.phasePredecessors ??= [];
+              predecessors.push(previous.sourceMember!);
+            }
+          }
+          a.phasePredecessors = predecessors;
+        } else if (a.onsetDays !== undefined)
+          a.phaseOrigin = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
+        else if (phase.kind === "relative" && phase.start) {
+          if (phase.startReference)
+            a.phaseStart = { anchor: phase.startReference, displacement: clinicalBoundary(phase.start).displacement };
+          else a.phaseOrigin = clinicalBoundary(phase.start).displacement;
+        } else if (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart)
           a.phaseStart = { anchor: "unresolved" };
         administrations.push(a);
       }
+      priorStart = phaseStart;
+      priorEnd = administrations.length;
     }
   }
   return { kind: "course", instruction, stages: [{ administrations }] };
@@ -365,6 +398,28 @@ function additionalInstructionsForAdministration(a: CanonicalAdministration): Ca
   });
 }
 
+/** Correct only a recognized label that contradicts the live symptom code.
+ * Qualified or opaque authored reasons retain their extra clinical detail. */
+function prnReasonForDisplay(reason: CanonicalPrnReasonExpr | undefined): CanonicalPrnReasonExpr | undefined {
+  const coding = reason?.coding;
+  const label = reason?.text ?? coding?.display;
+  if (!reason || !coding?.code || !label) return reason;
+  const previous = DEFAULT_PRN_REASON_DEFINITIONS[normalizePrnReasonKey(label)]?.coding;
+  const system = coding.system ?? SNOMED_SYSTEM;
+  if (!previous?.code || previous.code === coding.code && (previous.system ?? SNOMED_SYSTEM) === system)
+    return reason;
+  const current = findPrnReasonDefinitionByCoding(system, coding.code);
+  const text = current?.text ?? current?.coding?.display;
+  if (!current || !text) return reason;
+  return Object.assign({}, reason, {
+    text, i18n: current.i18n,
+    coding: Object.assign({}, coding, {
+      display: current.coding?.display ?? text,
+      i18n: current.coding?.i18n ?? current.i18n
+    })
+  });
+}
+
 /** The grammar's compact dose range has one shared unit and no endpoint
  * operators. Rich native ranges must retain each independently authored
  * endpoint instead of compressing them into a misleading scalar-unit view. */
@@ -410,6 +465,7 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     schedule.period=r?.period;schedule.periodMax=r?.periodMax;schedule.periodUnit=r?.periodUnit;
     schedule.administrationDuration=r?.occurrenceDuration;schedule.administrationDurationMax=r?.occurrenceDurationMax;
     schedule.administrationDurationUnit=r?.occurrenceDurationUnit;
+    schedule.administrationDurationComparator=r?.occurrenceDurationComparator;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
     schedule.durationIsRange=range ? true : undefined;
     schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;
@@ -441,6 +497,19 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   if (a.additionalInstructions || base?.additionalInstructions)
     result.additionalInstructions=additionalInstructionsForAdministration(a);
   result.prn=a.asNeeded===false?undefined:a.asNeeded?Object.assign({},base?.prn,{enabled:true}):base?.prn;
+  if (result.prn && a.provenance?.sourceTextVerified === false) {
+    const prn = result.prn;
+    let reasons = prn.reasons;
+    for (let index = 0; index < (prn.reasons?.length ?? 0); index++) {
+      const original = prn.reasons![index], current = prnReasonForDisplay(original)!;
+      if (current === original) continue;
+      if (reasons === prn.reasons) reasons = prn.reasons!.slice();
+      reasons![index] = current;
+    }
+    const reason = prn.reason === prn.reasons?.[0] ? reasons?.[0] : prnReasonForDisplay(prn.reason);
+    if (reason !== prn.reason || reasons !== prn.reasons)
+      result.prn = Object.assign({}, prn, { reason, reasons });
+  }
   let routeCode:RouteCode|undefined;
   for(const coding of a.route?.coding??[]){
     if(!coding.code || coding.system && coding.system!=="http://snomed.info/sct")continue;
@@ -457,7 +526,11 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   for(const code of a.target?.coding??[])if(code.code){targetCode=code;break;}
   if(a.target){
     const same=a.target.text===base?.site?.text&&targetCode?.code===base?.site?.coding?.code;
-    result.site=Object.assign({},same?base?.site:undefined,{text:a.target.text,administrationTargetCount:a.targetCount});
+    const changedCode=base?.site?.coding?.code!==targetCode?.code;
+    const text=targetCode?.code && (!a.target.text || a.provenance?.sourceTextVerified===false ||
+      changedCode && a.target.text===base?.site?.text)
+      ? getBodySiteText(targetCode) ?? a.target.text : a.target.text;
+    result.site=Object.assign({},same?base?.site:undefined,{text,administrationTargetCount:a.targetCount});
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
   }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
   else result.site=undefined;
@@ -522,13 +595,14 @@ export function courseFromAdministrations(
     if (relative) start = clinicalBoundary({ unit: "d", value: onset! });
     else if (start) administrations = administrations.map((a) => ({ ...a, delayMinutes: undefined }));
     const reference = first.onsetReference;
-    if (reference && administrations.every(a => a.onsetReference === reference))
-      start = { anchor: reference };
-    else if (administrations.some(a => a.onsetReference))
+    if (reference && administrations.every(a => a.onsetReference === reference &&
+        (reference !== "treatment-day-start" || a.onsetDays === onset)))
+      start = boundaryForOnset(first);
+    else if (administrations.some(a => a.onsetReference || !relative && a.onsetDays !== undefined))
       // A non-shared relation remains a member boundary; do not erase it or
       // silently apply one member's contextual origin to its companions.
       administrations = administrations.map(a => a.onsetReference
-        ? { ...a, phaseStart: { anchor: a.onsetReference } }
+        ? { ...a, phaseStart: boundaryForOnset(a) }
         : a.onsetDays !== undefined && a.onsetDays >= 0 && Number.isFinite(a.onsetDays)
           ? { ...a, phaseOrigin: { value: a.onsetDays, unit: "d" } } : a);
     const length = first.schedule?.recurrence?.courseLength;

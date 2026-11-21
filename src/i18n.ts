@@ -1882,9 +1882,10 @@ function describeAdministrationDurationThai(
       : unit === FhirPeriodUnit.Second ? "วินาที"
         : unit === FhirPeriodUnit.Day ? "วัน" : unit;
   const max = schedule?.administrationDurationMax;
+  const lower = quantityComparatorText(schedule?.administrationDurationComparator, "th") + stripTrailingZero(value);
   return max !== undefined && max !== value
-    ? `${prefix} ${stripTrailingZero(value)} ถึง ${stripTrailingZero(max)} ${label}`
-    : `${prefix} ${stripTrailingZero(value)} ${label}`;
+    ? `${prefix} ${lower} ถึง ${stripTrailingZero(max)} ${label}`
+    : `${prefix} ${lower} ${label}`;
 }
 
 function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
@@ -1998,6 +1999,10 @@ function formatShortThai(clause: CanonicalSigClause): string {
   } else if (clause.route?.text) {
     parts.push(clause.route.text);
   }
+  if (clause.site) {
+    const site = formatSiteThai(clause, resolveRouteGrammarThai(clause));
+    if (site) parts.push(site);
+  }
   const timing = describeFrequencyThai(schedule);
   if (timing) {
     parts.push(timing);
@@ -2051,9 +2056,10 @@ function formatShortThai(clause: CanonicalSigClause): string {
   }
   if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
+    const lower = (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
     const duration = max !== undefined && max !== schedule.administrationDuration
-      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
-      : stripTrailingZero(schedule.administrationDuration);
+      ? `${lower}-${stripTrailingZero(max)}`
+      : lower;
     parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
   }
   const durationShort = formatDurationShortThai(schedule);

@@ -7,6 +7,8 @@ export interface FhirCoding {
   code?: string;
   _code?: FhirPrimitiveElement;
   display?: string;
+  userSelected?: boolean;
+  _userSelected?: FhirPrimitiveElement;
   extension?: FhirExtension[];
   _display?: FhirPrimitiveElement;
   i18n?: Record<string, string>;
@@ -1747,11 +1749,12 @@ export interface CanonicalScheduleExpr {
   /** Source-anaphoric timing (e.g. "at the same times") awaiting a licensed
    * previous regimen daughter. Resolved within HPSG/regimen, never by FHIR. */
   timingReference?: "previous" | "previous-weekday-complement";
-  /** Source-relative phase onset, in elapsed days from treatment start. */
+  /** Source-relative phase onset; phaseStartReference selects civil-day
+   * midnight instead of the default clock-preserving treatment start. */
   treatmentStartOffsetDays?: number;
-  /** Phase onset resolved from the preceding phase's completion at execution,
-   * not from a guessed count-to-treatment-day conversion. */
-  phaseStartReference?: "previous-phase-next-day";
+  /** Local-day origin or preceding-phase completion, never a guessed
+   * count-to-treatment-day conversion. */
+  phaseStartReference?: "previous-phase-next-day" | "treatment-day-start";
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
   administrationOffsetMinutes?: number;
   timingCode?: string;
@@ -1777,6 +1780,8 @@ export interface CanonicalScheduleExpr {
   administrationDuration?: number;
   administrationDurationMax?: number;
   administrationDurationUnit?: FhirPeriodUnit;
+  /** Qualifier on each administration duration, distinct from course length. */
+  administrationDurationComparator?: FhirR6Quantity["comparator"];
   frequency?: number;
   frequencyMax?: number;
   period?: number;
