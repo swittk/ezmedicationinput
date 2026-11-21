@@ -59,6 +59,14 @@ export interface CanonicalConcept {
   text?: string;
   coding?: Array<{ system?: string; code?: string; display?: string; version?: string }>;
 }
+/** An amount role needs clinical wording or coding; wire annotations alone
+ * do not turn an ordinary scalar dose into a role-bearing amount. */
+export function hasAmountRole(role: CanonicalConcept | undefined): boolean {
+  if (!role) return false;
+  if (role.text?.trim()) return true;
+  if (role.coding) for (const coding of role.coding) if (coding.code || coding.display?.trim()) return true;
+  return false;
+}
 /** One clinical quantity limit retains its scope, independent value choice,
  * period and source identity. Unlike R5's three maximum fields, this list can
  * represent several differently qualified or expression-based limits without
@@ -220,6 +228,8 @@ export interface CanonicalAdministration {
     sourceHasStructuredClocks?: boolean;
     /** Original primary schedule anchor ownership; independent graph events remain source facts. */
     sourceHasStructuredEvents?: boolean;
+    /** Original structured primary site ownership; graph-only sites remain independent facts. */
+    sourceHasStructuredSite?: boolean;
     /** Original foreign fields retained inside an imported R5 row. Only
      * adapters inspect this source; execution reads the typed fields above. */
     retained?: Partial<import("../types").FhirR6Dosage> };

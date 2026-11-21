@@ -2574,6 +2574,9 @@ describe("round 32 known cadence and repeat range intersection", () => {
     { code: "QID", repeat: { frequency: 1, period: 8, periodMax: 12, periodUnit: FhirPeriodUnit.Hour } },
     { code: "Q4H", repeat: { frequency: 1, period: 30, periodMax: 120, periodUnit: FhirPeriodUnit.Minute } },
     { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 12, periodMax: 24, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 5, periodMax: 7, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 300, periodMax: 420, periodUnit: FhirPeriodUnit.Minute } },
+
   ])("refuses disjoint code/repeat cadence from both public execution APIs: $code $repeat", ({ code, repeat }) => {
     const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code }] }, repeat } };

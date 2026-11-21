@@ -15,6 +15,7 @@ export interface CourseLanguage {
   readonly choicePrefix: string;
   readonly stageSeparator: string;
   readonly doseLabel: string;
+  amountRoleLabel(kind: "dose" | "rate" | "rateRange", role: "ordered" | "calculated" | undefined, sourceRole: string): string;
   readonly rateLabel: string;
   readonly rateRangeLabel: string;
   readonly unspecified: string;

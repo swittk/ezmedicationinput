@@ -88,11 +88,11 @@ export function buildRegimenGraph(
   };
 }
 
-function nextDate(value: string): string | undefined {
+function advanceDate(value: string, days = 1): string | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
   const date = new Date(`${value}T00:00:00Z`);
   if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) return undefined;
-  date.setUTCDate(date.getUTCDate() + 1);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 
@@ -150,16 +150,16 @@ function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): numbe
 /** Half-open phase endpoint derived from explicit dates, end bounds, or anchored duration. */
 function phaseEndExclusive(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule) return undefined;
-  let endpoint = schedule.boundsEnd ? nextDate(schedule.boundsEnd) : undefined;
+  let endpoint = schedule.boundsEnd ? advanceDate(schedule.boundsEnd) : undefined;
   const inclusiveDurationEnd = anchoredScheduleDurationEnd(schedule);
-  const durationEnd = inclusiveDurationEnd ? nextDate(inclusiveDurationEnd) : undefined;
+  const durationEnd = inclusiveDurationEnd ? advanceDate(inclusiveDurationEnd) : undefined;
   if (durationEnd && (!endpoint || durationEnd < endpoint)) endpoint = durationEnd;
   // Explicit finite phase bounds take precedence over the date of its last dose.
   if (endpoint) return endpoint;
   if (schedule.calendarEvents?.length) {
     let latest = '';
     for (const event of schedule.calendarEvents) if (event.isoDate > latest) latest = event.isoDate;
-    return nextDate(latest);
+    return advanceDate(latest);
   }
   return undefined;
 }
@@ -405,7 +405,7 @@ export function scopeSequentialPhaseSemantics(
       } else if (start) {
         // A dated predecessor supplies an actual next calendar day. It must
         // not also claim the unrelated second day of treatment.
-        schedule.boundsStart = schedule.boundsStart ?? start;
+        schedule.boundsStart = schedule.boundsStart ?? (phasePauseDays ? advanceDate(start, phasePauseDays) : start);
         delete schedule.treatmentStartOffsetDays;
       } else {
         if (relativeNextDay === undefined) {

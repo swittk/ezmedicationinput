@@ -1,5 +1,7 @@
 /** Independent quantity and timestamp oracles for review 21 execution. */
 import { describe, expect, it } from "vitest";
+import { normalizeClock } from "../src/execution/calendar";
+import { lexInput } from "../src/lexer/lex";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph, scopeSequentialPhaseSemantics, anchoredScheduleDurationEnd } from "../src/regimen/regimen";
@@ -2370,4 +2372,141 @@ describe("round 32 execution cause-family oracles", () => {
       expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
         .toMatchObject({ totalUnits: 100, unit: "mL" });
   });
+});
+
+describe("round 33 execution history and clock ownership", () => {
+  const forms = (source: FhirR6DosageInstruction) => [
+    source, JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[],
+    importCanonicalCourse(source),
+  ];
+  const fixed = (clock: string): FhirR6DosageInstruction => ({ step: [{ component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 4, periodUnit: Unit.Hour, timeOfDay: [clock] } },
+  }] }] });
+
+  it.each(["08.5:30", "08:30.5"])("rejects an impossible civil clock before origin search: %s", clock => {
+    // Assert the existing clock boundary first so a regression fails without
+    // entering the impossible origin search in this synchronous test.
+    expect(() => normalizeClock(clock)).toThrow(/Invalid clock/);
+    const source = fixed(clock), before = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      expect(() => nextDueDoses(dosage, { ...options, limit: 1 })).toThrow(/Invalid clock/);
+      expect(() => calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrow(/Invalid clock/);
+    }
+    expect(importCanonicalCourse(source).stages[0].administrations[0].schedule?.recurrence?.clocks)
+      .toEqual([clock]);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("retains fractional seconds and advances across a real spring clock gap", () => {
+    for (const dosage of forms(fixed("08:30:00.5"))) {
+      expect(nextDueDoses(dosage, { ...options, limit: 2 }).map(Date.parse)).toEqual([
+        Date.parse("2026-01-01T08:30:00.500Z"), Date.parse("2026-01-01T12:30:00.500Z"),
+      ]);
+    }
+    const query = { from: "2026-03-08T00:00:00-05:00", orderedAt: "2026-03-08T00:00:00-05:00",
+      timeZone: "America/New_York", limit: 2 };
+    for (const dosage of forms(fixed("02:30:00")))
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-03-09T02:30:00-04:00", "2026-03-09T06:30:00-04:00",
+      ]);
+  });
+
+  it.each([false, true])("does not spend conditional replay slots on recorded doses (retained cap %s)", retainedCap => {
+    const source = parseSig("1 tab daily if SBP > 160").fhirNext;
+    const member = source.step![0].component[0];
+    member.timing!.repeat!.count = 2;
+    if (retainedCap) member.safety = { doseLimit: [{ scope: "period",
+      valueQuantity: { value: 500, unit: "mg" }, period: { value: 1, unit: "d" } }] };
+    const before = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      const query = { ...options, from: "2026-01-02T00:00:00Z",
+        priorDoseTimes: ["2026-01-01T09:00:00Z"], evaluateCondition: () => true, limit: 1 };
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-02T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => true })).toEqual([
+        "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+      ]);
+      expect(nextDueDoses(dosage, { ...query, evaluateCondition: () => false })).toEqual([]);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it.each([false, true])("preserves the caller receiver for its condition evaluator (%s)", allow => {
+    const source = parseSig("1 tab daily if SBP > 160").fhirNext;
+    class Evaluation {
+      from = origin;
+      orderedAt = origin;
+      timeZone = "UTC";
+      limit = 1;
+      durationValue = 1;
+      durationUnit = Unit.Day;
+      dosage = source;
+      allow = allow;
+      evaluateCondition() { return this.allow; }
+    }
+    expect(nextDueDoses(source, new Evaluation())).toEqual(allow ? ["2026-01-01T09:00:00+00:00"] : []);
+    expect(calculateTotalUnits(new Evaluation()).totalUnits).toBe(allow ? 1 : 0);
+  });
+
+  it.each(["native", "R5", "R6"] as const)("completes uncapped loading from recorded history on the chronological route (%s)", version => {
+    const loading = dose();
+    loading.schedule!.recurrence = { count: 1, frequency: 1, period: 12, periodUnit: Unit.Hour };
+    const maintenance = dose(2);
+    maintenance.schedule!.recurrence = { frequency: 1, period: 12, periodUnit: Unit.Hour,
+      courseLength: { value: 1, unit: "d" } };
+    maintenance.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 12, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const dosage = version === "native" ? course : version === "R6" ? courseToR6(course) :
+      JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[];
+    const before = JSON.stringify(dosage);
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T10:00:00Z", timeZone: "UTC", limit: 2 };
+    const recorded = { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+    expect(nextDueDoses(dosage, recorded)).toEqual([
+      "2026-01-01T21:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage, ...recorded, durationValue: 10.5, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ dosage, ...recorded, durationValue: 12, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(nextDueDoses(dosage, query)[0]).toBe("2026-01-01T20:00:00+00:00");
+    expect(nextDueDoses(dosage, { ...query, priorDoseTimes: ["2025-12-31T09:00:00Z"] })[0])
+      .toBe("2026-01-01T20:00:00+00:00");
+    expect(JSON.stringify(dosage)).toBe(before);
+  });
+
+
+  it.each(["native", "R5", "R6"] as const)("keeps recorded loading completion within its phase and cycle (%s)", version => {
+    const first = dose(), second = dose(), maintenance = dose(2);
+    first.schedule!.recurrence = second.schedule!.recurrence =
+      { count: 1, frequency: 1, period: 4, periodUnit: Unit.Hour };
+    maintenance.schedule!.recurrence = { frequency: 1, period: 4, periodUnit: Unit.Hour,
+      courseLength: { value: 1, unit: "d" } };
+    maintenance.limits = [{ scope: "period", amount: { value: 4, unit: "tab" }, period: { value: 4, unit: "h" } }];
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 2,
+      stages: [{ administrations: [first] }, { administrations: [second] }, { administrations: [maintenance] }] };
+    const dosage = version === "native" ? course : version === "R6" ? courseToR6(course) :
+      JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[];
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-04T16:00:00Z", timeZone: "UTC",
+      priorDoseTimes: ["2026-01-01T09:00:00Z", "2026-01-01T14:00:00Z",
+        "2026-01-04T10:00:00Z", "2026-01-04T15:00:00Z"], limit: 2 };
+    // Cycle two: the first actual dose at 10:00 opens the second phase at
+    // 14:00. Its actual dose at 15:00 opens maintenance at 19:00. Earlier-cycle records cannot close either phase.
+    expect(nextDueDoses(dosage, query)).toEqual([
+      "2026-01-04T19:00:00+00:00", "2026-01-04T23:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+  });
+});
+
+it("round33 supplies half a tablet from a spaced Thai fraction", () => {
+  const source = "๑ / ๒ เม็ด วันละครั้ง";
+  const fraction = lexInput(source).find(token => token.value === 0.5);
+  expect(fraction).toMatchObject({ original: "๑ / ๒", sourceText: "๑ / ๒", sourceStart: 0, sourceEnd: 5 });
+  const parsed = parseSig(source, { locale: "th" });
+  expect(parsed.input).toBe(source);
+  expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+  for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))])
+    expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3.5);
 });

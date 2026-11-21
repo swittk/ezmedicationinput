@@ -14,6 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
+import { hasAmountRole } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -457,10 +458,14 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     result.sourceHasStructuredClocks = a.provenance.sourceHasStructuredClocks;
   if (a.provenance?.sourceHasStructuredEvents !== undefined)
     result.sourceHasStructuredEvents = a.provenance.sourceHasStructuredEvents;
+  if (a.provenance?.sourceHasStructuredSite !== undefined)
+    result.sourceHasStructuredSite = a.provenance.sourceHasStructuredSite;
   const r=a.schedule?.recurrence;
   const length=r?.courseLength??a.anchoredLength?.quantity;
   const range=r?.courseLengthRange??a.anchoredLength?.range;
-  const value=a.amounts?.[0];
+  // The compact dose has no role or multiple-amount representation. Native
+  // amounts remain complete; presentation labels these independent entries.
+  const value=a.amounts?.length===1 && !hasAmountRole(a.amounts[0].role) ? a.amounts[0] : undefined;
   if(value?.quantity){
     result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
     if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;

@@ -521,10 +521,24 @@ export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
 
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
+const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
 export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
 export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
 /** Typed derivation identity shared by lexical timing and phase composition. */
 export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number): boolean {
+  let before = start - 1;
+  const previous = tokens[before];
+  if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower)) before--;
+  const governor = tokens[before];
+  return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
+}
+/** A daypart inside UNTIL + NEXT is an end complement, not a recurring event. */
+export function isEndBoundDaypartAt(tokens: readonly LexToken[], head: number): boolean {
+  const modifier = tokens[head - 1];
+  return Boolean(modifier && NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower) &&
+    hasRelativeTimeEndGovernor(tokens, head - 1));
+}
 /** Bounded NEXT + day/daypart nominal, with an optional locale article. */
 export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit: number):
   { headIndex: number; tokenEnd: number } | undefined {
@@ -536,8 +550,11 @@ export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit
   if (!modifier || !NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower)) return undefined;
   const headIndex = cursor + 1;
   const head = headIndex < limit ? tokens[headIndex] : undefined;
-  return head && NEXT_DAY_HEADS.has(head.canonical ?? head.lower)
-    ? { headIndex, tokenEnd: headIndex + 1 } : undefined;
+  if (!head || !NEXT_DAY_HEADS.has(head.canonical ?? head.lower)) return undefined;
+  // An end governor owns this nominal, including a cover starting at NEXT
+  // rather than its article. Ordinary non-NEXT tokens never inspect it.
+  if (hasRelativeTimeEndGovernor(tokens, start)) return undefined;
+  return { headIndex, tokenEnd: headIndex + 1 };
 }
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
@@ -553,6 +570,10 @@ function coordinationSurfaceSet(canonical: string, defaults: readonly string[]):
       if (Object.prototype.hasOwnProperty.call(localized, locale))
         result.add(localized[locale]);
     }
+  }
+  for (const alias in source.actionCoordinationConnectorAliases) {
+    if (source.actionCoordinationConnectorAliases[alias as keyof typeof source.actionCoordinationConnectorAliases] === canonical)
+      result.add(alias);
   }
   return result;
 }

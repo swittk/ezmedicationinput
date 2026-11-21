@@ -25,6 +25,10 @@ export const THAI_COURSE: CourseLanguage = {
   choicePrefix: "เลือกอย่างใดอย่างหนึ่ง: ",
   stageSeparator: " จากนั้น ",
   doseLabel: "ขนาดยาต่อครั้ง: ",
+  amountRoleLabel: (kind, role, sourceRole) => {
+    const label = kind === "dose" ? "ขนาดยา" : kind === "rate" ? "อัตราการให้ยา" : "ช่วงอัตราการให้ยา";
+    return label + (role === "ordered" ? "ที่สั่ง" : role === "calculated" ? "ที่คำนวณ" : " (" + sourceRole + ")") + ": ";
+  },
   rateLabel: "อัตราการให้ยา: ",
   rateRangeLabel: "ช่วงอัตราการให้ยา: ",
   unspecified: "ไม่ระบุค่า",

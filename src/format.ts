@@ -1,6 +1,7 @@
 import { TIMING_ABBREVIATIONS } from "./maps";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
 import { ENGLISH_COURSE } from "./locales/course/en";
+import type { CourseLanguage } from "./locales/course/types";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
@@ -8,7 +9,7 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import type { SigLocalization, SigLongContext, SigShortContext } from "./i18n";
+import type { SigLocalization, SigLongContext, SigShortContext, SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
@@ -388,6 +389,7 @@ function describeAlternateEventCadenceEnglish(
 ): string | undefined {
   if (
     schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
+    (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
     schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined
   ) return undefined;
   if (schedule.when[0] === EventTiming.Night) return "every other night";
@@ -422,11 +424,12 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
   const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
-  const rangeFrequency = rangedPeriod && frequency !== undefined
+  const countPrefix = frequency !== undefined &&
+    (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
     ? frequencyMax !== undefined && frequencyMax !== frequency
       ? `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times `
       : frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency)} times `
-    : rangedPeriod && frequencyMax !== undefined
+    : frequencyMax !== undefined && frequency === undefined
       ? `up to ${stripTrailingZero(frequencyMax)} times ` : "";
 
   if (
@@ -443,6 +446,10 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     }
     return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times daily`;
   }
+  if (frequency === undefined && frequencyMax !== undefined &&
+      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+    return `up to ${stripTrailingZero(frequencyMax)} times daily`;
+  }
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
     const dailyText = EN_TIMES_PER_DAY[frequency];
     if (dailyText) {
@@ -452,26 +459,28 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
     }
-    return `every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
+    return `${countPrefix}every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
     }
-    return `every ${stripTrailingZero(period)} hour${period === 1 ? "" : "s"}`;
+    return `${countPrefix}every ${stripTrailingZero(period)} hour${period === 1 ? "" : "s"}`;
   }
   if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
-    if (period === 2 && (!periodMax || periodMax === 2)) {
+    if (!countPrefix && period === 2 && (!periodMax || periodMax === 2)) {
       return "every other day";
     }
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
     }
-    return `every ${stripTrailingZero(period)} days`;
+    return `${countPrefix}every ${stripTrailingZero(period)} days`;
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times weekly`;
     if (
       frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency &&
       period === 1 && (!periodMax || periodMax === 1)
@@ -491,11 +500,13 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once weekly";
     }
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
     }
-    return `every ${stripTrailingZero(period)} weeks`;
+    return `${countPrefix}every ${stripTrailingZero(period)} weeks`;
   }
   if (periodUnit === FhirPeriodUnit.Month && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times monthly`;
     if (period === 1 && (!periodMax || periodMax === 1)) {
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times monthly`;
@@ -507,11 +518,13 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once monthly";
     }
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
     }
-    return `every ${stripTrailingZero(period)} months`;
+    return `${countPrefix}every ${stripTrailingZero(period)} months`;
   }
   if (periodUnit === FhirPeriodUnit.Year && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `up to ${stripTrailingZero(frequencyMax)} times yearly`;
     if (period === 1 && (!periodMax || periodMax === 1)) {
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times yearly`;
@@ -522,9 +535,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once yearly";
     }
     if (periodMax && periodMax !== period) {
-      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
+      return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
     }
-    return `every ${stripTrailingZero(period)} years`;
+    return `${countPrefix}every ${stripTrailingZero(period)} years`;
   }
   if (timingCode) {
     if (timingCode === "WK") {
@@ -679,6 +692,15 @@ function formatDoseLong(dose: CanonicalDoseExpr | undefined): string | undefined
   return undefined;
 }
 
+/** A typed scalar/range, or an already complete native rich amount, can be
+ * labelled without selecting it as the administration's prescribed dose. */
+export function formatDoseEnglish(
+  dose: CanonicalDoseExpr | string, style: "short" | "long", scope?: SigDoseScope
+): string | undefined {
+  const amount = typeof dose === "string" ? dose : style === "short" ? formatDoseShort(dose) : formatDoseLong(dose);
+  return amount && scope ? amount + " (" + (scope.site?.perTargetText ?? "per administration target") + ")" : amount;
+}
+
 function summarizeMealTimingGroup(group: MealTimingGroup): string {
   let relationText = "with";
   if (group.relation === "before") {
@@ -689,9 +711,9 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
-function describeEventWindowEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeEventWindowEnglish(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   const window = schedule?.eventWindow;
-  return window ? ENGLISH_COURSE.eventWindow(WHEN_TEXT[window.start] ?? window.start, WHEN_TEXT[window.end] ?? window.end) : undefined;
+  return window ? words.eventWindow(WHEN_TEXT[window.start] ?? window.start, WHEN_TEXT[window.end] ?? window.end) : undefined;
 }
 
 function formatEventOffsetQuantityEnglish(minutes: number, maximum?: number): string {
@@ -1160,7 +1182,7 @@ function timingCodeMatchesRecurrence(schedule: CanonicalScheduleExpr): boolean {
     (schedule.periodUnit === undefined || schedule.periodUnit === unit);
 }
 
-function formatShort(clause: CanonicalSigClause): string {
+function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
   const parts: string[] = [];
   const dosePart = formatDoseShort(clause.dose);
@@ -1225,7 +1247,7 @@ function formatShort(clause: CanonicalSigClause): string {
       ? collectWhenPhrases(schedule).join(" ") : schedule.when.join(" "));
   }
   if (schedule.activityTiming?.length) parts.push(...formatActivityTimingEnglish(schedule));
-  const eventWindow = describeEventWindowEnglish(schedule);
+  const eventWindow = describeEventWindowEnglish(schedule, words);
   if (eventWindow) parts.push(eventWindow);
   if (schedule.dayOfMonth?.length) {
     parts.push(describeDayOfMonth(schedule)!);
@@ -1300,7 +1322,7 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
   return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
-function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions): string {
+function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
   const baseVerb = resolveMethodVerb(clause, grammar);
@@ -1340,7 +1362,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
-  const eventWindowPart = describeEventWindowEnglish(schedule);
+  const eventWindowPart = describeEventWindowEnglish(schedule, words);
   let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
@@ -2005,12 +2027,12 @@ export function formatCanonicalClause(
     switch (target) {
       case "short":
         if (shortDefault === undefined) {
-          shortDefault = formatShort(clause);
+          shortDefault = formatShort(clause, localization?.course ?? ENGLISH_COURSE);
         }
         return shortDefault;
       case "long":
         if (longDefault === undefined) {
-          longDefault = formatLong(clause, options);
+          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE);
         }
         return longDefault;
     }
@@ -2025,6 +2047,7 @@ export function formatCanonicalClause(
       style: "short",
       clause,
       defaultText: formatDefault("short"),
+      course: localization.course,
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",
@@ -2041,6 +2064,7 @@ export function formatCanonicalClause(
       style: "long",
       clause,
       defaultText: formatDefault("long"),
+      course: localization.course,
       groupMealTimingsByRelation: Boolean(options?.groupMealTimingsByRelation),
       includeTimesPerDaySummary: Boolean(options?.includeTimesPerDaySummary),
       realizationMode: options?.realizationMode ?? "normalized",

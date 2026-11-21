@@ -127,6 +127,44 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
   return `${c.label}${object ? ` ${object}` : ""}`;
 }
 
+/** Typed ownership is shared; each locale only orders the resolved words. */
+function mixArgumentContent(c: InstructionActionRealizationInput) {
+  const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
+    relationHasSemanticClass(c.frame.relation, "accompaniment");
+  let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
+    amountArg: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (!themeArg && (arg.role === AdviceArgumentRole.Theme ||
+        !withComplement && arg.role === AdviceArgumentRole.Object)) themeArg = arg;
+    if (!substanceArg && (arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material ||
+        withComplement && (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)))
+      substanceArg = arg;
+    if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
+    if (themeArg && substanceArg && amountArg) break;
+  }
+  const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
+  const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
+  const substance = substanceArg
+    ? substanceArg.quantity && !substanceQuantity
+      ? substanceArg.text || substanceArg.normalized
+      : c.translateArgumentConcept(substanceArg)
+    : c.substance;
+  const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
+  // c.amount already preserves a partial quantity's authored wording. Reusing
+  // it avoids fabricating a number or attaching a tablet amount to plain water.
+  const coextensiveAmount = themeArg && amountArg?.quantity &&
+    themeArg.text.trim() === amountArg.text.trim() ? c.amount : undefined;
+  const amountAlreadyInTheme = Boolean(coextensiveAmount ||
+    themeArg?.quantity && amountArg?.quantity &&
+      themeArg.quantity.value === amountArg.quantity.value &&
+      themeArg.quantity.unit === amountArg.quantity.unit &&
+      themeArg.text.includes(amountArg.text.trim()));
+  const substanceAmount = substanceArg?.quantity ? substanceQuantity
+    : amountAlreadyInTheme ? undefined : c.amount;
+  return { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
+    coextensiveAmount, substanceAmount };
+}
+
 function renderEnglish(realizer: MedicationInstructionActionRealizer, c: InstructionActionRealizationInput): string | undefined {
   switch (realizer) {
     case "source-faithful": {
@@ -146,40 +184,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
     case "mix-substance": {
-      const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
-        relationHasSemanticClass(c.frame.relation, "accompaniment");
-      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme ||
-        (!withComplement && arg.role === AdviceArgumentRole.Object));
-      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance ||
-        arg.role === AdviceArgumentRole.Material || (withComplement &&
-          (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
-      const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
-      const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
-      const substance = substanceArg
-        ? substanceArg.quantity && !substanceQuantity
-          ? substanceArg.text || substanceArg.normalized
-          : c.translateArgumentConcept(substanceArg)
-        : c.substance;
-      const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
-      const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
-      // One object can be both the named theme and the parsed dose.
-      // Keep its localized amount ("1 tablet", not raw "1 tab").
-      // c.amount already uses the typed quantity when numeric, or the
-      // preserved argument source when a partial comparator has no number.
-      // Calling translateQuantity here bypasses that shared ownership and
-      // can fabricate an invalid 'at most mg' material amount.
-      const coextensiveAmount = themeArg && amountArg?.quantity &&
-        themeArg.text.trim() === amountArg.text.trim()
-        ? c.amount : undefined;
-      // "ยา 1 เม็ด" also owns its amount, though the theme includes a noun.
-      // Neither form licenses another tablet-sized amount on plain water.
-      const amountAlreadyInTheme = Boolean(coextensiveAmount ||
-        (themeArg?.quantity && amountArg?.quantity &&
-          themeArg.quantity.value === amountArg.quantity.value &&
-          themeArg.quantity.unit === amountArg.quantity.unit &&
-          themeArg.text.includes(amountArg.text.trim())));
-      const substanceAmount = substanceArg?.quantity ? substanceQuantity
-        : amountAlreadyInTheme ? undefined : c.amount;
+      const { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
+        coextensiveAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme
         ? ` ${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
         : "";
@@ -317,36 +323,8 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;
     case "mix-substance": {
-      const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
-        relationHasSemanticClass(c.frame.relation, "accompaniment");
-      const themeArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Theme ||
-        (!withComplement && arg.role === AdviceArgumentRole.Object));
-      const substanceArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Substance ||
-        arg.role === AdviceArgumentRole.Material || (withComplement &&
-          (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)));
-      const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
-      const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
-      const substance = substanceArg
-        ? substanceArg.quantity && !substanceQuantity
-          ? substanceArg.text || substanceArg.normalized
-          : c.translateArgumentConcept(substanceArg)
-        : c.substance;
-      const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
-      const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
-      // c.amount already uses the typed quantity when numeric, or the
-      // preserved argument source when a partial comparator has no number.
-      // Calling translateQuantity here bypasses that shared ownership and
-      // can fabricate an invalid 'at most mg' material amount.
-      const coextensiveAmount = themeArg && amountArg?.quantity &&
-        themeArg.text.trim() === amountArg.text.trim()
-        ? c.amount : undefined;
-      const amountAlreadyInTheme = Boolean(coextensiveAmount ||
-        (themeArg?.quantity && amountArg?.quantity &&
-          themeArg.quantity.value === amountArg.quantity.value &&
-          themeArg.quantity.unit === amountArg.quantity.unit &&
-          themeArg.text.includes(amountArg.text.trim())));
-      const substanceAmount = substanceArg?.quantity ? substanceQuantity
-        : amountAlreadyInTheme ? undefined : c.amount;
+      const { theme, themeAmount, substance, substanceArg, amountArg,
+        coextensiveAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme ? (coextensiveAmount ??
         `${theme}${themeAmount ? ` ${themeAmount}` : ""}`) : "";
       const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";

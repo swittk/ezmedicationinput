@@ -90,7 +90,7 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     // without an explicit step.end. Dose edits leave that declared completion.
     for (let member = 0; member < prior.component.length; member++)
       if (prior.component[member].id !== current.component[member].id ||
-          !equalStructuredValues(prior.component[member].timing, current.component[member].timing))
+          !prior.end && !equalStructuredValues(prior.component[member].timing, current.component[member].timing))
         return false;
     changed.push(identity);
   }
@@ -146,6 +146,7 @@ interface LiftedSafety {
   step: FhirR6DosageSafety;
   projected: FhirR6DosageSafety;
   ownerId?: string;
+  ownerComponentIds?: string[];
   ownerFingerprint?: string;
   /** Resolved current wire owner; never part of the serialized source record. */
   owner?: FhirR6DosageStep;
@@ -164,22 +165,38 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
   if (!marker) return undefined;
   try {
     const saved = decodeR6SourceMetadata(marker, "safety") as unknown as LiftedSafety | undefined;
-    if (!saved?.step || !equalStructuredValues(input.safety, saved.projected)) return undefined;
+    const current = input.safety;
+    if (!saved?.step || !current || current.ifExceeded !== saved.projected.ifExceeded ||
+        !equalStructuredValues(current.doseLimit, saved.projected.doseLimit) ||
+        !equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension)) return undefined;
+    // Header Element metadata follows the policy that supplied the projection.
+    // Changing its ID or ordinary annotations does not widen a phase's limits.
+    let course = saved.course, step = saved.step;
+    if (course) {
+      const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
+      course = { ...metadata,
+        ...(course.doseLimit !== undefined ? { doseLimit: course.doseLimit } : {}),
+        ...(course.ifExceeded !== undefined ? { ifExceeded: course.ifExceeded } : {}),
+        ...(course.modifierExtension !== undefined ? { modifierExtension: course.modifierExtension } : {}) };
+    } else step = current;
+    const retained = { ...saved, course, step };
     let owner: FhirR6DosageStep | undefined;
-    if (saved.ownerId === undefined && saved.ownerFingerprint === undefined) {
+    const componentIds = saved.ownerComponentIds?.length ? new Set(saved.ownerComponentIds) : undefined;
+    if (saved.ownerId === undefined && !componentIds && saved.ownerFingerprint === undefined) {
       // Unidentified source records retain their existing single-step meaning.
       if (input.step?.length === 1) owner = input.step[0];
     } else for (const candidate of input.step ?? []) {
       const matches = saved.ownerId !== undefined ? candidate.id === saved.ownerId
+        : componentIds ? candidate.component.some(member => member.id !== undefined && componentIds.has(member.id))
         : stepOwnerFingerprint(candidate) === saved.ownerFingerprint;
       if (!matches) continue;
-      if (owner) return saved;
+      if (owner) return retained;
       owner = candidate;
     }
     // The unchanged header is still only a projection when its step vanishes.
     // Keep the authored course policy, and retain the retired step policy in
     // its source record; it must never be promoted into course authority.
-    return { ...saved, owner };
+    return { ...retained, owner };
   } catch { return undefined; }
 }
 
@@ -356,8 +373,12 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
     // Distinct source IDs/annotations stay in the source record below. The
     // active policy includes every known limit and both authored actions.
   }
+  let ownerComponentIds: string[] | undefined;
+  if (step!.id === undefined) for (const member of step!.component)
+    if (member.id !== undefined) (ownerComponentIds ??= []).push(member.id);
   replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, { course, step: policy, projected,
-    ownerId: step!.id, ownerFingerprint: step!.id === undefined ? stepOwnerFingerprint(step!) : undefined });
+    ownerId: step!.id, ownerComponentIds,
+    ownerFingerprint: step!.id === undefined && !ownerComponentIds ? stepOwnerFingerprint(step!) : undefined });
   output.safety = projected;
   delete step!.safety;
 }

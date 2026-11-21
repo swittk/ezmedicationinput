@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  formatSig, formatParseBatch, fromFhir, parseSig, nextDueDoses,
+  formatSig, formatParseBatch, fromFhir, fromFhirDosage, parseSig, nextDueDoses, toFhirR5Dosages,
   parseInstructionActions, formatCanonicalCourse, projectCanonicalCourse, importCanonicalCourse,
 } from "../src/index";
 import { encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL, withDosageEditProvenance } from "../src/dosage-course";
@@ -13,7 +13,7 @@ import { THAI_COURSE } from "../src/locales/course/th";
 import { simpleQuantityForR5, getQuantityComparator } from "../src/fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { realizeInstructionAction } from "../src/instruction-graph";
-import { AdviceArgumentRole, FhirPeriodUnit, RouteCode } from "../src/types";
+import { AdviceArgumentRole, EventTiming, FhirPeriodUnit, RouteCode } from "../src/types";
 import type { FhirDosage, FhirR6Dosage, FhirR6DosageInstruction } from "../src/types";
 
 const tabletQuantity = { value: 1, unit: "tab" };
@@ -531,7 +531,9 @@ describe("round32 retained clinical labels and incomplete amounts", () => {
     const before = JSON.stringify(raw);
     const imported = fromFhir(raw, normalized);
     expect(imported.meta.canonical.clauses[0].site?.text).toBe(site.text);
-    expect(formatSig(raw, "long", normalized)).toContain("lower conjunctival sac");
+    const preview = formatSig(raw, "long", normalized);
+    expect(preview).toContain("left eye, lower conjunctival sac");
+    expect(preview).not.toContain("right eye");
     expect(JSON.stringify(raw)).toBe(before);
   });
 });
@@ -583,4 +585,200 @@ it("round32: a code-only site edit supersedes its exact contradictory old label"
   expect(formatSig(raw, "long", normalized)).toContain("left eye");
   expect(formatSig(raw, "long", normalized)).not.toContain("right eye");
   expect(JSON.stringify(raw)).toBe(before);
+});
+
+describe("round33 complete native amount and cadence previews", () => {
+  const wire = (repeat: NonNullable<FhirR6Dosage["timing"]>["repeat"]): FhirR6DosageInstruction =>
+    ({ step: [{ component: [{ doseAndRate: tablet.doseAndRate, timing: { repeat } }] }] });
+  it.each([EventTiming.Night, EventTiming.Morning])("keeps both period endpoints for alternate %s", when => {
+    for (const maximum of [undefined, 2, 3]) {
+      const raw = wire({ period: 2, periodMax: maximum, periodUnit: FhirPeriodUnit.Day, when: [when] });
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(raw, "long", { locale });
+        if (maximum === 3) {
+          expect(text).toContain(locale === "en" ? "2 to 3 days" : "2 ถึง 3 วัน");
+          expect(text).toContain(locale === "en" ? when === EventTiming.Night ? "night" : "morning"
+            : when === EventTiming.Night ? "กลางคืน" : "เช้า");
+          expect(text).not.toMatch(/every other|วันเว้นคืน|เช้าเว้นเช้า/u);
+        } else expect(text).toContain(locale === "en" ? when === EventTiming.Night ? "every other night" : "every other morning"
+          : when === EventTiming.Night ? "วันเว้นคืน" : "เช้าเว้นเช้า");
+      }
+    }
+  });
+  it.each([
+    [FhirPeriodUnit.Minute, 30, "minutes", "นาที"],
+    [FhirPeriodUnit.Hour, 8, "hours", "ชั่วโมง"],
+    [FhirPeriodUnit.Day, 2, "days", "วัน"],
+    [FhirPeriodUnit.Week, 2, "weeks", "สัปดาห์"],
+    [FhirPeriodUnit.Month, 2, "months", "เดือน"],
+    [FhirPeriodUnit.Year, 2, "years", "ปี"],
+  ] as const)("keeps two administrations per fixed %s period", (periodUnit, period, en, th) => {
+    const raw = wire({ frequency: 2, period, periodUnit });
+    const before = JSON.stringify(raw);
+    expect(formatSig(raw, "long", { locale: "en" })).toContain("twice every " + period + " " + en);
+    for (const style of ["short", "long"] as const)
+      expect(formatSig(raw, style, { locale: "th" })).toContain("2 ครั้ง ทุก " + period + " " + th);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it("keeps one administration's simple fixed interval wording", () => {
+    const raw = wire({ frequency: 1, period: 8, periodUnit: FhirPeriodUnit.Hour });
+    expect(formatSig(raw, "long", { locale: "en" })).toContain("every 8 hours");
+    expect(formatSig(raw, "long", { locale: "en" })).not.toContain("twice");
+    expect(formatSig(raw, "long", { locale: "th" })).toContain("ทุก 8 ชั่วโมง");
+  });
+  it.each([
+    [{ frequency: 1, frequencyMax: 2 }, "1 to 2 times every 8 hours", "1 ถึง 2 ครั้ง ทุก 8 ชั่วโมง"],
+    [{ frequencyMax: 2 }, "up to 2 times every 8 hours", "ไม่เกิน 2 ครั้ง ทุก 8 ชั่วโมง"]
+  ])("keeps fixed-period frequency bounds %j", (frequency, en, th) => {
+    const raw = wire({ ...frequency, period: 8, periodUnit: FhirPeriodUnit.Hour });
+    expect(formatSig(raw, "long", { locale: "en" })).toContain(en);
+    expect(formatSig(raw, "long", { locale: "th" })).toContain(th);
+  });
+  it.each([
+    [FhirPeriodUnit.Day, "daily", "วัน"],
+    [FhirPeriodUnit.Week, "weekly", "สัปดาห์"],
+    [FhirPeriodUnit.Month, "monthly", "เดือน"],
+    [FhirPeriodUnit.Year, "yearly", "ปี"],
+  ] as const)("keeps an upper-only administration count at one %s period", (periodUnit, en, th) => {
+    const raw = wire({ frequencyMax: 2, period: 1, periodUnit });
+    expect(formatSig(raw, "long", { locale: "en" })).toContain("up to 2 times " + en);
+    for (const style of ["short", "long"] as const)
+      expect(formatSig(raw, style, { locale: "th" })).toContain(th + "ละไม่เกิน 2 ครั้ง");
+  });
+  it("keeps an offset weekly window distinct from an inferred daily summary", () => {
+    const raw = wire({ frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week,
+      timeOfDay: ["08:00:00", "20:00:00"], startOffset: { value: 1, unit: "d" } });
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(raw, "long", { locale, includeTimesPerDaySummary: true });
+      expect(text).toContain(locale === "en" ? "2 administrations per 1 week" : "ให้ยา 2 ครั้งต่อช่วง 1 สัปดาห์");
+      expect(text).toContain(locale === "en" ? "8:00 am" : "08:00");
+      expect(text).toContain(locale === "en" ? "8:00 pm" : "20:00");
+      expect(text).not.toMatch(/twice daily|วันละ 2 ครั้ง/u);
+    }
+  });
+  const dose = (code: string, value: number) => ({
+    type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code }] },
+    doseQuantity: { value, unit: "mg" }
+  });
+  it.each([false, true])("labels ordered and calculated amounts independently of order (%s)", reverse => {
+    const amounts = [dose("calculated", 2), dose("ordered", 3)];
+    if (reverse) amounts.reverse();
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, doseAndRate: amounts
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, toFhirR5Dosages(raw)]) for (const style of ["short", "long"] as const) {
+      const en = formatSig(input, style, { locale: "en" });
+      const th = formatSig(input, style, { locale: "th" });
+      expect(en).toContain("Calculated dose: 2 mg");
+      expect(en).toContain("Ordered dose: 3 mg");
+      expect(en).not.toMatch(/(?:Use|Take) (?:2|3) mg/u);
+      expect(th).toContain("ขนาดยาที่คำนวณ: 2 mg");
+      expect(th).toContain("ขนาดยาที่สั่ง: 3 mg");
+      expect(th).not.toMatch(/ใช้ครั้งละ (?:2|3) /u);
+    }
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(fromFhirDosage(toFhirR5Dosages(raw)[0]).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it.each([false, true])("retains each-target scope on role-labelled amounts in either order (%s)", reverse => {
+    const amounts = [
+      { type: dose("ordered", 1).type, doseQuantity: simpleQuantityForR5({ value: 1, unit: "spray", comparator: "~" })! },
+      { type: dose("calculated", 2).type, doseQuantity: { value: 2, unit: "mg" } }
+    ];
+    if (reverse) amounts.reverse();
+    const raw: FhirR6DosageInstruction = { renderedInstruction: "Use approximately 1 spray in each nostril",
+      step: [{ component: [{ route: { text: "intranasal" },
+        site: { concept: { text: "both nostrils" } }, doseAndRate: amounts }] }] };
+    const before = JSON.stringify(raw), rows = toFhirR5Dosages(raw);
+    for (const locale of ["en", "th"]) {
+      const tag = locale + "-x-round33-dose-scope";
+      // A course-only regional pack inherits the same dose grammar as its
+      // clause callbacks; quantity wording remains a language-pack facet.
+      registerSigLocalization({ locale: tag, course: locale === "en" ? ENGLISH_COURSE : THAI_COURSE });
+      for (const input of [raw, rows]) {
+        const text = formatSig(input, "long", { locale: tag, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "Ordered dose: approximately 1 spray (each nostril)"
+          : "ขนาดยาที่สั่ง: รูจมูกข้างละ ประมาณ 1 ครั้ง");
+        expect(text).toContain(locale === "en" ? "Calculated dose: 2 mg (each nostril)"
+          : "ขนาดยาที่คำนวณ: รูจมูกข้างละ 2 มิลลิกรัม");
+        expect(text.match(locale === "en" ? /each nostril/gu : /ข้างละ/gu)).toHaveLength(2);
+      }
+    }
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(fromFhirDosage(rows[0]).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it.each([true, false])("retains code-only equal units on a scoped role-labelled range (known low unit %s)", knownLow => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      route: { text: "intranasal" }, site: { concept: { text: "both nostrils" } },
+      doseAndRate: [{ type: dose("ordered", 1).type, doseRange: {
+        low: knownLow ? { value: 1, system: "http://unitsofmeasure.org", code: "mg" } : { value: 1 },
+        high: { value: 2, system: "http://unitsofmeasure.org", code: "mg" }
+      } }]
+    }] }] };
+    const before = JSON.stringify(raw);
+    // An unknown lower unit retains its separate endpoint; only known equal
+    // units use the compact locale range grammar. Neither path loses upper mg.
+    for (const input of [raw, toFhirR5Dosages(raw)]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain(knownLow ? "Ordered dose: 1 to 2 mg (each nostril)" : "Ordered dose: 1 – 2 mg (each nostril)");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toContain(knownLow ? "ขนาดยาที่สั่ง: รูจมูกข้างละ 1 ถึง 2 มิลลิกรัม" : "ขนาดยาที่สั่ง: รูจมูกข้างละ 1 – 2 mg");
+    }
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it("labels a single calculated dose and leaves the simple untyped dose unchanged", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...tablet, doseAndRate: [dose("calculated", 2)] }] }] };
+    expect(formatSig(raw, "long", { locale: "en" })).toContain("Calculated dose: 2 mg");
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(formatSig({ step: [{ component: [tablet] }] }, "long", { locale: "en" })).toContain("1 tablet once daily");
+  });
+  it("keeps annotation-only amount types on the ordinary untyped dose path", () => {
+    const amount = { doseQuantity: { value: 1, unit: "tab" }, type: {
+      id: "type-annotation", extension: [{ url: "urn:example:annotation", valueString: "kept" }],
+      coding: [{ id: "coding-annotation", extension: [{ url: "urn:example:coding", valueBoolean: true }] }]
+    } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...tablet, doseAndRate: [amount] }] }] };
+    const before = JSON.stringify(raw), rows = toFhirR5Dosages(raw);
+    for (const input of [raw, rows]) {
+      const result = Array.isArray(input) ? fromFhirDosage(input[0]) : fromFhir(input);
+      expect(result.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en" })).toContain("1 tablet once daily");
+      expect(formatSig(input, "long", { locale: "en" })).not.toContain("unspecified");
+    }
+    expect(rows[0].doseAndRate?.[0].type).toEqual(amount.type);
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+  it.each([
+    [{ type: dose("calculated", 2).type, doseRange: { low: { value: 2, unit: "mg" }, high: { value: 4, unit: "mg" } } },
+      "Calculated dose: 2–4 mg"],
+    [{ type: dose("ordered", 0).type, doseQuantity: { value: 0, unit: "mg" } }, "Ordered dose: 0 mg"],
+    [{ type: { text: "locally adjusted", coding: [{ system: "urn:example:role", code: "ordered" }] },
+      doseQuantity: { value: 3, unit: "mg" } }, "Dose (locally adjusted): 3 mg"],
+    [{ type: dose("calculated", 2).type, doseQuantity: { unit: "mg" } }, "Calculated dose: unspecified mg"],
+    [{ type: dose("calculated", 2).type, rateQuantity: { value: 2, unit: "mg/h" } }, "Calculated rate: 2 mg/h"],
+  ] as const)("keeps the role on each native dose or rate choice %j", (amount, expected) => {
+    const raw = { step: [{ component: [{ ...tablet, doseAndRate: [amount] }] }] } as FhirR6DosageInstruction;
+    expect(formatSig(raw, "long", { locale: "en" })).toContain(expected);
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+  });
+  it.each(["en", "th"])("uses the registered %s event-window facet through inherited clause formatting", locale => {
+    const tag = locale + "-x-round33-window";
+    registerSigLocalization({ locale: tag, course: {
+      ...(locale === "en" ? ENGLISH_COURSE : THAI_COURSE),
+      eventWindow: (start, end) => "REGISTERED WINDOW " + start + " -> " + end
+    } });
+    const parsed = parseSig("take 1 tablet from breakfast to dinner");
+    const clause = { ...parsed.meta.canonical.clauses[0], schedule: {
+      eventWindow: { start: EventTiming.Breakfast, end: EventTiming.Dinner }
+    } };
+    for (const style of ["short", "long"] as const) {
+      const text = formatCanonicalClause(clause, style, resolveSigLocalization(tag));
+      expect(text).toContain("REGISTERED WINDOW");
+      expect(text).toContain(locale === "en" ? "breakfast" : "อาหารเช้า");
+      expect(text).toContain(locale === "en" ? "dinner" : "อาหารเย็น");
+    }
+  });
 });

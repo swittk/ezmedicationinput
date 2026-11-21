@@ -775,6 +775,8 @@ describe("partial explicit calendar events remain visible", () => {
       .toMatch(/Scheduled events: 2026, 2026-11(?![0-9-])/u);
     expect(formatCanonicalCourse(course, "long", { locale: "th" }))
       .toMatch(/วันที่กำหนด: 2026 และ 2026-11(?![0-9-])/u);
+    expect(formatCanonicalCourse(course, "long", { locale: "en" })).toContain("on 20 Nov 2026");
+    expect(formatCanonicalCourse(course, "long", { locale: "th" })).toContain("วันที่ 20/11/2569");
     for (const locale of ["en", "th"]) {
       const text = formatCanonicalCourse(course, "long", { locale });
       expect(text).not.toMatch(/2026-00|2026-11-00|2026-00-00/u);

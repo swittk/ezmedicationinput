@@ -2,11 +2,12 @@
  * and the existing grammar renderer, never FHIR rows or persistence markers.
  * Display stays separate from executable interpretation: unknown expressions
  * and boundaries remain visible without inventing values or event dates. */
-import type { FormatBatchOptions, FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause } from "../types";
+import type { FormatBatchOptions, FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause, CanonicalDoseExpr } from "../types";
 import type {
   CanonicalCourse,
   CanonicalBoundary,
   CanonicalAdministration,
+  CanonicalAmount,
   CanonicalMeasure,
   CanonicalRange,
   CanonicalExpression,
@@ -14,14 +15,16 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { getDoseQuantityUnit } from "../maps";
-import { formatCanonicalClause } from "../format";
+import { formatCanonicalClause, formatDoseEnglish } from "../format";
+import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
   resolveCourseLanguage,
   type SigLocalization,
+  type SigDoseScope,
   type CourseLanguage,
 } from "../i18n";
 
@@ -491,6 +494,22 @@ function courseHasClinicalFacts(course: CanonicalCourse): boolean {
   return false;
 }
 
+/** Amount roles qualify their own dose/rate; neither array position nor a
+ * preferred role selects a prescription from multiple authored amounts. */
+function amountLabel(amount: CanonicalAmount, kind: "dose" | "rate" | "rateRange", words: CourseLanguage): string {
+  const ordinary = kind === "dose" ? words.doseLabel : kind === "rate" ? words.rateLabel : words.rateRangeLabel;
+  const role = amount.role;
+  if (!role) return ordinary;
+  let source = role.text?.trim() || undefined;
+  for (const coding of role.coding ?? []) {
+    if (coding.system === "http://terminology.hl7.org/CodeSystem/dose-rate-type" &&
+        (coding.code === "ordered" || coding.code === "calculated"))
+      return words.amountRoleLabel(kind, coding.code, source ?? coding.display ?? coding.code);
+    source ??= coding.display?.trim() || coding.code;
+  }
+  return source ? words.amountRoleLabel(kind, undefined, source) : ordinary;
+}
+
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
 function formatCanonicalBase(
@@ -545,20 +564,41 @@ function formatCanonicalBase(
   if (a.excludedWeekdays?.length)
     rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   const ranges: string[] = [];
+  const labelled = (a.amounts?.length ?? 0) > 1 || hasAmountRole(primary?.role);
+  // Native target multiplicity applies to every labelled amount. It cannot
+  // depend on a compact scalar dose, which intentionally omits multiple roles.
+  const scope: SigDoseScope | undefined = a.targetCount !== undefined && a.targetCount > 1 &&
+    a.amounts?.length && (labelled || !clause.dose) ? {
+      targetCount: a.targetCount,
+      site: resolveBodySitePhrase(clause.site?.text ?? clause.site?.coding?.display ?? "")?.definition
+    } : undefined;
+  const formatDose = env.localization?.formatDose ?? formatDoseEnglish;
   for (let index = 0; index < (a.amounts?.length ?? 0); index++) {
     const amount = a.amounts![index];
-    // The clause represents only the first entry; later ordinary doses are
-    // independent authored amounts, including a dose after a rate-only entry.
-    if (index > 0 && amount.quantity?.value !== undefined && !amount.quantity.comparator) {
+    // A compact clause represents one untyped dose. Multiple entries and
+    // explicit roles remain complete, labelled amounts in the native preview.
+    if (labelled && amount.quantity) {
       const unit = amount.quantity.unit ?? getDoseQuantityUnit(amount.quantity);
-      ranges.push(words.doseLabel + amount.quantity.value + (unit ? " " + unit : ""));
+      const fallback = (amount.quantity.value === undefined ? words.unspecified
+        : (getQuantityComparator(amount.quantity) ?? "") + amount.quantity.value) + (unit ? " " + unit : "");
+      const dose = scope && amount.quantity.value !== undefined
+        ? { value: amount.quantity.value, unit, comparator: getQuantityComparator(amount.quantity) } : fallback;
+      ranges.push(amountLabel(amount, "dose", words) + (scope ? formatDose.call(env.localization, dose, style, scope) ?? fallback : fallback));
     }
-    if (amount.range && (index > 0 || doseRangeNeedsEndpointPreview(amount.range))) {
-      const dose = rateRangePreview(amount.range);
-      if (dose) ranges.push(words.doseLabel + dose);
+    if (amount.range && (labelled || doseRangeNeedsEndpointPreview(amount.range))) {
+      const text = rateRangePreview(amount.range);
+      if (text) {
+        let dose: CanonicalDoseExpr | string = text;
+        if (scope && !doseRangeNeedsEndpointPreview(amount.range)) {
+          const unit = amount.range.low?.unit || getDoseQuantityUnit(amount.range.low) ||
+            amount.range.high?.unit || getDoseQuantityUnit(amount.range.high) || undefined;
+          dose = { range: { low: amount.range.low?.value, high: amount.range.high?.value }, unit };
+        }
+        ranges.push(amountLabel(amount, "dose", words) + (scope ? formatDose.call(env.localization, dose, style, scope) ?? text : text));
+      }
     }
     const text = amount.rateRange && rateRangePreview(amount.rateRange);
-    if (text) ranges.push(words.rateRangeLabel + text);
+    if (text) ranges.push(amountLabel(amount, "rateRange", words) + text);
   }
   return ranges.length ? joinGeneratedClauses([rendered, ...ranges]) : rendered;
 }
@@ -742,14 +782,13 @@ export function formatCanonicalCourse(
             ...(structuredCount ? withoutCode : display.schedule), recurrence: rest
           } };
         }
-        // The clause owns the first dose, including its qualifier and target.
-        // Supplemental entries and rate qualifiers are rendered below without
-        // duplicating an unqualified value in the clause.
+        // The clause owns one untyped dose, including its qualifier and target.
+        // Multiple or role-bearing amounts and rate qualifiers remain labelled
+        // native entries rather than an unqualified positional dose.
         if (
           display.amounts &&
           component.amounts?.some(
             (amount, index) =>
-              index > 0 && amount.quantity?.comparator ||
               amount.rate?.comparator ||
               amount.rateRatio?.numerator?.comparator === "~"
           )
@@ -759,7 +798,6 @@ export function formatCanonicalCourse(
             amounts: display.amounts.map((amount, i) => {
               const source = component.amounts?.[i];
               const clean = { ...amount };
-              if (i > 0 && source?.quantity?.comparator) delete clean.quantity;
               if (source?.rate?.comparator) delete clean.rate;
               if (source?.rateRatio?.numerator?.comparator === "~") delete clean.rateRatio;
               return clean;
@@ -769,7 +807,7 @@ export function formatCanonicalCourse(
         const recognized = formatCanonicalBase(
           display,
           style,
-          options,
+          hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
           display === component ? compiled?.get(component) : undefined,
           environment,
           component
@@ -831,21 +869,11 @@ export function formatCanonicalCourse(
           // Native R6 Quantity comparators are absent from R5 SimpleQuantity.
           // Keep their actual amount visible in source-less R6 suggestions,
           // without introducing invalid R5 dose/rate choices.
-          if (amountIndex > 0 && amount.quantity?.comparator && amount.quantity.value !== undefined) {
-            expressions.push(
-              words.doseLabel +
-                amount.quantity.comparator +
-                amount.quantity.value +
-                (amount.quantity.unit || amount.quantity.code
-                  ? " " + (amount.quantity.unit ?? amount.quantity.code)
-                  : "")
-            );
-          }
           if (amount.rate && (amount.rate.value !== undefined || amount.rate.unit || amount.rate.code)) {
             const rate = amount.rate;
             const unit = rate.unit ?? rate.code;
             expressions.push(
-              words.rateLabel +
+              amountLabel(amount, "rate", words) +
                 (rate.value === undefined
                   ? words.unspecified
                   : (getQuantityComparator(rate) ?? "") + rate.value) +
@@ -869,7 +897,7 @@ export function formatCanonicalCourse(
                 ? unspecified
                 : (getQuantityComparator(denominator) ?? "") + denominator.value;
             expressions.push(
-              words.rateLabel +
+              amountLabel(amount, "rate", words) +
                 numeratorValue +
                 (numeratorUnit ? " " + numeratorUnit : "") +
                 (hasDenominator
@@ -878,9 +906,11 @@ export function formatCanonicalCourse(
             );
           }
           if (amount.expression)
-            expressions.push(unevaluatedExpressionText(amount.expression, "dose", words));
+            expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "dose", words) : "") +
+              unevaluatedExpressionText(amount.expression, "dose", words));
           if (amount.rateExpression)
-            expressions.push(unevaluatedExpressionText(amount.rateExpression, "rate", words));
+            expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
+              unevaluatedExpressionText(amount.rateExpression, "rate", words));
         }
         const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
         let memberTiming: string | undefined;

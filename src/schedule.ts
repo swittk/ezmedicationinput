@@ -26,7 +26,7 @@ export function nextDueDoses(
     from: options.from, orderedAt: options.orderedAt, limit: options.limit,
     priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
     timeZone: options.timeZone, config: options.config,
-    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition,
+    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition?.bind(options),
     eventClock: options.eventClock, mealOffsets: options.mealOffsets,
     frequencyDefaults: options.frequencyDefaults,
   });
@@ -46,7 +46,7 @@ export function calculateTotalUnits(options: TotalUnitsOptions | CanonicalSupply
     context: options.context, patientWeightKg: options.patientWeightKg,
     roundToMultiple: options.roundToMultiple, limit: options.limit,
     priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
-    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition,
+    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition?.bind(options),
     eventClock: options.eventClock, mealOffsets: options.mealOffsets,
     frequencyDefaults: options.frequencyDefaults,
   });

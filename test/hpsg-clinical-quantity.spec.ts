@@ -2103,6 +2103,11 @@ describe("round32 complete numeric daughters in dimensional quantities", () => {
       for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
         expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value, unit: "mL/h" });
         expect(row.route!.coding!.some(coding => coding.code === "47625008")).toBe(true);
+        for (const amount of row.doseAndRate ?? []) {
+          expect(amount.doseQuantity).toBeUndefined();
+          expect(amount.doseRange).toBeUndefined();
+          expect("doseExpression" in amount && amount.doseExpression).toBeFalsy();
+        }
       }
     });
 
@@ -2113,8 +2118,14 @@ describe("round32 complete numeric daughters in dimensional quantities", () => {
         representation: "rate-quantity", numerator: { value, unit: "[iU]" },
         denominators: [{ value: 1, unit: "h" }]
       });
-      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]])
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
         expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value, unit: "[iU]/h" });
+        for (const amount of row.doseAndRate ?? []) {
+          expect(amount.doseQuantity).toBeUndefined();
+          expect(amount.doseRange).toBeUndefined();
+          expect("doseExpression" in amount && amount.doseExpression).toBeFalsy();
+        }
+      }
     });
 
   it("keeps an attached clock temporal and a compact million scalar dose outside the rate construction", () => {
@@ -2125,5 +2136,65 @@ describe("round32 complete numeric daughters in dimensional quantities", () => {
     expect(scalar.meta.canonical.clauses[0].dose).toMatchObject({ value: 500000, unit: "IU" });
     expect(scalar.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
     expect(scalar.fhir[0].doseAndRate![0].rateQuantity).toBeUndefined();
+  });
+});
+
+describe("round33 exact fractional duration and rate ownership", () => {
+  it.each([
+    ["Infuse 100 mL over half an hour", 0.5, "h", undefined],
+    ["Infuse 100 mL over half hour", 0.5, "h", undefined],
+    ["Infuse 20 mg in 100 mL saline over half an hour", 0.5, "h", undefined],
+    ["Infuse 100 mL over about half an hour", 0.5, "h", "~"],
+    ["Infuse 100 mL over 30 minutes", 30, "min", undefined],
+  ] as const)("preserves the complete elapsed duration in %s", (source, value, unit, comparator) => {
+    const parsed = parsePublicSig(source);
+    const quantity = parsed.meta.canonical.clauses[0].clinicalQuantity!;
+    expect(quantity?.administrationDuration).toEqual({ value, unit, ...(comparator ? { comparator } : {}) });
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const a = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(a.amounts![0].rateRatio!.denominator).toMatchObject({ value, unit });
+      expect(a.amounts![0].rateRatio!.denominator!.comparator).toBe(comparator);
+      expect(a.schedule!.recurrence).toMatchObject({ occurrenceDuration: value, occurrenceDurationUnit: unit });
+    }
+  });
+
+  it("keeps an oral hourly cumulative limit separate from an infusion rate", () => {
+    const source = "Take 5 mL by mouth as needed, at most 10 mL per hour";
+    const parsed = parsePublicSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.representation).not.toBe("rate-quantity");
+    for (const row of [...parsed.fhir, ...parsed.fhirNext.step.flatMap(step => step.component)])
+      for (const amount of row.doseAndRate ?? []) {
+        expect(amount.rateQuantity).toBeUndefined();
+        expect(amount.rateRatio).toBeUndefined();
+        expect(amount.rateRange).toBeUndefined();
+      }
+    const infusion = parsePublicSig("IV at most 100 mL/hr");
+    expect(infusion.meta.canonical.clauses[0].clinicalQuantity)
+      .toMatchObject({ representation: "rate-quantity", numerator: { value: 100, unit: "mL", comparator: "<=" } });
+  });
+});
+
+
+describe("round33 adjacent oral limit attachment", () => {
+  it.each(["Give 100 mL per hour", "Administer at most 100 mL per hour", "Infuse at most 100 mL per hour"])(
+    "keeps an independently headed rate in %s", source => {
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+        representation: "rate-quantity", numerator: { value: 100, unit: "mL" }
+      });
+    });
+  it.each(["Give", "Administer", "Take"])("keeps the oral dose before a cumulative limit after %s", head => {
+    const source = head + " 5 mL orally, at most 10 mL per hour";
+    const parsed = parsePublicSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate![0].doseQuantity!.value).toBe(5);
+      expect(row.doseAndRate![0].rateQuantity).toBeUndefined();
+      expect(row.doseAndRate![0].rateRatio).toBeUndefined();
+    }
   });
 });

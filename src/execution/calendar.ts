@@ -82,8 +82,8 @@ export function normalizeClock(clock: string): string {
   const minute = Number(minutePart);
   const second = Number(secondPart);
   if (
-    Number.isNaN(hour) ||
-    Number.isNaN(minute) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
     Number.isNaN(second) ||
     hour < 0 ||
     hour > 23 ||

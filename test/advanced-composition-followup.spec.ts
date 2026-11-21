@@ -15,7 +15,7 @@ import { HPSG_TYPE_SYSTEM, type HpsgFeatureNode } from "../src/hpsg/type-system"
 import {
   BODY_SITE_RESTRICTION_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
-  getAdministrationOffsetMinutes, parserStateFromFhir
+  getAdministrationOffsetMinutes, parserStateFromFhir, getTimingClocks
 } from "../src/fhir";
 import { shiftCanonicalSigClauses } from "../src/ir";
 
@@ -1827,11 +1827,12 @@ describe("typed mixed-dose clock ownership", () => {
       .toEqual([7, undefined]);
     expect(parsed.fhir.map(row => ({
       when: row.timing?.repeat?.when,
-      timeOfDay: row.timing?.repeat?.timeOfDay
+      timeOfDay: getTimingClocks(row.timing?.repeat)
     }))).toEqual([
       { when: [EventTiming.Noon], timeOfDay: ["07:00:00", "19:00:00"] },
       { when: [EventTiming.Noon], timeOfDay: ["07:00:00", "19:00:00"] }
     ]);
+    expect(parsed.fhir.every(row => row.timing?.repeat?.timeOfDay === undefined)).toBe(true);
     expect(parsed.fhirNext.step).toHaveLength(2);
     expect(parsed.fhirNext.step.map(step => step.component.map(doseValue))).toEqual([[0.5], [1]]);
     expect(toDosageDetails(toFhirR5Dosages(parsed.fhirNext)).step).toHaveLength(2);

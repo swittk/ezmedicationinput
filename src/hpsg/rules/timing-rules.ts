@@ -49,6 +49,7 @@ import {
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
   nextDayOnsetAt,
+  isEndBoundDaypartAt,
   NEXT_DAY_SCHEDULE_RULE,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
@@ -1479,6 +1480,7 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
+      if (isEndBoundDaypartAt(context.tokens, start)) return [];
       // The same immediate lexeme cannot simultaneously schedule the whole
       // medication STAT and modify an explicit relative event. A typed
       // before/after + event daughter owns that atom compositionally.

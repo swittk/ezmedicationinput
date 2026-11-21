@@ -3896,7 +3896,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   if (primaryActionAmountConflicts(frame, clause.dose,
       !clause.dose && clause.sourceProjectionVerified === false))
     frame = frameWithoutSupersededAmount(frame, clause.dose);
-  if (clause.method && !actionMatchesCanonicalMethod(frame, clause)) {
+  if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
     const sourceDefinition = options?.instructionActionMap
@@ -4183,19 +4183,29 @@ function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigCl
 }
 
 function actionMatchesCanonicalMethod(
-  frame: AdviceFrame, clause: Pick<CanonicalSigClause, "method">
+  frame: AdviceFrame, clause: Pick<CanonicalSigClause, "method">,
+  options?: Pick<ParseOptions, "instructionActionMap">
 ): boolean {
   const method = clause.method;
   if (!method) return false;
+  const definition = options?.instructionActionMap
+    ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
+    : getMedicationInstructionAction(frame.predicate.lemma);
+  // Distinct authored actions may share an administration code (Apply/Reapply).
+  // Compare declared identities; an unknown custom source cannot be treated as
+  // a different default action merely because its local lemma is unfamiliar.
+  if (definition && method.text?.trim()) {
+    const current = resolveMedicationInstructionActionForMethod(method, options);
+    if (current) return current.code === definition.code;
+  }
   if (method.coding?.code) {
     if (frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) return true;
-    const declared = getMedicationInstructionAction(frame.predicate.lemma)?.administrationMethod;
+    const declared = definition?.administrationMethod;
     if (declared && codingEquivalent(declared, method.coding)) return true;
-    if (resolveMedicationInstructionActionByMethod(method.coding)) return false;
+    if (resolveMedicationInstructionActionByMethod(method.coding, options)) return false;
   }
   const methodText = normalizeActionSurface(method.text ?? "");
   if (!methodText) return false;
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
   const candidates = [
     frame.predicate.lemma,
     frame.predicate.display ?? "",
@@ -4279,9 +4289,10 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
   const ownsClocks = hasClocks || clause.sourceHasStructuredClocks === true;
   const ownsEvents = hasOffset || Boolean(schedule?.when?.length) || clause.sourceHasStructuredEvents === true;
   const site = clause.site;
+  const ownsSite = Boolean(site) || clause.sourceHasStructuredSite === true;
   // Both callers have already selected the source primary. A simultaneous
   // method edit cannot revoke its current schedule/site ownership.
-  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !site) return frame;
+  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !ownsSite) return frame;
   const args: AdviceArgument[] = [];
   let changed = false;
   for (const arg of frame.args) {
@@ -4292,6 +4303,10 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
         changed = true;
         continue;
       }
+    }
+    if (arg.role === AdviceArgumentRole.Site && !site && clause.sourceHasStructuredSite === true) {
+      changed = true;
+      continue;
     }
     if (arg.role === AdviceArgumentRole.Site && site &&
         (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||

@@ -1,3 +1,4 @@
+import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
 import { fromFhirDosage, toFhirR5Dosages, formatSig, getDoseUnitSemantics, getBodySiteCode, getBodySiteCodeAsync, getBodySiteText, getBodySiteTextAsync, listSupportedBodySiteGrammar, listSupportedBodySiteText, lookupBodySite, listDoseUnitTerminology, suggestBodySiteText, suggestBodySites } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
@@ -202,7 +203,8 @@ describe("parseSig core scenarios", () => {
     expect(result.count).toBe(1);
     expect(result.items[0].fhir.doseAndRate?.[0]?.doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     expect(result.items[0].fhir.route?.coding?.[0]?.code).toBe(SNOMEDCTRouteCodes["Oral route"]);
-    expect(result.items[0].fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(getTimingClocks(result.items[0].fhir.timing?.repeat)).toEqual(["08:00:00"]);
+    expect(result.items[0].fhir.timing?.repeat?.timeOfDay).toBeUndefined();
     expect(result.items[0].fhir.timing?.repeat?.when).toEqual([EventTiming["Before Sleep"]]);
   });
 
@@ -5545,7 +5547,8 @@ describe("time-based schedules", () => {
     const result = parseSig("1 tab with breakfast, with lunch, and at 9 am, 5 pm");
     expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
     expect(result.fhir.timing?.repeat?.when).toEqual(["CM", "CD"]);
-    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00", "17:00:00"]);
+    expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(["09:00:00", "17:00:00"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
     expect(result.warnings).toEqual([]);
   });
 
@@ -5553,30 +5556,35 @@ describe("time-based schedules", () => {
     const result = parseSig("1 tab with meals and @ 10:00");
     expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
     expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
-    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["10:00:00"]);
+    expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(["10:00:00"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
   });
 
   it("formats complex mixed schedules in Thai", () => {
     const cases = [
       {
         input: "1 tab with breakfast, with lunch, and at 9 am, 5 pm",
+        clocks: ["09:00:00", "17:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
       },
       {
         input: "1 tab with meals and @ 10:00",
+        clocks: ["10:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
       },
       {
         input: "1 tab ac and @ 8:00",
+        clocks: ["08:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
       }
     ];
 
-    for (const { input, expected } of cases) {
+    for (const { input, expected, clocks } of cases) {
       const result = parseSig(input, { locale: "th" });
       expect(result.longText).toBe(expected);
       expect(result.fhir.timing?.repeat?.when?.length).toBeGreaterThan(0);
-      expect(result.fhir.timing?.repeat?.timeOfDay?.length).toBeGreaterThan(0);
+      expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(clocks);
+      expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
       expect(result.warnings).toEqual([]);
     }
   });
@@ -5587,7 +5595,8 @@ describe("time-based schedules", () => {
     expect(result.longText).not.toContain("and.");
     expect(result.longText).toBe("Use 1 tablet with meals and at 9:00 am.");
     expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
-    expect(result.fhir.timing?.repeat?.timeOfDay).toEqual(["09:00:00"]);
+    expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(["09:00:00"]);
+    expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
   });
 });
 

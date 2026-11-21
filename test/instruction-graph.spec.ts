@@ -2,7 +2,7 @@ import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type Medi
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
-import { withDosageEditProvenance, getDosageSourceTimeOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
+import { withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
 } from "../src/instruction-graph";
@@ -10,7 +10,7 @@ import { formatCanonicalClause } from "../src/format";
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
-import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
+import { medicationInstructionActionCodings, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
@@ -2563,7 +2563,15 @@ describe("indexed instruction metadata import",()=>{
     const first=wire.extension!.find(item=>item.url==="action")!;
     const lemma=first.extension!.find(item=>item.url==="predicateLemma")!;
     const original=lemma.valueString;
-    const originalArguments=parseInstructionGraphExtension([wire])!.actions[0].args;
+    const originalArguments = actions[0].args;
+    const authored = [
+      { role: AdviceArgumentRole.Theme, text: "2 tablets", quantity: { value: 2, unit: "tab" } },
+      { role: AdviceArgumentRole.Substance, text: "water", conceptId: "water",
+        coding: { system: "http://snomed.info/sct", code: "11713004" } },
+      { role: AdviceArgumentRole.Amount, text: "2 tablets", quantity: { value: 2, unit: "tab" } }
+    ];
+    expect(originalArguments).toMatchObject(authored);
+    expect(parseInstructionGraphExtension([wire])!.actions[0].args).toMatchObject(authored);
     first.extension!.push({url:"predicateLemma",valueString:"not-the-owner"});
     first.extension!.push({url:"__proto__",valueString:"ordinary unknown metadata"});
     expect(parseInstructionGraphExtension([wire])?.actions.map(action=>action.predicate.lemma))
@@ -2572,8 +2580,7 @@ describe("indexed instruction metadata import",()=>{
     lemma.valueString="edited-source-action";
     expect(parseInstructionGraphExtension([wire])?.actions[0].predicate.lemma).toBe("edited-source-action");
     expect(original).toBe("dissolve");
-    expect(parseInstructionGraphExtension([wire])?.actions[0].args)
-      .toEqual(originalArguments);
+    expect(parseInstructionGraphExtension([wire])?.actions[0].args).toMatchObject(authored);
   });
 });
 
@@ -3168,7 +3175,7 @@ describe("round32 source clock ownership", () => {
     if (structured) row.timing = { repeat: { timeOfDay: ["08:00:00"] } };
     row.text = source;
     const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
-    expect(getDosageSourceTimeOwnership(saved)?.clocks).toBe(structured);
+    expect(getDosageSourceOwnership(saved)?.clocks).toBe(structured);
     saved.doseAndRate[0].doseQuantity.value = 2;
     if (edit === "replace") saved.timing.repeat.timeOfDay = ["10:00:00"];
     if (edit === "delete") delete saved.timing.repeat.timeOfDay;
@@ -3178,7 +3185,7 @@ describe("round32 source clock ownership", () => {
       for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode });
         expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
-        expect(/0?8:00/u.test(text), locale + " " + realizationMode + " " +
+        expect(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u.test(text), locale + " " + realizationMode + " " +
           (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(eight);
         expect(/10:00/u.test(text)).toBe(ten);
       }
@@ -3209,7 +3216,7 @@ describe("round32 source event ownership", () => {
     if (structured) row.timing = { repeat: { when: [EventTiming.Morning] } };
     row.text = source;
     const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
-    expect(getDosageSourceTimeOwnership(saved)?.events).toBe(structured);
+    expect(getDosageSourceOwnership(saved)?.events).toBe(structured);
     saved.doseAndRate[0].doseQuantity.value = 2;
     if (edit === "replace") saved.timing.repeat.when = [EventTiming.Evening];
     if (edit === "delete") delete saved.timing.repeat.when;
@@ -3237,7 +3244,7 @@ describe("round32 natural clock daughters", () => {
     }));
     expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Object)).toEqual([]);
     const initial = formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" });
-    expect(initial.match(/0?8:00/gu)).toHaveLength(1);
+    expect(initial.match(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
   });
 
   it.each(["delete", "replace"] as const)("honors a %s edit on freshly parsed R6 rich clock source", edit => {
@@ -3251,7 +3258,7 @@ describe("round32 natural clock daughters", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
-        expect(text).not.toMatch(/0?8:00/u);
+        expect(text).not.toMatch(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u);
         expect(text.includes("10:00")).toBe(edit === "replace");
       }
     }
@@ -3263,18 +3270,156 @@ it("round32: later-stage saved R5 rows retain their own source clock ownership",
   const parsed = parsePublicSig("Swallow 1 tablet whole at 08:00 daily for 2 days then swallow 2 tablets whole at 09:00 daily");
   expect(parsed.fhir).toHaveLength(2);
   const rows = JSON.parse(JSON.stringify(parsed.fhir));
-  expect(getDosageSourceTimeOwnership(rows[1])?.clocks).toBe(true);
+  expect(getDosageSourceOwnership(rows[1])?.clocks).toBe(true);
   rows[1].doseAndRate[0].doseQuantity.value = 3;
   delete rows[1].timing.repeat.timeOfDay;
   const before = JSON.stringify(rows);
   for (const locale of ["en", "th"]) {
     const local = formatSig(rows[1], "long", { locale, realizationMode: "normalized" });
     expect(local).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
-    expect(local).not.toMatch(/0?9:00/u);
+    expect(local).not.toMatch(/(?:^|[^0-9:])0?9:00(?::00)?(?![0-9:])/u);
     const whole = formatSig(toDosageDetails(rows), "long", { locale, realizationMode: "normalized" });
-    expect(whole).toMatch(/0?8:00/u);
-    expect(whole).not.toMatch(/0?9:00/u);
+    expect(whole).toMatch(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u);
+    expect(whole).not.toMatch(/(?:^|[^0-9:])0?9:00(?::00)?(?![0-9:])/u);
     expect(whole).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
   }
   expect(JSON.stringify(rows)).toBe(before);
+});
+
+describe("round33 current rich-primary ownership", () => {
+  it.each(["Apply", "Reapply", "coding-only", "metadata"])("honors shared-code method identity %s", edit => {
+    const source = "Reapply 1 g to the skin gently";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
+    ];
+    const graph = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary] })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== graph.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(graph);
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    if (edit === "coding-only") delete saved.method.text;
+    else if (edit === "metadata") { saved.method.id = "annotation"; saved.method.coding[0].id = "coding-annotation"; }
+    else saved.method.text = edit;
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(edit === "Reapply" || edit === "metadata" ? /^Reapply\b/u : /^Apply\b/u);
+      expect(text).toContain("1 g");
+      expect(text).toContain("gently");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+  it.each([
+    [false, "dose", true, false],
+    [false, "explicit-false", true, false],
+    [false, "add-delete", true, false],
+    [true, "dose", true, false],
+    [true, "metadata", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("keeps only current primary Site (structured %s, edit %s)", (structured, edit, right, left) => {
+    const source = "Instill 1 drop into right eye";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args.push({ role: AdviceArgumentRole.Manner, text: "gently",
+      normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } });
+    const warning = parseInstructionActions("Do not touch right eye")[0];
+    warning.span = { start: source.length + 2, end: source.length + 24 };
+    warning.sequenceIndex = 1;
+    const graph = buildInstructionGraphExtension({
+      sourceText: source + "; Do not touch right eye", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary, warning]
+    })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== graph.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(graph);
+    if (!structured) delete row.site;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source, true,
+      edit === "explicit-false" ? [{ sourceAgreement: true, sourceHasStructuredSite: false }] : undefined)[0]));
+    expect(getDosageSourceOwnership(saved)?.site).toBe(structured);
+    if (edit !== "metadata") saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "metadata") { saved.site.id = "site-annotation"; saved.site.coding[0].id = "coding-annotation"; }
+    if (edit === "replace") saved.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+    if (edit === "delete") delete saved.site;
+    if (edit === "add-delete") {
+      saved.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+      // Saving an independent graph site alongside a later structured site
+      // must not invent original structured ownership of that graph argument.
+      Object.assign(saved, JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([saved]))[0])));
+      delete saved.site;
+    }
+    const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? edit === "metadata" ? "1 drop" : "2 drops" : edit === "metadata" ? "1 หยด" : "2 หยด");
+        if (edit !== "metadata") expect(text).not.toMatch(locale === "en" ? /1 drop/u : /1 หยด/u);
+        expect(text).toContain(locale === "en" ? "gently" : "เบาๆ");
+        const primaryText = text.split(locale === "en" ? "Do not touch" : "ห้ามสัมผัส")[0];
+        expect(primaryText.includes(locale === "en" ? "right eye" : "ตาขวา")).toBe(right);
+        expect(primaryText.includes(locale === "en" ? "left eye" : "ตาซ้าย")).toBe(left);
+        expect(text).toMatch(locale === "en" ? /Do not touch (?:the )?right eye/u : /ห้ามสัมผัสตาขวา/u);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+
+describe("round33 declared method identity", () => {
+  it.each(["unchanged", "metadata", "edited"])("keeps custom bound manner only for its current method (%s)", edit => {
+    const source = "Swallow 1 tablet whole";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.actions[0].predicate.lemma = "local-swallow";
+    const marker = buildInstructionGraphExtension(graph)!;
+    row.extension = row.extension.filter((e: { url: string }) =>
+      e.url !== marker.url && e.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(marker);
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    const options = { instructionActionMap: { swallow: {
+      code: "local-swallow", display: "Swallow", semanticClass: "ingest",
+      primaryAdministrationHead: true, methodBoundMannerConcepts: ["whole"],
+      administrationMethod: { system: "http://snomed.info/sct", code: "738995006", display: "Swallow" }
+    } } };
+    if (edit === "metadata") saved.method.id = "annotation";
+    if (edit === "edited") saved.method.coding[0] = {
+      system: "http://snomed.info/sct", code: "738992009", display: "Chew"
+    };
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) {
+      const text = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("1 tablet");
+      expect(text).toMatch(edit === "edited" ? /^Chew/u : /^Swallow/u);
+      expect(text.includes("whole")).toBe(edit !== "edited");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round33 joined-script method vocabulary bounds", () => {
+  const swallow = { system: "http://snomed.info/sct", code: "738995006", display: "Swallow" };
+  const chew = { system: "http://snomed.info/sct", code: "738992009", display: "Chew" };
+  it("keeps an unfamiliar joined-script method source intact", () => {
+    const source = "คำไม่รู้จัก".repeat(100);
+    expect(resolveMedicationInstructionActionForMethod({ text: source, coding: swallow })).toBeUndefined();
+  });
+  it("honors long registered locale aliases and the longest matching lexical head", () => {
+    const alias = "คำวิธีที่ลงทะเบียน".repeat(8);
+    const options = { instructionActionMap: {
+      "custom-swallow": { code: "custom-swallow", display: "Custom swallow",
+        administrationMethod: swallow, localeAliases: { th: [alias] } },
+      "custom-chew": { code: "custom-chew", display: "Custom chew",
+        administrationMethod: chew, localeAliases: { th: [alias + "เพิ่ม"] } }
+    } };
+    // Compatible qualified source keeps its qualifiers, including aliases
+    // longer than any default action. A conflicting current code still wins.
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: swallow }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: chew }, options)?.code).toBe("chew");
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: chew }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: swallow }, options)?.code).toBe("swallow");
+  });
 });

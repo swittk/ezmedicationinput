@@ -1,3 +1,4 @@
+import { simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { describe, expect, it } from "vitest";
 import {
   fromFhir, fromFhirDosage, fromDosageDetails, toDosageDetails, toFhirR5Dosages, toEzDosages, formatSig,
@@ -701,5 +702,67 @@ describe("round26 single-step safety modifier scope", () => {
       expect(edit.course.step![0].safety).toEqual(stepSafety);
       wire = toDosageDetails(edit.dosages, undefined, edit.course);
     }
+  });
+});
+
+describe("round33 scalar R5 quantity meaning", () => {
+  it.each(["mL/h", "mg/h"])("renders a source-less scalar %s rate through public scalar paths", unit => {
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 5, unit } }] };
+    const before = JSON.stringify(row);
+    for (const locale of ["en", "th"]) {
+      expect(formatSig(row, "long", { locale })).toContain("5 " + unit);
+      expect(fromFhirDosage(row, { locale }).longText).toContain("5 " + unit);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    const authored = { ...row, text: "Infuse five units hourly, per the original instruction." };
+    expect(formatSig(authored, "long", { realizationMode: "roundtrip" })).toBe(authored.text);
+  });
+
+  it.each(["mg", "mL"])("keeps code-only %s units in equal-unit dose ranges", code => {
+    const quantity = (value: number) => ({ value, system: "http://unitsofmeasure.org", code });
+    const row: FhirDosage = { doseAndRate: [{ doseRange: { low: quantity(2), high: quantity(5) } }] };
+    const before = JSON.stringify(row);
+    for (const locale of ["en", "th"]) {
+      const parsed = fromFhirDosage(row, { locale });
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 2, high: 5 }, unit: code });
+      expect(parsed.meta.normalized.unit).toBe(code);
+      expect(formatSig(row, "long", { locale })).toContain(locale === "en" ? code :
+        code === "mg" ? "มิลลิกรัม" : "มิลลิลิตร");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each(["<", "<=", "~"] as const)("does not expose a qualified %s upper bound as an inclusive compact dose", comparator => {
+    const row: FhirDosage = { doseAndRate: [{ doseRange: {
+      low: { value: 2, unit: "mg" },
+      high: simpleQuantityForR5({ value: 5, unit: "mg", comparator })!
+    } }] };
+    const before = JSON.stringify(row);
+    const parsed = fromFhirDosage(row);
+    expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(parsed.meta.canonical.administration!.amounts![0].range!.high)
+      .toMatchObject({ value: 5, unit: "mg", comparator });
+    expect(JSON.stringify(row)).toBe(before);
+    const ordinary = fromFhirDosage({ doseAndRate: [{ doseRange: {
+      low: { value: 2, unit: "mg" }, high: { value: 5, unit: "mg" }
+    } }] });
+    expect(ordinary.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 2, high: 5 }, unit: "mg" });
+  });
+});
+
+
+describe("round33 adjacent range metadata", () => {
+  it.each([
+    { low: { value: 2 }, high: { value: 5, unit: "mg" } },
+    { low: { value: 2 }, high: { value: 5, system: "http://unitsofmeasure.org", code: "mg" } },
+    { low: { extension: [{ url: "urn:local:unmeasured", valueString: "not specified" }] },
+      high: { value: 5, system: "http://unitsofmeasure.org", code: "mg" } }
+  ])("retains the known endpoint unit when the other endpoint has none: %j", range => {
+    const row: FhirDosage = { doseAndRate: [{ doseRange: range }] };
+    const source = JSON.stringify(row);
+    const parsed = fromFhirDosage(row);
+    expect(parsed.meta.canonical.clauses[0].dose?.unit).toBe("mg");
+    expect(parsed.meta.normalized.unit).toBe("mg");
+    expect(JSON.stringify(row)).toBe(source);
   });
 });

@@ -8,6 +8,7 @@ import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInst
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel, clauseForAdministration } from "./canonical/compile";
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
+import { hasAmountRole } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
 import { getDoseQuantityUnit } from "./maps";
 /** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
@@ -70,7 +71,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
     route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
     asNeeded: dosage.asNeeded,
-    reasons: captureSourceReplayConceptList(dosage.asNeededFor),
+    reasons: captureSourceReplayConceptList(dosage.asNeededFor, true),
     instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
     quantity: captureDosePart(first?.doseQuantity),
     low: captureDosePart(first?.doseRange?.low),
@@ -92,7 +93,7 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
   return dosage.patientInstruction === original.patientInstruction && dosage.asNeeded === original.asNeeded &&
-    matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons) &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons, true) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
     matchesSourceReplayConcept(dosage.site, original.site) &&
     matchesSourceReplayConcept(dosage.route, original.route) &&
@@ -142,20 +143,23 @@ function markOriginalGraphSource(
   dosage: FhirDosage,
   clause: CanonicalSigClause,
   options: FormatOptions | undefined,
-  sourceTimeRead = false
+  sourceOwnershipRead = false
 ): void {
   if (!clause.instructionGraph) return;
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
   if (fresh) {
     clause.sourceHasStructuredClocks = Boolean(fresh.timing?.clocks?.length);
     clause.sourceHasStructuredEvents = Boolean(fresh.timing?.anchors?.length);
-  } else if (!sourceTimeRead &&
-      (clause.sourceHasStructuredClocks === undefined || clause.sourceHasStructuredEvents === undefined)) {
+    clause.sourceHasStructuredSite = Boolean(fresh.site);
+  } else if (!sourceOwnershipRead &&
+      (clause.sourceHasStructuredClocks === undefined || clause.sourceHasStructuredEvents === undefined ||
+        clause.sourceHasStructuredSite === undefined)) {
     // Native import owns absent evidence too; only the direct R5 path needs
     // this lookup after clause projection.
-    const sourceTime = getDosageSourceTimeOwnership(dosage);
-    if (sourceTime?.clocks !== undefined) clause.sourceHasStructuredClocks = sourceTime.clocks;
-    if (sourceTime?.events !== undefined) clause.sourceHasStructuredEvents = sourceTime.events;
+    const sourceOwnership = getDosageSourceOwnership(dosage);
+    if (sourceOwnership?.clocks !== undefined) clause.sourceHasStructuredClocks = sourceOwnership.clocks;
+    if (sourceOwnership?.events !== undefined) clause.sourceHasStructuredEvents = sourceOwnership.events;
+    if (sourceOwnership?.site !== undefined) clause.sourceHasStructuredSite = sourceOwnership.site;
   }
   if (options?.realizationMode !== "roundtrip" && clause.dose) return;
   const verified = fresh && !fresh.defaulted ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
@@ -193,7 +197,7 @@ import {
   captureSourceReplayModifiers, matchesSourceReplayModifiers,
   captureSourceReplayConcept, matchesSourceReplayConcept,
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
-  getDosageSourceTimeOwnership,
+  getDosageSourceOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
@@ -1206,6 +1210,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
     return true;
   const primary = dosage.doseAndRate?.[0];
+  if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
+  if (primary?.rateQuantity && !dosage.text?.trim()) return true;
   // Explicit normalization uses the existing rich native realizer; source
   // replay must not hide a retained infusion qualifier or requested locale.
   if (options?.realizationMode === "normalized" &&
@@ -1559,11 +1565,14 @@ function fromFhirDosageInternal(
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];
-  // Native range realization owns endpoint units/operators. The established
-  // compact clause metadata still retains its known numeric source bounds;
-  // its warning and the native amount expose any richer endpoint meaning.
+  // Compact range metadata can retain numeric bounds only when the one
+  // untyped amount has no endpoint qualifier. Rich native amounts retain
+  // roles and operators that this compact clause cannot express.
   let metadataClause = clause;
-  const rangeSource = native && !clause.dose ? dosage.doseAndRate?.[0]?.doseRange : undefined;
+  const nativeAmount = native?.amounts?.length === 1 ? native.amounts[0] : undefined;
+  const rangeSource = nativeAmount && !hasAmountRole(nativeAmount.role) && !clause.dose &&
+      !nativeAmount.range?.low?.comparator && !nativeAmount.range?.high?.comparator
+    ? dosage.doseAndRate?.[0]?.doseRange : undefined;
   if (rangeSource) {
     const extracted = extractCanonicalDoseRange(rangeSource);
     if (extracted.warning && warnings.indexOf(extracted.warning) < 0) warnings.push(extracted.warning);

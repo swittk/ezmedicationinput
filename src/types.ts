@@ -40,6 +40,7 @@ export interface FhirExtension {
   valueCanonical?: string;
   valueDateTime?: string;
   valueTime?: string;
+  _valueTime?: FhirPrimitiveElement;
   valuePositiveInt?: number;
   valueUnsignedInt?: number;
   valueRange?: FhirRange;
@@ -401,6 +402,8 @@ export interface FhirTimingRepeat extends FhirElement {
   periodUnit?: FhirPeriodUnit;
   dayOfWeek?: FhirDayOfWeek[];
   timeOfDay?: string[];
+  /** Primitive metadata corresponding positionally to timeOfDay. */
+  _timeOfDay?: Array<FhirPrimitiveElement | null>;
   when?: EventTiming[];
   /** Exact event offset in minutes. */
   offset?: number;
@@ -635,6 +638,7 @@ export interface FhirR6DosageStep extends FhirElement {
 /** Official FHIR R6 Snapshot 1 DosageInstruction course container. */
 export interface FhirR6DosageInstruction extends FhirBackboneElement {
   renderedInstruction?: string;
+  _renderedInstruction?: FhirPrimitiveElement;
   repeatCycle?: FhirR6Quantity;
   step?: FhirR6DosageStep[];
   safety?: FhirR6DosageSafety;
@@ -1928,6 +1932,8 @@ export interface CanonicalSigClause {
   sourceHasStructuredClocks?: boolean;
   /** Retained wire-source evidence that this primary's structured schedule owned event anchors. */
   sourceHasStructuredEvents?: boolean;
+  /** Original structured primary site ownership; graph-only sites remain independent facts. */
+  sourceHasStructuredSite?: boolean;
   kind: "administration";
   /** Source-backed phase operation; resolved by the typed regimen graph. */
   regimenAdjustment?: "replace" | "add" | "replace-target";

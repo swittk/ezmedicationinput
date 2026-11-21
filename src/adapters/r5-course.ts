@@ -323,16 +323,18 @@ export function projectNativeR5Course(
       const rowIndex = rows.length;
       const originalRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
       const sourceClocks = a.provenance?.sourceHasStructuredClocks,
-        sourceEvents = a.provenance?.sourceHasStructuredEvents;
+        sourceEvents = a.provenance?.sourceHasStructuredEvents,
+        sourceSite = a.provenance?.sourceHasStructuredSite;
       const originalAgreement = !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
         ? getDosageSourceTextAgreement(originalRow, false) : undefined;
-      if (sourceClocks !== undefined || sourceEvents !== undefined ||
+      if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined ||
           !deferSourceProvenance && (originalAgreement === false || sourceAgreement && a.provenance?.format === "r6")) {
         rowSources ??= [];
         rowSources[rowIndex] = { sourceAgreement: originalAgreement === false ||
           (sourceAgreement && a.provenance?.format === "r6") ? false : sourceAgreement,
           ...(sourceClocks !== undefined ? { sourceHasStructuredClocks: sourceClocks } : {}),
           ...(sourceEvents !== undefined ? { sourceHasStructuredEvents: sourceEvents } : {}),
+          ...(sourceSite !== undefined ? { sourceHasStructuredSite: sourceSite } : {}),
           ...(originalRow ? { textFingerprint: getDosageSourceTextFingerprint(originalRow) } : {}) };
       }
       const strict: EzDosage =

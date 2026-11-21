@@ -2152,6 +2152,9 @@
       }
     }
   },
+  "actionCoordinationConnectorAliases": {
+    "and again": "and"
+  },
   "actionCoordinationConnectors": [
     "and",
     "or"
@@ -2317,6 +2320,7 @@
     "dose",
     "doses"
   ],
+  "relativeTimeEndLeads": ["until", "through", "till", "before"],
   "nextDayModifiers": ["next", "following"],
   "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
   "treatmentPeriodStartLeads": [

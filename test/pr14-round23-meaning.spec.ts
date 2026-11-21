@@ -953,7 +953,7 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
       expect(text).toContain(locale === "en" ? "each nostril" : "ข้างละ");
       expect(text).toContain(locale === "en" ? comparator === "~" ? "approximately 1 spray" : "at least 1 spray"
         : comparator === "~" ? "ประมาณ 1" : "อย่างน้อย 1");
-      expect(text).toContain("<2 mg");
+      expect(text).toContain(locale === "en" ? "less than 2 mg" : "น้อยกว่า 2 มิลลิกรัม");
       expect(text.match(locale === "en" ? /1 spray/g : /1 ครั้ง/g)).toHaveLength(1);
       const short = formatSig(wire, "short", { locale, realizationMode: "normalized" });
       expect(short).toContain("1");
@@ -1691,10 +1691,20 @@ describe("round 29: typed onsets and complete numeric daughters", () => {
     const parsed = parseSig(source);
     expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.phaseStartReference).toBe("previous-phase-next-day");
     expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.treatmentStartOffsetDays).toBeUndefined();
-    const day = authored ? "2026-12-02" : "2026-11-26";
+    const orderedAt = "2026-11-21T00:00:00Z";
+    const successor = authored ? "2026-12-02T06:00:00+00:00" : "2026-11-26T06:00:00+00:00";
+    const expected = [
+      "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+      ...(authored
+        ? ["2026-11-30T09:00:00+00:00", "2026-12-01T09:00:00+00:00"]
+        : ["2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00"]),
+      successor,
+    ];
+    const successorTime = Date.parse(successor);
     for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
-      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
-        from: day + "T00:00:00Z", timeZone: "UTC", limit: 1 })).toEqual([day + "T06:00:00+00:00"]);
+      const due = nextDueDoses(input, { orderedAt, from: orderedAt, timeZone: "UTC", limit: expected.length });
+      expect(due).toEqual(expected);
+      expect(due.some(at => at.slice(11, 19) === "06:00:00" && Date.parse(at) < successorTime)).toBe(false);
     }
   });
 

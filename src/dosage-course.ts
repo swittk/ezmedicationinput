@@ -1,6 +1,6 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import {courseFromR5} from "./adapters/r5-import";
-import { ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL } from "./fhir";
+import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, parsePrnTriggerPhase, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -364,11 +364,15 @@ function parseConditionModifier(extension: FhirExtension): MedicationCondition |
   return undefined;
 }
 
-export function isExactConditionBridge(extension: FhirExtension): boolean {
-  if (extension.url !== DOSAGE_CONDITION_R5_URL || Object.keys(extension).length !== 2) return false;
+/** Generated copies may be consumed only when their typed predicate agrees. */
+export function exactConditionBridgePredicate(extension: FhirExtension): MedicationCondition | undefined {
+  if (extension.url !== DOSAGE_CONDITION_R5_URL || Object.keys(extension).length !== 2) return undefined;
   const predicate = parseConditionModifier(extension);
-  return predicate !== undefined &&
-    equalStructuredValues(extension.extension, [encodeConditionPredicate(predicate)]);
+  return predicate !== undefined && equalStructuredValues(extension.extension, [encodeConditionPredicate(predicate)])
+    ? predicate : undefined;
+}
+export function isExactConditionBridge(extension: FhirExtension): boolean {
+  return exactConditionBridgePredicate(extension) !== undefined;
 }
 
 export function assertUnderstoodDosageModifiers(_dosage: FhirDosage | EzDosage): void {
@@ -426,6 +430,16 @@ export function setDosageCondition(
   condition: MedicationCondition | undefined,
   calendarDayCondition?: MedicationCondition
 ): void {
+  const expanded = dosage as EzDosage;
+  // Lifted R5 rows expose a native condition mirror. Keep that existing owner
+  // synchronized before testing whether the R5 modifier itself is unchanged.
+  if (expanded.condition !== undefined && !equalStructuredValues(parseDosageCondition(expanded), condition)) {
+    if (expanded.condition.length) dosage.extension = [...(dosage.extension ?? []), {
+      url: DOSAGE_RECONCILIATION_SOURCE_URL,
+      extension: encodeR5RetainedFields({ component: { condition: expanded.condition } }),
+    }];
+    expanded.condition = condition ? [conditionToR6(condition)] : [];
+  }
   const previous = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
   const priorCalendar = calendarDayPredicateFromMarker(previous);
   const calendar = calendarDayCondition ?? priorCalendar;
@@ -433,6 +447,9 @@ export function setDosageCondition(
   // typed facts do not require replacement merely to export another version.
   if (condition && previous && equalStructuredValues(parseConditionModifier(previous), condition) &&
       equalStructuredValues(priorCalendar, calendar)) return;
+  if (previous && !isExactConditionBridge(previous)) dosage.extension = [...(dosage.extension ?? []), {
+    url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [previous],
+  }];
   const children = condition ? [encodeConditionPredicate(condition)] : [];
   if (condition && calendar && equalStructuredValues(condition, calendar)) {
     children.push({ ...encodeConditionPredicate(calendar), url: "calendarDayPredicate" });
@@ -886,14 +903,14 @@ function hasOtherOwnField(value:FhirExtension,second:"extension"|"valueString"):
 export function hasUnrecognizedEditMetadata(marker:FhirExtension):boolean {
   if(hasOtherOwnField(marker,"extension"))return true;
   for(const field of marker.extension??[]){
-    if(field.url==="sourceAgreement"||field.url==="sourceHasStructuredClocks"||field.url==="sourceHasStructuredEvents"){
+    if(field.url==="sourceAgreement"||field.url==="sourceHasStructuredClocks"||field.url==="sourceHasStructuredEvents"||field.url==="sourceHasStructuredSite"){
       if(typeof field.valueBoolean!=="boolean"||Object.keys(field).some(key=>key!=="url"&&key!=="valueBoolean"))return true;
       continue;
     }
     if(field.url==="instruction"||field.url==="textFingerprint"||field.url==="projectionFingerprint"){if(hasOtherOwnField(field,"valueString"))return true;continue;}
     if(field.url!=="row"||hasOtherOwnField(field,"extension"))return true;
     for(const part of field.extension??[]) {
-      if(part.url==="sourceAgreement"||part.url==="sourceHasStructuredClocks"||part.url==="sourceHasStructuredEvents") {
+      if(part.url==="sourceAgreement"||part.url==="sourceHasStructuredClocks"||part.url==="sourceHasStructuredEvents"||part.url==="sourceHasStructuredSite") {
         if(typeof part.valueBoolean!=="boolean"||Object.keys(part).some(key=>key!=="url"&&key!=="valueBoolean"))return true;
       } else if((part.url!=="projectionFingerprint"&&part.url!=="textFingerprint")||hasOtherOwnField(part,"valueString"))return true;
     }
@@ -1250,6 +1267,7 @@ interface SourceMaximaObservation {
 interface SourceConceptObservation {
   original: FhirCodeableConcept;
   text?: string;
+  triggerPhase?: "onset";
   codings: Array<{ original: FhirCoding; system?: string; version?: string;
     code?: string; display?: string; userSelected?: boolean }>;
 }
@@ -1279,22 +1297,25 @@ export function matchesSourceReplayConcept(
 }
 /** Observe an ordered clinical concept list only when one is supplied. */
 export function captureSourceReplayConceptList(
-  value: readonly FhirCodeableConcept[] | undefined
+  value: readonly FhirCodeableConcept[] | undefined, observeTriggerPhase = false
 ): SourceConceptObservation[] | undefined {
   if (!value) return undefined;
   const proof: SourceConceptObservation[] = new Array(value.length);
-  for (let index = 0; index < value.length; index++)
+  for (let index = 0; index < value.length; index++) {
     proof[index] = captureSourceReplayConcept(value[index])!;
+    if (observeTriggerPhase) proof[index].triggerPhase = parsePrnTriggerPhase(value[index]);
+  }
   return proof;
 }
 export function matchesSourceReplayConceptList(
   value: readonly FhirCodeableConcept[] | undefined,
-  proof: readonly SourceConceptObservation[] | undefined
+  proof: readonly SourceConceptObservation[] | undefined, observeTriggerPhase = false
 ): boolean {
   if (!value || !proof) return value === undefined && proof === undefined;
   if (value.length !== proof.length) return false;
   for (let index = 0; index < proof.length; index++)
-    if (!matchesSourceReplayConcept(value[index], proof[index])) return false;
+    if (!matchesSourceReplayConcept(value[index], proof[index]) ||
+        observeTriggerPhase && parsePrnTriggerPhase(value[index]) !== proof[index].triggerPhase) return false;
   return true;
 }
 interface SourcePredicateObservation {
@@ -1546,6 +1567,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let frequencyMin: number | undefined, frequencyMinSeen = false;
   let monthDays: number[] | undefined, weekdayOrdinal: number | undefined;
+  let additionalClocks: string[] | undefined;
   let clockWindow: SourceTimingObservation["clockWindow"];
   let eventWindow: SourceTimingObservation["eventWindow"];
   let occurrenceCap: SourceTimingObservation["occurrenceCap"];
@@ -1556,6 +1578,8 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     if (extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL && !frequencyMinSeen) {
       frequencyMin = extension.valueInteger; frequencyMinSeen = true;
     }
+    else if (extension.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL && repeat.timeOfDay === undefined && extension.valueTime !== undefined)
+      (additionalClocks ??= []).push(extension.valueTime);
     else if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
     else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
     else if (extension.url === TIMING_OFFSET_MAX_EXTENSION_URL) offsetMax ??= value;
@@ -1610,7 +1634,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     repeatValues: repeat ? { ...repeat } : undefined,
     frequencyMin, offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, eventWindow, occurrenceCap, administrationDuration, activities,
     events: timing.event?.slice(),
-    clocks: repeat?.timeOfDay?.slice(),
+    clocks: repeat?.timeOfDay?.slice() ?? additionalClocks,
     weekdays: repeat?.dayOfWeek?.slice(),
     anchors: repeat?.when?.slice(),
     timingCode: code,
@@ -1643,12 +1667,15 @@ export function matchesSourceReplayTiming(
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let frequencyMin: number | undefined, frequencyMinSeen = false;
-  let monthDayIndex = 0, weekdayOrdinal: number | undefined;
+  let monthDayIndex = 0, additionalClockIndex = 0, weekdayOrdinal: number | undefined;
   let eventWindowSeen = false, clockWindowSeen = false, occurrenceCapSeen = false, administrationDurationSeen = false, activityIndex = 0;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL && !frequencyMinSeen) {
       frequencyMin = extension.valueInteger; frequencyMinSeen = true;
+    }
+    else if (extension.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL && repeat.timeOfDay === undefined && extension.valueTime !== undefined) {
+      if (extension.valueTime !== proof.clocks?.[additionalClockIndex++]) return false;
     }
     else if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
     else if (extension.url === TIMING_OFFSET_MIN_EXTENSION_URL) offsetMin ??= value;
@@ -1726,7 +1753,8 @@ export function matchesSourceReplayTiming(
     repeat?.duration === prior?.duration && repeat?.durationMax === prior?.durationMax &&
     repeat?.durationUnit === prior?.durationUnit && repeat?.offset === prior?.offset &&
     unchangedReplayList(timing.event, proof.events) &&
-    unchangedReplayList(repeat?.timeOfDay, proof.clocks) &&
+    (repeat?.timeOfDay !== undefined ? unchangedReplayList(repeat.timeOfDay, proof.clocks)
+      : additionalClockIndex === (proof.clocks?.length ?? 0)) &&
     unchangedReplayList(repeat?.dayOfWeek, proof.weekdays) &&
     unchangedReplayList(repeat?.when, proof.anchors) &&
     unchangedReplayMeasure(repeat?.boundsDuration, proof.boundsDuration) &&
@@ -1785,7 +1813,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
     timing: captureSourceReplayTiming(dosage.timing), modifiers: captureSourceReplayModifiers(dosage),
     site: captureSourceReplayConcept(dosage.site), route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
-    asNeededFor: captureSourceReplayConceptList(dosage.asNeededFor),
+    asNeededFor: captureSourceReplayConceptList(dosage.asNeededFor, true),
     additionalInstructions: captureSourceReplayConceptList(dosage.additionalInstruction) };
 }
 function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplayProof): boolean {
@@ -1813,7 +1841,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   return matchesSourceReplayConcept(dosage.site, proof.site) &&
     matchesSourceReplayConcept(dosage.route, proof.route) &&
     matchesSourceReplayConcept(dosage.method, proof.method) &&
-    matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor) &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor, true) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, proof.additionalInstructions) &&
     matchesSourceReplayModifiers(dosage, proof.modifiers) &&
     matchesSourceReplayMaxima(dosage, proof.maxima) &&
@@ -1848,14 +1876,14 @@ export function getDosageSourceTextAgreement(
   }
   return undefined;
 }
-export interface DosageSourceTimeOwnership { clocks?: boolean; events?: boolean; }
-export function sourceTimeOwnership(marker: FhirExtension): DosageSourceTimeOwnership | undefined {
-  let result: DosageSourceTimeOwnership | undefined;
+export interface DosageSourceOwnership { clocks?: boolean; events?: boolean; site?: boolean; }
+export function sourceOwnership(marker: FhirExtension): DosageSourceOwnership | undefined {
+  let result: DosageSourceOwnership | undefined;
   let fields = marker.extension ?? [], local = false;
   for (let index = 0; index < fields.length; index++) {
     const field = fields[index];
     if (!local && field.url === "row") {
-      // Only this row's first baseline owns its primary source time.
+      // Only this row's first baseline owns its primary source facts.
       fields = field.extension ?? [];
       index = -1; local = true;
       continue;
@@ -1863,23 +1891,24 @@ export function sourceTimeOwnership(marker: FhirExtension): DosageSourceTimeOwne
     if (typeof field.valueBoolean !== "boolean") continue;
     if (field.url === "sourceHasStructuredClocks") (result ??= {}).clocks = field.valueBoolean;
     else if (field.url === "sourceHasStructuredEvents") (result ??= {}).events = field.valueBoolean;
+    else if (field.url === "sourceHasStructuredSite") (result ??= {}).site = field.valueBoolean;
   }
   return result;
 }
 
-/** Narrow saved primary-time ownership. Missing evidence never licenses
- * removal of clocks or event anchors supplied only by the action graph. */
-export function getDosageSourceTimeOwnership(dosage: Pick<FhirDosage, "extension">): DosageSourceTimeOwnership | undefined {
+/** Saved primary-field ownership. Missing evidence never licenses removal
+ * of independent clocks, event anchors, or sites supplied only by the graph. */
+export function getDosageSourceOwnership(dosage: Pick<FhirDosage, "extension">): DosageSourceOwnership | undefined {
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
-    const value = sourceTimeOwnership(marker);
+    const value = sourceOwnership(marker);
     if (value !== undefined) return value;
   }
   return undefined;
 }
 export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
   if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL || Object.keys(marker).length !== 2 ||
-      !marker.extension?.length || marker.extension.length > 5) return false;
+      !marker.extension?.length || marker.extension.length > 6) return false;
   let fields = 0;
   for (const field of marker.extension) {
     if (Object.keys(field).length !== 2) return false;
@@ -1888,6 +1917,7 @@ export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
     else if (field.url === "projectionFingerprint" && typeof field.valueString === "string" && !(fields & 4)) fields |= 4;
     else if (field.url === "sourceHasStructuredClocks" && typeof field.valueBoolean === "boolean" && !(fields & 8)) fields |= 8;
     else if (field.url === "sourceHasStructuredEvents" && typeof field.valueBoolean === "boolean" && !(fields & 16)) fields |= 16;
+    else if (field.url === "sourceHasStructuredSite" && typeof field.valueBoolean === "boolean" && !(fields & 32)) fields |= 32;
     else return false;
   }
   return Boolean(fields & 1);
@@ -1940,6 +1970,7 @@ export interface DosageSourceTextBaseline {
   textFingerprint?: string;
   sourceHasStructuredClocks?: boolean;
   sourceHasStructuredEvents?: boolean;
+  sourceHasStructuredSite?: boolean;
 }
 export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
   dosages: readonly T[], instruction: string | undefined, sourceAgreement = true,
@@ -1950,18 +1981,20 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
   if (!sourceAgreement || rowSources) children.push({ url: "sourceAgreement", valueBoolean: sourceAgreement });
   const result: T[] = new Array(dosages.length);
   const placeMarker = (row: T, marker: FhirExtension | undefined, baseline: FhirExtension[],
-    original: DosageSourceTextBaseline | undefined, keepLocalTime: boolean,
+    original: DosageSourceTextBaseline | undefined, keepLocalOwnership: boolean,
     rowAgreement: boolean, sourceText: string): T => {
-    const extension: FhirExtension[] | undefined = marker || keepLocalTime ? [] : undefined;
+    const extension: FhirExtension[] | undefined = marker || keepLocalOwnership ? [] : undefined;
     let sourceClocks = original?.sourceHasStructuredClocks,
-      sourceEvents = original?.sourceHasStructuredEvents, graph = false;
+      sourceEvents = original?.sourceHasStructuredEvents,
+      sourceSite = original?.sourceHasStructuredSite, graph = false;
     for (const prior of row.extension ?? []) {
       if (prior.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL) graph = true;
       if (prior.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL &&
-          (sourceClocks === undefined || sourceEvents === undefined)) {
-        const ownership = sourceTimeOwnership(prior);
+          (sourceClocks === undefined || sourceEvents === undefined || sourceSite === undefined)) {
+        const ownership = sourceOwnership(prior);
         sourceClocks ??= ownership?.clocks;
         sourceEvents ??= ownership?.events;
+        sourceSite ??= ownership?.site;
       }
       if (!extension) continue;
       const ownedBaseline = isRenderedInstructionMarker(prior) ||
@@ -1972,18 +2005,21 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
         extension.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [prior] });
     }
     if (graph) {
-      sourceClocks ??= Boolean(row.timing?.repeat?.timeOfDay?.length);
+      sourceClocks ??= Boolean(getTimingClocks(row.timing?.repeat)?.length);
       sourceEvents ??= Boolean(row.timing?.repeat?.when?.length);
+      sourceSite ??= Boolean(row.site);
     }
     if (sourceClocks !== undefined) baseline.push({ url: "sourceHasStructuredClocks", valueBoolean: sourceClocks });
     if (sourceEvents !== undefined) baseline.push({ url: "sourceHasStructuredEvents", valueBoolean: sourceEvents });
-    if (!marker && keepLocalTime && (sourceClocks !== undefined || sourceEvents !== undefined)) {
+    if (sourceSite !== undefined) baseline.push({ url: "sourceHasStructuredSite", valueBoolean: sourceSite });
+    if (!marker && keepLocalOwnership && (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined)) {
       const fields: FhirExtension[] = [
         { url: "sourceAgreement", valueBoolean: rowAgreement },
         { url: "textFingerprint", valueString: sourceText },
       ];
       if (sourceClocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: sourceClocks });
       if (sourceEvents !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: sourceEvents });
+      if (sourceSite !== undefined) fields.push({ url: "sourceHasStructuredSite", valueBoolean: sourceSite });
       marker = { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields };
     }
     if (!marker || !extension) return row;
@@ -2005,8 +2041,9 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     }
     result[index] = row;
     if (instruction === undefined && row.text === undefined) {
-      if (original?.sourceHasStructuredClocks !== undefined || original?.sourceHasStructuredEvents !== undefined) {
-        // Time ownership survives when an earlier clinical edit retired stale
+      if (original?.sourceHasStructuredClocks !== undefined || original?.sourceHasStructuredEvents !== undefined ||
+          original?.sourceHasStructuredSite !== undefined) {
+        // Source ownership survives when an earlier clinical edit retired stale
         // wording. This marker carries no text or new projection fingerprint.
         const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: false }];
         result[index] = placeMarker(row, { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields },
@@ -2037,7 +2074,8 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
       rowAgreement, sourceText);
     if (localFields)
       for (const field of baseline)
-        if (field.url === "sourceHasStructuredClocks" || field.url === "sourceHasStructuredEvents") localFields.push(field);
+        if (field.url === "sourceHasStructuredClocks" || field.url === "sourceHasStructuredEvents" ||
+            field.url === "sourceHasStructuredSite") localFields.push(field);
     result[index] = row;
     const projection = instruction !== undefined || localReplay ? dosageProjectionFingerprint(row) : undefined;
     if (instruction !== undefined) {
@@ -2660,7 +2698,8 @@ const R6_DRAFT_SOURCE: BridgeShape = {
 };
 const R6_SINGLE_SAFETY_SOURCE: BridgeShape = {
   course: { fields: SAFETY }, step: { fields: SAFETY }, projected: { fields: SAFETY },
-  ownerId: { value: "valueString" }, ownerFingerprint: { value: "valueString" }
+  ownerId: { value: "valueString" }, ownerComponentIds: { value: "valueString", repeated: true },
+  ownerFingerprint: { value: "valueString" }
 };
 
 export function encodeR6SourceMetadata(

@@ -1,4 +1,4 @@
-import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceTimeOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
+import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
@@ -52,7 +52,7 @@ import {
   DOSAGE_DETAILS_R5_URL,
   R5_RATE_MODIFIERS_R6_URL,
   DOSAGE_CONDITION_R5_URL,
-  isExactConditionBridge,
+  exactConditionBridgePredicate,
   isRenderedInstructionMarker,
   retainField,
   readRetainedField,
@@ -82,6 +82,8 @@ import {
 import {
   serializeCanonicalContext,
   serializeCanonicalSchedule,
+  TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
+  projectTimingClocks,
   deserializeCanonicalContext,
   cycleDayConstraintExtension,
   infusionCarrierMaterialExtension,
@@ -212,9 +214,10 @@ function offsetValue(repeat: { extension?: FhirExtension[] } | undefined, url: s
 /** Decode timing annotations in one classification walk. Each specialized
  * codec sees only its own marker(s), not the full extension list again. */
 function timingAnnotations(
-  r: { extension?: FhirExtension[]; offset?: number } | undefined
+  r: { extension?: FhirExtension[]; offset?: number; timeOfDay?: string[] } | undefined
 ): Pick<
   NonNullable<CanonicalTiming["recurrence"]>,
+  | "clocks"
   | "offset"
   | "offsetMin"
   | "offsetMax"
@@ -231,6 +234,7 @@ function timingAnnotations(
 > {
   const out: Pick<
     NonNullable<CanonicalTiming["recurrence"]>,
+    | "clocks"
     | "offset"
     | "offsetMin"
     | "offsetMax"
@@ -255,6 +259,9 @@ function timingAnnotations(
     event: FhirExtension | undefined;
   for (const e of r?.extension ?? [])
     switch (e.url) {
+      case TIMING_ADDITIONAL_CLOCK_EXTENSION_URL:
+        if (r?.timeOfDay === undefined && e.valueTime !== undefined) (out.clocks ??= []).push(e.valueTime);
+        break;
       case TIMING_ADMINISTRATION_DURATION_EXTENSION_URL:
         if (!administrationDurationSeen) {
           administrationDurationSeen = true;
@@ -328,7 +335,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
       courseLengthRange: rangeFromFhir(r.boundsRange),
       calendarWindow: r.boundsPeriod,
-      clocks: r.timeOfDay,
+      clocks: r.timeOfDay ?? annotations?.clocks,
       anchors: r.when,
       dayOfWeek: r.dayOfWeek,
       offset: annotations?.offset ?? r.offset,
@@ -594,11 +601,11 @@ function baseAdministration(
     : undefined;
   const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
   let weekdaysMarker: FhirExtension | undefined;
-  let sourceTime: ReturnType<typeof sourceTimeOwnership>;
+  let sourceFields: ReturnType<typeof sourceOwnership>;
   for (const e of raw.extension ?? []) {
     if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL && !weekdaysMarker) weekdaysMarker = e;
-    else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceTime === undefined)
-      sourceTime = sourceTimeOwnership(e);
+    else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceFields === undefined)
+      sourceFields = sourceOwnership(e);
   }
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
@@ -667,8 +674,9 @@ function baseAdministration(
   };
   // Keep sparse dependency identities off the ordinary import allocation
   // path; an object spread here emits ES6 descriptor-copy helpers per dose.
-  if (sourceTime?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceTime.clocks;
-  if (sourceTime?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceTime.events;
+  if (sourceFields?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceFields.clocks;
+  if (sourceFields?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceFields.events;
+  if (sourceFields?.site !== undefined) output.provenance!.sourceHasStructuredSite = sourceFields.site;
   if (phasePredecessors !== undefined) {
     output.sourceMember = sourceMember;
     output.phasePredecessors = phasePredecessors;
@@ -1033,6 +1041,14 @@ function updateNativeTimingAnnotations(
   const changed = (url: string, before: unknown, after: unknown) => {
     if (!same(before, after)) changes.add(url);
   };
+  const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+  const duration = parseTimingAdministrationDuration(durationMarker);
+  if (duration && (duration.value !== live?.occurrenceDuration ||
+      duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator)) {
+    changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
+  }
   changed(TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingMonthDays(oldMarkers), live?.monthDays);
   changed(TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, getTimingWeekdayOrdinal(oldMarkers), live?.weekdayOrdinal);
   changed(TIMING_CLOCK_WINDOW_EXTENSION_URL, getTimingClockWindow(oldMarkers), live?.clockWindow);
@@ -1171,6 +1187,11 @@ function administrationToWire(
     assign(wireTiming.repeat as Record<string, unknown>, "offset", scheduleMetadata.timing.repeat.offset);
   }
   wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
+  if (wireTiming?.repeat && a.schedule?.recurrence?.clocks !== undefined) {
+    const sourceRepeat = (a.provenance?.data as FhirDosage | FhirR6Dosage | undefined)?.timing?.repeat;
+    const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat);
+    if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
+  }
   const currentRange = wireTiming?.repeat?.boundsRange ??
     (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, Boolean(clause)) : undefined);
   const modifiers = output.modifierExtension as FhirExtension[] | undefined;
@@ -1562,13 +1583,16 @@ function administrationToWire(
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.clocks?.length) : undefined);
     const events = a.provenance?.sourceHasStructuredEvents ??
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
-    if (clocks !== undefined || events !== undefined) {
+    const site = a.provenance?.sourceHasStructuredSite ??
+      (clause?.instructionGraph ? Boolean(a.target || a.siteReference) : undefined);
+    if (clocks !== undefined || events !== undefined || site !== undefined) {
       // Whole-text agreement is never inferred for an R6 import. Keep only
-      // the narrow primary-time evidence needed to distinguish a deletion
-      // from an independent graph clock/event after another external save.
+      // the primary-field evidence needed to distinguish a deletion from
+      // an independent graph clock, event, or site after another external save.
       const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: false }];
       if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
       if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });
+      if (site !== undefined) fields.push({ url: "sourceHasStructuredSite", valueBoolean: site });
       output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
         { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields }];
     }
@@ -1594,8 +1618,10 @@ function administrationToWire(
           continue;
         }
         if (extension.url === DOSAGE_CONDITION_R5_URL) {
-          if (isExactConditionBridge(extension)) continue;
+          const generatedPredicate = exactConditionBridgePredicate(extension);
+          if (generatedPredicate && same(generatedPredicate, a.predicate)) continue;
           const nativeCondition = Boolean((output.condition as FhirR6Dosage["condition"])?.length);
+          const ownsCondition = nativeCondition || conditionSource?.condition !== undefined;
           let predicate = false, calendar = false;
           for (const child of extension.extension ?? []) {
             if (child.url === "predicate") predicate = true;
@@ -1603,7 +1629,7 @@ function administrationToWire(
           }
           // Once condition[] owns the predicate, an annotated R5 copy is
           // source, not a second active owner that can revive a later deletion.
-          if (nativeCondition && predicate || !a.predicate && calendar && !predicate) {
+          if (ownsCondition && predicate || !a.predicate && calendar && !predicate) {
             output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
               { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [extension] }];
             if (nativeCondition) {

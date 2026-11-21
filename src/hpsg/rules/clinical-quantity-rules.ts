@@ -167,10 +167,9 @@ function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQuantityTe
  * interpret the same lexical number daughters, without string special cases. */
 function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | undefined): number | undefined {
   if (!token) return undefined;
-  const value = token.kind === LexKind.Number
-    ? token.value
-    : DOSE_NUMBER_WORDS.get(normalizeTokenLower(token)) ??
-      FREQUENCY_NUMBER_WORDS[normalizeTokenLower(token)];
+  if (token.kind === LexKind.Number) return token.value !== undefined && token.value > 0 ? token.value : undefined;
+  const word = normalizeTokenLower(token);
+  const value = DOSE_NUMBER_WORDS.get(word) ?? FREQUENCY_NUMBER_WORDS[word] ?? DOSE_FRACTION_WORDS.get(word);
   return value !== undefined && value > 0 ? value : undefined;
 }
 
@@ -189,9 +188,16 @@ function weightRatePeriodUnit(
 
 function hasAdministrationCue(context: HpsgClauseContext, before: number): boolean {
   const first = Math.max(0, before - 8);
+  let precedingAmount = false;
   for (let index = before - 1; index >= first; index -= 1) {
-    const lower = normalizeTokenLower(context.tokens[index]);
-    if (/^(?:infuse|infusion|administer|give|run)$/u.test(lower)) return true;
+    const token = context.tokens[index];
+    const lower = normalizeTokenLower(token);
+    if (/^(?:infuse|infusion|run)$/u.test(lower)) return true;
+    // A generic administration head owns its nearest numeric argument. A
+    // later cumulative limit cannot borrow GIVE across the already given dose.
+    if (/^(?:administer|give)$/u.test(lower)) return !precedingAmount;
+    if (token.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower))
+      precedingAmount = true;
   }
   return false;
 }
@@ -361,9 +367,9 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
     doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
   let unitIndex = (qualified?.numericIndex ?? start) + 1;
   const value = qualified?.value ?? clinicalDurationNumber(token);
-  // The article in "about half an hour" belongs to the fractional daughter,
-  // while an ordinary duration number still requires its immediate unit.
-  if (qualified && !qualified.rawUnit && qualified.value > 0 && qualified.value < 1 &&
+  // Exact and qualified fractional daughters share the same article rule;
+  // ordinary whole duration numbers still require their immediate unit.
+  if (!qualified?.rawUnit && value !== undefined && value > 0 && value < 1 &&
       available(context, unitIndex) &&
       DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
   const unitToken = context.tokens[unitIndex];
@@ -534,13 +540,10 @@ function fixedRate(
   const cue = context.tokens[phraseStart - 1]?.original === ","
     ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
   const hasSeparateRateMarker = separateRateMarker(context, phraseStart) !== undefined;
-  // An inclusive comparator can share AT with the rate head ("at most",
-  // "at least"). Keep the entire qualifier owned by its quantity; only
-  // a marker outside that qualifier needs to be consumed separately.
+  // AT inside an inclusive comparator does not license an infusion rate.
+  // A separate marker, infusion route or administration head owns that role.
   const hasRateMarker = hasSeparateRateMarker ||
-    context.tokens[phraseStart].lower.startsWith("@") || (phraseStart < start &&
-    available(context, phraseStart) &&
-    normalizeTokenLower(context.tokens[phraseStart]) === "at");
+    context.tokens[phraseStart].lower.startsWith("@");
   // The neighboring IV route licenses a verb-free infusion instruction.
   // Route meaning is shared with the lexical route rule, including synonyms.
   const next = context.tokens[expression.end];

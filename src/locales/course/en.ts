@@ -25,6 +25,11 @@ export const ENGLISH_COURSE: CourseLanguage = {
   choicePrefix: "Choose one: ",
   stageSeparator: " then ",
   doseLabel: "Dose: ",
+  amountRoleLabel: (kind, role, sourceRole) => {
+    const label = kind === "dose" ? "dose" : kind === "rate" ? "rate" : "rate range";
+    return role ? (role === "ordered" ? "Ordered " : "Calculated ") + label + ": "
+      : label[0].toUpperCase() + label.slice(1) + " (" + sourceRole + "): ";
+  },
   rateLabel: "Rate: ",
   rateRangeLabel: "Rate range: ",
   unspecified: "unspecified",

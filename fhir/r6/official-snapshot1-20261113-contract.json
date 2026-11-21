@@ -727,6 +727,20 @@
             "CodeableConcept"
           ]
         }
+      ],
+      "constraints": [
+        {
+          "path": "Timing.repeat",
+          "key": "tim-9",
+          "severity": "error",
+          "expression": "offset.empty() or (when.exists() and when.select($this in ('C' | 'CM' | 'CD' | 'CV')).allFalse())"
+        },
+        {
+          "path": "Timing.repeat",
+          "key": "tim-10",
+          "severity": "error",
+          "expression": "timeOfDay.empty() or when.empty()"
+        }
       ]
     },
     "DosageCondition": {

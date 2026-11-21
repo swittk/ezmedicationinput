@@ -297,6 +297,84 @@ export const TIMING_ACTIVITY_WINDOW_EXTENSION_URL = "urn:ezmedicationinput:Struc
 export const TIMING_EVENT_WINDOW_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-timing-event-window";
 
+/** Independent clocks combined with event anchors share one recurrence/count.
+ * R5 and the current R6 pin forbid both core fields in that recurrence (tim-10). */
+export const TIMING_ADDITIONAL_CLOCK_EXTENSION_URL =
+  "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock";
+
+/** Read the current wire clock field. A supplied core field, including an empty
+ * array, owns its edit; the bridge is the clock field only when core is absent. */
+export function getTimingClocks(
+  repeat: Pick<FhirTimingRepeat, "timeOfDay" | "extension"> | undefined
+): string[] | undefined {
+  if (!repeat) return undefined;
+  if (repeat.timeOfDay !== undefined) return repeat.timeOfDay;
+  if (!repeat.extension?.length) return undefined;
+  let clocks: string[] | undefined;
+  for (const item of repeat.extension) {
+    if (item.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL && typeof item.valueTime === "string")
+      (clocks ??= []).push(item.valueTime);
+  }
+  return clocks;
+}
+
+/** Independent event and clock opportunities share one wire recurrence.
+ * The original wire repeat distinguishes a bridge read from a current core edit;
+ * no administration/count/cap is split, and retired carriers cannot revive. */
+export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
+  repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">
+): T {
+  const clocks = repeat.timeOfDay;
+  const mixed = Boolean(repeat.when?.length && clocks?.length);
+  if (!mixed && !repeat.extension?.length) return repeat;
+  let markers: FhirExtension[] | undefined;
+  const kept: FhirExtension[] = [];
+  let bridgeIndex = 0;
+  let bridgeMetadata: FhirTimingRepeat["_timeOfDay"];
+  let bridgeMatches = wireSource !== undefined && wireSource.timeOfDay === undefined;
+  for (const marker of repeat.extension ?? []) {
+    if (marker.url !== TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) { kept.push(marker); continue; }
+    (markers ??= []).push(marker);
+    if (marker.valueTime !== undefined) {
+      if (marker._valueTime && !bridgeMetadata) bridgeMetadata = Array(bridgeIndex).fill(null);
+      bridgeMetadata?.push(marker._valueTime ?? null);
+      if (marker.valueTime !== clocks?.[bridgeIndex++]) bridgeMatches = false;
+    }
+  }
+  if (!mixed && !markers) return repeat;
+  const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
+  if (mixed && markers && unchangedBridge) {
+    // These clocks were read from the current clock bridge. Keep its exact authored
+    // wrappers; the native writer temporarily supplied timeOfDay for projection.
+    const output = { ...repeat };
+    delete output.timeOfDay;
+    delete output._timeOfDay;
+    return output;
+  }
+  if (markers) kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
+  if (mixed) {
+    const primitiveCount = Math.max(clocks!.length, repeat._timeOfDay?.length ?? 0);
+    for (let index = 0; index < primitiveCount; index++) {
+      const metadata = repeat._timeOfDay?.[index];
+      if (index >= clocks!.length && !metadata) continue;
+      const marker: FhirExtension = { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL };
+      if (index < clocks!.length) marker.valueTime = clocks![index];
+      if (metadata) marker._valueTime = metadata;
+      kept.push(marker);
+    }
+  }
+  const output = { ...repeat };
+  if (!mixed && unchangedBridge && bridgeMetadata && output._timeOfDay === undefined)
+    output._timeOfDay = bridgeMetadata;
+  if (kept.length) output.extension = kept;
+  else delete output.extension;
+  if (mixed) {
+    delete output.timeOfDay;
+    delete output._timeOfDay;
+  }
+  return output;
+}
+
 export const TIMING_CLOCK_WINDOW_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-timing-clock-window";
 
@@ -551,7 +629,7 @@ function prnTriggerPhaseExtension(phase: "onset" | undefined) {
   return phase ? { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: phase } : undefined;
 }
 
-function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset" | undefined {
+export function parsePrnTriggerPhase(concept: FhirCodeableConcept | undefined): "onset" | undefined {
   const value = concept?.extension?.find(
     (candidate) => candidate.url === PRN_TRIGGER_PHASE_EXTENSION_URL
   )?.valueCode;
@@ -1265,8 +1343,8 @@ export function extractCanonicalDoseRange(
   range: FhirRange
 ): { range?: CanonicalDoseRange; unit?: string; warning?: string } {
   const canonicalRange: CanonicalDoseRange = {};
-  const lowUnit = range.low?.unit;
-  const highUnit = range.high?.unit;
+  const lowUnit = range.low?.unit ?? (range.low ? getDoseQuantityUnit(range.low) || undefined : undefined);
+  const highUnit = range.high?.unit ?? (range.high ? getDoseQuantityUnit(range.high) || undefined : undefined);
 
   if (range.low?.value !== undefined) {
     canonicalRange.low = range.low.value;
@@ -1870,6 +1948,9 @@ export function canonicalToFhir(
   if (clause.patientInstruction) {
     dosage.patientInstruction = clause.patientInstruction;
   }
+  const repeat = dosage.timing?.repeat;
+  if (repeat?.when?.length && repeat.timeOfDay?.length)
+    dosage.timing!.repeat = projectTimingClocks(repeat);
 
   return dosage;
 }
@@ -2079,6 +2160,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   const offsetMaxExtension = timingOffsetExtensionValue(repeat, TIMING_OFFSET_MAX_EXTENSION_URL);
   const timingBounds = extractCanonicalTimingBounds(dosage);
   const activityTiming = parseActivityTimingExtensions(repeat);
+  const clocks = getTimingClocks(repeat);
   const clockWindow = getTimingClockWindow(repeat);
   const weekdayOrdinal = getTimingWeekdayOrdinal(repeat);
   const dayOfMonth = getTimingMonthDays(repeat);
@@ -2121,7 +2203,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
     offsetMaxExtension !== undefined ||
     repeat?.dayOfWeek?.length ||
     repeat?.when?.length ||
-    repeat?.timeOfDay?.length ||
+    clocks?.length ||
     dosage.timing?.event?.length
   ) {
     clause.schedule = {
@@ -2160,7 +2242,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
       dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
       dayOfMonth,
       when: repeat?.when ? [...repeat.when] : undefined,
-      timeOfDay: repeat?.timeOfDay ? [...repeat.timeOfDay] : undefined,
+      timeOfDay: clocks ? [...clocks] : undefined,
       calendarEvents: dosage.timing?.event
         ?.map((value, index) => calendarEventFromFhir(value, dosage.timing?._event?.[index]))
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
@@ -2207,9 +2289,8 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
   state.primaryClause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const timingBounds = extractCanonicalTimingBounds(dosage);
-  state.timeOfDay = dosage.timing?.repeat?.timeOfDay
-    ? [...dosage.timing.repeat.timeOfDay]
-    : [];
+  const clocks = getTimingClocks(dosage.timing?.repeat);
+  state.timeOfDay = clocks ? [...clocks] : [];
   if (dosage.timing?.event?.length) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),

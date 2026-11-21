@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, formatSig, formatCanonicalCourse, fromFhir, nextDueDoses, calculateTotalUnits,
+  projectCanonicalCourse, toFhirR5Dosages, toDosageDetails, importCanonicalCourse,
   FhirPeriodUnit, type FhirDosage, type CanonicalCourse, type CanonicalAdministration,
 } from "../src/index";
 import { formatCanonicalClause } from "../src/format";
@@ -439,9 +440,143 @@ it.each(["the next morning and at 09:00", "at 09:00 and the next morning"])(
     const parsed = parseSig("Take 1 tablet " + timing);
     expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
     expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
+    for (const row of parsed.fhir)
+      expect(Boolean(row.timing?.repeat?.when?.length && row.timing.repeat.timeOfDay?.length)).toBe(false);
     for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
         timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
         "2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T08:00:00+00:00"
       ]);
   });
+
+describe("round33 onset scope and complete Thai fractions", () => {
+  it("keeps the pause after a dated phase before its next-morning successor", () => {
+    const parsed = parseSig("Take 1 tablet daily starting 2026-12-01 for 7 days, stop for 2 days, then 2 tablets the next morning for 3 days");
+    const expected = [
+      "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00", "2026-12-03T09:00:00+00:00",
+      "2026-12-04T09:00:00+00:00", "2026-12-05T09:00:00+00:00", "2026-12-06T09:00:00+00:00",
+      "2026-12-07T09:00:00+00:00", "2026-12-10T08:00:00+00:00", "2026-12-11T08:00:00+00:00",
+      "2026-12-12T08:00:00+00:00"
+    ];
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(nextDueDoses(input, { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+        timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 20 })).toEqual(expected);
+  });
+
+  it.each(["the next morning and again at 18:00", "at 18:00 and again the next morning"])(
+    "retains explicitly coordinated event and clock in %s", timing => {
+      const parsed = parseSig("Take 1 tablet " + timing);
+      expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+        expect(nextDueDoses(input, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+          timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
+            "2026-12-02T08:00:00+00:00", "2026-12-02T18:00:00+00:00", "2026-12-03T08:00:00+00:00"
+          ]);
+    });
+
+  it.each(["until the next morning", "until next morning"])("does not turn %s into an onset", ending => {
+    const parsed = parseSig("Take 1 tablet every 6 hours " + ending);
+    const schedule = parsed.meta.canonical.clauses[0].schedule!;
+    expect(schedule.treatmentStartOffsetDays).toBeUndefined();
+    expect(schedule.phaseStartReference).toBeUndefined();
+    expect(schedule).toMatchObject({ period: 6, periodUnit: "h" });
+    expect(schedule.frequency ?? 1).toBe(1);
+    expect(schedule.when).toBeUndefined();
+    expect(parsed.input).toContain(ending);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(nextDueDoses(input, { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+        timeZone: "UTC", limit: 4 })).toEqual([
+          "2026-12-01T08:00:00+00:00", "2026-12-01T14:00:00+00:00",
+          "2026-12-01T20:00:00+00:00", "2026-12-02T02:00:00+00:00"
+        ]);
+  });
+
+  it.each(["≤๑/๒เม็ด", "≤1/2เม็ด", ">=๑/๒เม็ด", "~๑/๒เม็ด"])("keeps the complete comparative fraction %s", amount => {
+    const source = amount + " วันละครั้ง";
+    const parsed = parseSig(source, { locale: "th" });
+    const comparator = amount.startsWith(">=") ? ">=" : amount.startsWith("~") ? "~" : "<=";
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab", comparator });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate![0].doseQuantity!.value).toBe(0.5);
+      expect(getQuantityComparator(row.doseAndRate![0].doseQuantity)).toBe(comparator);
+    }
+  });
+});
+
+
+describe("round33 mixed clock and event recurrence", () => {
+  const context = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+    timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 8 };
+  const clockUrl = "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock";
+  function mixed(): CanonicalAdministration {
+    const value = tablet();
+    value.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+      anchors: ["MORN"], clocks: ["09:00:00"] };
+    return value;
+  }
+  it("retains one count and cap owner across mixed occurrence positions and the next phase", () => {
+    const loading = mixed();
+    loading.schedule!.recurrence!.count = 2;
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" },
+      period: { value: 1, unit: "d" } }];
+    const next = tablet();
+    next.amounts![0].quantity!.value = 2;
+    next.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      clocks: ["20:00:00"], courseLength: { value: 2, unit: "d" } };
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [loading] }, { administrations: [next] }
+    ] };
+    const projection = projectCanonicalCourse(native);
+    expect(projection.fhir).toHaveLength(2);
+    for (const rows of [projection.fhir, ...projection.fhirNext.step.map(step => step.component)])
+      for (const row of rows)
+      expect(Boolean(row.timing?.repeat?.when?.length && row.timing.repeat.timeOfDay?.length)).toBe(false);
+    for (const input of [native, JSON.parse(JSON.stringify(projection.fhir)), projection.fhirNext]) {
+      expect(nextDueDoses(input, context)).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+        "2026-01-02T20:00:00+00:00", "2026-01-03T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...context,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(6);
+    }
+  });
+
+  it("keeps a current clock edit or deletion and does not apply an event offset to that clock", () => {
+    const administration = mixed();
+    administration.schedule!.recurrence!.offset = 30;
+    const native: CanonicalCourse = { kind: "course", stages: [{ administrations: [administration] }] };
+    const row: FhirDosage = JSON.parse(JSON.stringify(projectCanonicalCourse(native).fhir[0]));
+    const repeat = row.timing!.repeat!;
+    expect(repeat.timeOfDay).toBeUndefined();
+    const clock = repeat.extension!.find(field => field.url === clockUrl)!;
+    expect(clock.valueTime).toBe("09:00:00");
+    const due = (value: FhirDosage) => nextDueDoses([value], { ...context, limit: 2 });
+    expect(due(row)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T09:00:00+00:00"]);
+    clock.valueTime = "10:00:00";
+    expect(due(row)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T10:00:00+00:00"]);
+    const rewritten = toFhirR5Dosages(toDosageDetails([row]))[0];
+    rewritten.timing!.repeat!.extension = rewritten.timing!.repeat!.extension!.filter(field => field.url !== clockUrl);
+    expect(nextDueDoses([rewritten], { ...context, limit: 2 })).toEqual([
+      "2026-01-01T08:30:00+00:00", "2026-01-02T08:30:00+00:00"
+    ]);
+    repeat.timeOfDay = ["11:00:00"];
+    const replaced = toFhirR5Dosages(toDosageDetails([row]))[0];
+    expect(due(replaced)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T11:00:00+00:00"]);
+    expect(importCanonicalCourse(replaced).stages[0].administrations[0].schedule!.recurrence!.clocks).toEqual(["11:00:00"]);
+  });
+});
+
+
+describe("round33 adjacent unqualified Thai fractions", () => {
+  it.each(["1/2เม็ด", "๑/๒เม็ด", "1/2 เม็ด", "๑/๒ เม็ด"])("retains a half tablet in %s", amount => {
+    const source = amount + " วันละครั้ง";
+    const parsed = parseSig(source, { locale: "th" });
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate![0].doseQuantity!.value).toBe(0.5);
+      expect(getQuantityComparator(row.doseAndRate![0].doseQuantity)).toBeUndefined();
+    }
+  });
+});

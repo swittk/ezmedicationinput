@@ -1,3 +1,4 @@
+import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
 import conditionBridgeDefinition from "../fhir/r5/medication-conditional-dose.json";
 import renderedInstructionDefinition from "../fhir/r5/medication-rendered-instruction.json";
@@ -137,7 +138,8 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
-    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(getTimingClocks(repeat(result, 1))).toEqual(["22:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toBeUndefined();
     expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();
@@ -153,7 +155,8 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
-    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(getTimingClocks(repeat(result, 1))).toEqual(["22:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toBeUndefined();
     expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();

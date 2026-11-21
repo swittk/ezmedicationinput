@@ -1052,20 +1052,29 @@ function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): bo
  * A disjoint frequency/period range cannot make contradictory facts executable. */
 function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void {
   const repeat = timing?.recurrence;
-  if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
+  const codings = timing?.code?.coding;
+  if (!codings?.length || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
     return;
-  const daily = standardTimingCodeFrequency(executionTimingCoding(timing), true);
-  if (daily === undefined) return;
-  if ((repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
-      (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) {
-    const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
-    // Calendar months/years have no fixed elapsed duration. Existing range
-    // interpretation stays intact when these units cannot prove disjointness.
-    if (!seconds || daily * (repeat.periodMax ?? repeat.period) * seconds >= repeat.frequency * 86400 &&
-        daily * repeat.period * seconds <= (repeat.frequencyMax ?? repeat.frequency) * 86400) return;
-  } else if (matchesDailyCodeCadence(daily, repeat)) return;
-  throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
-    "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
+  const ranged = (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
+    (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period);
+  const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
+  // Calendar months/years have no fixed elapsed duration. Existing range
+  // interpretation stays intact when these units cannot prove disjointness.
+  if (ranged && !seconds) return;
+  for (const coding of codings) {
+    if (!coding.code) continue;
+    const daily = standardTimingCodeFrequency(coding, true);
+    if (daily === undefined) continue;
+    if (ranged) {
+      // Frequency counts are whole occurrences, even when period spans a range.
+      const minimum = Math.max(repeat.frequency, Math.ceil(daily * repeat.period * seconds! / 86400));
+      const maximum = Math.min(repeat.frequencyMax ?? repeat.frequency,
+        Math.floor(daily * (repeat.periodMax ?? repeat.period) * seconds! / 86400));
+      if (minimum <= maximum) continue;
+    } else if (seconds && daily * repeat.period * seconds === repeat.frequency * 86400) continue;
+    throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
+      "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
+  }
 }
 /** An occurrence ceiling without cadence cannot supply actual dose instants.
  * @param dosage Typed dose; explicit events and cadence remain authoritative.
@@ -2318,15 +2327,16 @@ function resolveAdministrationWindow(
   // Overlapping capped cycles cannot close an exact-count phase using
   // its LOCAL pre-cap completion point: earlier accepted administrations
   // from another cycle may defer this component's third actual dose.
-  // The shared chronological acceptor owns count completion ONLY when this
-  // component has a cap shared across cycles. An uncapped counted loading
-  // component still completes locally, even when a later maintenance
-  // component triggers chronological collection for its own rolling cap.
+  // The shared chronological acceptor also owns recorded count completion:
+  // an uncapped loading phase must finish from its actual administration when
+  // a later capped component selects this route. Without history or a shared
+  // cap, counted loading still completes locally.
   const hasCountCompletion = finiteCompletionCount(recurrence) !== undefined;
   const deferCount = deferFiniteCompletion && hasCountCompletion &&
-    Boolean(getTimingOccurrenceCap(recurrence) || (hasPeriodLimits(administration) &&
-      (executableDoseRange(administration, capContext)?.caps.length ??
-        executableQuantityCaps(administration, capContext).length)));
+    Boolean(options?.priorDoseTimes?.length || getTimingOccurrenceCap(recurrence) ||
+      (hasPeriodLimits(administration) &&
+        (executableDoseRange(administration, capContext)?.caps.length ??
+          executableQuantityCaps(administration, capContext).length)));
   if (hasCountCompletion && !deferCount) {
     const completion = finiteAdministrationCompletion(
       administration,
@@ -3414,7 +3424,6 @@ function chronologicalRepeatedEvents(
         from: cycleStart,
         orderedAt: cycleStart,
         priorCount: undefined,
-        priorDoseTimes: undefined,
         limit: 10000,
       },
       next ?? undefined,
@@ -4029,12 +4038,14 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     });
     let candidateLimit = Math.min(10000,
       Math.max(16, Math.floor((maximumEligible ?? limit) * 2)));
+    const recorded = (options as PhaseCountOptions).countedActualTimes;
     while (true) {
       const candidates = nextDueDoses(unconstrained, {
         ...options, from: eligibleFrom, priorCount: undefined, limit: candidateLimit,
       });
       const accepted: string[] = [];
       for (const at of candidates) {
+        if (recorded?.has(Date.parse(at))) continue;
         if (excludedWeekdays.size && excludedWeekdays.has(getLocalWeekday(new Date(at), timeZone))) {
           continue;
         }
@@ -4055,7 +4066,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       // Nor may a dose rejected by one cap consume the other's allowance.
       // Commit the eligible candidate only after every authored cap accepts it.
       const capped = applyQuantityCaps(
-        unrecordedCountCandidates(accepted, options),
+        accepted,
         quantityCaps,
         options.priorDoseTimes,
         timeZone,

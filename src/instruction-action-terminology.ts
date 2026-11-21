@@ -98,6 +98,8 @@ function indexMethodCoding(coding: FhirCoding | undefined, definition: Medicatio
     byCode.set(coding.code, definition);
 }
 
+let defaultActionSurfaceLength = 0;
+
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
   if (definition.administrationMethod) {
@@ -111,6 +113,7 @@ for (const definition of DEFAULT_ACTIONS) {
   ];
   for (const alias of aliases) {
     const normalized = normalizeActionSurface(alias);
+    defaultActionSurfaceLength = Math.max(defaultActionSurfaceLength, normalized.length);
     if (normalized && !DEFAULT_BY_ALIAS.has(normalized)) {
       DEFAULT_BY_ALIAS.set(normalized, definition);
       const words = normalized.split(" ");
@@ -576,8 +579,18 @@ export function resolveMedicationInstructionActionForMethod(
     // Joined scripts use the registered locale boundary policy and the same
     // declared aliases. No language literals or second action vocabulary.
     if (shouldJoinAdjacentSourceTokens(surface, surface)) {
-      const wordEnd = end < 0 ? surface.length : end;
-      for (let boundary = 1; boundary < wordEnd; boundary++) {
+      let surfaceLimit = defaultActionSurfaceLength;
+      const custom = options?.instructionActionMap;
+      if (custom) for (const key of Object.keys(custom)) {
+        const input = custom[key];
+        for (const alias of [key, input.code ?? "", ...(input.aliases ?? []),
+          ...flattenLocaleAliases(input.localeAliases)])
+          surfaceLimit = Math.max(surfaceLimit, normalizeActionSurface(alias).length);
+      }
+      // A suffix cannot introduce a longer lexical action than the declared
+      // vocabulary. Bound prefix lookups even for arbitrarily long source text.
+      const wordEnd = Math.min((end < 0 ? surface.length : end) - 1, surfaceLimit);
+      for (let boundary = 1; boundary <= wordEnd; boundary++) {
         const prefix = surface.slice(0, boundary);
         const head = resolveMedicationInstructionAction(prefix, options);
         if (head && shouldJoinAdjacentSourceTokens(prefix, surface.slice(boundary))) authored = head;

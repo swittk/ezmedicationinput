@@ -16,7 +16,7 @@ import {
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
-  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, getTimingClocks,
   toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
   buildInfusionCarrierMaterialStructureDefinition
 } from "../src/fhir";
@@ -295,7 +295,8 @@ describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
     const parsed = parseSig(text);
     const repeat = parsed.fhir[0].timing?.repeat;
     expect(repeat?.when).toEqual(["ACM"]);
-    expect(repeat?.timeOfDay).toEqual(["08:00:00"]);
+    expect(getTimingClocks(repeat)).toEqual(["08:00:00"]);
+    expect(repeat?.timeOfDay).toBeUndefined();
     expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
     expect(parsed.warnings).toEqual([]);
     expect(nextDueDoses(parsed.fhir, timingFamilyOptions).length).toBeGreaterThan(0);
@@ -2749,6 +2750,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   it("matches the pinned HL7 element hierarchy and emitted R6 wire fieldsets", () => {
     const profiles = r6SnapshotContract.profiles;
     expect(r6SnapshotContract.target).toBe("FHIR R6 6.0.0-snapshot1");
+    expect(profiles.Timing.constraints).toContainEqual({ path: "Timing.repeat", key: "tim-10",
+      severity: "error", expression: "timeOfDay.empty() or when.empty()" });
     const field = (name: keyof typeof profiles, path: string) =>
       profiles[name].elements.find(entry => entry.path === path);
     expect(field("DosageInstruction", "DosageInstruction.step.component")).toMatchObject({
@@ -5500,6 +5503,12 @@ describe("adversarial DST calendar-cycle and clockless active-window oracles", (
         expect(first).toHaveLength(frequency);
         expect(due[first.length]).toBe("2026-11-23T00:00:00-05:00");
         expect(new Set(first).size).toBe(frequency);
+        if (frequency === 7) expect(first).toEqual([
+          "2026-10-26T00:00:00-04:00", "2026-10-29T00:00:00-04:00",
+          "2026-11-01T00:00:00-04:00", "2026-11-04T00:00:00-05:00",
+          "2026-11-07T00:00:00-05:00", "2026-11-10T00:00:00-05:00",
+          "2026-11-13T00:00:00-05:00",
+        ]);
         for (const date of first) {
           expect(Number.isFinite(Date.parse(date))).toBe(true);
           const hour = date.slice(11, 13);
