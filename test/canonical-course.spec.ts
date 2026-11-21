@@ -25,6 +25,7 @@ import {
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
+  projectCourseDurationRange, getAnchoredCourseDuration,
 } from "../src/fhir";
 import { cloneStructuredValue } from "../src/stable-structure";
 import { dosageMatchesSavedProjection, withDosageEditProvenance } from "../src/dosage-course";
@@ -1357,4 +1358,53 @@ describe("round 28 live source concept lists", () => {
       expect(row.text).toBe(source);
     });
   }
+});
+
+describe("round30 current cadence and duration metadata", () => {
+  it.each([
+    [2, undefined, "wk", "2x/1wk"],
+    [1, 2, "wk", "1-2x/1wk"],
+    [2, undefined, "mo", "2x/1mo"]
+  ])("shows current frequency %s-%s per %s in short form", (frequency, frequencyMax, unit, expected) => {
+    const input = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: unit === "wk" ? "WK" : "MO" }] },
+        repeat: { frequency: frequency as number, frequencyMax: frequencyMax as number | undefined,
+          period: 1, periodUnit: unit as FhirPeriodUnit } }
+    }] }] };
+    const before = JSON.stringify(input);
+    expect(formatSig(input, "short", { locale: "en" }).toLowerCase()).toContain(expected as string);
+    expect(JSON.stringify(input)).toBe(before);
+    input.step[0].component[0].timing.repeat.frequency = 1;
+    input.step[0].component[0].timing.repeat.frequencyMax = undefined;
+    expect(formatSig(input, "short", { locale: "en" })).toContain(unit === "wk" ? "WK" : "MO");
+  });
+
+  it.each([
+    [2, 3, FhirPeriodUnit.Day, "2-3x/1-2d"],
+    [2, undefined, FhirPeriodUnit.Month, "2x/1-2mo"]
+  ] as const)("keeps frequency and period ranges together in short form", (frequency, frequencyMax, periodUnit, expected) => {
+    const input = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency, frequencyMax, period: 1, periodMax: 2, periodUnit } } };
+    expect(formatSig(input, "short", { locale: "en" }).toLowerCase()).toContain(expected);
+  });
+
+  it("keeps deletion of a projected duration annotation while retaining unprojected source-unit metadata", () => {
+    const source = {
+      low: { value: 48, unit: "hours", code: "h", system: "http://unitsofmeasure.org",
+        _value: { id: "number" }, _unit: { id: "authored-hour" }, _code: { id: "hour-code" } },
+      high: { value: 3, unit: "days", code: "d", system: "http://unitsofmeasure.org" }
+    };
+    const sourceBefore = JSON.stringify(source);
+    const projected = projectCourseDurationRange(source);
+    delete projected.range.low!._value;
+    const input = { modifierExtension: [projected.source!], timing: { repeat: { boundsRange: projected.range } } };
+    const before = JSON.stringify(input);
+    const restored = getAnchoredCourseDuration(input)!.valueRange!.low!;
+    expect(restored).toMatchObject({ value: 48, unit: "hours", code: "h",
+      _unit: { id: "authored-hour" }, _code: { id: "hour-code" } });
+    expect(restored._value).toBeUndefined();
+    expect(JSON.stringify(input)).toBe(before);
+    expect(JSON.stringify(source)).toBe(sourceBefore);
+  });
 });

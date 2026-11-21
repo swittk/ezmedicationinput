@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
-import { encodeR6SourceMetadata, decodeR6SourceMetadata, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
+import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
@@ -108,17 +108,39 @@ interface LiftedSafety {
   course?: FhirR6DosageSafety;
   step: FhirR6DosageSafety;
   projected: FhirR6DosageSafety;
+  ownerId?: string;
+  ownerFingerprint?: string;
+  /** Resolved current wire owner; never part of the serialized source record. */
+  owner?: FhirR6DosageStep;
+}
+
+function stepOwnerFingerprint(step: FhirR6DosageStep): string {
+  if (!step.safety) return compactProjectionFingerprint(step);
+  const { safety: _policy, ...projected } = step;
+  return compactProjectionFingerprint(projected);
 }
 
 /** Only a matching live policy can reuse its saved scope. A later wire edit
  * replaces that authority rather than reviving an old safety instruction. */
 export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): LiftedSafety | undefined {
-  if (input.step?.length !== 1) return undefined;
+  if (!input.step?.length) return undefined;
   const marker = input.extension?.find(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL);
   if (!marker) return undefined;
   try {
     const saved = decodeR6SourceMetadata(marker, "safety") as unknown as LiftedSafety | undefined;
-    return saved?.step && equalStructuredValues(input.safety, saved.projected) ? saved : undefined;
+    if (!saved?.step || !equalStructuredValues(input.safety, saved.projected)) return undefined;
+    let owner: FhirR6DosageStep | undefined;
+    if (saved.ownerId === undefined && saved.ownerFingerprint === undefined) {
+      // Unidentified source records retain their existing single-step meaning.
+      if (input.step.length === 1) owner = input.step[0];
+    } else for (const candidate of input.step) {
+      const matches = saved.ownerId !== undefined ? candidate.id === saved.ownerId
+        : stepOwnerFingerprint(candidate) === saved.ownerFingerprint;
+      if (!matches) continue;
+      if (owner) return undefined;
+      owner = candidate;
+    }
+    return owner ? { ...saved, owner } : undefined;
   } catch { return undefined; }
 }
 
@@ -271,7 +293,8 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
     // Distinct source IDs/annotations stay in the source record below. The
     // active policy includes every known limit and both authored actions.
   }
-  replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, { course, step: policy, projected });
+  replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, { course, step: policy, projected,
+    ownerId: step!.id, ownerFingerprint: step!.id === undefined ? stepOwnerFingerprint(step!) : undefined });
   output.safety = projected;
   delete step!.safety;
 }

@@ -76,7 +76,12 @@ import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units
 import { parseStrengthIntoRatio } from "../utils/strength";
 import { getDoseQuantityUnit } from "../maps";
 import { getDoseUnitSemantics } from "../unit-lexicon";
-import { TIMING_CODE_DAILY_FREQUENCIES } from "../timing-summary";
+import {
+  TIMING_CODE_DAILY_FREQUENCIES,
+  TIMING_CODE_HOURLY_PERIODS,
+  FHIR_GTS_TIMING_SYSTEM as GTS_TIMING_SYSTEM,
+  FHIR_GTS_TIMING_CODES as GTS_TIMING_CODES,
+} from "../timing-summary";
 
 /** A canonical stage array already owns order; only the compatibility array
  * input needs grouping. No retained wire metadata is read by these helpers. */
@@ -437,14 +442,22 @@ function positiveNumber(value: number | undefined): number | undefined {
 function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdministration {
   const timing = dosage.schedule;
   const repeat = timing?.recurrence;
-  if (!timing || !repeat) return dosage;
+  if (!timing) return dosage;
+  if (!repeat) {
+    const daily = standardTimingCodeFrequency(executionTimingCoding(timing));
+    if (daily === undefined) return dosage;
+    return { ...dosage, schedule: { ...timing, recurrence:
+      daily >= 1 ? { frequency: daily, period: 1, periodUnit: DurationUnit.Day } :
+        { frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day } } };
+  }
   // Keep the ordinary path allocation-free. It is also important not to
   // normalize an explicit zero count into "unlimited": range handling only
   // needs an operational copy when a range is actually present.
   if (repeat.countMax === undefined && repeat.frequencyMax === undefined && repeat.periodMax === undefined)
     return dosage;
-  const code = executionTimingCode(timing);
-  const codedDaily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
+  const coding = executionTimingCoding(timing);
+  const codedDaily = standardTimingCodeFrequency(coding);
+  const codedCadence = codedDaily ?? standardTimingCodeFrequency(coding, true);
   const explicitAnchors = Boolean(
     timing.explicitEvents?.length ||
       repeat.clocks?.length ||
@@ -478,9 +491,9 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
     schedule: { ...timing,
       // The original ranged cadence was checked before projection. Its code
       // cannot become an exact claim about a different chosen endpoint.
-      code: codedDaily !== undefined && nextRepeat.frequency !== undefined &&
+      code: codedCadence !== undefined && nextRepeat.frequency !== undefined &&
         nextRepeat.period !== undefined && nextRepeat.periodUnit &&
-        !matchesDailyCodeCadence(codedDaily, nextRepeat) ? undefined : timing.code,
+        !matchesDailyCodeCadence(codedCadence, nextRepeat) ? undefined : timing.code,
       recurrence: nextRepeat },
   };
 }
@@ -940,80 +953,95 @@ function inferDailyFrequencyClocks(frequency: number): string[] {
   }
   return Array.from(clocks).sort();
 }
-/** Known cadence wins over unrelated coding translations. Keep the existing
- * code-keyed, system-optional institution map contract; unfamiliar first codes
- * remain a clock-map fallback only when no known clinical code is present. */
-function executionTimingCode(timing: CanonicalTiming): string | undefined {
-  let fallback: string | undefined;
+type TimingCoding = NonNullable<NonNullable<CanonicalTiming["code"]>["coding"]>[number];
+/** A supplied coding system owns code identity. Systemless abbreviations keep
+ * the established shorthand policy; local codes remain institution-map keys. */
+function isStandardTimingCoding(coding: TimingCoding | undefined): boolean {
+  return !!coding && (!coding.system || coding.system === GTS_TIMING_SYSTEM);
+}
+/** Known cadence wins over unrelated translations without walking the coding
+ * list again to recover the selected identity. */
+function executionTimingCoding(timing: CanonicalTiming): TimingCoding | undefined {
+  let fallback: TimingCoding | undefined;
   for (const coding of timing.code?.coding ?? []) {
     const code = coding.code?.toUpperCase();
     if (!code) continue;
-    if (TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return code;
-    if (fallback === undefined) fallback = code;
+    if (isStandardTimingCoding(coding) && GTS_TIMING_CODES.has(code)) return coding;
+    if (fallback === undefined) fallback = coding;
   }
   return fallback;
 }
+/** Daily codes select institution clocks. Hourly cadence is used only for
+ * consistency checks, never to turn elapsed intervals into daily clocks. */
+function standardTimingCodeFrequency(coding: TimingCoding | undefined, includeIntervals = false): number | undefined {
+  if (!isStandardTimingCoding(coding)) return undefined;
+  const code = coding!.code!.toUpperCase();
+  const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
+  if (daily !== undefined || !includeIntervals) return daily;
+  const hours = TIMING_CODE_HOURLY_PERIODS[code];
+  return hours === undefined ? undefined : 24 / hours;
+}
 /** Resolves fallback clock arrays for frequency-only schedules. */
-function resolveFrequencyClocks(timing: CanonicalTiming, config: NextDueDoseConfig): string[] {
-  const defaults: Required<FrequencyFallbackTimes> = {
-    byCode: {
-      ...DEFAULT_FREQUENCY_DEFAULTS.byCode,
-      ...(config.frequencyDefaults?.byCode ?? {}),
-    },
-    byFrequency: {
-      ...DEFAULT_FREQUENCY_DEFAULTS.byFrequency,
-      ...(config.frequencyDefaults?.byFrequency ?? {}),
-    },
-  };
+function resolveFrequencyClocks(
+  timing: CanonicalTiming, config: NextDueDoseConfig, coding = executionTimingCoding(timing)
+): string[] {
+  const configured = config.frequencyDefaults;
   const collected = new Set<string>();
-  const normalizedCode = executionTimingCode(timing);
+  const normalizedCode = coding?.code?.toUpperCase();
   const repeat = timing.recurrence;
-  const codeFrequency = normalizedCode ? TIMING_CODE_DAILY_FREQUENCIES[normalizedCode] : undefined;
+  const codeFrequency = standardTimingCodeFrequency(coding);
   const liveDailyFrequency =
     repeat?.frequency !== undefined && repeat.period === 1 && repeat.periodUnit === "d"
       ? repeat.frequency
       : undefined;
   const staleDailyCode =
     codeFrequency !== undefined && liveDailyFrequency !== undefined && codeFrequency !== liveDailyFrequency;
-  const codeClocks = !staleDailyCode && normalizedCode ? defaults.byCode?.[normalizedCode] : undefined;
+  const codeClocks = !staleDailyCode && normalizedCode
+    ? configured?.byCode?.[normalizedCode] ??
+      (isStandardTimingCoding(coding) ? DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode] : undefined)
+    : undefined;
   if (codeClocks) {
-    for (const clock of codeClocks) {
-      collected.add(normalizeClock(clock));
-    }
+    for (const clock of codeClocks) collected.add(normalizeClock(clock));
   }
-  // A recognized code represents the SAME schedule, not another set of
-  // administrations. Use the frequency fallback only when the code has no
-  // configured institutional clock mapping.
+  // A code and a frequency describe the same opportunities. A local code can
+  // use institution clocks without acquiring the standard code's cadence.
   if (!codeClocks && repeat?.frequency && repeat.period && repeat.periodUnit) {
     const key = `freq:${repeat.frequency}/${repeat.periodUnit}`;
     const perPeriodKey = `freq:${repeat.frequency}/per:${repeat.period}${repeat.periodUnit}`;
-    const clocks = defaults.byFrequency?.[perPeriodKey] ?? defaults.byFrequency?.[key];
+    const clocks = configured?.byFrequency?.[perPeriodKey] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[perPeriodKey] ??
+      configured?.byFrequency?.[key] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[key];
     if (clocks) for (const clock of clocks) collected.add(normalizeClock(clock));
     if (collected.size === 0 && repeat.period === 1 && repeat.periodUnit === "d") {
-      for (const clock of inferDailyFrequencyClocks(repeat.frequency)) {
-        collected.add(clock);
-      }
+      for (const clock of inferDailyFrequencyClocks(repeat.frequency)) collected.add(clock);
     }
   }
   return Array.from(collected).sort();
 }
+/** QOD's alternate calendar days use institution clocks, while an uncoded
+ * two-day interval retains its elapsed treatment-start origin. */
+function codedCalendarRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
+  const repeat = timing?.recurrence;
+  if (!repeat || repeat.frequency !== 1 || repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day ||
+      repeat.clocks?.length || repeat.anchors?.length) return repeat;
+  const coding = executionTimingCoding(timing!);
+  return standardTimingCodeFrequency(coding) === 0.5
+    ? { ...repeat, clocks: resolveFrequencyClocks(timing!, config, coding) } : repeat;
+}
 function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined {
-  const code = executionTimingCode(timing);
-  const daily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
+  const daily = standardTimingCodeFrequency(executionTimingCoding(timing));
   return daily !== undefined && daily >= 1 ? daily : undefined;
 }
 function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): boolean {
   const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
   return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
 }
-/** A known daily code and an exact complete repeat both describe the same
- * recurrence. Contradictory external facts have no unique executable cadence. */
+/** A known code and an exact complete repeat describe the same recurrence.
+ * Contradictory external facts have no unique executable cadence. */
 function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void {
   const repeat = timing?.recurrence;
   if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
     return;
-  const code = executionTimingCode(timing);
-  const daily = code ? TIMING_CODE_DAILY_FREQUENCIES[code] : undefined;
+  const daily = standardTimingCodeFrequency(executionTimingCoding(timing), true);
   if (daily === undefined ||
       (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
       (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) return;
@@ -1625,10 +1653,11 @@ function applyOccurrenceCap(
 /** Maximum medication quantity per time window is not the same as a
  * frequency cap: divide by the actual per-administration quantity first.
  * Do not silently discard a limit when the dose unit cannot be compared. */
-function isQuantityCapPeriodUnit(unit: string | undefined): boolean {
+function isQuantityCapPeriod(period: number, unit: string | undefined): boolean {
+  if (!Number.isFinite(period) || period <= 0) return false;
   switch (unit) {
-    case "s": case "min": case "h": case "d":
-    case "wk": case "mo": case "a": return true;
+    case "s": case "min": case "h": case "d": case "wk": return true;
+    case "mo": case "a": return Number.isInteger(period);
     default: return false;
   }
 }
@@ -1753,9 +1782,7 @@ function executableQuantityCaps(
       !Number.isFinite(maximum) ||
       maximum < 0 ||
       period === undefined ||
-      !Number.isInteger(period) ||
-      period <= 0 ||
-      !isQuantityCapPeriodUnit(periodUnit)
+      !isQuantityCapPeriod(period, periodUnit)
     ) {
       continue;
     }
@@ -2623,14 +2650,14 @@ interface UncommittedCycleEvent extends ChronologicalEvent {
   key: string;
   member: CanonicalAdministration;
   quota: CycleEventQuota;
-  /** Actual PRN history, already charged to the quantity ledger. */
+  /** Actual administration history, already charged to the quantity ledger. */
   recorded?: true;
   /** Accepted total amount, including target multiplication, for ranged supply. */
   quantity?: number;
 }
 interface CycleEventQuota {
   remaining: number | undefined;
-  /** Only recorded use inside this PRN phase consumes its finite allowance. */
+  /** Eligible recorded use consumes this phase's finite allowance once. */
   historyStart?: number;
   historyEnd?: number;
   recordedTimes?: number[];
@@ -2720,8 +2747,7 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
       for(const limit of member.limits??[]) {
         if(limit.scope!=="period")continue;
         const period=limit.period?.value,unit=limit.period?.code??limit.period?.unit;
-        if(period===undefined||!Number.isInteger(period)||period<=0||
-            !isQuantityCapPeriodUnit(unit))continue;
+        if(period===undefined||!isQuantityCapPeriod(period,unit))continue;
         const since=quantityCapHistoryFloor(upcoming,
           {max:1,period,periodUnit:unit as DurationUnit},zone);
         if(since<oldest)oldest=since;
@@ -2815,7 +2841,7 @@ function scheduleTreatmentRelativeCourse(
           remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
-        if (collect && original.asNeeded && quota.remaining !== undefined) {
+        if (collect && (original.asNeeded || deferred) && quota.remaining !== undefined) {
           quota.historyStart = member.eligibleFrom.getTime();
           quota.historyEnd = effectiveEnd?.getTime();
         }
@@ -4103,27 +4129,29 @@ function generateWakingHoursIntervalSeries(
       const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
       const sleepDay = overnight ? addLocalDays(currentDay, 1, timeZone) : currentDay;
       const sleep = makeZonedDateFromDay(sleepDay, timeZone, sleepClock);
-      if (!wake || !sleep || sleep <= wake) {
+      if (wake && sleep && sleep <= wake) {
         throw new Error("Cannot execute a waking-hours interval unless configured WAKE precedes HS");
       }
-      let candidate = wake;
-      let intervalIterations = 0;
-      while (
-        (candidate < sleep || (includeEnd && candidate.getTime() === sleep.getTime())) &&
-        intervalIterations < 10000
-      ) {
-        if (
-          candidate >= from &&
-          (!orderedAt || candidate >= orderedAt) &&
-          (!courseEnd || candidate < courseEnd)
+      if (wake && sleep) {
+        let candidate = wake;
+        let intervalIterations = 0;
+        while (
+          (candidate < sleep || (includeEnd && candidate.getTime() === sleep.getTime())) &&
+          intervalIterations < 10000
         ) {
-          results.push(formatZonedIso(candidate, timeZone));
-          if (results.length >= limit) break;
+          if (
+            candidate >= from &&
+            (!orderedAt || candidate >= orderedAt) &&
+            (!courseEnd || candidate < courseEnd)
+          ) {
+            results.push(formatZonedIso(candidate, timeZone));
+            if (results.length >= limit) break;
+          }
+          const next = advance(candidate);
+          if (!next || next <= candidate) break;
+          candidate = next;
+          intervalIterations += 1;
         }
-        const next = advance(candidate);
-        if (!next || next <= candidate) break;
-        candidate = next;
-        intervalIterations += 1;
       }
     }
     currentDay = addLocalDays(currentDay, 1, timeZone);
@@ -4242,7 +4270,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     frequencyDefaults,
   };
   const timing: CanonicalTiming | undefined = dosage.schedule;
-  const repeat: CanonicalRecurrence | undefined = timing?.recurrence;
+  const repeat = codedCalendarRecurrence(timing, config);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
   const boundsStart = boundsPeriod.start;
   if (boundsStart && boundsStart > from) {
@@ -5297,7 +5325,7 @@ function countScheduleEvents(
   derivePriorCount = true
 ): number {
   const timing = dosage.schedule;
-  const repeat = timing?.recurrence;
+  const repeat = codedCalendarRecurrence(timing, config);
   if (!timing || !repeat) return 0;
   const normalizedCount = repeatOccurrenceCap(repeat);
   if (normalizedCount === 0) {
@@ -5565,7 +5593,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   const repeat = dosage.schedule?.recurrence;
   if (!repeat)
     return {
-      dosage,
+      dosage: prepareBestEffortTiming(dosage),
       countMaximum: false,
       frequencyMaximum: false,
       periodMinimum: false,
@@ -5921,6 +5949,8 @@ function sumCourseUnits(
   options: CanonicalSupplyOptions
 ): TotalUnitsResult {
   let commonUnit: string | undefined;
+  let zeroUnit: string | undefined;
+  let hasQuantity = false;
   let totalUnits = 0;
   let approximate: TotalUnitsResult["totalApproximateQuantity"];
   let ingredient: TotalUnitsResult["totalApproximateIngredientQuantity"];
@@ -5930,21 +5960,26 @@ function sumCourseUnits(
   const details: string[] = [];
   for (const { total, unit } of entries) {
     let quantity = total.totalUnits;
-    if (commonUnit !== undefined && unit !== undefined && commonUnit.toLowerCase() !== unit.toLowerCase()) {
-      const translated = convertValue(
-        quantity,
-        unit,
-        commonUnit,
-        measuredStrengthRatio(options.context)
-      );
-      if (translated === null)
-        throw new MedicationQuantityCalculationError(
-          "incompatible-dose-units",
-          `Cannot sum medication supply expressed in ${commonUnit} and ${unit}. Provide a product strength or equivalent conversion before combining the dosages.`
+    if (quantity === 0) {
+      zeroUnit ??= unit;
+    } else {
+      hasQuantity = true;
+      if (commonUnit !== undefined && unit !== undefined && commonUnit.toLowerCase() !== unit.toLowerCase()) {
+        const translated = convertValue(
+          quantity,
+          unit,
+          commonUnit,
+          measuredStrengthRatio(options.context)
         );
-      quantity = translated;
-    } else if (commonUnit === undefined) {
-      commonUnit = unit;
+        if (translated === null)
+          throw new MedicationQuantityCalculationError(
+            "incompatible-dose-units",
+            `Cannot sum medication supply expressed in ${commonUnit} and ${unit}. Provide a product strength or equivalent conversion before combining the dosages.`
+          );
+        quantity = translated;
+      } else if (commonUnit === undefined) {
+        commonUnit = unit;
+      }
     }
     totalUnits = roundCalculatedUnits(totalUnits + quantity);
     if (total.quantityKind === "maximum") maximum = true;
@@ -5986,6 +6021,7 @@ function sumCourseUnits(
       mixedIngredient = true;
     }
   }
+  if (!hasQuantity) commonUnit = zeroUnit;
   // Round only the combined supply, never each treatment stage separately.
   const scheduledUnits = totalUnits;
   if (options.roundToMultiple && options.roundToMultiple > 0)
@@ -6962,7 +6998,8 @@ function calculateCourseTotalUnits(
     if (!window.end && index + 1 < course.stages.length) assumedOpenTransition = true;
     for (let memberIndex=0;memberIndex<window.administrations.length;memberIndex++) {
       const member = window.administrations[memberIndex];
-      const dosage = member.administration;
+      const dosage = member.administration.schedule?.recurrence
+        ? member.administration : prepareBestEffortTiming(member.administration);
       const prnFrom = dosage.asNeeded ? (options as PhaseCountOptions).prnOpportunityFrom : undefined;
       const begin = prnFrom && prnFrom > member.eligibleFrom ? prnFrom : member.eligibleFrom;
       if (capacityOnly && !unscheduledOccurrenceCapacity(dosage)) continue;

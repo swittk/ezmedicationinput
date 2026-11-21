@@ -1170,13 +1170,15 @@ function formatShort(clause: CanonicalSigClause): string {
     schedule.frequency !== undefined &&
     schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1)
+    (!schedule.period || schedule.period === 1) &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}-${stripTrailingZero(schedule.frequencyMax)}x/d`);
   } else if (
     schedule.frequency &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
-    (!schedule.period || schedule.period === 1)
+    (!schedule.period || schedule.period === 1) &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
   } else if (schedule.period && schedule.periodUnit &&
@@ -1187,7 +1189,15 @@ function formatShort(clause: CanonicalSigClause): string {
       schedule.periodMax && schedule.periodMax !== schedule.period
         ? `${base}-${stripTrailingZero(schedule.periodMax)}`
         : base;
-    parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
+    const frequency = schedule.frequency;
+    const maximum = schedule.frequencyMax;
+    if (frequency !== undefined && frequency !== 1 || maximum !== undefined && maximum !== frequency) {
+      const count = maximum !== undefined && maximum !== frequency
+        ? frequency === undefined ? `<=${stripTrailingZero(maximum)}`
+          : `${stripTrailingZero(frequency)}-${stripTrailingZero(maximum)}`
+        : stripTrailingZero(frequency!);
+      parts.push(`${count}x/${qualifier}${schedule.periodUnit}`);
+    } else parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
   if (schedule.when?.length) {
     parts.push(schedule.when.join(" "));
@@ -1306,6 +1316,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
+  let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -1321,7 +1332,8 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
       timeStrings.push(`${displayHours}:${displayMinutes}${isAm ? " am" : " pm"}`);
     }
     if (timeStrings.length) {
-      eventParts.push(`at ${timeStrings.join(", ")}`);
+      clockPart = `at ${timeStrings.join(", ")}`;
+      eventParts.push(clockPart);
     }
   }
   const timing = combineFrequencyAndEvents(schedule, frequencyPart, eventParts, options);
@@ -1438,6 +1450,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     if (routePart) graphRegimenTail.push(routePart);
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
+    else if (clockPart) graphRegimenTail.push(clockPart);
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);

@@ -2185,6 +2185,7 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
+  let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -2199,7 +2200,8 @@ function formatLongThai(
       timeStrings.push(`${displayHours}:${displayMinutes}`);
     }
     if (timeStrings.length) {
-      eventParts.push(`เวลา ${timeStrings.join(", ")}`);
+      clockPart = `เวลา ${timeStrings.join(", ")}`;
+      eventParts.push(clockPart);
     }
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
@@ -2330,6 +2332,7 @@ function formatLongThai(
     if (richRoutePart) graphRegimenTail.push(richRoutePart);
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
+    else if (clockPart) graphRegimenTail.push(clockPart);
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);

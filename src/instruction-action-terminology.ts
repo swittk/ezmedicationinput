@@ -1,5 +1,6 @@
 import source from "./instruction-action-terminology.json";
 import { localizedConfig } from "./localization";
+import { shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import { SNOMED_SYSTEM } from "./snomed";
 import {
   AdviceArgument,
@@ -557,15 +558,40 @@ export function resolveMedicationInstructionActionForMethod(
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   if (!method) return undefined;
-  const authored = method.text ? resolveMedicationInstructionAction(method.text, options) : undefined;
+  let authored = method.text ? resolveMedicationInstructionAction(method.text, options) : undefined;
   const coding = method.coding;
-  // An unfamiliar authored phrase can add useful qualification beyond the
-  // recognized method. Only a known conflicting verb is superseded by code.
-  if (!authored && method.text?.trim() && method.text.trim() !== coding?.code) return undefined;
+  let coded: MedicationInstructionActionDefinition | undefined;
+  let qualified = false;
+  if (!authored && method.text?.trim() && method.text.trim() !== coding?.code) {
+    coded = resolveMedicationInstructionActionByMethod(coding, options);
+    if (!coded) return undefined;
+    // Resolve only a declared lexical head, bounded by the existing vocabulary.
+    // Compatible qualified text remains whole; unfamiliar text stays source.
+    const surface = normalizeActionSurface(method.text);
+    let end = surface.indexOf(" ");
+    // Joined scripts use the registered locale boundary policy and the same
+    // declared aliases. No language literals or second action vocabulary.
+    if (shouldJoinAdjacentSourceTokens(surface, surface)) {
+      const wordEnd = end < 0 ? surface.length : end;
+      for (let boundary = 1; boundary < wordEnd; boundary++) {
+        const prefix = surface.slice(0, boundary);
+        const head = resolveMedicationInstructionAction(prefix, options);
+        if (head && shouldJoinAdjacentSourceTokens(prefix, surface.slice(boundary))) authored = head;
+      }
+    }
+    const limit = medicationInstructionActionSpanLimit(surface.slice(0, end < 0 ? surface.length : end), options);
+    for (let count = 0; count < limit && end >= 0; count++) {
+      const head = resolveMedicationInstructionAction(surface.slice(0, end), options);
+      if (head) authored = head;
+      end = surface.indexOf(" ", end + 1);
+    }
+    if (!authored) return undefined;
+    qualified = true;
+  }
   if (authored && (!coding?.code || sameMethodCoding(authored.administrationMethod, coding) ||
       sameMethodCoding(authored.coding, coding) ||
-      authored.externalCodings?.some(value => sameMethodCoding(value, coding)))) return authored;
-  return resolveMedicationInstructionActionByMethod(coding, options) ?? authored;
+      authored.externalCodings?.some(value => sameMethodCoding(value, coding)))) return qualified ? undefined : authored;
+  return coded ?? resolveMedicationInstructionActionByMethod(coding, options) ?? (qualified ? undefined : authored);
 }
 
 export function getMedicationInstructionAction(

@@ -580,7 +580,9 @@ export interface FhirR6DosageSafety extends FhirBackboneElement {
 /** R6 Reference carries standard Reference.identifier and Element metadata. */
 export interface FhirReference extends FhirElement {
   reference?: string;
+  _reference?: FhirPrimitiveElement;
   type?: string;
+  _type?: FhirPrimitiveElement;
   identifier?: {
     id?: string;
     extension?: FhirExtension[];
@@ -592,6 +594,7 @@ export interface FhirReference extends FhirElement {
     assigner?: { reference?: string; type?: string; display?: string };
   };
   display?: string;
+  _display?: FhirPrimitiveElement;
 }
 
 /** R6 CodeableReference includes its own Element metadata. */

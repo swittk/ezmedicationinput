@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseSig, parseSigAsync, suggestSig, toDosageDetails,
-  MedicationQuantityCalculationError,
+  MedicationQuantityCalculationError, importCanonicalCourse,
   toFhirR5Dosages, fromFhir, getDosageExcludedWeekdays,
   EventTiming, FhirDayOfWeek, FhirPeriodUnit
 } from "../src";
@@ -2207,7 +2207,12 @@ describe("Thai additive and clock-target phase adjustments", () => {
       expect(repeat?.periodUnit ?? "d").toBe("d");
       expect(component.timing?.code?.coding?.map(coding => coding.code) ?? []).not.toContain("BID");
     }
-    for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+    const strictR5 = toFhirR5Dosages(parsed.fhirNext);
+    expect(strictR5.filter(row => row.sequence === 2).map(row =>
+      [row.doseAndRate?.[0]?.doseQuantity?.value, row.timing?.repeat?.timeOfDay])).toEqual([
+      [1, ["08:00:00"]], [0.5, ["20:00:00"]],
+    ]);
+    for (const dosage of [parsed.fhirNext, strictR5]) {
       expect(clocks(dosage, "2026-11-02")).toEqual(["08:00", "20:00"]);
       expect(clocks(dosage, "2026-11-09")).toEqual(["08:00", "20:00"]);
       expect(clocks(dosage, "2026-11-16")).toEqual([]);
@@ -3097,9 +3102,8 @@ describe("November 17 repeated-course caps remain bounded and anchored", () => {
   });
   it("a 60-day course retains exactly 30 administrations without retaining stale historical limits", () => {
     const next = nextDueDoses(course, { ...base, from: orderedAt, limit: 30 });
-    expect(next).toHaveLength(30);
-    expect(next[0]).toBe("2026-11-02T08:00:00+07:00");
-    expect(next[29]).toBe("2026-12-30T08:00:00+07:00");
+    expect(next).toEqual(Array.from({ length: 30 }, (_, index) =>
+      new Date(Date.UTC(2026, 10, 2 + index * 2)).toISOString().slice(0, 10) + "T08:00:00+07:00"));
     const supply = calculateTotalUnits({
       ...base,
       from: orderedAt,
@@ -3338,6 +3342,14 @@ describe("PR14 round 29 execution semantics", () => {
     }] }] };
     const original = JSON.stringify(course);
     for (const dosage of representations(course)) {
+      const native = "kind" in dosage ? dosage : importCanonicalCourse(dosage);
+      expect(native.stages[0].administrations[0].schedule).toMatchObject({
+        code: { coding: [expect.objectContaining({ code: "QOD" })] },
+        recurrence: { period: 1, periodMax: 2 },
+      });
+      if (Array.isArray(dosage)) expect(dosage[0].timing).toMatchObject({
+        code: { coding: [expect.objectContaining({ code: "QOD" })] }, repeat: { period: 1, periodMax: 2 },
+      });
       expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
         "2027-01-01T09:00:00+00:00", "2027-01-02T09:00:00+00:00",
       ]);
@@ -3366,7 +3378,7 @@ describe("PR14 round 29 execution semantics", () => {
     course.step[0].component[0].timing!.repeat!.period = 2;
     for (const dosage of representations(course)) {
       expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
-        "2027-01-01T00:00:00+00:00", "2027-01-03T00:00:00+00:00",
+        "2027-01-01T09:00:00+00:00", "2027-01-03T09:00:00+00:00",
       ]);
       expect(calculateTotalUnits({ dosage, ...supplyOptions }).totalUnits).toBe(2);
     }

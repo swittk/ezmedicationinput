@@ -1,4 +1,4 @@
-import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationCondition } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
@@ -2845,5 +2845,101 @@ describe("round29 action scope and external graph preservation", () => {
       code: coding.code, system: coding.system, userSelected: true,
       _userSelected: { id: "chosen" }, _code: { id: "code-annotation" }
     });
+  });
+});
+
+describe("round30 method and current timing ownership", () => {
+  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const method = (text: string, code: string) => ({
+    text, coding: [{ system: "http://snomed.info/sct", code }]
+  });
+
+  it("replaces a conflicting known method head while retaining compatible and unfamiliar authored phrases", () => {
+    const base = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    for (const [text, code, expected] of [
+      ["Swallow whole", "738992009", "Chew"],
+      ["Swallow whole", "738995006", "Swallow whole"],
+      ["กลืนทั้งเม็ด", "738992009", "Chew"],
+      ["กลืนทั้งเม็ด", "738995006", "กลืนทั้งเม็ด"],
+      ["Swallowing whole", "738992009", "Chew"],
+      ["Swallowtail whole", "738992009", "Swallowtail whole"],
+      ["Unfamiliar authored technique", "738992009", "Unfamiliar authored technique"]
+    ]) {
+      const input = { ...base, method: method(text, code) };
+      const before = JSON.stringify(input);
+      const rendered = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(rendered).toMatch(new RegExp("^" + expected + " 1 tablet"));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  function primaryWithTime(value: string, when?: EventTiming) {
+    const input = copy(parsePublicSig("Swallow 1 tablet with 200 mL water").fhir[0]);
+    const graph = parseInstructionGraphExtension(input.extension)!;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: value, normalized: value });
+    const marker = buildInstructionGraphExtension(graph)!;
+    input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
+    input.timing = { repeat: when ? { when: [when] } : { timeOfDay: [value] } };
+    return input;
+  }
+
+  it("applies a current event when both method and timing change on the selected primary", () => {
+    const input = primaryWithTime("HS", EventTiming["Before Sleep"]);
+    input.method = method("Chew", "738992009");
+    input.timing!.repeat!.when = [EventTiming.Morning];
+    const before = JSON.stringify(input);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).toMatch(/^Chew (?:1|one) tablet with 200 mL water/iu);
+      expect(en).toMatch(/morning/iu);
+      expect(en).not.toMatch(/bedtime|\bHS\b/iu);
+      expect(th).toContain("เคี้ยว");
+      expect(th).toContain("เช้า");
+      expect(th).not.toContain("ก่อนนอน");
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([false, true])("uses the current clock set once with an event also present %s", withEvent => {
+    const input = primaryWithTime("08:00");
+    input.timing!.repeat!.timeOfDay = ["09:00:00", "17:00:00"];
+    if (withEvent) {
+      input.timing!.repeat!.when = [EventTiming.Morning];
+      const graph = parseInstructionGraphExtension(input.extension)!;
+      graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning });
+      const marker = buildInstructionGraphExtension(graph)!;
+      input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
+    }
+    const before = JSON.stringify(input);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).not.toMatch(/08:00|8:00 am/u);
+      expect(en.match(/9:00 am/gu)).toHaveLength(1);
+      expect(en.match(/5:00 pm/gu)).toHaveLength(1);
+      expect(th).not.toContain("08:00");
+      expect(th.match(/09:00/gu)).toHaveLength(1);
+      expect(th.match(/17:00/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("realizes a qualified amount from its typed daughter without losing manner or accompaniment", () => {
+    const frame = parseInstructionActions("Swallow at most 1 tablet whole with 200 mL water")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)).toMatchObject({
+      text: "at most 1 tablet", quantity: { value: 1, unit: "tab", comparator: "<=" }
+    });
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)).toMatchObject({
+      relation: AdviceRelation.With, quantity: { value: 200, unit: "mL" }
+    });
+    const th = realizeInstructionAction(frame, "th");
+    expect(th).toMatch(/^กลืน.*ไม่เกิน 1 เม็ด.*ทั้งเม็ด.*200 มิลลิลิตรน้ำ/u);
+    expect(th).not.toContain("Swallow");
+    expect(realizeInstructionAction(frame, "en")).toBe("Swallow at most 1 tablet whole with 200 mL water");
+    const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: frame.sourceText, actions: [frame]
+    })!])!;
+    expect(realizeInstructionAction(reopened.actions[0], "th")).toBe(th);
   });
 });

@@ -14,6 +14,12 @@ export const TIMING_CODE_DAILY_FREQUENCIES: Readonly<Record<string, number>> = {
   QD: 1, QOD: 0.5, AM: 1, PM: 1, BID: 2, TID: 3, QID: 4
 };
 
+/** Exact standard elapsed intervals, separate from daily clock codes and
+ * language-specific SIG abbreviation recognition. */
+export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
+  Q1H: 1, Q2H: 2, Q3H: 3, Q4H: 4, Q6H: 6, Q8H: 8
+};
+
 export interface TimingSummaryOptions {
   /** Scoped vocabulary in the original parse/format request. Do not build
    * any second registry or retain it on the canonical clinical course. */

@@ -278,8 +278,8 @@ function boundaryEventText(
   }
   const range = boundary.displacementRange;
   if (range) {
-    const lower = range.low && formatCourseTimeQuantity(range.low, words);
-    const upper = range.high && formatCourseTimeQuantity(range.high, words);
+    const lower = range.low?.value === undefined ? undefined : formatCourseTimeQuantity(range.low, words);
+    const upper = range.high?.value === undefined ? undefined : formatCourseTimeQuantity(range.high, words);
     const offset = lower && upper ? lower + " – " + upper
       : lower ? (range.low?.comparator ? "" : ">=") + lower
       : upper ? (range.high?.comparator ? "" : "<=") + upper : undefined;
@@ -915,8 +915,12 @@ export function formatCanonicalCourse(
     if (!rendered.trim()) continue;
     let timing = "";
     if (step.start || step.end || index > 0) {
+      const previous = !step.start && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
+      const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
+        ? treatmentStepOffsetQuantity(previous.end) : undefined;
       if (
         (step.start && startDays === undefined) ||
+        (inheritedStart && startDays === undefined) ||
         (step.end && endDays === undefined) ||
         (startDays !== undefined && endDays !== undefined && endDays <= startDays)
       ) {
@@ -928,10 +932,7 @@ export function formatCanonicalCourse(
           ? { value: 0, unit: "d" }
           : startDays !== undefined
           ? { value: startDays, unit: "d" }
-          : oneOrCourse.stages[index - 1].count === undefined ||
-            oneOrCourse.stages[index - 1].count === 1
-          ? treatmentStepOffsetQuantity(oneOrCourse.stages[index - 1].end)
-          : undefined;
+          : inheritedStart;
         const endQuantity = treatmentStepOffsetQuantity(step.end);
         if (
           (!step.start || startQuantity) &&
@@ -976,11 +977,8 @@ export function formatCanonicalCourse(
       } else if (index > 0) {
         // The next phase is ordered even when its predecessor has no exact
         // end; displaying it without this context would make it immediate.
-        const previous = oneOrCourse.stages[index - 1];
-        const inherited = previous.count === undefined || previous.count === 1
-          ? treatmentStepOffsetQuantity(previous.end) : undefined;
-        timing = inherited
-          ? formatCalendarStepWindow(inherited, undefined, words, previous.end?.anchor)
+        timing = inheritedStart
+          ? formatCalendarStepWindow(inheritedStart, undefined, words, previous?.end?.anchor)
           : words.afterPreviousPhase;
       }
     }

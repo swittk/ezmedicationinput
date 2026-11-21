@@ -90,11 +90,13 @@ export function normalizeClock(clock: string): string {
     minute < 0 ||
     minute > 59 ||
     second < 0 ||
-    second > 59
+    second >= 60
   ) {
     throw new Error(`Invalid clock value: ${clock}`);
   }
-  return `${pad(hour)}:${pad(minute)}:${pad(second)}`;
+  const point = secondPart.indexOf(".");
+  const fraction = point >= 0 ? secondPart.slice(point).replace(/\.?0+$/u, "") : "";
+  return `${pad(hour)}:${pad(minute)}:${pad(Math.floor(second))}${fraction}`;
 }
 
 /** Retrieves (and caches) an Intl formatter for calendar components. */
@@ -316,11 +318,18 @@ export function calendarBoundaryDate(
 /** Convenience wrapper around makeZonedDate for day-level math. */
 export function makeZonedDateFromDay(base: Date, timeZone: string, clock: string): Date | null {
   const { year, month, day } = getTimeParts(base, timeZone);
-  const parts = clock.split(":").map((value) => Number(value));
-  const hour = parts[0] ?? 0;
-  const minute = parts[1] ?? 0;
-  const second = parts[2] ?? 0;
-  return makeZonedDate(timeZone, year, month, day, hour, minute, second);
+  const parts = clock.split(":");
+  const secondText = parts[2] ?? "0";
+  const point = secondText.indexOf(".");
+  const second = Number(point < 0 ? secondText : secondText.slice(0, point));
+  const exact = makeZonedDate(timeZone, year, month, day, Number(parts[0] ?? 0), Number(parts[1] ?? 0), second);
+  if (exact && point >= 0) {
+    // Read digits directly: floating subtraction can turn .123 into .122999.
+    // Truncation keeps .9996 within its authored second and calendar date.
+    const milliseconds = Number((secondText.slice(point + 1, point + 4) + "00").slice(0, 3));
+    if (milliseconds) exact.setTime(exact.getTime() + milliseconds);
+  }
+  return exact;
 }
 
 /** Returns a Date pinned to the start of the local day. */

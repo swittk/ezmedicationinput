@@ -98,6 +98,8 @@ import {
   parseActivityTimingExtensions,
   TIMING_EVENT_CALENDAR_SOURCE_EXTENSION_URL,
   TIMING_FREQUENCY_MIN_EXTENSION_URL,
+  TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
+  parseTimingAdministrationDuration,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   TIMING_OFFSET_MIN_EXTENSION_URL,
   TIMING_OFFSET_MAX_EXTENSION_URL,
@@ -222,6 +224,9 @@ function timingAnnotations(
   | "clockWindow"
   | "eventWindow"
   | "frequency"
+  | "occurrenceDuration"
+  | "occurrenceDurationUnit"
+  | "occurrenceDurationComparator"
 > {
   const out: Pick<
     NonNullable<CanonicalTiming["recurrence"]>,
@@ -235,7 +240,11 @@ function timingAnnotations(
     | "clockWindow"
     | "eventWindow"
     | "frequency"
+    | "occurrenceDuration"
+    | "occurrenceDurationUnit"
+    | "occurrenceDurationComparator"
   > = { offset: r?.offset };
+  let administrationDurationSeen = false;
   let exact: FhirExtension | undefined,
     month: FhirExtension[] | undefined,
     activities: FhirExtension[] | undefined;
@@ -245,6 +254,17 @@ function timingAnnotations(
     event: FhirExtension | undefined;
   for (const e of r?.extension ?? [])
     switch (e.url) {
+      case TIMING_ADMINISTRATION_DURATION_EXTENSION_URL:
+        if (!administrationDurationSeen) {
+          administrationDurationSeen = true;
+          const duration = parseTimingAdministrationDuration(e);
+          if (duration) {
+            out.occurrenceDuration = duration.value;
+            out.occurrenceDurationUnit = duration.unit;
+            out.occurrenceDurationComparator = duration.comparator;
+          }
+        }
+        break;
       case TIMING_FREQUENCY_MIN_EXTENSION_URL:
         if (out.frequency === undefined) out.frequency = e.valueInteger;
         break;
@@ -300,9 +320,10 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       period: r.period,
       periodMax: r.periodMax,
       periodUnit: r.periodUnit,
-      occurrenceDuration: r.duration,
+      occurrenceDuration: r.duration ?? annotations?.occurrenceDuration,
       occurrenceDurationMax: r.durationMax,
-      occurrenceDurationUnit: r.durationUnit,
+      occurrenceDurationUnit: r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
+      occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
       courseLengthRange: rangeFromFhir(r.boundsRange),
       calendarWindow: r.boundsPeriod,
@@ -735,7 +756,21 @@ export function administrationFromR5(
 export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = false): CanonicalCourse {
   const stages: CanonicalStage[] = [];
   const retainedSafety = retainedSingleStepSafety(raw);
-  for (const step of editableCourseSteps(raw)) {
+  const steps = editableCourseSteps(raw);
+  let sourceStepIndex = 0;
+  for (const step of steps) {
+    let safetyOwner = false;
+    if (retainedSafety) {
+      // Draft restoration can insert inactive stages or remove a synthesized
+      // start using a shallow step copy. Match its active source in this same
+      // traversal so the retained policy follows exactly one original owner.
+      const source = raw.step?.[sourceStepIndex];
+      if (step === source || step.component === source?.component) {
+        safetyOwner = source === retainedSafety.owner;
+        sourceStepIndex++;
+      }
+    }
+    const stepSafety = step.safety ?? (safetyOwner ? retainedSafety!.step : undefined);
     const administrations: CanonicalAdministration[] = [];
     for (const component of step.component)
       administrations.push(administrationFromR6(component, sourceContext));
@@ -744,9 +779,8 @@ export function courseFromR6(raw: FhirR6DosageInstructionInput, sourceContext = 
       start: boundaryFromR6(step.start),
       end: boundaryFromR6(step.end),
       count: step.count,
-      safety: safetyFromWire(step.component.length ? retainedSafety?.step ?? step.safety : step.safety, true),
-      provenance: record(step.component.length && retainedSafety
-        ? { ...step, safety: retainedSafety.step } : step),
+      safety: safetyFromWire(stepSafety, true),
+      provenance: record(safetyOwner && !step.safety ? { ...step, safety: stepSafety } : step),
     });
   }
   const course: CanonicalCourse = {
@@ -880,8 +914,8 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     // their typed extensions. Reuse and reconstruction must compare the same
     // positiveInt/unsignedInt-compatible wire values.
     const frequency = r.frequency === 0 ? undefined : r.frequency;
-    // Qualified infusion duration remains in its typed rate denominator;
-    // Timing.duration has no comparator and must not assert false exactness.
+    // A qualified duration stays in its typed timing marker or carrier rate
+    // denominator; Timing.duration must not assert false exactness.
     const occurrenceDuration = r.occurrenceDurationComparator ? undefined : r.occurrenceDuration;
     const occurrenceDurationMax = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationMax;
     const occurrenceDurationUnit = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationUnit;
@@ -1085,7 +1119,7 @@ function administrationToWire(
       ? clauseForAdministration(a)
       : undefined);
   const context = clause ? serializeCanonicalContext(clause, options) : undefined;
-  const scheduleMetadata = clause ? serializeCanonicalSchedule(clause.schedule, options) : undefined;
+  const scheduleMetadata = clause ? serializeCanonicalSchedule(clause.schedule, options, clause.clinicalQuantity) : undefined;
   const output: Record<string, unknown> = clause
     ? Object.assign({}, context)
     : Object.assign({}, a.provenance?.data, a.provenance?.retained);

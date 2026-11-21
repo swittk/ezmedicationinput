@@ -4,7 +4,7 @@ import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
 import {
-  calculateTotalUnits,
+  calculateTotalUnits, importCanonicalCourse,
   getEmaQuantityComparator,
   parseInstructionActions,
   getDosageCondition,
@@ -1941,5 +1941,83 @@ describe("round 28: qualified infusion durations keep their clinical operator", 
       expect(row.timing?.repeat?.duration).toBe(comparator ? undefined : 2);
     }
     expect(parsed.meta.canonical.course?.instruction).toBe(source);
+  });
+});
+
+describe("round30 qualified scalar infusion duration", () => {
+  it.each([
+    ["approximately", "~"], ["at most", "<="], ["at least", ">="]
+  ])("keeps %s duration separate from the one-hour rate denominator", (qualifier, comparator) => {
+    const parsed = parsePublicSig("Infuse at 100 mL/h for " + qualifier + " 2 hours");
+    const quantity = parsed.meta.canonical.clauses[0].clinicalQuantity!;
+    expect(quantity.administrationDuration).toEqual({ value: 2, unit: "h", comparator });
+    expect(quantity.denominators).toEqual([{ value: 1, unit: "h", dimension: "time" }]);
+    const inputs = [parsed.fhir, parsed.fhirNext, toDosageDetails(parsed.fhir), toFhirR5Dosages(parsed.fhirNext)];
+    for (const input of inputs) {
+      const before = JSON.stringify(input);
+      const recurrence = importCanonicalCourse(JSON.parse(before)).stages[0].administrations[0].schedule!.recurrence!;
+      expect(recurrence).toMatchObject({
+        occurrenceDuration: 2, occurrenceDurationUnit: "h", occurrenceDurationComparator: comparator
+      });
+      expect(recurrence.courseLength).toBeUndefined();
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].doseAndRate![0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+    expect(getQuantityComparator(parsed.fhir[0].doseAndRate![0].rateQuantity!)).toBeUndefined();
+  });
+});
+
+describe("round30 carrier duration keeps one wire owner", () => {
+  it.each([
+    "Infuse 500 mL over approximately 2 hours",
+    "Infuse 1 g in 500 mL saline over approximately 2 hours"
+  ])("keeps the carrier denominator authoritative after editing %s", source => {
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      const row = JSON.parse(JSON.stringify(input[0]));
+      expect(row.timing?.repeat?.extension?.some((extension: { url: string }) =>
+        extension.url === "urn:ezmedicationinput:StructureDefinition:timing-administration-duration")).not.toBe(true);
+      row.doseAndRate[0].rateRatio.denominator.value = 3;
+      const recurrence = importCanonicalCourse([row]).stages[0].administrations[0].schedule!.recurrence!;
+      expect(recurrence).toMatchObject({
+        occurrenceDuration: 3, occurrenceDurationUnit: "h", occurrenceDurationComparator: "~"
+      });
+      expect(canonicalFromFhir(row).schedule).toMatchObject({
+        administrationDuration: 3, administrationDurationUnit: "h", administrationDurationComparator: "~"
+      });
+    }
+  });
+});
+
+describe("round30 qualified duration unit ownership", () => {
+  it("uses the qualified Quantity unit until a live exact duration supplies the duration owner", () => {
+    const parsed = parsePublicSig("Infuse at 100 mL/h for approximately 2 hours");
+    const row = JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const repeat = row.timing!.repeat!;
+    const quantity = repeat.extension!.find(item =>
+      item.url === "urn:ezmedicationinput:StructureDefinition:timing-administration-duration")!.valueQuantity!;
+    repeat.durationUnit = FhirPeriodUnit.Hour;
+    quantity.value = 3;
+    quantity.code = "min";
+    quantity.unit = "minutes";
+    const before = JSON.stringify(row);
+    for (const input of [[row], toDosageDetails([row])]) {
+      const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!;
+      expect(recurrence).toMatchObject({
+        occurrenceDuration: 3, occurrenceDurationUnit: "min", occurrenceDurationComparator: "~"
+      });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("approximately 3 minutes");
+    }
+    expect(canonicalFromFhir(row).schedule).toMatchObject({
+      administrationDuration: 3, administrationDurationUnit: "min", administrationDurationComparator: "~"
+    });
+    expect(parserStateFromFhir(row).primaryClause.schedule).toMatchObject({
+      administrationDuration: 3, administrationDurationUnit: "min", administrationDurationComparator: "~"
+    });
+    expect(JSON.stringify(row)).toBe(before);
+    repeat.duration = 4;
+    expect(importCanonicalCourse([row]).stages[0].administrations[0].schedule!.recurrence)
+      .toMatchObject({ occurrenceDuration: 4, occurrenceDurationUnit: "h", occurrenceDurationComparator: undefined });
   });
 });

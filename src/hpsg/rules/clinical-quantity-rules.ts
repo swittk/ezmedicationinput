@@ -197,7 +197,7 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
 function durationAfter(
   context: HpsgClauseContext,
   start: number
-): { value: number; unit: FhirPeriodUnit.Hour | FhirPeriodUnit.Minute; indices: number[] } | undefined {
+): { value: number; unit: FhirPeriodUnit.Hour | FhirPeriodUnit.Minute; comparator?: NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]>["comparator"]; indices: number[] } | undefined {
   const limit = Math.min(context.limit, start + 8);
   for (let index = start; index + 2 < limit; index += 1) {
     if (!available(context, index)) break;
@@ -212,12 +212,10 @@ function durationAfter(
               /^(?:iv|intravenously)$/u.test(normalizeTokenLower(next))))) continue;
       break;
     }
-    const valueToken = context.tokens[index + 1];
-    const unitToken = context.tokens[index + 2];
-    const unit = unitToken ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
-    const value = clinicalDurationNumber(valueToken);
-    if (value === undefined || !unit) continue;
-    return { value, unit, indices: [index, index + 1, index + 2] };
+    const duration = infusionDurationAt(context, index + 1);
+    if (!duration) continue;
+    return { value: duration.value, unit: duration.unit, comparator: duration.comparator,
+      indices: Array.from({ length: duration.end - index }, (_, offset) => index + offset) };
   }
   return undefined;
 }
@@ -483,7 +481,8 @@ function weightQuantity(
         bodyMass,
         { value: periodValue, unit: rateTime, dimension: "time" }
       ],
-      administrationDuration: duration ? { value: duration.value, unit: duration.unit } : undefined,
+      administrationDuration: duration ? { value: duration.value, unit: duration.unit,
+        ...(duration.comparator ? { comparator: duration.comparator } : {}) } : undefined,
       requiresPatientWeight: true
     }, undefined, undefined, WEIGHT_RATE_WARNING);
   }
@@ -554,7 +553,8 @@ function fixedRate(
     status: "resolved",
     numerator,
     denominators: [{ value: 1, unit: denominatorUnit, dimension: "time" }],
-    administrationDuration: duration ? { value: duration.value, unit: duration.unit } : undefined
+    administrationDuration: duration ? { value: duration.value, unit: duration.unit,
+        ...(duration.comparator ? { comparator: duration.comparator } : {}) } : undefined
   });
 }
 

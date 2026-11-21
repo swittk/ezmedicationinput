@@ -476,7 +476,7 @@ function restoreComponentDelta(
     }
   }
   if (Object.keys(retained).length)
-    fresh.provenance = { format: "r5", data: row as Record<string, unknown>, retained };
+    fresh.provenance!.retained = retained;
   return { dosage: fresh, superseded };
 }
 
@@ -655,13 +655,19 @@ function reconcileNativeCompactCourse(
   // subset once; never let the presence of an unrelated compact row erase a
   // reference-only site or other known row fact from its full source marker.
   let historicalMembers: Map<number, CanonicalAdministration> | undefined;
+  let historicalStages: Map<number, CanonicalStage> | undefined;
   if (historicalRows) {
     const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext);
     const cursors = new Map<number, number>();
     const membersBySequence = new Map<number, readonly CanonicalAdministration[]>();
+    historicalStages = new Map();
     for (const stage of restored.stages) {
       const first = stage.administrations[0];
-      if (first) membersBySequence.set(first.stageOrdinal ?? 1, stage.administrations);
+      if (first) {
+        const sequence = first.stageOrdinal ?? 1;
+        membersBySequence.set(sequence, stage.administrations);
+        historicalStages.set(sequence, stage);
+      }
     }
     historicalMembers = new Map();
     for (let index = 0; index < historicalRows.length; index++) {
@@ -918,10 +924,14 @@ function reconcileNativeCompactCourse(
     );
   }
   const steps: CanonicalStage[] = [];
-  for (const sequence of [...sequences].sort((a, b) => a - b))
-    steps.push(
-      stageFromFields(r6StepMetadata(metadata.get(sequence)?.step ?? {}), groups.get(sequence) ?? [])
-    );
+  for (const sequence of [...sequences].sort((a, b) => a - b)) {
+    const fields = metadata.get(sequence), historical = historicalStages?.get(sequence);
+    const administrations = groups.get(sequence) ?? [];
+    // A compact/explicit live stage owns its metadata. Without one, keep the
+    // already-decoded historical stage facts with their own current members.
+    steps.push(!fields && historical ? { ...historical, administrations }
+      : stageFromFields(r6StepMetadata(fields?.step ?? {}), administrations));
+  }
   // A removed predecessor is harmless when the surviving phase has its own
   // treatment-relative start. A contextual stage/member start still needs
   // that predecessor's completion; an explicit shared start cannot supply it.

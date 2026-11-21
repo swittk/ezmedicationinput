@@ -703,8 +703,8 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
       ]);
       expect(calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
     } else {
-      // An incomplete repeat is not contradictory; this change does not invent
-      // previously unsupported execution semantics for a code-only instruction.
+      // Missing cadence fields do not create a contradiction. Bare daily
+      // codes are executable; an authored incomplete repeat remains intact.
       expect(() => nextDueDoses(row, { ...options, limit: 2 })).not.toThrow(/timing code.*repeat/i);
       expect(() => calculateTotalUnits({ ...options, dosage: row, durationValue: 2, durationUnit: Unit.Day }))
         .not.toThrow(/timing code.*repeat/i);
@@ -1109,20 +1109,21 @@ describe("round 26 independent track execution", () => {
       // Jan29–31: OD4 + OS4 daily; Feb1–2: OD4 + OS2 daily.
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 5, durationUnit: Unit.Day }))
         .toMatchObject({ totalUnits: 36, unit: "drop" });
+      const native = input === parsed ? parsed.meta.canonical.course! : importCanonicalCourse(input);
+      const members = native.stages.flatMap(stage => stage.administrations);
+      const right = members.find(a => a.target?.text === "right eye" && a.schedule?.recurrence?.frequency === 4)!;
+      const left = members.find(a => a.target?.text === "left eye" && a.schedule?.recurrence?.frequency === 2)!;
+      expect(right).toBeDefined(); expect(left).toBeDefined();
+      expect(nextDueDoses(right, { ...options, limit: 4 })).toEqual([
+        "2026-01-29T08:00:00+00:00", "2026-01-29T12:00:00+00:00",
+        "2026-01-29T16:00:00+00:00", "2026-01-29T20:00:00+00:00",
+      ]);
+      expect(nextDueDoses(left, { ...options, limit: 2 })).toEqual([
+        "2026-02-01T08:00:00+00:00", "2026-02-01T20:00:00+00:00",
+      ]);
+      expect(supply(right, 5, query).totalUnits).toBe(20);
+      expect(supply(left, 5, query).totalUnits).toBe(4);
     }
-    const members = parsed.meta.canonical.course!.stages.flatMap(stage => stage.administrations);
-    const right = members.find(a => a.target?.text === "right eye" && a.schedule?.recurrence?.frequency === 4)!;
-    const left = members.find(a => a.target?.text === "left eye" && a.schedule?.recurrence?.frequency === 2)!;
-    expect(right).toBeDefined(); expect(left).toBeDefined();
-    expect(nextDueDoses(right, { ...options, limit: 4 })).toEqual([
-      "2026-01-29T08:00:00+00:00", "2026-01-29T12:00:00+00:00",
-      "2026-01-29T16:00:00+00:00", "2026-01-29T20:00:00+00:00",
-    ]);
-    expect(nextDueDoses(left, { ...options, limit: 2 })).toEqual([
-      "2026-02-01T08:00:00+00:00", "2026-02-01T20:00:00+00:00",
-    ]);
-    expect(supply(right, 5, query).totalUnits).toBe(20);
-    expect(supply(left, 5, query).totalUnits).toBe(4);
   });
 
   it.each([false, true])("keeps an unresolved member boundary distinct from a malformed numeric origin (calendar bound %s)", calendar => {
@@ -1807,5 +1808,211 @@ describe("round28 execution ownership", () => {
     const exact = supply(member, 1);
     expect(exact).toMatchObject({ totalUnits: 100, unit: "mL" });
     expect(exact.quantityKind).not.toBe("maximum");
+  });
+});
+
+describe("round 30 execution clinical oracles", () => {
+  const versions = ["native", "R6", "persisted R5"] as const;
+  const wire = (value: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? value : version === "R6" ? courseToR6(value) :
+      JSON.parse(JSON.stringify(courseToR5(value))) as FhirDosage[];
+  const course = (member: CanonicalAdministration): CanonicalCourse =>
+    ({ kind: "course", stages: [{ administrations: [member] }] });
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  const coded = (code: string, system: string | undefined = gts) => {
+    const member = dose();
+    member.schedule = { code: { coding: [{ code, ...(system ? { system } : {}) }] } };
+    return member;
+  };
+
+  it.each(versions)("applies equivalent fractional rolling caps and retains cross-cycle history (%s)", version => {
+    for (const period of [{ value: 0.5, unit: "d" }, { value: 12, unit: "h" },
+      { value: 0.5, unit: "wk" }, { value: 3.5, unit: "d" }]) {
+      const member = dose();
+      member.schedule!.recurrence!.clocks = ["08:00:00", "16:00:00"];
+      member.schedule!.recurrence!.frequency = 2;
+      member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period }];
+      const input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(["2026-01-01T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(input)).toBe(original);
+    }
+    const member = dose(); member.schedule!.recurrence = { frequency: 1, period: 8, periodUnit: Unit.Hour };
+    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 0.5, unit: "d" } }];
+    const repeated = course(member); repeated.stages[0].end = relative(8, "h");
+    repeated.cycleInterval = { value: 8, unit: "h" }; repeated.cycleCount = 5;
+    const query = { from: "2026-01-01T08:00:00Z", orderedAt: "2026-01-01T08:00:00Z", timeZone: "UTC" };
+    const input = wire(repeated, version);
+    expect(nextDueDoses(input, { ...query, limit: 10 })).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T00:00:00+00:00", "2026-01-02T16:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 40, durationUnit: Unit.Hour }).totalUnits).toBe(3);
+  });
+
+  it.each(versions)("completes capped non-PRN loading from the actual off-clock record (%s)", version => {
+    const loading = dose(); loading.schedule!.recurrence = { count: 1, frequency: 1, period: 12, periodUnit: Unit.Hour };
+    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 12, unit: "h" } }];
+    const maintenance = dose(2); maintenance.schedule!.recurrence = {
+      frequency: 1, period: 12, periodUnit: Unit.Hour, courseLength: { value: 1, unit: "d" },
+    };
+    const value: CanonicalCourse = { kind: "course", cycleInterval: { value: 3, unit: "d" }, cycleCount: 1,
+      stages: [{ administrations: [loading] }, { administrations: [maintenance] }] };
+    const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T10:00:00Z", timeZone: "UTC" };
+    const input = wire(value, version), original = JSON.stringify(input);
+    const actual = { ...query, priorDoseTimes: ["2026-01-01T09:00:00Z"] };
+    expect(nextDueDoses(input, { ...actual, limit: 2 })).toEqual([
+      "2026-01-01T21:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...actual, dosage: input, durationValue: 10.5, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...actual, dosage: input, durationValue: 12, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    expect(nextDueDoses(input, { ...query, priorDoseTimes: ["2026-01-01T08:00:00Z"], limit: 1 }))
+      .toEqual(["2026-01-01T20:00:00+00:00"]);
+    expect(nextDueDoses(input, { ...query, priorDoseTimes: ["2025-12-31T19:00:00Z"], limit: 1 }))
+      .toEqual(["2026-01-01T20:00:00+00:00"]);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("skips only the waking window whose exact clock is in a DST gap (%s)", version => {
+    const member = dose(); member.schedule!.recurrence = {
+      frequency: 1, period: 4, periodUnit: Unit.Hour, anchors: [EventTiming.Wake],
+    };
+    const input = wire(course(member), version), original = JSON.stringify(input);
+    const query = { from: "2026-03-07T00:00:00-05:00", orderedAt: "2026-03-07T00:00:00-05:00",
+      timeZone: "America/New_York", eventClock: { WAKE: "02:30", HS: "14:00" } };
+    expect(nextDueDoses(input, { ...query, limit: 6 })).toEqual([
+      "2026-03-07T02:30:00-05:00", "2026-03-07T06:30:00-05:00", "2026-03-07T10:30:00-05:00",
+      "2026-03-09T02:30:00-04:00", "2026-03-09T06:30:00-04:00", "2026-03-09T10:30:00-04:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(() => nextDueDoses(input, { ...query, limit: 1, eventClock: { WAKE: "14:00", HS: "14:00" } }))
+      .toThrow(/WAKE precedes HS/);
+    expect(() => nextDueDoses(input, { ...query, limit: 1, eventClock: { WAKE: "14:00:00.5000", HS: "14:00:00.5" } }))
+      .toThrow(/WAKE precedes HS/);
+    expect(JSON.stringify(input)).toBe(original);
+  });
+
+  it.each(versions)("uses configured QOD clocks for alternate-day due, history and supply (%s)", version => {
+    const member = coded("QOD"); member.schedule!.recurrence = { frequency: 1, period: 2, periodUnit: Unit.Day, count: 2 };
+    const value = course(member), query = { ...options, frequencyDefaults: { byCode: { QOD: ["09:00"] } } };
+    const input = wire(value, version), original = JSON.stringify(input);
+    expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(nextDueDoses(input, { ...query, from: "2026-01-01T08:00:00Z", limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(JSON.stringify(input)).toBe(original);
+    expect(nextDueDoses(input, { ...options, limit: 1, frequencyDefaults: { byCode: { QOD: ["07:00"] } } }))
+      .toEqual(["2026-01-01T07:00:00+00:00"]);
+    member.schedule!.recurrence!.clocks = ["10:00:00"];
+    expect(nextDueDoses(wire(value, version), { ...query, limit: 1 })).toEqual(["2026-01-01T10:00:00+00:00"]);
+    member.schedule!.recurrence!.clocks = undefined; member.schedule!.code = undefined;
+    expect(nextDueDoses(wire(value, version), { ...query, limit: 2 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-03T00:00:00+00:00",
+    ]);
+  });
+
+  it.each(versions)("executes bare daily Timing codes without changing authored recurrence (%s)", version => {
+    const clocks = { QD: ["09:00"], BID: ["08:00", "20:00"], TID: ["08:00", "14:00", "20:00"],
+      QID: ["08:00", "12:00", "16:00", "20:00"], AM: ["08:00"], PM: ["20:00"], QOD: ["09:00"] };
+    for (const [code, times] of Object.entries(clocks)) {
+      const member = coded(code), input = wire(course(member), version), original = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: times.length })).toEqual(
+        times.map(time => `2026-01-01T${time}:00+00:00`));
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(times.length);
+      expect(JSON.stringify(input)).toBe(original);
+      expect(member.schedule!.recurrence).toBeUndefined();
+    }
+    const bid = wire(course(coded("BID")), version);
+    expect(nextDueDoses(bid, { ...options, limit: 2, frequencyDefaults: { byCode: { BID: ["07:00", "19:00"] } } }))
+      .toEqual(["2026-01-01T07:00:00+00:00", "2026-01-01T19:00:00+00:00"]);
+    expect(nextDueDoses(wire(course(coded("WARD", "https://example.org/timing")), version), { ...options, limit: 1 })).toEqual([]);
+  });
+
+  it.each(versions)("checks hourly GTS cadence while accepting equivalent period units (%s)", version => {
+    const member = coded("Q4H"); member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day };
+    member.schedule!.code!.coding!.unshift({ system: "https://example.org/timing", code: "BID" });
+    const value = course(member), input = wire(value, version), original = JSON.stringify(input);
+    expect(() => nextDueDoses(input, { ...options, limit: 2 })).toThrow(/timing code.*repeat/i);
+    expect(() => calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }))
+      .toThrow(/timing code.*repeat/i);
+    expect(JSON.stringify(input)).toBe(original);
+    for (const [period, periodUnit] of [[4, Unit.Hour], [240, Unit.Minute]] as const) {
+      member.schedule!.recurrence = { frequency: 1, period, periodUnit };
+      const matching = wire(value, version);
+      expect(nextDueDoses(matching, { ...options, limit: 3 })).toEqual([
+        "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: matching, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    }
+    member.schedule!.recurrence = { frequency: 1, period: 2, periodMax: 4, periodUnit: Unit.Hour };
+    const ranged = wire(value, version), rangedSource = JSON.stringify(ranged);
+    expect(nextDueDoses(ranged, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00", "2026-01-01T04:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: ranged, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(12);
+    expect(JSON.stringify(ranged)).toBe(rangedSource);
+  });
+
+  it.each(versions)("keeps local timing codes separate from GTS cadence while honoring institution clocks (%s)", version => {
+    const member = coded("BID", "https://example.org/timing");
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day };
+    const value = course(member), input = wire(value, version), original = JSON.stringify(input);
+    const query = { ...options, frequencyDefaults: { byCode: { BID: ["09:00"] } } };
+    expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(["2026-01-01T09:00:00+00:00"]);
+    expect(JSON.stringify(input)).toBe(original);
+    for (const system of [gts, undefined]) {
+      member.schedule!.code = { coding: [{ code: "BID", ...(system ? { system } : {}) }] };
+      const standard = wire(value, version);
+      expect(() => nextDueDoses(standard, { ...query, limit: 1 })).toThrow(/timing code.*repeat/i);
+    }
+  });
+
+  it.each(versions)("preserves authored clock fractions to millisecond precision (%s)", version => {
+    for (const [clock, expected] of [["08:30:00.500", "08:30:00.500"],
+      ["08:30:00.9996", "08:30:00.999"], ["23:59:59.999999999", "23:59:59.999"],
+      ["08:30:59.123", "08:30:59.123"], ["08:30:00.000000001", "08:30:00"]] as const) {
+      for (const event of [false, true]) {
+        const member = dose(); member.schedule!.recurrence = { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day,
+          ...(event ? { anchors: [EventTiming.Morning] } : { clocks: [clock] }) };
+        const input = wire(course(member), version), original = JSON.stringify(input);
+        const query = { ...options, ...(event ? { eventClock: { MORN: clock } } : {}) };
+        expect(nextDueDoses(input, { ...query, limit: 1 })).toEqual([`2026-01-01T${expected}+00:00`]);
+        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+        expect(JSON.stringify(input)).toBe(original);
+      }
+    }
+  });
+
+  it.each(versions)("keeps a fractional exact clock absent on a DST-gap date (%s)", version => {
+    const member = dose(); member.schedule!.recurrence!.clocks = ["02:30:00.500"];
+    const input = wire(course(member), version);
+    const query = { from: "2026-03-08T00:00:00-05:00", orderedAt: "2026-03-08T00:00:00-05:00", timeZone: "America/New_York" };
+    expect(nextDueDoses(input, { ...query, limit: 1 })).toEqual(["2026-03-09T02:30:00.500-04:00"]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+  });
+
+  it.each(versions)("sums zero inactive quantities without choosing their incompatible unit (%s)", version => {
+    for (const reverse of [false, true]) {
+      const inactive = dose(100); inactive.amounts![0].quantity!.unit = "mg";
+      inactive.schedule!.recurrence!.clocks = ["20:00:00"];
+      const active = dose(5); active.amounts![0].quantity!.unit = "mL";
+      const members = reverse ? [active, inactive] : [inactive, active];
+      const value: CanonicalCourse = { kind: "course", stages: [{ administrations: members }] };
+      const input = wire(value, version);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 12, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 5, unit: "mL" });
+      active.schedule!.recurrence!.clocks = ["20:00:00"];
+      expect(calculateTotalUnits({ ...options, dosage: wire(value, version), durationValue: 12, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: reverse ? "mL" : "mg" });
+      inactive.schedule!.recurrence!.clocks = ["09:00:00"]; active.schedule!.recurrence!.clocks = ["09:00:00"];
+      expect(() => calculateTotalUnits({ ...options, dosage: wire(value, version), durationValue: 12, durationUnit: Unit.Hour }))
+        .toThrow(/Cannot sum medication supply/);
+    }
   });
 });

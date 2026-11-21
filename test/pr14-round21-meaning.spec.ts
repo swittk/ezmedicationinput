@@ -154,9 +154,7 @@ describe("review 21 current structured course preview", () => {
         { doseQuantity: { value: 2, unit: "mg" } }],
     }] }] };
     const text = formatSig(raw, "long", normalized);
-    expect(text).toContain("5 mL/h");
-    expect(text).toContain("10 mL");
-    expect(text).toContain("2 mg");
+    for (const amount of ["5 mL/h", "10 mL", "2 mg"]) expect(text.split(amount)).toHaveLength(2);
     const single = formatSig({ step: [{ component: [tablet] }] }, "long", normalized);
     expect(single.match(/1 tablet/g)).toHaveLength(1);
   });

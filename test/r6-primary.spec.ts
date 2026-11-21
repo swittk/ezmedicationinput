@@ -3415,6 +3415,23 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(calculateTotalUnits({ dosage: input, ...options,
         durationValue: 85, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
     }
+    const earlyClock = JSON.parse(JSON.stringify(course)) as FhirR6DosageInstruction;
+    const repeat = earlyClock.step![0].component[0].timing!.repeat!;
+    repeat.frequency = 2;
+    repeat.timeOfDay = ["03:15:00", "08:00:00"];
+    // 03:15 is before March's gap-adjusted 03:30 origin, but after April's
+    // restored 02:30 origin. Permanent anchor drift would lose April's dose.
+    const expectedEarly = [
+      "2027-02-14T03:15:00-05:00", "2027-02-14T08:00:00-05:00",
+      "2027-03-14T08:00:00-04:00",
+      "2027-04-11T03:15:00-04:00", "2027-04-11T08:00:00-04:00",
+      "2027-05-09T03:15:00-04:00", "2027-05-09T08:00:00-04:00"
+    ];
+    for (const input of [earlyClock, toFhirR5Dosages(earlyClock), fromFhir(earlyClock)]) {
+      expect(nextDueDoses(input, { ...options, limit: expectedEarly.length })).toEqual(expectedEarly);
+      expect(calculateTotalUnits({ dosage: input, ...options,
+        durationValue: 85, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(7);
+    }
   });
 
   it("keeps calendar cycles past midnight DST gaps and distinguishes elapsed q24h", () => {
@@ -6159,11 +6176,25 @@ describe("November 16 current R6 review: canonical duration qualifier ownership"
         valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000052" }
       }] }
     } } } };
-    for (const restored of [canonicalToFhir(canonicalFromFhir(input)), parserStateToFhir(parserStateFromFhir(input))]) {
-      expect(getQuantityComparator(restored.timing?.repeat?.boundsRange?.low)).toBe(">=");
-      expect(getQuantityComparator(restored.timing?.repeat?.boundsRange?.high)).toBe("<=");
-      expect(restored.timing?.repeat?.boundsRange?.low?.value).toBe(3);
-      expect(restored.timing?.repeat?.boundsRange?.high?.value).toBe(7);
+    const anchored: FhirDosage = {
+      timing: { repeat: { boundsPeriod: { start: "2026-11-02" } } },
+      modifierExtension: [{
+        url: "urn:ezmedicationinput:StructureDefinition:medication-anchored-course-duration",
+        valueRange: input.timing!.repeat!.boundsRange
+      }]
+    };
+    for (const source of [input, anchored]) {
+      const before = JSON.stringify(source);
+      for (const restored of [canonicalToFhir(canonicalFromFhir(source)), parserStateToFhir(parserStateFromFhir(source))]) {
+        const range = source === input ? restored.timing?.repeat?.boundsRange
+          : restored.modifierExtension?.find(x => x.url.endsWith("medication-anchored-course-duration"))?.valueRange;
+        expect(getQuantityComparator(range?.low)).toBe(">=");
+        expect(getQuantityComparator(range?.high)).toBe("<=");
+        expect(range?.low?.value).toBe(3);
+        expect(range?.high?.value).toBe(7);
+        if (source === anchored) expect(restored.timing?.repeat?.boundsPeriod?.start).toBe("2026-11-02");
+      }
+      expect(JSON.stringify(source)).toBe(before);
     }
   });
 });

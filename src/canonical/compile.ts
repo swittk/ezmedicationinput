@@ -248,7 +248,7 @@ export function clinicalBoundary(
 }
 function boundaryForOnset(a: CanonicalAdministration): CanonicalBoundary {
   const boundary: CanonicalBoundary = { anchor: a.onsetReference! };
-  if (a.onsetReference === "treatment-day-start" && a.onsetDays !== undefined)
+  if (a.onsetDays !== undefined)
     boundary.displacement = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
   return boundary;
 }
@@ -587,11 +587,11 @@ export function courseFromAdministrations(
     ) {
       // A delay stated in minutes/hours is elapsed time, including full 24h
       // multiples. Calendar-relative onsetDays has its separate path below.
-      const unit = minutes % 60 === 0 ? "h" : "min";
-      start = clinicalBoundary({
-        unit,
-        value: unit === "h" ? minutes / 60 : minutes,
-      });
+      const unit = minutes % 60 === 0 ? "h" : Number.isInteger(minutes) ? "min" : "s";
+      const value = unit === "h" ? minutes / 60 : unit === "min" ? minutes : minutes * 60;
+      // Subsecond precision stays on the member delay rather than becoming
+      // a fractional boundary in a unit that requires integral offsets.
+      if (Number.isInteger(value)) start = clinicalBoundary({ unit, value });
     }
     const onset = first.onsetDays;
     const relative =
@@ -602,8 +602,7 @@ export function courseFromAdministrations(
     if (relative) start = clinicalBoundary({ unit: "d", value: onset! });
     else if (start) administrations = administrations.map((a) => ({ ...a, delayMinutes: undefined }));
     const reference = first.onsetReference;
-    if (reference && administrations.every(a => a.onsetReference === reference &&
-        (reference !== "treatment-day-start" || a.onsetDays === onset)))
+    if (reference && administrations.every(a => a.onsetReference === reference && a.onsetDays === onset))
       start = boundaryForOnset(first);
     else if (administrations.some(a => a.onsetReference || !relative && a.onsetDays !== undefined))
       // A non-shared relation remains a member boundary; do not erase it or

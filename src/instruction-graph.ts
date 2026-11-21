@@ -1053,9 +1053,12 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     objectEnd = start;
     break;
   }
-  const args = parsedArgs(argumentFromParts(
-    parts, argumentStart, objectEnd, input, undefined, options
-  ), finalManner);
+  const object = argumentFromParts(parts, argumentStart, objectEnd, input, undefined, options);
+  // The typed Amount already owns its exact source phrase and span. A second
+  // untyped copy must not turn a recognized qualified quantity into opaque text.
+  const amountOnly = object?.role === AdviceArgumentRole.Object && c.amount?.quantity &&
+    object.text === c.amount.text;
+  const args = parsedArgs(amountOnly ? undefined : object, finalManner);
   let typedLocalTime: AdviceArgument | undefined;
   for (let index = argumentStart; index < objectEnd; index += 1) {
     const candidate = internalArgument(key(parts[index]), parts[index].sourceText ?? parts[index].original, options);
@@ -4227,22 +4230,29 @@ function timeArgumentCoveredBySchedule(
 
 const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
 
-/** Keep current event timing authoritative in a display-only primary frame.
- * Opaque temporal wording remains source content; only a typed event that
- * the edited schedule no longer covers is superseded. */
+/** Keep the selected primary's typed schedule authoritative in a display copy.
+ * Event daughters may realize a covered event; concrete clocks are realized
+ * once from the current schedule. Opaque temporal wording remains source. */
 function frameWithoutSupersededTime(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
   const schedule = clause.schedule;
   const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
     schedule?.offsetMax !== undefined;
-  if ((clause.sourceProjectionVerified !== false && !hasOffset) ||
-      !actionMatchesCanonicalMethod(frame, clause)) return frame;
+  const hasClocks = Boolean(schedule?.timeOfDay?.length);
+  // Both callers have already selected the source primary. A simultaneous
+  // method edit cannot revoke its current schedule's ownership of Time slots.
+  if (clause.sourceProjectionVerified !== false && !hasOffset && !hasClocks) return frame;
   const args: AdviceArgument[] = [];
   let changed = false;
   for (const arg of frame.args) {
-    if (arg.role === AdviceArgumentRole.Time && arg.normalized &&
-        KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
-        (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) changed = true;
-    else args.push(arg);
+    if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
+      const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
+      if (clock || KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
+          (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) {
+        changed = true;
+        continue;
+      }
+    }
+    args.push(arg);
   }
   // The schedule may own a clock that is absent from the graph's Time slots.
   // Failed source proof also forbids replaying that stale raw fallback.

@@ -118,14 +118,17 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
     : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
   if (fresh && !fresh.condition && !dosage.modifierExtension?.length &&
-      !(dosage as EzDosage).condition?.length && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
+      !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
+      !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
       !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
     return false;
   const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   // A persisted standalone item can have no source fingerprint. Its explicit
   // live guard still owns clinical display; unverified narrative is provenance.
   return matches === false || (matches === undefined && Boolean((dosage as EzDosage).condition?.length ||
-    dosage.modifierExtension?.some(item => item.url === DOSAGE_CONDITION_R5_URL)));
+    (dosage as EzDosage).excludedDates?.length || dosage.modifierExtension?.some(item =>
+      item.url === DOSAGE_CONDITION_R5_URL || item.url === DOSAGE_EXCLUDED_DATES_R5_URL) ||
+    dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)));
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -176,6 +179,7 @@ import {
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+  DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
 } from "./dosage-course";
@@ -1189,7 +1193,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   // replay must not hide a retained infusion qualifier or requested locale.
   if (options?.realizationMode === "normalized" &&
       (primary?.rateQuantity || primary?.rateRatio || primary?.rateRange ||
-       primary?.doseExpression || primary?.rateExpression)) return true;
+       primary?.doseExpression || primary?.rateExpression || dosage.maxDosePerPeriod?.length ||
+       dosage.maxDosePerAdministration || dosage.maxDosePerLifetime)) return true;
   const range = primary?.doseRange;
   return Boolean(range && (getQuantityComparator(range.low) || getQuantityComparator(range.high) ||
     range.low?.value !== undefined && range.high?.value !== undefined &&

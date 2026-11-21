@@ -293,6 +293,7 @@ describe("R5 edit ownership and quantity boundaries", () => {
   it.each(["<", "<=", ">", ">=", "~"] as const)("does not create edit history for an unchanged scalar %s roundtrip", comparator => {
     const source = course({ doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator }) }] });
     const reopened = toDosageDetails(persisted(toFhirR5Dosages(source)));
+    expect(getQuantityComparator(reopened.step![0].component[0].doseAndRate![0].doseQuantity)).toBe(comparator);
     expect(reopened).toEqual(source);
     expect(reopened.extension).toBeUndefined();
     expect(reopened.step![0].component[0].doseAndRate![0].doseQuantity).not.toHaveProperty("comparator");

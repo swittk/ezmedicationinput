@@ -834,9 +834,10 @@ describe("round 25: duration endpoints and course preview boundaries", () => {
     const saved = JSON.stringify(dosage);
     for (const locale of ["en", "th"]) {
       const options = { locale, realizationMode: "normalized" as const };
-      expect(formatSig(dosage, "short", options)).toContain("x" + short + "d");
-      expect(formatSig(dosage, "long", options))
-        .toContain(locale === "en" ? "for " + english + " days" : "เป็นเวลา " + thai + " วัน");
+      const shortFragment = "x" + short + "d";
+      const longFragment = locale === "en" ? "for " + english + " days" : "เป็นเวลา " + thai + " วัน";
+      expect(formatSig(dosage, "short", options).split(shortFragment)).toHaveLength(2);
+      expect(formatSig(dosage, "long", options).split(longFragment)).toHaveLength(2);
     }
     expect(JSON.stringify(dosage)).toBe(saved);
   });
@@ -1794,5 +1795,128 @@ describe("round 29: method coding index", () => {
     expect(resolveMedicationInstructionActionByMethod({
       system: "urn:clinic:method", code: "unknown", display: "Masticate"
     }, options)).toBeUndefined();
+  });
+});
+
+
+describe("round 30: completed phase origins and exact boundary display", () => {
+  it.each([
+    ["1.5 days", "2026-11-21T08:00:00Z", "2026-11-22T20:00:00Z", "2026-11-23T06:00:00+00:00"],
+    ["1.5 days", "2026-11-21T20:00:00Z", "2026-11-23T08:00:00Z", "2026-11-24T06:00:00+00:00"],
+    ["0.5 days", "2026-11-21T08:00:00Z", "2026-11-21T20:00:00Z", "2026-11-22T06:00:00+00:00"],
+    ["0.5 weeks", "2026-11-21T08:00:00Z", "2026-11-24T20:00:00Z", "2026-11-25T06:00:00+00:00"]
+  ])("follows the actual local completion day of a %s predecessor ordered at %s", (duration, orderedAt, from, expected) => {
+    const source = "Take 1 tablet every 6 hours for " + duration + ", then take 2 tablets at 06:00 the next morning";
+    const parsed = parseSig(source);
+    const native = parsed.meta.canonical.course!;
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLength?.value).toBe(Number(duration.split(" ")[0]));
+    for (const input of [parsed, native, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { orderedAt, from, timeZone: "UTC", limit: 1 })).toEqual([expected]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(native.stages[1].start?.anchor).toBe("previous-phase-next-day");
+  });
+
+  it.each([false, true])("waits for each coordinated predecessor's own end (explicit first day %s)", explicit => {
+    const source = (explicit ? "From day 1 take" : "Take") +
+      " 1 tablet at 08:00 daily for 5 days and from day 4 take 2 tablets at 20:00 daily for 3 days, then take 3 tablets at 06:00 the next morning";
+    const parsed = parseSig(source);
+    const expected = [
+      "2026-11-21T08:00:00+00:00", "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T20:00:00+00:00", "2026-11-27T06:00:00+00:00"
+    ];
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      const context = { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z", timeZone: "UTC" };
+      expect(nextDueDoses(input, { ...context, limit: expected.length })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(17);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["Take 1 tablet every 6 hours for 1.5 days, then stop for 2 days, then take 2 tablets at 06:00 the next morning",
+      "2026-11-22T20:00:00Z", ["2026-11-25T06:00:00+00:00"]],
+    ["Take 1 tablet at 08:00 daily for 5 days and from day 4 take 2 tablets at 20:00 daily for 3 days, then stop for 2 days, then take 3 tablets at 06:00 the next morning and take 4 tablets at 07:00 daily",
+      "2026-11-27T00:00:00Z", ["2026-11-29T06:00:00+00:00", "2026-11-29T07:00:00+00:00"]]
+  ])("retains the terminal pause after a completed predecessor: %s", (source, from, expected) => {
+    const parsed = parseSig(source as string);
+    const next = parsed.meta.canonical.course!.stages[1];
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: from as string,
+        timeZone: "UTC", limit: (expected as string[]).length })).toEqual(expected);
+    }
+    expect(next.start).toMatchObject({ anchor: "previous-phase-next-day", displacement: { value: 2, unit: "d" } });
+  });
+
+  it.each([
+    [1.5, "s", 90, "2026-11-21T00:01:30+00:00"],
+    [1, "min", 1, "2026-11-21T00:01:00+00:00"],
+    [60, "h", 1, "2026-11-21T01:00:00+00:00"],
+    [1.501, undefined, undefined, "2026-11-21T00:01:30.060+00:00"]
+  ] as const)("keeps a %s-minute delay at its actual elapsed precision", (minutes, unit, value, expected) => {
+    const native = courseFromAdministrations([{ kind: "administration", delayMinutes: minutes,
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { count: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } }
+    }], "Administer one tablet after the stated delay");
+    if (unit) {
+      expect(native.stages[0].start?.displacement).toMatchObject({ unit, value });
+      expect(native.stages[0].administrations[0].delayMinutes).toBeUndefined();
+    } else {
+      expect(native.stages[0].start).toBeUndefined();
+      expect(native.stages[0].administrations[0].delayMinutes).toBe(minutes);
+    }
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual([expected]);
+    }
+  });
+
+  it.each(["low", "high"] as const)("shows the valued %s endpoint of an event-relative range", valued => {
+    const range = { low: { unit: "d", ...(valued === "low" ? { value: 2 } : {}) },
+      high: { unit: "d", ...(valued === "high" ? { value: 2 } : {}) } };
+    const source: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { text: "follow-up" }, offsetRange: range },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const before = JSON.stringify(source);
+    for (const input of [source, toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(source))))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain((valued === "low" ? ">=" : "<=") + "2 days after follow-up");
+      expect(th).toContain((valued === "low" ? ">=" : "<=") + "2 วัน");
+      expect(en).not.toContain(" – ");
+      expect(th).not.toContain(" – ");
+      expect(input.step![0].start?.offsetRange).toEqual(range);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+    source.step![0].start!.offsetRange!.low!.value = 1;
+    source.step![0].start!.offsetRange!.high!.value = 2;
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("1 day – 2 days after follow-up");
+  });
+
+  it.each([undefined, 1, 2] as const)("shows the inherited elapsed start beside a successor's end (repeat count %s)", count => {
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { count, end: { anchor: "treatment-start", displacement: { value: 48, unit: "h" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { end: { anchor: "treatment-start", displacement: { value: 4, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }] }
+    ] };
+    const before = JSON.stringify(native);
+    const r6 = courseToR6(native);
+    for (const text of [formatCanonicalCourse(native, "long", { locale: "en" }),
+      formatSig(r6, "long", { locale: "en" }),
+      formatSig(toFhirR5Dosages(r6), "long", { locale: "en" })]) {
+      if (count === 2) expect(text).not.toContain("From 48 hours after treatment start");
+      else expect(text).toContain("From 48 hours after treatment start until 4 days after treatment start");
+    }
+    expect(JSON.stringify(native)).toBe(before);
   });
 });
