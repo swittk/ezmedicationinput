@@ -886,14 +886,18 @@ function reconcileNativeCompactCourse(
       stageFromFields(r6StepMetadata(metadata.get(sequence)?.step ?? {}), groups.get(sequence) ?? [])
     );
   // A removed predecessor is harmless when the surviving phase has its own
-  // treatment-relative start. Otherwise its original elapsed time is unknown.
+  // treatment-relative start. A contextual stage/member start still needs
+  // that predecessor's completion; an explicit shared start cannot supply it.
   let missingPredecessor = false;
   for (const step of steps) {
     if (!step.administrations.length && !step.start && !step.end) {
       missingPredecessor = true;
       continue;
     }
-    if (missingPredecessor && !step.start && step.administrations.length) missing.add("predecessor");
+    if (missingPredecessor && step.administrations.length &&
+        (!step.start || step.start.anchor === "previous-phase-next-day" ||
+          step.administrations.some(a => a.phaseStart?.anchor === "previous-phase-next-day")))
+      missing.add("predecessor");
     if (step.start || step.end || step.administrations.length) missingPredecessor = false;
   }
   if (missing.size) {

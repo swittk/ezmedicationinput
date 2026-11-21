@@ -48,6 +48,8 @@ import {
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
+  nextDayOnsetAt,
+  NEXT_DAY_SCHEDULE_RULE,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -2916,6 +2918,24 @@ export function treatmentRelativePeriodStartAt(tokens: readonly Token[], start: 
     ? { tokenEnd: header.tokenEnd, offsetDays: header.offsetDays } : undefined;
 }
 
+/** NEXT selects a day/daypart relative to the preceding administration phase.
+ * The lexical daughter owns its whole phrase and retains the relation in its
+ * typed evidence; regimen composition resolves the local day displacement. */
+function nextDayScheduleSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+  const onset = nextDayOnsetAt(context.tokens, start, context.limit);
+  if (!onset) return undefined;
+  const members = tokensAvailable(context, start, onset.tokenEnd - start);
+  if (!members) return undefined;
+  const event = EVENT_TIMING_TOKENS[normalizeTokenLower(context.tokens[onset.headIndex])];
+  return lexicalSign({
+    type: "schedule-sign", rule: NEXT_DAY_SCHEDULE_RULE, tokens: members,
+    synsem: { head: { schedule: {
+      treatmentStartOffsetDays: 1, ...(event ? { when: [event] } : {})
+    } }, valence: {}, cont: { clauseKind: "administration" } },
+    score: 60 + members.length
+  });
+}
+
 function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
   const header = treatmentRelativePeriodHeaderAt(context.tokens, start);
   if (!header) return undefined;
@@ -3057,6 +3077,8 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
+    const nextDay = nextDayScheduleSign(context, start);
+    if (nextDay) return [nextDay];
     const relativePeriod = treatmentRelativePeriodSign(context, start);
     if (relativePeriod) return [relativePeriod];
     const ordinalWeekStage = ordinalWeekStageHeaderAt(context.tokens, start);

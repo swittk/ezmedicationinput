@@ -357,16 +357,13 @@ export function projectNativeR5Course(
         row = Object.assign({}, strict);
         if (hasExpressions) row.doseAndRate = strict.doseAndRate?.map((entry) => Object.assign({}, entry));
       }
-      let missingContext: string[] | undefined;
+      const missingContext = a.missingContexts;
       if (strict.modifierExtension?.length) {
         let remaining: FhirExtension[] | undefined;
         for (let index = 0; index < strict.modifierExtension.length; index++) {
           const e = strict.modifierExtension[index];
           if (e.url !== DOSAGE_DETAILS_R5_URL) { remaining?.push(e); continue; }
           remaining ??= strict.modifierExtension.slice(0, index);
-          for (const child of e.extension ?? [])
-            if (child.url === "missingContext" && child.valueString !== undefined)
-              (missingContext ??= []).push(child.valueString);
         }
         // This output's bridge is rebuilt from live facts. In particular,
         // clearing its last retained field must retire the previous marker.

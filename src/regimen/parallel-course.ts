@@ -183,6 +183,20 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
   return { ...clause, schedule: cadence };
 }
 
+/** A phase's authored treatment onset owns its origin; an exact prior end is
+ * only the default when this phase omits an onset. Coordinated members must
+ * agree before one origin can represent their complete phase. */
+function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): RegimenPosition | undefined {
+  let value: number | undefined;
+  for (const member of members) {
+    const onset = member.clause.schedule?.treatmentStartOffsetDays;
+    if (onset === undefined) continue;
+    if (value !== undefined && value !== onset) return undefined;
+    value = onset;
+  }
+  return value === undefined ? undefined : { unit: 'd', value };
+}
+
 /** Keep independent phase ownership when global cuts cannot be ordered.
  * This rare fallback reuses typed phase durations; it never assigns one
  * track's uncertain completion to another track's known transition. */
@@ -209,9 +223,10 @@ function partialParallelRegimen(
         const duration = durationPosition(item.clause);
         return duration && compareRegimenPositions(duration, first) === 0;
       });
-      const end: RegimenPosition | undefined = !calendar && at && exact ? advance(at, first) : undefined;
+      const start: RegimenPosition | undefined = calendar ? undefined : authoredPhaseStart(members) ?? at;
+      const end: RegimenPosition | undefined = start && exact ? advance(start, first) : undefined;
       phases.push({ kind: calendar ? "calendar" : "relative", members,
-        ...(!calendar && at ? { start: at } : {}), ...(end ? { end } : {}) });
+        ...(start ? { start } : {}), ...(end ? { end } : {}) });
       at = end;
     }
     tracks.push({ phases });
@@ -311,6 +326,11 @@ export function buildCanonicalParallelRegimen(
       const members = sourcePhases[index];
       if (!members.length || members.some(item => !hasRepeatSchedule(item.clause))) {
         return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-incomplete-dose');
+      }
+      const authoredStart = authoredPhaseStart(members);
+      if (authoredStart) {
+        at = authoredStart;
+        boundaries.push(at);
       }
       const durations = members.map(item => durationPosition(item.clause));
       const concrete = durations.filter(

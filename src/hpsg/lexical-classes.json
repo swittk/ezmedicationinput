@@ -2317,6 +2317,8 @@
     "dose",
     "doses"
   ],
+  "nextDayModifiers": ["next", "following"],
+  "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
   "treatmentPeriodStartLeads": [
     "from",
     "starting",

@@ -111,6 +111,18 @@ current reader accepts both that encoding and the older package comparator
 child. Older package readers may not recover `~` from a new export; this is not
 a guarantee that an older reader can interpret every newer extension encoding.
 
+A phase beginning on the day after the preceding phase uses an application-owned
+`step.start.contextCode`: system
+`urn:ezmedicationinput:CodeSystem:course-phase-event`, code
+`previous-phase-next-day`. It names local midnight following the predecessor's
+last occupied treatment day. The scheduler derives that date from the completed
+phase, including admitted doses and administration durations, so delayed starts,
+count limits, and daylight-saving changes retain their meaning. Any supplied
+`offsetDuration` or exact `offsetRange` is applied from that midnight. The
+preceding phase must remain available; removing it leaves the relation unresolved.
+The existing R5 course metadata preserves this boundary and its annotations
+through saves. Patient-facing wording comes from the course language facet.
+
 ### Internal native clinical model (unstable)
 
 **INTERNAL USE ONLY — NOT A BACKWARD-COMPATIBLE API OR PERSISTENCE FORMAT.**

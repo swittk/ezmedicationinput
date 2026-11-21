@@ -175,6 +175,7 @@ export function administrationFromClause(
     kind: "administration",
     stageOrdinal,
     onsetDays: s?.treatmentStartOffsetDays,
+    onsetReference: s?.phaseStartReference,
     syntax: clause,
     text,
     patientInstruction: clause.patientInstruction,
@@ -514,13 +515,22 @@ export function courseFromAdministrations(
     }
     const onset = first.onsetDays;
     const relative =
-      key >= 2 &&
       onset !== undefined &&
       onset > 0 &&
       Number.isFinite(onset) &&
       administrations.every((a) => a.onsetDays === onset);
     if (relative) start = clinicalBoundary({ unit: "d", value: onset! });
     else if (start) administrations = administrations.map((a) => ({ ...a, delayMinutes: undefined }));
+    const reference = first.onsetReference;
+    if (reference && administrations.every(a => a.onsetReference === reference))
+      start = { anchor: reference };
+    else if (administrations.some(a => a.onsetReference))
+      // A non-shared relation remains a member boundary; do not erase it or
+      // silently apply one member's contextual origin to its companions.
+      administrations = administrations.map(a => a.onsetReference
+        ? { ...a, phaseStart: { anchor: a.onsetReference } }
+        : a.onsetDays !== undefined && a.onsetDays >= 0 && Number.isFinite(a.onsetDays)
+          ? { ...a, phaseOrigin: { value: a.onsetDays, unit: "d" } } : a);
     const length = first.schedule?.recurrence?.courseLength;
     const end =
       key === 1 &&

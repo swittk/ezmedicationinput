@@ -173,7 +173,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   // A source anaphor is a typed request to the regimen donor, not an
   // executable inherited recurrence. Resolve before lowering to FHIR.
   sourceTimingReference: ['timingReference'],
-  sourcePhaseStart: ['treatmentStartOffsetDays'],
+  sourcePhaseStart: ['treatmentStartOffsetDays', 'phaseStartReference'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
@@ -195,7 +195,7 @@ const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
   'activityTiming', 'eventWindow', 'clockWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
-  'timingReference', 'treatmentStartOffsetDays', 'repeatCycle', 'repeatCount'
+  'timingReference', 'treatmentStartOffsetDays', 'phaseStartReference', 'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]

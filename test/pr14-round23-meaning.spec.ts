@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseSig, formatSig, toDosageDetails, toFhirR5Dosages,
-  registerMedicationDateResolver
+  registerMedicationDateResolver, nextDueDoses
 } from "../src/index";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
@@ -925,6 +925,12 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     }] };
     const text = formatSig(wire, "long", { realizationMode: "normalized" });
     expect(text).toContain("2 days – 3 days after follow-up visit");
+    const thai = formatSig(wire, "long", { locale: "th", realizationMode: "normalized" });
+    expect(thai).toContain("2 วัน – 3 วันหลังfollow-up visit");
+    expect(thai).toContain("ต้องตรวจสอบช่วงเวลา");
+    expect(thai).not.toMatch(/2026|วันที่ 1/u);
+    expect(wire.step![0].start).toEqual({ contextCode: { text: "follow-up visit" },
+      offsetRange: { low: { value: 2, code: "d" }, high: { value: 3, code: "d" } } });
     const unknown: FhirR6DosageInstruction = { step: [{ start: {}, component: wire.step![0].component }] };
     expect(formatSig(unknown, "long", { realizationMode: "normalized" }))
       .toContain("Stage timing requires review");
@@ -1013,10 +1019,12 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     const source = "Take 1 tablet at bedtime";
     const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
     const first = parseInstructionActions(source)[0];
-    const later = parseInstructionActions("Take 2 tablets at bedtime", 40)[0];
+    const laterText = "Take 2 tablets at bedtime";
+    const prefix = source + "; ";
+    const later = parseInstructionActions(laterText, prefix.length)[0];
     later.sequenceIndex = 1;
     row.extension = [...(row.extension ?? []), buildInstructionGraphExtension({
-      sourceText: source + "; Take 2 tablets at bedtime", sourceLocale: "en",
+      sourceText: prefix + laterText, sourceLocale: "en",
       primaryAdministrationSpan: { start: 0, end: 4 }, actions: [first, later]
     })!];
     row.timing!.repeat!.when = [EventTiming.Morning];
@@ -1126,4 +1134,186 @@ describe("round 26: member-origin labels respect conservative calendar ordering"
       }
     }
   );
+});
+
+
+describe("round 27: authored phase relations constrain inheritance", () => {
+  it("keeps a next-morning unitless dose after the preceding evening", () => {
+    const parsed = parseSig("Take 1 tablet at 22:00, then 2 at 06:00 the next morning");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({ value: 2, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      treatmentStartOffsetDays: 1, timeOfDay: ["06:00:00"]
+    });
+    expect(parsed.meta.canonical.clauses[1].site).toBeUndefined();
+    expect(parsed.fhirNext.step).toHaveLength(2);
+  });
+  it("does not inherit injection as the method of a separate rate-only phase", () => {
+    const parsed = parseSig("Inject 5 mg IV once, then IV at 1mg/hr");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[0].method?.coding?.code).toBe("740685003");
+    expect(parsed.meta.canonical.clauses[1].method).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].clinicalQuantity?.numerator).toMatchObject({ value: 1, unit: "mg" });
+    const second = parsed.fhirNext.step[1].component[0];
+    expect(second.method).toBeUndefined();
+    expect(second.route?.coding?.[0]?.code).toBe("47625008");
+    expect(second.doseAndRate?.[0]?.rateQuantity).toMatchObject({ value: 1, code: "mg/h" });
+  });
+});
+
+
+describe("round 27: related relative-day and method families", () => {
+  const clockOptions = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 };
+  it("continues unitless next-day daughters through a nonzero authored onset", () => {
+    const source = "From day 5 take 1 tablet at 22:00 then 2 at 06:00 the next morning then 3 at 07:00 the following morning";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
+      { value: 1, unit: "tab" }, { value: 2, unit: "tab" }, { value: 3, unit: "tab" }
+    ]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.treatmentStartOffsetDays)).toEqual([4, 5, 6]);
+    expect(nextDueDoses(parsed, clockOptions)).toEqual([
+      "2026-11-25T22:00:00+00:00", "2026-11-26T06:00:00+00:00", "2026-11-27T07:00:00+00:00"
+    ]);
+  });
+  it("anchors next morning to a dated predecessor without a contradictory treatment offset", () => {
+    const parsed = parseSig("Take 1 tablet on 2026-11-25 at 22:00 then 2 at 06:00 the next morning");
+    const next = parsed.meta.canonical.clauses[1].schedule;
+    expect(next?.boundsStart).toBe("2026-11-26");
+    expect(next?.treatmentStartOffsetDays).toBeUndefined();
+    expect(nextDueDoses(parsed, { ...clockOptions, limit: 2 })).toEqual([
+      "2026-11-25T22:00:00+00:00", "2026-11-26T06:00:00+00:00"
+    ]);
+  });
+  it.each([
+    ["Inject 5 mg IV once, then 2 mg IV daily", "740685003"],
+    ["Infuse 2 mg/hr for 1 day, then IV at 1mg/hr", "764794000"]
+  ])("retains a genuine shared administration method in %s", (source, code) => {
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[1].method?.coding?.code).toBe(code);
+    expect(parsed.fhirNext.step[1].component[0].method?.coding?.[0].code).toBe(code);
+  });
+});
+
+
+it("round 27: a mid-clause onset modifies its unscheduled dose before later next-day phases", () => {
+  const source = "Take 1 tablet from day 5 at 22:00, then 2 at 06:00 the next morning, then 3 at 07:00 the following morning";
+  const parsed = parseSig(source);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2, 3]);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.treatmentStartOffsetDays)).toEqual([4, 5, 6]);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.timeOfDay)).toEqual([
+    ["22:00:00"], ["06:00:00"], ["07:00:00"]
+  ]);
+  expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 }))
+    .toEqual(["2026-11-25T22:00:00+00:00", "2026-11-26T06:00:00+00:00", "2026-11-27T07:00:00+00:00"]);
+  expect(parsed.meta.canonical.course?.instruction).toBe(source);
+});
+
+
+it.each([
+  "Take 1 tablet from day 5 take 2 tablets at 22:00",
+  "Take 1 tablet daily for 3 days from day 5 take 2 tablets daily"
+])("round 27: preserves a separately headed phase after its onset: %s", source => {
+  const parsed = parseSig(source);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+  expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(4);
+});
+
+
+describe("round 27: next-day continuation after a finite predecessor", () => {
+  const options = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 6 };
+  it("starts the next morning after all five authored treatment days", () => {
+    const parsed = parseSig("Take 1 tablet daily for 5 days then take 2 tablets at 06:00 the next morning");
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBe(5);
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(5);
+    expect(nextDueDoses(parsed, options)).toEqual([
+      "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+      "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T06:00:00+00:00"
+    ]);
+  });
+  it("uses the same five-day endpoint when the successor omits its clock", () => {
+    const parsed = parseSig("Take 1 tablet daily for 5 days then take 2 tablets the next day");
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(5);
+    expect(parsed.meta.canonical.course?.stages[1].start?.displacement).toMatchObject({ value: 5, code: "d" });
+  });
+  it("adds the finite duration to an already delayed predecessor origin", () => {
+    const parsed = parseSig("From day 5 take 1 tablet daily for 5 days then take 2 tablets at 06:00 the next morning");
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.treatmentStartOffsetDays)).toEqual([4, 9]);
+    expect(nextDueDoses(parsed, options)).toEqual([
+      "2026-11-25T09:00:00+00:00", "2026-11-26T09:00:00+00:00", "2026-11-27T09:00:00+00:00",
+      "2026-11-28T09:00:00+00:00", "2026-11-29T09:00:00+00:00", "2026-11-30T06:00:00+00:00"
+    ]);
+  });
+});
+
+
+describe("round 27: next day follows finite administration count completion", () => {
+  it.each(["06:00", "15:00"])("keeps all five doses before the next-day %s successor", clock => {
+    const source = `Take 1 tablet daily for 5 doses then take 2 tablets at ${clock} the next day`;
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(5);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({ value: 2, unit: "tab" });
+    for (const [orderedAt, expectedPrior, expectedDate] of [
+      ["2026-11-21T00:00:00Z", ["2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00"], "2026-11-26"],
+      ["2026-11-21T18:00:00Z", ["2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T09:00:00+00:00"], "2026-11-27"]
+    ] as const) {
+      expect(nextDueDoses(parsed, { orderedAt, from: orderedAt, timeZone: "UTC", limit: 6 }))
+        .toEqual([...expectedPrior, `${expectedDate}T${clock}:00+00:00`]);
+    }
+  });
+  it("keeps a calendar-month predecessor governed by its complete calendar duration", () => {
+    const parsed = parseSig("Take 1 tablet daily for 1 month then take 2 tablets at 06:00 the next morning");
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 1, durationUnit: "mo" });
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-12-20T00:00:00Z", timeZone: "UTC", limit: 2 }))
+      .toEqual(["2026-12-20T09:00:00+00:00", "2026-12-21T06:00:00+00:00"]);
+  });
+});
+
+
+it("round 27: carries a contextual next-day origin through another finite next-day daughter", () => {
+  const source = "Take 1 tablet daily for 5 doses then take 2 tablets once at 06:00 the next day then take 3 tablets once at 15:00 the following day";
+  const parsed = parseSig(source);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual([5, 1, 1]);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.phaseStartReference)).toEqual([
+    undefined, "previous-phase-next-day", "previous-phase-next-day"
+  ]);
+  expect(parsed.meta.canonical.clauses.slice(1).every(clause => clause.schedule?.treatmentStartOffsetDays === undefined)).toBe(true);
+  expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 7 }))
+    .toEqual(["2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T06:00:00+00:00", "2026-11-27T15:00:00+00:00"]);
+});
+
+
+it("round 27: shares contextual onset across coordinated successor doses", () => {
+  const parsed = parseSig("Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day and 3 tablets at 15:00");
+  expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2, 3]);
+  expect(parsed.meta.canonical.clauses.slice(1).map(clause => clause.schedule?.phaseStartReference))
+    .toEqual(["previous-phase-next-day", "previous-phase-next-day"]);
+  expect(parsed.meta.canonical.course?.stages).toHaveLength(2);
+  expect(parsed.meta.canonical.course?.stages[1].start?.anchor).toBe("previous-phase-next-day");
+  expect(parsed.meta.canonical.course?.stages[1].administrations).toHaveLength(2);
+});
+
+it.each([
+  ["fronted", "Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day and from day 10 take 3 tablets at 15:00"],
+  ["postposed", "Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day and 3 tablets from day 10 at 15:00"]
+])("round 27: preserves a member's independent %s authored onset beside a contextual next-day member", (_position, source) => {
+  const parsed = parseSig(source);
+  expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2, 3]);
+  expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+  expect(parsed.meta.canonical.clauses[2].schedule?.phaseStartReference).toBeUndefined();
+  expect(parsed.meta.canonical.clauses[2].schedule?.treatmentStartOffsetDays).toBe(9);
+  const phase = parsed.meta.canonical.course!.stages[1];
+  expect(phase.start).toBeUndefined();
+  expect(phase.administrations[0].phaseStart?.anchor).toBe("previous-phase-next-day");
+  expect(phase.administrations[1].onsetDays).toBe(9);
+  expect(nextDueDoses(parsed, {
+    orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-29T00:00:00Z", timeZone: "UTC", limit: 5
+  })).toEqual([
+    "2026-11-29T06:00:00+00:00", "2026-11-30T06:00:00+00:00", "2026-11-30T15:00:00+00:00",
+    "2026-12-01T06:00:00+00:00", "2026-12-01T15:00:00+00:00"
+  ]);
 });

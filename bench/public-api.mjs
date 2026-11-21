@@ -18,7 +18,10 @@ import { pathToFileURL } from "node:url";
 const argv = process.argv.slice(2),
   value = (flag, fallback) => {
     const i = argv.indexOf(flag);
-    return i < 0 ? fallback : argv[i + 1];
+    if (i < 0) return fallback;
+    const operand = argv[i + 1];
+    if (!operand || operand.startsWith("--")) throw new Error(flag + " requires a value");
+    return operand;
   };
 const baselinePath = value("--baseline", process.env.EZMED_BASELINE);
 if (!baselinePath) throw new Error("Supply --baseline pointing to the built origin/master package");
@@ -551,8 +554,12 @@ function completeThaiDose(output, action, unit, expected) {
   return phrase !== null && Number(phrase[1]) === expected && quantities.length === 1 &&
     Number(quantities[0][1]) === expected;
 }
+function completeThaiRightEyeDose(output) {
+  return completeThaiDose(output, "หยอด", "หยด", 2) &&
+    output.includes("ตาขวา") && !output.includes("ตาซ้าย");
+}
 const equivalenceOracles = new Map([
-  ["formatSig/R5-roundtrip-edited-thai", output => completeThaiDose(output, "หยอด", "หยด", 2)],
+  ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
   ["formatSig/R5-roundtrip-added-dose-thai", output => completeThaiDose(output, "ดื่ม", "เม็ด", 2)],
 ]);
 // Source-bearing R6 fixtures used to return the saved input verbatim. The
@@ -638,17 +645,24 @@ for (const [action, unit] of [["หยอด", "หยด"], ["ดื่ม", "�
   if (completeThaiDose(`${action} 2 ${unit}; ${action} 1 ${unit}.`, action, unit, 2))
     throw new Error("Complete-dose oracle accepted the superseded administration");
 }
-for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด."])
-  if (!completeThaiDose(text, "หยอด", "หยด", 2))
+for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด.", "หยอด 2 หยด ตาขวา."])
+  if (!completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle rejected the authored site placement");
+for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด."])
+  if (completeThaiRightEyeDose(text))
+    throw new Error("Complete-dose oracle accepted a missing or conflicting eye");
+const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
-  if (typeof baseline[test.api] !== "function") continue;
   if (nativeUnavailable.has(test.name)) {
     const unavailable = { api: test.api, name: test.name, reason: nativeUnavailable.get(test.name) };
     report.unavailable.push(unavailable);
     console.error("UNAVAILABLE", test.name, unavailable.reason);
     checkpoint();
+    continue;
+  }
+  if (typeof baseline[test.api] !== "function") {
+    candidateOnlyCases.push(test);
     continue;
   }
   try {
@@ -751,22 +765,33 @@ const nativeCases = [
   ],
   ["projectEditableR5Course", "native/project-editable-R5", () => candidate.projectEditableR5Course(complex)],
 ];
-report.newApiMeasurements = [];
+const candidateOnlyNames = new Set(candidateOnlyCases.map(test => test.name));
 for (const [api, name, run] of nativeCases) {
-  if (!filter.test(name) || typeof baseline[api] === "function") continue;
+  if (!filter.test(name) || typeof baseline[api] === "function" || candidateOnlyNames.has(name)) continue;
+  candidateOnlyCases.push({ api, name, run });
+  candidateOnlyNames.add(name);
+}
+for (const test of candidateOnlyCases) {
+  const { api, name } = test;
   try {
-    run();
+    const probe = test.run(candidate, 0);
+    const async = !!probe?.then;
+    const output = async ? await probe : probe;
+    const oracle = equivalenceOracles.get(name);
+    if (oracle && !oracle(output)) throw new Error("Candidate failed the independent clinical preview oracle");
     if (smoke) {
       report.newApiMeasurements.push({ api, name, smoke: true });
       continue;
     }
-    const test = { run };
-    for (let i = 0; i < 12; i++) run();
-    const iterations = await calibratedIterations(test, [candidate], false);
+    for (let i = 0; i < 12; i++) {
+      const warmup = test.run(candidate, i);
+      if (async) await warmup;
+    }
+    const iterations = await calibratedIterations(test, [candidate], async);
     const times = [];
     for (let r = 0; r < rounds; r++) {
       if (global.gc) global.gc();
-      times.push(await measure(test, candidate, iterations, false));
+      times.push(await measure(test, candidate, iterations, async));
     }
     const candidateUs = median(times);
     report.newApiMeasurements.push({

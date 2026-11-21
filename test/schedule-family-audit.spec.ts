@@ -2633,7 +2633,7 @@ describe("November 16 finite-count parallel loading stage", () => {
       { component: [{
         modifierExtension: [{ url: marker, valueQuantity: { value: 3, unit: "h", code: "h" } }],
         timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
-          timeOfDay: ["08:00:00"] } },
+          timeOfDay: ["04:00:00"] } },
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
       }] },
       { component: [{
@@ -2644,11 +2644,11 @@ describe("November 16 finite-count parallel loading stage", () => {
     ] };
     const opts = { orderedAt: "2026-11-02T02:30:00-05:00",
       from: "2026-11-02T02:30:00-05:00", timeZone: "America/New_York",
-      limit: 10, durationValue: 2, durationUnit: FhirPeriodUnit.Day };
+      limit: 10, durationValue: 3, durationUnit: FhirPeriodUnit.Day };
     const expected = [
-      "2026-11-02T08:00:00-05:00",
-      "2026-11-02T20:00:00-05:00",
-      "2026-11-03T20:00:00-05:00"
+      "2026-11-03T04:00:00-05:00",
+      "2026-11-03T20:00:00-05:00",
+      "2026-11-04T20:00:00-05:00"
     ];
     for (const data of [course, toFhirR5Dosages(course), fromFhir(course)]) {
       expect(nextDueDoses(data, opts)).toEqual(expected);
@@ -2796,13 +2796,13 @@ describe("count-vs-calendar predecessor clock ownership across DST", () => {
         }] },
         { component: [{
           ...one, timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
-            timeOfDay: ["07:00:00"], boundsDuration: { value: 1, code: "d", unit: "d" } } }
+            timeOfDay: ["08:30:00"], boundsDuration: { value: 1, code: "d", unit: "d" } } }
         }] }
       ]
     };
     expect(nextDueDoses(course, start)).toEqual([
       "2027-03-13T08:00:00-05:00",
-      "2027-03-14T07:00:00-04:00",
+      "2027-03-14T08:30:00-04:00",
       "2027-03-20T08:00:00-04:00"
     ]);
     expect(calculateTotalUnits({ dosage: course, ...start }).totalUnits).toBe(2);
@@ -3110,7 +3110,8 @@ describe("PR14 new review: conditional one-time count ownership", () => {
       evaluateCondition:()=>true}).totalUnits).toBe(1);
   });
   it("does not invent a second event when its original condition is false",()=>{
-    expect(nextDueDoses(one,{...options,evaluateCondition:()=>false})).toEqual([]);
+    expect(nextDueDoses(one,{...options,
+      evaluateCondition:(_condition,at)=>Date.parse(at)>Date.parse(options.orderedAt)})).toEqual([]);
   });
   it("keeps the authored event at treatment start, not at a later query",()=>{
     expect(nextDueDoses(one,{...options,from:"2026-11-03T00:00:00+07:00",
@@ -3167,7 +3168,8 @@ describe("PR14 new review: overlapping repeated-course chronological rolling all
       frequency:1,period:1,periodUnit:FhirPeriodUnit.Day,
       clocks:["00:00:00"],courseLength:{value:6,unit:"d"},count:3
     }}};
-    const single={...course,cycleInterval:undefined,stages:[{count:1,administrations:[stageMember]}]};
+    const single={...course,cycleInterval:undefined,stages:[{count:1,start:{anchor:"treatment-start" as const,
+      displacement:{value:0,unit:"d"}},administrations:[stageMember]}]};
     expect(nextDueDoses(single,{...opts,limit:4}))
       .toEqual(["01","03","05"].map(day=>"2026-01-"+day+"T00:00:00+00:00"));
     expect(calculateTotalUnits({...opts,dosage:single,durationValue:6,

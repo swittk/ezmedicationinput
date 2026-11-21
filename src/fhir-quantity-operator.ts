@@ -100,8 +100,8 @@ function editedOperator(
   sources: FhirExtension[]
 ): FhirExtension {
   const coding = extension.valueCoding!;
-  const { _display, i18n, ...current } = coding;
-  if (_display !== undefined || i18n !== undefined || coding.code === EMA_EQUALITY_OPERATOR_CODE)
+  const { _code, _display, i18n, ...current } = coding;
+  if (_code !== undefined || _display !== undefined || i18n !== undefined || coding.code === EMA_EQUALITY_OPERATOR_CODE)
     sources.push({ url: QUANTITY_OPERATOR_SOURCE_URL, valueCoding: coding });
   return { ...extension, valueCoding: {
     ...current, code: emaCodeByComparator[comparator],

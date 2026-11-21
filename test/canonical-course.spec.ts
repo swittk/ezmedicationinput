@@ -22,6 +22,7 @@ import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
   TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
   TIMING_CLOCK_WINDOW_EXTENSION_URL,
+  TIMING_OCCURRENCE_CAP_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
 } from "../src/fhir";
@@ -1046,7 +1047,7 @@ describe("review 26 independent partial phase boundaries", () => {
 
 
 it.each(["fresh", "persisted"] as const)("keeps %s clinician text edits and honors an explicit text clear", kind => {
-  const parsed = parseSig("Swallow 1 tablet whole at bedtime");
+  const parsed = parseSig("Swallow 1 tablet whole at bedtime per the agreed plan.");
   const row = kind === "fresh" ? parsed.items[0].fhir
     : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
   const options = { locale: "en", realizationMode: "roundtrip" as const };
@@ -1059,8 +1060,12 @@ it.each(["fresh", "persisted"] as const)("keeps %s clinician text edits and hono
   expect(normalized).toMatch(/bedtime|on sleep/u);
   expect(normalized).not.toContain("discussion with the clinician");
   row.text = "";
-  expect(formatSig(row, "long", options)).not.toBe(replacement);
-  expect(formatSig(row, "long", options)).toContain("1 tablet");
+  for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    expect(text).not.toContain("per the agreed plan");
+    expect(text).not.toContain("discussion with the clinician");
+    expect(text).toContain("1 tablet");
+    expect(text).toMatch(/bedtime|on sleep/u);
+  }
 });
 
 
@@ -1082,4 +1087,157 @@ it("keeps replacement text authoritative on a qualified range while preserving r
   expect(imported.meta.canonical.administration?.amounts?.[0].range?.high)
     .toMatchObject({ value: 5, unit: "mg", comparator: "<" });
   expect(fromFhirDosage(persisted, { ...options, realizationMode: "normalized" }).longText).toContain("<5");
+});
+
+
+describe("review 27 live clinical source proofs and language receivers", () => {
+  it.each(["fresh", "persisted"] as const)("invalidates a %s occurrence-cap proof after each nested edit", kind => {
+    const source = "Dissolve 1 tablet in water as needed, maximum 3 doses per day";
+    const parsed = parseSig(source);
+    const row = kind === "fresh" ? parsed.items[0].fhir
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    const originalRowText = row.text;
+    expect(formatSig(row, "long", options)).toContain("3 doses per day");
+    const cap = row.timing!.repeat!.extension!.find(e => e.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL)!;
+    cap.extension!.find(e => e.url === "max")!.valueInteger = 2;
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toContain("maximum 2 doses per day");
+      expect(text).not.toContain("3 doses");
+    }
+    cap.extension!.find(e => e.url === "period")!.valueQuantity!.value = 2;
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toContain("maximum 2 doses per 2 days");
+      expect(text).not.toContain("3 doses");
+    }
+    expect(row.text).toBe(originalRowText);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it.each(["period", "administration", "lifetime"] as const)("invalidates a warm saved %s maximum proof", scope => {
+    const suffix = scope === "period" ? "per day" : "per " + scope;
+    const text = "Take 1 tablet as needed, max 4 tablets " + suffix;
+    const raw: FhirDosage = { text, asNeededBoolean: true,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      ...(scope === "period" ? { maxDosePerPeriod: [{ numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }] }
+        : scope === "administration" ? { maxDosePerAdministration: { value: 4, unit: "tab" } }
+        : { maxDosePerLifetime: { value: 4, unit: "tab" } }) };
+    const row = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0])) as FhirDosage;
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toContain("4 tablets");
+    const quantity = scope === "period" ? row.maxDosePerPeriod![0].numerator!
+      : scope === "administration" ? row.maxDosePerAdministration! : row.maxDosePerLifetime!;
+    quantity.value = 2;
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
+      expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
+    }
+    if (scope === "period") {
+      row.maxDosePerPeriod![0].denominator!.value = 2;
+      for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText])
+        expect(text).toMatch(/(?<![\d.])2 (?:tablets per 2 days|tab \/ 2 d)\b/u);
+    }
+  });
+
+  it("binds per-call base, inherited and override callbacks to their owning objects", () => {
+    class BasePack {
+      readonly locale = "r27";
+      readonly course = ENGLISH_COURSE;
+      #short = "Base short";
+      #long = "Base long";
+      formatShort() { return this.#short; }
+      formatLong() { return this.#long; }
+    }
+    class InheritedPack {
+      readonly locale = "r27-inherited";
+      #long = "Inherited long";
+      formatLong() { return this.#long; }
+    }
+    class CallConfig {
+      readonly locale = "r27-CA";
+      readonly inherit = "r27-inherited";
+      #short = "Per-call short";
+      formatShort() { return this.#short; }
+    }
+    const base = new BasePack();
+    registerSigLocalization(base);
+    registerSigLocalization(new InheritedPack());
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    expect(resolveSigLocalization("r27")).toBe(base);
+    expect(resolveSigLocalization("r27-CA")).toBe(base);
+    expect(formatSig(row, "long", { i18n: { locale: "r27-CA" } })).toBe("Base long");
+    expect(formatSig(row, "short", { i18n: { locale: "r27-CA" } })).toBe("Base short");
+    const localization = new CallConfig();
+    expect(formatSig(row, "long", { i18n: localization })).toBe("Inherited long");
+    expect(formatSig(row, "short", { i18n: localization })).toBe("Per-call short");
+  });
+});
+
+it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("keeps a fresh item maximum edit live for %s", head => {
+  const batch = parseSig(head + " as needed, max 4 tablets per day");
+  const row = batch.items[0].fhir;
+  const originalText = row.text;
+  expect(row).not.toBe(batch.fhir[0]);
+  expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toContain("4 tablets");
+  row.maxDosePerPeriod![0].numerator!.value = 2;
+  for (const realizationMode of ["roundtrip", "normalized"] as const) {
+    const options = { locale: "en", realizationMode };
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
+      expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
+    }
+  }
+  expect(row.text).toBe(originalText);
+});
+
+it("keeps inserted and removed maxima live on direct parser items", () => {
+  const row = parseSig("Take 1 tablet daily").items[0].fhir;
+  const sourceText = row.text;
+  expect(formatSig(row, "long")).not.toMatch(/max|limit/iu);
+  row.maxDosePerPeriod = [{ numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }];
+  for (const realizationMode of ["roundtrip", "normalized"] as const)
+    for (const text of [formatSig(row, "long", { realizationMode }),
+      fromFhirDosage(row, { realizationMode }).longText])
+      expect(text).toMatch(/(?<![\d.])4 (?:tablets per day|tab \/ 1 d)\b/u);
+  delete row.maxDosePerPeriod;
+  for (const realizationMode of ["roundtrip", "normalized"] as const)
+    for (const text of [formatSig(row, "long", { realizationMode }),
+      fromFhirDosage(row, { realizationMode }).longText]) {
+      expect(text).toContain("1 tablet");
+      expect(text).not.toMatch(/max|limit|4 tab/iu);
+    }
+  expect(row.text).toBe(sourceText);
+});
+
+it.each([
+  ["en", "the day after the previous phase"],
+  ["th", "วันถัดจากวันสุดท้ายของขั้นตอนก่อนหน้า"],
+] as const)("localizes the completion-relative next-day boundary in %s", (locale, expected) => {
+  const course: CanonicalCourse = { kind: "course", stages: [
+    { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { count: 5, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["09:00:00"] } } }] },
+    { start: { anchor: "previous-phase-next-day" }, administrations: [{
+      kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }],
+      schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["15:00:00"] } }
+    }] }
+  ] };
+  const text = formatCanonicalCourse(course, "long", { locale });
+  expect(text).toContain(expected);
+  expect(text).not.toMatch(/day 2|วันที่ 2|requires review|ต้องตรวจสอบช่วงเวลา/iu);
+});
+
+it("retains an independent member onset beside a completion-relative member over three external saves", () => {
+  const source = "Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day and from day 10 take 3 tablets at 15:00";
+  let wire = parseSig(source).fhirNext;
+  for (let save = 0; save < 3; save++) {
+    const native = courseFromR6(wire);
+    expect(native.stages).toHaveLength(2);
+    const members = native.stages[1].administrations;
+    expect(members).toHaveLength(2);
+    expect(members[0]).toMatchObject({ phaseStart: { anchor: "previous-phase-next-day" },
+      amounts: [{ quantity: { value: 2, unit: "tab" } }] });
+    expect(members[1]).toMatchObject({ phaseOrigin: { value: 9, unit: "d" },
+      amounts: [{ quantity: { value: 3, unit: "tab" } }] });
+    wire = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(wire))));
+  }
 });

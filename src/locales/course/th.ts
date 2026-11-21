@@ -46,6 +46,7 @@ export const THAI_COURSE: CourseLanguage = {
   periodContext: (period) => ` (รอบละ ${period})`,
   startsWithinPeriod: (offset, context) => `เริ่มให้ยาหลังเริ่มรอบ ${offset}${context}`,
   endsWithinPeriod: (offset, context) => `งดยาในช่วง ${offset}สุดท้ายของแต่ละรอบ${context}`,
+  nextDayAfterPreviousPhase: "วันถัดจากวันสุดท้ายของขั้นตอนก่อนหน้า",
   afterTreatmentStart: (offset) => `${offset}หลังเริ่มการรักษา`,
   relativeEvent: (offset, event, before) => `${offset}${before ? "ก่อน" : "หลัง"}${event ?? "เหตุการณ์"}`,
   calendarWindow: (start, end) =>

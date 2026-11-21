@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   formatSig, formatParseBatch, fromFhir, parseSig, nextDueDoses,
-  parseInstructionActions, formatCanonicalCourse,
+  parseInstructionActions, formatCanonicalCourse, projectCanonicalCourse, importCanonicalCourse,
 } from "../src/index";
+import { encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
 import { courseFromR6 } from "../src/adapters/canonical-course";
 import { formatCanonicalClause } from "../src/format";
 import { canonicalFromFhir } from "../src/fhir";
@@ -124,7 +125,14 @@ describe("review 21 current structured course preview", () => {
         expect(text).toContain(action);
         expect(text.split(action)).toHaveLength(2);
         if (numeric) expect(text).toContain("8 tab / 1 d");
-        if (scope === "stage") expect(text).toContain("Within this stage:");
+        if (scope === "stage") {
+          const stageSection = text.split("Within this stage: ")[1]?.split(" then ")[0];
+          expect(stageSection).toContain(action);
+          if (numeric) expect(stageSection).toContain("8 tab / 1 d");
+          expect(text).not.toContain("Across this course:");
+          expect(text.split(" then ")[0]).toContain(action);
+          expect(text.split(" then ").slice(1).join(" then ")).not.toContain(action);
+        }
         if (scope === "course") expect(text).toContain("Across this course:");
       }
     }
@@ -423,5 +431,41 @@ describe("review 21 locale facets and grammar number", () => {
     const raw = { safety: { doseLimit: [{ scope: "lifetime" as const, valueInteger: 1 }] } };
     expect(formatSig(raw, "long", normalized)).toContain("1 administration");
     expect(formatSig(raw, "long", normalized)).not.toContain("1 administrations");
+  });
+});
+
+
+describe("round27 current boundary and metadata-only previews", () => {
+  it.each(["stage", "member"] as const)("uses the current structured %s start while retaining old descriptive text", scope => {
+    const start = { text: "2 days after follow-up", contextCode: { text: "follow-up" },
+      offsetDuration: { value: 2, unit: "d", code: "d" } };
+    start.offsetDuration.value = 5;
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...tablet }] }] };
+    if (scope === "stage") raw.step![0].start = start;
+    else raw.step![0].component[0].modifierExtension = [
+      encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start }, "step"),
+    ];
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toContain("5 days after follow-up");
+    expect(text).not.toContain("2 days after follow-up");
+    expect(JSON.stringify(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext)).toContain("2 days after follow-up");
+  });
+
+  it("formats an event-relative end as the upper bound of the first stage window", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ end: { contextCode: { text: "follow-up" },
+      offsetDuration: { value: 2, unit: "d", code: "d" } }, component: [tablet] }] };
+    const text = formatSig(raw, "long", normalized);
+    expect(text).toContain("Timing requires review: From treatment start until 2 days after follow-up");
+    expect(text).not.toContain("onward");
+  });
+
+  it("keeps text-only external instructions visible beside nonclinical safety annotations", () => {
+    const instruction = "Use the patient's separately supplied administration plan.";
+    const annotation = { url: "https://example.org/safety-source", valueString: "external note" };
+    const raw: FhirR6DosageInstruction = { renderedInstruction: instruction, safety: { extension: [annotation] } };
+    for (const realizationMode of ["roundtrip", "normalized"] as const)
+      expect(formatSig(raw, "long", { locale: "en", realizationMode })).toBe(instruction);
+    expect(formatSig(raw, "long", { locale: "en" })).toBe(instruction);
+    expect(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.safety?.extension).toEqual([annotation]);
   });
 });

@@ -136,9 +136,11 @@ export interface CanonicalTiming {
 /** A boundary's anchor is interpreted once at import. A foreign/unknown event
  * remains available for editing, never guessed to be treatment start. */
 export interface CanonicalBoundary {
-  /** Non-treatment anchors are valid clinical references, but MUST NOT be
-   * executed as treatment-relative dates without a supplied resolver. */
-  anchor: "treatment-start" | "coded-event" | "resource-reference" |
+  /** The previous-phase-next-day anchor denotes local midnight following
+   * the predecessor's final occupied day, derived from its exclusive end.
+   * Other non-treatment anchors need an external resolver; never reinterpret
+   * them as treatment-relative dates. */
+  anchor: "treatment-start" | "previous-phase-next-day" | "coded-event" | "resource-reference" |
     "definition" | "path" | "unresolved";
   contextCode?: CanonicalConcept;
   contextReference?: CanonicalReference;
@@ -177,6 +179,7 @@ export interface CanonicalAdministration {
   /** Typed parser member identity, independent of external dose sequence. */
   sourceMember?: number;
   onsetDays?: number;
+  onsetReference?: "previous-phase-next-day";
   asNeeded?: boolean;
   targetCount?: number;
   target?: CanonicalConcept;

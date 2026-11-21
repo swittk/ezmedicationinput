@@ -1041,6 +1041,9 @@ function numericTokenIsProcedureLocalQuantity(
     const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
     for (const arg of frame.args) {
       if (!arg.span || token.sourceStart < arg.span.start || token.sourceEnd > arg.span.end) continue;
+      // A source-spanned quantity on a complement is owned by that daughter,
+      // even when the action head may independently define a medication dose.
+      if (arg.quantity && arg.role !== AdviceArgumentRole.Amount) return true;
       if (arg.role === AdviceArgumentRole.Duration) return true;
       if (arg.role === AdviceArgumentRole.Amount && (!definition?.definesDose ||
           frame.args.some(complement => complement.role === AdviceArgumentRole.Time &&
@@ -1127,7 +1130,8 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!tokens || !token) {
       return [];
     }
-    if (context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
+    if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+        context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
     const supplementalDose = supplementalDoseAfter(context, start);
     if (supplementalDose) return [supplementalDose];
     if (quantityHasSupplementalPrefix(context.tokens, start)) return [];

@@ -324,15 +324,29 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
   }
   return out;
 }
+/** Stable external event identity; the native boundary shape remains internal.
+ * This event is already the next local day after the prior phase completes,
+ * so the adapter must not synthesize an additional one-day displacement. */
+const COURSE_PHASE_EVENT_SYSTEM = "urn:ezmedicationinput:CodeSystem:course-phase-event";
+const PREVIOUS_PHASE_NEXT_DAY_CODE = "previous-phase-next-day";
+
 export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoundary | undefined {
   if (!b) return undefined;
-  const recognized =
-    !b.contextReference &&
-    !b.contextDefinition &&
-    !b.contextPath &&
-    b.contextCode?.coding?.some((c) => c.system === TREATMENT_START_SYSTEM && c.code === "treatment-start");
+  let recognized: "treatment-start" | "previous-phase-next-day" | undefined;
+  if (!b.contextReference && !b.contextDefinition && !b.contextPath) {
+    for (const coding of b.contextCode?.coding ?? []) {
+      const event = coding.system === TREATMENT_START_SYSTEM && coding.code === "treatment-start"
+        ? "treatment-start" : coding.system === COURSE_PHASE_EVENT_SYSTEM && coding.code === PREVIOUS_PHASE_NEXT_DAY_CODE
+        ? "previous-phase-next-day" : undefined;
+      if (!event) continue;
+      // Conflicting understood anchors are retained as a coded event. Unknown
+      // foreign equivalents do not supply a different executable meaning.
+      if (recognized && recognized !== event) { recognized = undefined; break; }
+      recognized = event;
+    }
+  }
   const anchor = recognized
-    ? "treatment-start"
+    ? recognized
     : b.contextReference
     ? "resource-reference"
     : b.contextDefinition
@@ -483,6 +497,8 @@ function baseAdministration(
     phaseStart: CanonicalBoundary | undefined,
     phaseOriginIssue = false,
     seenOrigin = false;
+  let missingContexts: string[] | undefined,
+    contextIssue: CanonicalAdministration["contextIssue"];
   let anchored: FhirExtension | undefined,
     choiceMarker: FhirExtension | undefined,
     predicateMarker: FhirExtension | undefined,
@@ -493,6 +509,19 @@ function baseAdministration(
   // field rather than repeatedly traversing the whole imported marker list.
   for (const e of raw.modifierExtension ?? [])
     switch (e.url) {
+      case DOSAGE_DETAILS_R5_URL:
+        // R6 carries unresolved row context as an active modifier. Normalize
+        // it here so both exporters read the same typed administration facts.
+        // R5 membership/resolution remains owned by the R5 course importer.
+        if (format === "r6") for (const child of e.extension ?? []) {
+          const context = child.valueString;
+          if (child.url !== "missingContext" || context === undefined) continue;
+          if (!missingContexts) missingContexts = [context];
+          else if (missingContexts.indexOf(context) < 0) missingContexts.push(context);
+          if (context === "conflicting-phase") contextIssue = "conflicting-course-phase";
+          else contextIssue ??= "missing-course-context";
+        }
+        break;
       case PARALLEL_COMPONENT_PHASE_ORIGIN_URL:
         if (seenOrigin) phaseOriginIssue = true;
         seenOrigin = true;
@@ -584,6 +613,10 @@ function baseAdministration(
     cycleDays: cycleMarker ? getCycleDayConstraint({ modifierExtension: [cycleMarker] }) : undefined,
     provenance: { format, data: record(raw) },
   };
+  if (missingContexts) {
+    output.missingContexts = missingContexts;
+    output.contextIssue = contextIssue;
+  }
   if (sourceTextVerified !== undefined) output.provenance!.sourceTextVerified = sourceTextVerified;
   if (format === "r5") {
     let limits: CanonicalDoseLimit[] | undefined, sourceMaxima: FhirExtension[] | undefined;
@@ -775,10 +808,14 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
       output.contextCode = {
         coding: [{ system: TREATMENT_START_SYSTEM, code: "treatment-start", display: "Start of Treatment" }],
       };
+    else if (b.anchor === "previous-phase-next-day")
+      output.contextCode = {
+        coding: [{ system: COURSE_PHASE_EVENT_SYSTEM, code: PREVIOUS_PHASE_NEXT_DAY_CODE }],
+      };
   }
   // Understood external anchor types stay typed, including in native edits.
   // These are preserved but not considered executable without an event/source resolver.
-  if (b.anchor !== "treatment-start") {
+  if (b.anchor !== "treatment-start" && b.anchor !== "previous-phase-next-day") {
     assign(output, "contextReference", b.anchor === "resource-reference" ? b.contextReference : undefined);
     assign(output, "contextDefinition", b.anchor === "definition" ? b.contextDefinition : undefined);
     assign(output, "contextPath",

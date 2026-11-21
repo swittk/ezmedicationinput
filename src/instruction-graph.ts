@@ -778,15 +778,16 @@ function parseQuantityArgument(
   endExclusive: number,
   input: string,
   offset: number,
-  options?: ParseOptions
+  options?: ParseOptions,
+  numberEndExclusive = endExclusive
 ): AdviceArgument | undefined {
-  for (let index = start; index < endExclusive; index += 1) {
+  for (let index = start; index < numberEndExclusive; index += 1) {
     const valueToken = parts[index];
     if (!valueToken) continue;
     // Reuse the same bounded qualifier lexeme as scalar/infusion HPSG.
     // The graph keeps the original source span, not an exact-dose rewrite.
     const qualified = valueToken.kind === "NUMBER" ? undefined :
-      doseComparatorNumberAt(parts, index, endExclusive, key(valueToken));
+      doseComparatorNumberAt(parts, index, numberEndExclusive, key(valueToken));
     const numberIndex = qualified?.numericIndex ?? index;
     const modifier = parts[numberIndex + 1];
     const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
@@ -795,7 +796,7 @@ function parseQuantityArgument(
     const unitMatch = qualified?.rawUnit
       ? compactUnit ? { unit: compactUnit, endExclusive: numberIndex + 1 } : undefined
       : instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
-    if (!unitMatch) continue;
+    if (!unitMatch || unitMatch.endExclusive > numberEndExclusive) continue;
     const unitToken = parts[unitMatch.endExclusive - 1];
     if (!unitToken) continue;
     const unit = unitMatch.unit;
@@ -1072,9 +1073,14 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       : undefined;
     const fallbackRole = relationHasGrammarFeature(relation, "activityFallback")
       ? AdviceArgumentRole.Activity : undefined;
-    pushArgument(args, time ?? relationDuration ?? argumentFromParts(
+    const complement = time ?? relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
-    ));
+    );
+    const accompanyingQuantity = !time && !relationDuration &&
+      relationHasGrammarFeature(relation, "accompanimentComplement")
+      ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
+          AdviceArgumentRole.Substance, options) : undefined;
+    pushArgument(args, accompanyingQuantity?.quantity ? accompanyingQuantity : complement);
   }
   return { args };
 };
@@ -1150,9 +1156,12 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let targetRelation = relation;
   let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
-    const target = argumentFromParts(
+    const nominal = argumentFromParts(
       parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
     );
+    const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
+      nominal?.role ?? AdviceArgumentRole.Destination, options);
+    const target = quantified?.quantity ? quantified : nominal;
     // Each local complement owns its relation, independently of noun role:
     // saline WITH water TO 100 mL retains both targets.
     if (target) target.relation = targetRelation;
@@ -1637,8 +1646,19 @@ function buildActionFrame(
       : segmentEnd;
   // A conditional daughter owns its own measurements and observation window.
   // They are not the preceding administration's amount or course duration.
+  // Material/destination complements own their quantities independently of
+  // the head Amount. Temporal adjuncts permit a later medication amount in
+  // flexible word order; other valences may license postdestination amounts
+  // too, e.g. Pour into a cup 5 mL.
+  const directObjectValence = !definition.argumentParser || definition.argumentParser === "default";
+  const headOwnsAmount = directObjectValence && relationHasGrammarFeature(relation, "accompanimentComplement") ||
+    (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
+      !relationHasSemanticClass(relation, "temporal");
+  const amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  // Unit meaning can depend on the full typed action context (a measured
+  // topical line and its destination), while its numeric head stays local.
   const amount = definition.acceptsAmount
-    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options)
+    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options, amountEnd)
     : undefined;
   const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
 
@@ -3765,12 +3785,10 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   };
   const adapter = getInstructionActionLocaleAdapter(locale);
   input = adapter.selectLexicalRealization?.(input) ?? input;
-  if (frame.polarity === AdvicePolarity.Negate) {
-    return adapter.renderNegated(input);
-  }
+  const negated = frame.polarity === AdvicePolarity.Negate;
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const genericRealizer = ACTION_REALIZERS[realizerKey];
-  const realized = genericRealizer
+  const realized = negated ? adapter.renderNegated(input) : genericRealizer
     ? genericRealizer(input)
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
@@ -3792,10 +3810,8 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
         translatedArgumentConcept(temporalAdjunct, locale)
       ])
     : undefined;
-  return adapter.applyPositiveModality(
-    temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized,
-    frame
-  );
+  const complete = temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized;
+  return negated ? complete : adapter.applyPositiveModality(complete, frame);
 }
 
 export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): string {

@@ -521,6 +521,24 @@ export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
 
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
+export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
+export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
+/** Typed derivation identity shared by lexical timing and phase composition. */
+export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+/** Bounded NEXT + day/daypart nominal, with an optional locale article. */
+export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit: number):
+  { headIndex: number; tokenEnd: number } | undefined {
+  const first = tokens[start];
+  if (!first || start >= limit) return undefined;
+  let cursor = start;
+  if (EVENT_ARTICLE_TOKENS.has(first.canonical ?? first.lower)) cursor++;
+  const modifier = tokens[cursor];
+  if (!modifier || !NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower)) return undefined;
+  const headIndex = cursor + 1;
+  const head = headIndex < limit ? tokens[headIndex] : undefined;
+  return head && NEXT_DAY_HEADS.has(head.canonical ?? head.lower)
+    ? { headIndex, tokenEnd: headIndex + 1 } : undefined;
+}
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
 /** Disjunction is alternative administration, never conjunctive dose sharing.

@@ -591,9 +591,7 @@ describe("round 25 live rate and wire boundary regressions", () => {
     row.doseAndRate![0].rateRange = { low: { value: 10, unit: "mL/h" }, high: { value: 15, unit: "mL/h" } };
     for (const text of [formatSig(row, "long", { locale: "en" }),
       fromFhirDosage(row, { locale: "en" }).longText]) {
-      expect(text).toContain("10");
-      expect(text).toContain("15");
-      expect(text).toContain("mL/h");
+      expect(text).toMatch(/(?<![\d.])10–15 mL\/h(?![\w/])/u);
       expect(text).not.toContain("at 5 mL/h");
     }
     expect(row.text).toBe("Infuse at 5 mL/h");

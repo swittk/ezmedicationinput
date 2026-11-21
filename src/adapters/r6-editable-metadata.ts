@@ -6,7 +6,7 @@
  */
 import type {
   FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
-  FhirR6DosageSafety, FhirR6DosageStep, FhirR6Ratio,
+  FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio,
 } from "../types";
 import { equalStructuredValues } from "../stable-structure";
 import { quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
@@ -122,10 +122,77 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
   } catch { return undefined; }
 }
 
+/** A live edit to lifted safety also owns the active scoped modifier. Keep
+ * qualifiers attached to surviving limits, never to a superseded snapshot. */
+function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
+  if (!safety?.modifierExtension?.length) return;
+  const current = safety.doseLimit ?? [];
+  let modifiers: FhirExtension[] | undefined;
+  let retired: FhirExtension[] | undefined;
+  for (let index = 0; index < safety.modifierExtension.length; index++) {
+    const marker = safety.modifierExtension[index];
+    let replacement = marker;
+    if (marker.url === R6_SCOPED_SAFETY_MODIFIER_URL) {
+      const saved = decodeR6SourceMetadata(marker, "safety") as {
+        course?: FhirR6DosageSafety; step?: FhirR6DosageSafety;
+      } | undefined;
+      if (saved) {
+        const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
+        const combinedAction = stepAction && stepAction !== courseAction
+          ? courseAction ? courseAction + "\n" + stepAction : stepAction : courseAction;
+        const reconcile = (policy: FhirR6DosageSafety | undefined) => {
+          if (!policy) return policy;
+          let changed = false;
+          const limits: FhirR6DoseLimit[] = [];
+          for (const limit of policy.doseLimit ?? []) {
+            // Exact unchanged values are unambiguous without IDs. An external
+            // ID keeps its policy association when its live value is edited.
+            const unchanged = current.find(value => equalStructuredValues(value, limit));
+            if (unchanged) { limits.push(unchanged); continue; }
+            changed = true;
+            if (limit.id) {
+              const matches = current.filter(value => value.id === limit.id);
+              if (matches.length === 1) limits.push(matches[0]);
+            }
+          }
+          const action = policy.ifExceeded;
+          const keepAction = action === undefined || safety.ifExceeded === action ||
+            safety.ifExceeded === combinedAction;
+          if (!changed && keepAction) return policy;
+          const next = { ...policy };
+          if (limits.length) next.doseLimit = limits;
+          else delete next.doseLimit;
+          if (!keepAction) delete next.ifExceeded;
+          return next;
+        };
+        const course = reconcile(saved.course), step = reconcile(saved.step);
+        if (course !== saved.course || step !== saved.step) {
+          const generated = encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
+            { ...saved, course, step }, "safety");
+          replacement = { ...marker, extension: marker.extension?.map(child => {
+            if ((child.url !== "course" && child.url !== "step") ||
+                (child.url === "course" && course === saved.course) ||
+                (child.url === "step" && step === saved.step)) return child;
+            const updated = generated.extension?.find(value => value.url === child.url);
+            return updated ? { ...child, ...updated } : child;
+          }) };
+          (retired ??= []).push(marker);
+        }
+      }
+    }
+    if (replacement !== marker && !modifiers) modifiers = safety.modifierExtension.slice(0, index);
+    modifiers?.push(replacement);
+  }
+  if (modifiers) safety.modifierExtension = modifiers;
+  if (retired?.length) safety.extension = [...(safety.extension ?? []),
+    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired }];
+}
+
 export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
   const step = output.step?.length === 1 ? output.step[0] : undefined;
   const policy = step?.safety;
   if (!policy) {
+    reconcileScopedSafety(output.safety);
     if (output.extension?.some(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL))
       retireSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL);
     return;

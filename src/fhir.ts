@@ -184,9 +184,16 @@ export function projectCourseDurationRange(range: FhirRange): { range: FhirRange
   const factor = lowUnit && highUnit && (lowUnit === highUnit ? 1 :
     elapsed[lowUnit] && elapsed[highUnit] ? elapsed[lowUnit]! / elapsed[highUnit]! : undefined);
   const projected: FhirRange = { ...metadata, high };
-  if (factor !== undefined && low.value !== undefined) projected.low = {
-    ...low, value: low.value * factor, unit: high.unit, system: high.system, code: high.code,
-  };
+  if (factor !== undefined && low.value !== undefined) {
+    projected.low = {
+      ...low, value: low.value * factor, unit: high.unit, system: high.system, code: high.code,
+    };
+    // Primitive annotations describe their authored unit/code, retained below.
+    // They cannot label a replacement unit as though it were the original.
+    if (low.unit !== high.unit) delete projected.low._unit;
+    if (low.code !== high.code || low.system !== high.system) delete projected.low._code;
+    if (low.system !== high.system) delete projected.low._system;
+  }
   const children: FhirExtension[] = [
     { url: "low", valueQuantity: low }, { url: "high", valueQuantity: high },
   ];

@@ -10,6 +10,7 @@ import type {
   CanonicalRange,
   CanonicalExpression,
   CanonicalDoseLimit,
+  CanonicalSafety,
   RegimenPosition,
 } from "./course";
 import { measureOperator as getQuantityComparator, compareRegimenPositions } from "./course";
@@ -263,7 +264,8 @@ function boundaryEventText(
   boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
 ): string | undefined {
   if (!boundary || boundary.anchor === "treatment-start") return undefined;
-  const event = boundary.contextCode?.text ?? boundary.contextCode?.coding?.[0]?.display ??
+  const event = boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
+    : boundary.contextCode?.text ?? boundary.contextCode?.coding?.[0]?.display ??
     boundary.contextReference?.display ?? boundary.contextReference?.reference ??
     boundary.contextDefinition ?? boundary.contextPath;
   const quantity = boundary.displacement;
@@ -430,6 +432,10 @@ function appendDoseLimits(
   return text ? joinGeneratedClauses([text, rendered]) : rendered;
 }
 
+function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
+  return Boolean(safety?.limits?.length || safety?.ifExceeded?.trim());
+}
+
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
 function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
@@ -439,7 +445,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
-      a.limits?.length || a.safety || a.choice || a.phaseOrigin || a.phaseStart || a.anchoredLength ||
+      a.limits?.length || safetyHasClinicalFacts(a.safety) || a.choice || a.phaseOrigin || a.phaseStart || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
   const timing = a.schedule;
   if (timing?.explicitEvents?.length || timing?.code) return true;
@@ -454,9 +460,9 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
     !!r.startOffset || !!r.endOffset);
 }
 function courseHasClinicalFacts(course: CanonicalCourse): boolean {
-  if (course.cycleInterval || course.cycleCount !== undefined || course.safety) return true;
+  if (course.cycleInterval || course.cycleCount !== undefined || safetyHasClinicalFacts(course.safety)) return true;
   for (const stage of course.stages) {
-    if (stage.start || stage.end || stage.count !== undefined || stage.safety) return true;
+    if (stage.start || stage.end || stage.count !== undefined || safetyHasClinicalFacts(stage.safety)) return true;
     for (const a of stage.administrations) if (administrationHasClinicalFacts(a)) return true;
   }
   return false;
@@ -836,7 +842,7 @@ export function formatCanonicalCourse(
         }
         const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
         let memberTiming = component.phaseStart
-          ? words.reviewTiming(component.phaseStart.description ?? boundaryEventText(component.phaseStart, words))
+          ? words.reviewTiming(boundaryEventText(component.phaseStart, words) ?? component.phaseStart.description)
           : undefined;
         const origin = component.phaseOrigin;
         if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
@@ -890,21 +896,27 @@ export function formatCanonicalCourse(
         } else {
           const startRange = treatmentBoundaryRangeText(step.start, words);
           const endRange = treatmentBoundaryRangeText(step.end, words);
+          const point = (q: CanonicalMeasure | undefined) => q
+            ? q.value === 0 && !getQuantityComparator(q) ? words.treatmentStart
+              : words.afterTreatmentStart(formatCourseTimeQuantity(q, words))
+            : undefined;
           if ((startRange || !step.start || startQuantity) &&
               (endRange || !step.end || endQuantity) && (startRange || endRange)) {
-            const point = (q: CanonicalMeasure | undefined) => q
-              ? q.value === 0 && !getQuantityComparator(q) ? words.treatmentStart
-                : words.afterTreatmentStart(formatCourseTimeQuantity(q, words))
-              : undefined;
             timing = words.calendarWindow(startRange ?? point(startQuantity), endRange ?? point(endQuantity));
           } else {
-            const source = [
-              step.start?.description ?? startRange ?? boundaryEventText(step.start, words) ??
-                (startQuantity ? formatCalendarStepWindow(startQuantity, undefined, words) : undefined),
-              step.end?.description ?? endRange ?? boundaryEventText(step.end, words) ??
-                (endQuantity ? formatCalendarStepWindow(undefined, endQuantity, words) : undefined)
-            ].filter((value): value is string => Boolean(value?.trim())).join("; ");
-            timing = words.reviewTiming(source || undefined);
+            // Current structured bounds own the window. Descriptive source is
+            // a fallback, and each side is a point rather than an open window.
+            const start = startRange ?? boundaryEventText(step.start, words) ??
+              point(startQuantity) ?? step.start?.description;
+            const end = endRange ?? boundaryEventText(step.end, words) ??
+              point(endQuantity) ?? step.end?.description;
+            const contextualStart = index > 0 && step.start?.anchor === "previous-phase-next-day";
+            const contextualEnd = index > 0 && step.end?.anchor === "previous-phase-next-day";
+            const window = words.calendarWindow(start, end);
+            timing = (contextualStart || contextualEnd) &&
+              (!step.start || startQuantity || startRange || contextualStart) &&
+              (!step.end || endQuantity || endRange || contextualEnd)
+              ? window : words.reviewTiming(window || undefined);
           }
         }
       } else if (endDays !== undefined && startDays !== undefined) {

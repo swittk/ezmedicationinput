@@ -24,10 +24,12 @@ interface FreshDosePart {
 interface FreshDoseProof {
   length: number;
   text?: string;
+  defaulted?: boolean;
   quantity?: FreshDosePart;
   low?: FreshDosePart;
   high?: FreshDosePart;
   timing?: ReturnType<typeof captureSourceReplayTiming>;
+  maxima?: ReturnType<typeof captureSourceReplayMaxima>;
   rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
     numerator?: FreshDosePart; denominator?: FreshDosePart };
 }
@@ -49,15 +51,17 @@ function sameDosePart(
     part.code === live.code && part.system === live.system &&
     part.comparator === getQuantityComparator(live);
 }
-function captureFreshDose(dosage: FhirDosage): void {
+function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
   const first = dosage.doseAndRate?.[0];
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     length: dosage.doseAndRate?.length ?? 0,
     text: dosage.text,
+    defaulted,
     quantity: captureDosePart(first?.doseQuantity),
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
     timing: captureSourceReplayTiming(dosage.timing),
+    maxima: captureSourceReplayMaxima(dosage),
     rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
       quantity: captureDosePart(first.rateQuantity),
       low: captureDosePart(first.rateRange?.low),
@@ -79,7 +83,8 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
     sameDosePart(original.rate?.high, first?.rateRange?.high) &&
     sameDosePart(original.rate?.numerator, first?.rateRatio?.numerator) &&
     sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
-    matchesSourceReplayTiming(dosage.timing, original.timing);
+    matchesSourceReplayTiming(dosage.timing, original.timing) &&
+    matchesSourceReplayMaxima(dosage, original.maxima);
 }
 
 /** Source edits are separate from clinical edits: replacement clinician text
@@ -91,7 +96,9 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const textChanged = fresh ? fresh.text !== dosage.text
     : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
-  if (fresh && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio) return false;
+  if (fresh && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
+      !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+    return false;
   return (fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage)) === false;
 }
 
@@ -106,7 +113,7 @@ function markOriginalGraphSource(
 ): void {
   if (!clause.instructionGraph || (options?.realizationMode !== "roundtrip" && clause.dose)) return;
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
-  const verified = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  const verified = fresh && !fresh.defaulted ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   clause.sourceProjectionVerified = verified;
   if (clause.dose) clause.dose.sourceDoseVerified = verified;
 }
@@ -136,7 +143,8 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
-  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming, getDosageSourceTextAgreement,
+  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
+  captureSourceReplayMaxima, matchesSourceReplayMaxima, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
@@ -1271,8 +1279,11 @@ export function formatSigBatch(
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
-  if((batch.fhirNext.step?.length??0)>1||batch.fhirNext.repeatCycle||batch.fhirNext.safety)return style==="short"?batch.shortText:batch.longText;
-  for(const step of batch.fhirNext.step??[])if(step.start||step.end||step.count!==undefined||step.safety)
+  const steps=batch.fhirNext.step;
+  if(steps&&steps.length>1)return style==="short"?batch.shortText:batch.longText;
+  if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
+    return style==="short"?batch.shortText:batch.longText;
+  for(const step of steps??[])if(step.start||step.end||step.count!==undefined||step.safety)
     return style==="short"?batch.shortText:batch.longText;
   const text:string[]=[];
   const members=batch.meta.canonical.course?.stages[0]?.administrations;
@@ -1759,11 +1770,10 @@ function buildParseResult(
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
-  // Capture the live source projection for authored graph rows, including
-  // dose-less actions whose clock can later be edited on the external row.
-  // Inferred defaults have no authored amount to protect from later removal.
-  if (clause.instructionGraph && !clause.dose?.defaulted)
-    captureFreshDose(fhir);
+  // Every emitted external item is editable, including an initially
+  // uncapped ordinary row that later gains a maximum. Capture its small live
+  // projection once; defaulted amounts still do not prove graph authorship.
+  captureFreshDose(fhir, clause.dose?.defaulted === true);
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];

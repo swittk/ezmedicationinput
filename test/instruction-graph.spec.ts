@@ -2617,7 +2617,8 @@ describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
       doseAndRate: [{ ...entry, doseQuantity: { ...entry.doseQuantity, value: 2 } }]
     };
     const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
-    expect(text).toMatch(/(?:2|สอง)/u);
+    expect(text).toMatch(/(?:2|สอง)\s*หยด/u);
+    expect(text).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
     expect(text).not.toBe(source);
     expect(entry.doseQuantity.value).toBe(1);
   });
@@ -2633,7 +2634,8 @@ describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
     dose.value=2;
     const changed=show();
     expect(changed).not.toBe(source);
-    expect(changed).toMatch(/(?:2|สอง)/u);
+    expect(changed).toMatch(/(?:2|สอง)\s*หยด/u);
+    expect(changed).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
     dose.value=1;
     expect(show()).toBe(source);
   });
@@ -2671,5 +2673,44 @@ describe("PR14 new review: amountless authored source with a later canonical dos
   it("does not treat an empty dose object as an authored administered quantity",()=>{
     const clause=parsePublicSig("Mix with water then swallow").meta.canonical.clauses[0];
     expect(instructionGraphSourceConflictsWithDose({...clause,dose:{}})).toBe(false);
+  });
+});
+
+
+describe("round 27: action heads and complements keep separate quantities", () => {
+  it("composes the typed event adjunct after a negated action in both locales", () => {
+    const frame = parseInstructionActions("Do not mix with milk before each dose")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Time)).toMatchObject({
+      conceptId: "each-dose", relation: AdviceRelation.Before
+    });
+    const en = realizeInstructionAction(frame, "en");
+    const th = realizeInstructionAction(frame, "th");
+    expect(en).toMatch(/^Do not mix.*milk before each dose$/u);
+    expect(th).toContain("ห้ามผสม");
+    expect(th).toContain("ก่อนการให้ยาแต่ละครั้ง");
+    expect(en.match(/before each dose/gu)).toHaveLength(1);
+    expect(th.match(/ก่อนการให้ยาแต่ละครั้ง/gu)).toHaveLength(1);
+  });
+  it.each(["Swallow whole with 200 mL water", "Take with 200 mL water", "Drink with 200 mL water"])(
+    "retains accompaniment quantity without promoting it to a medication dose: %s", source => {
+      const frame = parseInstructionActions(source)[0];
+      expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+      expect(frame.args.some(arg => arg.text.includes("200 mL water"))).toBe(true);
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose?.value).toBeUndefined();
+      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    });
+  it("keeps destination quantity separate while retaining licensed leading and postdestination amounts", () => {
+    const onlyDestination = parseInstructionActions("Dilute to 10 mL")[0];
+    expect(onlyDestination.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+    expect(realizeInstructionAction(onlyDestination, "en")).toBe("Dilute to 10 mL");
+    const diluted = parseInstructionActions("Dilute 1 mL to 10 mL")[0];
+    expect(diluted.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 1, unit: "mL" });
+    expect(realizeInstructionAction(diluted, "en")).toBe("Dilute 1 mL to 10 mL");
+    const swallowed = parseInstructionActions("Swallow 1 tablet with 200 mL water")[0];
+    expect(swallowed.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 1, unit: "tab" });
+    const poured = parseInstructionActions("Pour into the cup 5 mL")[0];
+    expect(poured.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 5, unit: "mL" });
+    expect(realizeInstructionAction(poured, "en")).toBe("Pour 5 mL into the cup");
   });
 });

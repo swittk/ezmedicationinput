@@ -5,6 +5,7 @@ import {
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { shiftCanonicalSigClauses } from "../src/ir";
+import { courseFromPartialParallel } from "../src/canonical/compile";
 import { parseClauseState } from "../src/parser";
 import {
   buildCanonicalParallelRegimen
@@ -831,4 +832,50 @@ describe("concurrent independent treatment sequences", () => {
     expect(asyncResult.course).toEqual(normal.course);
     expect(asyncResult.warnings).toEqual(normal.warnings);
   });
+});
+
+
+describe("round 27: partial parallel authored onset", () => {
+  it("uses an explicit day-35 onset and derives its own end from that onset", () => {
+    const source = "1 drop OD QID x4wk then 1 drop OD BID x1wk; 1 drop OS QID then 1 drop OS BID";
+    const plan = createBoundaryPlan(source);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    // Typed construction fixture: the right-eye second phase carries an
+    // authored treatment-relative onset; the other track has no cutover.
+    states[1].primaryClause.schedule!.treatmentStartOffsetDays = 35;
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+    expect(regimen.kind).toBe("unresolved");
+    if (regimen.kind !== "unresolved") throw new Error("Expected partial independent tracks");
+    const phases = regimen.tracks![0].phases;
+    expect(phases[0].start).toEqual({ unit: "d", value: 0 });
+    expect(phases[0].end).toEqual({ unit: "d", value: 28 });
+    expect(phases[1].start).toEqual({ unit: "d", value: 35 });
+    expect(phases[1].end).toEqual({ unit: "d", value: 42 });
+    expect(phases[1].members[0].clause.schedule?.treatmentStartOffsetDays).toBe(35);
+    const course = courseFromPartialParallel(regimen, plan.segments.map(segment => segment.text), source);
+    const right = course.stages[0].administrations.filter(member => member.target?.text === "right eye");
+    expect(right[1].phaseOrigin).toMatchObject({ value: 35, code: "d" });
+    const track = { kind: "course" as const, stages: [{ administrations: right }] };
+    const late = { ...options("2026-11-16T00:00:00+07:00", 2) };
+    expect(nextDueDoses(track, late)).toEqual([
+      "2026-11-23T08:00:00+07:00", "2026-11-23T20:00:00+07:00"
+    ]);
+    expect(calculateTotalUnits({ ...late, dosage: track, durationValue: 7, durationUnit: "d" }).totalUnits).toBe(0);
+  });
+});
+
+
+it("round 27: resolves next-day onset against a typed nonzero phase origin", () => {
+  const source = "Take 1 tablet at 22:00 then 2 tablets at 06:00 the next morning then 3 tablets at 07:00 the following morning";
+  const plan = createBoundaryPlan(source);
+  const states = plan.segments.map(segment => parseClauseState(segment.text));
+  const graph = buildRegimenGraph(plan, plan.segments);
+  states[0].primaryClause.schedule!.treatmentStartOffsetDays = 4;
+  scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+  expect(states.map(state => state.primaryClause.schedule?.treatmentStartOffsetDays)).toEqual([4, 5, 6]);
+  expect(states.map(state => state.primaryClause.schedule?.timeOfDay)).toEqual([
+    ["22:00:00"], ["06:00:00"], ["07:00:00"]
+  ]);
 });

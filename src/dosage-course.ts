@@ -1,5 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL } from "./fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -405,12 +405,58 @@ export function getDosageExcludedDates(dosage: FhirDosage | EzDosage): string[] 
     .map(child => child.valueDate!))].sort();
 }
 
+/** Calendar values own only their typed children. Unchanged external wrappers
+ * retain their exact annotations; removed values remain inactive source. */
+function setCalendarRestriction(
+  dosage: FhirDosage, url: string, kind: "date" | "day", values: readonly string[]
+): void {
+  const field = kind === "date" ? "modifierExtension" : "extension";
+  const extensions = dosage[field];
+  const index = extensions?.findIndex(item => item.url === url) ?? -1;
+  const previous = index >= 0 ? extensions![index] : undefined;
+  // New markers have no source annotations to reconcile.
+  if (!previous) {
+    if (!values.length) return;
+    if (kind === "date") {
+      const marker = { url, extension: values.map(valueDate => ({ url: "date", valueDate })) };
+      dosage.modifierExtension = extensions?.length ? [...extensions, marker] : [marker];
+    } else {
+      const marker = { url, extension: values.map(valueCode => ({ url: "day", valueCode })) };
+      dosage.extension = extensions?.length ? [...extensions, marker] : [marker];
+    }
+    return;
+  }
+  const valueKey = kind === "date" ? "valueDate" : "valueCode";
+  const read = (child: FhirExtension) => child.url === kind && typeof child[valueKey] === "string" &&
+    (kind !== "date" || /^\d{4}-\d{2}-\d{2}$/.test(child[valueKey]!)) ? child[valueKey] : undefined;
+  const current = new Set<string>();
+  for (const child of previous?.extension ?? []) {
+    const value = read(child);
+    if (value !== undefined) current.add(value);
+  }
+  if (current.size === values.length && values.every(value => current.has(value))) return;
+  const wanted = new Set(values);
+  const children: FhirExtension[] = [];
+  let removed = false;
+  for (const child of previous?.extension ?? []) {
+    const value = read(child);
+    if (value === undefined || wanted.has(value)) children.push(child);
+    else removed = true;
+  }
+  for (const value of values)
+    if (!current.has(value)) children.push({ url: kind, [valueKey]: value });
+  const next = extensions ? extensions.slice() : [];
+  const marker = values.length ? { ...previous, url, extension: children } : undefined;
+  if (index < 0) { if (marker) next.push(marker); }
+  else next.splice(index, 1, ...(marker ? [marker] : []));
+  dosage[field] = next.length ? next : undefined;
+  if (previous && removed) dosage.extension = [...(dosage.extension ?? []),
+    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [previous] }];
+}
+
 export function setDosageExcludedDates(dosage: FhirDosage, dates: string[]): void {
-  const values = [...new Set(dates)].sort();
-  replacementExtensions(dosage, DOSAGE_EXCLUDED_DATES_R5_URL, values.length ? {
-    url: DOSAGE_EXCLUDED_DATES_R5_URL,
-    extension: values.map(valueDate => ({ url: "date", valueDate }))
-  } : undefined);
+  setCalendarRestriction(dosage, DOSAGE_EXCLUDED_DATES_R5_URL, "date",
+    dates.length < 2 ? dates : [...new Set(dates)].sort());
 }
 
 export function getDosageExcludedWeekdays(dosage: FhirDosage): FhirDayOfWeek[] {
@@ -421,11 +467,8 @@ export function getDosageExcludedWeekdays(dosage: FhirDosage): FhirDayOfWeek[] {
 }
 
 export function setDosageExcludedWeekdays(dosage: FhirDosage, days: FhirDayOfWeek[]): void {
-  const remaining = (dosage.extension ?? []).filter(value => value.url !== DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
-  dosage.extension = days.length
-    ? [...remaining, { url: DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
-      extension: days.map(valueCode => ({ url: "day", valueCode })) }]
-    : remaining.length ? remaining : undefined;
+  setCalendarRestriction(dosage, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL, "day",
+    days.length < 2 ? days : [...new Set(days)]);
 }
 
 function describe(condition: MedicationCondition): string {
@@ -734,10 +777,26 @@ export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] 
     const row:EzDosage=Object.assign({},input);
     if(predicate)row.condition=[conditionToR6(predicate)];
     if(safety){
+      // These two external editing owners and their saved baseline must not
+      // share mutable Quantity objects. Copy only lifted quantities, including
+      // their annotations; ordinary rows and internal native paths do no work.
+      const retainedLimits: FhirR6DoseLimit[] = [];
+      for (const limit of safety.doseLimit ?? []) {
+        const retained = { ...limit };
+        if (limit.valueQuantity) {
+          retained.valueQuantity = cloneStructuredValue(limit.valueQuantity);
+          limit.valueQuantity = cloneStructuredValue(limit.valueQuantity);
+        }
+        if (limit.period) {
+          retained.period = cloneStructuredValue(limit.period);
+          limit.period = cloneStructuredValue(limit.period);
+        }
+        retainedLimits.push(retained);
+      }
       row.safety=safety;
       row.extension=[...(input.extension??[]).filter(item=>item.url!==R5_LIFTED_SAFETY_SOURCE_URL),{
         url:R5_LIFTED_SAFETY_SOURCE_URL,
-        extension:encodeR5RetainedFields({component:{safety},baseline:{
+        extension:encodeR5RetainedFields({component:{safety:{...safety,doseLimit:retainedLimits}},baseline:{
           safety:compactProjectionFingerprint(safety)
         }})
       }];
@@ -1095,10 +1154,10 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
  * quantity qualifier participates: a later clock or rate-unit edit on a
  * previously formatted R5 row cannot replay an old HPSG-owned instruction.
  *
- * The externally supplied object/provenance graph is immutable by caller
- * contract. Mutating an internal nested graph extension in place is a caller
- * footgun; adding deep defensive rescans to every format invocation would
- * violate the project's throughput contract.
+ * Only the opaque retained source/provenance graph is immutable by caller
+ * contract. Live external dosage, timing and maximum fields remain editable
+ * and are observed explicitly. Rewalking the retained graph on every preview
+ * would violate the project's throughput contract.
  */
 interface SourceMeasureObservation {
   original: FhirQuantity;
@@ -1119,10 +1178,16 @@ interface SourceDoseObservation {
   ratioNumerator?: SourceMeasureObservation;
   ratioDenominator?: SourceMeasureObservation;
 }
+interface SourceMaximaObservation {
+  periods?: Array<{ original: FhirRatio; numerator?: SourceMeasureObservation; denominator?: SourceMeasureObservation }>;
+  administration?: SourceMeasureObservation;
+  lifetime?: SourceMeasureObservation;
+}
 interface SourceReplayProof {
   matches: boolean;
   top: Array<[string, unknown]>;
   amounts: SourceDoseObservation[];
+  maxima?: SourceMaximaObservation;
   timing?: SourceTimingObservation;
 }
 interface SourceTimingObservation {
@@ -1136,6 +1201,7 @@ interface SourceTimingObservation {
   monthDays?: number[];
   weekdayOrdinal?: number;
   clockWindow?: { start?: string; end?: string; endInclusive?: boolean };
+  occurrenceCap?: { max?: number; period?: SourceMeasureObservation };
   events?: string[];
   clocks?: string[];
   weekdays?: FhirDayOfWeek[];
@@ -1190,6 +1256,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let monthDays: number[] | undefined, weekdayOrdinal: number | undefined;
   let clockWindow: SourceTimingObservation["clockWindow"];
+  let occurrenceCap: SourceTimingObservation["occurrenceCap"];
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1198,6 +1265,16 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined)
       (monthDays ??= []).push(extension.valuePositiveInt);
     else if (extension.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL) weekdayOrdinal ??= extension.valueInteger;
+    else if (extension.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL && !occurrenceCap) {
+      occurrenceCap = {};
+      let maxSeen = false, periodSeen = false;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "max" && !maxSeen) { occurrenceCap.max = part.valueInteger; maxSeen = true; }
+        else if (part.url === "period" && !periodSeen) {
+          occurrenceCap.period = capturedReplayMeasure(part.valueQuantity); periodSeen = true;
+        }
+      }
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindow) {
       clockWindow = {};
       for (const part of extension.extension ?? []) {
@@ -1212,7 +1289,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
-    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow,
+    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, occurrenceCap,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1247,7 +1324,7 @@ export function matchesSourceReplayTiming(
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let monthDayIndex = 0, weekdayOrdinal: number | undefined;
-  let clockWindowSeen = false;
+  let clockWindowSeen = false, occurrenceCapSeen = false;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1256,6 +1333,17 @@ export function matchesSourceReplayTiming(
     else if (extension.url === TIMING_DAY_OF_MONTH_EXTENSION_URL && extension.valuePositiveInt !== undefined) {
       if (extension.valuePositiveInt !== proof.monthDays?.[monthDayIndex++]) return false;
     } else if (extension.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL) weekdayOrdinal ??= extension.valueInteger;
+    else if (extension.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL && !occurrenceCapSeen) {
+      occurrenceCapSeen = true;
+      if (!proof.occurrenceCap) return false;
+      let max: number | undefined, period: FhirQuantity | undefined;
+      let maxSeen = false, periodSeen = false;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "max" && !maxSeen) { max = part.valueInteger; maxSeen = true; }
+        else if (part.url === "period" && !periodSeen) { period = part.valueQuantity; periodSeen = true; }
+      }
+      if (max !== proof.occurrenceCap.max || !unchangedReplayMeasure(period, proof.occurrenceCap.period)) return false;
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindowSeen) {
       clockWindowSeen = true;
       if (!proof.clockWindow) return false;
@@ -1269,7 +1357,8 @@ export function matchesSourceReplayTiming(
           endInclusive !== proof.clockWindow.endInclusive) return false;
     }
   }
-  if (weekdayOrdinal !== proof.weekdayOrdinal || clockWindowSeen !== Boolean(proof.clockWindow)) return false;
+  if (weekdayOrdinal !== proof.weekdayOrdinal || clockWindowSeen !== Boolean(proof.clockWindow) ||
+      occurrenceCapSeen !== Boolean(proof.occurrenceCap)) return false;
   if (monthDayIndex !== (proof.monthDays?.length ?? 0)) return false;
   if (offsetExact !== proof.offsetExact || offsetMin !== proof.offsetMin || offsetMax !== proof.offsetMax) return false;
   return repeat === proof.repeat && repeat?.extension === prior?.extension &&
@@ -1287,6 +1376,35 @@ export function matchesSourceReplayTiming(
     unchangedReplayMeasure(repeat?.boundsRange?.low, proof.boundsLow) &&
     unchangedReplayMeasure(repeat?.boundsRange?.high, proof.boundsHigh) &&
     repeat?.boundsPeriod?.start === proof.boundsStart && repeat?.boundsPeriod?.end === proof.boundsEnd;
+}
+/** Fresh parser items and saved R5 rows share the same maximum ownership.
+ * Only live clinical quantities are observed; cap-free rows allocate nothing. */
+export function captureSourceReplayMaxima(dosage: FhirDosage): SourceMaximaObservation | undefined {
+  if (!dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+    return undefined;
+  return {
+    periods: dosage.maxDosePerPeriod?.map(original => ({
+      original, numerator: capturedReplayMeasure(original.numerator),
+      denominator: capturedReplayMeasure(original.denominator),
+    })),
+    administration: capturedReplayMeasure(dosage.maxDosePerAdministration),
+    lifetime: capturedReplayMeasure(dosage.maxDosePerLifetime),
+  };
+}
+export function matchesSourceReplayMaxima(
+  dosage: FhirDosage, maxima: SourceMaximaObservation | undefined
+): boolean {
+  if (!maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+    return true;
+  const periods = dosage.maxDosePerPeriod, saved = maxima?.periods;
+  if ((periods?.length ?? 0) !== (saved?.length ?? 0)) return false;
+  for (let index = 0; index < (saved?.length ?? 0); index++) {
+    const current = periods![index], prior = saved![index];
+    if (current !== prior.original || !unchangedReplayMeasure(current.numerator, prior.numerator) ||
+        !unchangedReplayMeasure(current.denominator, prior.denominator)) return false;
+  }
+  return unchangedReplayMeasure(dosage.maxDosePerAdministration, maxima?.administration) &&
+    unchangedReplayMeasure(dosage.maxDosePerLifetime, maxima?.lifetime);
 }
 function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): SourceReplayProof {
   const raw = dosage as Record<string, unknown>;
@@ -1306,7 +1424,8 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
       ratioDenominator: capturedReplayMeasure(original.rateRatio?.denominator),
     });
   }
-  return { matches, top, amounts, timing: captureSourceReplayTiming(dosage.timing) };
+  return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
+    timing: captureSourceReplayTiming(dosage.timing) };
 }
 function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplayProof): boolean {
   const raw = dosage as Record<string, unknown>;
@@ -1330,7 +1449,8 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
       !unchangedReplayMeasure(row.rateRatio?.denominator, prior.ratioDenominator)
     ) return false;
   }
-  return matchesSourceReplayTiming(dosage.timing, proof.timing);
+  return matchesSourceReplayMaxima(dosage, proof.maxima) &&
+    matchesSourceReplayTiming(dosage.timing, proof.timing);
 }
 
 /** Source text can be retained without claiming it agrees with current
@@ -1562,7 +1682,7 @@ export function fromDosageDetails(details: FhirR6DosageInstructionInput): {
  * intermediate representation for the other. */
 export function toFhirR5Dosages(input:FhirR6DosageInstructionInput|readonly(FhirDosage|EzDosage)[],
   metadata?:EzCourseMetadata):FhirDosage[] {
-  const native=Array.isArray(input)?courseFromR5(input,metadata?.renderedInstruction,metadata)
+  const native=Array.isArray(input)?courseFromR5(input,undefined,metadata)
     :courseFromR6(input as FhirR6DosageInstructionInput);
   return projectNativeR5Course(native).dosages;
 }
@@ -1884,11 +2004,14 @@ export function retainedDoseRateMatches(
   // Unchanged projected lists retain conventional ordering for anonymous
   // duplicate entries. Once numeric slots change, an unmatched keyed entry
   // has no proven association; keep its expression inert instead of guessing.
+  // One anonymous source slot is unambiguous when its rate changes or it
+  // receives its first Element.id; an existing source ID must still match. Each
+  // individual dose/rate choice still passes its own edit reconciliation.
   if (source.length === live.length) {
     for (let i = 0; i < live.length; i++) {
       if (matches.has(i) || used.has(i) ||
-          source[i]?.id || live[i]?.id ||
-          oldProjectionKeys?.[i] !== undefined && (!unchangedProjectionOrder || oldProjectionKeys[i] !== liveProjectionKeys?.[i]) ||
+          source[i]?.id || source.length > 1 && live[i]?.id ||
+          source.length > 1 && oldProjectionKeys?.[i] !== undefined && (!unchangedProjectionOrder || oldProjectionKeys[i] !== liveProjectionKeys?.[i]) ||
           !equalStructuredValues(source[i]?.type, live[i]?.type)) continue;
       matches.set(i, i);
       used.add(i);

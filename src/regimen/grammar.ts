@@ -82,7 +82,8 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
  * amount and comparator. Independent action heads require an explicit unit. */
 const hasContinuationDoseUnit = (f: BoundaryFacts): boolean =>
   f.explicitRightUnit || f.site.kind === 'sequence' && !f.right.method &&
-    f.right.hasDose && !f.right.clause.dose?.unit && Boolean(f.left.clause.dose?.unit);
+    f.right.hasDose && !f.right.clause.dose?.unit &&
+    (Boolean(f.left.clause.dose?.unit) || f.inheritedAdministration && f.left.hasDose && !f.left.method);
 
 const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),

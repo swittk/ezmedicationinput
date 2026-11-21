@@ -1553,7 +1553,7 @@ describe("source-less R6 treatment-relative step display", () => {
       }]
     };
     expect(formatSig(course, "long", { locale: "en" }))
-      .toContain("two days after dialysis");
+      .toContain("2 days after dialysis");
     expect(formatSig(course, "long", { locale: "en" }))
       .not.toContain("from day 3");
   });
@@ -2778,6 +2778,11 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }
     };
     const parsed = parseSig("1 drop OD q2h for 1 week then qid for 1 month");
+    expect(parsed.fhirNext.step).toHaveLength(2);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(1);
+    expect(parsed.fhirNext.step[1].component).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component[0].timing?.repeat).toMatchObject({ period: 2, periodUnit: "h" });
+    expect(parsed.fhirNext.step[1].component[0].timing?.repeat).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
     assertWireKeys(parsed.fhirNext, permitted("DosageInstruction", "DosageInstruction"));
     for (const step of parsed.fhirNext.step) {
       assertWireKeys(step, permitted("DosageInstruction", "DosageInstruction.step"));
@@ -6459,6 +6464,88 @@ describe("review 26 scoped safety and cycle controls", () => {
       expect(formatSig(input, "long", { locale: "en" })).toContain("Repeat this schedule every 3 days for 4 cycles");
       expect(formatSig(input, "long", { locale: "en" })).toContain("for 2 cycles");
       expect(input.step![0].count).toBe(2);
+    }
+  });
+});
+
+describe("review 27 external editing and batch course semantics", () => {
+  it("keeps a standalone whole-course count in both batch styles", () => {
+    const batch = fromFhir({
+      modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }],
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }]
+    });
+    expect(batch.fhirNext.step).toHaveLength(1);
+    expect(batch.fhirNext.repeatCycle).toBeUndefined();
+    expect(batch.meta.canonical.course?.cycleCount).toBe(3);
+    expect(batch.longText).toContain("3 cycles");
+    expect(formatParseBatch(batch, "long", " | ")).toBe(batch.longText);
+    expect(formatParseBatch(batch, "short", " | ")).toBe(batch.shortText);
+    const ordinary = parseSig("1 tablet morning and 2 tablets evening");
+    expect(formatParseBatch(ordinary, "long", " | "))
+      .toBe(ordinary.items.map(item => item.longText).join(" | "));
+  });
+
+  it.each(["rate", "first-id", "both"] as const)("keeps an anonymous dose expression active after %s R5 edits across three saves", edit => {
+    const expression = { id: "dose-calculation", language: "text/fhirpath", expression: "%patient.weight * 2",
+      extension: [{ url: "urn:test:calculation", valueString: "retain" }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{
+      doseExpression: expression, rateQuantity: { value: 5, unit: "mL/h" }
+    }] }] }] };
+    let rows = toFhirR5Dosages(input);
+    if (edit !== "first-id") rows[0].doseAndRate![0].rateQuantity!.value = 10;
+    if (edit !== "rate") rows[0].doseAndRate![0].id = "new-slot-id";
+    for (let save = 0; save < 3; save++) {
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+      expect(reopened.step[0].component[0].doseAndRate).toHaveLength(1);
+      expect(reopened.step[0].component[0].doseAndRate![0]).toMatchObject({
+        doseExpression: expression, rateQuantity: { value: edit === "first-id" ? 5 : 10, unit: "mL/h" },
+        ...(edit !== "rate" ? { id: "new-slot-id" } : {})
+      });
+      rows = toFhirR5Dosages(reopened);
+    }
+  });
+
+  it.each([false, true])("keeps repeating-course dose edits and actual header replacement=%s across three saves", replaceText => {
+    const original = "Take 1 tablet daily for 2 days; repeat every 7 days";
+    const replacement = "Use 2 tablets according to the updated weekly plan.";
+    const input: FhirR6DosageInstruction = { renderedInstruction: original,
+      repeatCycle: { value: 7, unit: "d", code: "d" },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          boundsDuration: { value: 2, unit: "d", code: "d" } } } }] }] };
+    let editable = fromDosageDetails(input);
+    editable.dosages[0].doseAndRate![0].doseQuantity!.value = 2;
+    if (replaceText) editable.course.renderedInstruction = replacement;
+    for (let save = 0; save < 3; save++) {
+      const rows = toFhirR5Dosages(editable.dosages, editable.course);
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+      expect(reopened.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
+      const preview = formatSig(reopened, "long", { realizationMode: "roundtrip" });
+      if (replaceText) expect(reopened.renderedInstruction).toBe(replacement);
+      expect(preview).toContain("2 tablets");
+      expect(preview).not.toContain("1 tablet");
+      editable = fromDosageDetails(reopened);
+    }
+  });
+
+  it.each(["period", "administration", "lifetime"] as const)("owns independent lifted and retained %s safety quantities", scope => {
+    const quantity = { value: 4, unit: "tab", id: "original-maximum",
+      extension: [{ url: "urn:test:maximum-note", valueString: "keep" }] };
+    const raw: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      ...(scope === "period" ? { maxDosePerPeriod: [{ numerator: quantity, denominator: { value: 1, unit: "d" } }] }
+        : scope === "administration" ? { maxDosePerAdministration: quantity } : { maxDosePerLifetime: quantity }) };
+    for (const edit of ["safety", "r5", "both"] as const) {
+      const row = structuredClone(toEzDosages([raw])[0]);
+      const lifted = row.safety!.doseLimit![0].valueQuantity!;
+      const maximum = scope === "period" ? row.maxDosePerPeriod![0].numerator!
+        : scope === "administration" ? row.maxDosePerAdministration! : row.maxDosePerLifetime!;
+      if (edit !== "r5") lifted.value = 3;
+      if (edit !== "safety") maximum.value = 2;
+      const marker = row.extension!.find(e => e.url.endsWith("r5-lifted-safety-source"))!;
+      expect(decodeR5RetainedFields(marker).component?.safety?.doseLimit?.[0].valueQuantity?.value).toBe(4);
+      const actual = toDosageDetails([row]).step[0].component[0].safety!.doseLimit![0];
+      expect(actual.valueQuantity).toMatchObject({ value: edit === "r5" ? 2 : 3,
+        unit: "tab", id: "original-maximum", extension: quantity.extension });
     }
   });
 });

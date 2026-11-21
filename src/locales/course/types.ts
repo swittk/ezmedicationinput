@@ -19,6 +19,7 @@ export interface CourseLanguage {
   readonly rateRangeLabel: string;
   readonly unspecified: string;
   readonly treatmentStart: string;
+  readonly nextDayAfterPreviousPhase: string;
   readonly incompleteInterpretation: string;
   readonly retainedStructure: string;
   readonly maxAdministrationLabel: string;

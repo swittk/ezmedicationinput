@@ -199,26 +199,15 @@ export function resolveSigLocalization(
       ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
 
-  if (base?.formatShort) {
-    result.formatShort = base.formatShort;
-  }
-  if (base?.formatLong) {
-    result.formatLong = base.formatLong;
-  }
-
-  if (inherited?.formatShort) {
-    result.formatShort = inherited.formatShort;
-  }
-  if (inherited?.formatLong) {
-    result.formatLong = inherited.formatLong;
-  }
-
-  if (config?.formatShort !== undefined) {
-    result.formatShort = config.formatShort;
-  }
-  if (config?.formatLong !== undefined) {
-    result.formatLong = config.formatLong;
-  }
+  // Select each winning facet once, then preserve the receiver that owns it.
+  // Only configured compositions allocate bindings; the registered fast path
+  // above still returns the original object.
+  const shortOwner = config.formatShort !== undefined ? config
+    : inherited?.formatShort ? inherited : base;
+  const longOwner = config.formatLong !== undefined ? config
+    : inherited?.formatLong ? inherited : base;
+  if (shortOwner?.formatShort) result.formatShort = shortOwner.formatShort.bind(shortOwner);
+  if (longOwner?.formatLong) result.formatLong = longOwner.formatLong.bind(longOwner);
 
   if (!result.formatShort && !result.formatLong && !result.course) {
     return base ?? inherited ?? result;

@@ -5,6 +5,7 @@ export interface FhirCoding {
   /** Terminology edition used to define this code. */
   version?: string;
   code?: string;
+  _code?: FhirPrimitiveElement;
   display?: string;
   extension?: FhirExtension[];
   _display?: FhirPrimitiveElement;
@@ -12,6 +13,7 @@ export interface FhirCoding {
 }
 
 export interface FhirCodeableConcept {
+  id?: string;
   coding?: FhirCoding[];
   text?: string;
   extension?: FhirExtension[];
@@ -1747,6 +1749,9 @@ export interface CanonicalScheduleExpr {
   timingReference?: "previous" | "previous-weekday-complement";
   /** Source-relative phase onset, in elapsed days from treatment start. */
   treatmentStartOffsetDays?: number;
+  /** Phase onset resolved from the preceding phase's completion at execution,
+   * not from a guessed count-to-treatment-day conversion. */
+  phaseStartReference?: "previous-phase-next-day";
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
   administrationOffsetMinutes?: number;
   timingCode?: string;

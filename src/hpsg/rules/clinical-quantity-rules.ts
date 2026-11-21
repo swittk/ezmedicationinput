@@ -312,20 +312,26 @@ function activeDoseInCarrierOverTime(
     /^(?:iv|intravenously)$/u.test(normalizeTokenLower(routeToken)));
   if (markedIV) cursor++;
   const overToken = context.tokens[cursor];
-  const durationToken = context.tokens[cursor + 1];
-  const durationUnitToken = context.tokens[cursor + 2];
-  if (!overToken || !durationToken || !durationUnitToken ||
-      !available(context, cursor + 2) ||
+  const durationStart = cursor + 1;
+  const durationToken = context.tokens[durationStart];
+  if (!overToken || !durationToken || !available(context, durationStart) ||
       !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
-  const durationValue = clinicalDurationNumber(durationToken);
-  const durationUnit = timeUnit(normalizeTokenLower(durationUnitToken));
-  if (durationValue === undefined || !durationUnit) return undefined;
+  const qualifiedDuration = durationToken.kind === LexKind.Number ? undefined :
+    doseComparatorNumberAt(context.tokens, durationStart, context.limit, normalizeTokenLower(durationToken));
+  const durationUnitIndex = (qualifiedDuration?.numericIndex ?? durationStart) + 1;
+  const durationUnitToken = context.tokens[durationUnitIndex];
+  const durationValue = qualifiedDuration?.value ?? clinicalDurationNumber(durationToken);
+  const durationUnit = qualifiedDuration?.rawUnit ? timeUnit(qualifiedDuration.rawUnit) :
+    durationUnitToken && available(context, durationUnitIndex) ? timeUnit(normalizeTokenLower(durationUnitToken)) : undefined;
+  if (durationValue === undefined || durationValue <= 0 || !durationUnit) return undefined;
+  const durationEnd = durationUnitIndex + (qualifiedDuration?.rawUnit ? 0 : 1);
+  const durationQualifier = qualifiedDuration ? { comparator: qualifiedDuration.comparator } : {};
 
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
     status: "resolved",
     numerator: carrier,
-    denominators: [{ value: durationValue, unit: durationUnit, dimension: "time" }],
+    denominators: [{ value: durationValue, unit: durationUnit, dimension: "time", ...durationQualifier }],
     projectedDose: { value, unit: activeDose.unit },
     rateNumerator: { value: carrier.value, unit: carrier.unit,
       ...(carrier.comparator ? { comparator: carrier.comparator } : {}) },
@@ -339,16 +345,16 @@ function activeDoseInCarrierOverTime(
         end: context.tokens[materialEnd - 1].sourceEnd
       }
     } } : {}),
-    administrationDuration: { value: durationValue, unit: durationUnit }
+    administrationDuration: { value: durationValue, unit: durationUnit, ...durationQualifier }
   };
   return clinicalSign(
     context,
     "hpsg.lex.clinicalQuantity.activeDoseInCarrierOverTime",
-    Array.from({ length: cursor + 3 - start }, (_, offset) => start + offset),
+    Array.from({ length: durationEnd - start }, (_, offset) => start + offset),
     clinicalQuantity,
     clinicalQuantity.projectedDose,
     { sourceRanges: [{
-      start: overToken.sourceStart, end: durationUnitToken.sourceEnd
+      start: overToken.sourceStart, end: context.tokens[durationEnd - 1].sourceEnd
     }] },
     undefined,
     markedIV ? RouteCode["Intravenous route"] : undefined
@@ -636,12 +642,13 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
 }
 
 function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgSign[] {
-  const additive = additiveFractionDose(context, start);
-  if (additive) return [additive];
-  const division = dividedDoseCountSign(context, start);
-  if (division) return [division];
   const token = context.tokens[start];
   if (!token || !available(context, start)) return [];
+  // The complete numeric daughter owns its suffix. Its fraction cannot start
+  // another competing rate after the full expression was licensed.
+  if (context.clinicalCache.rateTokenIndices?.has(token.index)) return [];
+  const division = dividedDoseCountSign(context, start);
+  if (division) return [division];
   let phraseStart = start;
   let quantityToken = token;
   const lower = token.kind === LexKind.Number ? "" : normalizeTokenLower(token);
@@ -660,17 +667,22 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
         doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
     }
   }
-  const exactNumber = qualified ? undefined : quantityToken.kind === LexKind.Number
-    ? quantityToken.value : DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
-  const exactMillion = exactNumber !== undefined
+  const exactNumber = qualified ? undefined : doseNumberValue(quantityToken) ??
+    DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
+  const exactMixed = exactNumber !== undefined
+    ? additiveDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
+  const exactMillion = !exactMixed && exactNumber !== undefined
     ? millionDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
-  const numericStart = qualified?.numericIndex ?? exactMillion?.numericIndex ?? phraseStart;
+  const numericStart = qualified?.numericIndex ?? exactMixed?.numericIndex ?? exactMillion?.numericIndex ?? phraseStart;
+  if (exactMixed) for (let index = phraseStart + 1; index <= numericStart; index++) {
+    if (!available(context, index)) return [];
+  }
   // The general lower-case normalizer strips leading punctuation, but a
   // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
   // trailing sentence punctuation only; never turn .1 into 1.
   const attached = !qualified && quantityToken.kind !== LexKind.Number
     ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
-  const value = qualified?.value ?? exactMillion?.value ??
+  const value = qualified?.value ?? exactMixed?.value ?? exactMillion?.value ??
     exactNumber ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
@@ -690,6 +702,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     }) : volume;
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of sign.tokens) owned.add(token.index);
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [sign]);
     return [sign];
   }
   const accepts = (candidate: string) =>
@@ -698,7 +711,12 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const expression = compactUnitExpression(
     context, numericStart + 1, accepts, unit ?? ""
   );
-  if (!expression) return [];
+  if (!expression) {
+    // Only a scalar unit can finish the additive dose construction. A per-time
+    // continuation belongs to the complete mixed numeric daughter above.
+    const additive = exactMixed ? additiveFractionDose(context, phraseStart) : undefined;
+    return additive ? [additive] : [];
+  }
   const weight = qualifyClinicalSign(context, phraseStart, numericStart,
     weightQuantity(context, numericStart, value, expression, phraseStart), comparator);
   if (weight) {
@@ -706,6 +724,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     // Publish ownership before the site fallback examines that marker.
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of weight.tokens) owned.add(token.index);
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [weight]);
     return [weight];
   }
   const rate = qualifyClinicalSign(context, phraseStart, numericStart,
@@ -713,6 +732,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (rate) {
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of rate.tokens) owned.add(token.index);
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [rate]);
   } else {
     // Unit morphology already established a per-time quantity. Without a
     // licensed rate head it remains source text; its numeric daughter must
