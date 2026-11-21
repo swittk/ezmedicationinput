@@ -20,6 +20,7 @@ import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
+import { parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
 import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
@@ -393,6 +394,16 @@ function timeArgumentFromParts(
   endExclusive: number,
   input: string
 ): AdviceArgument | undefined {
+  // The same bounded clock grammar supplies HPSG schedules and a complete
+  // temporal action daughter. Do not turn a clock into an opaque Object.
+  if (endExclusive - start <= 2) {
+    const clock = parseClockToken(parts[start], start + 1 < endExclusive ? parts[start + 1] : undefined);
+    if (clock && clock.tokens.length === endExclusive - start) return {
+      role: AdviceArgumentRole.Time,
+      text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+      normalized: clock.value
+    };
+  }
   const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
   let event: EventTiming | undefined;
   for (let index = 0; index < canonicalParts.length; index += 1) {
@@ -1687,6 +1698,11 @@ function buildActionFrame(
   const temporalIndex = parsed.tailRelationIndex ?? nextRelationIndex;
   const temporalRelation = temporalIndex === nextRelationIndex ? nextRelation
     : actionArgumentRelation(key(parts[temporalIndex]), definition.preferredRelationSemanticClasses);
+  // A multi-complement valence can discover a condition after its second
+  // destination. End the action at that boundary so the existing graph
+  // relation owner keeps the condition and its complete source span.
+  if (temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "conditionalTail"))
+    semanticEnd = Math.min(semanticEnd, temporalIndex);
   const nextTemporal = temporalIndex >= 0 &&
     relationHasSemanticClass(temporalRelation, "temporal") &&
     relationHasGrammarFeature(temporalRelation, "activityFallback")
@@ -2159,6 +2175,13 @@ function actionTailIsRegimenModifier(
   // not license this boundary.
   for (let cursor = actionStart + 1; cursor < index - 1; cursor += 1) {
     const relation = resolveActionRelationSurface(key(parts[cursor]));
+    // A complete clock daughter also ends before a separate regimen cadence.
+    // Reuse the shared clock reader within this existing local-valence walk.
+    if (!negatedAction && relationHasGrammarFeature(relation, "timeComplement") &&
+        index - cursor <= 3) {
+      const clock = parseClockToken(parts[cursor + 1], cursor + 2 < index ? parts[cursor + 2] : undefined);
+      if (clock && clock.tokens.length === index - cursor - 1) return true;
+    }
     if (!relationHasGrammarFeature(relation, "accompanimentComplement")) continue;
     const complement = argumentFromParts(parts, cursor + 1, index, input, undefined, options);
     if (complement?.role === AdviceArgumentRole.Substance && complement.conceptId) {
@@ -3638,7 +3661,9 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     (relationHasSemanticClass(targetRelation, "accompaniment") ||
       relationHasSemanticClass(targetRelation, "locative"))
     ? relationTarget : undefined;
-  const activityRelation = c.activity && relationHasGrammarFeature(c.frame.relation, "activityFallback")
+  const activityRelation = c.activity &&
+    (relationHasGrammarFeature(c.frame.relation, "activityFallback") ||
+      relationHasSemanticClass(c.frame.relation, "accompaniment"))
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   const activityPhrase = activityRelation && c.activity
@@ -3867,7 +3892,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   options?: Pick<ParseOptions, "instructionActionMap">
 ): string {
   const sourceFrame = frame;
-  frame = frameWithoutSupersededTime(frame, clause);
+  frame = frameWithCanonicalPrimaryContext(frame, clause);
   if (primaryActionAmountConflicts(frame, clause.dose,
       !clause.dose && clause.sourceProjectionVerified === false))
     frame = frameWithoutSupersededAmount(frame, clause.dose);
@@ -4243,32 +4268,46 @@ function timeArgumentCoveredBySchedule(
 
 const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
 
-/** Keep the selected primary's typed schedule authoritative in a display copy.
- * Event daughters may realize a covered event; concrete clocks are realized
- * once from the current schedule. Opaque temporal wording remains source. */
-function frameWithoutSupersededTime(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
+/** Apply the selected primary's live schedule/site in one display-only pass.
+ * A source graph clock is independent unless the wire source established
+ * structured clock ownership. Source arguments and other actions stay intact. */
+function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
   const schedule = clause.schedule;
   const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
     schedule?.offsetMax !== undefined;
   const hasClocks = Boolean(schedule?.timeOfDay?.length);
+  const ownsClocks = hasClocks || clause.sourceHasStructuredClocks === true;
+  const ownsEvents = hasOffset || Boolean(schedule?.when?.length) || clause.sourceHasStructuredEvents === true;
+  const site = clause.site;
   // Both callers have already selected the source primary. A simultaneous
-  // method edit cannot revoke its current schedule's ownership of Time slots.
-  if (clause.sourceProjectionVerified !== false && !hasOffset && !hasClocks) return frame;
+  // method edit cannot revoke its current schedule/site ownership.
+  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !site) return frame;
   const args: AdviceArgument[] = [];
   let changed = false;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
       const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
-      if (clock || KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
+      if (clock && ownsClocks || ownsEvents && KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
           (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) {
         changed = true;
         continue;
       }
     }
+    if (arg.role === AdviceArgumentRole.Site && site &&
+        (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||
+          arg.coding?.system !== site.coding?.system)) {
+      changed = true;
+      const text = site.text ?? site.coding?.display ?? site.coding?.code ?? "";
+      args.push({ ...arg, text, normalized: text, conceptId: undefined,
+        coding: site.coding, codings: site.coding ? [site.coding] : undefined,
+        i18n: site.i18n ?? site.coding?.i18n ?? codingFromSite(text)?.i18n });
+      continue;
+    }
     args.push(arg);
   }
-  // The schedule may own a clock that is absent from the graph's Time slots.
-  // Failed source proof also forbids replaying that stale raw fallback.
+  // A failed proof forbids old raw wording, even when a graph-only clock
+  // survives as an independent typed argument.
+  if (!changed && clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks) return frame;
   return { ...frame, sourceText: "", args: changed ? args : frame.args };
 }
 
@@ -4742,7 +4781,7 @@ export function realizeInstructionGraph(
     const ownsPrimary = primaryAction >= 0
       ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
     const frame = ownsPrimary && options?.omitCanonicalAdministration
-      ? frameWithoutSupersededTime(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
+      ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
     if (sourceFrame === amountOwner) displayedAmountOwner = frame;
     if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) continue;
     const frameSource = normalizedInstructionSurface(sourceFrame.sourceText);

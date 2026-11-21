@@ -5,7 +5,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
-  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
+  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition, FhirPeriodUnit,
   getDosageAlternativeChoice,
   type FhirDosage, type FhirR6DosageInstruction, type EzDosage, type FhirExtension
 } from "../src";
@@ -2561,6 +2561,30 @@ describe("rebased HPSG instruction scopes", () => {
       expect(calculateTotalUnits({ dosage, from: "2026-11-02T00:00:00Z",
         orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC", durationValue: days,
         durationUnit: "d" }).totalUnits).toBe(21);
+    }
+  });
+});
+
+
+describe("round 32 known cadence and repeat range intersection", () => {
+  const options = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    { code: "QID", repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    { code: "QID", repeat: { frequency: 5, frequencyMax: 6, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    { code: "QID", repeat: { frequency: 1, period: 8, periodMax: 12, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, period: 30, periodMax: 120, periodUnit: FhirPeriodUnit.Minute } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 12, periodMax: 24, periodUnit: FhirPeriodUnit.Hour } },
+  ])("refuses disjoint code/repeat cadence from both public execution APIs: $code $repeat", ({ code, repeat }) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code }] }, repeat } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]]) {
+      const original = JSON.stringify(dosage);
+      expect(() => nextDueDoses(dosage, { ...options, limit: 2 }))
+        .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+      expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+      expect(JSON.stringify(dosage)).toBe(original);
     }
   });
 });

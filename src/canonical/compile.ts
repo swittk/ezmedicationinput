@@ -19,7 +19,8 @@ import { getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
 import {
   ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit,
-  DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
+  DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey,
+  DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
 import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM } from "../timing-summary";
@@ -315,7 +316,8 @@ export function courseFromPartialParallel(
           if (phase.startReference)
             a.phaseStart = { anchor: phase.startReference, displacement: clinicalBoundary(phase.start).displacement };
           else a.phaseOrigin = clinicalBoundary(phase.start).displacement;
-        } else if (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart)
+        } else if (!a.schedule?.explicitEvents?.length &&
+            (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart))
           a.phaseStart = { anchor: "unresolved" };
         administrations.push(a);
       }
@@ -451,6 +453,10 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   };
   if (a.provenance?.sourceTextVerified !== undefined)
     result.sourceProjectionVerified = a.provenance.sourceTextVerified;
+  if (a.provenance?.sourceHasStructuredClocks !== undefined)
+    result.sourceHasStructuredClocks = a.provenance.sourceHasStructuredClocks;
+  if (a.provenance?.sourceHasStructuredEvents !== undefined)
+    result.sourceHasStructuredEvents = a.provenance.sourceHasStructuredEvents;
   const r=a.schedule?.recurrence;
   const length=r?.courseLength??a.anchoredLength?.quantity;
   const range=r?.courseLengthRange??a.anchoredLength?.range;
@@ -532,7 +538,14 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
   if(a.target){
     const same=a.target.text===base?.site?.text&&targetCode?.code===base?.site?.coding?.code;
     const changedCode=base?.site?.coding?.code!==targetCode?.code;
-    const text=targetCode?.code && (!a.target.text || a.provenance?.sourceTextVerified===false ||
+    // A failed whole-row source proof does not invalidate a live site's
+    // qualified text. Only an unchanged old site label or an exact known
+    // contradictory site label licenses replacing it with the coded label.
+    const textCode = a.provenance?.sourceTextVerified === false && a.target.text
+      ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(a.target.text)]?.coding : undefined;
+    const staleText = textCode?.code && targetCode?.code && textCode.code !== targetCode.code &&
+      (textCode.system ?? SNOMED_SYSTEM) === (targetCode.system ?? SNOMED_SYSTEM);
+    const text=targetCode?.code && (!a.target.text || staleText ||
       changedCode && a.target.text===base?.site?.text)
       ? getBodySiteText(targetCode) ?? a.target.text : a.target.text;
     result.site=Object.assign({},same?base?.site:undefined,{text,administrationTargetCount:a.targetCount});

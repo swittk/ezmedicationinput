@@ -685,13 +685,15 @@ function reconcileNativeCompactCourse(
     const cursors = new Map<number, number>();
     const membersBySequence = new Map<number, readonly CanonicalAdministration[]>();
     historicalStages = new Map();
-    for (const stage of restored.stages) {
-      const first = stage.administrations[0];
-      if (first) {
-        const sequence = first.stageOrdinal ?? 1;
-        membersBySequence.set(sequence, stage.administrations);
-        historicalStages.set(sequence, stage);
-      }
+    for (let index = 0; index < restored.stages.length; index++) {
+      const stage = restored.stages[index], first = stage.administrations[0];
+      // Historical reconciliation retains every source step in marker order,
+      // including empty steps. Only a live member can move beyond that range.
+      const sequence = first?.stageOrdinal ?? index + 1;
+      if (first) membersBySequence.set(sequence, stage.administrations);
+      else if (!metadata.has(sequence))
+        metadata.set(sequence, { step: stage.provenance as Omit<FhirR6DosageStep, "component">, rowIndex: -1 });
+      historicalStages.set(sequence, stage);
     }
     historicalMembers = new Map();
     for (let index = 0; index < historicalRows.length; index++) {
@@ -817,14 +819,21 @@ function reconcileNativeCompactCourse(
   // keeps the saved stages, but deleting an empty entry is a live edit; the
   // retained header and its old stepCount cannot add that stage back.
   let removedEmptySequences: Set<number> | undefined;
-  if (ownsEmptyStageMembership(editedCourse) && header?.emptyStep?.length) {
+  if (ownsEmptyStageMembership(editedCourse) && (header?.emptyStep?.length || historicalStages?.size)) {
     const liveSequences = new Set(dosages.map(dosage => dosage.sequence ?? 1));
-    for (const step of header.emptyStep) {
-      if (editedSequences.has(step.sequence) || liveSequences.has(step.sequence)) continue;
+    const remove = (step: NonNullable<EzCourseMetadata["step"]>[number]) => {
+      if (editedSequences.has(step.sequence) || liveSequences.has(step.sequence) ||
+          removedEmptySequences?.has(step.sequence)) return;
       (removedEmptySequences ??= new Set()).add(step.sequence);
       metadata.delete(step.sequence);
+      historicalStages?.delete(step.sequence);
       metadataEdited = true;
       sources.push(retainedCourseStepSource(step));
+    };
+    for (const step of header?.emptyStep ?? []) remove(step);
+    for (const [sequence, stage] of historicalStages ?? []) {
+      if (!stage.administrations.length)
+        remove({ ...r5StepMetadata(stage.provenance as Omit<FhirR6DosageStep, "component">), sequence });
     }
   }
   let instructionMarker: FhirExtension | undefined;
@@ -952,7 +961,7 @@ function reconcileNativeCompactCourse(
   // Fill only the observed stage range (including retained explicit empty
   // steps), bounded to 10,000 stages. Preserve the original marker as inert
   // provenance when a malformed index exceeds that representable limit.
-  const sequences = new Set([...groups.keys(), ...metadata.keys()]);
+  const sequences = new Set([...groups.keys(), ...metadata.keys(), ...(historicalStages?.keys() ?? [])]);
   const stageCount = Math.max(0, ...localRows.map((local) => local?.value.stepCount ?? 0));
   const observedLast = Math.max(0, ...sequences);
   const fillCount = Math.min(stageCount, observedLast, 10_000);

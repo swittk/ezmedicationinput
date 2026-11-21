@@ -84,12 +84,12 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
   // Keep decimal points inside numeric tokens (e.g. 1.5 mL, .5 tab,
-  // or a directly prefixed '~.1mcg/kg/min'). Breaking after '~' changes
+  // or a directly prefixed '~.1mcg/kg/min' / '@.5 mL/h'). Breaking the prefix changes
   // 0.1 into 1, a tenfold dose error. This is a lexical boundary, not a
   // separate clinical grammar or a whole-input repair pass.
   if (/[0-9๐-๙]/u.test(after) &&
       (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) ||
-        before === "(" || before === "~" || before === "≈" ||
+        before === "(" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
         before === "<" || before === ">" ||
         before === "=" && index >= 2 && /[<>]/u.test(input[index - 2]))) {

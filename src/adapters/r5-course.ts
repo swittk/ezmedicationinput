@@ -248,7 +248,8 @@ export function projectNativeR5Course(
   strictPreview = false,
   suppliedRows?: readonly (FhirDosage | EzDosage)[],
   deferSourceProvenance = false
-): { dosages: EzDosage[]; course: EzCourseMetadata; strictDosages?: FhirDosage[] } {
+): { dosages: EzDosage[]; course: EzCourseMetadata; strictDosages?: FhirDosage[];
+  sourceBaselines?: readonly (DosageSourceTextBaseline | undefined)[] } {
   const header = courseMetadataToWire(course);
   const sourceAgreement = course.provenance?.format !== "r6" && course.provenance?.sourceTextVerified !== false;
   let rowSources: Array<DosageSourceTextBaseline | undefined> | undefined;
@@ -321,11 +322,17 @@ export function projectNativeR5Course(
     for (const a of stage.administrations) {
       const rowIndex = rows.length;
       const originalRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
+      const sourceClocks = a.provenance?.sourceHasStructuredClocks,
+        sourceEvents = a.provenance?.sourceHasStructuredEvents;
       const originalAgreement = !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
         ? getDosageSourceTextAgreement(originalRow, false) : undefined;
-      if (!deferSourceProvenance && (originalAgreement === false || (sourceAgreement && a.provenance?.format === "r6"))) {
+      if (sourceClocks !== undefined || sourceEvents !== undefined ||
+          !deferSourceProvenance && (originalAgreement === false || sourceAgreement && a.provenance?.format === "r6")) {
         rowSources ??= [];
-        rowSources[rowIndex] = { sourceAgreement: false,
+        rowSources[rowIndex] = { sourceAgreement: originalAgreement === false ||
+          (sourceAgreement && a.provenance?.format === "r6") ? false : sourceAgreement,
+          ...(sourceClocks !== undefined ? { sourceHasStructuredClocks: sourceClocks } : {}),
+          ...(sourceEvents !== undefined ? { sourceHasStructuredEvents: sourceEvents } : {}),
           ...(originalRow ? { textFingerprint: getDosageSourceTextFingerprint(originalRow) } : {}) };
       }
       const strict: EzDosage =
@@ -421,7 +428,7 @@ export function projectNativeR5Course(
   // A caller that owns final semantic normalization writes these markers once
   // after that normalization. Standalone projections retain local authority.
   const writeProvenance = !deferSourceProvenance && hasAdministrations &&
-    (instruction !== undefined || !sourceAgreement && hasSourceText);
+    (instruction !== undefined || !sourceAgreement && hasSourceText || rowSources !== undefined);
   const dosages = writeProvenance
     ? withDosageEditProvenance(rows, instruction, sourceAgreement, rowSources) : rows;
   const strictDosages = strictRows
@@ -430,6 +437,7 @@ export function projectNativeR5Course(
   return {
     dosages,
     ...(strictPreview ? { strictDosages } : {}),
+    ...(deferSourceProvenance && rowSources ? { sourceBaselines: rowSources } : {}),
     course: {
       ...header,
       ...(course.instruction !== undefined ? { renderedInstruction: course.instruction } : {}),

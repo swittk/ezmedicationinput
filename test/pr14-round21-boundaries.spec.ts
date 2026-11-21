@@ -84,7 +84,7 @@ describe("round 21 external boundary preservation", () => {
     expect(courseToR6(reopened)).toEqual(wire);
   });
 
-  it("keeps obsolete draft source inert after a live dose edit across repeated saves", () => {
+  it("keeps a dose-edited pause, then retires it after a live boundary edit across repeated saves", () => {
     const native: CanonicalCourse = { kind: "course", stages: [
       { provenance: { id: "unmatched-draft-note" }, end: boundary, administrations: [] },
       { administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
@@ -92,6 +92,15 @@ describe("round 21 external boundary preservation", () => {
     let wire = persist(courseToR6(native));
     wire.step![0].component[0].doseAndRate![0].doseQuantity!.value = 2;
     wire = courseToR6(importCanonicalCourse(wire));
+    const doseEdited = importCanonicalCourse(wire);
+    expect(doseEdited.stages).toHaveLength(2);
+    expect(doseEdited.stages[0].end).toMatchObject(boundary);
+    expect(doseEdited.stages[1].administrations[0].amounts![0].quantity!.value).toBe(2);
+    expect(wire.step![0].start!.offsetDuration!.value).toBe(2);
+    wire = persist(wire);
+    wire.step![0].start!.offsetDuration!.value = 3;
+    wire = courseToR6(importCanonicalCourse(wire));
+    expect(wire.step![0].start!.offsetDuration!.value).toBe(3);
     expect(wire.extension?.some(e => e.url === R6_DRAFT_STEPS_SOURCE_URL)).not.toBe(true);
     expect(JSON.stringify(wire)).toContain("unmatched-draft-note");
     for (let round = 0; round < 3; round++) {
@@ -101,6 +110,7 @@ describe("round 21 external boundary preservation", () => {
       expect(JSON.stringify(saved)).toContain("unmatched-draft-note");
       expect(importCanonicalCourse(saved).stages).toHaveLength(1);
       expect(saved.step![0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
+      expect(saved.step![0].start!.offsetDuration!.value).toBe(3);
       if (round > 0) expect(saved).toEqual(wire);
       wire = saved;
     }
@@ -158,7 +168,16 @@ describe("round 21 external boundary preservation", () => {
     wire = persist(wire); // Edit the persisted external value, not a borrowed projection.
     wire.step![0].component[0].doseAndRate![0].doseQuantity!.value = 2;
     wire = courseToR6(importCanonicalCourse(persist(wire)));
+    const doseEdited = importCanonicalCourse(wire);
+    expect(doseEdited.stages).toHaveLength(2);
+    expect(doseEdited.stages[0].end).toMatchObject(boundary);
+    expect(doseEdited.stages[1].administrations[0].amounts![0].quantity!.value).toBe(2);
+    expect(courseToR6(importCanonicalCourse(persist(wire)))).toEqual(wire);
+    wire = persist(wire);
+    wire.step![0].start!.offsetDuration!.value = 3;
+    wire = courseToR6(importCanonicalCourse(wire));
     expect(importCanonicalCourse(wire).stages).toHaveLength(1);
+    expect(wire.step![0].start!.offsetDuration!.value).toBe(3);
     expect(JSON.stringify(wire)).toContain("source-marker-id");
     expect(JSON.stringify(wire)).toContain("second-source-marker");
     expect(JSON.stringify(wire)).toContain("retain-future-source");

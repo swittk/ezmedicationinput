@@ -71,9 +71,12 @@ describe("R5 edit ownership and quantity boundaries", () => {
       .toHaveLength(2);
     edit.course.step = [];
     const removed = toDosageDetails(edit.dosages, undefined, edit.course);
-    expect(importCanonicalCourse(removed).stages).toHaveLength(1);
-    expect(importCanonicalCourse(toDosageDetails(persisted(toFhirR5Dosages(removed)))).stages)
-      .toHaveLength(1);
+    for (const current of [removed, toDosageDetails(persisted(toFhirR5Dosages(removed)))]) {
+      const stages = importCanonicalCourse(current).stages;
+      expect(stages).toHaveLength(1);
+      expect(stages[0].administrations).toHaveLength(1);
+      expect(stages[0].administrations[0].amounts![0]).toMatchObject({ quantity: { value: 1, unit: "tab" } });
+    }
   });
 
   it("removes the final metadata-only carrier stage without losing its raw annotations", () => {

@@ -366,16 +366,14 @@ export function scopeSequentialPhaseSemantics(
             preceding.weekdayOrdinal === undefined && !preceding.repeatCycle &&
             !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length)
           singleClockPredecessor = prior[0];
-        contextualPredecessor = singleClockPredecessor !== undefined || priorStart === null ||
-          schedules.some(value => {
-            const days = exactPhaseDurationDays(value);
-            // Fractional days can complete on different local dates depending
-            // on the order clock. Preserve the relation instead of rounding a
-            // treatment-day number before that clock and timezone are known.
-            return value?.count !== undefined || value?.countMax !== undefined ||
-              value?.phaseStartReference === 'previous-phase-next-day' ||
-              days !== undefined && !Number.isInteger(days);
-          });
+        // Every finite duration can end within a local day. The execution
+        // owner knows its actual endpoint, order clock and timezone; grammar
+        // must preserve NEXT instead of reducing it to an elapsed offset.
+        // A fully dated predecessor already supplies its civil endpoint.
+        contextualPredecessor = !start && (singleClockPredecessor !== undefined || priorStart === null ||
+          schedules.some(value => value?.count !== undefined || value?.countMax !== undefined ||
+            value?.phaseStartReference === 'previous-phase-next-day' ||
+            value?.duration !== undefined || value?.durationUnit !== undefined));
       }
       const authoredOffset = schedule.evidence.some(item => item.rule !== NEXT_DAY_SCHEDULE_RULE &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
@@ -411,21 +409,10 @@ export function scopeSequentialPhaseSemantics(
         delete schedule.treatmentStartOffsetDays;
       } else {
         if (relativeNextDay === undefined) {
-          // A finite phase owns every authored day before its successor. The
-          // following day starts at its exclusive end, not origin + one.
-          const lengths = schedules.map(exactPhaseDurationDays);
-          if (priorStart !== null && lengths.length &&
-              lengths.every((value): value is number => value !== undefined)) {
-            relativeNextDay = priorStart + Math.max(...lengths) + phasePauseDays;
-            localNextDay = schedules.every(value => value?.phaseStartReference === "treatment-day-start");
-          } else {
-            // Calendar/uncertain course lengths keep their sequential duration
-            // owner; they cannot be replaced by a fabricated treatment day2.
-            relativeNextDay = priorStart === null ||
-              schedules.some(value => value?.duration !== undefined || value?.durationUnit !== undefined)
-              ? null : priorStart + 1;
-            localNextDay = relativeNextDay !== null;
-          }
+          // Finite and dependent predecessors were handled above. An
+          // otherwise unbounded NEXT uses the established local-day origin.
+          relativeNextDay = priorStart === null ? null : priorStart + 1;
+          localNextDay = relativeNextDay !== null;
         }
         if (relativeNextDay === null) delete schedule.treatmentStartOffsetDays;
         else {

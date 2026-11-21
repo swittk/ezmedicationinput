@@ -697,7 +697,7 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
       timing: { code: { coding: [{ code: "BID" }] }, ...(variant === "code only" ? {} : {
         repeat: { frequency: 2, ...(variant === "full" ? { period: 1, periodUnit: Unit.Day } : {}) },
       }) } };
-    if (variant === "full") {
+    if (variant !== "missing period") {
       expect(nextDueDoses(row, { ...options, limit: 2 })).toEqual([
         "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
       ]);
@@ -818,15 +818,19 @@ describe("round 25 execution boundary and history oracles", () => {
     expect(projected.kind).toBe("resolved");
     if (projected.kind !== "resolved") return;
     const terminal = projected.canonical.stages.flatMap(stage => stage.administrations)
-      .filter(member => member.schedule?.recurrence?.frequency === 2 &&
-        member.phaseOrigin?.value === 7);
+      .filter(member => member.target?.text === "right eye" &&
+        member.schedule?.recurrence?.frequency === 2 && member.phaseOrigin?.value === 7);
     expect(terminal.length).toBeGreaterThan(0);
     for (const member of terminal) expect(member.schedule?.recurrence?.courseLength).toMatchObject({ value: 1.5, unit: "d" });
     for (const rows of [projected.dosages, (projected.details.step ?? []).flatMap(step => step.component)]) {
-      const terminalRows = rows.filter(row => row.timing?.repeat?.frequency === 2 &&
-        row.timing?.repeat?.boundsDuration?.value === 1.5);
+      const terminalRows = rows.filter(row => {
+        const site = row.site;
+        const text = site && "concept" in site ? site.concept?.text : site && "text" in site ? site.text : undefined;
+        return text === "right eye" && row.timing?.repeat?.frequency === 2;
+      });
       expect(terminalRows.length).toBe(terminal.length);
-      for (const row of terminalRows) expect(row.timing?.repeat?.boundsDuration?.code).toBe("d");
+      for (const row of terminalRows)
+        expect(row.timing?.repeat?.boundsDuration).toMatchObject({ value: 1.5, code: "d" });
     }
   });
 
@@ -1833,7 +1837,9 @@ describe("round 30 execution clinical oracles", () => {
       member.schedule!.recurrence!.frequency = 2;
       member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period }];
       const input = wire(course(member), version), original = JSON.stringify(input);
-      expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(["2026-01-01T08:00:00+00:00"]);
+      const second = period.unit === "h" || period.value === 0.5 && period.unit === "d"
+        ? "2026-01-02T08:00:00+00:00" : "2026-01-05T08:00:00+00:00";
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual(["2026-01-01T08:00:00+00:00", second]);
       expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
       expect(JSON.stringify(input)).toBe(original);
     }
@@ -1893,14 +1899,14 @@ describe("round 30 execution clinical oracles", () => {
 
   it.each(versions)("uses configured QOD clocks for alternate-day due, history and supply (%s)", version => {
     const member = coded("QOD"); member.schedule!.recurrence = { frequency: 1, period: 2, periodUnit: Unit.Day, count: 2 };
-    const value = course(member), query = { ...options, frequencyDefaults: { byCode: { QOD: ["09:00"] } } };
+    const value = course(member), query = { ...options, frequencyDefaults: { byCode: { QOD: ["07:00"] } } };
     const input = wire(value, version), original = JSON.stringify(input);
     expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
-      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+      "2026-01-01T07:00:00+00:00", "2026-01-03T07:00:00+00:00",
     ]);
-    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(1);
     expect(nextDueDoses(input, { ...query, from: "2026-01-01T08:00:00Z", limit: 3 })).toEqual([
-      "2026-01-01T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+      "2026-01-03T07:00:00+00:00",
     ]);
     expect(JSON.stringify(input)).toBe(original);
     expect(nextDueDoses(input, { ...options, limit: 1, frequencyDefaults: { byCode: { QOD: ["07:00"] } } }))
@@ -1959,11 +1965,11 @@ describe("round 30 execution clinical oracles", () => {
     const member = coded("BID", "https://example.org/timing");
     member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day };
     const value = course(member), input = wire(value, version), original = JSON.stringify(input);
-    const query = { ...options, frequencyDefaults: { byCode: { BID: ["09:00"] } } };
+    const query = { ...options, frequencyDefaults: { byCode: { BID: ["07:00"] } } };
     expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
-      "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+      "2026-01-01T07:00:00+00:00", "2026-01-02T07:00:00+00:00",
     ]);
-    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 8, durationUnit: Unit.Hour }).totalUnits).toBe(1);
     expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(["2026-01-01T09:00:00+00:00"]);
     expect(JSON.stringify(input)).toBe(original);
     for (const system of [gts, undefined]) {
@@ -2180,5 +2186,188 @@ describe("round 31 execution clinical oracles", () => {
     expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(3);
     expect(JSON.stringify(input)).toBe(original);
     expect(member.schedule.recurrence).toBeUndefined();
+  });
+});
+
+
+describe("round 32 execution cause-family oracles", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const forms = (source: FhirR6DosageInstruction) => [
+    courseFromR6(source), source,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[],
+  ];
+  const daily = { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] };
+  const component = (quantity: { value: number; unit?: string }, timing = { repeat: daily }) =>
+    ({ doseAndRate: [{ doseQuantity: quantity }], timing });
+
+  it.each(["code only", "localized display", "scaled denominator"])(
+    "uses the same concentration meaning for caps and containers (%s)", variant => {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        ...component({ value: 1, unit: "mL" }, { repeat: { ...daily,
+          frequency: 2, timeOfDay: ["08:00:00", "20:00:00"] } }),
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 5, unit: "mg" },
+          period: { value: 24, code: "h", system: ucum } }] },
+      }] }] };
+      const context = { strengthRatio: {
+        numerator: { value: 5, system: ucum, code: "mg",
+          ...(variant === "localized display" ? { unit: "มิลลิกรัม" } : {}) },
+        denominator: { value: variant === "scaled denominator" ? 1000 : 1, system: ucum,
+          code: variant === "scaled denominator" ? "uL" : "mL",
+          ...(variant === "localized display" ? { unit: "มิลลิลิตร" } : {}) },
+      }, containerValue: 5, containerUnit: "mg" };
+      const original = JSON.stringify({ source, context });
+      for (const dosage of forms(source)) {
+        expect(calculateTotalUnits({ ...options, dosage, context,
+          durationValue: 1, durationUnit: Unit.Day })).toMatchObject({
+          totalUnits: 1, unit: "mL", totalContainers: 1,
+        });
+      }
+      expect(JSON.stringify({ source, context })).toBe(original);
+    });
+
+  it("uses coded concentration endpoints for approximate ingredient mass", () => {
+    const source = parseSig("1 drop OD QID").fhirNext;
+    const context = { dosageForm: "eye drops", strengthRatio: {
+      numerator: { value: 500, code: "ug", system: ucum },
+      denominator: { value: 100, code: "mL", system: ucum },
+    }, containerValue: 5, containerUnit: "mL" };
+    const original = JSON.stringify({ source, context });
+    for (const dosage of forms(source)) {
+      expect(calculateTotalUnits({ ...options, dosage, context, roundToMultiple: 300,
+        durationValue: 1, durationUnit: Unit.Day })).toMatchObject({
+        totalUnits: 300, totalApproximateQuantity: { value: 15, unit: "mL" },
+        totalApproximateIngredientQuantity: { value: 75, unit: "ug" }, totalContainers: 3,
+      });
+    }
+    expect(JSON.stringify({ source, context })).toBe(original);
+  });
+
+  it.each(["absent", "empty timing", "unknown code"])(
+    "keeps an absent scalar schedule unknown instead of counting zero (%s)", variant => {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+        ...(variant === "absent" ? {} : { timing: variant === "empty timing" ? {} :
+          { code: { coding: [{ system: "https://example.org/ward", code: "WARD" }] } } }) };
+      const source: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+      const original = JSON.stringify(source);
+      for (const dosage of [row, ...forms(source)]) {
+        expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toThrow(expect.objectContaining({ code: "timing-required" }));
+      }
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+  it("keeps executable zero windows, bare codes and explicit events distinct from missing timing", () => {
+    const exact: FhirR6DosageInstruction = { step: [{ component: [component({ value: 1, unit: "mL" })] }] };
+    for (const dosage of forms(exact))
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 8, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 0, unit: "mL" });
+    for (const timing of [
+      { code: { coding: [{ code: "BID" }] } },
+      { event: ["2026-01-01T08:00:00Z", "2026-01-01T20:00:00Z"] },
+    ]) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }], timing,
+      }] }] };
+      for (const dosage of forms(source))
+        expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: 2, unit: "mL" });
+    }
+  });
+
+  it.each([false, true])("never assigns the measured component's unit to a nonzero unitless amount (reverse %s)", reverse => {
+    const rows = [component({ value: 1 }), component({ value: 100, unit: "mg" })];
+    if (reverse) rows.reverse();
+    const source: FhirR6DosageInstruction = { step: [{ component: rows }] };
+    const original = JSON.stringify(source);
+    for (const dosage of forms(source))
+      expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+        .toThrow(expect.objectContaining({ code: "incompatible-dose-units" }));
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it("sums compatible dimensions while retaining unitless-only quantities and inactive zero members", () => {
+    for (const [quantities, expected] of [
+      [[{ value: 1 }, { value: 2 }], { totalUnits: 3 }],
+      [[{ value: 1, unit: "g" }, { value: 100, unit: "mg" }], { totalUnits: 1.1, unit: "g" }],
+      [[{ value: 0 }, { value: 100, unit: "mg" }], { totalUnits: 100, unit: "mg" }],
+      [[{ value: 100, unit: "mg" }, { value: 0 }], { totalUnits: 100, unit: "mg" }],
+      [[{ value: 0, unit: "mg" }, { value: 2 }], { totalUnits: 2 }],
+    ] as const) {
+      // A zero contribution is a positive dose whose clock lies outside this query.
+      const source: FhirR6DosageInstruction = { step: [{ component: quantities.map(quantity =>
+        quantity.value === 0 ? component({ ...quantity, value: 1 },
+          { repeat: { ...daily, timeOfDay: ["20:00:00"] } }) : component(quantity)) }] };
+      for (const dosage of forms(source)) {
+        const result = calculateTotalUnits({ ...options, dosage, durationValue: 12, durationUnit: Unit.Hour });
+        expect(result).toMatchObject(expected);
+        if (!("unit" in expected)) expect(result.unit).toBeUndefined();
+      }
+    }
+  });
+
+  it.each([[1.5, "h"], [90, "min"], [5400, "s"], [90.5, "min"], [0.5, "s"]] as const)(
+    "executes treatment-start +%s %s as an elapsed offset", (value, code) => {
+      const offsetMs = value * (code === "h" ? 3600000 : code === "min" ? 60000 : 1000);
+      const expected = new Date(Date.parse(origin) + offsetMs).toISOString().replace("Z", "+00:00").replace(".000", "");
+      const source: FhirR6DosageInstruction = { step: [{
+        start: { contextCode: { coding: [{
+          system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+        }] }, offsetDuration: { value, code, system: ucum } },
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { count: 1 } } }],
+      }] };
+      const original = JSON.stringify(source);
+      for (const dosage of forms(source)) {
+        expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([expected]);
+        expect(calculateTotalUnits({ ...options, dosage, durationValue: 3, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: 1, unit: "tab" });
+      }
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+  it("keeps conditional opportunities available while the existing supply result explains its assumption", () => {
+    const source = parseSig("1 tab daily if SBP > 160").fhirNext;
+    const original = JSON.stringify(source);
+    for (const dosage of forms(source)) {
+      const expected = ["2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"];
+      expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual(expected);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => true })).toEqual(expected);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => false })).toEqual([]);
+      expect(nextDueDoses(dosage, { ...options, limit: 2, evaluateCondition: () => undefined })).toEqual([]);
+      const maximum = calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day });
+      expect(maximum).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
+      expect(maximum.explanation).toContain("every scheduled clinical condition was assumed true");
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 2, durationUnit: Unit.Day,
+        evaluateCondition: () => false }).totalUnits).toBe(0);
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it.each([
+    { name: "empty repeat", repeat: {} },
+    { name: "frequency without period", repeat: { frequency: 2 } },
+    { name: "frequency with unmeasured period", repeat: { frequency: 2, period: 1 } },
+    { name: "multiple uses without cadence", repeat: { count: 2 } },
+  ])("keeps $name unknown through scalar and conditional counting", ({ repeat }) => {
+    for (const conditional of [false, true]) {
+      const source = parseSig(conditional ? "1 tab daily if SBP > 160" : "1 tab daily").fhirNext;
+      source.step![0].component[0].timing = { repeat };
+      const original = JSON.stringify(source);
+      for (const dosage of forms(source))
+        expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+          .toThrow(expect.objectContaining({ code: "timing-required" }));
+      expect(JSON.stringify(source)).toBe(original);
+    }
+  });
+
+  it("preserves one-time counts and measured infusion supply without recurring cadence", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ rateRatio: { numerator: { value: 50, unit: "mL" },
+        denominator: { value: 1, unit: "h", code: "h" } } }],
+      timing: { repeat: { count: 1, duration: 2, durationUnit: Unit.Hour } },
+    }] }] };
+    for (const dosage of forms(source))
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 100, unit: "mL" });
   });
 });

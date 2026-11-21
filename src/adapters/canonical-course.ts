@@ -1,4 +1,4 @@
-import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, isCompactSourceAgreementMarker } from "../dosage-course";
+import { reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceTimeOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
@@ -62,6 +62,7 @@ import {
   getDosageSourceTextFingerprint,
   dosageTextFingerprint,
   DOSAGE_RECONCILIATION_SOURCE_URL,
+  DOSAGE_RENDERED_INSTRUCTION_R5_URL,
   getDosageCondition,
   getDosageCalendarDayCondition,
   getDosageExcludedDates,
@@ -593,11 +594,12 @@ function baseAdministration(
     : undefined;
   const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
   let weekdaysMarker: FhirExtension | undefined;
-  for (const e of raw.extension ?? [])
-    if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) {
-      weekdaysMarker = e;
-      break;
-    }
+  let sourceTime: ReturnType<typeof sourceTimeOwnership>;
+  for (const e of raw.extension ?? []) {
+    if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL && !weekdaysMarker) weekdaysMarker = e;
+    else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceTime === undefined)
+      sourceTime = sourceTimeOwnership(e);
+  }
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
     amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
@@ -665,6 +667,8 @@ function baseAdministration(
   };
   // Keep sparse dependency identities off the ordinary import allocation
   // path; an object spread here emits ES6 descriptor-copy helpers per dose.
+  if (sourceTime?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceTime.clocks;
+  if (sourceTime?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceTime.events;
   if (phasePredecessors !== undefined) {
     output.sourceMember = sourceMember;
     output.phasePredecessors = phasePredecessors;
@@ -1552,6 +1556,22 @@ function administrationToWire(
       } else if (kept) kept.push(e);
     }
     if (kept) assign(output, "extension", kept.length ? kept : undefined);
+  }
+  if (target === "r6") {
+    const clocks = a.provenance?.sourceHasStructuredClocks ??
+      (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.clocks?.length) : undefined);
+    const events = a.provenance?.sourceHasStructuredEvents ??
+      (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
+    if (clocks !== undefined || events !== undefined) {
+      // Whole-text agreement is never inferred for an R6 import. Keep only
+      // the narrow primary-time evidence needed to distinguish a deletion
+      // from an independent graph clock/event after another external save.
+      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: false }];
+      if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
+      if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields }];
+    }
   }
   const sourceMaxima = projectSourceMaxima(output, target);
   // No understood safety concept is serialized through a generic bag.

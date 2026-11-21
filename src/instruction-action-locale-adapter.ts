@@ -188,7 +188,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         (withComplement || c.frame.relation === AdviceRelation.In)
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "with";
-      return `${c.label}${themeText}${substance ? ` ${materialRelation} ${amountText}${substance}` : ""}${c.time ? ` at ${c.time}` : ""}`;
+      const timeRelation = c.frame.relation && relationHasSemanticClass(c.frame.relation, "temporal")
+        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : "at";
+      return `${c.label}${themeText}${substance ? ` ${materialRelation} ${amountText}${substance}` : ""}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
     }
     case "site-relation": {
       const object = c.site ?? c.theme ?? c.container;
@@ -355,7 +357,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
           : themeText ? "กับ" : "";
       const substanceText = substance
         ? `${materialRelation}${substance}${substanceAmount ? `${amountSeparator}${substanceAmount}` : ""}` : "";
-      return `${c.label}${themeText}${substanceText}${c.time ? ` เวลา ${c.time}` : ""}`;
+      const timeRelation = c.frame.relation && relationHasSemanticClass(c.frame.relation, "temporal")
+        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : " เวลา ";
+      return `${c.label}${themeText}${substanceText}${c.time ? `${timeRelation}${c.time}` : ""}`;
     }
     case "site-relation": {
       const object = c.site ?? c.theme ?? c.container;

@@ -7,6 +7,8 @@ import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   millionDoseNumberAt,
+  compactMillionDoseNumber,
+  DOSE_FRACTION_ARTICLES,
   additiveDoseNumberAt,
   attachedNumberUnitAt,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
@@ -357,9 +359,14 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   if (!token || !available(context, start)) return undefined;
   const qualified = token.kind === LexKind.Number ? undefined :
     doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
-  const unitIndex = (qualified?.numericIndex ?? start) + 1;
-  const unitToken = context.tokens[unitIndex];
+  let unitIndex = (qualified?.numericIndex ?? start) + 1;
   const value = qualified?.value ?? clinicalDurationNumber(token);
+  // The article in "about half an hour" belongs to the fractional daughter,
+  // while an ordinary duration number still requires its immediate unit.
+  if (qualified && !qualified.rawUnit && qualified.value > 0 && qualified.value < 1 &&
+      available(context, unitIndex) &&
+      DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
+  const unitToken = context.tokens[unitIndex];
   const unit = qualified?.rawUnit ? timeUnit(qualified.rawUnit) :
     unitToken && available(context, unitIndex) ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
   if (value === undefined || !unit) return undefined;
@@ -671,7 +678,14 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
         doseComparatorNumberAt(context.tokens, phraseStart, context.limit, normalizeTokenLower(next));
     }
   }
-  const exactNumber = qualified ? undefined : doseNumberValue(quantityToken) ??
+  // Read the complete numeric head before an attached unit. A million
+  // suffix scales the number, while an attached @ only licenses a rate.
+  const attachedLower = !qualified && quantityToken.kind !== LexKind.Number
+    ? quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "") : undefined;
+  const compactMillion = attachedLower?.endsWith("m") ? compactMillionDoseNumber(attachedLower) : undefined;
+  const markedNumber = quantityToken.lower.startsWith("@") && /^@(?:\d+(?:\.\d+)?|\.\d+)$/u.test(quantityToken.lower)
+    ? Number(quantityToken.lower.slice(1)) : undefined;
+  const exactNumber = qualified ? undefined : compactMillion ?? markedNumber ?? doseNumberValue(quantityToken) ??
     DOSE_FRACTION_WORDS.get(quantityToken.canonical ?? quantityToken.lower);
   const exactMixed = exactNumber !== undefined
     ? additiveDoseNumberAt(context.tokens, phraseStart, context.limit, exactNumber) : undefined;
@@ -692,8 +706,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   // The general lower-case normalizer strips leading punctuation, but a
   // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
   // trailing sentence punctuation only; never turn .1 into 1.
-  const attached = !qualified && quantityToken.kind !== LexKind.Number
-    ? attachedNumberUnitAt(quantityToken.lower.replace(/^@|[{};]+|\.+$/gu, "")) : undefined;
+  const attached = compactMillion === undefined && attachedLower
+    ? attachedNumberUnitAt(attachedLower) : undefined;
   const value = qualified?.value ?? exactMixed?.value ?? exactMillion?.value ??
     exactFraction?.value ?? exactNumber ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact

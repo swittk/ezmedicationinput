@@ -61,8 +61,45 @@ export function retainDraftSteps(
     retireSource(output, R6_DRAFT_STEPS_SOURCE_URL);
 }
 
-/** Restore inactive editable stages only while the exported active course
- * still matches. Wire edits never acquire an old hidden stage boundary. */
+/** A pause belongs to the ordered phase boundaries, not its successor's dose.
+ * Changed anonymous stages need a unique boundary identity; position alone
+ * cannot prove which stage survived a deletion, replacement or reordering. */
+function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[], firstIsTreatmentOrigin: boolean): boolean {
+  if (!Array.isArray(saved) || active.length !== saved.length) return false;
+  // Unchanged projections need no identity index or boundary hashes. Remember
+  // the compared prefix so reconciliation never deep-walks those stages twice.
+  let firstChanged = 0;
+  while (firstChanged < saved.length && equalStructuredValues(saved[firstChanged], active[firstChanged]))
+    firstChanged++;
+  if (firstChanged === saved.length) return true;
+  const identities = new Map<string, number>();
+  const changed: string[] = [];
+  for (let index = 0; index < saved.length; index++) {
+    const prior = saved[index], current = active[index];
+    const identity = prior.id !== undefined ? "id:" + prior.id :
+      prior.start || prior.end ? "boundary:" + compactProjectionFingerprint({
+        start: prior.start, end: prior.end, count: prior.count,
+      }) : index === 0 && firstIsTreatmentOrigin ? "treatment-origin" : undefined;
+    if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
+    if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) continue;
+    if (identity === undefined || prior.id !== current.id || prior.count !== current.count ||
+        !equalStructuredValues(prior.start, current.start) ||
+        !equalStructuredValues(prior.end, current.end) ||
+        prior.component.length !== current.component.length) return false;
+    // A phase can finish through its member timing (count, duration or bounds)
+    // without an explicit step.end. Dose edits leave that declared completion.
+    for (let member = 0; member < prior.component.length; member++)
+      if (prior.component[member].id !== current.component[member].id ||
+          !equalStructuredValues(prior.component[member].timing, current.component[member].timing))
+        return false;
+    changed.push(identity);
+  }
+  for (const identity of changed) if (identities.get(identity) !== 1) return false;
+  return true;
+}
+
+/** Restore inactive editable stages while their active phase owners and
+ * boundaries still agree. Current doses and other live fields stay current. */
 export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6DosageStep[] {
   const active = input.step ?? [];
   const marker = input.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
@@ -73,7 +110,7 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
       projected: FhirR6DosageStep[];
       synthesizedStarts?: number[];
     } | undefined;
-    if (!saved || !Array.isArray(saved.drafts) || !equalStructuredValues(active, saved.projected)) return active;
+    if (!saved || !Array.isArray(saved.drafts) || !sameDraftStageOwnership(active, saved.projected, saved.drafts[0]?.index !== 0)) return active;
     const restored: FhirR6DosageStep[] = [];
     const inferred = new Set(saved.synthesizedStarts ?? []);
     let draft = 0, member = 0;
@@ -123,7 +160,6 @@ function stepOwnerFingerprint(step: FhirR6DosageStep): string {
 /** Only a matching live policy can reuse its saved scope. A later wire edit
  * replaces that authority rather than reviving an old safety instruction. */
 export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): LiftedSafety | undefined {
-  if (!input.step?.length) return undefined;
   const marker = input.extension?.find(item => item.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL);
   if (!marker) return undefined;
   try {
@@ -132,15 +168,18 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
     let owner: FhirR6DosageStep | undefined;
     if (saved.ownerId === undefined && saved.ownerFingerprint === undefined) {
       // Unidentified source records retain their existing single-step meaning.
-      if (input.step.length === 1) owner = input.step[0];
-    } else for (const candidate of input.step) {
+      if (input.step?.length === 1) owner = input.step[0];
+    } else for (const candidate of input.step ?? []) {
       const matches = saved.ownerId !== undefined ? candidate.id === saved.ownerId
         : stepOwnerFingerprint(candidate) === saved.ownerFingerprint;
       if (!matches) continue;
-      if (owner) return undefined;
+      if (owner) return saved;
       owner = candidate;
     }
-    return owner ? { ...saved, owner } : undefined;
+    // The unchanged header is still only a projection when its step vanishes.
+    // Keep the authored course policy, and retain the retired step policy in
+    // its source record; it must never be promoted into course authority.
+    return { ...saved, owner };
   } catch { return undefined; }
 }
 
@@ -179,7 +218,12 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
           // Only unmatched anonymous edits need this short clinical comparison.
           // No object serialization or opaque metadata participates in identity.
           let replacement: FhirR6DoseLimit | undefined;
-          for (const item of current) if (!claimed.has(item) && sameShape(limit, item)) {
+          for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
+              (!item.id || !sourceIds.has(item.id) &&
+                item.valueQuantity?.value === limit.valueQuantity?.value &&
+                getQuantityComparator(item.valueQuantity) === getQuantityComparator(limit.valueQuantity) &&
+                item.valueInteger === limit.valueInteger &&
+                equalStructuredValues(item.valueExpression, limit.valueExpression))) {
             if (replacement) return undefined;
             replacement = item;
           }

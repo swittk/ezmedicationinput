@@ -1689,6 +1689,7 @@ describe("adversarial compact infusion carriers and leading-decimal rates", () =
       const reopened = recovered.step[0].component[0].doseAndRate?.[0];
       expectSimpleQuantityOperator(reopened?.doseQuantity, approximateDrug ? "~" : undefined);
       expect(reopened?.rateRatio?.numerator?.comparator).toBe(approximateCarrier ? "~" : undefined);
+      expect(reopened?.rateRatio?.denominator).toMatchObject({ value: 4, unit: "h" });
       expect(reopened?.rateRatio?.denominator?.comparator).toBeUndefined();
       expect(parsed.input).toBe(input);
     }
@@ -2072,5 +2073,57 @@ describe("round31 independent and compact infusion durations", () => {
       expect(recurrence.occurrenceDurationComparator).toBe(comparator);
       expect(JSON.stringify(input)).toBe(before);
     }
+  });
+});
+
+describe("round32 complete numeric daughters in dimensional quantities", () => {
+  it.each(["Infuse 500 mL over about half an hour", "Infuse 20 mg in 500 mL saline over about half an hour",
+    "Infuse 500 mL over about 0.5 hours"])("keeps qualified fraction articles inside %s", source => {
+    const parsed = parsePublicSig(source);
+    const quantity = parsed.meta.canonical.clauses[0].clinicalQuantity!;
+    expect(quantity.denominators).toContainEqual({ value: 0.5, unit: "h", dimension: "time", comparator: "~" });
+    expect(quantity.administrationDuration).toEqual({ value: 0.5, unit: "h", comparator: "~" });
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts![0].rateRatio!.denominator).toMatchObject({ value: 0.5, unit: "h", comparator: "~" });
+      expect(administration.schedule!.recurrence).toMatchObject({
+        occurrenceDuration: 0.5, occurrenceDurationUnit: "h", occurrenceDurationComparator: "~"
+      });
+    }
+  });
+
+  it.each(["IV @100 mL/hr", "IV @ 100 mL/hr", "IV @.5 mL/hr", "IV @ .5 mL/hr"])(
+    "recognizes the exact attached or separate rate marker in %s", source => {
+      const parsed = parsePublicSig(source);
+      const value = source.includes(".5") ? 0.5 : 100;
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+        representation: "rate-quantity", numerator: { value, unit: "mL" },
+        denominators: [{ value: 1, unit: "h" }]
+      });
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+        expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value, unit: "mL/h" });
+        expect(row.route!.coding!.some(coding => coding.code === "47625008")).toBe(true);
+      }
+    });
+
+  it.each([[".5M", 500000], ["2M", 2000000], ["0.5 million", 500000]] as const)(
+    "keeps the million multiplier in the numeric head: %s", (amount, value) => {
+      const parsed = parsePublicSig("Infuse " + amount + " IU per hour");
+      expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+        representation: "rate-quantity", numerator: { value, unit: "[iU]" },
+        denominators: [{ value: 1, unit: "h" }]
+      });
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]])
+        expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value, unit: "[iU]/h" });
+    });
+
+  it("keeps an attached clock temporal and a compact million scalar dose outside the rate construction", () => {
+    const clock = parsePublicSig("Take 1 tablet @09:00");
+    expect(clock.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
+    expect(clock.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    const scalar = parsePublicSig(".5M IU IM once");
+    expect(scalar.meta.canonical.clauses[0].dose).toMatchObject({ value: 500000, unit: "IU" });
+    expect(scalar.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    expect(scalar.fhir[0].doseAndRate![0].rateQuantity).toBeUndefined();
   });
 });

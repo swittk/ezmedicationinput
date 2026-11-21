@@ -208,10 +208,11 @@ function measuredStrengthRatio(
 ): { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } } | undefined {
   const ratio = resolveContextStrengthRatio(context);
   const numerator = ratio?.numerator, denominator = ratio?.denominator;
-  return numerator?.value !== undefined && numerator.unit &&
-    denominator?.value !== undefined && denominator.unit
-    ? { numerator: { value: numerator.value, unit: numerator.unit },
-        denominator: { value: denominator.value, unit: denominator.unit } }
+  if (numerator?.value === undefined || denominator?.value === undefined) return undefined;
+  const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
+  return numeratorUnit && denominatorUnit
+    ? { numerator: { value: numerator.value, unit: numeratorUnit },
+        denominator: { value: denominator.value, unit: denominatorUnit } }
     : undefined;
 }
 function estimateIngredientQuantity(
@@ -224,44 +225,42 @@ function estimateIngredientQuantity(
   const strength = resolveContextStrengthRatio(context);
   const numerator = strength?.numerator;
   const denominator = strength?.denominator;
-  if (
-    !numerator?.unit ||
-    numerator.value === undefined ||
-    !denominator?.unit ||
-    denominator.value === undefined
-  ) {
-    return undefined;
-  }
+  if (numerator?.value === undefined || denominator?.value === undefined) return undefined;
+  const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
+  if (!numeratorUnit || !denominatorUnit) return undefined;
+  // An uncoded recognized label remains the existing estimate's display.
+  // A coded endpoint uses its actual dimension even when its display is localized.
+  const ingredientUnit = numerator.code ? numeratorUnit : numerator.unit ?? numeratorUnit;
   const quantityCategory = getUnitCategory(quantity.unit);
-  const denominatorCategory = getUnitCategory(denominator.unit);
+  const denominatorCategory = getUnitCategory(denominatorUnit);
   if (quantityCategory !== "other" && quantityCategory === denominatorCategory) {
     const quantityInDenominatorBase = quantity.value * getBaseUnitFactor(quantity.unit);
-    const denominatorInBase = denominator.value * getBaseUnitFactor(denominator.unit);
-    const numeratorInBase = numerator.value * getBaseUnitFactor(numerator.unit);
+    const denominatorInBase = denominator.value * getBaseUnitFactor(denominatorUnit);
+    const numeratorInBase = numerator.value * getBaseUnitFactor(numeratorUnit);
     if (denominatorInBase !== 0) {
       return {
         value: roundCalculatedUnits(
           (quantityInDenominatorBase * numeratorInBase) /
             denominatorInBase /
-            getBaseUnitFactor(numerator.unit)
+            getBaseUnitFactor(numeratorUnit)
         ),
-        unit: numerator.unit,
+        unit: ingredientUnit,
         confidence: quantity.confidence,
         basis: quantity.basis,
         source: quantity.source,
       };
     }
   }
-  const converted = convertValue(quantity.value, quantity.unit, numerator.unit, {
-    numerator: { value: numerator.value, unit: numerator.unit },
-    denominator: { value: denominator.value, unit: denominator.unit },
+  const converted = convertValue(quantity.value, quantity.unit, numeratorUnit, {
+    numerator: { value: numerator.value, unit: numeratorUnit },
+    denominator: { value: denominator.value, unit: denominatorUnit },
   });
   if (converted === null) {
     return undefined;
   }
   return {
     value: roundCalculatedUnits(converted),
-    unit: numerator.unit,
+    unit: ingredientUnit,
     confidence: quantity.confidence,
     basis: quantity.basis,
     source: quantity.source,
@@ -1049,17 +1048,22 @@ function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): bo
   const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
   return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
 }
-/** A known code and an exact complete repeat describe the same recurrence.
- * Contradictory external facts have no unique executable cadence. */
+/** A known code and a complete repeat must have an overlapping cadence.
+ * A disjoint frequency/period range cannot make contradictory facts executable. */
 function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void {
   const repeat = timing?.recurrence;
   if (!timing?.code || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
     return;
   const daily = standardTimingCodeFrequency(executionTimingCoding(timing), true);
-  if (daily === undefined ||
-      (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
-      (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) return;
-  if (matchesDailyCodeCadence(daily, repeat)) return;
+  if (daily === undefined) return;
+  if ((repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
+      (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period)) {
+    const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
+    // Calendar months/years have no fixed elapsed duration. Existing range
+    // interpretation stays intact when these units cannot prove disjointness.
+    if (!seconds || daily * (repeat.periodMax ?? repeat.period) * seconds >= repeat.frequency * 86400 &&
+        daily * repeat.period * seconds <= (repeat.frequencyMax ?? repeat.frequency) * 86400) return;
+  } else if (matchesDailyCodeCadence(daily, repeat)) return;
   throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
     "The timing code conflicts with the complete repeat recurrence. Resolve the conflicting schedule before scheduling or calculating supply.");
 }
@@ -2007,8 +2011,9 @@ function treatmentRelativeInstant(
     !knownAnchor ||
     getQuantityComparator(duration) ||
     quantity === undefined ||
-    !Number.isInteger(quantity) ||
-    quantity < 0
+    !Number.isFinite(quantity) ||
+    quantity < 0 ||
+    (unit !== "s" && unit !== "min" && unit !== "h" && !Number.isInteger(quantity))
   ) {
     throw new Error("Unsupported R6 step RelativeTime: requires a treatment-start offset");
   }
@@ -4346,6 +4351,9 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     );
   }
   if (!timing || !repeat) {
+    if ((options as PhaseCountOptions).quantityEstimation)
+      throw new MedicationQuantityCalculationError("timing-required",
+        "The dosage has no executable frequency or dosing time for supply calculation.");
     return [];
   }
   if (courseEnd && from >= courseEnd) {
@@ -4608,6 +4616,11 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     }
     return results.slice(0, effectiveLimit);
   }
+  // Candidate-only scheduling may remain empty when cadence is incomplete.
+  // Numeric supply must distinguish that unknown plan from an executed zero.
+  if ((options as PhaseCountOptions).quantityEstimation)
+    throw new MedicationQuantityCalculationError("timing-required",
+      "The dosage has no executable frequency or dosing time for supply calculation.");
   return [];
 }
 function derivePriorCountFromHistory(
@@ -5354,7 +5367,9 @@ function countScheduleEvents(
 ): number {
   const timing = dosage.schedule;
   const repeat = codedExecutionRecurrence(timing, config);
-  if (!timing || !repeat) return 0;
+  if (!timing || !repeat)
+    throw new MedicationQuantityCalculationError("timing-required",
+      "The dosage has no executable frequency or dosing time for supply calculation.");
   const normalizedCount = repeatOccurrenceCap(repeat);
   if (normalizedCount === 0) {
     return 0;
@@ -5554,8 +5569,10 @@ function countScheduleEvents(
       currentDay = addLocalDays(currentDay, 1, timeZone);
       iterations += 1;
     }
+    return count;
   }
-  return count;
+  throw new MedicationQuantityCalculationError("timing-required",
+    "The dosage has no executable frequency or dosing time for supply calculation.");
 }
 /** Supply math is deterministic only when the administered amount is known.
  * Clinical conditions/PRN are represented as a maximum permitted supply,
@@ -5991,6 +6008,9 @@ function sumCourseUnits(
     if (quantity === 0) {
       zeroUnit ??= unit;
     } else {
+      if (hasQuantity && (commonUnit === undefined) !== (unit === undefined))
+        throw new MedicationQuantityCalculationError("incompatible-dose-units",
+          "Cannot sum medication supply with both a nonzero unitless amount and a measured quantity.");
       hasQuantity = true;
       if (commonUnit !== undefined && unit !== undefined && commonUnit.toLowerCase() !== unit.toLowerCase()) {
         const translated = convertValue(
@@ -6294,6 +6314,12 @@ function calculateTotalUnitsSingle(
     frequencyDefaults,
   };
   const repeat = dosage.schedule?.recurrence;
+  // Maximum-supply preparation has already realized executable bare codes.
+  // Missing cadence is unknown, including conditional/capped scalar paths;
+  // an explicit event list or already accepted event count still owns a plan.
+  if (!repeat && !dosage.schedule?.explicitEvents?.length && acceptedEventCount === undefined)
+    throw new MedicationQuantityCalculationError("timing-required",
+      "The dosage has no executable frequency or dosing time for supply calculation.");
   const capacityCap = unscheduledOccurrenceCapacity(dosage);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
   const boundsStart = boundsPeriod.start;

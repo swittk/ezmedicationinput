@@ -266,9 +266,14 @@ function boundaryEventText(
   boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
 ): string | undefined {
   if (!boundary || boundary.anchor === "treatment-start") return undefined;
+  let context = boundary.contextCode?.text?.trim();
+  if (!context) for (const coding of boundary.contextCode?.coding ?? []) {
+    const display = coding.display?.trim();
+    if (display) { context = display; break; }
+  }
   const event = boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
-    : boundary.contextCode?.text ?? boundary.contextCode?.coding?.[0]?.display ??
+    : context ??
     boundary.contextReference?.display ?? boundary.contextReference?.reference ??
     boundary.contextDefinition ?? boundary.contextPath;
   const quantity = boundary.displacement;
@@ -457,7 +462,8 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
  * that can replace an authored instruction with a generated preview. */
 function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
   for (const amount of a.amounts ?? [])
-    if (amount.quantity || amount.range || amount.expression || amount.rate ||
+    if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
+        amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
         amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction ||

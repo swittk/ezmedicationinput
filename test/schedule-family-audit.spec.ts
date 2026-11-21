@@ -3287,8 +3287,8 @@ describe("PR14 round 29 execution semantics", () => {
       safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 2, unit: "drop" },
         period: { value: 24, unit: "h", code: "h" } }] }
     }] }] };
-    expect(courseFromR6(course).stages[0].administrations[0].targetCount).toBe(2);
     const original = JSON.stringify(course);
+    expect(courseFromR6(course).stages[0].administrations[0].targetCount).toBe(2);
     for (const dosage of representations(course)) {
       expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([
         "2027-01-01T08:00:00+00:00", "2027-01-02T08:00:00+00:00", "2027-01-03T08:00:00+00:00",

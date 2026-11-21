@@ -426,7 +426,8 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     ? frequencyMax !== undefined && frequencyMax !== frequency
       ? `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times `
       : frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency)} times `
-    : "";
+    : rangedPeriod && frequencyMax !== undefined
+      ? `up to ${stripTrailingZero(frequencyMax)} times ` : "";
 
   if (
     frequency !== undefined &&
@@ -1901,25 +1902,40 @@ export function formatCanonicalClause(
 ): string {
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
-    const sourceQualifier = cycle.sourceText.trim();
+    const retainedQualifier = cycle.sourceText.trim();
+    const sourceQualifier = clause.sourceProjectionVerified === false ? "" : retainedQualifier;
     const alreadyRealized = style === "long" && sourceQualifier &&
       clause.additionalInstructions?.some(instruction => instruction.text?.trim() === sourceQualifier);
     if (!alreadyRealized) {
-      // The known modifier is the authority after a textless FHIR import.
-      // Realize its retained qualifier without interpreting or executing it.
+      // Current typed cycle fields own display after a source disagreement.
+      // Keep their old wording in source, including a duplicate advice entry,
+      // but do not replay that entry alongside the edited cycle.
       const rendered = formatCanonicalClause({ ...clause,
+        additionalInstructions: clause.sourceProjectionVerified === false && retainedQualifier
+          ? clause.additionalInstructions?.filter(instruction => instruction.text?.trim() !== retainedQualifier)
+          : clause.additionalInstructions,
         schedule: { ...clause.schedule, cycleDayConstraint: undefined }
       }, style, localization, options);
-      const thai = localization?.locale.startsWith("th");
-      const details = [
-        ...(cycle.days.length ? [thai ? `วันที่ในรอบ ${cycle.days.join(", ")}` : `cycle days ${cycle.days.join(", ")}`] : []),
-        ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
-        ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
-        ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
-      ];
-      const qualifier = sourceQualifier ||
-        (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
-        (details.length ? ` (${details.join("; ")})` : "");
+      let qualifier = sourceQualifier;
+      if (!qualifier) {
+        let days = "";
+        for (let index = 0; index < cycle.days.length;) {
+          const first = cycle.days[index++];
+          let last = first;
+          while (index < cycle.days.length && cycle.days[index] === last + 1)
+            last = cycle.days[index++];
+          days += (days ? ", " : "") + first + (last === first ? "" : "-" + last);
+        }
+        const thai = localization?.locale.startsWith("th");
+        const details = [
+          ...(days ? [thai ? `วันที่ในรอบ ${days}` : `cycle days ${days}`] : []),
+          ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
+          ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
+          ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
+        ];
+        qualifier = (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
+          (details.length ? ` (${details.join("; ")})` : "");
+      }
       return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
     }
   }

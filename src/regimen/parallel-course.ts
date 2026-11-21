@@ -192,8 +192,9 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
 function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): RegimenPosition | null | undefined {
   let value: number | undefined;
   for (const member of members) {
-    const onset = member.clause.schedule?.treatmentStartOffsetDays;
-    if (onset === undefined) continue;
+    const schedule = member.clause.schedule;
+    const onset = schedule?.treatmentStartOffsetDays;
+    if (onset === undefined || schedule?.phaseStartReference === "previous-phase-next-day") continue;
     if (value !== undefined && value !== onset) return null;
     value = onset;
   }
@@ -215,10 +216,11 @@ function partialParallelRegimen(
     let atReference: CanonicalParallelPhase["startReference"];
     for (let index = 0; index < source.length; index++) {
       const phase = source[index];
-      let hasAuthoredDayStart = false, hasAuthoredElapsedStart = false;
+      let hasAuthoredDayStart = false, hasAuthoredElapsedStart = false, hasDependentStart = false;
       let members = phase.members.map(member => {
         const clause = clauses[member], schedule = clause.schedule;
-        if (schedule?.treatmentStartOffsetDays !== undefined) {
+        if (schedule?.phaseStartReference === "previous-phase-next-day") hasDependentStart = true;
+        else if (schedule?.treatmentStartOffsetDays !== undefined) {
           if (schedule.phaseStartReference === "treatment-day-start") hasAuthoredDayStart = true;
           else hasAuthoredElapsedStart = true;
         }
@@ -235,8 +237,10 @@ function partialParallelRegimen(
         const duration = durationPosition(item.clause);
         return duration && compareRegimenPositions(duration, first) === 0;
       });
-      const authoredStart = authoredPhaseStart(members);
-      const hasAuthoredStart = hasAuthoredDayStart || hasAuthoredElapsedStart;
+      // A pause after a predecessor has no fixed treatment origin. It cannot
+      // supply an absolute end for this phase or its unanchored successor.
+      const authoredStart = hasDependentStart ? undefined : authoredPhaseStart(members);
+      const hasAuthoredStart = hasAuthoredDayStart || hasAuthoredElapsedStart || hasDependentStart;
       const start: RegimenPosition | undefined = calendar ? undefined
         : authoredStart ?? (hasAuthoredStart ? undefined : at);
       const startReference = authoredStart
@@ -309,9 +313,9 @@ export function buildCanonicalParallelRegimen(
     let calendarBounded = false;
     for (const members of sourcePhases) {
       for (const item of members) {
-        // Civil treatment days cannot share elapsed-time global cuts. Keep
-        // the existing track representation and each member's typed anchor.
-        if (item.clause.schedule?.phaseStartReference === "treatment-day-start")
+        // Civil days and predecessor-dependent onsets cannot share elapsed
+        // global cuts. Keep each member's typed origin in its own track.
+        if (item.clause.schedule?.phaseStartReference)
           return partialParallelRegimen(trackPhases, clauses, "parallel-regimen-local-day-origin");
         allMembers.push(item);
         calendarBounded ||= Boolean(item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);

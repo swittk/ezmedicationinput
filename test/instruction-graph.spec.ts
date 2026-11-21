@@ -2,6 +2,7 @@ import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type Medi
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
+import { withDosageEditProvenance, getDosageSourceTimeOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
 } from "../src/instruction-graph";
@@ -2271,6 +2272,10 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
           }
         }
         expect(long).toContain(String(amount));
+        if (source === "Take 1 tablet, then drink 5 mL") {
+          expect(long).toMatch(locale === "en" ? /Take 3 mL/u : /(?:รับประทาน|ใช้ยา) 3 มิลลิลิตร/u);
+          expect(long).toContain(locale === "en" ? "5 mL" : "5 มิลลิลิตร");
+        }
       }
       expect(JSON.stringify(graph)).toBe(saved);
       // An independent mixing Substance/Duration never inherits the
@@ -2980,7 +2985,9 @@ describe("round31 edited action ownership", () => {
         expect(en).toContain("with 200 mL water");
         expect(en.match(/200 mL/gu)).toHaveLength(1);
         expect(en).not.toMatch(/\bswallow\b|\bwhole\b/iu);
-        expect(th).toContain("เคี้ยว");
+        expect(en.match(/\bChew\b/giu)).toHaveLength(1);
+        expect(th.match(/เคี้ยว/gu)).toHaveLength(1);
+        expect(th).toContain(editDose ? "2 เม็ด" : "1 เม็ด");
         expect(th).toContain("200 มิลลิลิตรน้ำ");
         expect(th).not.toMatch(/กลืน|ทั้งเม็ด/u);
       }
@@ -2994,15 +3001,17 @@ describe("round31 edited action ownership", () => {
     const parsed = parsePublicSig("Dissolve 2 tablets in water then drink at 09:00");
     const clause = parsed.meta.canonical.clauses[0];
     const graph = clause.instructionGraph!;
+    // The compact canonical graph omits the covered Drink; construct the
+    // complete source graph once and select its real source-owned primary.
+    graph.actions = parseInstructionActions(graph.sourceText!);
     const preparation = graph.actions[0];
     preparation.args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" });
     preparation.sourceText = "Dissolve 2 tablets in water at 08:00";
-    const start = graph.primaryAdministrationSpan!.start;
-    const drink = parseInstructionActions("Drink at 09:00")[0];
-    drink.span = { start, end: start + 14 };
-    drink.sequenceIndex = 1;
+    const primary = graph.primaryAdministrationSpan!;
+    const drink = graph.actions.find(action => action.predicate.lemma === "drink" &&
+      action.span.start <= primary.start && action.span.end >= primary.end)!;
+    expect(graph.actions.filter(action => action.predicate.lemma === "drink")).toHaveLength(1);
     drink.args = [{ role: AdviceArgumentRole.Time, text: "09:00", normalized: "09:00" }];
-    graph.actions.push(drink);
     clause.schedule!.timeOfDay = ["10:00:00"];
     clause.sourceProjectionVerified = false;
     const before = JSON.stringify(graph);
@@ -3034,4 +3043,238 @@ describe("round31 method-bound manner control", () => {
     expect(current).not.toContain("whole");
     expect(JSON.stringify(graph)).toBe(before);
   });
+});
+
+describe("round32 action meaning combinations", () => {
+  it("keeps prohibition, amount and Without activity together in both locales", () => {
+    const source = "Do not swallow 1 tablet without chewing";
+    const frame = parseInstructionActions(source)[0];
+    expect(frame).toMatchObject({ polarity: "negate", relation: AdviceRelation.Without });
+    expect(frame.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Activity, normalized: "chew" })
+    ]));
+    const before = JSON.stringify(frame);
+    const saved = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: [frame]
+    })!])!;
+    for (const action of [frame, saved.actions[0]]) {
+      expect(realizeInstructionAction(action, "en")).toBe("Do not swallow 1 tablet without chewing");
+      expect(realizeInstructionAction(action, "th")).toMatch(/^ห้ามกลืน 1 เม็ด.*โดยไม่เคี้ยว$/u);
+    }
+    expect(realizeInstructionAction(parseInstructionActions("Do not swallow 1 tablet")[0], "en"))
+      .toBe("Do not swallow 1 tablet");
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+
+  it.each(["if", "unless"])("retains a dilution's %s condition after all material complements", connector => {
+    const source = "Dilute 1 mL with saline to 10 mL " + connector + " given by nebulizer";
+    const parsed = parsePublicSig(source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const tail = connector + " given by nebulizer";
+    expect(graph.actions[0].sourceText).toBe("Dilute 1 mL with saline to 10 mL");
+    expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: connector, toActionIndex: 0, text: expect.stringContaining(tail),
+      span: expect.objectContaining({ end: source.length })
+    }));
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, recovered]) for (const locale of ["en", "th"]) {
+      const text = realizeInstructionGraph(candidate, locale)!;
+      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      expect(text).toContain(tail);
+      expect(text.match(new RegExp(connector + " given by nebulizer", "g"))).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    [AdviceRelation.Before, "before breakfast", "ก่อนอาหารเช้า"],
+    [AdviceRelation.After, "after breakfast", "หลังอาหารเช้า"],
+    [undefined, "at 08:00", "เวลา 08:00"]
+  ] as const)("preserves a Mix Time relation %s", (relation, english, thai) => {
+    const frame = parseInstructionActions("Mix")[0];
+    frame.relation = relation;
+    frame.sourceText = "";
+    frame.args = [relation ? { role: AdviceArgumentRole.Time, text: "breakfast",
+      normalized: "breakfast", i18n: { en: "breakfast", th: "อาหารเช้า" } }
+      : { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" }];
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension({ actions: [frame] })!])!;
+    for (const action of [frame, recovered.actions[0]]) {
+      expect(realizeInstructionAction(action, "en")).toBe("Mix " + english);
+      expect(realizeInstructionAction(action, "th")).toContain(thai);
+    }
+  });
+
+  it("composes independent material and temporal daughters once", () => {
+    const frame = parseInstructionActions("Mix with water before breakfast")[0];
+    expect(realizeInstructionAction(frame, "en")).toBe("Mix with water before breakfast");
+    const dilution = parseInstructionActions("Dilute 1 mL with saline to 10 mL before use")[0];
+    expect(realizeInstructionAction(dilution, "en")).toMatch(/1 mL.*saline.*10 mL.*before use/u);
+    expect(realizeInstructionAction(dilution, "en").match(/before/gu)).toHaveLength(1);
+  });
+
+  it("uses an externally edited site on a rich primary while keeping an independent action site", () => {
+    const source = "Instill 1 drop into right eye";
+    const original = parsePublicSig(source).fhir[0];
+    const primary = parseInstructionActions(source)[0];
+    primary.args.push({ role: AdviceArgumentRole.Manner, text: "gently",
+      normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } });
+    const warning = parseInstructionActions("Do not touch right eye")[0];
+    warning.span = { start: source.length + 2, end: source.length + 24 };
+    warning.sequenceIndex = 1;
+    const extension = buildInstructionGraphExtension({
+      sourceText: source + "; Do not touch right eye", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary, warning]
+    })!;
+    const row = JSON.parse(JSON.stringify(original));
+    row.extension.push(extension);
+    row.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+    const before = JSON.stringify(row);
+    for (const input of [row, toDosageDetails([row])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).toMatch(/^Instill.*gently.*left eye/u);
+      expect(en).toMatch(/Do not touch (?:the )?right eye/u);
+      expect(en.match(/right eye/gu)).toHaveLength(1);
+      expect(th).toMatch(/^หยอด.*เบาๆ.*ตาซ้าย/u);
+      expect(th).toContain("ห้ามสัมผัสตาขวา");
+      expect(th.match(/ตาขวา/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+describe("round32 source clock ownership", () => {
+  it.each([
+    [false, "dose", true, false],
+    [true, "dose", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("retains only clocks still owned after external edit (structured %s, edit %s)",
+    (structured, edit, eight, ten) => {
+    const source = "Swallow 1 tablet whole at 08:00";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.sourceText = source;
+    graph.actions[0].sourceText = source;
+    graph.actions[0].span.end = source.length;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" });
+    const graphUrl = buildInstructionGraphExtension(graph)!.url;
+    // This fixture authors a new complete source, not an edit of the helper
+    // parser's clockless source. Establish its initial wire baseline once.
+    row.extension = row.extension.filter((item: { url: string }) =>
+      item.url !== graphUrl && item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(buildInstructionGraphExtension(graph)!);
+    if (structured) row.timing = { repeat: { timeOfDay: ["08:00:00"] } };
+    row.text = source;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    expect(getDosageSourceTimeOwnership(saved)?.clocks).toBe(structured);
+    saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "replace") saved.timing.repeat.timeOfDay = ["10:00:00"];
+    if (edit === "delete") delete saved.timing.repeat.timeOfDay;
+    const before = JSON.stringify(saved);
+    const r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(/0?8:00/u.test(text), locale + " " + realizationMode + " " +
+          (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(eight);
+        expect(/10:00/u.test(text)).toBe(ten);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round32 source event ownership", () => {
+  it.each([
+    [false, "dose", true, false],
+    [true, "dose", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("retains independent graph events after external edit (structured %s, edit %s)",
+    (structured, edit, morning, evening) => {
+    const source = "Swallow 1 tablet whole in the morning";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.sourceText = source;
+    graph.actions[0].sourceText = source;
+    graph.actions[0].span.end = source.length;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning });
+    const extension = buildInstructionGraphExtension(graph)!;
+    row.extension = row.extension.filter((item: { url: string }) =>
+      item.url !== extension.url && item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(extension);
+    if (structured) row.timing = { repeat: { when: [EventTiming.Morning] } };
+    row.text = source;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    expect(getDosageSourceTimeOwnership(saved)?.events).toBe(structured);
+    saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "replace") saved.timing.repeat.when = [EventTiming.Evening];
+    if (edit === "delete") delete saved.timing.repeat.when;
+    const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text.includes(locale === "en" ? "morning" : "เช้า"), locale + " " + realizationMode + " " +
+          (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(morning);
+        expect(text.includes(locale === "en" ? "evening" : "เย็น")).toBe(evening);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round32 natural clock daughters", () => {
+  it.each(["08:00", "8 am"])("types the complete %s daughter using the shared clock grammar", clock => {
+    const source = "Swallow 1 tablet whole at " + clock;
+    const parsed = parsePublicSig(source);
+    const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(action.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Time, text: clock, normalized: "08:00:00"
+    }));
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Object)).toEqual([]);
+    const initial = formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" });
+    expect(initial.match(/0?8:00/gu)).toHaveLength(1);
+  });
+
+  it.each(["delete", "replace"] as const)("honors a %s edit on freshly parsed R6 rich clock source", edit => {
+    const raw = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole at 08:00").fhirNext));
+    const component = raw.step[0].component[0];
+    component.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "delete") delete component.timing.repeat.timeOfDay;
+    else component.timing.repeat.timeOfDay = ["10:00:00"];
+    const before = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text).not.toMatch(/0?8:00/u);
+        expect(text.includes("10:00")).toBe(edit === "replace");
+      }
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+it("round32: later-stage saved R5 rows retain their own source clock ownership", () => {
+  const parsed = parsePublicSig("Swallow 1 tablet whole at 08:00 daily for 2 days then swallow 2 tablets whole at 09:00 daily");
+  expect(parsed.fhir).toHaveLength(2);
+  const rows = JSON.parse(JSON.stringify(parsed.fhir));
+  expect(getDosageSourceTimeOwnership(rows[1])?.clocks).toBe(true);
+  rows[1].doseAndRate[0].doseQuantity.value = 3;
+  delete rows[1].timing.repeat.timeOfDay;
+  const before = JSON.stringify(rows);
+  for (const locale of ["en", "th"]) {
+    const local = formatSig(rows[1], "long", { locale, realizationMode: "normalized" });
+    expect(local).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+    expect(local).not.toMatch(/0?9:00/u);
+    const whole = formatSig(toDosageDetails(rows), "long", { locale, realizationMode: "normalized" });
+    expect(whole).toMatch(/0?8:00/u);
+    expect(whole).not.toMatch(/0?9:00/u);
+    expect(whole).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+  }
+  expect(JSON.stringify(rows)).toBe(before);
 });

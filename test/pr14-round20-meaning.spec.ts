@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, formatSig, formatCanonicalCourse, fromFhir,
+  parseSig, formatSig, formatCanonicalCourse, fromFhir, nextDueDoses, calculateTotalUnits,
   FhirPeriodUnit, type FhirDosage, type CanonicalCourse, type CanonicalAdministration,
 } from "../src/index";
 import { formatCanonicalClause } from "../src/format";
@@ -14,6 +14,8 @@ import {
 } from "../src/instruction-graph";
 import { AdviceArgumentRole } from "../src/types";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
+import { canonicalFromFhir, TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL } from "../src/fhir";
+import { withDosageEditProvenance } from "../src/dosage-course";
 
 function tablet(): CanonicalAdministration {
   return { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
@@ -278,3 +280,168 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     expect(text).not.toBe("");
   });
 });
+
+describe("round32 phase origin and numeric ownership audit", () => {
+  const query = { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+    timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 5 };
+
+  it("does not promote a predecessor-relative pause to an absolute parallel-track origin", () => {
+    const source = "1 drop OD daily for 5 doses, stop for 2 days, then 2 drops OD the next morning for 3 days, then 3 drops OD daily; 1 drop OS BID";
+    const course = parseSig(source).meta.canonical.course!;
+    const members = course.stages[0].administrations;
+    expect(members).toHaveLength(4);
+    expect(members[1]).toMatchObject({
+      phaseStart: { anchor: "previous-phase-next-day", displacement: { value: 2, unit: "d" } },
+      phasePredecessors: [0],
+    });
+    expect(members[1].phaseOrigin).toBeUndefined();
+    expect(members[2].phaseOrigin).toBeUndefined();
+    expect(members[2].phaseStart).toEqual({ anchor: "unresolved" });
+    expect(members[3].phaseOrigin).toMatchObject({ value: 0, unit: "d" });
+
+    const explicit = parseSig(source.replace("then 3 drops OD daily", "then from day 10 take 3 drops OD daily"))
+      .meta.canonical.course!.stages[0].administrations;
+    expect(explicit[2].phaseStart).toMatchObject({
+      anchor: "treatment-day-start", displacement: { value: 9, unit: "d" }
+    });
+  });
+
+  it.each([
+    ["2026-11-21T08:00:00Z", "2026-11-25T09:00:00+00:00"],
+    ["2026-11-21T00:00:00Z", "2026-11-24T09:00:00+00:00"],
+  ])("opens next morning after the last occupied predecessor date from %s", (orderedAt, expected) => {
+    const parsed = parseSig("Take 1 tablet daily for 3 days, then take 2 tablets the next morning at 9 AM");
+    expect(parsed.meta.canonical.course!.stages[1].start).toMatchObject({ anchor: "previous-phase-next-day" });
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(input, { ...query, orderedAt, from: orderedAt, limit: 4 })).toEqual([
+        "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00",
+        "2026-11-23T09:00:00+00:00", expected
+      ]);
+    }
+  });
+
+  it.each([
+    ["2026-11-21T06:00:00Z", "2026-11-21T06:00:00+00:00", "2026-11-21T07:00:00+00:00", "2026-11-22T09:00:00+00:00"],
+    ["2026-11-21T22:00:00Z", "2026-11-21T22:00:00+00:00", "2026-11-21T23:00:00+00:00", "2026-11-22T09:00:00+00:00"],
+  ])("keeps next morning after an hourly phase from %s", (orderedAt, first, second, next) => {
+    const parsed = parseSig("1 puff q1h for 2 hours, then 2 puffs the next morning at 9 AM");
+    expect(parsed.meta.canonical.course!.stages[1].start).toMatchObject({ anchor: "previous-phase-next-day" });
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(nextDueDoses(input, { ...query, orderedAt, from: orderedAt, limit: 3 }))
+        .toEqual([first, second, next]);
+  });
+
+  it("lets authored dated events own their origin after an unresolved independent track", () => {
+    const parsed = parseSig("1 drop OD daily for 2 doses then 2 drops OD on 2026-11-25 at 10:00; 1 drop OS on 2026-11-26 at 11:00");
+    const course = parsed.meta.canonical.course!;
+    expect(course.stages[0].administrations[1].phaseStart).toBeUndefined();
+    for (const input of [course, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(input, { ...query, limit: 8 })).toEqual([
+        "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00",
+        "2026-11-25T10:00:00+00:00", "2026-11-26T11:00:00+00:00",
+      ]);
+    }
+  });
+
+  it.each(["the next morning at 9 AM", "at 9 AM the next morning"])(
+    "refines the next-day daypart with its authored clock: %s", successor => {
+      const parsed = parseSig("Take 1 tablet at 8 PM, then take 1 tablet " + successor);
+      const schedule = parsed.meta.canonical.clauses[1].schedule!;
+      expect(schedule.when).toBeUndefined();
+      expect(schedule.timeOfDay).toEqual(["09:00:00"]);
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+        expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+          "2026-11-21T20:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
+      }
+    });
+
+  it("keeps a daypart-only next morning and an independently coordinated evening", () => {
+    const daypart = parseSig("Take 1 tablet at 8 PM, then take 1 tablet the next morning");
+    expect(daypart.meta.canonical.clauses[1].schedule?.when).toEqual(["MORN"]);
+    expect(nextDueDoses(daypart, { ...query, limit: 2 })).toEqual([
+      "2026-11-21T20:00:00+00:00", "2026-11-22T08:00:00+00:00"
+    ]);
+    const separate = parseSig("Take 1 tablet the next morning at 9 AM and in the evening");
+    expect(separate.meta.canonical.clauses[0].schedule?.when).toEqual(["EVE"]);
+  });
+
+  it.each(["≤.๕เม็ด", "≤.๕ เม็ด", "≤.5เม็ด", "<=.5เม็ด", "≥.๕เม็ด", "~.๕เม็ด", "≤0.๕เม็ด"])(
+    "keeps the leading decimal in the Thai comparative quantity %s", amount => {
+      const parsed = parseSig("กลืน " + amount, { locale: "th" });
+      const comparator = amount.startsWith("≥") ? ">=" : amount.startsWith("~") ? "~" : "<=";
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab", comparator });
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+        expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
+        expect(getQuantityComparator(row.doseAndRate![0].doseQuantity)).toBe(comparator);
+      }
+    });
+
+  it("invalidates warm capped source replay after a live minimum-frequency edit", () => {
+    const text = "Take 1 tablet zero to three times per day, maximum 3 tablets per day.";
+    const row = withDosageEditProvenance<FhirDosage>([{
+      text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequencyMax: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+        extension: [{ url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }] } },
+      maxDosePerPeriod: [{ numerator: { value: 3, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
+    }], text)[0];
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toBe(text);
+    row.timing!.repeat!.extension![0].valueInteger = 2;
+    expect(canonicalFromFhir(row).schedule?.frequency).toBe(2);
+    const warm = formatSig(row, "long", options);
+    const cold = formatSig(JSON.parse(JSON.stringify(row)), "long", options);
+    expect(warm).not.toBe(text);
+    expect(warm).toBe(cold);
+    expect(warm).toMatch(/2(?:-|–| to )3/u);
+  });
+});
+
+
+describe("round32 live schedule modifier proof family", () => {
+  it.each(["delay", "cycle"] as const)("observes an in-place %s modifier edit on a warmed capped row", kind => {
+    const modifier = kind === "delay"
+      ? { url: ADMINISTRATION_OFFSET_EXTENSION_URL, valueQuantity: { value: 30, unit: "min", code: "min" } }
+      : { url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, extension: [
+        { url: "day", valueInteger: 1 }, { url: "day", valueInteger: 8 },
+        { url: "periodDays", valueInteger: 21 },
+        { url: "reason", valueCode: "unresolved-cycle-eligibility" },
+        { url: "source", valueString: "on days 1 and 8 of each cycle" },
+      ] };
+    const text = kind === "delay"
+      ? "Take 1 tablet daily after a 30-minute delay, maximum 2 tablets daily."
+      : "Take 1 tablet on days 1 and 8 of each cycle, maximum 2 tablets daily.";
+    const row = withDosageEditProvenance<FhirDosage>([{
+      text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
+      modifierExtension: [modifier],
+    }], text)[0];
+    const options = { locale: "en", realizationMode: "roundtrip" as const };
+    expect(formatSig(row, "long", options)).toBe(text);
+    if (kind === "delay") modifier.valueQuantity!.value = 60;
+    else modifier.extension![1].valueInteger = 15;
+    const clause = canonicalFromFhir(row);
+    if (kind === "delay") expect(clause.schedule?.administrationOffsetMinutes).toBe(60);
+    else expect(clause.schedule?.cycleDayConstraint?.days).toEqual([1, 15]);
+    const warm = formatSig(row, "long", options);
+    expect(warm).not.toBe(text);
+    expect(warm).toBe(formatSig(JSON.parse(JSON.stringify(row)), "long", options));
+    if (kind === "delay") expect(warm).toContain("60 minutes later");
+    // Meaning's sibling test checks day15 replaces stale source wording.
+    expect(row.modifierExtension![0]).toBe(modifier);
+  });
+});
+
+it.each(["the next morning and at 09:00", "at 09:00 and the next morning"])(
+  "round32 retains explicitly coordinated NEXT and clock events in either order: %s", timing => {
+    const parsed = parseSig("Take 1 tablet " + timing);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
+        timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T08:00:00+00:00"
+      ]);
+  });

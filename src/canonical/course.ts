@@ -216,6 +216,10 @@ export interface CanonicalAdministration {
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
     /** False when preserved wording has no agreement proof for current clinical facts. */
     sourceTextVerified?: boolean;
+    /** Original primary schedule clock ownership; independent graph clocks remain source facts. */
+    sourceHasStructuredClocks?: boolean;
+    /** Original primary schedule anchor ownership; independent graph events remain source facts. */
+    sourceHasStructuredEvents?: boolean;
     /** Original foreign fields retained inside an imported R5 row. Only
      * adapters inspect this source; execution reads the typed fields above. */
     retained?: Partial<import("../types").FhirR6Dosage> };

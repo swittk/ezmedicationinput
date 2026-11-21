@@ -141,10 +141,23 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
 function markOriginalGraphSource(
   dosage: FhirDosage,
   clause: CanonicalSigClause,
-  options: FormatOptions | undefined
+  options: FormatOptions | undefined,
+  sourceTimeRead = false
 ): void {
-  if (!clause.instructionGraph || (options?.realizationMode !== "roundtrip" && clause.dose)) return;
+  if (!clause.instructionGraph) return;
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
+  if (fresh) {
+    clause.sourceHasStructuredClocks = Boolean(fresh.timing?.clocks?.length);
+    clause.sourceHasStructuredEvents = Boolean(fresh.timing?.anchors?.length);
+  } else if (!sourceTimeRead &&
+      (clause.sourceHasStructuredClocks === undefined || clause.sourceHasStructuredEvents === undefined)) {
+    // Native import owns absent evidence too; only the direct R5 path needs
+    // this lookup after clause projection.
+    const sourceTime = getDosageSourceTimeOwnership(dosage);
+    if (sourceTime?.clocks !== undefined) clause.sourceHasStructuredClocks = sourceTime.clocks;
+    if (sourceTime?.events !== undefined) clause.sourceHasStructuredEvents = sourceTime.events;
+  }
+  if (options?.realizationMode !== "roundtrip" && clause.dose) return;
   const verified = fresh && !fresh.defaulted ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   clause.sourceProjectionVerified = verified;
   if (clause.dose) clause.dose.sourceDoseVerified = verified;
@@ -180,6 +193,7 @@ import {
   captureSourceReplayModifiers, matchesSourceReplayModifiers,
   captureSourceReplayConcept, matchesSourceReplayConcept,
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
+  getDosageSourceTimeOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
@@ -1375,12 +1389,12 @@ export function fromFhir(
     : strict;
   const r5Rows = normalizedStrict.length
     ? hasAdministrations
-      ? withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction, false)
+      ? withDosageEditProvenance(normalizedStrict, dosageDetails.renderedInstruction, false, projection.sourceBaselines)
       : normalizedStrict
     : toFhirR5Dosages(dosageDetails); // zero-component text/safety carrier only
   const dosages = projection.dosages === normalizedStrict
     ? r5Rows
-    : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction, false);
+    : withDosageEditProvenance(projection.dosages, dosageDetails.renderedInstruction, false, projection.sourceBaselines);
   const compiled = new Map<CanonicalAdministration, CanonicalSigClause>();
   const items: ParseResult[] = [];
   let row = 0;
@@ -1399,13 +1413,17 @@ export function fromFhir(
       }
     });
   }
-  // A text-only instruction has no administration but keeps the existing
-  // public editable carrier row. Its display comes from native source text,
-  // never from reparsing the exported R5 carrier.
+  const shortText = formatCanonicalCourse(native, "short", options, compiled);
+  const longText = formatCanonicalCourse(native, "long", options, compiled);
+  // A header-only instruction keeps the editable carrier. Its course
+  // constraints are visible on that item as well as the batch preview.
   if (!items.length && r5Rows.length) {
     const text = native.instruction ?? "";
     const clause = createEmptyCanonicalClause(text);
-    items.push({ fhir: r5Rows[0], shortText: text, longText: text, warnings: [],
+    const structured = native.safety || native.cycleInterval || native.cycleCount !== undefined || native.stages.length;
+    items.push({ fhir: r5Rows[0],
+      shortText: structured ? shortText : text,
+      longText: structured ? longText : text, warnings: [],
       meta: { consumedTokens: [], normalized: {}, canonical: { clauses: [clause] } } });
   }
   const primary = items[0] ?? fromFhirDosage({
@@ -1418,8 +1436,6 @@ export function fromFhir(
     for (const warning of item.warnings) warnings.add(warning);
   }
   // Importing structured R6 data is best-effort and data-preserving.
-  const shortText = formatCanonicalCourse(native, "short", options, compiled);
-  const longText = formatCanonicalCourse(native, "long", options, compiled);
   return {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
@@ -1509,7 +1525,7 @@ function fromFhirDosageInternal(
   // The saved fingerprint proves that a primary source dose still matches
   // its exported R5 clinical fields, even if the auxiliary instruction
   // graph contains no Amount. A removed dose also needs this ownership proof.
-  markOriginalGraphSource(dosage,clause,options);
+  markOriginalGraphSource(dosage,clause,options,native !== undefined);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const guarded = getDosageCondition(dosage) !== undefined ||
     getDosageExcludedDates(dosage).length > 0 ||

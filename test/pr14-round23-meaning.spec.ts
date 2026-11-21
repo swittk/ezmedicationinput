@@ -1234,7 +1234,8 @@ describe("round 27: next-day continuation after a finite predecessor", () => {
   it("starts the next morning after all five authored treatment days", () => {
     const parsed = parseSig("Take 1 tablet daily for 5 days then take 2 tablets at 06:00 the next morning");
     expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBe(5);
-    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(5);
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
     expect(nextDueDoses(parsed, options)).toEqual([
       "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
       "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T06:00:00+00:00"
@@ -1242,12 +1243,14 @@ describe("round 27: next-day continuation after a finite predecessor", () => {
   });
   it("uses the same five-day endpoint when the successor omits its clock", () => {
     const parsed = parseSig("Take 1 tablet daily for 5 days then take 2 tablets the next day");
-    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(5);
-    expect(parsed.meta.canonical.course?.stages[1].start?.displacement).toMatchObject({ value: 5, code: "d" });
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(parsed.meta.canonical.course?.stages[1].start).toMatchObject({ anchor: "previous-phase-next-day" });
   });
   it("adds the finite duration to an already delayed predecessor origin", () => {
     const parsed = parseSig("From day 5 take 1 tablet daily for 5 days then take 2 tablets at 06:00 the next morning");
-    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.treatmentStartOffsetDays)).toEqual([4, 9]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.treatmentStartOffsetDays)).toEqual([4, undefined]);
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
     expect(nextDueDoses(parsed, options)).toEqual([
       "2026-11-25T09:00:00+00:00", "2026-11-26T09:00:00+00:00", "2026-11-27T09:00:00+00:00",
       "2026-11-28T09:00:00+00:00", "2026-11-29T09:00:00+00:00", "2026-11-30T06:00:00+00:00"
@@ -1421,7 +1424,7 @@ describe("round 28: retained phase origins and clinical meaning", () => {
   it.each([
     ["approximately ", "~", [undefined, undefined, undefined]],
     ["at most ", "<=", [undefined, undefined, undefined]],
-    ["", undefined, [undefined, 5, undefined]]
+    ["", undefined, [undefined, undefined, undefined]]
   ] as const)("does not turn a %sfive-day course into exact later origins", (qualifier, comparator, expected) => {
     const source = "Take 1 tablet daily at 09:00 for 5 days then 2 tablets at 06:00 the next morning then 3 tablets at 07:00 the following morning";
     const plan = createBoundaryPlan(source);
@@ -1686,7 +1689,8 @@ describe("round 29: typed onsets and complete numeric daughters", () => {
     const source = "Take 1 tablet daily for 3 days, then " + (authored ? "from day 10 " : "") +
       "take 2 tablets daily for 2 days, then take 1 tablet at 06:00 the next morning";
     const parsed = parseSig(source);
-    expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.treatmentStartOffsetDays).toBe(authored ? 11 : 5);
+    expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.phaseStartReference).toBe("previous-phase-next-day");
+    expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1]?.schedule?.treatmentStartOffsetDays).toBeUndefined();
     const day = authored ? "2026-12-02" : "2026-11-26";
     for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
@@ -1972,7 +1976,8 @@ describe("round 31: conditional and qualified timing display", () => {
   it.each([
     [1, undefined, "once", "1 ครั้ง"],
     [2, undefined, "twice", "2 ครั้ง"],
-    [1, 2, "1 to 2 times", "1 ถึง 2 ครั้ง"]
+    [1, 2, "1 to 2 times", "1 ถึง 2 ครั้ง"],
+    [undefined, 2, "up to 2 times", "ไม่เกิน 2 ครั้ง"]
   ] as const)("preserves count %s–%s within a ranged period in English and Thai", (frequency, frequencyMax, englishCount, thaiCount) => {
     for (const [unit, englishUnit, thaiUnit] of [
       [FhirPeriodUnit.Day, "days", "วัน"], [FhirPeriodUnit.Hour, "hours", "ชั่วโมง"],
@@ -1986,12 +1991,14 @@ describe("round 31: conditional and qualified timing display", () => {
       const before = JSON.stringify(source);
       const native = courseFromR6(source);
       expect(native.stages[0].administrations[0].schedule?.recurrence).toMatchObject({
-        frequency, ...(frequencyMax === undefined ? {} : { frequencyMax }),
+        ...(frequency === undefined ? {} : { frequency }), ...(frequencyMax === undefined ? {} : { frequencyMax }),
         period: 1, periodMax: 2, periodUnit: unit
       });
       for (const input of [source, native, JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
         expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
           .toContain(englishCount + " every 1 to 2 " + englishUnit);
+        if (frequency === undefined)
+          expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain("<=2x/1-2");
         for (const style of ["short", "long"] as const) {
           expect(formatSig(input, style, { locale: "th", realizationMode: "normalized" }))
             .toContain(thaiCount + " ทุก 1 ถึง 2 " + thaiUnit);

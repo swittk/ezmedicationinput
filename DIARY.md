@@ -12113,3 +12113,117 @@ Negative values indicate less runtime. These are medians of paired ratios, not r
 
 
 Review communication is limited to concise replies in the 17 original threads after the final validated commit is pushed, followed by resolution. No top-level comment or new full-review request.
+
+## PR #14 review round 32 — 2026-11-21
+
+### Completed cause-family audit
+
+The owner requested a new loop with real family auditing, independent workers and coordinator integration. Starting head was f921ad755a27d8433f47615b61cab2495b4a94d9; comparison master remains 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. All prior workers were inactive at preflight. The owner-triggered full review 6005354351 and overflow comment 7063046942 contain 46 findings: 21 major, 24 minor and one test nit. No new inline thread was created; all findings in the body and overflow were inventoried rather than looking only at thread state. The three later replies in previous resolved threads acknowledge prior fixes; their useful Thai quantity/one-Chew oracle refinement was also included.
+
+Execution owned 12 findings, interchange 10, meaning/action realization 12 and the coordinator 12. The coordinator reproduced and implemented phase, lexical-quantity and source-proof fixes, reviewed cross-owner changes, caught integration issues, removed avoidable work and ran final artifact gates. Worker source validation was bounded; only the coordinator built and benchmarked the final artifact.
+
+### Why the major count remained high
+
+Comparison against the previous two built PR artifacts (f921ad7 and 325d8a7), with master comparisons only where behavior is equivalent, establishes one clear previous-round regression among the 21 majors: #4 restored the quantity in a negated primary but dropped its Without activity. The other 20 are older gaps or incomplete prior fixes. In particular #7 previously omitted temporal meaning, then rendered it with the wrong relation; #8/#9 previously omitted more of the frequency range and still missed the upper-only branch. #14 already lost historical empty stages; later missing-context reporting exposed an additional symptom. These qualifications are recorded rather than counting every newly reported case as a new regression.
+
+Several old tests asserted the mechanism rather than independent clinical meaning. A projected step cap was explicitly expected to become a course cap after owner deletion. Two draft tests treated any dose edit as grounds to retire an authored two-day pause. Some assertions checked a digit without its unit or eye; clock overrides equalled fallback clocks; one cap oracle checked only the first unchanged dose; an absent comparator could pass with no denominator. Hand-built graph fixtures also hid the fact that actual natural clock phrases were being classified as Object. Those gaps explain why many green tests did not establish the intended public behavior.
+
+The audit therefore followed each real defect through its immediate family and actual public path: source parsing, typed construction, direct sibling adapters, JSON persistence, external edits, localized display and execution where applicable. It did not treat reviewer suggestions or adversarial examples as an automatic specification.
+
+### Finding dispositions
+
+32 findings received production fixes, 13 strengthened or corrected tests without production changes, and #46 received a documentation correction while the requested new runtime diagnostic/refusal/API expansion was rejected. #30's duplicate-action premise was not reproduced; its fixture now explicitly declares the complete graph it intends to test.
+
+| ID | Severity | Resolution |
+| --- | --- | --- |
+| 1 | major | Dose-only edits retain pauses; deletion, reorder, changed completion and ambiguous ownership retire them. |
+| 2 | major | Deleting a step never promotes its projected cap into course scope; authored course cap and source remain. |
+| 3 | major | A new limit ID plus changed amount does not borrow an anonymous retired limit's qualifiers. |
+| 4 | major | Negated primary action retains quantity and Without activity together in both languages. |
+| 5 | major | Multi-complement dilution stops at IF/UNLESS so the existing graph keeps the condition. |
+| 6 | major | Concrete clock/event source ownership preserves independent graph timing and respects structured edits/deletions. |
+| 7 | major | Mix realizes typed Before/After; plain clocks still use the existing clock relation. |
+| 8 | major | Thai upper-only frequency maximum remains visible with ranged periods in both styles. |
+| 9 | major | English long upper-only frequency maximum remains visible with ranged periods. |
+| 10 | major | Current primary site replaces stale graph site in the same Time/Site argument pass. |
+| 11 | major | Code-only strength units participate in caps and ingredient conversion through the standard quantity-unit getter. |
+| 12 | major | Supply does not report missing/incomplete cadence as measured zero; established finite/once/exact-event cases stay executable. |
+| 13 | major | Nonzero unitless amounts never acquire another administration's measured unit during accumulation. |
+| 14 | major | Mixed historical/compact R5 import keeps authored empty-stage sequence and endpoint; current membership edits win. |
+| 15 | major | Standard code and disjoint ranged cadence are recognized by the existing conflict policy. |
+| 16 | major | Dependent parallel pauses cannot become a treatment-start offset or invent following origins. |
+| 17 | major | Next morning follows finite calendar-duration completion, with explicit midnight control. |
+| 18 | major | The same predecessor relation handles finite hourly completion without starting early. |
+| 19 | major | Explicit dated events outrank unresolved relative-origin fallback in compilation. |
+| 20 | major | Exact clock refines a NEXT daypart; explicit coordination in either order preserves separate events. |
+| 21 | major | Compact Thai leading-decimal quantities and comparator forms retain the decimal. |
+| 22 | minor | Month-precision assertion rejects appended date digits while retaining the full-date control. |
+| 23 | minor | Install retained source before the one clinical fingerprint; direct writer output describes the returned row. |
+| 24 | nit | Rolling-cap oracle asserts the second due timestamp, not only the unchanged first dose. |
+| 25 | minor | Replay proof includes minimum frequency, administration delay and cycle fields in existing passes. |
+| 26 | minor | Restored hour endpoint gets its source primitive annotations; projected-day annotations remain retained source. |
+| 27 | minor | Both taper stages assert dose and eye identity. |
+| 28 | minor | Empty-stage deletion also asserts the surviving tablet administration across persistence. |
+| 29 | minor | Edited primary amount asserts 3mL in both locales beside an independent 5mL action. |
+| 30 | minor | False duplicate premise corrected: fixture explicitly supplies the complete parsed action list and asserts one Drink. |
+| 31 | minor | Thai cap assertions distinguish per-administration, lifetime and daily-period scope. |
+| 32 | minor | Preservation snapshot is taken before the first import. |
+| 33 | minor | Header-only carrier displays the already-computed structured course preview. |
+| 34 | minor | Hourly denominator asserts value4/unit h before comparator absence. |
+| 35 | minor | Event label chooses the first nonblank coding display when concept text is absent. |
+| 36 | minor | Unit-only or valueless dose does not suppress an authored component instruction. |
+| 37 | minor | Fractional terminal phase assertion includes right-eye identity. |
+| 38 | minor | Local BID configured clock differs from defaults and is asserted exactly. |
+| 39 | minor | QOD configured clock and consumed-history boundary differ from defaults and are asserted exactly. |
+| 40 | minor | Bare standard BID asserts positive supply and exact due doses; incomplete repeat remains separate. |
+| 41 | minor | Qualified live site text survives recognized coding; exact contradictory old labels yield to current code. |
+| 42 | minor | Qualified fractional duration recognizes the existing article a and retains its rate denominator. |
+| 43 | minor | Attached @ rate and leading-decimal rate reuse existing number and surface owners; clock control retained. |
+| 44 | minor | Compact fractional-million rate reuses the standard magnitude reader and unit conversion. |
+| 45 | minor | Finite fractional elapsed s/min/h offsets are accepted; existing integer calendar policy remains. |
+| 46 | minor | Clarified optional evaluator/candidate-opportunity behavior; rejected new diagnostic/refusal/API mechanism. |
+
+### Bounded adjacent cases and integration
+
+- The existing known timing proof was checked against all 11 recognized repeat markers. Minimum frequency was missing, and the same supported warm-edit problem also affected administration delay and cycle eligibility. They now join the existing timing/modifier classification passes. Edited cycle facts own display, including a stale duplicate advice qualifier; consecutive typed days render as ranges without sorting, deduplicating or replaying old source text.
+- Clock/event ownership uses two concrete source facts in the existing baseline. Import reads them in its current extension pass; independent row saves, later stages, fresh R6 and R6-to-saved-R5 paths carry them through existing writers. The natural-clock family exposed 08:00 and 8am becoming Object: the existing shared clock reader now supplies a complete bounded temporal daughter and the current valence traversal separates a following cadence.
+- Next-morning cases cover finite calendar and hourly predecessors, non-midnight and midnight starts, dependent pauses, unresolved parallel origins, authored onset controls and exact dated events. An authored next-morning clock refines only its inferred daypart. The coordinator caught a mistake in the first local fix: a reversed explicit coordinator was included in the clock daughter's span. Excluding the declared connector from the clock bound retains both explicitly coordinated events in either order. This was fixed before committing.
+- Quantity families cover Thai/ASCII leading decimals with comparators, article-qualified half-hour infusions, attached and separate @ rates including @.5, compact million-unit rates, and unchanged scalar/clock controls. No new fallback grammar or FHIR-stage semantic repair.
+- The first complete gate had 5,552 passes and three failures. The two old pause assertions were corrected to keep the dose-only pause, then replace the actual start from two to three days and verify that old source becomes inert across repeated R5/R6 saves. The cycle expectation stayed intact; typed range display restored its concise wording. The failed report and intermediate fixture correction are retained. Final complete source gate passes 5,557 tests.
+
+### Cost and ownership audit
+
+The final read-only cost audit identified two concrete avoidable additions, both removed by the coordinator. Unchanged marked draft projections now return before allocating an identity index or hashing boundary objects. Edited projections retain the already-compared prefix, so each stage is deeply compared once before the necessary unique-owner reconciliation. Scalar native R5 import now owns absent timing evidence too, avoiding a second extension lookup by the display helper. Missing evidence is not coerced into false.
+
+The source writer still computes one clinical fingerprint per applicable row, after retained marker placement. Its additional local time-ownership discovery for independently editable later graph rows is required; it is not removed speculatively. Imported producers pass their already-read baseline facts onward. Frequency minimum, delay and cycle checks reuse their existing passes; endpoint annotation correction is three scalar field checks. No broad validation pass, extra clinical hash, editor lifecycle, mutation interception, callback/draft API, or stable native compatibility contract was added.
+
+English/Thai realization stays in the existing locale and lexical facets, with shared typed meaning and the existing clock parser. There is no further language-specific parser split. Public .fhir and downstream storage remain R5; .fhirNext and R6 import use only the current pinned R6 model. R5 and R6 remain direct sibling adapters; no downstream migration or old-R6 compatibility path.
+
+### Validation and performance
+
+- npm test passed the strict ES6 gate and **5,557 tests in 56 files**, 112 more than round 31.
+- npm run test:dist passed ES6 ESM/CJS builds, declarations and all **4 distribution tests**.
+- The actual downstream converter -> usage map -> medication statements preserved complete dosage JSON for simple daily, Thai parallel doses, multi-stage taper and independent-eye courses. R5/storage row counts remain **1/2/4/2**. No downstream code changed.
+- The full PR path union remains **100 original files**, zero additional paths. Source/debug checks and git diff --check passed.
+- Source hash: 3e197693ab8541550013685dc27c93a4a134ddfdb6e16c48bf84c3e55dbc31db. Candidate built SHA-256: 1c282742de26ff7b181856599f3a02df1b1587b89453eb4d7432728cf480b123. Built master SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Unchanged benchmark blob: 92ddc9cc49685de69028665fadbad022753e7151.
+
+Performance passed **174 equivalent-work comparisons across all 117 shared public functions**. The unchanged full harness measured 181 comparisons with 21 paired rounds and a 35 ms batch target: 173 passed initially and one was flagged. The seven known non-equivalent cases retain their raw measurements and separate classification; none is counted as a performance pass. Seven candidate-only measurements cover six new exports. No missing functions or measurement errors.
+
+The initial result is retained: getDosageExcludedWeekdays measured **+5.148715%**. Its preselected longer confirmation (71 paired rounds, 140 ms target) on the identical candidate measured **-0.039332%** and passed. Its implementation is identical to master; that fact did not waive measurement. The worst accepted paired change is **+3.870483% (buildSnomedFindingSiteCoding)**, below the 4% per-scenario limit. No cross-domain averaging or aggregate waiver.
+
+| Scenario | Median paired runtime change against built master |
+| --- | ---: |
+| Ordinary parse | -3.36% |
+| Thai parse | -6.00% |
+| R5 English preview | -4.75% |
+| Native R6 next doses | -81.64% |
+| Native R6 supply | -84.07% |
+| Complex R6 to R5 | -20.37% |
+
+Negative values indicate less runtime. Changes use the median paired ratio, not ratios of independently aggregated absolute medians. Source, distribution, storage and performance results refer to the identical frozen final candidate above.
+
+Raw failed-before, first full-gate and first benchmark reports are preserved. Final logs: ezmed14-round32-source-final-2-gate.log, ezmed14-round32-dist-final-2-gate.log and ezmed14-round32-storage-check.json. Performance reports: ezmed14-round32-master-full.json and ezmed14-round32-master-confirm.json; acceptance ledger: ezmed14-round32-performance-accepted.json. Full 46-item product-gate decisions, source URLs, oracle evidence and attribution are in ezmed14-round32-findings-ledger.json, with each worker's detailed notes retained.
+
+### Review communication
+
+All 46 new findings are in the review body/overflow, so there is no new inline thread to reply to or resolve. Previous three positive acknowledgments did not require another public reply. No top-level comment, internal project name, or additional full-review request was posted. The completed local diary and per-finding evidence ledger are the handoff.

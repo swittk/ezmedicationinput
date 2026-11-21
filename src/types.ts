@@ -1924,6 +1924,10 @@ export interface CanonicalClinicalAdjuncts {
 export interface CanonicalSigClause {
   /** Current dose/timing proof for replaying retained source, including dose-less clauses. */
   sourceProjectionVerified?: boolean;
+  /** Retained wire-source evidence that this primary's structured schedule owned clocks. */
+  sourceHasStructuredClocks?: boolean;
+  /** Retained wire-source evidence that this primary's structured schedule owned event anchors. */
+  sourceHasStructuredEvents?: boolean;
   kind: "administration";
   /** Source-backed phase operation; resolved by the typed regimen graph. */
   regimenAdjustment?: "replace" | "add" | "replace-target";
@@ -2131,7 +2135,10 @@ export interface NextDueDoseOptions {
    * Parsing and editing never require a selection; execution and supply do.
    */
   alternativeChoices?: Readonly<Record<string, string>>;
-  /** Evaluate structured conditional instructions at each candidate occurrence. Required for conditional scheduling. */
+  /** Evaluate structured conditions at each candidate occurrence. Omission
+   * returns candidate opportunities assuming the conditions hold; these are
+   * not patient-specific confirmed administrations. A supplied evaluator must
+   * return true to admit an occurrence; false/undefined withhold it. */
   evaluateCondition?: MedicationConditionEvaluator;
   orderedAt?: Date | string;
   limit?: number;

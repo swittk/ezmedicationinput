@@ -3,10 +3,10 @@ import {
   formatSig, formatParseBatch, fromFhir, parseSig, nextDueDoses,
   parseInstructionActions, formatCanonicalCourse, projectCanonicalCourse, importCanonicalCourse,
 } from "../src/index";
-import { encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
+import { encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL, withDosageEditProvenance } from "../src/dosage-course";
 import { courseFromR6 } from "../src/adapters/canonical-course";
 import { formatCanonicalClause } from "../src/format";
-import { canonicalFromFhir } from "../src/fhir";
+import { canonicalFromFhir, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL } from "../src/fhir";
 import { registerSigLocalization, resolveSigLocalization } from "../src/i18n";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { THAI_COURSE } from "../src/locales/course/th";
@@ -484,4 +484,103 @@ describe("round27 current boundary and metadata-only previews", () => {
     expect(formatSig(raw, "long", { locale: "en" })).toBe(instruction);
     expect(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.safety?.extension).toEqual([annotation]);
   });
+});
+
+describe("round32 retained clinical labels and incomplete amounts", () => {
+  it("uses the first nonblank event coding display without inventing a date", () => {
+    const raw: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { coding: [
+        { system: "urn:test:event", code: "123", display: " " },
+        { system: "urn:test:alternate", code: "visit", display: "Follow-up visit" }
+      ] }, offsetDuration: { value: 2, unit: "d" } }, component: [tablet]
+    }] };
+    const before = JSON.stringify(raw);
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(raw, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("Follow-up visit");
+      expect(text).toContain(locale === "en" ? "2 days" : "2 วัน");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it.each(["quantity", "range"] as const)("keeps authored component text when %s carries no value", kind => {
+    const amount = kind === "quantity" ? { doseQuantity: { unit: "tab" } }
+      : { doseRange: { low: { unit: "tab" }, high: { unit: "tab" } } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      text: "Take one tablet daily", doseAndRate: [amount]
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      expect(formatSig(raw, style, { locale, realizationMode: "normalized" })).toBe("Take one tablet daily");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    const live = JSON.parse(before) as FhirR6DosageInstruction;
+    live.step![0].component![0].timing = { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } };
+    const text = formatSig(live, "long", normalized);
+    expect(text).toContain("twice daily");
+    expect(text).not.toContain("one tablet daily");
+  });
+
+  it("retains a live R6 site qualifier beyond its recognized body-site code", () => {
+    const site = { text: "left eye, lower conjunctival sac", coding: [
+      { system: "http://snomed.info/sct", code: "1290031003", display: "Structure of left eye proper" }
+    ] };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, site: { concept: site }
+    }] }] };
+    const before = JSON.stringify(raw);
+    const imported = fromFhir(raw, normalized);
+    expect(imported.meta.canonical.clauses[0].site?.text).toBe(site.text);
+    expect(formatSig(raw, "long", normalized)).toContain("lower conjunctival sac");
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+describe("round32 live cycle qualifier", () => {
+  it.each([
+    { advice: false, days: [1, 15], label: "1, 15" },
+    { advice: true, days: [1, 15], label: "1, 15" },
+    { advice: false, days: [1, 2, 3, 8, 15, 16], label: "1-3, 8, 15-16" },
+    { advice: true, days: [1, 2, 3, 8, 15, 16], label: "1-3, 8, 15-16" },
+  ])("uses edited cycle days $label beside retained source wording (advice $advice)", ({ advice, days, label }) => {
+    const qualifier = "on days 1 and 8 of each cycle";
+    const modifier = { url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, extension: [
+      { url: "day", valueInteger: 1 }, { url: "day", valueInteger: 8 },
+      { url: "periodDays", valueInteger: 21 },
+      { url: "reason", valueCode: "unresolved-cycle-eligibility" },
+      { url: "source", valueString: qualifier }
+    ] };
+    const text = "Take 1 tablet " + qualifier + ", maximum 2 tablets daily.";
+    const row: FhirDosage = withDosageEditProvenance([{
+      text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
+      modifierExtension: [modifier],
+      ...(advice ? { additionalInstruction: [{ text: qualifier }] } : {})
+    }], text)[0];
+    formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+    modifier.extension.splice(0, 2, ...days.map(day => ({ url: "day", valueInteger: day })));
+    const before = JSON.stringify(row);
+    for (const input of [row, JSON.parse(before)]) for (const locale of ["en", "th"]) {
+      const current = formatSig(input, "long", { locale, realizationMode: "roundtrip" });
+      expect(current).toContain((locale === "en" ? "cycle days " : "วันที่ในรอบ ") + label);
+      expect(current).toContain(locale === "en" ? "21-day cycle" : "รอบละ 21 วัน");
+      expect(current).not.toContain(qualifier);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+it("round32: a code-only site edit supersedes its exact contradictory old label", () => {
+  const raw: FhirR6DosageInstruction = { step: [{ component: [{
+    ...tablet, site: { concept: { text: "right eye", coding: [
+      { system: "http://snomed.info/sct", code: "1290031003", display: "Structure of left eye proper" }
+    ] } }
+  }] }] };
+  const before = JSON.stringify(raw);
+  const imported = fromFhir(raw, normalized);
+  expect(imported.meta.canonical.clauses[0].site?.text).toBe("left eye");
+  expect(formatSig(raw, "long", normalized)).toContain("left eye");
+  expect(formatSig(raw, "long", normalized)).not.toContain("right eye");
+  expect(JSON.stringify(raw)).toBe(before);
 });

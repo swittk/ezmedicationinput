@@ -2785,6 +2785,12 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(parsed.fhirNext.step[1].component).toHaveLength(1);
     expect(parsed.fhirNext.step[0].component[0].timing?.repeat).toMatchObject({ period: 2, periodUnit: "h" });
     expect(parsed.fhirNext.step[1].component[0].timing?.repeat).toMatchObject({ frequency: 4, period: 1, periodUnit: "d" });
+    for (const step of parsed.fhirNext.step) {
+      expect(step.component[0].doseAndRate).toEqual([{ doseQuantity: expect.objectContaining({ value: 1, unit: "drop" }) }]);
+      expect(step.component[0].site?.concept?.coding).toContainEqual(expect.objectContaining({
+        system: "http://snomed.info/sct", code: "1290032005",
+      }));
+    }
     assertWireKeys(parsed.fhirNext, permitted("DosageInstruction", "DosageInstruction"));
     for (const step of parsed.fhirNext.step) {
       assertWireKeys(step, permitted("DosageInstruction", "DosageInstruction.step"));

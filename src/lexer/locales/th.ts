@@ -742,7 +742,9 @@ function splitThaiCompactNumericToken(
   }
   const output: LexToken[] = [];
   let cursor = 0;
-  const numericRun = /[0-9๐-๙]+(?:\.[0-9๐-๙]+)?/gu;
+  // Comparative prefixes and leading decimal points belong to the same
+  // numeric daughter; splitting them can multiply a dose by ten.
+  const numericRun = /(?:[~≈<>≥≤]=?)?(?:[0-9๐-๙]+(?:\.[0-9๐-๙]+)?|\.[0-9๐-๙]+)/gu;
   for (
     let match = numericRun.exec(token.original);
     match;

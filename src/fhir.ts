@@ -2,7 +2,7 @@ import { resolveMedicationInstructionActionForMethod, selectMedicationInstructio
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  retainField, readRetainedField
+  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL
 } from "./dosage-course";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
@@ -238,6 +238,17 @@ function reconcileDurationEndpoint(
     if (key !== "value" && key !== "unit" && key !== "code" && key !== "system" && !(key in current))
       delete (result as Record<string, unknown>)[key];
   }
+  let retainProjectedAnnotations = false;
+  for (const field of ["unit", "code", "system"] as const) {
+    if (source[field] === current[field]) continue;
+    const annotation = ("_" + field) as "_unit" | "_code" | "_system";
+    if (current[annotation] !== undefined) retainProjectedAnnotations = true;
+    if (source[annotation] === undefined) delete result[annotation];
+    else result[annotation] = source[annotation];
+  }
+  if (retainProjectedAnnotations)
+    result.extension = [...(result.extension ?? []), { url: DOSAGE_RECONCILIATION_SOURCE_URL,
+      extension: [{ url: "projectedDurationEndpoint", valueQuantity: current }] }];
   return result;
 }
 

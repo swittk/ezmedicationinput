@@ -1,8 +1,9 @@
 import { formBodySiteRestriction } from "../body-site-grammar";
+import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, coordinationConnectorKind } from "./lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -24,7 +25,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { AdviceRelation, BodySiteSpatialRelation, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceRelation, BodySiteSpatialRelation, EventTiming, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -1102,11 +1103,63 @@ function fixedClockMealAdjunctSynsem(
   };
 }
 
+/** An exact clock refines the daypart of NEXT within one administration.
+ * Its lexical evidence identifies only that inferred anchor; independently
+ * coordinated events retain their own occurrence. */
+function nextDayClockAdjunctSynsem(
+  clockSign: HpsgSign, onsetSign: HpsgSign, context: HpsgUnificationContext
+): HpsgSynsem | undefined {
+  const clock = clockSign.synsem.head.schedule, onset = onsetSign.synsem.head.schedule;
+  if (!clock?.timeOfDay?.length || !onset?.when?.length ||
+      onset.phaseStartReference !== "treatment-day-start") return undefined;
+  const nextDay = onsetSign.evidence.find(item => item.rule === NEXT_DAY_SCHEDULE_RULE);
+  if (!nextDay) return undefined;
+  const onsetIndices = new Set(nextDay.tokenIndices), clockIndices = new Set<number>();
+  for (const evidence of clockSign.evidence)
+    if ((evidence.scheduleFields?.indexOf("timeOfDay") ?? -1) >= 0)
+      for (const index of evidence.tokenIndices) clockIndices.add(index);
+  let onsetStart = Infinity, onsetEnd = -Infinity, clockStart = Infinity, clockEnd = -Infinity;
+  let daypart: EventTiming | undefined;
+  for (const token of onsetSign.tokens) {
+    if (!onsetIndices.has(token.index)) continue;
+    onsetStart = Math.min(onsetStart, token.sourceStart);
+    onsetEnd = Math.max(onsetEnd, token.sourceEnd);
+    daypart ??= EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
+  }
+  for (const token of clockSign.tokens) {
+    // A clock-list daughter can own a trailing connector. It belongs to the
+    // bridge, not the last clock, so it cannot hide explicit event coordination.
+    if (!clockIndices.has(token.index) ||
+        coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown") continue;
+    clockStart = Math.min(clockStart, token.sourceStart);
+    clockEnd = Math.max(clockEnd, token.sourceEnd);
+  }
+  if (!daypart || clockStart === Infinity) return undefined;
+  const bridgeStart = onsetEnd <= clockStart ? onsetEnd : clockEnd;
+  const bridgeEnd = onsetEnd <= clockStart ? clockStart : onsetStart;
+  if (bridgeStart > bridgeEnd) return undefined;
+  // A coordinator can still be an uncombined daughter. Its declared lexical
+  // surface in this owned bridge retains both events in either word order.
+  if (context.sourceText &&
+      coordinationConnectorKind(context.sourceText(bridgeStart, bridgeEnd)) !== "unknown") return undefined;
+  for (const sign of [clockSign, onsetSign])
+    for (const token of sign.tokens)
+      if (token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd &&
+          coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown") return undefined;
+  const when = onset.when.filter(event => event !== daypart);
+  return { ...onsetSign.synsem, head: { ...onsetSign.synsem.head,
+    schedule: { ...onset, when: when.length ? when : undefined } } };
+}
+
 function scheduleRefinementSynsems(
   left: HpsgSign,
   right: HpsgSign,
   context: HpsgUnificationContext
 ): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
+  const nextDayRight = nextDayClockAdjunctSynsem(left, right, context);
+  if (nextDayRight) return { left: left.synsem, right: nextDayRight, refined: true };
+  const nextDayLeft = nextDayClockAdjunctSynsem(right, left, context);
+  if (nextDayLeft) return { left: nextDayLeft, right: right.synsem, refined: true };
   const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
   if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
   const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);

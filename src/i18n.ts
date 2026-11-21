@@ -1132,7 +1132,8 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     ? frequencyMax !== undefined && frequencyMax !== frequency
       ? `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง `
       : `${stripTrailingZero(frequency)} ครั้ง `
-    : "";
+    : rangedPeriod && frequencyMax !== undefined
+      ? `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง ` : "";
 
   if (
     frequency !== undefined &&
