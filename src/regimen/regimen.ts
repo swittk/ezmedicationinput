@@ -343,6 +343,7 @@ export function scopeSequentialPhaseSemantics(
     let nextDayRelation = false;
     let contextualNextDay = false;
     let localNextDay = false;
+    let datedNextDay: string | undefined;
     let contextualPredecessor: boolean | undefined;
     let singleClockPredecessor: number | undefined;
     let relativeNextDay: number | null | undefined;
@@ -405,7 +406,8 @@ export function scopeSequentialPhaseSemantics(
       } else if (start) {
         // A dated predecessor supplies an actual next calendar day. It must
         // not also claim the unrelated second day of treatment.
-        schedule.boundsStart = schedule.boundsStart ?? (phasePauseDays ? advanceDate(start, phasePauseDays) : start);
+        datedNextDay = phasePauseDays ? advanceDate(start, phasePauseDays) : start;
+        schedule.boundsStart ??= datedNextDay;
         delete schedule.treatmentStartOffsetDays;
       } else {
         if (relativeNextDay === undefined) {
@@ -427,7 +429,7 @@ export function scopeSequentialPhaseSemantics(
             start ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
         note: 'The next-day daughter follows the complete preceding phase, retaining its authored endpoint or origin.' });
     }
-    if (contextualNextDay || localNextDay) {
+    if (contextualNextDay || localNextDay || datedNextDay) {
       // Coordination already established one successor phase. Its onset scopes
       // over daughters that omit an onset, while independently authored dates
       // and treatment offsets remain local to their own administrations.
@@ -438,13 +440,16 @@ export function scopeSequentialPhaseSemantics(
         if (schedule?.phaseStartReference || schedule?.treatmentStartOffsetDays !== undefined ||
             schedule?.boundsStart || schedule?.calendarEvents?.length) continue;
         clause.schedule ??= {};
-        clause.schedule.phaseStartReference = contextualNextDay ? 'previous-phase-next-day' : "treatment-day-start";
-        if (contextualNextDay && phasePauseDays)
-          clause.schedule.treatmentStartOffsetDays = phasePauseDays;
-        else if (localNextDay && relativeNextDay !== null && relativeNextDay !== undefined)
-          clause.schedule.treatmentStartOffsetDays = relativeNextDay;
+        if (datedNextDay) clause.schedule.boundsStart = datedNextDay;
+        else {
+          clause.schedule.phaseStartReference = contextualNextDay ? 'previous-phase-next-day' : "treatment-day-start";
+          if (contextualNextDay && phasePauseDays)
+            clause.schedule.treatmentStartOffsetDays = phasePauseDays;
+          else if (localNextDay && relativeNextDay !== null && relativeNextDay !== undefined)
+            clause.schedule.treatmentStartOffsetDays = relativeNextDay;
+        }
         clause.evidence.push({ rule: 'hpsg.regimen.shared-next-day-onset', spans: [],
-          scheduleFields: clause.schedule.treatmentStartOffsetDays !== undefined
+          scheduleFields: datedNextDay ? ['boundsStart'] : clause.schedule.treatmentStartOffsetDays !== undefined
             ? ["phaseStartReference", "treatmentStartOffsetDays"] : ['phaseStartReference'],
           note: 'The coordinated successor shares the phase onset while retaining its local dose and clock.' });
       }

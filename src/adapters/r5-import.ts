@@ -556,7 +556,7 @@ function reconcileNativeCompactCourse(
   const headers = new Map<string, CompactCourseRow>();
   const conflictingContexts = new Set<string>();
   const conflictingPhases = new Set<number>();
-  let metadataEdited = false;
+  let metadataEdited = false, hasUnmarkedFirstPhase = false;
   const metadata = new Map<
     number,
     { step: NonNullable<CompactCourseRow["step"]>; rowIndex: number; marker?: FhirExtension }
@@ -603,6 +603,7 @@ function reconcileNativeCompactCourse(
       sequence: decoded.sequence,
       stepCount: decoded.stepCount,
     } as CompactCourseRow;
+    if (value.sequence === 1 && value.countScope === undefined) hasUnmarkedFirstPhase = true;
     if (
       !equalStructuredValues(marker, { url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields(value) })
     )
@@ -748,28 +749,43 @@ function reconcileNativeCompactCourse(
       }
     }
     for (const context of local.value.missingContext ?? []) {
-      if (context !== CONFLICTING_PHASE_CONTEXT) missing.add(context);
+      if (context === "predecessor") sources.push(localReconciliationSource(local.marker));
+      else if (context !== CONFLICTING_PHASE_CONTEXT) missing.add(context);
     }
   }
   // The previous owned R5 writer stored whole-course repetitions on the
   // first step. Only that unversioned saved-row contract is migrated here;
   // current markers and arbitrary R6 step.count always keep step semantics.
   let legacyCycleCount: number | undefined;
-  if (header?.countScope === undefined && header?.course?.repeatCycle &&
+  if (hasUnmarkedFirstPhase && header?.course?.repeatCycle &&
       getCourseCycleCount(header.course) === undefined &&
       !conflictingContexts.size && !conflictingPhases.has(1)) {
     const firstSavedStep = metadata.get(1);
     if (Number.isInteger(firstSavedStep?.step.count) && firstSavedStep!.step.count! > 0) {
       // Current rows and courses without the old cycle encoding need no
       // secondary row scan or temporary first-stage list.
-      const legacyFirstRows = localRows.filter(local => local?.value.sequence === 1 &&
-        local.value.context === header.context);
-      if (legacyFirstRows.length && legacyFirstRows.every(local => local?.value.countScope === undefined)) {
+      let unmarked = false, marked = false;
+      const firstRows: NonNullable<typeof localRows[number]>[] = [];
+      for (const local of localRows) {
+        if (local?.value.sequence !== 1 || local.value.context !== header.context) continue;
+        firstRows.push(local);
+        if (local.value.countScope === undefined) unmarked = true;
+        else marked = true;
+      }
+      if (unmarked && marked) {
+        // One known saved shape means whole-course count, the other means
+        // first-phase count. Reuse phase reconciliation until the caller
+        // explicitly resolves that ownership; neither meaning can be guessed.
+        if (!resolvedSequences.has(1)) conflictingPhases.add(1);
+        for (const local of firstRows) sources.push(sourceWithoutNestedHistory(local.marker));
+        addWarning(warnings,
+          "Saved R5 rows disagree on whole-course versus phase count ownership; resolve the first phase and course count before numeric execution.");
+      } else if (unmarked) {
         legacyCycleCount = firstSavedStep!.step.count;
         const { count: _courseCount, ...step } = firstSavedStep!.step;
         metadata.set(1, { ...firstSavedStep!, step });
-        for (const local of legacyFirstRows)
-          if (local) sources.push(sourceWithoutNestedHistory(local.marker));
+        for (const local of firstRows)
+          sources.push(sourceWithoutNestedHistory(local.marker));
         addWarning(warnings,
           "Migrated the saved R5 course repetition count from the previous first-step encoding; original metadata retained as source provenance.");
       }
@@ -1041,8 +1057,10 @@ function reconcileNativeCompactCourse(
   // ordinary current-marker clear semantics above.
   if (legacyCycleCount !== undefined && (courseEdits.modifierExtension === undefined ||
       courseEdits.modifierExtension.length > 0 && !courseEdits.modifierExtension.some(item =>
-        item.url === COURSE_CYCLE_COUNT_EXTENSION_URL)))
-    setCourseCycleCount(currentHeader, legacyCycleCount);
+        item.url === COURSE_CYCLE_COUNT_EXTENSION_URL))) {
+    const displaced = setCourseCycleCount(currentHeader, legacyCycleCount);
+    if (displaced) sources.push(...displaced);
+  }
   const replacementOwnsHeader = instruction !== undefined &&
     (renderedInstruction !== undefined || instruction !== savedInstruction);
   const result = courseFromFields(currentHeader, steps,

@@ -3647,7 +3647,7 @@ describe("parseSig core scenarios", () => {
     expect(again.longText).toBe("Use up to 2 tablets.");
   });
 
-  it("fromFhirDosage warns on mismatched dose range units instead of dropping the range", () => {
+  it("fromFhirDosage retains independent range endpoints without a false compact unit", () => {
     const again = fromFhirDosage({
       doseAndRate: [
         {
@@ -3659,13 +3659,15 @@ describe("parseSig core scenarios", () => {
       ]
     });
 
-    expect(again.meta.canonical.clauses[0]?.dose).toEqual({
-      range: { low: 1, high: 2 },
-      unit: "tab"
-    });
-    expect(again.warnings).toContain(
-      "FHIR doseRange low/high units differ (tab vs mL); preserved numeric bounds using tab."
-    );
+    expect(again.meta.canonical.clauses[0]?.dose).toBeUndefined();
+    const endpoints = {
+      low: { value: 1, unit: "tab" },
+      high: { value: 2, unit: "mL" }
+    };
+    expect(again.meta.canonical.administration?.amounts?.[0].range).toEqual(endpoints);
+    expect(again.fhir.doseAndRate?.[0].doseRange).toEqual(endpoints);
+    expect(again.longText).toContain("1 tab");
+    expect(again.longText).toContain("2 mL");
   });
 
   it("does not emit empty timing objects when no timing data is present", () => {

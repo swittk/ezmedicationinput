@@ -3,7 +3,7 @@ import { fromDosageDetails } from '../dosage-course';
 import { type FhirProjectionOptions } from '../fhir';
 import { courseFromParallel } from '../canonical/compile';
 import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
-import { compareRegimenPositions, type CanonicalCourse, type RegimenPosition } from '../canonical/course';
+import { compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
 import { anchoredScheduleDurationEnd, type RegimenGraph } from './regimen';
@@ -33,6 +33,8 @@ export interface CanonicalParallelPhase {
   /** Origin of the known relative start; absent retains elapsed semantics. */
   startReference?: "treatment-day-start";
   end?: RegimenPosition;
+  /** A known same-track successor caps this phase without replacing its own end. */
+  phaseEnd?: CanonicalBoundary;
 }
 
 export interface CanonicalParallelTrack {
@@ -251,6 +253,14 @@ function partialParallelRegimen(
       const planned: CanonicalParallelPhase = { kind: calendar ? "calendar" : "relative", members,
         ...(start ? { start } : {}), ...(end ? { end } : {}) };
       if (start && startReference) planned.startReference = startReference;
+      // A known successor replaces the old cadence even when its predecessor
+      // has no duration. Keep the authored end separately: it can leave a gap.
+      // Mixed or dependent origins cannot supply a concrete treatment cutoff.
+      if (index > 0 && start && !hasDependentStart && !(hasAuthoredDayStart && hasAuthoredElapsedStart))
+        phases[index - 1].phaseEnd = {
+          anchor: startReference ?? "treatment-start",
+          displacement: { value: start.value, unit: start.unit, code: start.unit, system: "http://unitsofmeasure.org" }
+        };
       phases.push(planned);
       at = end;
       atReference = end ? startReference : undefined;

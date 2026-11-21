@@ -713,6 +713,7 @@ function thaiNumericTokenAt(
   const original = input.slice(whole.sourceStart, fraction.sourceEnd);
   if (!/[๐-๙]/u.test(original)) return undefined;
   let value: number | undefined;
+  let comparator: string | undefined;
   if (separator.original === ".") {
     if (whole.sourceEnd !== separator.sourceStart || separator.sourceEnd !== fraction.sourceStart)
       return undefined;
@@ -721,13 +722,21 @@ function thaiNumericTokenAt(
     if (!/^\s*$/u.test(input.slice(whole.sourceEnd, separator.sourceStart)) ||
         !/^\s*$/u.test(input.slice(separator.sourceEnd, fraction.sourceStart)) ||
         whole.original.includes("/") || fraction.original.includes("/")) return undefined;
-    const numerator = medicationNumberValue(whole.original);
+    comparator = whole.original.match(/^(?:[<>]=?|[~≈≥≤])/u)?.[0];
+    const numerator = medicationNumberValue(comparator ? whole.original.slice(comparator.length) : whole.original);
     const denominator = medicationNumberValue(fraction.original);
     if (numerator === undefined || denominator === undefined || denominator === 0) return undefined;
     value = numerator / denominator;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;
   const token = fragmentToken(whole, input, whole.sourceStart, fraction.sourceEnd, value);
+  if (comparator) {
+    // Keep the qualifier in the numeric head consumed by the shared quantity
+    // grammar; the original Thai phrase and all source spans remain intact.
+    token.kind = LexKind.Word;
+    token.value = undefined;
+    token.canonical = comparator + value;
+  }
   token.surfaceIndices = [];
   for (const part of [whole, separator, fraction]) {
     for (const surfaceIndex of part.surfaceIndices) {
@@ -881,7 +890,7 @@ export function applyThaiLocaleLexicon(tokens: readonly LexToken[], input: strin
     const token = prepared[cursor];
     // Thai digits in a compact comparative number retain their original
     // source while sharing the existing numeric grammar with ASCII digits.
-    const canonical = canonicalLocaleLexeme(token.lower) ??
+    const canonical = token.canonical ?? canonicalLocaleLexeme(token.lower) ??
       (/^[~≈<>≥≤]/u.test(token.lower) && /[๐-๙]/u.test(token.lower)
         ? token.lower.replace(/[๐-๙]/gu, digit => String(digit.charCodeAt(0) - 0x0e50))
         : undefined);

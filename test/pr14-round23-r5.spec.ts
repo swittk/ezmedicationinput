@@ -13,7 +13,7 @@ import {
   decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, withDosageEditProvenance, isRenderedInstructionMarker,
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
-  setDosageExcludedDates, setDosageExcludedWeekdays,
+  setDosageExcludedDates, getDosageExcludedDates, setDosageExcludedWeekdays, R5_RATE_MODIFIERS_R6_URL,
   captureSourceReplayTiming, matchesSourceReplayTiming, dosageMatchesSavedProjection,
 } from "../src/dosage-course";
 import {
@@ -3191,5 +3191,183 @@ describe("R5 edit ownership and quantity boundaries", () => {
     ]);
     delete projected.comparator;
     expect(getQuantityComparator(projected)).toBeUndefined();
+  });
+});
+
+describe("round34 interchange current clinical ownership", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const options = { from: "2026-11-21T00:00:00Z", orderedAt: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 10 };
+  const boundary = (days: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value: days, unit: "d" } });
+
+  it("retires the saved missing-predecessor reason when its real first phase is restored", () => {
+    const input: FhirR6DosageInstruction = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { ...daily, count: 3 } } }] },
+      { start: { contextCode: { coding: [{ system: "urn:ezmedicationinput:CodeSystem:course-phase-event", code: "previous-phase-next-day" }] } },
+        component: [{ doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: { ...daily, count: 1 } } }] },
+    ] };
+    const original = persist(toFhirR5Dosages(input));
+    const incomplete = persist(toFhirR5Dosages(toDosageDetails(original.slice(1))));
+    expect(() => nextDueDoses(incomplete, options)).toThrow(/complete dosage array/i);
+    let restored = [original[0], ...incomplete];
+    for (let save = 0; save < 3; save++) {
+      expect(nextDueDoses(restored, options).map(value => new Date(value).toISOString())).toEqual([
+        "2026-11-21T08:00:00.000Z", "2026-11-22T08:00:00.000Z",
+        "2026-11-23T08:00:00.000Z", "2026-11-24T08:00:00.000Z",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: restored, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(5);
+      expect(importCanonicalCourse(restored).stages[1].administrations[0].missingContexts).toBeUndefined();
+      restored = persist(toFhirR5Dosages(toDosageDetails(restored)));
+    }
+    expect(JSON.stringify(toDosageDetails(restored).extension)).toContain("predecessor");
+  });
+
+  it.each([false, true])("keeps mixed saved R5 count meanings unresolved in either row order (%s)", reverse => {
+    // Actual former writer's first-stage course count shape, combined with a
+    // current explicitly step-scoped row from the same persisted course.
+    const marker: FhirExtension = { url: DOSAGE_DETAILS_R5_URL, extension: [
+      { url: "rowIndex", valueInteger: 0 }, { url: "sequence", valueInteger: 1 }, { url: "stepCount", valueInteger: 1 },
+      { url: "step", extension: [{ url: "count", valueInteger: 3 }] },
+      { url: "context", valueString: "72f2f03d1f8289c5" }, { url: "contextRequired", valueBoolean: true },
+      { url: "course", extension: [{ url: "repeatCycle", valueQuantity: { value: 14, unit: "d", code: "d", system: "http://unitsofmeasure.org" } }] },
+    ] };
+    const old: FhirDosage = { sequence: 1, doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { ...daily, boundsDuration: { value: 7, unit: "d", code: "d" } } }, modifierExtension: [marker] };
+    const current = persist(old);
+    current.modifierExtension![0].extension![0].valueInteger = 1;
+    current.modifierExtension![0].extension!.push({ url: "countScope", valueCode: "step" });
+    let rows = reverse ? [current, old] : [old, current];
+    for (let save = 0; save < 3; save++) {
+      expect(() => nextDueDoses(rows, { ...options, limit: 50 })).toThrow(/conflicting|complete dosage array|resolve/i);
+      expect(() => calculateTotalUnits({ ...options, dosage: rows, durationValue: 42, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(/conflicting|complete dosage array|resolve/i);
+      rows = persist(toFhirR5Dosages(toDosageDetails(rows)));
+    }
+    const resolved = toDosageDetails(rows, undefined, { step: [{ sequence: 1, count: 1 }],
+      modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }] }, { resolvedPhaseSequences: [1] });
+    const actual = nextDueDoses(resolved, { ...options, limit: 100 });
+    expect(actual).toHaveLength(42); // two members, three seven-day active blocks
+    expect(new Set(actual).size).toBe(21);
+    expect(new Date(actual[41]).toISOString()).toBe("2026-12-25T08:00:00.000Z");
+    expect(calculateTotalUnits({ ...options, dosage: resolved, durationValue: 42, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(42);
+    expect(JSON.stringify(resolved.extension)).toContain("72f2f03d1f8289c5");
+  });
+
+  it("does not move an unidentified phase policy with its member into a new identified phase", () => {
+    let wire = toDosageDetails([{ id: "original-member", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } }],
+      undefined, { step: [{ sequence: 1, safety: {
+        doseLimit: [{ scope: "administration", valueQuantity: q(2) }], ifExceeded: "Review the original phase",
+      } }] });
+    wire.step = [{ id: "replacement-phase", component: wire.step![0].component }];
+    for (let save = 0; save < 3; save++) {
+      const native = importCanonicalCourse(wire);
+      expect(native.safety).toBeUndefined();
+      expect(native.stages[0].safety).toBeUndefined();
+      expect(JSON.stringify(r6Save(wire).extension)).toContain("Review the original phase");
+      wire = save === 1 ? toDosageDetails(persist(toFhirR5Dosages(wire))) : r6Save(wire);
+    }
+  });
+
+  it.each(["replace", "clear", "stale-mirror"] as const)("synchronizes the lifted date owner on setter %s", edit => {
+    const row: EzDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } };
+    setDosageExcludedDates(row, ["2026-11-22"]);
+    row.excludedDates = ["2026-11-22"];
+    if (edit === "stale-mirror") row.excludedDates = ["2026-11-23"];
+    const dates = edit === "clear" ? [] : edit === "replace" ? ["2026-11-23"] : ["2026-11-22"];
+    setDosageExcludedDates(row, dates);
+    expect(getDosageExcludedDates(row)).toEqual(dates);
+    const expected = ["2026-11-21", "2026-11-22", "2026-11-23", "2026-11-24"].filter(day => dates.indexOf(day) < 0);
+    expect(nextDueDoses(row, { ...options, limit: expected.length }).map(value => value.slice(0, 10))).toEqual(expected);
+    const wire = toDosageDetails([row]);
+    expect(getDosageExcludedDates({ modifierExtension: wire.step![0].component[0].modifierExtension })).toEqual(dates);
+  });
+
+  it.each(["value", "period", "scope", "action", "expression"] as const)("invalidates a warmed lifted safety preview after a live %s edit", edit => {
+    const row: EzDosage = { text: "Take one tablet daily; maximum four tablets per dose.",
+      doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      safety: { doseLimit: [{ scope: "administration", valueQuantity: q(4) }] } };
+    if (edit === "period") row.safety!.doseLimit![0] = { scope: "period", valueQuantity: q(4), period: { value: 1, unit: "d" } };
+    if (edit === "expression") row.safety!.doseLimit![0] = { scope: "administration", valueExpression: expression("originalLimit") };
+    const saved = persist(withDosageEditProvenance([row], row.text)[0]);
+    expect(dosageMatchesSavedProjection(saved)).toBe(true);
+    expect(formatSig(saved, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+    if (edit === "value") saved.safety!.doseLimit![0].valueQuantity!.value = 2;
+    else if (edit === "period") saved.safety!.doseLimit![0].period!.value = 2;
+    else if (edit === "scope") saved.safety!.doseLimit![0].scope = "lifetime";
+    else if (edit === "action") saved.safety!.ifExceeded = "Contact the clinician";
+    else saved.safety!.doseLimit![0].valueExpression!.expression = "%currentLimit";
+    expect(dosageMatchesSavedProjection(saved)).toBe(false);
+    const warm = formatSig(saved, "long", { locale: "en", realizationMode: "roundtrip" });
+    expect(warm).toBe(formatSig(persist(saved), "long", { locale: "en", realizationMode: "roundtrip" }));
+    expect(warm).not.toBe(row.text);
+    if (edit === "value") expect(warm).toContain("2 tab");
+    if (edit === "action") expect(warm).toContain("Contact the clinician");
+  });
+
+  it("keeps a primitive-metadata-only R6 header as a header without inventing a dosage", () => {
+    const input = { _renderedInstruction: { id: "instruction-annotation", extension: [
+      { url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" },
+    ] } };
+    let current: FhirR6DosageInstructionInput = input;
+    for (let save = 0; save < 3; save++) {
+      const native = importCanonicalCourse(current);
+      expect(native.stages).toEqual([]);
+      const output = projectCanonicalCourse(native).fhirNext;
+      expect(output._renderedInstruction).toEqual(input._renderedInstruction);
+      expect(output.step).toBeUndefined();
+      current = save === 1 ? toDosageDetails(persist(toFhirR5Dosages(output))) : persist(output);
+    }
+  });
+
+  it.each(["unchanged", "replace", "clear"] as const)("preserves rate wrapper annotations while current modifier %s owns the value", edit => {
+    const original = { url: "urn:test:rate-policy", valueString: "Original clinical rate policy" };
+    const replacement = { url: "urn:test:rate-policy", valueString: "Replacement clinical rate policy" };
+    const wrapper = { id: "authored-rate-wrapper", url: R5_RATE_MODIFIERS_R6_URL, extension: [original] };
+    const input = course({ doseAndRate: [{ doseQuantity: q(1), extension: [wrapper, { url: "urn:test:rate-note", valueString: "Keep rate note" }] }] });
+    let rows = persist(toFhirR5Dosages(input));
+    if (edit !== "unchanged") rows[0].doseAndRate![0].modifierExtension = edit === "replace" ? [replacement] : [];
+    for (let save = 0; save < 3; save++) {
+      const output = toDosageDetails(rows);
+      const rate = output.step![0].component[0].doseAndRate![0];
+      const active = rate.extension?.find(marker => marker.url === R5_RATE_MODIFIERS_R6_URL);
+      if (edit === "clear") {
+        expect(active).toBeUndefined();
+        expect(JSON.stringify(rate.extension)).toContain("authored-rate-wrapper");
+      } else expect(active).toEqual({ ...wrapper, extension: [edit === "replace" ? replacement : original] });
+      expect(rate.extension).toContainEqual({ url: "urn:test:rate-note", valueString: "Keep rate note" });
+      rows = persist(toFhirR5Dosages(output));
+    }
+  });
+
+  it("retains a displaced authored course count without rewriting it to the first value", () => {
+    const first = { id: "authoritative-count", url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 2 };
+    const second = { id: "displaced-count", url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3,
+      extension: [{ url: "urn:test:count-note", valueString: "Second authored cycle count" }] };
+    const unknown = { url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueString: "unresolved authored value" };
+    let current: FhirR6DosageInstruction = { ...course({ timing: { repeat: { ...daily, count: 1 } } }),
+      repeatCycle: { value: 7, unit: "d" }, modifierExtension: [first, second, unknown] };
+    for (let save = 0; save < 3; save++) {
+      const output = r6Save(current);
+      expect(output.modifierExtension).toEqual([first, unknown]);
+      expect(output.extension).toContainEqual({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [second] });
+      expect(nextDueDoses(output, options).map(value => value.slice(0, 10))).toEqual(["2026-11-21", "2026-11-28"]);
+      current = save === 1 ? toDosageDetails(persist(toFhirR5Dosages(output))) : output;
+    }
+  });
+
+  it("retains independent phase start and end with their authored wrapper annotations", () => {
+    const start = { ...boundary(2), id: "component-start" }, end = { ...boundary(35), id: "component-cutoff" };
+    const marker = encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { start, end }, "step");
+    marker.id = "phase-window";
+    marker.extension!.push({ url: "urn:test:phase-note", valueString: "Independent member interval" });
+    let current = course({ modifierExtension: [marker], timing: { repeat: daily } });
+    for (let save = 0; save < 3; save++) {
+      const member = importCanonicalCourse(current).stages[0].administrations[0];
+      expect(member.phaseStart?.displacement?.value).toBe(2);
+      expect(member.phaseEnd?.displacement?.value).toBe(35);
+      current = save === 1 ? toDosageDetails(persist(toFhirR5Dosages(current))) : r6Save(current);
+      expect(current.step![0].component[0].modifierExtension).toContainEqual(marker);
+    }
   });
 });

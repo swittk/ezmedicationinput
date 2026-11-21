@@ -18,7 +18,7 @@ import type {
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { getDoseQuantityUnit } from "../maps";
-import { formatCanonicalClause, formatDoseEnglish } from "../format";
+import { formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -268,13 +268,15 @@ function treatmentBoundaryRangeText(
 function boundaryEventText(
   boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
 ): string | undefined {
-  if (!boundary || boundary.anchor === "treatment-start") return undefined;
+  if (!boundary || boundary.anchor === "treatment-start" &&
+      !(boundary.displacement?.value !== undefined && boundary.displacement.value < 0)) return undefined;
   let context = boundary.contextCode?.text?.trim();
   if (!context) for (const coding of boundary.contextCode?.coding ?? []) {
     const display = coding.display?.trim();
     if (display) { context = display; break; }
   }
-  const event = boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
+  const event = boundary.anchor === "treatment-start" ? words.treatmentStart
+    : boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
     : context ??
     boundary.contextReference?.display ?? boundary.contextReference?.reference ??
@@ -680,7 +682,7 @@ export function formatCanonicalCourse(
     only.count === undefined &&
     !oneOrCourse.cycleInterval &&
     oneOrCourse.cycleCount === undefined &&
-    !administration.phaseStart && !administration.phaseOrigin?.value &&
+    !administration.phaseStart && !administration.phaseEnd && !administration.phaseOrigin?.value &&
     !administration.choice
   ) {
     const recurrence = administration.schedule?.recurrence;
@@ -777,9 +779,11 @@ export function formatCanonicalCourse(
           // A structured count owns cadence. Its stale code must not restore
           // the full-period frequency that this offset-only preview omits.
           const structuredCount = _frequency !== undefined || _frequencyMax !== undefined;
-          const { code: _timingCode, ...withoutCode } = display.schedule;
+          const { code: timingCode, ...withoutCode } = display.schedule;
+          const codeAgrees = timingCodeMatchesRecurrence(display.schedule.recurrence,
+            timingCode?.coding?.[0]?.code ?? timingCode?.text);
           display = { ...display, schedule: {
-            ...(structuredCount ? withoutCode : display.schedule), recurrence: rest
+            ...(structuredCount || !codeAgrees ? withoutCode : display.schedule), recurrence: rest
           } };
         }
         // The clause owns one untyped dose, including its qualifier and target.
@@ -941,6 +945,14 @@ export function formatCanonicalCourse(
           }
           if (!stageCoversOrigin) memberTiming = words.calendarWindow(
             words.afterTreatmentStart(formatCourseTimeQuantity(origin, words)), undefined);
+        }
+        if (component.phaseEnd) {
+          const boundary = component.phaseEnd;
+          const point = treatmentBoundaryRangeText(boundary, words) ??
+            courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words) ??
+            boundaryEventText(boundary, words);
+          const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description);
+          memberTiming = memberTiming ? memberTiming + "; " + endTiming : endTiming;
         }
         return memberTiming ? memberTiming + ": " + body : body;
       },

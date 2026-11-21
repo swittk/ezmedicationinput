@@ -3418,8 +3418,71 @@ describe("round33 joined-script method vocabulary bounds", () => {
     // Compatible qualified source keeps its qualifiers, including aliases
     // longer than any default action. A conflicting current code still wins.
     expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: swallow }, options)).toBeUndefined();
-    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: chew }, options)?.code).toBe("chew");
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: chew }, options)?.code).toBe("custom-chew");
     expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: chew }, options)).toBeUndefined();
-    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: swallow }, options)?.code).toBe("swallow");
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: swallow }, options)?.code).toBe("custom-swallow");
   });
+});
+
+
+describe("round34 live method realization", () => {
+  it.each(["Apply", "Rub"] as const)("keeps the live dose and compatible adjuncts for %s", method => {
+    const source = "Rub 1 g into the skin gently";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to the skin gently").fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
+    ];
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 3 }, actions: [primary] })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== marker.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(marker);
+    row.method = { text: "Rub", coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] };
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    if (method === "Apply") saved.method = { text: "Apply",
+      coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] };
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(method === "Apply" ? /^Apply\b/u : /^Rub\b/u);
+      if (method === "Apply") expect(text).toContain("1 g");
+      expect(text).toContain("skin");
+      expect(text).toContain("gently");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+
+  it.each([undefined, "Custom apply", "old display"])("resolves a declared custom method by exact code (%s)", display => {
+    const options = { instructionActionMap: {
+      "custom-apply": { code: "custom-apply", display: "Custom apply", primaryAdministrationHead: true,
+        semanticClass: "apply", administrationMethod: { system: "urn:clinic:method", code: "apply-local" } }
+    } };
+    const method = { text: "Swallow", coding: { system: "urn:clinic:method", code: "apply-local", ...(display ? { display } : {}) } };
+    const before = JSON.stringify(method);
+    expect(resolveMedicationInstructionActionForMethod(method, options)?.code).toBe("custom-apply");
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      method: { text: method.text, coding: [method.coding] } };
+    const text = formatSig(row, "long", { ...options, locale: "en", realizationMode: "normalized" });
+    expect(text).toContain("Custom apply");
+    expect(text).toContain("1 g");
+    expect(text).not.toContain("Swallow");
+    expect(JSON.stringify(method)).toBe(before);
+    expect(resolveMedicationInstructionActionForMethod({ text: "Swallow",
+      coding: { system: "urn:another:method", code: "apply-local" } }, options)?.code).toBe("swallow");
+  });
+});
+
+
+it("round34: keeps display-selected custom method identity among equal coded definitions", () => {
+  const coding = { system: "urn:clinic:method", code: "skin-application" };
+  const options = { instructionActionMap: {
+    "local-apply": { code: "local-apply", display: "Local apply", administrationMethod: coding },
+    "local-rub": { code: "local-rub", display: "Local rub", administrationMethod: coding }
+  } };
+  expect(resolveMedicationInstructionActionForMethod({ text: "Swallow",
+    coding: { ...coding, display: "local-rub" } }, options)?.code).toBe("local-rub");
+  expect(resolveMedicationInstructionActionForMethod({ text: "Swallow",
+    coding }, options)?.code).toBe("local-apply");
 });

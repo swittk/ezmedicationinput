@@ -187,7 +187,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       if (input.step?.length === 1) owner = input.step[0];
     } else for (const candidate of input.step ?? []) {
       const matches = saved.ownerId !== undefined ? candidate.id === saved.ownerId
-        : componentIds ? candidate.component.some(member => member.id !== undefined && componentIds.has(member.id))
+        : componentIds ? candidate.id === undefined && candidate.component.some(member => member.id !== undefined && componentIds.has(member.id))
         : stepOwnerFingerprint(candidate) === saved.ownerFingerprint;
       if (!matches) continue;
       if (owner) return retained;

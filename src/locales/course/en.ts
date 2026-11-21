@@ -15,6 +15,15 @@ const MEASUREMENT_NAMES: Readonly<Record<string, string>> = {
   bp: "BP", sbp: "SBP", dbp: "DBP", hr: "HR", spo2: "SpO2",
 };
 export const ENGLISH_COURSE: CourseLanguage = {
+  unresolvedCycleTiming: (days, periodDays, cycles, anchor) => {
+    const details = [
+      ...(days ? ["cycle days " + days] : []),
+      ...(periodDays !== undefined ? [periodDays + "-day cycle"] : []),
+      ...(cycles !== undefined ? [cycles + " cycles"] : []),
+      ...(anchor ? ["cycle anchor " + anchor] : [])
+    ];
+    return "Unresolved cycle timing" + (details.length ? " (" + details.join("; ") + ")" : "");
+  },
   notPrefix: "not ",
   allSeparator: " and ",
   anySeparator: " or ",

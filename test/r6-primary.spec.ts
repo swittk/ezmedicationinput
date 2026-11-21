@@ -12,7 +12,7 @@ import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageInstruction, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
@@ -798,7 +798,7 @@ describe("typed alternative-choice FHIR membership", () => {
 
   it("supports three alternatives without assuming a binary pair or changing their quantities", () => {
     const original = alternativeCourse();
-    const third: FhirR6DosageInstruction["step"][number]["component"][number] = {
+    const third: FhirR6Dosage = {
       id: "third-option", doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }]
     };
     setDosageAlternativeChoice(third, {
@@ -923,7 +923,7 @@ describe("choice execution over reloaded branch groups", () => {
     timeZone: "Asia/Bangkok", limit: 4
   };
   const component = (value: number, time: string, groupId: string, branchId: string) => {
-    const dosage: FhirR6DosageInstruction["step"][number]["component"][number] = {
+    const dosage: FhirR6Dosage = {
       doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: [time] } }
     };
@@ -1805,7 +1805,7 @@ describe("method-only inheritance remains reachable for PRN successors", () => {
 
 describe("native R6 label-only condition text", () => {
   it("does not confuse a source-less condition label with its Boolean or numeric meaning", () => {
-    const cases: Array<{ condition: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["condition"]>[number]; expected: string }> = [
+    const cases: Array<{ condition: NonNullable<FhirR6Dosage["condition"]>[number]; expected: string }> = [
       { condition: { code: { coding: [{ code: "problem-presents" }] },
         details: { text: "fasting" }, valueBoolean: false }, expected: "only if not fasting" },
       { condition: { code: { text: "systolic BP" }, operation: "gt",
@@ -2269,7 +2269,7 @@ describe("compact course metadata ownership and editing", () => {
     contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
     offsetDuration: { value, unit: "d", code: "d" }
   });
-  const component = (value = 1): FhirR6DosageInstruction["step"][number]["component"][number] => ({
+  const component = (value = 1): FhirR6Dosage => ({
     doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
     timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] } }
   });
@@ -4372,7 +4372,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   });
 
   it("renders exact R6 rate quantities and ratios in both course and item previews", () => {
-    const one = (entry: NonNullable<FhirR6DosageInstruction["step"][number]["component"][number]["doseAndRate"]>[number]) =>
+    const one = (entry: NonNullable<FhirR6Dosage["doseAndRate"]>[number]) =>
       ({ step: [{ component: [{ doseAndRate: [entry] }] }] }) as FhirR6DosageInstruction;
     const exactRate = one({ rateQuantity: { value: 100, unit: "mL/h" } });
     const mixed = one({ doseQuantity: simpleQuantityForR5({ value: 500, unit: "mL", comparator: "~" })!,

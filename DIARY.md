@@ -12384,3 +12384,227 @@ Negative values indicate less runtime. Changes are median paired ratios, not rat
 ### Review communication
 
 Fresh delivery preflight confirmed 148 review threads, all resolved, with the remote head still at 84e74c9 and master at 7d62823. These 45 new findings are in the review body and overflow, with no new inline thread requiring a reply. No top-level comment, private project name, or additional full-review request was posted. Delivery uses the existing PR branch; remote head, thread state and clean local tree are checked again after the push.
+
+
+## PR #14 review round 34 — 2026-11-22
+
+### Scope, decisions and integration
+
+Reviewed head `d659c06` against review 6008489685 and overflow 7069893392: **39 findings — 22 major, 15 minor and 2 trivial.** Accepted 38 after the product gate; declined #18 as a request for a new schema-only mixed-unit normalization policy. The separate wrong-unit compact metadata defect is fixed. All 148 pre-existing inline threads were resolved at preflight; the new findings are body/overflow items. Three bounded workers handled execution, interchange and meaning, and the coordinator implemented the remaining fixes, reviewed the integration and owns the final gates.
+
+The public `.fhir` and downstream storage contract stays R5. `.fhirNext` uses the current pinned R6 contract through a direct sibling adapter; current R6 import does not add legacy R6 compatibility. The native model remains an unstable implementation detail. No native editor lifecycle, general misuse validator, downstream migration or new repository path was added. The PR stays at **100 changed paths**.
+
+### Findings and product gates
+
+**#1 — accepted (major): Clear the saved `predecessor` reason when the complete R5 course is restored.**
+
+Requirement: A complete restored public R5 course must execute from its current predecessor membership. Harm: Saving a deleted predecessor persisted the derived predecessor missing reason; restoring the real first phase still rejected scheduling and supply. Owner: Existing compact R5 missing-context reconstruction and current stage predecessor check in r5-import.ts. Change: Do not reactivate saved predecessor evidence; preserve its marker as source and let the existing current-stage check rederive absence. Cost: Existing missingContext loop adds one string comparison; source envelope only for rows that actually carry the stale/derived reason. No new stage pass. Preservation: All other missing reasons remain active; incomplete-course control still refuses; retired marker remains in reconciliation source. Independent oracle: Restoring first phase gives Nov21/22/23 08:00 one tablet and Nov24 08:00 two tablets: four events, five tablets. Repeated R5/R6 saves remain executable.
+
+**#2 — accepted (major): Expose mixed `countScope` rows instead of silently applying step semantics.**
+
+Requirement: Actual saved R5 whole-course count must not silently become current per-step count when two supported row contracts are mixed. Harm: Unmarked saved first-step count3 with14-day cycle merged with current countScope step row emitted50 events into repeated/overlapping phases. The original three-course bound was lost. Owner: Existing compact-row count migration and conflicting-phase / resolvedPhaseSequences ownership in r5-import.ts. Change: Classify candidate first-stage scopes once inside the old-count branch; mixed forms retain originals and use existing unresolved-phase handling. Explicit current metadata plus resolvedPhaseSequences resolves it. Cost: A boolean is recorded in the existing initial compact-row classification. All-current rows skip secondary scan; actual old/mixed first-row inputs replace prior filter/every with one classification pass and one source iteration. Preservation: No new R6/native compatibility, no schema-only validation, no source deletion. All-legacy still migrates; current step counts remain steps; source count and context identity retained. Independent oracle: Both row orders remain unresolved through three saves. Explicit countScope resolution to one step and three courses gives two concurrent members x7 active days x3 cycles =42 events,21 unique dates,42 tablets; last Dec25 08:00.
+
+**#3 — accepted (major): Bind a retained step-only safety policy to its original phase.**
+
+Requirement: Lifted sole-step safety remains owned by its actual phase; member identity must not override a replacement explicit phase ID. Harm: Moving old component into new identified phase transferred the old two-tablet cap and original-phase policy. Owner: retainedSingleStepSafety owner selection in r6-editable-metadata.ts. Change: Component-ID fallback applies only when candidate phase is still ID-less. Cost: One scalar undefined check before the already-existing component membership scan; no new scan/fingerprint. Preservation: ID-less dose/reorder edits still keep original owner in existing tests. Retired safety/action stays source; identified replacement phase receives no old cap. Independent oracle: Replacement-phase contains original member but native course and replacement phase safety are absent; original policy wording remains source after repeated direct R6 and R5 saves.
+
+**#4 — accepted (major): Do not assign one unit to both endpoints of a mixed-unit dose range.**
+
+Requirement: One compact range unit must never label different native endpoint units. Harm: 500 mcg to1 mg became500 to1 mcg in public compact metadata. Owner: Native-to-clause doseRangeNeedsEndpointPreview and clauseForAdministration. Change: Remove the duplicate index.ts fallback; rich endpoints own their original units, roles and qualifiers. Cost: No extra walk; removes repeat extraction and fallback object copying. Preservation: Native/R5/currentR6 endpoints and source remain unchanged. Independent oracle: Different authored/coded units: compact absent, both endpoint units visible; known shared-unit controls remain usable.
+
+**#5 — accepted (major): End the old cadence at a known same-track switch.**
+
+Requirement: A known same-track successor replaces its predecessor cadence without borrowing another eye's onset or erasing an earlier authored end. Harm: Open OD QID continued through its known BID switch and duplicated the 08:00 dose. Owner: Partial parallel phase planner + member phaseEnd boundary; execution and marker codec supplied by their assigned owners. Change: Single existing phase-building pass sets a separate phaseEnd from the known same-track successor; lowering preserves duration/calendar window independently. Native formatter exposes the cutoff. Parent-approved interface field only. Cost: Rare partial path only; no extra course walk, no manufactured duration, no shared stage end. Existing source clauses and other track remain unchanged. Engine intersects rather than replaces ends. Independent oracle: At day35 OD2 drops BID is exactly08:00/20:00, four units/day; old1drop QID contributes none. OS3 drops QID remains12/day. Existing four-week OD duration retains seven-day gap28–35.
+
+**#6 — accepted (major): Apply a dated terminal pause to the full successor phase.**
+
+Requirement: A resolved dated terminal pause scopes over unanchored members of its coordinated successor phase. Harm: Sibling beginsNovember26 during the pause although NEXT member startsNovember28. Owner: scopeSequentialPhaseSemantics in regimen.ts. Change: Carry resolved dated next-day start through the existing phase-onset sharing loop; independently authored onset stays local. Cost: One scalar datedNextDay; no extra walk. Existing metadata/source and authored sibling dates retained. Independent oracle: Doses1/2/3 retained; successor first dosesNovember28 at06:00 and07:00; unpaused controlNovember26; independent siblingNovember30 remains07:00.
+
+**#7 — accepted (major): Check the administration cue before the complete numeric phrase.**
+
+Requirement: An administration cue scopes over the complete numeric phrase. Harm: Give1 million units/hour lost its rate because the cue scan started at million. Owner: Existing clinical quantity rate phraseStart and bounded administration cue scan. Change: Pass phraseStart to the existing cue check. Cost: Scalar argument change; no extra walk. Preservation: Original phrase spans and rate quantity retained. Independent oracle: 1 million,1.5 million,half-million units/h keep the exact value without a fabricated scalar dose;100 units/h control.
+
+**#8 — accepted (major): Read the full mixed number in an exact infusion duration.**
+
+Requirement: Exact mixed-number infusion duration must include every numeric word. Harm: 100 mL over one and a half hours lost the complete infusion duration. Owner: Existing additiveDoseNumberAt within infusionDurationAt. Change: Read exact mixed number with the same bounded numeric helper used by qualified quantities. Cost: One existing bounded helper on the duration path; no second parser. Preservation: Carrier amount and duration qualifier remain unchanged. Independent oracle: 1.5h,1.75h,2.5h; approximate and decimal controls; native and both wire boundaries.
+
+**#9 — accepted (major): Keep the live dose when a method edit changes the action head.**
+
+Requirement: An edited method head must retain live dose and compatible rich adjuncts. Harm: Rub→Apply preview omitted structured1g. Owner: Rich primary action realization in instruction-graph.ts. Change: Keep existing source frame valence, except result-only realization becomes dose-capable default on a method-head edit. Bound manner removal and independent adjuncts retain existing ownership. Cost: Scalar choice on existing changed-head branch; original graph unchanged; no new graph walk. Independent oracle: Apply1g with skin and gently; unchanged Rub behavior; existing Swallow→Chew water200 mL, slow manner, clocks and live dose controls remain green.
+
+**#10 — accepted (major): Do not render a maximum frequency as a fixed cadence.**
+
+Requirement: Maximum-only frequency cannot be rendered as a fixed timing abbreviation. Harm: BID falsely prescribes a fixed two administrations instead of up to two. Owner: Shared typed recurrence/code agreement in format.ts. Change: Require a frequency lower value before frequencyMax can agree with fixed shorthand; existing numeric fallback retained. Cost: Scalar guard only; no extra array work/source edits. Independent oracle: Upper-only<=2x/1d and up to2times daily; fixed2 staysBID;1–2range staysrange.
+
+**#11 — accepted (major): Keep the actual period start as the first inferred slot.**
+
+Requirement: A clockless frequency-per-period plan must retain the actual known first instant, including the second DST fold and source milliseconds. Harm: The source-time administration was discarded after reconstructing the first fold; next due missed Nov1 and a one-week query undercounted two prescribed doses as one. Owner: generateFrequencyPerPeriodSeries already owns the inferred period slots. Change: Use cycleStart directly for implicitClock/index0; retain existing authored-clock and all other slot resolution. Cost: One scalar branch, fewer calendar operations for the first inferred slot; no member scans or wire/data mutation. Independent oracle: NY ordered2026-11-01T06:30Z => Nov1 01:30-05, Nov4 01:30-05, Nov8 01:30-05; one week2 tablets. Authored01:30 control still begins Nov4.
+
+**#12 — accepted (major): Start each duration-based step repetition at the previous window’s end.**
+
+Requirement: A duration-based repeated step continues at its previous resolved exclusive end while retaining its civil span and independent treatment-anchored member facts. Harm: Jan31 treatment with step+1mo through+2mo,count2 overlapped Mar28-30 and moved maintenance toApr28 instead ofApr30. Owner: treatmentStepWindows traversal + existing treatmentStepWindow/resolveAdministrationWindow and durationStepper; no second phase engine. Change: Pass a private resolved repetition {start,end,capClock} into the existing resolver. Set next start=window.end and next end=existing retained-span stepper(next start). Preserve fixed course anchor for explicit member phaseStart/phaseEnd/calendar bounds; preserve separate finite-completion branch. Cost: Constant extra optional-window check; an object only for actual repeated duration steps. Existing member pass reused; stepper prepared once per repeated stage. No parser/model edits, cloning API, rescans, or source-bound rewriting. Independent oracle: First Feb28-Mar31 exclusive, second Mar31-Apr30 exclusive, then2 tablets Apr30/May1:63distinct timestamps and65 tablets. Zero-start month control remains28+28+31=87 days. Explicit weekly Feb28 origin stays on Saturdays and independently intersects absoluteApr13 or phaseEndMar31.
+
+**#13 — accepted (major): Skip the alternative supply plan when the query window is empty.**
+
+Requirement: A supply query wholly before a future dosage start returns zero for frequency or period ranges. Harm: The alternative maximum plan invented an end before the retained source start and threw instead of returning zero. Owner: calculateTotalUnitsSingle maximum-plan eligibility. Change: Require countFrom<endDay before entering the alternative plan. Cost: One scalar guard eliminates a plan for empty windows; source start/bounds remain untouched. Independent oracle: Jan10start with Jan1-Jan2 and Jan9-Jan10 queries =>0. ActiveJan10 query =>2frequency-max or1shortest-period dose.
+
+**#14 — accepted (major): Prepare the target-count fixture only for scenarios that need it.**
+
+Requirement: Unrelated API smoke runs must not require an older target-count export. Harm: Harness crashed before selected parseSig case when the baseline lacked the builder. Owner: Benchmark fixture selection. Change: Independently encode the count marker only for selected decoder/getter cases; validate available decoders. Cost: Fixture-only setup; no measured product work added. Preservation: Missing named baseline API still receives candidate-only classification. Independent oracle: Controlled missing-export module: before aborts, after unrelated parse succeeds and decoder is measured as new.
+
+**#15 — accepted (major): Reject the candidate entrypoint as the baseline.**
+
+Requirement: Benchmark baseline and candidate must be separate module identities. Harm: Passing candidate path or symlink as its own baseline could produce a meaningless comparison. Owner: Benchmark canonical entrypoint setup. Change: Resolve real paths and reject equal module entrypoints before imports. Cost: Setup-only filesystem resolution. Preservation: Distinct copied builds with identical bytes remain valid controls. Independent oracle: Before accepts self; after rejects symlink alias and accepts immutable separate copy.
+
+**#16 — accepted (major): Keep the lifted exclusion mirror in sync with the setter.**
+
+Requirement: Supported external date setter must synchronize its existing lifted public edit representation. Harm: Changing or clearing wire restriction left old lifted excludedDates active; scheduler skipped wrong day. Even same wire values failed to repair stale lifted mirror. Owner: setDosageExcludedDates existing calendar restriction setter. Change: Normalize once, update wire through existing codec, then update/delete only an already-present lifted mirror. Cost: One property existence check for plain R5; one shallow short date-list copy only for an existing lifted mirror. No new calendar scan. Preservation: Plain R5 shape stays modifier-only; recognized/foreign annotation ownership remains in existing setter. Current date values survive R6 projection. Independent oracle: Replace Nov22→Nov23 changes excluded event; clear restores Nov22; stale mirror Nov23 with unchanged wireNov22 is repaired toNov22. Literal dates asserted.
+
+**#17 — accepted (major): Include the lifted safety limits in the saved-preview proof.**
+
+Requirement: Warm source preview must invalidate on actual live lifted safety edits. Harm: In-place cap4→2 kept saved four-tablet wording on warm cache while cold import showed2. Period/scope/action/expression edits were likewise invisible to replay proof. Owner: Shared SourceMaximaObservation and capture/matchesSourceReplayMaxima in dosage-course.ts, already used by index fresh-item proof and saved-row proof. Change: Observe bounded live safety list fields, quantities and expression scalars through existing quantity observation; no new proof/hash or index plumbing. Cost: No-safety/no-maxima path remains O(1), no allocations. Safety captures only its live limit list once; replay compares in one list loop without allocation. Preservation: Unchanged source wording retained; opaque extensions/grammar graphs not traversed or cloned; cold and warm current previews agree. Independent oracle: Cap2 must show2tab; changed action must showContact the clinician; changed period/scope/expression invalidates and warm equals cold. All unchanged baselines replay exact saved wording.
+
+**#18 — declined — schema-only policy (major): Do not lock in a mixed-unit active `doseRange` in the R6 export.**
+
+Requirement: Preserve independently authored mixed-unit dose endpoints under the historical no-schema-only policy. Harm: Review identifies an interchange conformance concern but concedes preview/import meaning is correct and specifies no product conversion policy. Owner: Existing source/native endpoint preservation. Change: Decline new normalization/removal/provenance policy; keep the independent clinical compact-unit fix in#4. Cost: No new conversion layer, traversal or normalization tax. Preservation: Retain both authored values, units and annotations. Do not claim strict Range conformance for the retained mixed-unit representation. Independent oracle: Existing mixed-unit independent endpoint tests remain; no new semantic policy was invented.
+
+**#19 — accepted (major): Keep the shared day floor off stages with mixed onset origins.**
+
+Requirement: Shared stage floor requires the same origin, not merely equal displacement numbers. Harm: Noon elapsed floor drops the local-midnight member's first08:00 clock. Owner: courseFromAdministrations shared onset region only, compile.ts. Change: Existing every predicate for elapsed shared onset excludes onsetReference members; mixed origins stay member-local. Cost: One added scalar predicate inside existing every; no extra walk. Uniform elapsed/civil origins and member delays unchanged. Independent oracle: Mixed origins orderedatNovember21 noon yieldNovember22 08:00 and14:00; uniform elapsed yields22nd14:00 and23rd08:00; uniform civil yields22nd08:00/14:00.
+
+**#20 — accepted (major): Assert the oral cumulative cap, and make `per hour` parse as a one-hour cap.**
+
+Requirement: Oral per-hour cumulative maxima must remain active separate from infusion rates. Harm: Old tests asserted no rate while the actual10 mL per1hour cap was discarded. Owner: maximumDosePeriodAt and existing mapIntervalUnit vocabulary. Change: Resolve per-unit limits through the existing time-unit lexicon; strengthen both old oral tests plus h/hr/hrs/hour/hours siblings. Cost: Replaces ad hoc day/week checks with existing lookup; no new lexicon/pass. Preservation: 5 mL oral dose stays5 mL; canonical, R5 maxDosePerPeriod and R6 safety preserve10 mL/1h. Independent oracle: All five hourly spellings retain the independent exact cap and no rate; headed infusion controls remain rates.
+
+**#21 — accepted (major): Remove a timing code only when it contradicts the original recurrence.**
+
+Requirement: Offset preview must check timing abbreviation against original structured recurrence before hiding period fields. Harm: Q6H shown beside an eight-hour period. Owner: format-course.ts calls shared typed recurrence/code agreement from format.ts. Change: Check original frequency/bounds/period/unit; remove conflicting code or existing structured-count code; preserve agreeing code-only cadence. Cost: Scalar guard on offset-only path; no reparsing or unconditional code dropping; original schedule retained. Independent oracle: Q6H absent for8h,6–8h,6day; present for code-only6h; structured frequency keeps existing omission behavior;1tab and1hour offset retained.
+
+**#22 — accepted (major): The spaced comparator fraction `≤๑ / ๒ เม็ด` can lose its comparator and half-tablet quantity.**
+
+Requirement: A spaced Thai comparator fraction is one qualified amount. Harm: The half-tablet numerator failed folding and the denominator could become a separate dose. Owner: Existing Thai numeric fold and lexical canonicalization. Change: Retain comparator in the folded canonical numeric head; preserve derived canonical value in locale normalization. Cost: Same existing quantity pass, bounded3-token fold; no language parsing in adapters. Preservation: Original Thai text and spans retained. Independent oracle: Four spaced qualifiers produce one0.5tablet dose with qualifier across native/R5/R6; compact fraction control passes.
+
+**#23 — accepted (trivial): Assert that event-window previews add no clock times.**
+
+Requirement: Event-only window preview must not fabricate clock values. Harm: Positive phrase-only assertion would allow invented clock ranges. Owner: Existing bounded event-window test block only. Change: Capture each local/public text once and reject clock notation in both. Cost: No runtime change. Independent oracle: No digit-clock notation in EN/TH short/long local clause and formatSig; positive event phrase remains.
+
+**#24 — accepted (trivial): Add a joint-plan case where independent clock selection changes the total.**
+
+Requirement: The test must distinguish joint clock choices from independently summing each member's preferred alternative during overlapping cycles. Harm: The old4tablet fixture passed even when the overlap exclusion was removed. Owner: Existing execution oracle family; no production code change for this finding. Change: Jan2 overlapping-cycle short query where authored plan admits onlyA06 and inferred plan onlyB08; each joint plan yields1, independent member selection yields2. Cost: Test only; all3input forms also assert source preservation. Independent oracle: One feasible complete clock plan supplies1tablet; separate per-member winners would supply2.
+
+**#25 — accepted (minor): Use a component type that does not index an optional `step`.**
+
+Requirement: Current R6 optional0..*step remains accurate while test component aliases use its direct named component type. Harm: Indexing optional FhirR6DosageInstruction.step[number] givesTS2537 under strict TypeScript. Owner: Five test/r6-primary.spec.ts type declarations only; FhirR6Dosage. Change: Import FhirR6Dosage and use directly, including nested condition and doseAndRate element types. Cost: No runtime or public-type change; rendered-only instruction remains valid. Independent oracle: Strict temporary fixture for component/condition/amount aliases and rendered-only instruction.
+
+**#26 — accepted (minor): Recognize an R6 header with `_renderedInstruction` but no text value.**
+
+Requirement: An R6 primitive-metadata-only instruction header must remain header metadata. Harm: Shared importer classified _renderedInstruction-only header as R5 dosage and invented one component with header metadata misplaced. Owner: Existing isR6DosageInstruction shape dispatch in canonical-course.ts. Change: Recognize current R6 _renderedInstruction discriminator alongside renderedInstruction. Cost: One in-operator check in current dispatch; no traversal or validation pass. Preservation: Exact primitive ID and data-absent-reason extension retained; no fake step/component; existing explicit R5 dosage discriminators unchanged. Independent oracle: Zero native stages, no output.step, exact authored _renderedInstruction metadata through direct and R5 repeated saves.
+
+**#27 — accepted (minor): Preserve the `id` on the R6 rate-modifier wrapper across R5 conversion.**
+
+Requirement: R5↔current R6 rate modifier projection preserves authored wrapper metadata while live modifier replacement/clear owns active semantics. Harm: R6 wrapper ID erased by R5 export/reopen. Old retained wrapper children could overwrite supported live R5 replacement/clear. Owner: Shared existing Element modifier-wrapper boundary for steps and doseAndRate. Change: Consolidate narrow already-owned-output projection helpers; preserve wrapper metadata, prioritize defined live modifier list including[], retain superseded duplicate/cleared wrappers as source. Cost: Removed duplicate rate codec. One lazy-copy classification per extension list; ordinary empty and foreign-only lists allocate nothing. No new wrapper whole-object clones (callers already own output). Preservation: Authored-rate-wrapper ID, foreign rate note, current replacement policy, and clear retained source verified through repeated saves. Existing step modifier ownership tests remain passing. Independent oracle: Unchanged emits original policy+ID; replacement emits replacement policy+sameID; clear emits no active wrapper but source retains ID; unrelated note remains exact.
+
+**#28 — accepted (minor): Emit only one active whole-course count.**
+
+Requirement: Writer must not overwrite a displaced authored count with first-owner value. Harm: Read picks2 but writing2/3 rewrites authored3 into2 and permanently loses original value/annotation. This acceptance is about data loss, not profile cardinality. Owner: Existing first-recognized course count getter/setter and source-envelope writers. Change: Setter keeps chosen first owner and returns displaced known markers to existing course source writers; no new dependency or codec. Cost: Same single modifier pass; extra list allocated only for actual displaced known count markers; valid single marker retains reference and ordinary path. Preservation: First2 stays active; original3+ID+note stays source; malformed same-URL valueString stays untouched; repeated saves stable. Independent oracle: Two weekly administrations Nov21/28; active first2 plus untouched unknown marker; source exactly contains original annotated3.
+
+**#29 — accepted (minor): Narrow `step` in historical tests that require a structured result.**
+
+Requirement: Tests requiring a structured R6 result must narrow optional step. Harm: Two historical dosageDetails.step accesses fail strict TypeScript. Owner: Existing advanced composition fixtures. Change: Assert structured step presence locally and narrow those two accesses; keep helper return type accurate. Cost: Test-only; zero runtime product cost. Preservation: Rendered-only R6 remains valid without step. Independent oracle: Before strict pass has two exact TS18048 dosageDetails.step diagnostics; after removes those two, with other pre-existing legacy diagnostics explicitly recorded.
+
+**#30 — accepted (minor): Do not let a unitless maximum set the comparison unit.**
+
+Requirement: An unknown-unit maximum must not suppress an independently usable maximum. Harm: A unitless first maximum poisoned the comparison unit so a later5 mg bound became unusable. Owner: numericAdministrationLimits existing scoped scan. Change: Skip unknown comparison units as unevaluated while retaining source; choose comparison unit from usable bound. Cost: Resolve each bound unit once; no extra limits walk. Preservation: Every original limit retained; multiple reports unresolved constraints. Independent oracle: Both orders and administration/lifetime scopes retain the5 mg effective maximum and both source constraints across native/R5/R6.
+
+**#31 — accepted (minor): Resolve declared custom administration methods by code when the coding has no display.**
+
+Requirement: Declared custom method resolves by exact system/code even without display and reaches scalar/rich preview. Harm: Known custom method incorrectly keeps stale Swallow. Owner: instruction-action-terminology.ts configured vocabulary lookup; format.ts configured display view. Change: One configured map pass preserves matching-display precedence, otherwise exact-code fallback. Shared surface predicate avoids candidate arrays. Per-call configured method head is resolved into a read-only clause view before locale callbacks. Cost: Default path has no new vocabulary scan. No repeated configured map walks; source coding/text unchanged. Exact-system mismatch retains existing text fallback. Independent oracle: Custom apply1g for absent/matching/stale displays; wrong-system code staysSwallow; display-selected local-rub beats first equal-code local-apply, absent display chooses first exact identity.
+
+**#32 — accepted (minor): Use the same classification for measurements and the `newApis` list.**
+
+Requirement: New API report must match actual missing-baseline case classification. Harm: A non-hardcoded new helper was measured as new but absent from newApis. Owner: Existing covered-API set and named export availability. Change: Derive newApis from covered candidate functions actually missing baseline. Cost: Report-only setup. Preservation: Uncovered public functions still fail; candidate-only cases still execute their oracle. Independent oracle: Controlled missing helper: old measurements/list disagree; new measurements/list agree.
+
+**#33 — accepted (minor): Check that the right eye belongs to the administration.**
+
+Requirement: Thai right-eye oracle must bind the eye to the administration. Harm: An unrelated close-right-eye instruction could falsely validate an eye-less dose. Owner: Benchmark completeThaiDose matched administration. Change: Require right-eye text within the matched dose phrase, before or after the amount. Cost: Oracle-only outside timed samples. Preservation: Known prep, quantity equality, left-eye conflict and negation controls retained. Independent oracle: Old accepts Instill2 drops then close right eye; new rejects it while both legitimate site placements pass.
+
+**#34 — accepted (minor): Balance the starting order across the paired rounds.**
+
+Requirement: Paired measurements need equal start orders and a conventional even median. Harm: Odd21/71rounds favored one starting order by one sample. Owner: Benchmark sampling setup and median. Change: Round requested minimum upward to even count, expose actual counts and first-order reversal; average the two central values. Cost: Measurement protocol only; no product path changed. Preservation: Preserve all samples, strict4 percent threshold, per-scenario equivalence and raw non-equivalent timings. Independent oracle: Requested3 executes4samples,2perorder in both starting orders; final protocol22/72balanced rounds.
+
+**#35 — accepted (minor): Keep a metadata-only `timeOfDay` slot out of the clinical clock list without losing its annotation.**
+
+Requirement: Clinical clocks exclude legal FHIR null primitive slots, while wire annotation positions stay intact. Harm: Null clock reaches formatter and removing it alone can move its note onto another administration time. Owner: getTimingClocks, direct adapter clock decode and existing projectTimingClocks. Change: One lazy filtering loop; restore source positions only after gated exact non-null-value comparison; preserve null slots or metadata-only markers. Cost: Ordinary clock array reused; no additional extension walk; rare restoration only when source list is longer. Preservation: R5/R6 leading,middle,trailing annotations and source input remain exact, without inventing an occurrence. Independent oracle: Both versions mixed/plain timing over3JSONsaves retain09:00/17:00clinical clocks, exact metadata alignment and independent due timestamps.
+
+**#36 — accepted (minor): Keep the known endpoint unit in the editable R6 dose.**
+
+Requirement: A known range endpoint unit must reach compact metadata without falsifying its source. Harm: Code-only highmg with an unlabelled low endpoint lost the compact dose/unit. Owner: Shared native-to-clause range representability and unit selection. Change: One known unit supplies the compact view; prefer the endpoint with a numeric value for one-sided ranges. Cost: Existing quantity-unit resolver; removed duplicate index fallback. Preservation: Native/source endpoint absence remains absent; mixed known units and comparators still require rich preview. Independent oracle: Low-only/high-only/both code units retain2–5 mg; one-sided1g high cannot become1 mg from a unit-only low; scoped native amounts remain rich.
+
+**#37 — accepted (minor): Show signed treatment-start offsets in the preview.**
+
+Requirement: Signed treatment-start displacement remains visible in step and member preview. Harm: Premedication30minutes before treatment becomes generic review note or treatment start. Owner: boundaryEventText in canonical/format-course.ts. Change: Negative treatment-start displacement uses existing localized relative-event wording; positive scalar and nonnegative day/gap arithmetic unchanged. Cost: Scalar branch; no day arithmetic for negative values; source boundary immutable. Independent oracle: 30minutes before treatment start for both step/member, positive30after unchanged; EN/TH short/long, no invented negative day/gap note.
+
+**#38 — accepted (minor): Select regenerated cycle wording from the effective course facet.**
+
+Requirement: Regenerated cycle qualifier uses effective course-language facet, including inheritance and future packs. Harm: Thai inherited clause receives English qualifier; third pack cannot localize it. Owner: CourseLanguage + EN/TH course facets, neutral formatter passes typed facts. Change: Added unresolvedCycleTiming(days,periodDays,cycles,anchor) facet; removed locale-tag language branching from regenerated cycle wrapper. Cost: Only regenerated cycle path; existing source qualifier retained; compressed day string computed once, locale owns wording. Independent oracle: localeen/inheritth renders Thai unresolved/day-list21daycycle4cycles/anchor; custom facet receives exact1-3,8/21/4/2026-11-21 facts.
+
+**#39 — accepted (minor): Untimed PRN maximum supply counts days where the evaluator returns `undefined`.**
+
+Requirement: A supplied condition evaluator's undefined result withholds calendar-conditioned untimed PRN capacity, consistent with the documented evaluation contract. Harm: 3unknown days incorrectly supplied6 tablets; true/unknown/false mix incorrectly supplied4instead of2. Owner: maximumUnscheduledCapCount's existing calendar-day predicate branch. Change: Admit a supplied evaluation only when exactlytrue; absent evaluator retains existing maximum assumption. Cost: Same evaluator call count, no extra scan or parser refusal. Independent oracle: Parsed1tabletPRN up-to2daily only-on-dialysis-days:3 days missing/alltrue=6, undefined/allfalse=0, true/unknown/false=2, untimed due=[] across native/R5/R6.
+
+### Integration and attribution evidence
+
+- The first integrated source run passed 5,780 tests and caught three failures. A real rate-wrapper regression retained an own `modifierExtension: undefined` property; the shared helper now removes it before its no-content return, with no added scan or allocation. The other two assertions required the superseded false compact range unit and a scalar origin representation now also carried by the existing full boundary codec. Updated assertions check independent endpoint values/units and the equivalent treatment start plus the new successor end.
+- The coordinator caught and corrected a one-sided range interaction: a unit-only lower endpoint may not override a valued upper endpoint. A high endpoint of 1 g remains 1 g. Both original endpoint records remain unchanged.
+- The member `phaseEnd` is a genuine independent boundary. It caps only the preceding same-track cadence and intersects its authored duration/calendar end. It does not manufacture a course duration or clip another eye. The existing planner pass, boundary resolver and phase marker codec own it.
+- The exact public partial-eye attribution uses the known OD track from actual parser output. Current/prior reviewed builds yielded duplicate 08:00 then 12:00/16:00; master still retained the old QID cadence. The corrected known phase yields 08:00/20:00 and four drops per day. Parsing the whole source succeeds; attempting to execute its deliberately unresolved other-eye successor still requires a clinical boundary.
+- Frozen comparisons distinguish earlier gaps from regressions. The stale moved safety policy and million-unit cue failure are regressions relative to the immediately prior reviewed artifact. The rate-wrapper ID loss is a regression relative to master. Mixed-unit compact metadata, exact mixed-number infusion duration, hourly oral cap loss, spaced qualified Thai fractions, null clock crashes, inferred DST-fold loss, empty alternative windows and unknown PRN-day overcount also reproduce on exact master. No baseline equivalence is asserted for unavailable private/native/current-R6 concepts.
+- Existing historical test files are not all strict ES6 compilation targets. The two reported optional-step accesses were locally narrowed, removing exactly those two diagnostics; remaining unrelated historical diagnostics are recorded, not reported as a passing broad test-file type check. Production types and the configured strict ES6 gate pass.
+
+### Validation on the frozen integrated candidate
+
+- **5,783 source tests in 55 files passed**, including the configured strict ES6 type gate.
+- **4 distribution tests passed**, after rebuilding ESM, CommonJS and declarations.
+- **9 actual downstream parser-to-R5 storage round trips passed**, with complete JSON equality through both converter and save/reopen map paths: simple, mixed event/clock, Thai half tablet, qualified Thai half tablet, mixed-number infusion, hourly oral cap, Thai parallel doses, taper and independent eyes. Row counts are 1/1/1/1/1/1/2/4/2.
+- An additional externally supplied raw R5 null-clock probe exposed a pre-existing downstream converter restriction: it rejects `timeOfDay: [null, "09:00:00"]`. The supplied row is independent of library version, and that consumer file is unchanged. The library now imports, formats, executes and preserves the legal nullable clock input correctly; this consumer limitation is recorded separately from the nine parser-generated storage cases.
+- **Benchmark integrity controls passed**: absent target-count baseline exports do not abort unrelated selections; candidate-only helpers agree with the reported API list; direct/symlink self-baselines are rejected; a separate identical build is accepted; the Thai oracle rejects an eye mentioned only in later advice; odd requested rounds become balanced even rounds in either starting order.
+
+### Performance
+
+Exact baseline: master `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`. Candidate source SHA-256: `4f0a2237a44b5bb1681f059c1cd9005b3a86a62072814bbd46f030b7b9f1ea64`. Built candidate SHA-256: `0c5b3b6f3261c6b601f9691b14f2cda217c46474a1ca6991b23c3f66f371fcac`. Baseline build SHA-256: `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`. Harness blob: `4ed621edc7d5c05195e0ba2abc3dbe4af58b4732`. The harness changed intentionally for the independently reproduced integrity defects in #14/#15/#32/#33/#34; it is not claimed unchanged from round33.
+
+**117/117 exported functions covered and measured.** There are 181 paired scenarios: **174 equivalent-work scenarios pass the 4% gate**, with the same seven previously documented non-equivalent preview cases kept visible without a regression verdict. Six candidate-only APIs receive seven independent measurements. No new equivalence exception was introduced. No unavailable case or benchmark error occurred.
+
+The full pass uses **22 rounds at 35 ms**, balanced 11 baseline-first and 11 candidate-first batches. All five provisional failures were confirmed on the identical built candidate with **72 rounds at 140 ms**, balanced 36/36, with the first measured order reversed. Even medians average the two central observations. All first-pass and confirmation samples are retained; no cross-function/domain average determines acceptance.
+
+| Scenario | First pass | Confirmation |
+|---|---:|---:|
+| `buildSnomedFindingSitePostcoordinationCode` | +4.2714% | -0.3468% |
+| `findSymptomDefinitionByCoding` | +4.8269% | -0.2439% |
+| `inferMedicationLocale` | +12.1853% | -0.3971% |
+| `registerAdviceLocaleAdapter` | +7.3370% | +0.1148% |
+| `registerSuggestLocaleAdapter` | +4.2361% | +0.9081% |
+
+The worst accepted equivalent scenario is `evaluateMedicationCondition` at **+3.390174%**. All five confirmations passed; the highest confirmed change was **+0.908120%**.
+
+| Representative scenario | Change versus exact master |
+|---|---:|
+| Ordinary parser | -0.83% |
+| Thai parser | -4.98% |
+| Eye-course parser | +1.48% |
+| Staged parser | -1.11% |
+| Guard parser | -9.90% |
+| Action parser | -14.71% |
+| R5 English formatter | -1.24% |
+| R5 Thai formatter | -15.87% |
+| Unchanged Thai round trip | -33.68% |
+| Scalar supply | -86.93% |
+| Parallel supply | -70.87% |
+| Native R6 supply | -83.20% |
+| Complex R6 to R5 | -16.72% |
+
+Negative values indicate less runtime. Changes are median paired ratios, not ratios of independently aggregated absolute medians. Source, distribution, storage and performance refer to the same frozen candidate. Raw evidence is retained in `ezmed14-round34-master-full.json`, `ezmed14-round34-master-confirm.json`, `ezmed14-round34-performance-accepted.json` and the 39-entry `ezmed14-round34-findings-ledger.json`.
+
+### Review communication and delivery
+
+No top-level GitHub comment, private project name or new full-review request was posted. GitHub operations use the CLI. The current review has no new inline thread requiring a reply. Final delivery preflight confirmed the existing PR is open and mergeable, remote head remains `d659c06`, exact master remains `7d62823`, all 148 inline threads remain resolved, and the PR remains at 100 changed paths. Delivery uses the existing PR branch; remote-head and clean-tree verification follows the push.

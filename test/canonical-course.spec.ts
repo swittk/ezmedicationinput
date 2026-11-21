@@ -1021,7 +1021,13 @@ describe("review 26 independent partial phase boundaries", () => {
       const left = course.stages[0].administrations.filter(a => a.target?.text === "left eye");
       expect(right).toHaveLength(2);
       expect(left).toHaveLength(2);
-      expect(right[0].phaseOrigin).toMatchObject({ value: 0, code: "d" });
+      // The wire boundary codec can express the scalar origin as a full
+      // treatment boundary when this member also owns a successor cutoff.
+      if (right[0].phaseStart) expect(right[0].phaseStart.anchor).toBe("treatment-start");
+      expect(right[0].phaseStart?.displacement ?? right[0].phaseOrigin).toMatchObject({ value: 0, code: "d" });
+      expect(right[0].phaseEnd).toMatchObject({
+        anchor: "treatment-start", displacement: { value: 7, code: "d" }
+      });
       const length = right[0].schedule?.recurrence?.courseLength;
       expect(length?.value).toBe(7);
       expect(length?.code ?? length?.unit).toBe("d");

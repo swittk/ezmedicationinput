@@ -438,6 +438,19 @@ function normalizeCustomDefinition(
   };
 }
 
+function customDefinitionMatchesSurface(
+  surface: string, input: MedicationInstructionActionInput, normalized: string
+): boolean {
+  if (normalizeActionSurface(surface) === normalized ||
+      input.code && normalizeActionSurface(input.code) === normalized) return true;
+  for (const alias of input.aliases ?? [])
+    if (normalizeActionSurface(alias) === normalized) return true;
+  for (const locale of Object.keys(input.localeAliases ?? {}))
+    for (const alias of input.localeAliases![locale])
+      if (normalizeActionSurface(alias) === normalized) return true;
+  return false;
+}
+
 function customDefinitionForSurface(
   surface: string,
   options?: ParseOptions
@@ -447,11 +460,7 @@ function customDefinitionForSurface(
   const target = normalizeActionSurface(surface);
   for (const configuredSurface of Object.keys(map)) {
     const input = map[configuredSurface];
-    const candidates = [
-      configuredSurface, input.code ?? "", ...(input.aliases ?? []),
-      ...flattenLocaleAliases(input.localeAliases)
-    ];
-    if (candidates.some((candidate) => normalizeActionSurface(candidate) === target)) {
+    if (customDefinitionMatchesSurface(configuredSurface, input, target)) {
       return normalizeCustomDefinition(configuredSurface, input);
     }
   }
@@ -534,9 +543,20 @@ export function resolveMedicationInstructionActionByMethod(
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   if (!coding?.code) return undefined;
-  if (coding.display && options?.instructionActionMap) {
-    const custom = customDefinitionForSurface(coding.display, options);
-    if (custom && sameMethodCoding(custom.administrationMethod, coding)) return custom;
+  const customMap = options?.instructionActionMap;
+  if (customMap) {
+    const display = coding.display ? normalizeActionSurface(coding.display) : undefined;
+    let fallback: string | undefined;
+    // Prefer the existing matching display among equal identities, then the
+    // first exact code match. One configured-vocabulary walk serves both.
+    for (const surface of Object.keys(customMap)) {
+      const input = customMap[surface];
+      if (!sameMethodCoding(input.administrationMethod, coding)) continue;
+      if (!display || customDefinitionMatchesSurface(surface, input, display))
+        return normalizeCustomDefinition(surface, input);
+      fallback ??= surface;
+    }
+    if (fallback !== undefined) return normalizeCustomDefinition(fallback, customMap[fallback]);
   }
   return DEFAULT_BY_METHOD.get(coding.system ?? SNOMED_SYSTEM)?.get(coding.code);
 }

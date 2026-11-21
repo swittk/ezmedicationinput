@@ -718,13 +718,13 @@ describe("round33 complete native amount and cadence previews", () => {
       } }]
     }] }] };
     const before = JSON.stringify(raw);
-    // An unknown lower unit retains its separate endpoint; only known equal
-    // units use the compact locale range grammar. Neither path loses upper mg.
+    // A single known endpoint supplies the compact range's unit without
+    // filling in or changing the retained source endpoint.
     for (const input of [raw, toFhirR5Dosages(raw)]) {
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
-        .toContain(knownLow ? "Ordered dose: 1 to 2 mg (each nostril)" : "Ordered dose: 1 – 2 mg (each nostril)");
+        .toContain("Ordered dose: 1 to 2 mg (each nostril)");
       expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toContain(knownLow ? "ขนาดยาที่สั่ง: รูจมูกข้างละ 1 ถึง 2 มิลลิกรัม" : "ขนาดยาที่สั่ง: รูจมูกข้างละ 1 – 2 mg");
+        .toContain("ขนาดยาที่สั่ง: รูจมูกข้างละ 1 ถึง 2 มิลลิกรัม");
     }
     expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
     expect(JSON.stringify(raw)).toBe(before);
@@ -780,5 +780,104 @@ describe("round33 complete native amount and cadence previews", () => {
       expect(text).toContain(locale === "en" ? "breakfast" : "อาหารเช้า");
       expect(text).toContain(locale === "en" ? "dinner" : "อาหารเย็น");
     }
+  });
+});
+
+
+describe("round34 typed recurrence and locale previews", () => {
+  const code = (value: string) => ({ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: value }] });
+  it.each([
+    [{ frequencyMax: 2 }, "<=2x/1d", "up to 2 times daily"],
+    [{ frequency: 2 }, "BID", "twice daily"],
+    [{ frequency: 1, frequencyMax: 2 }, "1-2x/d", "one to two times daily"]
+  ])("does not promote a frequency bound to fixed shorthand (%j)", (frequency, short, long) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, timing: { code: code("BID"), repeat: { ...frequency, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      expect(formatSig(input, "short", normalized)).toContain(short);
+      expect(formatSig(input, "long", normalized)).toContain(long);
+      if (!("frequency" in frequency) || frequency.frequency !== 2)
+        expect(formatSig(input, "short", normalized)).not.toContain("BID");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it.each([
+    [{ period: 8, periodUnit: FhirPeriodUnit.Hour }, false, "8 hours"],
+    [{ period: 6, periodUnit: FhirPeriodUnit.Hour }, true, "6 hours"],
+    [{ period: 6, periodMax: 8, periodUnit: FhirPeriodUnit.Hour }, false, "6"],
+    [{ period: 6, periodUnit: FhirPeriodUnit.Day }, false, "6 days"],
+    [{ frequency: 1, period: 6, periodUnit: FhirPeriodUnit.Hour }, false, "6 hours"]
+  ] as const)("checks a timing code against its original offset period (%j)", (repeat, keepCode, period) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...tablet, timing: { code: code("Q6H"), repeat: { ...repeat, startOffset: { value: 1, unit: "h" } } }
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const text = formatSig(input, "short", normalized);
+      expect(text.includes("Q6H")).toBe(keepCode);
+      expect(text).toContain(period);
+      expect(text).toContain("1 hour");
+      expect(text).toContain("1 tab");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it.each(["step", "member"] as const)("shows signed %s starts without making negative day ranges", where => {
+    for (const value of [-30, 30]) {
+      const boundary = { anchor: "treatment-start" as const, displacement: { value, unit: "min" } };
+      const native = { kind: "course" as const, stages: [{
+        ...(where === "step" ? { start: boundary } : {}),
+        administrations: [{ kind: "administration" as const,
+          ...(where === "member" ? { phaseStart: boundary } : {}),
+          amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+      }] };
+      const before = JSON.stringify(native);
+      const r6 = projectCanonicalCourse(native).fhirNext;
+      for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+        for (const style of ["short", "long"] as const) {
+          const english = formatSig(input, style, normalized);
+          const thai = formatSig(input, style, { locale: "th", realizationMode: "normalized" });
+          expect(english).toContain("30 minutes " + (value < 0 ? "before" : "after") + " treatment start");
+          expect(thai).toContain("30 นาที");
+          expect(thai).toContain(value < 0 ? "ก่อน" : "หลัง");
+          expect(english).not.toMatch(/No dose|Review timing|Days? -/u);
+        }
+      }
+      expect(JSON.stringify(native)).toBe(before);
+    }
+  });
+
+  it("uses the effective inherited and custom course facets for regenerated cycle details", () => {
+    const clause = canonicalFromFhir({
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    });
+    clause.schedule!.cycleDayConstraint = {
+      days: [1, 2, 3, 8], periodDays: 21, cycles: 4, anchor: "2026-11-21",
+      sourceText: "", reason: "unresolved-cycle-eligibility"
+    };
+    const inherited = resolveSigLocalization("en", { locale: "en", inherit: "th" });
+    for (const style of ["short", "long"] as const) {
+      const text = formatCanonicalClause(clause, style, inherited);
+      expect(text).toContain("ยังระบุเวลาในรอบไม่ได้");
+      expect(text).toContain("วันที่ในรอบ 1-3, 8");
+      expect(text).toContain("รอบละ 21 วัน");
+      expect(text).toContain("4 รอบ");
+      expect(text).toContain("วันเริ่มรอบ 2026-11-21");
+      expect(text).not.toContain("cycle days");
+    }
+    const calls: unknown[][] = [];
+    const custom = resolveSigLocalization("round34-cycle", {
+      locale: "round34-cycle", inherit: "en",
+      course: { ...ENGLISH_COURSE, unresolvedCycleTiming: (days, periodDays, cycles, anchor) => {
+        calls.push([days, periodDays, cycles, anchor]);
+        return "Local cycle " + days + " | " + periodDays + " | " + cycles + " | " + anchor;
+      } }
+    });
+    expect(formatCanonicalClause(clause, "long", custom)).toContain("Local cycle 1-3, 8 | 21 | 4 | 2026-11-21");
+    expect(calls).toEqual([["1-3, 8", 21, 4, "2026-11-21"]]);
   });
 });

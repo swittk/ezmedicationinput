@@ -1,5 +1,4 @@
 import { courseFromR5 } from "./adapters/r5-import";
-import { extractCanonicalDoseRange } from "./fhir";
 import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
@@ -1565,21 +1564,6 @@ function fromFhirDosageInternal(
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];
-  // Compact range metadata can retain numeric bounds only when the one
-  // untyped amount has no endpoint qualifier. Rich native amounts retain
-  // roles and operators that this compact clause cannot express.
-  let metadataClause = clause;
-  const nativeAmount = native?.amounts?.length === 1 ? native.amounts[0] : undefined;
-  const rangeSource = nativeAmount && !hasAmountRole(nativeAmount.role) && !clause.dose &&
-      !nativeAmount.range?.low?.comparator && !nativeAmount.range?.high?.comparator
-    ? dosage.doseAndRate?.[0]?.doseRange : undefined;
-  if (rangeSource) {
-    const extracted = extractCanonicalDoseRange(rangeSource);
-    if (extracted.warning && warnings.indexOf(extracted.warning) < 0) warnings.push(extracted.warning);
-    if (extracted.range) metadataClause = { ...clause,
-      dose: { range: extracted.range, unit: extracted.unit },
-      ...(warnings.length ? { warnings } : {}) };
-  }
   return {
     fhir: dosage,
     shortText,
@@ -1587,9 +1571,9 @@ function fromFhirDosageInternal(
     warnings,
     meta: {
       consumedTokens: [],
-      normalized: buildNormalizedMetaFromClause(metadataClause, dosage, options),
+      normalized: buildNormalizedMetaFromClause(clause, dosage, options),
       canonical: {
-        clauses: [metadataClause],
+        clauses: [clause],
         ...(native ? { administration: native } : {})
       }
     }

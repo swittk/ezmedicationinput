@@ -295,6 +295,7 @@ export function courseFromPartialParallel(
       for (const item of phase.members) {
         const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
         a.sourceMember = item.member;
+        if (phase.phaseEnd) a.phaseEnd = phase.phaseEnd;
         // Keep the authored clause in syntax; only this owned execution window
         // receives the calendar end inferred within its independent track.
         const calendar = a.schedule?.recurrence?.calendarWindow;
@@ -433,9 +434,11 @@ function prnReasonForDisplay(reason: CanonicalPrnReasonExpr | undefined): Canoni
  * endpoint instead of compressing them into a misleading scalar-unit view. */
 export function doseRangeNeedsEndpointPreview(range: CanonicalRange): boolean {
   const low = range.low, high = range.high;
-  return Boolean(low?.comparator || high?.comparator ||
-    (low?.value !== undefined && high?.value !== undefined &&
-      (low.unit ?? getDoseQuantityUnit(low)) !== (high.unit ?? getDoseQuantityUnit(high))));
+  if (low?.comparator || high?.comparator) return true;
+  if (low?.value === undefined || high?.value === undefined) return false;
+  const lowUnit = low.unit || getDoseQuantityUnit(low);
+  const highUnit = high.unit || getDoseQuantityUnit(high);
+  return Boolean(lowUnit && highUnit && lowUnit !== highUnit);
 }
 
 /** Project native live facts back into the existing grammar realization view.
@@ -470,9 +473,8 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
     if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;
   }else if(value?.range && !doseRangeNeedsEndpointPreview(value.range))result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
-    unit:value.range.low?.value !== undefined
-      ? value.range.low.unit ?? (getDoseQuantityUnit(value.range.low) || undefined)
-      : value.range.high?.unit ?? (getDoseQuantityUnit(value.range.high) || undefined)};
+    unit: getDoseQuantityUnit(value.range.low?.value !== undefined ? value.range.low : value.range.high) ||
+      getDoseQuantityUnit(value.range.high?.value !== undefined ? value.range.high : value.range.low) || undefined};
   else result.dose=undefined;
   if(a.schedule){
     const schedule:NonNullable<CanonicalSigClause["schedule"]>=base?.schedule?Object.assign({},base.schedule):{};
@@ -619,7 +621,7 @@ export function courseFromAdministrations(
       onset !== undefined &&
       onset > 0 &&
       Number.isFinite(onset) &&
-      administrations.every((a) => a.onsetDays === onset);
+      administrations.every((a) => a.onsetDays === onset && !a.onsetReference);
     if (relative) start = clinicalBoundary({ unit: "d", value: onset! });
     else if (start) administrations = administrations.map((a) => ({ ...a, delayMinutes: undefined }));
     const reference = first.onsetReference;

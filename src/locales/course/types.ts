@@ -33,6 +33,7 @@ export interface CourseLanguage {
   readonly stageLimitsLabel: string;
   ifLimitExceeded(action: string): string;
   eventWindow(start: string, end: string): string;
+  unresolvedCycleTiming(days: string, periodDays?: number, cycles?: number, anchor?: string): string;
   weekdayName(day: string): string;
   measurementName(name: string): string;
   joinList(items: readonly string[]): string;

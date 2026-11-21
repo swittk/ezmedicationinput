@@ -57,50 +57,66 @@ const R5_STEP_MODIFIERS_R6_URL =
 export const R5_RATE_MODIFIERS_R6_URL =
   "urn:ezmedicationinput:StructureDefinition:r5-dose-and-rate-modifier-extensions";
 
-export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageStep, "component"> {
-  const { sequence: _sequence, modifierExtension, extension, ...fields } = step;
-  // R5's current modifier value supersedes any older embedded R6 wrapper.
-  // A single wrapper can own this field; unrelated extensions stay intact.
-  let existing: FhirExtension | undefined;
-  const extensions: FhirExtension[] = [];
-  for (const item of extension ?? []) {
-    if (item.url !== R5_STEP_MODIFIERS_R6_URL) extensions.push(item);
-    else if (!existing) existing = item;
-    else extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+type ModifierWrapperOwner = { extension?: FhirExtension[]; modifierExtension?: FhirExtension[] };
+/** Project the editable modifier owner on an already-owned output fragment.
+ * Step and doseAndRate share this Element boundary, including wrapper metadata. */
+export function projectR6ModifierWrapper(output: ModifierWrapperOwner, url: string): void {
+  const { modifierExtension, extension } = output;
+  delete output.modifierExtension;
+  if (modifierExtension === undefined && !extension?.length) return;
+  let existing: FhirExtension | undefined, extensions: FhirExtension[] | undefined;
+  for (let index = 0; index < (extension?.length ?? 0); index++) {
+    const item = extension![index];
+    if (item.url !== url) extensions?.push(item);
+    else {
+      extensions ??= extension!.slice(0, index);
+      if (!existing) existing = item;
+      else extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+    }
   }
   const modifiers = modifierExtension ?? existing?.extension;
   if (modifiers?.length)
-    extensions.push({ ...existing, url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers });
-  if (!modifiers?.length && existing && hasOtherOwnField(existing, "extension"))
-    extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
-  // Empty arrays are explicit edits, not missing metadata. Omitting them
-  // here lets the retained step bring a cleared extension back to life.
-  return { ...fields, ...(extensions.length || extension !== undefined ||
-    modifierExtension !== undefined ? { extension: extensions } : {}) };
+    (extensions ??= extension?.slice() ?? []).push({ ...existing, url, extension: modifiers });
+  else if (existing && hasOtherOwnField(existing, "extension"))
+    (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
+  // Empty lists retain explicit clear ownership; unchanged foreign-only
+  // lists keep their reference and require no allocation.
+  if (extensions) output.extension = extensions;
+  else if (modifierExtension !== undefined && extension === undefined) output.extension = [];
 }
-
-export function r5StepMetadata(step: Omit<FhirR6DosageStep, "component">):
-  Omit<EzCourseStep, "sequence"> {
-  const { extension, ...fields } = step;
-  let retained: FhirExtension | undefined;
-  let extensions: FhirExtension[] | undefined;
-  for (const item of extension ?? []) {
-    if (item.url === R5_STEP_MODIFIERS_R6_URL) {
-      if (retained) {
-        (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
-        continue;
-      }
+export function projectR5ModifierWrapper(output: ModifierWrapperOwner, url: string): void {
+  const { extension } = output;
+  if (!extension?.length) return;
+  let retained: FhirExtension | undefined, extensions: FhirExtension[] | undefined;
+  for (let index = 0; index < extension.length; index++) {
+    const item = extension[index];
+    if (item.url !== url) extensions?.push(item);
+    else if (retained) {
+      (extensions ??= extension.slice(0, index)).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+    } else {
       retained = item;
-      // The editable modifier list owns the children. Keep authored wrapper
-      // annotations so rebuilding that list cannot erase the source envelope.
-      if (hasOtherOwnField(item, "extension")) (extensions ??= []).push(item);
-    } else (extensions ??= []).push(item);
+      // The editable modifier list owns the children; keep the authored
+      // wrapper so its annotations survive a subsequent live replacement.
+      if (hasOtherOwnField(item, "extension")) extensions?.push(item);
+      else extensions ??= extension.slice(0, index);
+    }
   }
-  return {
-    ...fields,
-    ...(extensions?.length ? { extension: extensions } : {}),
-    ...(retained?.extension?.length ? { modifierExtension: retained.extension } : {})
-  };
+  if (extensions) {
+    if (extensions.length) output.extension = extensions;
+    else delete output.extension;
+  }
+  if (output.modifierExtension === undefined && retained?.extension?.length)
+    output.modifierExtension = retained.extension;
+}
+export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageStep, "component"> {
+  const { sequence: _sequence, ...output } = step;
+  projectR6ModifierWrapper(output, R5_STEP_MODIFIERS_R6_URL);
+  return output;
+}
+export function r5StepMetadata(step: Omit<FhirR6DosageStep, "component">): Omit<EzCourseStep, "sequence"> {
+  const output: Omit<EzCourseStep, "sequence"> = { ...step };
+  projectR5ModifierWrapper(output, R5_STEP_MODIFIERS_R6_URL);
+  return output;
 }
 
 /** Treatment-relative phase origin for an independent parallel component. */
@@ -517,8 +533,14 @@ function setCalendarRestriction(
 }
 
 export function setDosageExcludedDates(dosage: FhirDosage, dates: string[]): void {
-  setCalendarRestriction(dosage, DOSAGE_EXCLUDED_DATES_R5_URL, "date",
-    dates.length < 2 ? dates : [...new Set(dates)].sort());
+  const current = dates.length < 2 ? dates : [...new Set(dates)].sort();
+  setCalendarRestriction(dosage, DOSAGE_EXCLUDED_DATES_R5_URL, "date", current);
+  // Only an already-lifted public edit view has this second representation.
+  // Even a no-op wire write must bring a stale lifted value back in agreement.
+  if ("excludedDates" in dosage) {
+    if (current.length) (dosage as EzDosage).excludedDates = current.slice();
+    else delete (dosage as EzDosage).excludedDates;
+  }
 }
 
 export function getDosageExcludedWeekdays(dosage: FhirDosage): FhirDayOfWeek[] {
@@ -1260,6 +1282,14 @@ interface SourceDoseObservation {
   ratioDenominator?: SourceMeasureObservation;
 }
 interface SourceMaximaObservation {
+  safety?: {
+    original: FhirR6DosageSafety;
+    ifExceeded?: string;
+    limits?: Array<{ original: FhirR6DoseLimit; scope: FhirR6DoseLimit["scope"]; text?: string;
+      amount?: SourceMeasureObservation; period?: SourceMeasureObservation; integer?: number;
+      expression?: { original: NonNullable<FhirR6DoseLimit["valueExpression"]>; language?: string;
+        description?: string; name?: string; expression?: string; reference?: string } }>;
+  };
   periods?: Array<{ original: FhirRatio; numerator?: SourceMeasureObservation; denominator?: SourceMeasureObservation }>;
   administration?: SourceMeasureObservation;
   lifetime?: SourceMeasureObservation;
@@ -1514,7 +1544,7 @@ interface SourceTimingObservation {
   activities?: Array<{ relation?: string; activity?: SourceConceptObservation;
     offset?: SourceMeasureObservation; offsetMin?: SourceMeasureObservation; offsetMax?: SourceMeasureObservation }>;
   events?: string[];
-  clocks?: string[];
+  clocks?: FhirTimingRepeat["timeOfDay"];
   weekdays?: FhirDayOfWeek[];
   anchors?: FhirTimingRepeat["when"];
   timingCode?: FhirTiming["code"];
@@ -1765,9 +1795,19 @@ export function matchesSourceReplayTiming(
 /** Fresh parser items and saved R5 rows share the same maximum ownership.
  * Only live clinical quantities are observed; cap-free rows allocate nothing. */
 export function captureSourceReplayMaxima(dosage: FhirDosage): SourceMaximaObservation | undefined {
-  if (!dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+  const safety = (dosage as EzDosage).safety;
+  if (!dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime && !safety)
     return undefined;
   return {
+    safety: safety ? { original: safety, ifExceeded: safety.ifExceeded,
+      limits: safety.doseLimit?.map(original => ({
+        original, scope: original.scope, text: original.text, integer: original.valueInteger,
+        amount: capturedReplayMeasure(original.valueQuantity), period: capturedReplayMeasure(original.period),
+        expression: original.valueExpression ? { original: original.valueExpression,
+          language: original.valueExpression.language, description: original.valueExpression.description,
+          name: original.valueExpression.name, expression: original.valueExpression.expression,
+          reference: original.valueExpression.reference } : undefined,
+      })) } : undefined,
     periods: dosage.maxDosePerPeriod?.map(original => ({
       original, numerator: capturedReplayMeasure(original.numerator),
       denominator: capturedReplayMeasure(original.denominator),
@@ -1779,8 +1819,20 @@ export function captureSourceReplayMaxima(dosage: FhirDosage): SourceMaximaObser
 export function matchesSourceReplayMaxima(
   dosage: FhirDosage, maxima: SourceMaximaObservation | undefined
 ): boolean {
-  if (!maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+  const safety = (dosage as EzDosage).safety, observed = maxima?.safety;
+  if (!maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime && !safety)
     return true;
+  if (safety !== observed?.original || safety?.ifExceeded !== observed?.ifExceeded ||
+      (safety?.doseLimit?.length ?? 0) !== (observed?.limits?.length ?? 0)) return false;
+  for (let index = 0; index < (observed?.limits?.length ?? 0); index++) {
+    const current = safety!.doseLimit![index], prior = observed!.limits![index], expression = current.valueExpression;
+    if (current !== prior.original || current.scope !== prior.scope || current.text !== prior.text ||
+        current.valueInteger !== prior.integer || !unchangedReplayMeasure(current.valueQuantity, prior.amount) ||
+        !unchangedReplayMeasure(current.period, prior.period) || expression !== prior.expression?.original ||
+        expression?.language !== prior.expression?.language || expression?.description !== prior.expression?.description ||
+        expression?.name !== prior.expression?.name || expression?.expression !== prior.expression?.expression ||
+        expression?.reference !== prior.expression?.reference) return false;
+  }
   const periods = dosage.maxDosePerPeriod, saved = maxima?.periods;
   if ((periods?.length ?? 0) !== (saved?.length ?? 0)) return false;
   for (let index = 0; index < (saved?.length ?? 0); index++) {

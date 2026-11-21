@@ -1,3 +1,4 @@
+import { projectCanonicalCourse } from "../src/index";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
@@ -890,4 +891,67 @@ it("round 27: resolves next-day onset against a typed nonzero phase origin", () 
     from: "2026-11-21T23:00:00Z", timeZone: "UTC", limit: 3 })).toEqual([
     "2026-11-26T22:00:00+00:00", "2026-11-27T06:00:00+00:00", "2026-11-28T07:00:00+00:00"
   ]);
+});
+
+
+describe("round34 partial same-track cadence cutoffs", () => {
+  it.each([
+    [false, false], [false, true], [true, false], [true, true]
+  ] as const)("ends the old right-eye cadence at its own successor (duration %s, civil origin %s)", (duration, dayStart) => {
+    const source = "1 drop OD QID" + (duration ? " x4wk" : "") +
+      " then 2 drops OD BID x1wk; 3 drops OS QID then 3 drops OS BID";
+    const plan = createBoundaryPlan(source);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    states[1].primaryClause.schedule!.treatmentStartOffsetDays = 35;
+    if (dayStart) states[1].primaryClause.schedule!.phaseStartReference = "treatment-day-start";
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    const regimen = buildCanonicalParallelRegimen(states.map(state => state.primaryClause), plan.segments, plan, graph);
+    if (regimen.kind !== "unresolved") throw new Error("Expected partial independent tracks");
+    expect(regimen.tracks![0].phases[0].end).toEqual(duration ? { value: 28, unit: "d" } : undefined);
+    const native = courseFromPartialParallel(regimen, plan.segments.map(segment => segment.text), source);
+    const right = native.stages[0].administrations.filter(member => member.target?.text === "right eye");
+    const left = native.stages[0].administrations.filter(member => member.target?.text === "left eye");
+    expect(right.map(member => member.amounts?.[0].quantity?.value)).toEqual([1, 2]);
+    const rightTrack = { kind: "course" as const, stages: [{ administrations: right }] };
+    const late = options("2026-11-23T08:00:00+07:00", 4);
+    const wire = projectCanonicalCourse(rightTrack);
+    for (const input of [rightTrack, wire.fhirNext, JSON.parse(JSON.stringify(wire.fhir))]) {
+      expect(nextDueDoses(input, late)).toEqual([
+        "2026-11-23T08:00:00+07:00", "2026-11-23T20:00:00+07:00",
+        "2026-11-24T08:00:00+07:00", "2026-11-24T20:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ ...late, dosage: input, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+    }
+    expect(right[0].phaseEnd).toMatchObject({
+      anchor: dayStart ? "treatment-day-start" : "treatment-start", displacement: { value: 35, code: "d" }
+    });
+    expect(left[0].phaseEnd).toBeUndefined();
+    const leftTrack = { kind: "course" as const, stages: [{ administrations: [left[0]] }] };
+    expect(calculateTotalUnits({ ...late, dosage: leftTrack, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(12);
+    if (duration) expect(calculateTotalUnits({ ...options("2026-11-16T08:00:00+07:00"), dosage: rightTrack,
+      durationValue: 7, durationUnit: "d" }).totalUnits).toBe(0);
+  });
+});
+
+
+it("round34: public parsing closes the known eye track and retains the unresolved other eye", () => {
+  const source = "1 drop OD QID then from day 36 2 drops OD BID x1wk; 3 drops OS QID then 3 drops OS BID";
+  const parsed = parseSig(source);
+  const members = parsed.meta.canonical.course!.stages[0].administrations;
+  expect(members.map(member => [member.target?.text, member.amounts?.[0].quantity?.value]))
+    .toEqual([["right eye", 1], ["right eye", 2], ["left eye", 3], ["left eye", 3]]);
+  expect(members[0].phaseEnd).toMatchObject({
+    anchor: "treatment-day-start", displacement: { value: 35, code: "d" }
+  });
+  expect(members[3].phaseStart).toMatchObject({ anchor: "unresolved" });
+  const rightRows = parsed.fhir.filter(row => row.site?.text === "right eye");
+  const before = JSON.stringify(parsed);
+  expect(nextDueDoses(rightRows, options("2026-11-23T08:00:00+07:00", 4))).toEqual([
+    "2026-11-23T08:00:00+07:00", "2026-11-23T20:00:00+07:00",
+    "2026-11-24T08:00:00+07:00", "2026-11-24T20:00:00+07:00"
+  ]);
+  expect(calculateTotalUnits({ ...options("2026-11-23T08:00:00+07:00"), dosage: rightRows,
+    durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+  expect(JSON.stringify(parsed)).toBe(before);
 });

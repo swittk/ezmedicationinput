@@ -23,13 +23,18 @@ export function getCourseCycleCount(owner: CourseCountOwner): number | undefined
 
 /** Write the current typed count while preserving unrelated modifiers and
  * metadata on an existing recognized count annotation. Output owns writes. */
-export function setCourseCycleCount(owner: CourseCountOwner, count: number | undefined): void {
+export function setCourseCycleCount(owner: CourseCountOwner, count: number | undefined): FhirExtension[] | undefined {
   const original = owner.modifierExtension;
-  let found = false, changed: FhirExtension[] | undefined;
+  let found = false, changed: FhirExtension[] | undefined, displaced: FhirExtension[] | undefined;
   for (let index = 0; index < (original?.length ?? 0); index++) {
     const item = original![index];
     if (countValue(item) === undefined) {
       changed?.push(item);
+      continue;
+    }
+    if (found) {
+      changed ??= original!.slice(0, index);
+      (displaced ??= []).push(item);
       continue;
     }
     found = true;
@@ -47,4 +52,5 @@ export function setCourseCycleCount(owner: CourseCountOwner, count: number | und
     if (changed.length) owner.modifierExtension = changed;
     else delete owner.modifierExtension;
   }
+  return displaced;
 }

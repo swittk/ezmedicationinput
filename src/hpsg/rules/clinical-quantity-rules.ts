@@ -365,8 +365,11 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   if (!token || !available(context, start)) return undefined;
   const qualified = token.kind === LexKind.Number ? undefined :
     doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
-  let unitIndex = (qualified?.numericIndex ?? start) + 1;
-  const value = qualified?.value ?? clinicalDurationNumber(token);
+  const exact = qualified ? undefined : clinicalDurationNumber(token);
+  const mixed = exact === undefined ? undefined :
+    additiveDoseNumberAt(context.tokens, start, context.limit, exact);
+  let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ?? start) + 1;
+  const value = qualified?.value ?? mixed?.value ?? exact;
   // Exact and qualified fractional daughters share the same article rule;
   // ordinary whole duration numbers still require their immediate unit.
   if (!qualified?.rawUnit && value !== undefined && value > 0 && value < 1 &&
@@ -551,7 +554,7 @@ function fixedRate(
   const hasInfusionRoute = getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
     getRouteMeaning(after)?.code === RouteCode["Intravenous route"];
   if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, start))) return undefined;
+      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
     ...(hasSeparateRateMarker ? [phraseStart - 1] : []),

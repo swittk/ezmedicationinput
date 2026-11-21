@@ -13,7 +13,7 @@ import { R6_DRAFT_STEPS_SOURCE_URL, R6_SCOPED_SAFETY_MODIFIER_URL } from "../src
 import { numericAdministrationLimits, type CanonicalCourse } from "../src/canonical/course";
 import { EventTiming, FhirPeriodUnit, type EzCourseMetadata, type FhirDosage, type FhirR6DosageInstruction, type FhirR6DosageSafety, type FhirR6DosageCondition, type FormatOptions, type FhirR6DoseLimit } from "../src/types";
 
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL } from "../src/fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, getTimingClocks } from "../src/fhir";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, decodeR6SourceMetadata } from "../src/dosage-course";
 import { getSuggestLocaleAdapter, registerSuggestLocaleAdapter } from "../src/suggest-locale-adapter";
 
@@ -764,5 +764,133 @@ describe("round33 adjacent range metadata", () => {
     expect(parsed.meta.canonical.clauses[0].dose?.unit).toBe("mg");
     expect(parsed.meta.normalized.unit).toBe("mg");
     expect(JSON.stringify(row)).toBe(source);
+  });
+});
+
+describe("round34 compact range and maximum ownership", () => {
+  it.each(["authored", "coded"] as const)("keeps %s mixed-unit endpoints out of compact dose metadata", kind => {
+    const range = kind === "authored"
+      ? { low: { value: 500, unit: "mcg" }, high: { value: 1, unit: "mg" } }
+      : { low: { value: 500, system: "http://unitsofmeasure.org", code: "ug" },
+          high: { value: 1, system: "http://unitsofmeasure.org", code: "mg" } };
+    const row: FhirDosage = { doseAndRate: [{ doseRange: range }] };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [persist(row)] }] };
+    const before = JSON.stringify([row, raw]);
+    expect(fromFhirDosage(row).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    for (const input of [row, raw]) {
+      const amount = importCanonicalCourse(input).stages[0].administrations[0].amounts![0];
+      expect(amount.range).toEqual(range);
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("500");
+      expect(text).toContain("1 mg");
+      expect(text).not.toContain("500 to 1");
+    }
+    expect(JSON.stringify([row, raw])).toBe(before);
+  });
+
+  it.each(["low", "high", "both"] as const)("retains the known code-only %s endpoint unit in both editable views", known => {
+    const unit = { system: "http://unitsofmeasure.org", code: "mg" };
+    const range = {
+      low: { value: 2, ...(known === "high" ? {} : unit) },
+      high: { value: 5, ...(known === "low" ? {} : unit) },
+    };
+    const row: FhirDosage = { doseAndRate: [{ doseRange: range }] };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [persist(row)] }] };
+    const before = JSON.stringify([row, raw]);
+    for (const result of [fromFhirDosage(row), fromFhir(raw)]) {
+      expect(result.meta.canonical.clauses[0].dose).toEqual({ range: { low: 2, high: 5 }, unit: "mg" });
+      expect(result.meta.normalized.unit).toBe("mg");
+    }
+    for (const input of [row, raw])
+      expect(importCanonicalCourse(input).stages[0].administrations[0].amounts![0].range).toEqual(range);
+    expect(JSON.stringify([row, raw])).toBe(before);
+  });
+
+  it.each(["administration", "lifetime"] as const)("keeps a usable %s maximum regardless of a unitless limit's position", scope => {
+    const unitless = { scope, valueQuantity: { value: 10, id: "unit-not-supplied" } };
+    const known = { scope, valueQuantity: { value: 5, unit: "mg", id: "known-maximum" } };
+    for (const limits of [[unitless, known], [known, unitless]]) {
+      const raw: FhirR6DosageInstruction = { step: [{ component: [{ safety: { doseLimit: limits } }] }] };
+      const before = JSON.stringify(raw);
+      for (const input of [raw, toFhirR5Dosages(raw)]) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        const bounds = numericAdministrationLimits(member);
+        expect(bounds[scope]).toEqual(known.valueQuantity);
+        expect(bounds.multiple).toBe(true);
+        expect(member.limits).toHaveLength(2);
+      }
+      expect(JSON.stringify(raw)).toBe(before);
+    }
+  });
+});
+
+describe("round34 qualified Thai fractions", () => {
+  it.each([
+    ["≤๑ / ๒ เม็ด วันละครั้ง", "<="],
+    ["≥๑ / ๒ เม็ด วันละครั้ง", ">="],
+    [">=๑ / ๒ เม็ด วันละครั้ง", ">="],
+    ["~๑ / ๒ เม็ด วันละครั้ง", "~"],
+    ["≤๑/๒เม็ด วันละครั้ง", "<="],
+  ] as const)("preserves the half tablet and qualifier in %s", (source, comparator) => {
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.items).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab", comparator });
+    for (const wire of [parsed.fhir, parsed.fhirNext]) {
+      const native = importCanonicalCourse(wire);
+      expect(native.stages).toHaveLength(1);
+      expect(native.stages[0].administrations).toHaveLength(1);
+      expect(native.stages[0].administrations[0].amounts![0].quantity).toMatchObject({ value: 0.5, comparator });
+    }
+    expect(getQuantityComparator(parsed.fhir[0].doseAndRate![0].doseQuantity)).toBe(comparator);
+    expect(getQuantityComparator(parsed.fhirNext.step![0].component[0].doseAndRate![0].doseQuantity)).toBe(comparator);
+  });
+});
+
+describe("round34 positional clock primitive annotations", () => {
+  const clocks = [null, "09:00:00", null, "17:00:00", null];
+  const notes = ["leading", "nine", "middle", "seventeen", "trailing"].map(id => ({ id }));
+  it.each(["R5", "R6"] as const)("keeps metadata-only slots out of clinical clocks through %s", boundary => {
+    for (const mixed of [false, true]) {
+      const timing = { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        ...(mixed ? { when: [EventTiming.Morning] } : {}),
+        timeOfDay: clocks, _timeOfDay: notes,
+      } };
+      // JSON is the public wire boundary, including legal primitive null slots.
+      const source = persist(boundary === "R5"
+        ? [{ ...tablet(), timing }]
+        : { step: [{ component: [{ ...tablet(), timing }] }] });
+      const before = JSON.stringify(source);
+      expect(getTimingClocks(timing.repeat)).toEqual(["09:00:00", "17:00:00"]);
+      let wire = courseToR6(importCanonicalCourse(source));
+      for (let save = 0; save < 3; save++) {
+        const rows = persist(toFhirR5Dosages(wire));
+        for (const candidate of [wire, rows]) {
+          const native = importCanonicalCourse(candidate);
+          expect(native.stages[0].administrations[0].schedule?.recurrence?.clocks)
+            .toEqual(["09:00:00", "17:00:00"]);
+          expect(formatSig(candidate, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/0?9:00/u);
+          const repeat = Array.isArray(candidate) ? candidate[0].timing!.repeat! : candidate.step![0].component[0].timing!.repeat!;
+          if (mixed) {
+            const active = repeat.extension!.filter(marker => marker.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL);
+            expect(active.map(marker => marker.valueTime ?? null)).toEqual(clocks);
+            expect(active.map(marker => marker._valueTime)).toEqual(notes);
+          } else {
+            expect(repeat.timeOfDay).toEqual(clocks);
+            expect(repeat._timeOfDay).toEqual(notes);
+          }
+          expect(nextDueDoses(candidate, {
+            orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+            timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3,
+          })).toEqual(mixed
+            ? ["2026-12-01T08:00:00+00:00", "2026-12-01T09:00:00+00:00", "2026-12-01T17:00:00+00:00"]
+            : ["2026-12-01T09:00:00+00:00", "2026-12-01T17:00:00+00:00", "2026-12-02T09:00:00+00:00"]);
+        }
+        wire = persist(toDosageDetails(rows));
+      }
+      expect(JSON.stringify(source)).toBe(before);
+    }
   });
 });

@@ -215,6 +215,8 @@ export interface CanonicalAdministration {
   phaseOrigin?: CanonicalMeasure;
   /** A member phase whose event origin is not a concrete treatment offset. */
   phaseStart?: CanonicalBoundary;
+  /** Exclusive same-track transition, independent of this member's duration. */
+  phaseEnd?: CanonicalBoundary;
   phaseOriginIssue?: boolean;
   delayMinutes?: number;
   anchoredLength?: { quantity?: CanonicalMeasure; range?: CanonicalRange };
@@ -326,6 +328,9 @@ export function numericAdministrationLimits(
       multiple = true;
       continue;
     }
+    const source = unitOf(bound);
+    const sourceUnit = normalizeQuantityCapUnit(source);
+    if (!sourceUnit) { multiple = true; continue; }
     if (doseUnit === undefined) {
       const amount = a.amounts?.[0];
       doseUnit = unitOf(amount?.quantity ?? amount?.range?.high ?? amount?.range?.low);
@@ -333,10 +338,9 @@ export function numericAdministrationLimits(
     // Keep every comparison in the same unit even when the winning original
     // bound uses a different unit. Returning that original preserves metadata.
     const target = limit.scope === "administration"
-      ? (administrationUnit ??= doseUnit || unitOf(bound))
-      : (lifetimeUnit ??= doseUnit || unitOf(bound));
-    const source = unitOf(bound);
-    const value = normalizeQuantityCapUnit(source) === normalizeQuantityCapUnit(target)
+      ? (administrationUnit ??= doseUnit || source)
+      : (lifetimeUnit ??= doseUnit || source);
+    const value = sourceUnit === normalizeQuantityCapUnit(target)
       ? bound.value : convertValue(bound.value, source, target, strength);
     if (value === null || !Number.isFinite(value)) {
       multiple = true;

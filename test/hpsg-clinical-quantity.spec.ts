@@ -2163,6 +2163,14 @@ describe("round33 exact fractional duration and rate ownership", () => {
     const parsed = parsePublicSig(source);
     expect(parsed.input).toBe(source);
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: 10, unit: "mL", period: 1, periodUnit: "h" }]);
+    expect(parsed.fhir[0].maxDosePerPeriod).toMatchObject([{
+      numerator: { value: 10, unit: "mL" }, denominator: { value: 1, unit: "h" },
+    }]);
+    expect(parsed.fhirNext.step![0].component[0].safety?.doseLimit).toMatchObject([{
+      scope: "period", valueQuantity: { value: 10, unit: "mL" }, period: { value: 1, unit: "h" },
+    }]);
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.representation).not.toBe("rate-quantity");
     for (const row of [...parsed.fhir, ...parsed.fhirNext.step.flatMap(step => step.component)])
       for (const amount of row.doseAndRate ?? []) {
@@ -2190,11 +2198,82 @@ describe("round33 adjacent oral limit attachment", () => {
     const parsed = parsePublicSig(source);
     expect(parsed.input).toBe(source);
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: 10, unit: "mL", period: 1, periodUnit: "h" }]);
+    expect(parsed.fhir[0].maxDosePerPeriod).toMatchObject([{
+      numerator: { value: 10, unit: "mL" }, denominator: { value: 1, unit: "h" },
+    }]);
+    expect(parsed.fhirNext.step![0].component[0].safety?.doseLimit).toMatchObject([{
+      scope: "period", valueQuantity: { value: 10, unit: "mL" }, period: { value: 1, unit: "h" },
+    }]);
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
       expect(row.doseAndRate![0].doseQuantity!.value).toBe(5);
       expect(row.doseAndRate![0].rateQuantity).toBeUndefined();
       expect(row.doseAndRate![0].rateRatio).toBeUndefined();
+    }
+  });
+});
+
+describe("round34 complete dimensional numeric phrases", () => {
+  it.each([
+    ["Give 1 million units per hour", 1000000],
+    ["Give one and a half million units per hour", 1500000],
+    ["Administer half a million units per hour", 500000],
+    ["Give 100 units per hour", 100],
+  ] as const)("keeps the whole administration rate in %s", (source, value) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { value, unit: "[iU]" },
+      denominators: [{ value: 1, unit: "h" }],
+    });
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const amounts = importCanonicalCourse(input).stages[0].administrations[0].amounts!;
+      expect(amounts[0].rate?.value).toBe(value);
+      for (const amount of amounts) {
+        expect(amount.quantity).toBeUndefined();
+        expect(amount.range).toBeUndefined();
+        expect(amount.expression).toBeUndefined();
+      }
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each([
+    ["Infuse 100 mL over one and a half hours", 1.5, undefined],
+    ["Infuse 100 mL over one and three quarters hours", 1.75, undefined],
+    ["Infuse 20 mg in 100 mL saline over two and a half hours", 2.5, undefined],
+    ["Infuse 100 mL over approximately one and a half hours", 1.5, "~"],
+    ["Infuse 100 mL over 1.5 hours", 1.5, undefined],
+  ] as const)("retains the complete duration in %s", (source, value, comparator) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration)
+      .toEqual({ value, unit: "h", ...(comparator ? { comparator } : {}) });
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0].rateRatio?.numerator).toMatchObject({ value: 100, unit: "mL" });
+      expect(member.amounts![0].rateRatio?.denominator).toMatchObject({ value, unit: "h" });
+      expect(member.amounts![0].rateRatio?.denominator?.comparator).toBe(comparator);
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it.each(["h", "hr", "hrs", "hour", "hours"])("retains an oral ten-mL maximum per %s without a rate", unit => {
+    const parsed = parsePublicSig("Give 5 mL orally, at most 10 mL per " + unit);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: 10, unit: "mL", period: 1, periodUnit: "h" }]);
+    expect(parsed.fhir[0].maxDosePerPeriod).toMatchObject([{
+      numerator: { value: 10, unit: "mL" }, denominator: { value: 1, unit: "h" },
+    }]);
+    expect(parsed.fhirNext.step![0].component[0].safety?.doseLimit).toMatchObject([{
+      scope: "period", valueQuantity: { value: 10, unit: "mL" }, period: { value: 1, unit: "h" },
+    }]);
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 5, unit: "mL" });
+      expect(member.amounts![0].rate).toBeUndefined();
+      expect(member.amounts![0].rateRatio).toBeUndefined();
     }
   });
 });

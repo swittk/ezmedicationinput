@@ -15,6 +15,15 @@ const MEASUREMENT_NAMES: Readonly<Record<string, string>> = {
   bp: "BP", sbp: "SBP", dbp: "DBP", hr: "HR", spo2: "SpO2",
 };
 export const THAI_COURSE: CourseLanguage = {
+  unresolvedCycleTiming: (days, periodDays, cycles, anchor) => {
+    const details = [
+      ...(days ? ["วันที่ในรอบ " + days] : []),
+      ...(periodDays !== undefined ? ["รอบละ " + periodDays + " วัน"] : []),
+      ...(cycles !== undefined ? [cycles + " รอบ"] : []),
+      ...(anchor ? ["วันเริ่มรอบ " + anchor] : [])
+    ];
+    return "ยังระบุเวลาในรอบไม่ได้" + (details.length ? " (" + details.join("; ") + ")" : "");
+  },
   notPrefix: "ไม่ ",
   allSeparator: " และ ",
   anySeparator: " หรือ ",

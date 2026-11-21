@@ -1589,8 +1589,8 @@ function maximumUnscheduledCapCount(
         !dates.has(formatZonedIso(day, timeZone).slice(0, 10)) &&
         (!dayCondition ||
           !options.evaluateCondition ||
-          options.evaluateCondition(dayCondition, formatZonedIso(new Date(Math.max(+begin, +day)), timeZone)) !==
-            false)
+          options.evaluateCondition(dayCondition, formatZonedIso(new Date(Math.max(+begin, +day)), timeZone)) ===
+            true)
       ) {
         const start = Math.max(+begin, +day),
           stop = Math.min(+stopAt, +next);
@@ -2310,6 +2310,9 @@ function resolveAdministrationWindow(
         : cadence.capClock),
     absoluteEnd
   );
+  if (administration.phaseEnd)
+    endExclusive = earlierDate(endExclusive,
+      treatmentRelativeInstant(administration.phaseEnd, anchor, timeZone, sourceClock));
   let completionPoint: Date | undefined;
   if (administration.schedule?.explicitEvents?.length) {
     // A finite authored event list owns its last possible administration.
@@ -2414,15 +2417,17 @@ function treatmentStepWindow(
   options?: NextDueDoseOptions,
   predecessorPoint?: Date,
   deferFiniteCompletion = false,
-  capContext?: MedicationContext
+  capContext?: MedicationContext,
+  repetitionWindow?: { start: Date; end: Date; capClock?: TreatmentWallClock }
 ): TreatmentStepWindow {
   const stage = course.stages[index];
-  const start = stage.start
+  const start = repetitionWindow ? repetitionWindow.start : stage.start
     ? stage.start.anchor === "previous-phase-next-day"
       ? previousPhaseNextDay(stage.start, index > 0 ? previousEnd : undefined, timeZone)
       : treatmentRelativeInstant(stage.start, anchor, timeZone, sourceClock)
     : predecessorPoint ?? previousEnd;
-  const capClock = stageCalendarClock(course, index, start, timeZone, sourceClock, predecessorClock);
+  const capClock = repetitionWindow ? repetitionWindow.capClock
+    : stageCalendarClock(course, index, start, timeZone, sourceClock, predecessorClock);
   const administrations: ResolvedAdministrationWindow[] = [];
   let allFinite = stage.administrations.length > 0;
   let completionPending = false;
@@ -2505,7 +2510,8 @@ function treatmentStepWindow(
         throw new MedicationQuantityCalculationError("previous-phase-required",
           "The same-track predecessor is missing; retain that phase before executing its dependent dosage.");
   }
-  let end = stage.end ? treatmentRelativeInstant(stage.end, anchor, timeZone, sourceClock) : undefined;
+  let end = repetitionWindow?.end ??
+    (stage.end ? treatmentRelativeInstant(stage.end, anchor, timeZone, sourceClock) : undefined);
   let completionPoint: Date | undefined;
   if (!end && allFinite && latest) {
     end = latest.end;
@@ -2522,7 +2528,7 @@ function treatmentStepWindow(
       "R6 treatment step end must be after its start"
     );
   return { start, end, completionPoint, capClock, administrations,
-    ...(!stage.end && completionPending ? { completionPending: true } : {}),
+    ...(!stage.end && !repetitionWindow && completionPending ? { completionPending: true } : {}),
     ...(dependencies ? { dependencies } : {}) };
 }
 /** A repeated step keeps its authored civil duration when both boundaries
@@ -2587,10 +2593,11 @@ function* treatmentStepWindows(
     let localAnchor = anchor, localCourse = course, localClock = sourceClock;
     let advance: ((at: Date) => Date | null) | null | undefined;
     let civilRepetition = false;
+    let repetitionWindow: { start: Date; end: Date; capClock?: TreatmentWallClock } | undefined;
     for (let repetition = 0; repetition < repetitions; repetition++) {
       const window = treatmentStepWindow(localCourse, index, localAnchor, previousEnd,
         timeZone, localClock, predecessorClock, options, predecessorPoint,
-        deferFiniteCompletion, capContext);
+        deferFiniteCompletion, capContext, repetitionWindow);
       const accepted = yield { index, stage, window };
       if (accepted) {
         window.end = accepted.end;
@@ -2608,6 +2615,7 @@ function* treatmentStepWindows(
         ? getTimeParts(window.completionPoint, timeZone) : window.capClock;
       if (repetition + 1 < repetitions) {
         if (window.completionPoint) {
+          repetitionWindow = undefined;
           // A finite administration sequence owns a completion point, not an
           // elapsed duration. Its next occurrence starts strictly after that
           // point using the same successor cadence rule as any other stage.
@@ -2622,16 +2630,17 @@ function* treatmentStepWindows(
           if (advance === undefined) {
             const span = stepRepeatSpan(stage, window, index === 0 && window.start.getTime() === localAnchor.getTime());
             civilRepetition = !!normalizedCalendarInterval(span?.value, parseBoundsDurationUnit(span));
-            advance = durationStepper(span, timeZone, localAnchor, "recurrence", localClock);
+            advance = durationStepper(span, timeZone, window.end, "recurrence", window.capClock);
           }
-          const next = advance?.(localAnchor);
-          if (!next || next <= localAnchor)
+          const nextEnd = advance?.(window.end);
+          if (!nextEnd || nextEnd <= window.end)
             throw new MedicationQuantityCalculationError("step-repeat-unresolved",
               "The repeated treatment step does not define a usable duration.");
-          localAnchor = next;
-          // The original source clock belongs only to civil repetition.
-          if (!civilRepetition)
-            localClock = getTimeParts(localAnchor, timeZone);
+          // Repetition continues from the resolved exclusive end. Reapplying
+          // the original offsets to a shifted treatment anchor can overlap
+          // clamped months; member treatment anchors remain owned by the course.
+          repetitionWindow = { start: window.end, end: nextEnd,
+            capClock: civilRepetition ? window.capClock : getTimeParts(window.end, timeZone) };
         }
       }
     }
@@ -2740,7 +2749,7 @@ function definitelyNonOverlappingCycle(course: CanonicalCourse, cycle?: Canonica
   if (stage.start || stage.end || (stage.count !== undefined && stage.count !== 1)) return false;
   for (const member of stage.administrations) {
     const repeat = member.schedule?.recurrence;
-    if (member.phaseOrigin || member.phaseStart || member.phaseOriginIssue ||
+    if (member.phaseOrigin || member.phaseStart || member.phaseEnd || member.phaseOriginIssue ||
         member.anchoredLength || member.delayMinutes ||
         repeat?.calendarWindow?.end || repeat?.calendarWindow?.start ||
         (repeat?.count !== undefined && !unscheduledOccurrenceCapacity(member)) ||
@@ -2886,7 +2895,7 @@ function scheduleTreatmentRelativeCourse(
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
           : originalRepeat;
         const execution: CanonicalAdministration = {
-          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
+          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
           ...(collect && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
@@ -3837,7 +3846,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const single = stage?.administrations.length === 1 ? stage.administrations[0] : undefined;
     // A one-administration course has no inter-stage relationship to
     // resolve. This is a proven scalar fast path, not another course model.
-    if (single && (stage?.count === undefined || stage.count === 1) && !stage?.start && !stage?.end && !single.phaseOrigin && !single.phaseStart && !single.phaseOriginIssue)
+    if (single && (stage?.count === undefined || stage.count === 1) && !stage?.start && !stage?.end && !single.phaseOrigin && !single.phaseStart && !single.phaseEnd && !single.phaseOriginIssue)
       return nextDueDoses(single, options);
     if (zone && hasRepeatedStep(course) && hasRollingCycleLimit(course)) {
       const events = chronologicalRepeatedEvents(course, options, zone, undefined, options.limit ?? 10);
@@ -3847,7 +3856,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   }
   const one = dosage as CanonicalAdministration;
   requireConsistentTimingCode(one.schedule);
-  if (one.phaseOrigin || one.phaseStart || one.phaseOriginIssue ||
+  if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return nextDueDoses(courseFromCanonicalRows([one]), options);
   // The successor's cadence can be anchored to its predecessor's last
@@ -5100,7 +5109,11 @@ function generateFrequencyPerPeriodSeries(
     for (let index = 0; index < candidates && results.length < effectiveLimit; index++) {
       let candidate: Date | null;
       let shiftedClock = false;
-      if (calendarUnit && (frequency <= spanDays || clockedDays || clocklessCalendarPeriod)) {
+      if (implicitClock && index === 0) {
+        // Zero displacement already has an exact instant, including which
+        // occurrence of a folded wall clock and its source milliseconds.
+        candidate = cycleStart;
+      } else if (calendarUnit && (frequency <= spanDays || clockedDays || clocklessCalendarPeriod)) {
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
@@ -6469,7 +6482,7 @@ function calculateTotalUnitsSingle(
             options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
           );
   }
-  if (acceptedEventCount === undefined && !rangePlan && !dosage.schedule?.explicitEvents?.length &&
+  if (acceptedEventCount === undefined && countFrom < endDay && !rangePlan && !dosage.schedule?.explicitEvents?.length &&
       (maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
     // Scheduling keeps every stated clock/code as the concrete partial plan.
     // Numeric supply can still report the prescribed upper bound without
@@ -6725,7 +6738,7 @@ function calculateChronologicalCourseUnits(
       for(const [key, group] of byMember){
         const dosage:CanonicalAdministration={
           ...group.member,
-          delayMinutes:undefined,phaseOrigin:undefined,phaseStart:undefined,phaseOriginIssue:undefined,
+          delayMinutes:undefined,phaseOrigin:undefined,phaseStart:undefined,phaseEnd:undefined,phaseOriginIssue:undefined,
           // Retain authored period limits for the final supply explanation.
           // The acceptedEventCount path never re-enforces them; any cap that
           // could NOT be executed in the chronological ledger must still be
@@ -6909,7 +6922,7 @@ function calculateCourseTotalUnits(
     for (const [key, plan] of collected) {
       plan.windows.sort((a, b) => a.start - b.start);
       const source = plan.dosage;
-      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
+      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
         schedule: { ...source.schedule, recurrence: { ...source.schedule?.recurrence,
           count: undefined, countMax: undefined,
           courseLength: undefined, courseLengthRange: undefined, calendarWindow: undefined } } };
@@ -7103,6 +7116,7 @@ function calculateCourseTotalUnits(
         ...dosage,
         phaseOrigin: undefined,
         phaseStart: undefined,
+        phaseEnd: undefined,
         phaseOriginIssue: undefined,
         schedule: {
           ...dosage.schedule,
@@ -7195,7 +7209,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     return calculateCourseTotalUnits(input as CanonicalCourse, options);
   if (Array.isArray(input)) return calculateCourseTotalUnits(courseFromCanonicalRows(input), options);
   const one = input as CanonicalAdministration;
-  if (one.phaseOrigin || one.phaseStart || one.phaseOriginIssue ||
+  if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return calculateCourseTotalUnits(courseFromCanonicalRows([one]), options);
   const choice = executionChoice(one);
@@ -7371,7 +7385,7 @@ function explicitAdministrationCompletion(
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
   const raw = withoutOccurrenceCap({
-    ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined,
+    ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
     limits: dosage.limits?.filter(limit => limit.scope !== "period"),
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
@@ -7400,8 +7414,8 @@ function finiteAdministrationCompletion(
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
   const local =
-    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseOriginIssue
-      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseOriginIssue: undefined }
+    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue
+      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined }
       : dosage;
   // Completion is a historical boundary, not the number of doses still due.
   // Only records inside this phase can complete it; older records still belong

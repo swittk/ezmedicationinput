@@ -13,7 +13,7 @@ import type { SigLocalization, SigLongContext, SigShortContext, SigDoseScope } f
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
-import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
@@ -1166,8 +1166,10 @@ function shouldSuppressRoutePhrase(
 }
 
 /** A timing abbreviation is shorthand only while its typed recurrence agrees. */
-function timingCodeMatchesRecurrence(schedule: CanonicalScheduleExpr): boolean {
-  const code = schedule.timingCode;
+export function timingCodeMatchesRecurrence(
+  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit">,
+  code = schedule.timingCode
+): boolean {
   if (!code) return true;
   const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
   const interval = daily === undefined ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
@@ -1176,7 +1178,7 @@ function timingCodeMatchesRecurrence(schedule: CanonicalScheduleExpr): boolean {
   const period = code === "QOD" ? 2 : interval?.period ?? 1;
   const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;
   return (schedule.frequency === undefined || schedule.frequency === frequency) &&
-    (schedule.frequencyMax === undefined || schedule.frequencyMax === frequency) &&
+    (schedule.frequencyMax === undefined || schedule.frequency !== undefined && schedule.frequencyMax === frequency) &&
     (schedule.period === undefined || schedule.period === period) &&
     (schedule.periodMax === undefined || schedule.periodMax === period) &&
     (schedule.periodUnit === undefined || schedule.periodUnit === unit);
@@ -1922,6 +1924,14 @@ export function formatCanonicalClause(
   localization?: SigLocalization,
   options?: TimingSummaryOptions
 ): string {
+  // Per-call vocabulary can declare method identities beyond the built-in
+  // compiler dictionary. Resolve that head for every locale's display view
+  // without replacing source method text or adding work to ordinary clauses.
+  if (options?.instructionActionMap && clause.method) {
+    const definition = resolveMedicationInstructionActionForMethod(clause.method, options);
+    if (definition && definition.display !== clause.method.text)
+      clause = { ...clause, method: { ...clause.method, text: definition.display } };
+  }
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
     const retainedQualifier = cycle.sourceText.trim();
@@ -1948,15 +1958,9 @@ export function formatCanonicalClause(
             last = cycle.days[index++];
           days += (days ? ", " : "") + first + (last === first ? "" : "-" + last);
         }
-        const thai = localization?.locale.startsWith("th");
-        const details = [
-          ...(days ? [thai ? `วันที่ในรอบ ${days}` : `cycle days ${days}`] : []),
-          ...(cycle.periodDays !== undefined ? [thai ? `รอบละ ${cycle.periodDays} วัน` : `${cycle.periodDays}-day cycle`] : []),
-          ...(cycle.cycles !== undefined ? [thai ? `${cycle.cycles} รอบ` : `${cycle.cycles} cycles`] : []),
-          ...(cycle.anchor ? [thai ? `วันเริ่มรอบ ${cycle.anchor}` : `cycle anchor ${cycle.anchor}`] : [])
-        ];
-        qualifier = (thai ? "ยังระบุเวลาในรอบไม่ได้" : "Unresolved cycle timing") +
-          (details.length ? ` (${details.join("; ")})` : "");
+        qualifier = (localization?.course ?? ENGLISH_COURSE).unresolvedCycleTiming(
+          days, cycle.periodDays, cycle.cycles, cycle.anchor
+        );
       }
       return `${rendered.replace(/[.。]$/u, "")}; ${qualifier.replace(/[.。]$/u, "")}.`;
     }

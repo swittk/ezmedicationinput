@@ -393,7 +393,8 @@ describe("advanced compositional follow-up", () => {
       system: "http://example.org/custom-sites", code
     });
     expect(parsed.fhir.asNeeded).not.toBe(true);
-    const r6Component = parsed.dosageDetails.step[0]?.component[0];
+    expect(parsed.dosageDetails.step).toBeDefined();
+    const r6Component = parsed.dosageDetails.step![0]?.component[0];
     expect(r6Component?.site?.concept?.coding?.[0]).toMatchObject({
       system: "http://example.org/custom-sites", code
     });
@@ -473,7 +474,8 @@ describe("advanced compositional follow-up", () => {
         { url: "predicateText", valueString: expected.restriction.slice("where ".length) }
       ]));
     });
-    const components = parsed.dosageDetails.step[0]?.component ?? [];
+    expect(parsed.dosageDetails.step).toBeDefined();
+    const components = parsed.dosageDetails.step![0]?.component ?? [];
     expect(components.map(component =>
       component.site?.concept?.coding?.[0]?.code
     )).toEqual(sites.map(site => site.code));

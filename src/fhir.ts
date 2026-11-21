@@ -308,7 +308,16 @@ export function getTimingClocks(
   repeat: Pick<FhirTimingRepeat, "timeOfDay" | "extension"> | undefined
 ): string[] | undefined {
   if (!repeat) return undefined;
-  if (repeat.timeOfDay !== undefined) return repeat.timeOfDay;
+  if (repeat.timeOfDay !== undefined) {
+    const source = repeat.timeOfDay;
+    let clocks: string[] | undefined;
+    for (let index = 0; index < source.length; index++) {
+      const clock = source[index];
+      if (clock === null) clocks ??= source.slice(0, index) as string[];
+      else if (clocks) clocks.push(clock);
+    }
+    return clocks ?? source as string[];
+  }
   if (!repeat.extension?.length) return undefined;
   let clocks: string[] | undefined;
   for (const item of repeat.extension) {
@@ -324,9 +333,24 @@ export function getTimingClocks(
 export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
   repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">
 ): T {
-  const clocks = repeat.timeOfDay;
+  let clocks = repeat.timeOfDay;
   const mixed = Boolean(repeat.when?.length && clocks?.length);
-  if (!mixed && !repeat.extension?.length) return repeat;
+  // Native clocks contain only values. Restore a source's primitive positions
+  // only when those same values still occupy its non-null slots.
+  const sourceClocks = wireSource?.timeOfDay;
+  let restorePositions = false;
+  if (sourceClocks && clocks && sourceClocks.length > clocks.length) {
+    let valueIndex = 0, unchanged = true;
+    for (const clock of sourceClocks) {
+      if (clock !== null && clock !== clocks[valueIndex++]) { unchanged = false; break; }
+    }
+    if (unchanged && valueIndex === clocks.length) {
+      clocks = sourceClocks;
+      restorePositions = true;
+    }
+  }
+  if (!mixed && !repeat.extension?.length)
+    return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   let markers: FhirExtension[] | undefined;
   const kept: FhirExtension[] = [];
   let bridgeIndex = 0;
@@ -341,7 +365,7 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
       if (marker.valueTime !== clocks?.[bridgeIndex++]) bridgeMatches = false;
     }
   }
-  if (!mixed && !markers) return repeat;
+  if (!mixed && !markers) return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
   if (mixed && markers && unchangedBridge) {
     // These clocks were read from the current clock bridge. Keep its exact authored
@@ -358,12 +382,13 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
       const metadata = repeat._timeOfDay?.[index];
       if (index >= clocks!.length && !metadata) continue;
       const marker: FhirExtension = { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL };
-      if (index < clocks!.length) marker.valueTime = clocks![index];
+      if (clocks![index] != null) marker.valueTime = clocks![index]!;
       if (metadata) marker._valueTime = metadata;
       kept.push(marker);
     }
   }
   const output = { ...repeat };
+  if (!mixed && restorePositions) output.timeOfDay = clocks;
   if (!mixed && unchangedBridge && bridgeMetadata && output._timeOfDay === undefined)
     output._timeOfDay = bridgeMetadata;
   if (kept.length) output.extension = kept;

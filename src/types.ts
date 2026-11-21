@@ -401,7 +401,7 @@ export interface FhirTimingRepeat extends FhirElement {
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
   dayOfWeek?: FhirDayOfWeek[];
-  timeOfDay?: string[];
+  timeOfDay?: Array<string | null>;
   /** Primitive metadata corresponding positionally to timeOfDay. */
   _timeOfDay?: Array<FhirPrimitiveElement | null>;
   when?: EventTiming[];

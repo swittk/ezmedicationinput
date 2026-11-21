@@ -2658,11 +2658,9 @@ function maximumDosePeriodAt(
     return undefined;
   }
   const unitLower = normalizeTokenLower(unitToken);
-  if (/^(?:day|d)$/u.test(unitLower)) {
-    return { tokens: [connector, unitToken], period: 1, periodUnit: FhirPeriodUnit.Day };
-  }
-  if (/^(?:week|wk)$/u.test(unitLower)) {
-    return { tokens: [connector, unitToken], period: 1, periodUnit: FhirPeriodUnit.Week };
+  const periodUnit = mapIntervalUnit(unitLower);
+  if (periodUnit) {
+    return { tokens: [connector, unitToken], period: 1, periodUnit };
   }
   if (unitLower !== "24") return undefined;
   const hourToken = context.tokens[start + 2];

@@ -1805,7 +1805,7 @@ describe("round 29: method coding index", () => {
     }, options)).toBeUndefined();
     expect(resolveMedicationInstructionActionByMethod({
       system: "urn:clinic:method", code: "chew-slowly"
-    }, options)).toBeUndefined();
+    }, options)?.code).toBe("clinic-chew");
     expect(resolveMedicationInstructionActionByMethod({
       system: "urn:clinic:method", code: "unknown", display: "Masticate"
     }, options)).toBeUndefined();
@@ -2138,8 +2138,12 @@ describe("round 31: bounded event windows remain in preview", () => {
     expect(clause.schedule?.eventWindow).toEqual({ start, end });
     for (const [locale, expected] of [["en", english], ["th", thai]]) {
       for (const style of ["short", "long"] as const) {
-        expect(formatCanonicalClause(clause, style, resolveSigLocalization(locale))).toContain(expected);
-        expect(formatSig(row, style, { locale, realizationMode: "normalized" })).toContain(expected);
+        const local = formatCanonicalClause(clause, style, resolveSigLocalization(locale));
+        const whole = formatSig(row, style, { locale, realizationMode: "normalized" });
+        expect(local).toContain(expected);
+        expect(whole).toContain(expected);
+        expect(local).not.toMatch(/\d{1,2}:\d{2}/u);
+        expect(whole).not.toMatch(/\d{1,2}:\d{2}/u);
       }
     }
     expect(JSON.stringify(row)).toBe(before);
@@ -2181,5 +2185,53 @@ describe("round 31: bounded event windows remain in preview", () => {
     for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
       expect(formatSig(row, style, { locale, realizationMode: "normalized" })).not.toMatch(/between|ระหว่าง/u);
     }
+  });
+});
+
+
+describe("round34 successor and member origins", () => {
+  it.each([false, true])("shares the dated successor onset with coordinated siblings (pause %s)", pause => {
+    const source = "Take 1 tablet on 2026-11-25 at 22:00, " +
+      (pause ? "then stop for 2 days, " : "") +
+      "then take 2 tablets at 06:00 the next morning and take 3 tablets at 07:00 daily";
+    const parsed = parseSig(source);
+    const date = pause ? "2026-11-28" : "2026-11-26";
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2, 3]);
+    expect(parsed.meta.canonical.clauses.slice(1).map(clause => clause.schedule?.boundsStart)).toEqual([date, date]);
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-26T00:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual([date + "T06:00:00+00:00", date + "T07:00:00+00:00"]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("keeps an independently dated sibling outside the shared dated pause", () => {
+    const parsed = parseSig("Take 1 tablet on 2026-11-25 at 22:00, then stop for 2 days, then take 2 tablets at 06:00 the next morning and take 3 tablets on 2026-11-30 at 07:00");
+    expect(parsed.meta.canonical.clauses.slice(1).map(clause => clause.schedule?.boundsStart)).toEqual(["2026-11-28", undefined]);
+    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-30T00:00:00Z",
+      timeZone: "UTC", limit: 2 })).toEqual(["2026-11-30T06:00:00+00:00", "2026-11-30T07:00:00+00:00"]);
+  });
+
+  it.each(["mixed", "elapsed", "day-start"] as const)("keeps the first civil-day clock for %s member origins", kind => {
+    const administrations = [8, 14].map((hour, index) => ({
+      kind: "administration" as const, onsetDays: 1,
+      ...(kind === "day-start" || kind === "mixed" && index === 0
+        ? { onsetReference: "treatment-day-start" as const } : {}),
+      amounts: [{ quantity: { value: index + 1, unit: "tab" } }],
+      schedule: { recurrence: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        clocks: [String(hour).padStart(2, "0") + ":00:00"] } }
+    }));
+    const before = JSON.stringify(administrations);
+    const native = courseFromAdministrations(administrations, "Two members with their own onset origins");
+    const wire = courseToR6(native);
+    const expected = kind === "elapsed"
+      ? ["2026-11-22T14:00:00+00:00", "2026-11-23T08:00:00+00:00"]
+      : ["2026-11-22T08:00:00+00:00", "2026-11-22T14:00:00+00:00"];
+    for (const input of [native, wire, JSON.parse(JSON.stringify(toFhirR5Dosages(wire)))])
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-21T12:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual(expected);
+    if (kind === "mixed") expect(native.stages[0].start).toBeUndefined();
+    expect(JSON.stringify(administrations)).toBe(before);
   });
 });

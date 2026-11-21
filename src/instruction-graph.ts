@@ -3903,6 +3903,10 @@ export function realizeRichPrimaryWithCanonicalDose(
       ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
       : getMedicationInstructionAction(frame.predicate.lemma);
     const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
+    // Preserve the source frame's accompaniment valence. A result-only
+    // realization cannot own the live administration Amount after a head edit;
+    // the default action composes that dose with its surviving site and manner.
+    const realizer = sourceRealizer === "result" ? "default" : sourceRealizer;
     const methodBoundManners = sourceDefinition?.methodBoundMannerConcepts;
     // Independent material, manner and event daughters stay with the edited
     // action. Only the source method's declared bound qualifiers are superseded.
@@ -3912,10 +3916,10 @@ export function realizeRichPrimaryWithCanonicalDose(
         methodBoundManners.indexOf(arg.conceptId) < 0) : frame.args,
       predicate: definition ? {
       lemma: definition.code, display: definition.display, i18n: definition.i18n,
-      semanticClass: definition.semanticClass, realizer: sourceRealizer,
+      semanticClass: definition.semanticClass, realizer,
       realizerConfig: frame.predicate.realizerConfig, codings: medicationInstructionActionCodings(definition)
     } : { lemma: method.text ?? method.coding?.display ?? method.coding?.code ?? "",
-      display: method.text ?? method.coding?.display, realizer: sourceRealizer,
+      display: method.text ?? method.coding?.display, realizer,
       realizerConfig: frame.predicate.realizerConfig,
       codings: method.coding ? [method.coding] : undefined } };
   }

@@ -1,7 +1,7 @@
 /** Public API performance gate, not just parse/format/supply.
  *
  * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
- *   [--only regex] [--rounds 9] [--target-ms 12] [--smoke] [--json report.json]
+ *   [--only regex] [--rounds 10] [--target-ms 12] [--smoke] [--json report.json]
  *
  * Each exported function has a fixture or an explicit new-API classification.
  * Ordinary and adversarial API families are separate measurements; a fast
@@ -10,11 +10,11 @@
  * inside correctness tests. Tiny noisy APIs report both absolute time and spread.
  */
 import { performance } from "node:perf_hooks";
-import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { cpus } from "node:os";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 const argv = process.argv.slice(2),
   value = (flag, fallback) => {
     const i = argv.indexOf(flag);
@@ -26,13 +26,21 @@ const argv = process.argv.slice(2),
 const baselinePath = value("--baseline", process.env.EZMED_BASELINE);
 if (!baselinePath) throw new Error("Supply --baseline pointing to the built origin/master package");
 const filter = new RegExp(value("--only", ".")),
-  rounds = Number(value("--rounds", "9"));
+  requestedRounds = Number(value("--rounds", "10"));
 const targetMs = Number(value("--target-ms", "12")),
   smoke = argv.includes("--smoke");
-if (!smoke && (!Number.isInteger(rounds) || rounds < 1))
+if (!smoke && (!Number.isInteger(requestedRounds) || requestedRounds < 1))
   throw new Error("--rounds must be a positive integer for timed measurements");
 if (!smoke && (!Number.isFinite(targetMs) || targetMs <= 0))
   throw new Error("--target-ms must be finite and greater than zero for timed measurements");
+// Every timed comparison has equally many baseline-first and candidate-first
+// batches. Preserve the requested minimum, including historical odd inputs.
+const rounds = requestedRounds + requestedRounds % 2;
+const candidateFirst = argv.includes("--candidate-first");
+const baselineEntry = realpathSync(resolve(baselinePath));
+const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
+if (baselineEntry === candidateEntry)
+  throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
 const maxRegression = 0.04;
 const outputPath = value("--json", undefined);
 const report = {
@@ -64,8 +72,8 @@ function checkpoint(complete = false) {
   }
 }
 checkpoint();
-const baseline = await import(pathToFileURL(resolve(baselinePath)).href);
-const candidate = await import(new URL("../dist/index.js", import.meta.url));
+const baseline = await import(pathToFileURL(baselineEntry).href);
+const candidate = await import(pathToFileURL(candidateEntry).href);
 const emaComparatorQuantity = { extension: [{
   url: candidate.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
   valueCoding: { system: candidate.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
@@ -104,7 +112,12 @@ const relation = {
   sourceText: "around left eye",
 };
 const relationConcept = { extension: baseline.buildBodySiteSpatialRelationExtensions(relation) };
-const counted = { extension: [baseline.buildBodySiteAdministrationTargetCountExtension(2)] };
+// This decoder fixture is independently encoded and constructed only for
+// selected consumers; an older module need not export its builder or decoder.
+const counted = ["parseBodySiteAdministrationTargetCountExtension", "getBodySiteAdministrationTargetCount"]
+  .some(name => filter.test(name))
+  ? { extension: [{ url: "urn:ezmedicationinput:body-site-administration-target-count", valueInteger: 2 }] }
+  : undefined;
 const conditionRow = {};
 baseline.setDosageCondition(conditionRow, condition);
 const dateRow = {};
@@ -473,23 +486,17 @@ addNative("formatCanonicalAdministration", "native/format-administration", (m) =
 addNative("formatCanonicalCourse", "native/format-course", (m) =>
   m.formatCanonicalCourse(nativeFixtures.get(m).textless, "long", { locale: "th" }), "textless");
 addNative("projectEditableR5Course", "native/project-editable-R5", (m) => m.projectEditableR5Course(complex));
-const newApis = new Set([
-  "importCanonicalCourse",
-  "projectCanonicalCourse",
-  "formatCanonicalAdministration",
-  "formatCanonicalCourse",
-  "projectEditableR5Course",
-  "getEmaQuantityComparator",
-].filter(api => typeof baseline[api] !== "function"));
+const newApis = new Set([...covered].filter(api =>
+  typeof candidate[api] === "function" && typeof baseline[api] !== "function"));
 const missing = Object.keys(candidate).filter(
-  (k) => typeof candidate[k] === "function" && !covered.has(k) && !newApis.has(k)
+  (key) => typeof candidate[key] === "function" && !covered.has(key)
 );
 if (missing.length) throw new Error("Uncovered public APIs: " + missing.join(", "));
-if (
-  baseline.parseBodySiteAdministrationTargetCountExtension(counted) !== 2 ||
-  candidate.parseBodySiteAdministrationTargetCountExtension(counted) !== 2
-)
-  throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
+if (counted) for (const module of [baseline, candidate]) {
+  const decode = module.parseBodySiteAdministrationTargetCountExtension;
+  if (typeof decode === "function" && decode(counted) !== 2)
+    throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
+}
 Object.assign(report, {
   phase: "measuring",
   runtime: {
@@ -511,15 +518,21 @@ Object.assign(report, {
   newApis: [...newApis],
   threshold: 1 + maxRegression,
   methodology:
-    "Alternating paired warm batches; helper exports captured before timing; no cross-domain averaging",
+    "Balanced alternating paired warm batches; helper exports captured before timing; no cross-domain averaging",
   filter: filter.source,
   selectedComparisons: cases.filter(
     (test) => filter.test(test.name) && typeof baseline[test.api] === "function"
   ).length,
+  requestedRounds,
   rounds,
+  firstBatch: candidateFirst ? "candidate" : "baseline",
+  pairsPerOrder: rounds / 2,
 });
 checkpoint();
-const median = (a) => [...a].sort((x, y) => x - y)[Math.floor(a.length / 2)];
+const median = (values) => {
+  const sorted = [...values].sort((x, y) => x - y), middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
 let sink;
 async function measure(test, module, iterations, async) {
   const invoke = test.direct?.get(module) ?? ((i) => test.run(module, i));
@@ -550,7 +563,7 @@ async function calibratedIterations(test, modules, async) {
 // These edit cases have an independent clinical oracle. An older formatter
 // that returns the superseded quantity is doing different work; keep both
 // timings visible but apply the latency gate only when both render the edit.
-function completeThaiDose(output, action, unit, expected) {
+function completeThaiDose(output, action, unit, expected, requiredSite) {
   if (typeof output !== "string") return false;
   const number = "([+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+))";
   const verb = action === "หยอด" ? "หยอด(?:\\s*ตาขวา)?" : action;
@@ -558,16 +571,16 @@ function completeThaiDose(output, action, unit, expected) {
   // Accept that complete prefix, never an arbitrary substring after a negator.
   const preparation = action === "หยอด" ? "ล้างมือก่อนหยอดตา" : "ผสมน้ำ";
   const lead = "^\\s*(?:" + preparation + "\\s*(?:[.;,]\\s*|จากนั้น\\s*|แล้ว\\s*)?)?";
+  const siteAfter = action === "หยอด" ? "(?:\\s*ตาขวา)?" : "";
   const phrase = new RegExp(lead + verb + "\\s*(?:ครั้งละ\\s*)?" +
-    number + "\\s*" + unit + "(?=$|[\\s.;,])", "u").exec(output);
+    number + "\\s*" + unit + siteAfter + "(?=$|[\\s.;,])", "u").exec(output);
   const quantities = [...output.matchAll(new RegExp("(?<![\\d.])" + number +
     "\\s*" + unit + "(?=$|[\\s.;,])", "gu"))];
   return phrase !== null && Number(phrase[1]) === expected && quantities.length === 1 &&
-    Number(quantities[0][1]) === expected;
+    Number(quantities[0][1]) === expected && (!requiredSite || phrase[0].includes(requiredSite));
 }
 function completeThaiRightEyeDose(output) {
-  return completeThaiDose(output, "หยอด", "หยด", 2) &&
-    output.includes("ตาขวา") && !output.includes("ตาซ้าย");
+  return completeThaiDose(output, "หยอด", "หยด", 2, "ตาขวา") && !output.includes("ตาซ้าย");
 }
 const equivalenceOracles = new Map([
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
@@ -664,7 +677,7 @@ for (const text of ["หยอดตาขวา 2 หยด แล้วหล�
   "ล้างมือก่อนหยอดตา จากนั้นหยอดตาขวา ครั้งละ 2 หยด จากนั้นหลับตา."])
   if (!completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle rejected the authored site placement");
-for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
+for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด แล้วหลับตาขวา.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
   "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา."])
   if (completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");
@@ -721,7 +734,7 @@ for (const test of cases) {
       b = [];
     for (let r = 0; r < rounds; r++) {
       if (global.gc) global.gc();
-      if (r % 2) {
+      if ((r % 2 === 0) === candidateFirst) {
         b.push(await measure(test, candidate, iterations, async));
         a.push(await measure(test, baseline, iterations, async));
       } else {
