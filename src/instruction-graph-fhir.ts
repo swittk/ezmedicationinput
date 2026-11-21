@@ -1,3 +1,4 @@
+import { getQuantityComparator, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -45,12 +46,6 @@ function getAdviceRelationByCoding(coding: FhirCoding | undefined): AdviceRelati
 export const MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
 
-function child(extension: FhirExtension, url: string): FhirExtension | undefined {
-  return extension.extension?.find((entry) => entry.url === url);
-}
-function children(extension: FhirExtension, url: string): FhirExtension[] {
-  return extension.extension?.filter((entry) => entry.url === url) ?? [];
-}
 function add(target: FhirExtension[], value: FhirExtension | undefined): void {
   if (value) target.push(value);
 }
@@ -75,14 +70,19 @@ function valueBoolean(url: string, value: boolean | undefined): FhirExtension | 
  */
 function wireCoding(value: FhirCoding): FhirCoding {
   const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
-  return {
-    ...(value.system !== undefined ? { system: value.system } : {}),
-    ...(value.version !== undefined ? { version: value.version } : {}),
-    ...(value.code !== undefined ? { code: value.code } : {}),
-    ...(value.display !== undefined ? { display: value.display } : {}),
-    ...(value.extension?.length ? { extension: value.extension } : {}),
-    ...(displayPrimitive ? { _display: displayPrimitive } : {})
-  };
+  // One typed wire value, not a chain of optional fragment objects and
+  // transpiled spread-descriptor walks for every Coding in an action graph.
+  const result:FhirCoding={};
+  if(value.system!==undefined)result.system=value.system;
+  if(value.version!==undefined)result.version=value.version;
+  if(value.code!==undefined)result.code=value.code;
+  if(value._code!==undefined)result._code=value._code;
+  if(value.display!==undefined)result.display=value.display;
+  if(value.userSelected!==undefined)result.userSelected=value.userSelected;
+  if(value._userSelected!==undefined)result._userSelected=value._userSelected;
+  if(value.extension?.length)result.extension=value.extension;
+  if(displayPrimitive)result._display=displayPrimitive;
+  return result;
 }
 
 function readCoding(value: FhirCoding | undefined): FhirCoding | undefined {
@@ -110,16 +110,6 @@ function addRelation(
   const coding = getAdviceRelationCoding(relation);
   if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
   else add(extensions, valueCode(name, relation));
-}
-
-/** Decode the exact standards mapping; preserve existing local-only and
- * previously saved valueCode representations without NLP reparsing.
- * @param extension Encoded action, argument or relation.
- * @param name Relation child name.
- */
-function readRelation(extension: FhirExtension, name: string): AdviceRelation | undefined {
-  return getAdviceRelationByCoding(child(extension, `${name}Coding`)?.valueCoding) ??
-    child(extension, name)?.valueCode as AdviceRelation | undefined;
 }
 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
@@ -151,6 +141,11 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     add(quantity, valueDecimal("low", argument.quantity.range?.low));
     add(quantity, valueDecimal("high", argument.quantity.range?.high));
     add(quantity, valueString("unit", argument.quantity.unit));
+    // Use the published EMA Coding for an operator, not a private graph code.
+    // Exact graph quantities keep their existing wire shape.
+    if (argument.quantity.comparator) quantity.push(
+      ...(simpleQuantityForR5({ comparator: argument.quantity.comparator })?.extension ?? [])
+    );
     nested.push({ url: "quantity", extension: quantity });
   }
   for (const locale of Object.keys(argument.i18n ?? {})) {
@@ -276,221 +271,209 @@ export function buildInstructionGraphExtension(
   return { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
 }
 
-function parseArgumentExtension(extension: FhirExtension): AdviceArgument | undefined {
-  const role = child(extension, "role")?.valueCode as AdviceArgumentRole | undefined;
-  const text = child(extension, "text")?.valueString;
-  if (!role || text === undefined) return undefined;
-  const argument: AdviceArgument = {
-    role,
-    text,
-    relation: readRelation(extension, "relation"),
-    normalized: child(extension, "normalized")?.valueString,
-    conceptId: child(extension, "conceptId")?.valueString,
-    coding: readCoding(child(extension, "coding")?.valueCoding),
-    codings: children(extension, "argumentCoding")
-      .map((entry) => readCoding(entry.valueCoding))
-      .filter((entry): entry is FhirCoding => Boolean(entry))
-  };
-  const components: NonNullable<AdviceArgument["components"]> = [];
-  for (const component of children(extension, "component")) {
-    const role = child(component, "role")?.valueCode;
-    const text = child(component, "text")?.valueString;
-    if ((role === "head" || role === "qualifier" || role === "amount") && text !== undefined) {
-      const coding = readCoding(child(component, "coding")?.valueCoding);
-      components.push({ role, text, ...(coding ? { coding } : {}) });
+function firstRelation(coding:FhirCoding|undefined,raw:string|undefined):AdviceRelation|undefined {
+  return getAdviceRelationByCoding(coding)??raw as AdviceRelation|undefined;
+}
+function parseTranslationNode(extension:FhirExtension):{locale?:string;text?:string} {
+  let locale:FhirExtension|undefined,text:FhirExtension|undefined;
+  for(const node of extension.extension??[])switch(node.url){
+    case "locale":if(!locale)locale=node;break;
+    case "text":if(!text)text=node;break;
+  }
+  return {locale:locale?.valueCode,text:text?.valueString};
+}
+function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefined {
+  let role:FhirExtension|undefined,text:FhirExtension|undefined,relation:FhirExtension|undefined,
+    relationCoding:FhirExtension|undefined,normalized:FhirExtension|undefined,concept:FhirExtension|undefined,
+    coding:FhirExtension|undefined,spanStart:FhirExtension|undefined,spanEnd:FhirExtension|undefined,
+    quantity:FhirExtension|undefined;
+  const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
+  let i18n:Record<string,string>|undefined;
+  for(const entry of extension.extension??[])switch(entry.url){
+    case "role":if(!role)role=entry;break;
+    case "text":if(!text)text=entry;break;
+    case "relation":if(!relation)relation=entry;break;
+    case "relationCoding":if(!relationCoding)relationCoding=entry;break;
+    case "normalized":if(!normalized)normalized=entry;break;
+    case "conceptId":if(!concept)concept=entry;break;
+    case "coding":if(!coding)coding=entry;break;
+    case "spanStart":if(!spanStart)spanStart=entry;break;
+    case "spanEnd":if(!spanEnd)spanEnd=entry;break;
+    case "quantity":if(!quantity)quantity=entry;break;
+    case "argumentCoding":{const value=readCoding(entry.valueCoding);if(value)codings.push(value);break;}
+    case "translation":{const value=parseTranslationNode(entry);if(value.locale&&value.text)(i18n??={})[value.locale]=value.text;break;}
+    case "component":{
+      let componentRole:FhirExtension|undefined,componentText:FhirExtension|undefined,componentCoding:FhirExtension|undefined;
+      for(const part of entry.extension??[])switch(part.url){
+        case "role":if(!componentRole)componentRole=part;break;
+        case "text":if(!componentText)componentText=part;break;
+        case "coding":if(!componentCoding)componentCoding=part;break;
+      }
+      const value=componentRole?.valueCode,body=componentText?.valueString;
+      if((value==="head"||value==="qualifier"||value==="amount")&&body!==undefined){
+        const term=readCoding(componentCoding?.valueCoding);
+        components.push({role:value,text:body,...(term?{coding:term}:{})});
+      }
+      break;
     }
   }
-  if (components.length) argument.components = components;
-  const spanStart = child(extension, "spanStart")?.valueInteger;
-  const spanEnd = child(extension, "spanEnd")?.valueInteger;
-  if (spanStart !== undefined && spanEnd !== undefined) argument.span = { start: spanStart, end: spanEnd };
-  const quantityExtension = child(extension, "quantity");
-  if (quantityExtension) {
-    const value = child(quantityExtension, "value")?.valueDecimal;
-    const low = child(quantityExtension, "low")?.valueDecimal;
-    const high = child(quantityExtension, "high")?.valueDecimal;
-    const unit = child(quantityExtension, "unit")?.valueString;
-    if (value !== undefined || low !== undefined || high !== undefined || unit !== undefined) {
-      argument.quantity = {
-        value,
-        range: low !== undefined || high !== undefined ? { low, high } : undefined,
-        unit
-      };
+  if(!role?.valueCode||text?.valueString===undefined)return undefined;
+  const result:AdviceArgument={role:role.valueCode as AdviceArgumentRole,text:text.valueString,
+    relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
+    normalized:normalized?.valueString,conceptId:concept?.valueString,
+    coding:readCoding(coding?.valueCoding),codings};
+  if(components.length)result.components=components;
+  if(spanStart?.valueInteger!==undefined&&spanEnd?.valueInteger!==undefined)
+    result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
+  if(quantity){
+    let value:FhirExtension|undefined,low:FhirExtension|undefined,high:FhirExtension|undefined,unit:FhirExtension|undefined;
+    for(const field of quantity.extension??[])switch(field.url){
+      case "value":if(!value)value=field;break;case "low":if(!low)low=field;break;
+      case "high":if(!high)high=field;break;case "unit":if(!unit)unit=field;break;
     }
+    const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;
+    const comparator=getQuantityComparator(quantity);
+    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined)
+      result.quantity={value:amount,range:lower!==undefined||upper!==undefined?{low:lower,high:upper}:undefined,
+        unit:units,...(comparator?{comparator}:{})};
   }
-  const i18n: Record<string, string> = {};
-  for (const translation of children(extension, "translation")) {
-    const locale = child(translation, "locale")?.valueCode;
-    const translated = child(translation, "text")?.valueString;
-    if (locale && translated) i18n[locale] = translated;
-  }
-  if (Object.keys(i18n).length) argument.i18n = i18n;
-  return argument;
+  if(i18n)result.i18n=i18n;
+  return result;
 }
 
-function parseActionExtension(extension: FhirExtension): AdviceFrame | undefined {
-  const lemma = child(extension, "predicateLemma")?.valueString;
-  const spanStart = child(extension, "spanStart")?.valueInteger;
-  const spanEnd = child(extension, "spanEnd")?.valueInteger;
-  const sourceText = child(extension, "sourceText")?.valueString;
-  const force = child(extension, "force")?.valueCode as AdviceForce | undefined;
-  if (!lemma || spanStart === undefined || spanEnd === undefined || sourceText === undefined || !force) return undefined;
-  const args: AdviceArgument[] = [];
-  for (const argumentExtension of children(extension, "argument")) {
-    const argument = parseArgumentExtension(argumentExtension);
-    if (argument) args.push(argument);
+/** Decode a locale-specific realizer configuration as a data-only facet.
+ * No language-specific licensing occurs in this interchange reader. */
+function parseRealizerLocale(extension:FhirExtension):{
+  locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string]
+}|undefined {
+  let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,
+    implicit:FhirExtension|undefined,direct:FhirExtension|undefined;
+  const activities:string[]=[],sites:string[]=[];
+  for(const field of extension.extension??[])switch(field.url){
+    case "locale":if(!locale)locale=field;break;
+    case "fallbackObject":if(!fallback)fallback=field;break;
+    case "implicitMedicationObject":if(!implicit)implicit=field;break;
+    case "directSiteObject":if(!direct)direct=field;break;
+    case "suppressActivityConcept":if(field.valueString)activities.push(field.valueString);break;
+    case "suppressSiteConcept":if(field.valueString)sites.push(field.valueString);break;
   }
-  const localeRealizerConfig: NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"] = {};
-  for (const localized of children(extension, "predicateRealizerLocale")) {
-    const locale = child(localized, "locale")?.valueCode;
-    if (!locale) continue;
-    const suppressActivityConcepts = children(localized, "suppressActivityConcept")
-      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-    const suppressSiteConcepts = children(localized, "suppressSiteConcept")
-      .map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-    localeRealizerConfig![locale] = {
-      fallbackObject: child(localized, "fallbackObject")?.valueString,
-      implicitMedicationObject: child(localized, "implicitMedicationObject")?.valueBoolean,
-      directSiteObject: child(localized, "directSiteObject")?.valueBoolean,
-      suppressActivityConcepts: suppressActivityConcepts.length ? suppressActivityConcepts : undefined,
-      suppressSiteConcepts: suppressSiteConcepts.length ? suppressSiteConcepts : undefined
-    };
-  }
-  // Backward-compatible read of the pre-locale-profile extension fields.
-  const legacyThaiSuppressActivityConcepts = children(
-    extension,
-    "predicateRealizerThaiSuppressActivityConcept"
-  ).map((entry) => entry.valueString).filter((value): value is string => Boolean(value));
-  const legacyThaiFallbackObject = child(extension, "predicateRealizerThaiFallbackObject")?.valueString;
-  if (legacyThaiFallbackObject || legacyThaiSuppressActivityConcepts.length) {
-    localeRealizerConfig!.th = {
-      ...(localeRealizerConfig!.th ?? {}),
-      fallbackObject: legacyThaiFallbackObject ?? localeRealizerConfig!.th?.fallbackObject,
-      suppressActivityConcepts: legacyThaiSuppressActivityConcepts.length
-        ? legacyThaiSuppressActivityConcepts
-        : localeRealizerConfig!.th?.suppressActivityConcepts
-    };
-  }
-  const predicateI18n: Record<string, string> = {};
-  for (const translation of children(extension, "predicateTranslation")) {
-    const locale = child(translation, "locale")?.valueCode;
-    const translated = child(translation, "text")?.valueString;
-    if (locale && translated) predicateI18n[locale] = translated;
-  }
-  const semanticComponents: NonNullable<AdviceFrame["predicate"]["semanticComponents"]> = [];
-  for (const part of children(extension, "predicateComponent")) {
-    const role = child(part, "role")?.valueCode;
-    const coding = readCoding(child(part, "coding")?.valueCoding);
-    if ((role === "activity" || role === "technique" || role === "target-state" ||
-      role === "target-site" || role === "target-object" || role === "operation" || role === "orientation" ||
-      role === "mechanism" || role === "situation") && coding?.system && coding.code) {
-      semanticComponents.push({ role, coding });
+  if(!locale?.valueCode)return undefined;
+  return {locale:locale.valueCode,config:{fallbackObject:fallback?.valueString,
+    implicitMedicationObject:implicit?.valueBoolean,directSiteObject:direct?.valueBoolean,
+    suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined}};
+}
+function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
+  let lemma:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
+    source:FhirExtension|undefined,force:FhirExtension|undefined,origin:FhirExtension|undefined,
+    confidence:FhirExtension|undefined,polarity:FhirExtension|undefined,polaritySource:FhirExtension|undefined,
+    modality:FhirExtension|undefined,relation:FhirExtension|undefined,relationCoding:FhirExtension|undefined,
+    display:FhirExtension|undefined,semanticClass:FhirExtension|undefined,realizer:FhirExtension|undefined,
+    sequence:FhirExtension|undefined,legacyFallback:FhirExtension|undefined;
+  const args:AdviceArgument[]=[],codings:FhirCoding[]=[],legacyActivities:string[]=[];
+  const semanticComponents:NonNullable<AdviceFrame["predicate"]["semanticComponents"]>=[];
+  let translations:Record<string,string>|undefined;
+  let locales:NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]|undefined;
+  for(const field of extension.extension??[])switch(field.url){
+    case "predicateLemma":if(!lemma)lemma=field;break;
+    case "spanStart":if(!start)start=field;break;case "spanEnd":if(!end)end=field;break;
+    case "sourceText":if(!source)source=field;break;case "force":if(!force)force=field;break;
+    case "origin":if(!origin)origin=field;break;case "confidence":if(!confidence)confidence=field;break;
+    case "polarity":if(!polarity)polarity=field;break;case "polaritySource":if(!polaritySource)polaritySource=field;break;
+    case "modality":if(!modality)modality=field;break;
+    case "relation":if(!relation)relation=field;break;case "relationCoding":if(!relationCoding)relationCoding=field;break;
+    case "predicateDisplay":if(!display)display=field;break;case "semanticClass":if(!semanticClass)semanticClass=field;break;
+    case "predicateRealizer":if(!realizer)realizer=field;break;case "sequenceIndex":if(!sequence)sequence=field;break;
+    case "argument":{const value=parseArgumentExtension(field);if(value)args.push(value);break;}
+    case "predicateCoding":{const value=readCoding(field.valueCoding);if(value)codings.push(value);break;}
+    case "predicateTranslation":{const value=parseTranslationNode(field);if(value.locale&&value.text)(translations??={})[value.locale]=value.text;break;}
+    case "predicateRealizerLocale":{const value=parseRealizerLocale(field);if(value)(locales??={})[value.locale]=value.config;break;}
+    // Actual historically persisted locale annotations, not new grammar rules.
+    case "predicateRealizerThaiFallbackObject":if(!legacyFallback)legacyFallback=field;break;
+    case "predicateRealizerThaiSuppressActivityConcept":if(field.valueString)legacyActivities.push(field.valueString);break;
+    case "predicateComponent":{
+      let role:FhirExtension|undefined,coding:FhirExtension|undefined;
+      for(const part of field.extension??[])switch(part.url){case "role":if(!role)role=part;break;case "coding":if(!coding)coding=part;break;}
+      const value=role?.valueCode,code=readCoding(coding?.valueCoding);
+      if((value==="activity"||value==="technique"||value==="target-state"||value==="target-site"||
+        value==="target-object"||value==="operation"||value==="orientation"||value==="mechanism"||value==="situation")&&code?.system&&code.code)
+        semanticComponents.push({role:value,coding:code});
+      break;
     }
   }
-  return {
-    force,
-    origin: child(extension, "origin")?.valueCode as AdviceFrame["origin"] | undefined,
-    confidence: child(extension, "confidence")?.valueDecimal,
-    polarity: child(extension, "polarity")?.valueCode as AdvicePolarity | undefined,
-    polaritySource: child(extension, "polaritySource")?.valueCode === "shared" ? "shared" : undefined,
-    modality: child(extension, "modality")?.valueCode as AdviceModality | undefined,
-    relation: readRelation(extension, "relation"),
-    predicate: {
-      lemma,
-      display: child(extension, "predicateDisplay")?.valueString,
-      i18n: Object.keys(predicateI18n).length ? predicateI18n : undefined,
-      semanticClass: child(extension, "semanticClass")?.valueString,
-      realizer: child(extension, "predicateRealizer")?.valueCode as AdviceFrame["predicate"]["realizer"] | undefined,
-      realizerConfig: Object.keys(localeRealizerConfig ?? {}).length
-        ? { locales: localeRealizerConfig }
-        : undefined,
-      codings: children(extension, "predicateCoding")
-        .map((entry) => readCoding(entry.valueCoding))
-        .filter((entry): entry is FhirCoding => Boolean(entry)),
-      ...(semanticComponents.length ? { semanticComponents } : {})
-    },
-    args,
-    span: { start: spanStart, end: spanEnd },
-    sourceText,
-    sequenceIndex: child(extension, "sequenceIndex")?.valueInteger
-  };
+  if(!lemma?.valueString||start?.valueInteger===undefined||end?.valueInteger===undefined||source?.valueString===undefined||!force?.valueCode)return undefined;
+  if(legacyFallback?.valueString||legacyActivities.length){
+    locales??={};locales.th={...locales.th,fallbackObject:legacyFallback?.valueString??locales.th?.fallbackObject,
+      suppressActivityConcepts:legacyActivities.length?legacyActivities:locales.th?.suppressActivityConcepts};
+  }
+  return {force:force.valueCode as AdviceForce,origin:origin?.valueCode as AdviceFrame["origin"],
+    confidence:confidence?.valueDecimal,polarity:polarity?.valueCode as AdvicePolarity,
+    polaritySource:polaritySource?.valueCode==="shared"?"shared":undefined,
+    modality:modality?.valueCode as AdviceModality,relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
+    predicate:{lemma:lemma.valueString,display:display?.valueString,i18n:translations,
+      semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
+      realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
+    args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString,sequenceIndex:sequence?.valueInteger};
 }
 
-export function parseInstructionGraphExtension(
-  extensions: FhirExtension[] | undefined
-): CanonicalInstructionGraph | undefined {
-  const extension = extensions?.find((entry) => entry.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
-  if (!extension) return undefined;
-  const actions: AdviceFrame[] = [];
-  for (const actionExtension of children(extension, "action")) {
-    const action = parseActionExtension(actionExtension);
-    if (action) actions.push(action);
+function parseGraphRelation(extension:FhirExtension):CanonicalInstructionRelation|undefined {
+  let coding:FhirExtension|undefined,kind:FhirExtension|undefined,to:FhirExtension|undefined,from:FhirExtension|undefined,
+    start:FhirExtension|undefined,end:FhirExtension|undefined,text:FhirExtension|undefined;
+  for(const field of extension.extension??[])switch(field.url){
+    case "kindCoding":if(!coding)coding=field;break;case "kind":if(!kind)kind=field;break;
+    case "toActionIndex":if(!to)to=field;break;case "fromActionIndex":if(!from)from=field;break;
+    case "spanStart":if(!start)start=field;break;case "spanEnd":if(!end)end=field;break;
+    case "text":if(!text)text=field;break;
   }
-  const relations: CanonicalInstructionRelation[] = [];
-  for (const entry of children(extension, "graphRelation")) {
-    const edgeCoding = child(entry, "kindCoding")?.valueCoding;
-    const kind = edgeCoding?.system === "http://hl7.org/fhir/action-relationship-type" &&
-      (edgeCoding.code === "before" || edgeCoding.code === "after")
-      ? edgeCoding.code as AdviceRelation : readRelation(entry, "kind");
-    const toActionIndex = child(entry, "toActionIndex")?.valueInteger;
-    if (!kind || toActionIndex === undefined) continue;
-    const spanStart = child(entry, "spanStart")?.valueInteger;
-    const spanEnd = child(entry, "spanEnd")?.valueInteger;
-    relations.push({
-      kind,
-      fromActionIndex: child(entry, "fromActionIndex")?.valueInteger,
-      toActionIndex,
-      text: child(entry, "text")?.valueString,
-      span: spanStart !== undefined && spanEnd !== undefined
-        ? { start: spanStart, end: spanEnd }
-        : undefined
-    });
+  const value=coding?.valueCoding;
+  const relation=value?.system==="http://hl7.org/fhir/action-relationship-type"&&(value.code==="before"||value.code==="after")
+    ? value.code as AdviceRelation:firstRelation(value,kind?.valueCode);
+  if(!relation||to?.valueInteger===undefined)return undefined;
+  return {kind:relation,fromActionIndex:from?.valueInteger,toActionIndex:to.valueInteger,text:text?.valueString,
+    span:start?.valueInteger!==undefined&&end?.valueInteger!==undefined?{start:start.valueInteger,end:end.valueInteger}:undefined};
+}
+function parseOpaqueSpan(extension:FhirExtension):CanonicalSourceSpan|undefined {
+  let start:FhirExtension|undefined,end:FhirExtension|undefined,text:FhirExtension|undefined;
+  const tokens:number[]=[];
+  for(const field of extension.extension??[])switch(field.url){
+    case "start":if(!start)start=field;break;case "end":if(!end)end=field;break;case "text":if(!text)text=field;break;
+    case "tokenIndex":if(field.valueInteger!==undefined)tokens.push(field.valueInteger);break;
   }
-  const coverageExtension = child(extension, "coverage");
-  let coverage: CanonicalInstructionCoverage | undefined;
-  if (coverageExtension) {
-    const understoodCharacters = child(coverageExtension, "understoodCharacters")?.valueInteger;
-    const opaqueCharacters = child(coverageExtension, "opaqueCharacters")?.valueInteger;
-    const ratio = child(coverageExtension, "ratio")?.valueDecimal;
-    const complete = child(coverageExtension, "complete")?.valueBoolean;
-    if (
-      understoodCharacters !== undefined &&
-      opaqueCharacters !== undefined &&
-      ratio !== undefined &&
-      complete !== undefined
-    ) {
-      coverage = { understoodCharacters, opaqueCharacters, ratio, complete };
-    }
+  return start?.valueInteger!==undefined&&end?.valueInteger!==undefined&&text?.valueString!==undefined
+    ?{start:start.valueInteger,end:end.valueInteger,text:text.valueString,...(tokens.length?{tokenIndices:tokens}:{})}:undefined;
+}
+function parseGraphCoverage(extension:FhirExtension):CanonicalInstructionCoverage|undefined {
+  let known:FhirExtension|undefined,opaque:FhirExtension|undefined,ratio:FhirExtension|undefined,complete:FhirExtension|undefined;
+  for(const field of extension.extension??[])switch(field.url){
+    case "understoodCharacters":if(!known)known=field;break;case "opaqueCharacters":if(!opaque)opaque=field;break;
+    case "ratio":if(!ratio)ratio=field;break;case "complete":if(!complete)complete=field;break;
   }
-  const opaqueSpans: CanonicalSourceSpan[] = [];
-  for (const entry of children(extension, "opaque")) {
-    const start = child(entry, "start")?.valueInteger;
-    const end = child(entry, "end")?.valueInteger;
-    const text = child(entry, "text")?.valueString;
-    if (start === undefined || end === undefined || text === undefined) continue;
-    const tokenIndices = children(entry, "tokenIndex")
-      .map((token) => token.valueInteger)
-      .filter((value): value is number => value !== undefined);
-    opaqueSpans.push({
-      start,
-      end,
-      text,
-      ...(tokenIndices.length ? { tokenIndices } : {})
-    });
+  return known?.valueInteger!==undefined&&opaque?.valueInteger!==undefined&&ratio?.valueDecimal!==undefined&&complete?.valueBoolean!==undefined
+    ?{understoodCharacters:known.valueInteger,opaqueCharacters:opaque.valueInteger,ratio:ratio.valueDecimal,complete:complete.valueBoolean}:undefined;
+}
+
+/** One traversal per known graph/action/argument node. Repeated children retain
+ * order, first scalar fields retain ownership, and unknown metadata remains
+ * outside interpreted clinical meaning. No indexed heap copies or cached
+ * input identities are needed to read the same mutable external input again. */
+export function parseInstructionGraphExtension(extensions:FhirExtension[]|undefined):CanonicalInstructionGraph|undefined {
+  let graph:FhirExtension|undefined;
+  for(const item of extensions??[])if(item.url===MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL){graph=item;break;}
+  if(!graph)return undefined;
+  const actions:AdviceFrame[]=[],relations:CanonicalInstructionRelation[]=[],opaque:CanonicalSourceSpan[]=[];
+  let coverage:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
+    source:FhirExtension|undefined,locale:FhirExtension|undefined;
+  for(const field of graph.extension??[])switch(field.url){
+    case "action":{const action=parseActionExtension(field);if(action)actions.push(action);break;}
+    case "graphRelation":{const relation=parseGraphRelation(field);if(relation)relations.push(relation);break;}
+    case "opaque":{const span=parseOpaqueSpan(field);if(span)opaque.push(span);break;}
+    case "coverage":if(!coverage)coverage=field;break;
+    case "primaryAdministrationStart":if(!start)start=field;break;
+    case "primaryAdministrationEnd":if(!end)end=field;break;
+    case "sourceText":if(!source)source=field;break;case "sourceLocale":if(!locale)locale=field;break;
   }
-  if (!actions.length && !opaqueSpans.length) return undefined;
-  const primaryAdministrationStart = child(extension, "primaryAdministrationStart")?.valueInteger;
-  const primaryAdministrationEnd = child(extension, "primaryAdministrationEnd")?.valueInteger;
-  return {
-    actions,
-    primaryAdministrationSpan:
-      primaryAdministrationStart !== undefined && primaryAdministrationEnd !== undefined
-        ? { start: primaryAdministrationStart, end: primaryAdministrationEnd }
-        : undefined,
-    relations: relations.length ? relations : undefined,
-    opaqueSpans: opaqueSpans.length ? opaqueSpans : undefined,
-    coverage,
-    sourceText: child(extension, "sourceText")?.valueString ?? "",
-    sourceLocale: child(extension, "sourceLocale")?.valueCode
-  };
+  if(!actions.length&&!opaque.length)return undefined;
+  return {actions,primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
+    ?{start:start.valueInteger,end:end.valueInteger}:undefined,
+    relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,
+    coverage:coverage?parseGraphCoverage(coverage):undefined,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};
 }

@@ -1,3 +1,4 @@
+import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
@@ -16,6 +17,7 @@ import { getRouteMeaning } from "../../lexer/meaning";
 import { Token } from "../../parser-state";
 import { normalizeUnit } from "../../unit-lexicon";
 import {
+  AdviceArgument,
   AdviceArgumentRole,
   AdviceForce,
   AdviceFrame,
@@ -164,7 +166,7 @@ function frameTokens(context: HpsgClauseContext, frame: AdviceFrame): Token[] {
 function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
-): { value?: number; range?: { low?: number; high?: number }; unit?: string } | undefined {
+): AdviceArgument["quantity"] {
   const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
@@ -172,7 +174,8 @@ function frameDose(
   return {
     value: amount.quantity.value,
     range: amount.quantity.range ? { ...amount.quantity.range } : undefined,
-    unit: amount.quantity.unit
+    unit: amount.quantity.unit,
+    ...(amount.quantity.comparator ? { comparator: amount.quantity.comparator } : {})
   };
 }
 
@@ -875,6 +878,9 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!first || context.state.consumed.has(first.index)) {
       return [];
     }
+    // "No more than 100 mL/hr" inside a recognized rate is a quantity,
+    // not free instruction text. Other advice remains an independent sign.
+    if (context.clinicalCache.rateTokenIndices?.has(first.index)) return [];
     const activityDay = registeredActivityDayAt(context, start);
     if (activityDay) return [activityDay];
     const administrationWindow = administrationWindowInstructionAt(context, start);
@@ -964,6 +970,10 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (isInstructionSeparator(token) && bodyTokens.length) {
         break;
       }
+      // A separator may precede a rate whose own chart position is later.
+      // Resolve that typed owner once before admitting its tokens as advice.
+      if (cursor > start) clinicalQuantityAt(context, cursor);
+      if (context.clinicalCache.rateTokenIndices?.has(token.index)) break;
       if (!bodyTokens.length && isScheduleLead(context, cursor)) {
         return [];
       }

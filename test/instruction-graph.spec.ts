@@ -1,10 +1,16 @@
-import { AdviceArgumentRole, AdviceForce, AdviceRelation, type MedicationCondition } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
-import { realizeInstructionAction } from "../src/instruction-graph";
+import { withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
+import { realizeInstructionAction, instructionGraphRichPrimaryAction,
+  instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
+} from "../src/instruction-graph";
+import { formatCanonicalClause } from "../src/format";
+import { getQuantityComparator } from "../src/fhir-quantity-operator";
+import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
-import { medicationInstructionActionCodings } from "../src/instruction-action-terminology";
+import { medicationInstructionActionCodings, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
@@ -1564,9 +1570,10 @@ describe("composed instruction concepts", () => {
     }
   });
 
-  it("clones constituent codings and preserves an explicitly supplied expression as one coding", () => {
+  it("reuses immutable constituent definitions and preserves an explicitly supplied expression as one coding", () => {
     const first = getMedicationInstructionConcept("new_patch")!;
-    first.components![0].coding!.code = "changed";
+    expect(getMedicationInstructionConcept("new_patch")).toBe(first);
+    expect(Object.isFrozen(first)).toBe(false);
     expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("733005001");
     const expression = "22253000:363698007=(78883009:272741003=24028007)";
     const frames = parseInstructionActions("Avoid toe discomfort", 0, {
@@ -2010,5 +2017,1409 @@ describe("standard coded oromucosal swish-and-spit technique", () => {
       const route = parsePublicSig(source).fhir[0]?.route;
       expect(route?.coding?.some(coding => coding.code === "SWISHSPIT")).not.toBe(true);
     }
+  });
+});
+
+
+describe("qualified quantities keep their meaning in action graph realization", () => {
+  it.each([
+    ["approximately ", "~", "approximately ", "ประมาณ "],
+    ["at least ", ">=", "at least ", "อย่างน้อย "],
+    ["at most ", "<=", "at most ", "ไม่เกิน "],
+    ["more than ", ">", "more than ", "มากกว่า "],
+    ["less than ", "<", "less than ", "น้อยกว่า "],
+    ["~", "~", "approximately ", "ประมาณ "],
+    [">=", ">=", "at least ", "อย่างน้อย "],
+    ["<=", "<=", "at most ", "ไม่เกิน "]
+  ] as const)("retains %s on the primary rich amount through source, graph and FHIR", (prefix, comparator, en, th) => {
+    const source = `squeeze ${prefix}1 cm ribbon cream onto each spot`;
+    for (const [locale, expected] of [["en", en], ["th", th]] as const) {
+      const parsed = parsePublicSig(source, { locale });
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toMatchObject({ value: 1, unit: "cm ribbon", comparator });
+      const graph = clause.instructionGraph!;
+      const action = graph.actions.find(value => value.predicate.lemma === "squeeze")!;
+      const quantity = action.args.find(value => value.role === AdviceArgumentRole.Amount)?.quantity;
+      expect(quantity).toMatchObject({ value: 1, unit: "cm ribbon", comparator });
+      expect(parsed.longText).toContain(`${expected}1`);
+      expect(parsed.longText).toContain(locale === "th" ? "ครีม" : "cream");
+      expect(parsed.longText).toContain(locale === "th" ? "จุดที่มีอาการ" : "spot");
+      expect(clause.rawText).toBe(source);
+      const extension = buildInstructionGraphExtension(graph)!;
+      expect(JSON.stringify(extension)).toContain("http://ema.europa.eu/fhir/extension/comparator");
+      const restored = parseInstructionGraphExtension([JSON.parse(JSON.stringify(extension))])!;
+      expect(restored.actions.find(value => value.predicate.lemma === "squeeze")?.args
+        .find(value => value.role === AdviceArgumentRole.Amount)?.quantity?.comparator).toBe(comparator);
+      expect(realizeInstructionAction(restored.actions.find(value => value.predicate.lemma === "squeeze")!, locale))
+        .toContain(`${expected}1`);
+      expect(fromFhirDosage(parsed.fhir[0], { locale }).longText).toContain(`${expected}1`);
+    }
+  });
+
+  it("retains qualifiers on dose-defining action arguments and does not confuse AT MOST with a location", () => {
+    for (const [prefix, comparator, expected] of [
+      ["approximately ", "~", "ประมาณ "],
+      ["at most ", "<=", "ไม่เกิน "],
+      [">=", ">=", "อย่างน้อย "]
+    ] as const) {
+      const source = `Dissolve ${prefix}2 tablets in water`;
+      const parsed = parsePublicSig(source, { locale: "th" });
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab", comparator });
+      expect(parsed.longText).toContain(`${expected}2`);
+      expect(parsed.longText).toContain("น้ำ");
+      expect(getQuantityComparator(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
+    }
+  });
+
+  it.each([
+    { comparator: "~" as const }, { comparator: "<=" as const },
+    { value: 2 }, { unit: "g" }, { range: { low: 1, high: 2 } }
+  ])("does not replay a stale graph quantity over the canonical edit %j", (edit) => {
+    const parsed = parsePublicSig("squeeze 1 cm ribbon cream onto each spot");
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    // A structured saved graph may declare its primary span. Both selectors
+    // must honor canonical editing, regardless of which display mode is used.
+    graph.primaryAdministrationSpan = { ...graph.actions[0].span };
+    expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
+    expect(instructionGraphRoundTripPrimaryAction(clause)).toBeDefined();
+    const source = JSON.stringify(graph);
+    Object.assign(clause.dose!, edit);
+    // Raw source replay is disallowed, but the selected rich event still owns
+    // its material and target when its display copy uses the edited quantity.
+    const rich = instructionGraphRichPrimaryAction(clause)!;
+    expect(rich).toBe(graph.actions[0]);
+    expect(instructionGraphRoundTripPrimaryAction(clause)).toBeUndefined();
+    const current = realizeRichPrimaryWithCanonicalDose(rich, clause, "en");
+    expect(current).toContain("cream");
+    expect(current).toContain("each spot");
+    if ("value" in edit) expect(current).toMatch(/2 cm/u);
+    if ("unit" in edit) expect(current).toMatch(/1 g(?:ram)?/u);
+    if ("range" in edit) expect(current).toMatch(/1(?:[–-]| to )2 cm/u);
+    expect(JSON.stringify(graph)).toBe(source);
+    if ("comparator" in edit) {
+      const roundtrip = formatCanonicalClause(clause, "long", { locale: "en" }, {
+        realizationMode: "roundtrip"
+      });
+      expect(roundtrip).toContain(edit.comparator === "~" ? "approximately 1" : "at most 1");
+      expect(roundtrip).toContain("cream");
+      expect(roundtrip).toContain("each spot");
+      expect(roundtrip).not.toContain("Squeeze 1 cm ribbon");
+      const thai = formatCanonicalClause(clause, "long", resolveSigLocalization("th"), {
+        realizationMode: "roundtrip"
+      });
+      expect(thai).toContain(edit.comparator === "~" ? "ประมาณ 1" : "ไม่เกิน 1");
+      expect(thai).toContain("ครีม");
+      expect(thai).not.toContain("บีบครีม 1 ซม.");
+      expect(JSON.stringify(graph)).toBe(source);
+    }
+    // The old graph remains editable. It is simply not the current dose.
+    expect(graph.actions[0].args.find(value =>
+      value.role === AdviceArgumentRole.Amount)?.quantity?.value).toBe(1);
+  });
+});
+
+
+describe("source-owned action amounts remain editable across the whole graph", () => {
+  it.each([
+    ["Dissolve 2 tablets in water and drink 5 mL", 3, ["water", "drink 5 mL"], ["2 tablets"]],
+    ["Take 1 tablet of amoxicillin, drink 5 mL", 2, ["amoxicillin", "drink 5 mL"], ["1 tablet"]],
+    ["Take 1 tablet, then take 2 tablets", 2, ["take 2 tablets"], ["Take 1 tablet"]],
+    ["Dissolve 2 tablets in water, stir, then drink", 3, ["water", "stir", "drink"], ["2 tablets"]]
+  ] as const)(
+    "replaces only the primary dose without erasing independent actions: %s",
+    (source, editedDose, retained, removed) => {
+      const graph = { sourceText: source, sourceLocale: "en",
+        actions: parseInstructionActions(source) };
+      expect(graph.actions.length).toBeGreaterThan(1);
+      const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+      clause.dose = { value: editedDose, unit: "tab" };
+      const snapshot = JSON.stringify(graph);
+      expect(instructionGraphSourceConflictsWithDose({ ...clause, instructionGraph: graph })).toBe(true);
+      for (const locale of ["en", "th"]) for (const mode of [false, true]) {
+        const text = realizeInstructionGraph(graph, locale, {
+          omitCanonicalAdministration: clause,
+          preferSourceText: mode, roundtripSafe: mode
+        })!;
+        for (const phrase of retained) {
+          if (locale === "en") expect(text.toLowerCase()).toContain(phrase.toLowerCase());
+          else {
+            const expected: Record<string, RegExp> = {
+              water: /น้ำ/, "drink 5 mL": /ดื่ม\s*5\s*มิลลิลิตร/,
+              amoxicillin: /amoxicillin/, "take 2 tablets": /รับประทาน\s*2\s*เม็ด/,
+              stir: /คน/, drink: /ดื่ม/
+            };
+            expect(text).toMatch(expected[phrase]);
+          }
+        }
+        if (source.startsWith("Dissolve"))
+          expect(text.toLowerCase()).toContain(locale === "en" ? "dissolve" : "ละลาย");
+        for (const phrase of removed)
+          expect(text.toLowerCase()).not.toContain(phrase.toLowerCase());
+      }
+      expect(JSON.stringify(graph)).toBe(snapshot);
+      // The later, independently authored amount remains in its source graph.
+      if (source.includes("5 mL")) expect(graph.actions.at(-1)?.args.some(arg =>
+        arg.role === AdviceArgumentRole.Amount && arg.quantity?.value === 5)).toBe(true);
+    }
+  );
+
+  it("does not confuse a later identical-unit amount with an edited primary amount", () => {
+    const source = "Take 1 tablet, then take 2 tablets";
+    const actions = parseInstructionActions(source);
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    clause.dose = { value: 2, unit: "tab" };
+    const graph = { sourceText: source, sourceLocale: "en", actions };
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).not.toContain("Take 1 tablet");
+    expect(text).toContain("take 2 tablets");
+    expect(instructionGraphSourceConflictsWithDose({
+      ...clause, instructionGraph: graph
+    })).toBe(true);
+    // An explicit primary span may instead identify the later action.
+    const last = actions[1];
+    graph.actions = actions;
+    const targeted = { ...graph, primaryAdministrationSpan: { ...last.span } };
+    clause.dose = { value: 3, unit: "tab" };
+    const selected = realizeInstructionGraph(targeted, "en", {
+      omitCanonicalAdministration: clause
+    })!;
+    expect(selected).toContain("Take 1 tablet");
+    expect(selected).not.toContain("take 2 tablets");
+  });
+
+  it("does not treat a later independent dose as a mismatch when the primary is unchanged", () => {
+    const source = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    expect(instructionGraphSourceConflictsWithDose({
+      ...clause, instructionGraph: graph
+    })).toBe(false);
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).toContain("drink 5 mL");
+  });
+
+  it("retains an untranslated drug name without reviving a superseded dose in Thai", () => {
+    const source = "Take 1 tablet of amoxicillin, drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    const original = JSON.stringify(graph);
+    const text = realizeInstructionGraph(graph, "th", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).toContain("amoxicillin");
+    expect(text).not.toContain("1 tablet");
+    expect(text).toContain("5");
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+});
+
+describe("adversarial independent graph quantity and dose-owner edits", () => {
+  it.each([
+    ["Dissolve 2 tablets in 100 mL water, wait 5 minutes, then drink",
+      3, "tab", ["100 mL", "5 minutes", "water"], ["2 tablets"]],
+    ["Dissolve 2 tablets in 100 mL solvent",
+      3, "tab", ["100 mL", "solvent"], ["2 tablets"]],
+    ["Swish 10 mL for 5 minutes",
+      11, "mL", ["5 minutes"], ["10 mL"]],
+    ["Take 1 tablet, then drink 5 mL",
+      3, "mL", ["drink 5 mL"], ["1 tablet"]],
+    ["Take 1 tablet, then take 2 tablets",
+      3, "tab", ["take 2 tablets"], ["Take 1 tablet"]]
+  ] as const)("preserves separately quantified arguments after editing the primary amount: %s",
+    (source, amount, unit, retained, removed) => {
+      const parsed = parsePublicSig(source);
+      const clause = parsed.meta.canonical.clauses[0];
+      const graph = clause.instructionGraph?.actions.length
+        ? clause.instructionGraph
+        : { sourceText: source, sourceLocale: "en",
+          actions: parseInstructionActions(source) };
+      const saved = JSON.stringify(graph);
+      clause.dose = { value: amount, unit };
+      for (const locale of ["en", "th"] as const) {
+        const rendered = realizeInstructionGraph(graph, locale, {
+          omitCanonicalAdministration: clause, preferSourceText: true
+        }) ?? "";
+        const long = formatCanonicalClause({ ...clause, instructionGraph: graph },
+          "long", resolveSigLocalization(locale), {
+            realizationMode: "roundtrip"
+          });
+        for (const remove of removed) {
+          expect(rendered.toLowerCase()).not.toContain(remove.toLowerCase());
+          expect(long.toLowerCase()).not.toContain(remove.toLowerCase());
+        }
+        for (const item of retained) if (locale === "en") {
+          expect(rendered.toLowerCase()).toContain(item.toLowerCase());
+          expect(long.toLowerCase()).toContain(item.toLowerCase());
+        }
+        if (locale === "th") {
+          if (source.includes("100 mL water")) {
+            expect(rendered).toContain("100 มิลลิลิตร");
+            expect(long).toContain("100 มิลลิลิตร");
+          } else if (source.includes("100 mL")) {
+            expect(rendered).toMatch(/100 (?:mL|มิลลิลิตร)/u);
+            expect(long).toMatch(/100 (?:mL|มิลลิลิตร)/u);
+          }
+          if (source.includes("5 minutes")) {
+            expect(rendered).toContain("5 นาที");
+            expect(long).toContain("5 นาที");
+          }
+        }
+        expect(long).toContain(String(amount));
+        if (source === "Take 1 tablet, then drink 5 mL") {
+          expect(long).toMatch(locale === "en" ? /Take 3 mL/u : /(?:รับประทาน|ใช้ยา) 3 มิลลิลิตร/u);
+          expect(long).toContain(locale === "en" ? "5 mL" : "5 มิลลิลิตร");
+        }
+      }
+      expect(JSON.stringify(graph)).toBe(saved);
+      // An independent mixing Substance/Duration never inherits the
+      // changed tablet dose or loses its original numeric quantity.
+      if (source.includes("100 mL")) expect(graph.actions.some(action =>
+        action.args.some(arg => arg.quantity?.value === 100))).toBe(true);
+      if (source.includes("5 minutes")) expect(graph.actions.some(action =>
+        action.args.some(arg => arg.quantity?.value === 5 &&
+          arg.role === AdviceArgumentRole.Duration))).toBe(true);
+    }
+  );
+
+  it("preserves the dose-defining preparation when the primary administration span is a later verb", () => {
+    const source = "Dissolve 2 tablets in 100 mL water, wait 5 minutes, then drink";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    expect(graph.primaryAdministrationSpan).toMatchObject({ start: 57, end: 62 });
+    const original = JSON.stringify(graph);
+    clause.dose = { value: 3, unit: "tab" };
+    for (const locale of ["en", "th"] as const) {
+      const display = formatCanonicalClause(clause, "long",
+        resolveSigLocalization(locale), { realizationMode: "roundtrip" });
+      expect(display).toContain("3");
+      expect(display).not.toContain("2 tablets");
+      expect(display).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+      expect(display).toContain(locale === "en" ? "5 minutes" : "5 นาที");
+    }
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+
+  it("does not assign an edited unit to a later independent matching-unit action", () => {
+    const source = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    const clause = parsePublicSig("Take 3 mL").meta.canonical.clauses[0];
+    clause.dose = { value: 3, unit: "mL" };
+    const unchanged = JSON.stringify(graph);
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    });
+    expect(text).not.toContain("1 tablet");
+    expect(text).toContain("drink 5 mL");
+    expect(JSON.stringify(graph)).toBe(unchanged);
+  });
+});
+
+describe("review 17: original action ownership and source quantity mirrors", () => {
+  it("removes a superseded Theme quantity, not its medication name or independent mixing volume", () => {
+    const source = "Dissolve 2 tablets of amoxicillin in 100 mL water";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    const sourceGraph = JSON.stringify(graph);
+    const original = graph.actions[0];
+    expect(original.args.some(arg => arg.role === AdviceArgumentRole.Theme &&
+      arg.quantity?.value === 2 && arg.text?.includes("amoxicillin"))).toBe(true);
+    expect(original.args.some(arg => arg.role === AdviceArgumentRole.Substance &&
+      arg.quantity?.value === 100)).toBe(true);
+    clause.dose = { value: 3, unit: "tab" };
+    for (const locale of ["en", "th"]) {
+      const realized = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: clause, preferSourceText: true
+      })!;
+      expect(realized).toContain("amoxicillin");
+      expect(realized).not.toContain("2 tablets");
+      expect(realized).not.toContain("2 เม็ด");
+      expect(realized).toContain("100");
+      const formatted = formatCanonicalClause(clause, "long",
+        resolveSigLocalization(locale), { realizationMode: "roundtrip" });
+      expect(formatted).toContain("3");
+      expect(formatted).not.toContain("2 tablets");
+      expect(formatted).toContain("amoxicillin");
+      expect(formatted).toContain("100");
+    }
+    expect(JSON.stringify(graph)).toBe(sourceGraph);
+  });
+
+  it("retains the original dose action when both method and unit are edited on a spanless graph", () => {
+    const source = "Take 1 tablet, then drink 100 mL water";
+    const graph = { sourceText: source, sourceLocale: "en",
+      actions: parseInstructionActions(source) };
+    expect(graph.actions).toHaveLength(2);
+    const saved = JSON.stringify(graph);
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    const changed = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    clause.dose = changed.dose;
+    clause.method = changed.method;
+    for (const locale of ["en", "th"]) {
+      const display = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: clause, preferSourceText: true
+      })!;
+      expect(display).not.toContain("1 tablet");
+      expect(display).toContain("100");
+      const complete = formatCanonicalClause({
+        ...clause, instructionGraph: graph
+      }, "long", resolveSigLocalization(locale), {
+        realizationMode: "roundtrip"
+      });
+      expect(complete).not.toContain("1 tablet");
+      expect(complete).toContain("5");
+      expect(complete).toContain("100");
+    }
+    expect(JSON.stringify(graph)).toBe(saved);
+    expect(graph.actions[1].args.some(arg =>
+      arg.role === AdviceArgumentRole.Amount && arg.quantity?.value === 100)).toBe(true);
+  });
+});
+
+
+describe("review 18: comparator-only graph quantities remain editable", () => {
+  it.each(["~", "<", "<=", ">", ">="] as const)(
+    "round-trips a partial source-backed %s Quantity without inventing a number",
+    comparator => {
+      const parsed = parsePublicSig("Dissolve 2 tablets in water, then drink");
+      const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+      const action = graph.actions.find(value => value.predicate.lemma === "dissolve")!;
+      const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+      const sourceText = graph.sourceText;
+      const text = amount.text;
+      amount.quantity = { comparator };
+      const encoded = buildInstructionGraphExtension(graph)!;
+      const reimported = parseInstructionGraphExtension([encoded])!;
+      const restored = reimported.actions.find(value =>
+        value.predicate.lemma === "dissolve")!.args.find(arg =>
+        arg.role === AdviceArgumentRole.Amount)!;
+      expect(restored.quantity).toEqual({ comparator });
+      expect(restored.quantity?.value).toBeUndefined();
+      expect(restored.text).toBe(text);
+      expect(reimported.sourceText).toBe(sourceText);
+      expect(parseInstructionGraphExtension([JSON.parse(JSON.stringify(encoded))])
+        ?.actions.find(value => value.predicate.lemma === "dissolve")
+        ?.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+        .toEqual({ comparator });
+    }
+  );
+
+  it("does not drop a known qualifier when an amount has a partial unit but no value", () => {
+    const graph = parsePublicSig("Dissolve 2 tablets in water, then drink")
+      .meta.canonical.clauses[0].instructionGraph!;
+    const amount = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+    amount.quantity = { unit: "mg", comparator: "~" };
+    const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    expect(restored.actions[0].args.find(arg =>
+      arg.role === AdviceArgumentRole.Amount)?.quantity).toEqual({
+        unit: "mg", comparator: "~"
+      });
+    expect(restored.sourceText).toBe(graph.sourceText);
+  });
+});
+
+describe("review 20: edited canonical administration cannot steal an independent action", () => {
+  it("retains a later source-backed Drink 5 mL when a prior Take 1 tablet is edited to Drink 5 mL", () => {
+    const original = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: original, sourceLocale: "en",
+      actions: parseInstructionActions(original) };
+    const unchanged = JSON.stringify(graph);
+    const edited = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    expect(edited.dose).toMatchObject({ value: 5, unit: "mL" });
+    for (const locale of ["en", "th"]) {
+      const display = realizeInstructionGraph(graph, locale, {
+        omitCanonicalAdministration: edited, preferSourceText: true
+      })!;
+      expect(display).toContain("5");
+      if (locale === "en") expect(display).toContain("drink 5 mL");
+      else expect(display).toContain("ดื่ม");
+      expect(display).not.toContain("1 tablet");
+      const whole = formatCanonicalClause({
+        ...edited, instructionGraph: graph
+      }, "long", resolveSigLocalization(locale), {
+        realizationMode: "roundtrip"
+      });
+      const administrations = locale === "en"
+        ? whole.match(/drink\s*5\s*mL/giu)
+        : whole.match(/ดื่ม\s*5\s*มิลลิลิตร/gu);
+      expect(administrations).toHaveLength(2);
+      expect(whole).not.toContain("1 tablet");
+    }
+    expect(JSON.stringify(graph)).toBe(unchanged);
+    expect(graph.actions[1].args.some(arg => arg.role === AdviceArgumentRole.Amount &&
+      arg.quantity?.value === 5 && arg.quantity?.unit === "mL")).toBe(true);
+  });
+
+  it("still omits the true original canonical primary, not an unrelated later dose", () => {
+    const original = "Take 1 tablet, then drink 5 mL";
+    const graph = { sourceText: original, sourceLocale: "en",
+      actions: parseInstructionActions(original) };
+    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    const text = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, preferSourceText: true
+    })!;
+    expect(text).not.toContain("Take 1 tablet");
+    expect(text).toContain("drink 5 mL");
+
+    // An explicit source primary span can identify that the Drink action
+    // really was the canonical administration. In that case, only THAT
+    // source-backed action is eligible for omission.
+    const targeted = {
+      ...graph, primaryAdministrationSpan: { ...graph.actions[1].span }
+    };
+    const drink = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
+    const realized = realizeInstructionGraph(targeted, "en", {
+      omitCanonicalAdministration: drink, preferSourceText: true
+    })!;
+    expect(realized).toContain("Take 1 tablet");
+    expect(realized).not.toContain("drink 5 mL");
+    expect(JSON.stringify(graph)).toContain("drink 5 mL");
+  });
+});
+
+
+describe("November 16 explicit primary action owner", () => {
+  it("omits the selected second administration with unchanged canonical dose", () => {
+    const source = "Take 1 tablet, then take 2 tablets";
+    const actions = parseInstructionActions(source);
+    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...actions[1].span } };
+    const snapshot = JSON.stringify(graph);
+    for (const preferSourceText of [false, true]) {
+      const text = realizeInstructionGraph(graph, "en", {
+        omitCanonicalAdministration: clause, preferSourceText
+      }) ?? "";
+      expect(text).toContain("Take 1 tablet");
+      expect(text.toLowerCase()).not.toContain("take 2 tablets");
+    }
+    const whole = formatCanonicalClause({ ...clause, instructionGraph: graph },
+      "long", resolveSigLocalization("en"), { realizationMode: "roundtrip" });
+    expect(whole.toLowerCase().match(/take 2 tablets/g)).toHaveLength(1);
+    expect(whole.toLowerCase()).toContain("take 1 tablet");
+    expect(JSON.stringify(graph)).toBe(snapshot);
+  });
+});
+
+
+describe("November 16 rich amountless primary remains dose-editable", () => {
+  it("retains an edited canonical dose beside an amountless rich Drink action in EN/TH", () => {
+    const source = "Dissolve 2 tablets in water, then drink slowly";
+    const actions = parseInstructionActions(source);
+    const drink = actions.find(action => action.predicate.lemma === "drink")!;
+    drink.args = [{ role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" }];
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...drink.span } };
+    const clause = parsePublicSig("Drink 2 tablets").meta.canonical.clauses[0];
+    clause.dose = { value: 3, unit: "tab" };
+    clause.instructionGraph = graph;
+    expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
+    const original = JSON.stringify(graph);
+    for (const locale of ["en", "th"] as const) {
+      const text = formatCanonicalClause(clause, "long", resolveSigLocalization(locale));
+      expect(text).toContain("3");
+      if (locale === "en") expect(text.toLowerCase()).toContain("slowly");
+      else expect(text).toContain("เม็ด");
+      expect(text).not.toContain("2 tablets");
+    }
+    expect(JSON.stringify(graph)).toBe(original);
+  });
+});
+
+
+describe("review 2026-11-16 19h: incomplete graph quantities do not invent amounts", () => {
+  it.each(["en", "th"] as const)(
+    "uses recognizable source argument text for a comparator-only quantity in %s", locale => {
+      const graph = parseInstructionActions("Dissolve 2 tablets in water, then drink slowly");
+      const frame = graph.find(a => a.predicate.lemma === "dissolve")!;
+      const amount = frame.args.find(a => a.role === AdviceArgumentRole.Amount)!;
+      amount.quantity = { comparator: "<=", unit: "mg" };
+      const original = JSON.stringify(frame);
+      const realized = realizeInstructionAction(frame, locale);
+      expect(realized).not.toMatch(/(?:<=|≤)\s*mg/u);
+      // An incomplete edited quantity uses the intact authored argument;
+      // retaining its tablet unit is essential even in a Thai realization.
+      expect(realized).toContain("2 tablets");
+      expect(JSON.stringify(frame)).toBe(original);
+    }
+  );
+});
+
+
+describe("indexed instruction metadata import",()=>{
+  it("keeps first-value ownership, repeated children and externally edited input visible",()=>{
+    const source="Dissolve 2 tablets in water, then drink slowly";
+    const actions=parseInstructionActions(source);
+    const wire=buildInstructionGraphExtension({sourceText:source,sourceLocale:"en",actions})!;
+    const first=wire.extension!.find(item=>item.url==="action")!;
+    const lemma=first.extension!.find(item=>item.url==="predicateLemma")!;
+    const original=lemma.valueString;
+    const originalArguments = actions[0].args;
+    const authored = [
+      { role: AdviceArgumentRole.Theme, text: "2 tablets", quantity: { value: 2, unit: "tab" } },
+      { role: AdviceArgumentRole.Substance, text: "water", conceptId: "water",
+        coding: { system: "http://snomed.info/sct", code: "11713004" } },
+      { role: AdviceArgumentRole.Amount, text: "2 tablets", quantity: { value: 2, unit: "tab" } }
+    ];
+    expect(originalArguments).toMatchObject(authored);
+    expect(parseInstructionGraphExtension([wire])!.actions[0].args).toMatchObject(authored);
+    first.extension!.push({url:"predicateLemma",valueString:"not-the-owner"});
+    first.extension!.push({url:"__proto__",valueString:"ordinary unknown metadata"});
+    expect(parseInstructionGraphExtension([wire])?.actions.map(action=>action.predicate.lemma))
+      .toEqual(actions.map(action=>action.predicate.lemma));
+    // A later external input edit is not hidden by any persisted identity index.
+    lemma.valueString="edited-source-action";
+    expect(parseInstructionGraphExtension([wire])?.actions[0].predicate.lemma).toBe("edited-source-action");
+    expect(original).toBe("dissolve");
+    expect(parseInstructionGraphExtension([wire])?.actions[0].args).toMatchObject(authored);
+  });
+});
+
+
+describe("November 17 review: institution dose action owns prior quantitative instruction", () => {
+  const options = {
+    instructionActionMap: {
+      disperse: {
+        code: "disperse",
+        display: "Disperse",
+        semanticClass: "procedure",
+        procedural: true,
+        acceptsAmount: true,
+        definesDose: true,
+        argumentParser: "amount-material-destination" as const,
+        realizer: "amount-material-destination" as const,
+      },
+    },
+  };
+  it("detects the custom earlier amount owner when the final drink action owns the administration", () => {
+    const source = "Disperse 2 tablets in water, then drink slowly";
+    const parsed = parsePublicSig(source, options);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.actions[0]?.predicate.lemma).toBe("disperse");
+    expect(clause.instructionGraph?.primaryAdministrationSpan).toEqual({
+      start: source.indexOf("drink"), end: source.indexOf("drink") + "drink".length
+    });
+    const changed = { ...clause, dose: { ...clause.dose!, value: 3 } };
+    expect(instructionGraphSourceConflictsWithDose(changed, options)).toBe(true);
+    const unchanged = { ...clause, dose: { ...clause.dose!, value: 2 } };
+    expect(instructionGraphSourceConflictsWithDose(unchanged, options)).toBe(false);
+    for (const locale of ["en", "th"]) {
+      const rendered = formatCanonicalClause(changed, "long", resolveSigLocalization(locale), options);
+      expect(rendered).not.toContain("Disperse 2 tablets in water, then drink slowly");
+      expect(rendered).not.toContain("2 tablets");
+      expect(rendered).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+      expect(rendered).toContain(locale === "en" ? "water" : "น้ำ");
+      expect(rendered.toLowerCase()).toContain(locale === "en" ? "drink" : "ดื่ม");
+    }
+  });
+});
+
+
+describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
+  it("retains an original HPSG-owned Thai dose without replaying a changed dose", () => {
+    const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+    const parsed = parsePublicSig(source, { locale: "th" });
+    const row = parsed.items[0].fhir;
+    expect(formatSig(row, "long", { locale: "th", realizationMode: "roundtrip" }))
+      .toBe(source);
+    const entry = row.doseAndRate![0];
+    if (!entry.doseQuantity) throw new Error("Expected authored HPSG dose");
+    const changed = {
+      ...row,
+      doseAndRate: [{ ...entry, doseQuantity: { ...entry.doseQuantity, value: 2 } }]
+    };
+    const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(text).toMatch(/(?:2|สอง)\s*หยด/u);
+    expect(text).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
+    expect(text).not.toBe(source);
+    expect(entry.doseQuantity.value).toBe(1);
+  });
+  it("rechecks the live dose after a previously verified external R5 row is edited in place", () => {
+    const source="ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+    // The authoritative persisted top-level R5 row owns the saved edit
+    // fingerprint; per-item parser previews intentionally do not.
+    const row=structuredClone(parsePublicSig(source,{locale:"th"}).fhir[0]);
+    const show=()=>formatSig(row,"long",{locale:"th",realizationMode:"roundtrip"});
+    expect(show()).toBe(source);
+    const dose=row.doseAndRate?.[0]?.doseQuantity;
+    if(!dose)throw new Error("authored dose missing");
+    dose.value=2;
+    const changed=show();
+    expect(changed).not.toBe(source);
+    expect(changed).toMatch(/(?:2|สอง)\s*หยด/u);
+    expect(changed).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
+    dose.value=1;
+    expect(show()).toBe(source);
+  });
+
+  it("displays a newly introduced dose in an imported amountless Thai R5 row", () => {
+    const source = "ผสมน้ำแล้วดื่ม";
+    const row = parsePublicSig(source, { locale: "th" }).items[0].fhir;
+    const changed = { ...row, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
+    const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(text).toMatch(/(?:2|สอง)/u);
+    expect(text).toMatch(/(?:เม็ด|tablet)/u);
+    expect(text).not.toBe(source);
+  });
+});
+
+describe("PR14 new review: amountless authored source with a later canonical dose",()=>{
+  for(const [source,locale] of [
+    ["Mix with water then swallow","en"],
+    ["ผสมน้ำแล้วดื่ม","th"]
+  ] as const){
+    it("retains a canonical quantity added to amountless "+locale+" source",()=>{
+      const parsed=parsePublicSig(source);
+      const clause=parsed.meta.canonical.clauses[0];
+      expect(clause.instructionGraph?.actions.length).toBeGreaterThan(0);
+      expect(clause.dose?.value).toBeUndefined();
+      const edited={...clause,dose:{value:1,unit:"tab"}};
+      const output=formatCanonicalClause(edited,"long",resolveSigLocalization(locale),
+        {realizationMode:"roundtrip",locale});
+      expect(output).not.toBe(source);
+      expect(output).toMatch(/(?:1|one|หนึ่ง)/ui);
+      expect(output).toMatch(/(?:tablet|tab|เม็ด)/ui);
+      expect(instructionGraphSourceConflictsWithDose(edited)).toBe(true);
+    });
+  }
+  it("does not treat an empty dose object as an authored administered quantity",()=>{
+    const clause=parsePublicSig("Mix with water then swallow").meta.canonical.clauses[0];
+    expect(instructionGraphSourceConflictsWithDose({...clause,dose:{}})).toBe(false);
+  });
+});
+
+
+describe("round 27: action heads and complements keep separate quantities", () => {
+  it("composes the typed event adjunct after a negated action in both locales", () => {
+    const frame = parseInstructionActions("Do not mix with milk before each dose")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Time)).toMatchObject({
+      conceptId: "each-dose", relation: AdviceRelation.Before
+    });
+    const en = realizeInstructionAction(frame, "en");
+    const th = realizeInstructionAction(frame, "th");
+    expect(en).toMatch(/^Do not mix.*milk before each dose$/u);
+    expect(th).toContain("ห้ามผสม");
+    expect(th).toContain("ก่อนการให้ยาแต่ละครั้ง");
+    expect(en.match(/before each dose/gu)).toHaveLength(1);
+    expect(th.match(/ก่อนการให้ยาแต่ละครั้ง/gu)).toHaveLength(1);
+  });
+  it.each(["Swallow whole with 200 mL water", "Take with 200 mL water", "Drink with 200 mL water"])(
+    "retains accompaniment quantity without promoting it to a medication dose: %s", source => {
+      const frame = parseInstructionActions(source)[0];
+      expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+      expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)).toMatchObject({
+        text: "200 mL water", quantity: { value: 200, unit: "mL" }
+      });
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose?.value).toBeUndefined();
+      expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    });
+  it("keeps destination quantity separate while retaining licensed leading and postdestination amounts", () => {
+    const onlyDestination = parseInstructionActions("Dilute to 10 mL")[0];
+    expect(onlyDestination.args.filter(arg => arg.role === AdviceArgumentRole.Amount)).toEqual([]);
+    expect(realizeInstructionAction(onlyDestination, "en")).toBe("Dilute to 10 mL");
+    const diluted = parseInstructionActions("Dilute 1 mL to 10 mL")[0];
+    expect(diluted.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 1, unit: "mL" });
+    expect(realizeInstructionAction(diluted, "en")).toBe("Dilute 1 mL to 10 mL");
+    const swallowed = parseInstructionActions("Swallow 1 tablet with 200 mL water")[0];
+    expect(swallowed.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 1, unit: "tab" });
+    const poured = parseInstructionActions("Pour into the cup 5 mL")[0];
+    expect(poured.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 5, unit: "mL" });
+    expect(realizeInstructionAction(poured, "en")).toBe("Pour 5 mL into the cup");
+  });
+});
+
+
+describe("round29 action scope and external graph preservation", () => {
+  it.each(["Swallow whole with 200 mL water", "Swallow 1 tablet whole with 200 mL water"])(
+    "keeps the quantified accompaniment separate from the direct object: %s", source => {
+      const frame = parseInstructionActions(source)[0];
+      expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)).toMatchObject({
+        relation: AdviceRelation.With, quantity: { value: 200, unit: "mL" }
+      });
+      const expected = source.includes("1 tablet") ? "Swallow 1 tablet whole with 200 mL water"
+        : "Swallow whole with 200 mL water";
+      expect(realizeInstructionAction(frame, "en")).toBe(expected);
+      expect(realizeInstructionAction(frame, "th")).toMatch(/^กลืน.*ทั้งเม็ดร่วมกับ200 มิลลิลิตรน้ำ$/u);
+      const graph = { sourceText: source, actions: [frame] };
+      const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+      expect(realizeInstructionAction(reopened.actions[0], "en")).toBe(expected);
+      delete reopened.actions[0].relation;
+      expect(realizeInstructionAction(reopened.actions[0], "en")).toBe(expected);
+    });
+
+  it("keeps a partial mixing amount as source text in both locale realizers", () => {
+    const frame = parseInstructionActions("Mix with 100 mL water")[0];
+    const substance = frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
+    substance.text = "about 100 mL water";
+    substance.quantity = { comparator: "~", unit: "mL" };
+    const saved = buildInstructionGraphExtension({ sourceText: frame.sourceText, actions: [frame] })!;
+    const restored = parseInstructionGraphExtension([saved])!.actions[0];
+    const before = JSON.stringify(restored);
+    for (const locale of ["en", "th"]) {
+      expect(realizeInstructionAction(restored, locale)).toContain("about 100 mL water");
+    }
+    expect(JSON.stringify(restored)).toBe(before);
+    const complete = parseInstructionActions("Mix with 100 mL water")[0];
+    expect(realizeInstructionAction(complete, "en")).toBe("Mix with 100 mL water");
+    expect(realizeInstructionAction(complete, "th")).toContain("น้ำ 100 มิลลิลิตร");
+  });
+
+  it("negation governs the complete qualified dilution target", () => {
+    const frame = parseInstructionActions("Do not dilute to more than 10 mL before each dose")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Destination)).toMatchObject({
+      relation: AdviceRelation.To, quantity: { value: 10, unit: "mL", comparator: ">" }
+    });
+    expect(realizeInstructionAction(frame, "en")).toBe("Do not dilute to more than 10 mL before each dose");
+    const th = realizeInstructionAction(frame, "th");
+    expect(th).toMatch(/^ห้ามเจือจาง.*มากกว่า 10 มิลลิลิตร.*ก่อนการให้ยาแต่ละครั้ง$/u);
+    expect(th.match(/ก่อนการให้ยาแต่ละครั้ง/gu)).toHaveLength(1);
+    expect(realizeInstructionAction(parseInstructionActions("Dilute to 10 mL")[0], "en")).toBe("Dilute to 10 mL");
+  });
+
+  it("retains an independent stopping result after material and destination complements", () => {
+    const frame = parseInstructionActions("Dilute with water to 10 mL until clear")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Result)).toMatchObject({
+      relation: AdviceRelation.Until, text: "clear"
+    });
+    expect(realizeInstructionAction(frame, "en")).toBe("Dilute with water to 10 mL until clear");
+    expect(realizeInstructionAction(frame, "th")).toMatch(/จนกว่า.*clear$/u);
+    const saved = buildInstructionGraphExtension({ sourceText: frame.sourceText, actions: [frame] })!;
+    expect(realizeInstructionAction(parseInstructionGraphExtension([saved])!.actions[0], "en"))
+      .toBe("Dilute with water to 10 mL until clear");
+    const beforeDose = parseInstructionActions("Dilute with water to 10 mL before each dose")[0];
+    expect(realizeInstructionAction(beforeDose, "en")).toBe("Dilute with water to 10 mL before each dose");
+  });
+
+  it("uses the externally edited method without losing the dose or water accompaniment", () => {
+    const source = parsePublicSig("Swallow 1 tablet with 200 mL water").fhir[0];
+    const replacement = parsePublicSig("Chew 1 tablet").fhir[0].method;
+    const saved = JSON.parse(JSON.stringify(source));
+    saved.method = replacement;
+    const before = JSON.stringify(saved);
+    const codeOnlyEdit = JSON.parse(JSON.stringify(source));
+    codeOnlyEdit.method.coding = [{ system: "http://snomed.info/sct", code: "738992009" }];
+    const codeOnlyMethod = JSON.parse(JSON.stringify(codeOnlyEdit));
+    codeOnlyMethod.method = { coding: codeOnlyEdit.method.coding };
+    for (const input of [saved, JSON.parse(JSON.stringify(saved)), codeOnlyEdit, codeOnlyMethod]) {
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode });
+        const th = formatSig(input, "long", { locale: "th", realizationMode });
+        expect(en).toMatch(/^Chew (?:1|one) tablet with 200 mL water\b/iu);
+        expect(en).not.toMatch(/\bswallow\b/iu);
+        expect(th).toMatch(/^เคี้ยว.*1 เม็ด.*200 มิลลิลิตรน้ำ/u);
+        expect(th).not.toContain("กลืน");
+      }
+      expect(fromFhirDosage(input).longText).toMatch(/^Chew (?:1|one) tablet with 200 mL water\b/iu);
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "roundtrip" })).toContain("Swallow 1 tablet");
+  });
+
+  it.each([false, true])("uses a known method coding beside a local translation (standard first %s)", standardFirst => {
+    const source = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet with 200 mL water").fhir[0]));
+    const standard = { system: "http://snomed.info/sct", code: "738992009" };
+    const local = { system: "urn:clinic:method", code: "local-translation" };
+    source.method.coding = standardFirst ? [standard, local] : [local, standard];
+    const before = JSON.stringify(source);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      expect(formatSig(source, "long", { locale: "en", realizationMode }))
+        .toMatch(/^Chew (?:1|one) tablet with 200 mL water\b/iu);
+    }
+    expect(fromFhirDosage(source, { locale: "th" }).longText).toMatch(/^เคี้ยว.*1 เม็ด.*200 มิลลิลิตรน้ำ/u);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it("renders a coded method without a saved graph and keeps compatible or qualified source verbs", () => {
+    const coding = { system: "http://snomed.info/sct", code: "738992009" };
+    const source = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      method: { text: "Swallow", coding: [coding] } };
+    const before = JSON.stringify(source);
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/^Chew 1 tablet/u);
+    expect(fromFhirDosage(source, { locale: "th" }).longText).toMatch(/^เคี้ยว.*1 เม็ด/u);
+    expect(JSON.stringify(source)).toBe(before);
+    const compatible = { ...source, method: { text: "Drink",
+      coding: [{ system: "http://snomed.info/sct", code: "738995006" }] } };
+    expect(formatSig(compatible, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/^Drink 1 tablet/u);
+    const qualified = { ...source, method: { text: "Swallow whole", coding: compatible.method.coding } };
+    expect(formatSig(qualified, "long", { locale: "en", realizationMode: "normalized" })).toMatch(/^Swallow whole 1 tablet/u);
+  });
+
+  it("preserves declared coding annotations through graph import and projection", () => {
+    const frame = parseInstructionActions("Swallow 1 tablet")[0];
+    const coding = frame.predicate.codings![0];
+    coding.userSelected = true;
+    coding._userSelected = { id: "chosen" };
+    coding._code = { id: "code-annotation" };
+    const graph = { sourceText: frame.sourceText, actions: [frame] };
+    const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    expect(reopened.actions[0].predicate.codings![0]).toMatchObject({
+      code: coding.code, system: coding.system, userSelected: true,
+      _userSelected: { id: "chosen" }, _code: { id: "code-annotation" }
+    });
+  });
+});
+
+describe("round30 method and current timing ownership", () => {
+  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const method = (text: string, code: string) => ({
+    text, coding: [{ system: "http://snomed.info/sct", code }]
+  });
+
+  it("replaces a conflicting known method head while retaining compatible and unfamiliar authored phrases", () => {
+    const base = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    for (const [text, code, expected] of [
+      ["Swallow whole", "738992009", "Chew"],
+      ["Swallow whole", "738995006", "Swallow whole"],
+      ["กลืนทั้งเม็ด", "738992009", "Chew"],
+      ["กลืนทั้งเม็ด", "738995006", "กลืนทั้งเม็ด"],
+      ["Swallowing whole", "738992009", "Chew"],
+      ["Swallowtail whole", "738992009", "Swallowtail whole"],
+      ["Unfamiliar authored technique", "738992009", "Unfamiliar authored technique"]
+    ]) {
+      const input = { ...base, method: method(text, code) };
+      const before = JSON.stringify(input);
+      const rendered = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(rendered).toMatch(new RegExp("^" + expected + " 1 tablet"));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  function primaryWithTime(value: string, when?: EventTiming) {
+    const input = copy(parsePublicSig("Swallow 1 tablet with 200 mL water").fhir[0]);
+    const graph = parseInstructionGraphExtension(input.extension)!;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: value, normalized: value });
+    const marker = buildInstructionGraphExtension(graph)!;
+    input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
+    input.timing = { repeat: when ? { when: [when] } : { timeOfDay: [value] } };
+    return input;
+  }
+
+  it("applies a current event when both method and timing change on the selected primary", () => {
+    const input = primaryWithTime("HS", EventTiming["Before Sleep"]);
+    input.method = method("Chew", "738992009");
+    input.timing!.repeat!.when = [EventTiming.Morning];
+    const before = JSON.stringify(input);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).toMatch(/^Chew (?:1|one) tablet with 200 mL water/iu);
+      expect(en).toMatch(/morning/iu);
+      expect(en).not.toMatch(/bedtime|\bHS\b/iu);
+      expect(th).toContain("เคี้ยว");
+      expect(th).toContain("เช้า");
+      expect(th).not.toContain("ก่อนนอน");
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([false, true])("uses the current clock set once with an event also present %s", withEvent => {
+    const input = primaryWithTime("08:00");
+    input.timing!.repeat!.timeOfDay = ["09:00:00", "17:00:00"];
+    if (withEvent) {
+      input.timing!.repeat!.when = [EventTiming.Morning];
+      const graph = parseInstructionGraphExtension(input.extension)!;
+      graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning });
+      const marker = buildInstructionGraphExtension(graph)!;
+      input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
+    }
+    const before = JSON.stringify(input);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).not.toMatch(/08:00|8:00 am/u);
+      expect(en.match(/9:00 am/gu)).toHaveLength(1);
+      expect(en.match(/5:00 pm/gu)).toHaveLength(1);
+      expect(th).not.toContain("08:00");
+      expect(th.match(/09:00/gu)).toHaveLength(1);
+      expect(th.match(/17:00/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it("realizes a qualified amount from its typed daughter without losing manner or accompaniment", () => {
+    const frame = parseInstructionActions("Swallow at most 1 tablet whole with 200 mL water")[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)).toMatchObject({
+      text: "at most 1 tablet", quantity: { value: 1, unit: "tab", comparator: "<=" }
+    });
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)).toMatchObject({
+      relation: AdviceRelation.With, quantity: { value: 200, unit: "mL" }
+    });
+    const th = realizeInstructionAction(frame, "th");
+    expect(th).toMatch(/^กลืน.*ไม่เกิน 1 เม็ด.*ทั้งเม็ด.*200 มิลลิลิตรน้ำ/u);
+    expect(th).not.toContain("Swallow");
+    expect(realizeInstructionAction(frame, "en")).toBe("Swallow at most 1 tablet whole with 200 mL water");
+    const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: frame.sourceText, actions: [frame]
+    })!])!;
+    expect(realizeInstructionAction(reopened.actions[0], "th")).toBe(th);
+  });
+});
+
+describe("round31 edited action ownership", () => {
+  it.each([
+    ["Do not swallow more than 1 tablet", "Do not swallow more than 1 tablet", "มากกว่า 1 เม็ด"],
+    ["Do not swallow 2 tablets", "Do not swallow 2 tablets", "2 เม็ด"]
+  ])("retains the typed amount in %s", (source, expected, thaiAmount) => {
+    const action = parseInstructionActions(source)[0];
+    const before = JSON.stringify(action);
+    expect(realizeInstructionAction(action, "en")).toBe(expected);
+    expect(realizeInstructionAction(action, "th")).toContain(thaiAmount);
+    expect(realizeInstructionAction(action, "th")).toMatch(/^ห้ามกลืน/u);
+    expect(JSON.stringify(action)).toBe(before);
+  });
+
+  it.each([false, true])("moves the water accompaniment to the edited method (dose edited %s)", editDose => {
+    const original = parsePublicSig("Swallow 1 tablet whole with 200 mL water").fhir[0];
+    const row = JSON.parse(JSON.stringify(original));
+    row.method = parsePublicSig("Chew 1 tablet").fhir[0].method;
+    if (editDose) row.doseAndRate[0].doseQuantity.value = 2;
+    const before = JSON.stringify(row);
+    for (const input of [row, toDosageDetails([row])]) {
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode });
+        const th = formatSig(input, "long", { locale: "th", realizationMode });
+        expect(en).toMatch(editDose ? /^Chew 2 tablets?/u : /^Chew (?:1|one) tablet/u);
+        expect(en).toContain("with 200 mL water");
+        expect(en.match(/200 mL/gu)).toHaveLength(1);
+        expect(en).not.toMatch(/\bswallow\b|\bwhole\b/iu);
+        expect(en.match(/\bChew\b/giu)).toHaveLength(1);
+        expect(th.match(/เคี้ยว/gu)).toHaveLength(1);
+        expect(th).toContain(editDose ? "2 เม็ด" : "1 เม็ด");
+        expect(th).toContain("200 มิลลิลิตรน้ำ");
+        expect(th).not.toMatch(/กลืน|ทั้งเม็ด/u);
+      }
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(formatSig(original, "long", { locale: "en", realizationMode: "normalized" }))
+      .toMatch(/Swallow.*whole/u);
+  });
+
+  it("preserves a preparation clock when the separate primary clock changes", () => {
+    const parsed = parsePublicSig("Dissolve 2 tablets in water then drink at 09:00");
+    const clause = parsed.meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!;
+    // The compact canonical graph omits the covered Drink; construct the
+    // complete source graph once and select its real source-owned primary.
+    graph.actions = parseInstructionActions(graph.sourceText!);
+    const preparation = graph.actions[0];
+    preparation.args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" });
+    preparation.sourceText = "Dissolve 2 tablets in water at 08:00";
+    const primary = graph.primaryAdministrationSpan!;
+    const drink = graph.actions.find(action => action.predicate.lemma === "drink" &&
+      action.span.start <= primary.start && action.span.end >= primary.end)!;
+    expect(graph.actions.filter(action => action.predicate.lemma === "drink")).toHaveLength(1);
+    drink.args = [{ role: AdviceArgumentRole.Time, text: "09:00", normalized: "09:00" }];
+    clause.schedule!.timeOfDay = ["10:00:00"];
+    clause.sourceProjectionVerified = false;
+    const before = JSON.stringify(graph);
+    const output = realizeInstructionGraph(graph, "en", {
+      omitCanonicalAdministration: clause, position: "pre", preferSourceText: true
+    });
+    expect(output).toContain("Dissolve 2 tablets in water at 08:00");
+    const long = formatCanonicalClause(clause, "long", { locale: "en" }, { realizationMode: "normalized" });
+    expect(long).toContain("08:00");
+    expect(long).toContain("10:00");
+    expect(long).not.toContain("9:00");
+    const thai = formatCanonicalClause(clause, "long", resolveSigLocalization("th"), { realizationMode: "normalized" });
+    expect(thai).toContain("08:00");
+    expect(thai).toContain("10:00");
+    expect(thai).not.toContain("09:00");
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+});
+
+describe("round31 method-bound manner control", () => {
+  it("keeps an independent manner when a typed source method qualifier is superseded", () => {
+    const clause = parsePublicSig("Swallow 1 tablet whole with 200 mL water").meta.canonical.clauses[0];
+    const graph = clause.instructionGraph!, frame = graph.actions[0];
+    frame.args.push({ role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" });
+    clause.method = parsePublicSig("Chew 1 tablet").meta.canonical.clauses[0].method;
+    const before = JSON.stringify(graph);
+    const current = realizeRichPrimaryWithCanonicalDose(frame, clause, "en");
+    expect(current).toMatch(/^Chew 1 tablet slowly with 200 mL water$/u);
+    expect(current).not.toContain("whole");
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+});
+
+describe("round32 action meaning combinations", () => {
+  it("keeps prohibition, amount and Without activity together in both locales", () => {
+    const source = "Do not swallow 1 tablet without chewing";
+    const frame = parseInstructionActions(source)[0];
+    expect(frame).toMatchObject({ polarity: "negate", relation: AdviceRelation.Without });
+    expect(frame.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Activity, normalized: "chew" })
+    ]));
+    const before = JSON.stringify(frame);
+    const saved = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: [frame]
+    })!])!;
+    for (const action of [frame, saved.actions[0]]) {
+      expect(realizeInstructionAction(action, "en")).toBe("Do not swallow 1 tablet without chewing");
+      expect(realizeInstructionAction(action, "th")).toMatch(/^ห้ามกลืน 1 เม็ด.*โดยไม่เคี้ยว$/u);
+    }
+    expect(realizeInstructionAction(parseInstructionActions("Do not swallow 1 tablet")[0], "en"))
+      .toBe("Do not swallow 1 tablet");
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+
+  it.each(["if", "unless"])("retains a dilution's %s condition after all material complements", connector => {
+    const source = "Dilute 1 mL with saline to 10 mL " + connector + " given by nebulizer";
+    const parsed = parsePublicSig(source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const tail = connector + " given by nebulizer";
+    expect(graph.actions[0].sourceText).toBe("Dilute 1 mL with saline to 10 mL");
+    expect(graph.relations).toContainEqual(expect.objectContaining({
+      kind: connector, toActionIndex: 0, text: expect.stringContaining(tail),
+      span: expect.objectContaining({ end: source.length })
+    }));
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, recovered]) for (const locale of ["en", "th"]) {
+      const text = realizeInstructionGraph(candidate, locale)!;
+      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      expect(text).toContain(tail);
+      expect(text.match(new RegExp(connector + " given by nebulizer", "g"))).toHaveLength(1);
+    }
+  });
+
+  it.each([
+    [AdviceRelation.Before, "before breakfast", "ก่อนอาหารเช้า"],
+    [AdviceRelation.After, "after breakfast", "หลังอาหารเช้า"],
+    [undefined, "at 08:00", "เวลา 08:00"]
+  ] as const)("preserves a Mix Time relation %s", (relation, english, thai) => {
+    const frame = parseInstructionActions("Mix")[0];
+    frame.relation = relation;
+    frame.sourceText = "";
+    frame.args = [relation ? { role: AdviceArgumentRole.Time, text: "breakfast",
+      normalized: "breakfast", i18n: { en: "breakfast", th: "อาหารเช้า" } }
+      : { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" }];
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension({ actions: [frame] })!])!;
+    for (const action of [frame, recovered.actions[0]]) {
+      expect(realizeInstructionAction(action, "en")).toBe("Mix " + english);
+      expect(realizeInstructionAction(action, "th")).toContain(thai);
+    }
+  });
+
+  it("composes independent material and temporal daughters once", () => {
+    const frame = parseInstructionActions("Mix with water before breakfast")[0];
+    expect(realizeInstructionAction(frame, "en")).toBe("Mix with water before breakfast");
+    const dilution = parseInstructionActions("Dilute 1 mL with saline to 10 mL before use")[0];
+    expect(realizeInstructionAction(dilution, "en")).toMatch(/1 mL.*saline.*10 mL.*before use/u);
+    expect(realizeInstructionAction(dilution, "en").match(/before/gu)).toHaveLength(1);
+  });
+
+  it("uses an externally edited site on a rich primary while keeping an independent action site", () => {
+    const source = "Instill 1 drop into right eye";
+    const original = parsePublicSig(source).fhir[0];
+    const primary = parseInstructionActions(source)[0];
+    primary.args.push({ role: AdviceArgumentRole.Manner, text: "gently",
+      normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } });
+    const warning = parseInstructionActions("Do not touch right eye")[0];
+    warning.span = { start: source.length + 2, end: source.length + 24 };
+    warning.sequenceIndex = 1;
+    const extension = buildInstructionGraphExtension({
+      sourceText: source + "; Do not touch right eye", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary, warning]
+    })!;
+    const row = JSON.parse(JSON.stringify(original));
+    row.extension.push(extension);
+    row.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+    const before = JSON.stringify(row);
+    for (const input of [row, toDosageDetails([row])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en).toMatch(/^Instill.*gently.*left eye/u);
+      expect(en).toMatch(/Do not touch (?:the )?right eye/u);
+      expect(en.match(/right eye/gu)).toHaveLength(1);
+      expect(th).toMatch(/^หยอด.*เบาๆ.*ตาซ้าย/u);
+      expect(th).toContain("ห้ามสัมผัสตาขวา");
+      expect(th.match(/ตาขวา/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+describe("round32 source clock ownership", () => {
+  it.each([
+    [false, "dose", true, false],
+    [true, "dose", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("retains only clocks still owned after external edit (structured %s, edit %s)",
+    (structured, edit, eight, ten) => {
+    const source = "Swallow 1 tablet whole at 08:00";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.sourceText = source;
+    graph.actions[0].sourceText = source;
+    graph.actions[0].span.end = source.length;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" });
+    const graphUrl = buildInstructionGraphExtension(graph)!.url;
+    // This fixture authors a new complete source, not an edit of the helper
+    // parser's clockless source. Establish its initial wire baseline once.
+    row.extension = row.extension.filter((item: { url: string }) =>
+      item.url !== graphUrl && item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(buildInstructionGraphExtension(graph)!);
+    if (structured) row.timing = { repeat: { timeOfDay: ["08:00:00"] } };
+    row.text = source;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    expect(getDosageSourceOwnership(saved)?.clocks).toBe(structured);
+    saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "replace") saved.timing.repeat.timeOfDay = ["10:00:00"];
+    if (edit === "delete") delete saved.timing.repeat.timeOfDay;
+    const before = JSON.stringify(saved);
+    const r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u.test(text), locale + " " + realizationMode + " " +
+          (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(eight);
+        expect(/10:00/u.test(text)).toBe(ten);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round32 source event ownership", () => {
+  it.each([
+    [false, "dose", true, false],
+    [true, "dose", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("retains independent graph events after external edit (structured %s, edit %s)",
+    (structured, edit, morning, evening) => {
+    const source = "Swallow 1 tablet whole in the morning";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.sourceText = source;
+    graph.actions[0].sourceText = source;
+    graph.actions[0].span.end = source.length;
+    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning });
+    const extension = buildInstructionGraphExtension(graph)!;
+    row.extension = row.extension.filter((item: { url: string }) =>
+      item.url !== extension.url && item.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(extension);
+    if (structured) row.timing = { repeat: { when: [EventTiming.Morning] } };
+    row.text = source;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    expect(getDosageSourceOwnership(saved)?.events).toBe(structured);
+    saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "replace") saved.timing.repeat.when = [EventTiming.Evening];
+    if (edit === "delete") delete saved.timing.repeat.when;
+    const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text.includes(locale === "en" ? "morning" : "เช้า"), locale + " " + realizationMode + " " +
+          (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(morning);
+        expect(text.includes(locale === "en" ? "evening" : "เย็น")).toBe(evening);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round32 natural clock daughters", () => {
+  it.each(["08:00", "8 am"])("types the complete %s daughter using the shared clock grammar", clock => {
+    const source = "Swallow 1 tablet whole at " + clock;
+    const parsed = parsePublicSig(source);
+    const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(action.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Time, text: clock, normalized: "08:00:00"
+    }));
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Object)).toEqual([]);
+    const initial = formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" });
+    expect(initial.match(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
+  });
+
+  it.each(["delete", "replace"] as const)("honors a %s edit on freshly parsed R6 rich clock source", edit => {
+    const raw = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole at 08:00").fhirNext));
+    const component = raw.step[0].component[0];
+    component.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "delete") delete component.timing.repeat.timeOfDay;
+    else component.timing.repeat.timeOfDay = ["10:00:00"];
+    const before = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text).not.toMatch(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u);
+        expect(text.includes("10:00")).toBe(edit === "replace");
+      }
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+it("round32: later-stage saved R5 rows retain their own source clock ownership", () => {
+  const parsed = parsePublicSig("Swallow 1 tablet whole at 08:00 daily for 2 days then swallow 2 tablets whole at 09:00 daily");
+  expect(parsed.fhir).toHaveLength(2);
+  const rows = JSON.parse(JSON.stringify(parsed.fhir));
+  expect(getDosageSourceOwnership(rows[1])?.clocks).toBe(true);
+  rows[1].doseAndRate[0].doseQuantity.value = 3;
+  delete rows[1].timing.repeat.timeOfDay;
+  const before = JSON.stringify(rows);
+  for (const locale of ["en", "th"]) {
+    const local = formatSig(rows[1], "long", { locale, realizationMode: "normalized" });
+    expect(local).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+    expect(local).not.toMatch(/(?:^|[^0-9:])0?9:00(?::00)?(?![0-9:])/u);
+    const whole = formatSig(toDosageDetails(rows), "long", { locale, realizationMode: "normalized" });
+    expect(whole).toMatch(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/u);
+    expect(whole).not.toMatch(/(?:^|[^0-9:])0?9:00(?::00)?(?![0-9:])/u);
+    expect(whole).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+  }
+  expect(JSON.stringify(rows)).toBe(before);
+});
+
+describe("round33 current rich-primary ownership", () => {
+  it.each(["Apply", "Reapply", "coding-only", "metadata"])("honors shared-code method identity %s", edit => {
+    const source = "Reapply 1 g to the skin gently";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
+    ];
+    const graph = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary] })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== graph.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(graph);
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    if (edit === "coding-only") delete saved.method.text;
+    else if (edit === "metadata") { saved.method.id = "annotation"; saved.method.coding[0].id = "coding-annotation"; }
+    else saved.method.text = edit;
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(edit === "Reapply" || edit === "metadata" ? /^Reapply\b/u : /^Apply\b/u);
+      expect(text).toContain("1 g");
+      expect(text).toContain("gently");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+  it.each([
+    [false, "dose", true, false],
+    [false, "explicit-false", true, false],
+    [false, "add-delete", true, false],
+    [true, "dose", true, false],
+    [true, "metadata", true, false],
+    [true, "replace", false, true],
+    [true, "delete", false, false]
+  ] as const)("keeps only current primary Site (structured %s, edit %s)", (structured, edit, right, left) => {
+    const source = "Instill 1 drop into right eye";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args.push({ role: AdviceArgumentRole.Manner, text: "gently",
+      normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } });
+    const warning = parseInstructionActions("Do not touch right eye")[0];
+    warning.span = { start: source.length + 2, end: source.length + 24 };
+    warning.sequenceIndex = 1;
+    const graph = buildInstructionGraphExtension({
+      sourceText: source + "; Do not touch right eye", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary, warning]
+    })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== graph.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(graph);
+    if (!structured) delete row.site;
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source, true,
+      edit === "explicit-false" ? [{ sourceAgreement: true, sourceHasStructuredSite: false }] : undefined)[0]));
+    expect(getDosageSourceOwnership(saved)?.site).toBe(structured);
+    if (edit !== "metadata") saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "metadata") { saved.site.id = "site-annotation"; saved.site.coding[0].id = "coding-annotation"; }
+    if (edit === "replace") saved.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+    if (edit === "delete") delete saved.site;
+    if (edit === "add-delete") {
+      saved.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
+      // Saving an independent graph site alongside a later structured site
+      // must not invent original structured ownership of that graph argument.
+      Object.assign(saved, JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([saved]))[0])));
+      delete saved.site;
+    }
+    const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? edit === "metadata" ? "1 drop" : "2 drops" : edit === "metadata" ? "1 หยด" : "2 หยด");
+        if (edit !== "metadata") expect(text).not.toMatch(locale === "en" ? /1 drop/u : /1 หยด/u);
+        expect(text).toContain(locale === "en" ? "gently" : "เบาๆ");
+        const primaryText = text.split(locale === "en" ? "Do not touch" : "ห้ามสัมผัส")[0];
+        expect(primaryText.includes(locale === "en" ? "right eye" : "ตาขวา")).toBe(right);
+        expect(primaryText.includes(locale === "en" ? "left eye" : "ตาซ้าย")).toBe(left);
+        expect(text).toMatch(locale === "en" ? /Do not touch (?:the )?right eye/u : /ห้ามสัมผัสตาขวา/u);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+
+describe("round33 declared method identity", () => {
+  it.each(["unchanged", "metadata", "edited"])("keeps custom bound manner only for its current method (%s)", edit => {
+    const source = "Swallow 1 tablet whole";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const graph = parseInstructionGraphExtension(row.extension)!;
+    graph.actions[0].predicate.lemma = "local-swallow";
+    const marker = buildInstructionGraphExtension(graph)!;
+    row.extension = row.extension.filter((e: { url: string }) =>
+      e.url !== marker.url && e.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(marker);
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    const options = { instructionActionMap: { swallow: {
+      code: "local-swallow", display: "Swallow", semanticClass: "ingest",
+      primaryAdministrationHead: true, methodBoundMannerConcepts: ["whole"],
+      administrationMethod: { system: "http://snomed.info/sct", code: "738995006", display: "Swallow" }
+    } } };
+    if (edit === "metadata") saved.method.id = "annotation";
+    if (edit === "edited") saved.method.coding[0] = {
+      system: "http://snomed.info/sct", code: "738992009", display: "Chew"
+    };
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) {
+      const text = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+      expect(text).toContain("1 tablet");
+      expect(text).toMatch(edit === "edited" ? /^Chew/u : /^Swallow/u);
+      expect(text.includes("whole")).toBe(edit !== "edited");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+});
+
+describe("round33 joined-script method vocabulary bounds", () => {
+  const swallow = { system: "http://snomed.info/sct", code: "738995006", display: "Swallow" };
+  const chew = { system: "http://snomed.info/sct", code: "738992009", display: "Chew" };
+  it("keeps an unfamiliar joined-script method source intact", () => {
+    const source = "คำไม่รู้จัก".repeat(100);
+    expect(resolveMedicationInstructionActionForMethod({ text: source, coding: swallow })).toBeUndefined();
+  });
+  it("honors long registered locale aliases and the longest matching lexical head", () => {
+    const alias = "คำวิธีที่ลงทะเบียน".repeat(8);
+    const options = { instructionActionMap: {
+      "custom-swallow": { code: "custom-swallow", display: "Custom swallow",
+        administrationMethod: swallow, localeAliases: { th: [alias] } },
+      "custom-chew": { code: "custom-chew", display: "Custom chew",
+        administrationMethod: chew, localeAliases: { th: [alias + "เพิ่ม"] } }
+    } };
+    // Compatible qualified source keeps its qualifiers, including aliases
+    // longer than any default action. A conflicting current code still wins.
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: swallow }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "ช้า", coding: chew }, options)?.code).toBe("chew");
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: chew }, options)).toBeUndefined();
+    expect(resolveMedicationInstructionActionForMethod({ text: alias + "เพิ่มช้า", coding: swallow }, options)?.code).toBe("swallow");
   });
 });

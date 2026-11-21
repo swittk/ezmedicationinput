@@ -1,3 +1,4 @@
+import { getTimingClocks } from "../src/fhir";
 import { describe, expect, it } from "vitest";
 import conditionBridgeDefinition from "../fhir/r5/medication-conditional-dose.json";
 import renderedInstructionDefinition from "../fhir/r5/medication-rendered-instruction.json";
@@ -14,6 +15,7 @@ import {
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { AdviceArgumentRole, FhirDosage } from "../src/types";
 import { getDosageCalendarDayCondition, setDosageCondition } from "../src/dosage-course";
+import { getCourseCycleCount } from "../src/fhir-course-cycle-count";
 
 const TABLET_CONTEXT = { dosageForm: "tablet" };
 
@@ -136,7 +138,8 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
-    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(getTimingClocks(repeat(result, 1))).toEqual(["22:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toBeUndefined();
     expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();
@@ -152,7 +155,8 @@ describe("heterogeneous multi-dose regimens", () => {
     expect(repeat(result, 0)?.when).toEqual(["WAKE", "CD"]);
     expect(dose(result, 1)).toMatchObject({ value: 2, unit: "tab" });
     expect(repeat(result, 1)?.when).toEqual(["CV"]);
-    expect(repeat(result, 1)?.timeOfDay).toEqual(["22:00:00"]);
+    expect(getTimingClocks(repeat(result, 1))).toEqual(["22:00:00"]);
+    expect(repeat(result, 1)?.timeOfDay).toBeUndefined();
     expect(result.items[1].warnings).toEqual([]);
     expect(result.items[1].fhir.doseAndRate?.[0]?.doseQuantity?.value).toBe(2);
     expect(result.items[0].meta.leftoverText).toBeUndefined();
@@ -1016,7 +1020,8 @@ describe("finite recurring-course punctuation and terminal cycle bound", () => {
     const parsed = parseSig(source);
     expect(parsed.fhirNext.repeatCycle).toMatchObject({ value: 14, code: "d" });
     expect(parsed.fhirNext.step).toHaveLength(1);
-    expect(parsed.fhirNext.step[0].count).toBe(3);
+    expect(getCourseCycleCount(parsed.fhirNext)).toBe(3);
+    expect(parsed.fhirNext.step[0].count).toBeUndefined();
     const base = { timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00" };
     for (const dosage of [parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
       expect(nextDueDoses(dosage, { ...base, from: "2026-12-14T00:00:00+07:00", limit: 2 })).toEqual([]);

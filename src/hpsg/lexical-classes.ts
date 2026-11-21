@@ -522,6 +522,41 @@ export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
 
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
+const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
+export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
+export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
+/** Typed derivation identity shared by lexical timing and phase composition. */
+export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number): boolean {
+  let before = start - 1;
+  const previous = tokens[before];
+  if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower)) before--;
+  const governor = tokens[before];
+  return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
+}
+/** A daypart inside UNTIL + NEXT is an end complement, not a recurring event. */
+export function isEndBoundDaypartAt(tokens: readonly LexToken[], head: number): boolean {
+  const modifier = tokens[head - 1];
+  return Boolean(modifier && NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower) &&
+    hasRelativeTimeEndGovernor(tokens, head - 1));
+}
+/** Bounded NEXT + day/daypart nominal, with an optional locale article. */
+export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit: number):
+  { headIndex: number; tokenEnd: number } | undefined {
+  const first = tokens[start];
+  if (!first || start >= limit) return undefined;
+  let cursor = start;
+  if (EVENT_ARTICLE_TOKENS.has(first.canonical ?? first.lower)) cursor++;
+  const modifier = tokens[cursor];
+  if (!modifier || !NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower)) return undefined;
+  const headIndex = cursor + 1;
+  const head = headIndex < limit ? tokens[headIndex] : undefined;
+  if (!head || !NEXT_DAY_HEADS.has(head.canonical ?? head.lower)) return undefined;
+  // An end governor owns this nominal, including a cover starting at NEXT
+  // rather than its article. Ordinary non-NEXT tokens never inspect it.
+  if (hasRelativeTimeEndGovernor(tokens, start)) return undefined;
+  return { headIndex, tokenEnd: headIndex + 1 };
+}
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;
 /** Disjunction is alternative administration, never conjunctive dose sharing.
@@ -536,6 +571,10 @@ function coordinationSurfaceSet(canonical: string, defaults: readonly string[]):
       if (Object.prototype.hasOwnProperty.call(localized, locale))
         result.add(localized[locale]);
     }
+  }
+  for (const alias in source.actionCoordinationConnectorAliases) {
+    if (source.actionCoordinationConnectorAliases[alias as keyof typeof source.actionCoordinationConnectorAliases] === canonical)
+      result.add(alias);
   }
   return result;
 }
@@ -675,4 +714,164 @@ export function courseContinuationDurationAt(
   const unit = label ? FhirPeriodUnit[label as keyof typeof FhirPeriodUnit] : undefined;
   return value !== undefined && Number.isFinite(value) && value > 0 && unit
     ? { end: cursor + 2, value, unit } : undefined;
+}
+
+/** Authored comparative dose NPs. Only complete number+medication-unit
+ * constituents are licensed; "about 3 weeks" stays temporal, and no
+ * second text-level dose parser runs after HPSG.
+ */
+type DoseComparator = "<" | "<=" | ">" | ">=" | "~";
+export const DOSE_COMPARATOR_PREFIXES = new Map<string, Array<{
+  words: readonly string[];
+  comparator: DoseComparator;
+}>>();
+for (const comparator of Object.keys(source.doseComparatorWordings) as DoseComparator[]) {
+  for (const words of source.doseComparatorWordings[comparator]) {
+    const candidates = DOSE_COMPARATOR_PREFIXES.get(words[0]) ?? [];
+    candidates.push({ words, comparator });
+    DOSE_COMPARATOR_PREFIXES.set(words[0], candidates);
+  }
+}
+export const DOSE_COMPARATOR_SYMBOLS =
+  source.doseComparatorSymbols as Record<string, DoseComparator>;
+
+/** Shared WHOLE + connector + optional article + fraction head. The
+ * caller still owns its medication unit; this cannot swallow two independently
+ * unit-bearing coordinated doses. Returns the last number token it owns. */
+export function additiveDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, whole: number
+): { value: number; numericIndex: number } | undefined {
+  const connector = start + 1 < limit ? tokens[start + 1] : undefined;
+  if (!Number.isInteger(whole) || whole <= 0 || !connector ||
+      !DOSE_ADDITIVE_QUANTITY_CONNECTORS.has(connector.canonical ?? connector.lower)) return undefined;
+  let cursor = start + 2;
+  const article = cursor < limit ? tokens[cursor] : undefined;
+  if (article && DOSE_FRACTION_ARTICLES.has(article.canonical ?? article.lower)) cursor++;
+  const token = cursor < limit ? tokens[cursor] : undefined;
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  let fraction = DOSE_FRACTION_WORDS.get(word);
+  const numeric = token.kind === LexKind.Number ? token.value : DOSE_NUMBER_WORDS.get(word);
+  if (fraction === undefined && numeric !== undefined) {
+    if (numeric > 0 && numeric < 1) fraction = numeric;
+    else {
+      const denominator = cursor + 1 < limit ? tokens[cursor + 1] : undefined;
+      const factor = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+        denominator.canonical ?? denominator.lower);
+      if (factor !== undefined) { fraction = numeric * factor; cursor++; }
+    }
+  }
+  if (fraction === undefined || fraction <= 0 || fraction >= 1) return undefined;
+  const amount = whole + fraction;
+  // Both plain and comparator-qualified mixed numbers can be scaled:
+  // 'two and a half million units' is 2,500,000 units, not 0.5 or 2.5.
+  return millionDoseNumberAt(tokens, cursor, limit, amount) ??
+    { value: amount, numericIndex: cursor };
+}
+
+/** A million is a numeric multiplier, never a medication unit.
+ * Shared by exact/comparative scalar and dimensional quantities. Source
+ * position advances past a separately spelled multiplier only when present. */
+export function millionDoseNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, value: number
+): { value: number; numericIndex: number } | undefined {
+  let index = start + 1;
+  let next = index < limit ? tokens[index] : undefined;
+  // A fractional multiplier licenses its article: "half a million".
+  // Exact and comparative heads consume the same complete numeric phrase.
+  if(value > 0 && value < 1 && next && DOSE_FRACTION_ARTICLES.has(next.canonical ?? next.lower))
+    next = ++index < limit ? tokens[index] : undefined;
+  // Most doses have no multiplier. Avoid allocating a placeholder result
+  // for every routine '1 tab' token on the phone parsing hot path.
+  return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)
+    ? { value: value * 1_000_000, numericIndex: index }
+    : undefined;
+}
+
+/** Numeric source token with an attached unit, e.g. 0.1mcg/kg.
+ * A prefix comparator is optional and remains owned by its outer lexeme.
+ * This is a bounded token form, never a second whole-SIG parser. */
+export function attachedNumberUnitAt(lower: string):
+  { value: number; rawUnit: string } | undefined {
+  if (!/^(?:\d|\.)/u.test(lower)) return undefined;
+  const matched = lower.match(/^((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)$/u);
+  return matched ? { value: Number(matched[1]), rawUnit: matched[2] } : undefined;
+}
+
+/** A compact million suffix shares the attached-numeral decimal shape.
+ * The leading decimal point is numeric evidence, never punctuation. */
+export function compactMillionDoseNumber(lower: string): number | undefined {
+  const match = /^((?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+))m$/u.exec(lower);
+  return match ? Number(match[1]) * 1_000_000 : undefined;
+}
+
+/** One bounded quantity-prefix lexeme shared by scalar and dimensional
+ * rules. It identifies source tokens; it does not assign a unit or dose. */
+export function doseComparatorNumberAt(
+  tokens: readonly LexToken[], start: number, limit: number, lower: string
+): { comparator: "<" | "<=" | ">" | ">=" | "~";
+  value: number; numericIndex: number; rawUnit?: string } | undefined {
+  if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
+      !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+\/\d+|\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
+  if (glued) {
+    const slash = glued[2].indexOf("/");
+    const value = slash < 0 ? Number(glued[2]) :
+      Number(glued[2].slice(0, slash)) / Number(glued[2].slice(slash + 1));
+    // Never turn '≤1/0' into an infinite dose or numeric advice.
+    if (!Number.isFinite(value)) return undefined;
+    const compactMillion = glued[3] === "m";
+    const million = compactMillion
+      ? { value: value * 1_000_000, numericIndex: start }
+      : glued[3] ? undefined : millionDoseNumberAt(tokens, start, limit, value);
+    const mixed = !glued[3] && !million
+      ? additiveDoseNumberAt(tokens, start, limit, value) : undefined;
+    return { comparator: DOSE_COMPARATOR_SYMBOLS[glued[1]],
+      value: million?.value ?? mixed?.value ?? value,
+      numericIndex: million?.numericIndex ?? mixed?.numericIndex ?? start,
+      ...(glued[3] && !compactMillion ? { rawUnit: glued[3] } : {}) };
+  }
+  let comparator = DOSE_COMPARATOR_SYMBOLS[lower];
+  let prefixLength = comparator ? 1 : 0;
+  if (!comparator) for (const candidate of DOSE_COMPARATOR_PREFIXES.get(lower) ?? []) {
+    if (candidate.words.length <= prefixLength || start + candidate.words.length >= limit) continue;
+    if (candidate.words.every((part, index) => {
+      const token = tokens[start + index];
+      return token && (token.canonical ?? token.lower) === part;
+    })) {
+      comparator = candidate.comparator;
+      prefixLength = candidate.words.length;
+    }
+  }
+  if (!comparator) return undefined;
+  let numericIndex = start + prefixLength;
+  // A dotted approximation is one lexical qualifier (e.g. "approx. 5 mg").
+  if (comparator === "~" && tokens[numericIndex]?.kind === LexKind.Separator &&
+      tokens[numericIndex].original === ".") numericIndex++;
+  const token = numericIndex < limit ? tokens[numericIndex] : undefined;
+  if (!token) return undefined;
+  const word = token.canonical ?? token.lower;
+  const attached = token.kind !== LexKind.Number ? attachedNumberUnitAt(word) : undefined;
+  let value = token.kind === LexKind.Number ? token.value :
+    attached?.value ?? DOSE_NUMBER_WORDS.get(word) ?? DOSE_FRACTION_WORDS.get(word);
+  const embeddedMillion = compactMillionDoseNumber(word);
+  // The million suffix belongs to the numeric head, not the unit slot.
+  if (embeddedMillion !== undefined) return { comparator, value: embeddedMillion, numericIndex };
+  if (value === undefined) return undefined;
+  if (attached) return { comparator, value, numericIndex, rawUnit: attached.rawUnit };
+  const million = millionDoseNumberAt(tokens, numericIndex, limit, value);
+  if (million) return { comparator, ...million };
+  const mixed = additiveDoseNumberAt(tokens, numericIndex, limit, value);
+  if (mixed) return { comparator, ...mixed };
+  // The existing fraction vocabulary also licenses "a quarter" or
+  // "two thirds". Keep those tokens within the qualified quantity head.
+  const denominator = numericIndex + 1 < limit ? tokens[numericIndex + 1] : undefined;
+  const fraction = denominator && DOSE_FRACTION_DENOMINATOR_WORDS.get(
+    denominator.canonical ?? denominator.lower);
+  if (fraction !== undefined) {
+    value *= fraction; numericIndex++;
+    const scaled = millionDoseNumberAt(tokens, numericIndex, limit, value);
+    if(scaled)return { comparator, ...scaled };
+  }
+  return { comparator, value, numericIndex };
 }

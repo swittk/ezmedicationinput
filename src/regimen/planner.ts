@@ -892,15 +892,17 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       inheritTrailingDurationFromNext: inheritTrailingDurationFromNext || undefined });
     return true;
   };
-  const probeEnd = (rightIndex: number, broad = false) => {
+  const probeBoundary = (rightIndex: number, broad = false): BoundarySite | undefined => {
     const rightStart = tokens[rightIndex]?.sourceStart ?? input.length;
     for (const site of sites) {
       if (site.start <= rightStart || site.kind === 'adjacent-dose') continue;
       if (broad && (site.kind === 'coordination' || site.kind === 'sequence' || site.kind === 'punctuation')) continue;
-      if (!owners.owner(site.start)) return site.start;
+      if (!owners.owner(site.start)) return site;
     }
-    return input.length;
+    return undefined;
   };
+  const probeEnd = (rightIndex: number, broad = false) =>
+    probeBoundary(rightIndex, broad)?.start ?? input.length;
   const hasUnit = (a: number, b: number) => tokens.some((t, i) => i >= a && t.sourceStart < b && Boolean(normalizeUnit(lexeme(t), options)));
   const keep = (rule: string, priority: number, feature: string, value: string | boolean): Proposal =>
     ({ action: 'keep', rule, priority, evidence: [{ feature, value }] });
@@ -1061,9 +1063,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           evidence: [{ feature: 'delimiter', value: site.surface }] });
       }
     } else {
-      const end = adjacentHead?.end ?? probeEnd(site.rightIndex);
+      const nextBoundary = adjacentHead ? undefined : probeBoundary(site.rightIndex);
+      let end = adjacentHead?.end ?? nextBoundary?.start ?? input.length;
       const rightStart = tokens[site.rightIndex]?.sourceStart ?? input.length;
-      const rightUnit = hasUnit(site.rightIndex, end);
       const priorTiming = tokens.some(t => t.sourceStart >= start && t.sourceEnd <= site.start &&
         (hasEventTimingMeaning(t) || hasTimingAbbreviationMeaning(t) || t.kind === LexKind.TimeLike));
       const canProbe = site.kind !== 'adjacent-dose' || Boolean(adjacentHead) ||
@@ -1072,6 +1074,21 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (procedural) proposals.push(keep('regimen.procedural-coordination', 900, 'actionFrames.bridge', true));
 
       if (!procedural && canProbe && rightStart < end) {
+        // A synthetic onset seam cannot hide the schedule belonging to a
+        // coordinated dose. Extend only when cached typed daughters show an
+        // unscheduled amount followed by a schedule with no independent head.
+        if (site.kind === 'coordination' && nextBoundary?.kind === 'sequence' &&
+            !nextBoundary.surface &&
+            TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[nextBoundary.rightIndex])) &&
+            treatmentRelativePeriodStartAt(tokens, nextBoundary.rightIndex)) {
+          const prefix = evidence.probe(rightStart, end);
+          if (prefix.hasDose && !prefix.hasSchedule) {
+            const onsetEnd = probeEnd(nextBoundary.rightIndex);
+            const onset = evidence.probe(nextBoundary.start, onsetEnd);
+            if (onset.hasSchedule && !onset.hasDose && !onset.method) end = onsetEnd;
+          }
+        }
+        const rightUnit = hasUnit(site.rightIndex, end);
         const targetCue = (from: number, to: number) => {
           const ownedTarget = claims.some(claim => claim.kind === 'target-list' &&
             claim.start < to && claim.end > from);
@@ -1088,6 +1105,20 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         let rightValue: ProbeSummary | undefined = adjacentHead?.right;
         let actionValue: AdviceFrame[] | undefined;
         const rightActions = () => actionValue ?? (actionValue = evidence.actions(rightStart, end));
+        const sourceOnset = site.kind === 'sequence' && !site.surface &&
+          TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[site.rightIndex]))
+          ? treatmentRelativePeriodStartAt(tokens, site.rightIndex) : undefined;
+        if (sourceOnset) {
+          const left = leftValue ?? (leftValue = evidence.probe(start, site.start));
+          const right = rightValue ?? (rightValue = evidence.probe(rightStart, end));
+          // A postposed onset and clock complete the same unscheduled dose.
+          // A new dosed/method head or an established prior schedule licenses
+          // the ordinary phase construction instead; punctuation stays explicit.
+          if (left.hasDose && !left.hasSchedule && !right.hasDose && !right.method) {
+            proposals.push(keep('regimen.onset-adjunct-of-unscheduled-dose', 950,
+              'right.schedule-modifies-left-dose', true));
+          }
+        }
         proposals.push(...grammaticalProposals({
           site,
           connectorKind: semanticConnectorKind(site),
@@ -1119,7 +1150,13 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         if (clockEnd(tokens, site.rightIndex) !== undefined) {
           proposals.push(keep('structure.clock-continuation', 500, 'right.type', 'clock'));
         } else if (right?.kind === LexKind.Number || right?.kind === LexKind.NumberRange) {
-          proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
+          // A typed route alone modifies the following quantity; it is not an
+          // independent administration before this comma. The prefix probe is
+          // shared with the grammatical proposals above.
+          const prefix = evidence.probe(start, site.start);
+          if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
+            proposals.push(keep('structure.route-complement', 500, 'left.typed-route-only', true));
+          } else proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
             evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
         } else if (LATERAL_MODIFIER_WORDS.has(lexeme(right)) && following?.kind !== LexKind.Number) {
           proposals.push(keep('structure.site-continuation', 500, 'right.type', 'lateral-modifier'));

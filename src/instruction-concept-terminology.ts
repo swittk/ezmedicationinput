@@ -175,6 +175,9 @@ function customDefinitionForSurface(
   return undefined;
 }
 
+/** Dictionary definitions are immutable by caller contract. Repeated
+ * lexical resolution must not recursively clone the same vocabulary tree.
+ * Explicit frame construction still copies only the fields it later edits. */
 export function resolveMedicationInstructionConcept(
   surface: string,
   options?: ParseOptions
@@ -182,7 +185,7 @@ export function resolveMedicationInstructionConcept(
   const custom = customDefinitionForSurface(surface, options);
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeConceptSurface(surface));
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function getMedicationInstructionConcept(
@@ -191,14 +194,32 @@ export function getMedicationInstructionConcept(
   const definition = !system || system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM
     ? DEFAULT_BY_CODE.get(code)
     : DEFAULT_BY_CODING.get(system + "|" + code);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition;
 }
 
 export function listMedicationInstructionConcepts(): MedicationInstructionConceptDefinition[] {
-  return DEFAULT_CONCEPTS.map(cloneDefinition);
+  return DEFAULT_CONCEPTS;
 }
 
+/** The public CodeSystem is freshly returned, but its published concepts
+ * require only one source-definition walk and one designation walk each.
+ * This avoids filter->map and map->filter intermediary arrays per call. */
 export function buildMedicationInstructionConceptCodeSystem(): MedicationInstructionConceptCodeSystem {
+  const concepts: MedicationInstructionConceptCodeSystem["concept"] = [];
+  for (const definition of DEFAULT_CONCEPTS) {
+    // An explicit local whole-phrase code remains part of this CodeSystem
+    // even when its standard-coded constituents are also available.
+    if (definition.coding?.system !== MEDICATION_INSTRUCTION_CONCEPT_SYSTEM &&
+        (definition.coding || definition.externalCodings?.length || definition.components?.length)) continue;
+    const designations: NonNullable<MedicationInstructionConceptCodeSystem["concept"]>[number]["designation"] = [];
+    const translations = definition.i18n;
+    if (translations) for (const language in translations) {
+      if (!Object.prototype.hasOwnProperty.call(translations, language)) continue;
+      const value = translations[language];
+      if (value) designations.push({ language, value });
+    }
+    concepts.push({ code: definition.code, display: definition.display, designation: designations });
+  }
   return {
     resourceType: "CodeSystem",
     url: MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
@@ -208,19 +229,7 @@ export function buildMedicationInstructionConceptCodeSystem(): MedicationInstruc
     experimental: false,
     caseSensitive: true,
     content: "complete",
-    concept: DEFAULT_CONCEPTS.filter((definition) =>
-      // An explicit local whole-phrase code remains part of this CodeSystem
-      // even when its standard-coded constituents are also available.
-      definition.coding?.system === MEDICATION_INSTRUCTION_CONCEPT_SYSTEM ||
-      (!definition.coding && !definition.externalCodings?.length && !definition.components?.length)
-    ).map((definition) => ({
-      code: definition.code,
-      display: definition.display,
-      designation: Object.keys(definition.i18n ?? {}).map((language) => ({
-        language,
-        value: definition.i18n?.[language] ?? ""
-      })).filter((designation) => designation.value.length > 0)
-    }))
+    concept: concepts
   };
 }
 

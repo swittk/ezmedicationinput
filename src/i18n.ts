@@ -1,4 +1,10 @@
-import { hasDailyRecurrenceAcrossClocks } from "./format";
+import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
+import type { CourseLanguage } from "./locales/course/types";
+import { ENGLISH_COURSE } from "./locales/course/en";
+import { THAI_COURSE } from "./locales/course/th";
+export type { CourseLanguage } from "./locales/course/types";
+import { quantityComparatorText } from "./localization";
+import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -41,6 +47,8 @@ import {
   instructionGraphHasNovelNonWarningContent,
   instructionGraphPrimaryAdministrationModality,
   instructionGraphRichPrimaryAction,
+  realizeRichPrimaryWithCanonicalDose,
+  instructionGraphSourceConflictsWithDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
@@ -61,6 +69,7 @@ import {
   AdvicePolarity,
   AdviceRelation,
   BodySiteSpatialRelation,
+  BodySiteDefinition,
   CanonicalDoseExpr,
   CanonicalPrnReasonExpr,
   CanonicalScheduleExpr,
@@ -80,10 +89,12 @@ export interface SigFormatContext {
   readonly style: "short" | "long";
   readonly clause: CanonicalSigClause;
   readonly defaultText: string;
+  readonly course?: CourseLanguage;
   readonly groupMealTimingsByRelation: boolean;
   readonly includeTimesPerDaySummary: boolean;
   readonly realizationMode: "normalized" | "roundtrip";
   readonly sitePlacement: "natural" | "trailing";
+  readonly instructionActionMap?: TimingSummaryOptions["instructionActionMap"];
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -95,8 +106,19 @@ export interface SigLongContext extends SigFormatContext {
   readonly style: "long";
 }
 
+/** Dose amount scope is independent of whether the compact clause has one
+ * scalar dose. Native multi/role-bearing amounts retain this target scope. */
+export interface SigDoseScope {
+  targetCount: number;
+  site?: BodySiteDefinition;
+}
+
 export interface SigLocalization {
   readonly locale: string;
+  /** Optional language-pack facet for whole-course text. Clinical facts stay
+   * in canonical code; adding a language never edits the course algorithm. */
+  readonly course?: CourseLanguage;
+  formatDose?(dose: CanonicalDoseExpr | string, style: "short" | "long", scope?: SigDoseScope): string | undefined;
   formatShort?(context: SigShortContext): string;
   formatLong?(context: SigLongContext): string;
 }
@@ -114,6 +136,14 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
 );
 
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
+// An inherited regional view is valid while BOTH its exact registration and
+// base registration still have the same identity. No invalidation walk or
+// generation increment is required for an ordinary locale registration.
+const RESOLVED_REGIONAL_LOCALIZATIONS = new Map<string, {
+  exact: SigLocalization;
+  base: SigLocalization;
+  localization: SigLocalization;
+}>();
 
 export function registerSigLocalization(localization: SigLocalization): void {
   REGISTERED_LOCALIZATIONS.set(localization.locale.toLowerCase(), localization);
@@ -123,20 +153,48 @@ export function getRegisteredSigLocalizations(): SigLocalization[] {
   return Array.from(REGISTERED_LOCALIZATIONS.values());
 }
 
+/** Each regional facet overrides only its matching base-language facet.
+ * Complete registrations keep their allocation-free common path; partial
+ * regional compositions are refreshed lazily after explicit registration. */
+function registeredLocalization(key: string | undefined): SigLocalization | undefined {
+  if (!key) return undefined;
+  const exact = REGISTERED_LOCALIZATIONS.get(key);
+  if (exact?.formatShort && exact.formatLong && exact.course && exact.formatDose) return exact;
+  const separator = key.indexOf("-");
+  if (separator < 0) return exact;
+  const base = REGISTERED_LOCALIZATIONS.get(key.slice(0, separator));
+  if (!exact || !base) return exact ?? base;
+  const cached = RESOLVED_REGIONAL_LOCALIZATIONS.get(key);
+  if (cached?.exact === exact && cached.base === base) return cached.localization;
+  const resolved: SigLocalization = {
+    locale: exact.locale,
+    formatDose: exact.formatDose?.bind(exact) ?? base.formatDose?.bind(base),
+    formatShort: exact.formatShort?.bind(exact) ?? base.formatShort?.bind(base),
+    formatLong: exact.formatLong?.bind(exact) ?? base.formatLong?.bind(base),
+    course: exact.course ?? base.course,
+  };
+  RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {
+    exact,
+    base,
+    localization: resolved,
+  });
+  return resolved;
+}
+
 export function resolveSigLocalization(
   locale?: string,
   config?: SigLocalizationConfig
 ): SigLocalization | undefined {
   const normalizedLocale = config?.locale ?? locale;
   const targetKey = normalizedLocale?.toLowerCase();
-  const base = targetKey ? REGISTERED_LOCALIZATIONS.get(targetKey) : undefined;
+  const base = registeredLocalization(targetKey);
   const inherited = config?.inherit
-    ? REGISTERED_LOCALIZATIONS.get(config.inherit.toLowerCase())
+    ? registeredLocalization(config.inherit.toLowerCase())
     : undefined;
+  // Registered localizations are immutable-by-contract. Returning the
+  // established object needs no repeat allocation on every clause render.
+  if (!config) return base;
 
-  if (!base && !inherited && !config) {
-    return undefined;
-  }
 
   const resolvedLocale =
     config?.locale ??
@@ -147,31 +205,25 @@ export function resolveSigLocalization(
     "custom";
 
   const result: SigLocalization = {
-    locale: resolvedLocale
+    locale: resolvedLocale,
+    ...(config?.course ?? inherited?.course ?? base?.course
+      ? {course:config?.course ?? inherited?.course ?? base?.course} : {})
   };
 
-  if (base?.formatShort) {
-    result.formatShort = base.formatShort;
-  }
-  if (base?.formatLong) {
-    result.formatLong = base.formatLong;
-  }
+  // Select each winning facet once, then preserve the receiver that owns it.
+  // Only configured compositions allocate bindings; the registered fast path
+  // above still returns the original object.
+  const doseOwner = config.formatDose !== undefined ? config
+    : inherited?.formatDose ? inherited : base;
+  if (doseOwner?.formatDose) result.formatDose = doseOwner.formatDose.bind(doseOwner);
+  const shortOwner = config.formatShort !== undefined ? config
+    : inherited?.formatShort ? inherited : base;
+  const longOwner = config.formatLong !== undefined ? config
+    : inherited?.formatLong ? inherited : base;
+  if (shortOwner?.formatShort) result.formatShort = shortOwner.formatShort.bind(shortOwner);
+  if (longOwner?.formatLong) result.formatLong = longOwner.formatLong.bind(longOwner);
 
-  if (inherited?.formatShort) {
-    result.formatShort = inherited.formatShort;
-  }
-  if (inherited?.formatLong) {
-    result.formatLong = inherited.formatLong;
-  }
-
-  if (config?.formatShort !== undefined) {
-    result.formatShort = config.formatShort;
-  }
-  if (config?.formatLong !== undefined) {
-    result.formatLong = config.formatLong;
-  }
-
-  if (!result.formatShort && !result.formatLong) {
+  if (!result.formatDose && !result.formatShort && !result.formatLong && !result.course) {
     return base ?? inherited ?? result;
   }
 
@@ -180,9 +232,25 @@ export function resolveSigLocalization(
 
 registerSigLocalization({
   locale: "en",
+  course: ENGLISH_COURSE,
+  formatDose: formatDoseEnglish,
   formatShort: ({ defaultText }) => defaultText,
   formatLong: ({ defaultText }) => defaultText
 });
+
+/** Resolve the course facet once at a public formatting boundary. Reuse the
+ * existing registry and inheritance contract; no new pack registry or parser. */
+export function resolveCourseLanguage(locale?: string, config?: SigLocalizationConfig,
+  resolved?: SigLocalization): CourseLanguage {
+  if (resolved?.course) return resolved.course;
+  if (config?.course) return config.course;
+  // Per-call inheritance overrides a registered base exactly as clause
+  // callbacks do. The output locale tag is a label, not an inheritance veto.
+  const inherited=config?.inherit?registeredLocalization(config.inherit.toLowerCase())?.course:undefined;
+  if(inherited)return inherited;
+  const key = (config?.locale ?? locale ?? "en").toLowerCase();
+  return registeredLocalization(key)?.course ?? ENGLISH_COURSE;
+}
 
 export type SigTranslation = SigLocalization;
 export type SigTranslationConfig = SigLocalizationConfig;
@@ -200,20 +268,29 @@ export function resolveSigTranslation(
 function createThaiLocalization(): SigLocalization {
   return {
     locale: "th",
-    formatShort: ({ clause }) => formatShortThai(clause),
+    course: THAI_COURSE,
+    formatDose: (dose, style, scope) => {
+      const amount = typeof dose === "string" ? dose : scope ? formatDoseThaiPerTarget(dose)
+        : style === "short" ? formatDoseThaiShort(dose) : formatDoseThaiLong(dose);
+      return amount && scope ? (scope.site?.perTargetI18n?.th ?? "แต่ละจุด") + " " + amount : amount;
+    },
+    formatShort: ({ clause, course }) => formatShortThai(clause, course),
     formatLong: ({
       clause,
+      course,
       groupMealTimingsByRelation,
       includeTimesPerDaySummary,
       realizationMode,
-      sitePlacement
+      sitePlacement,
+      instructionActionMap
     }) =>
       formatLongThai(clause, {
         groupMealTimingsByRelation,
         includeTimesPerDaySummary,
         realizationMode,
-        sitePlacement
-      })
+        sitePlacement,
+        instructionActionMap
+      }, course)
   };
 }
 
@@ -268,15 +345,7 @@ const WHEN_TEXT_THAI: Partial<Record<EventTiming, string>> = {
   [EventTiming.Immediate]: "ทันที"
 };
 
-export const DAY_NAMES_THAI: Record<string, string> = {
-  mon: "วันจันทร์",
-  tue: "วันอังคาร",
-  wed: "วันพุธ",
-  thu: "วันพฤหัสบดี",
-  fri: "วันศุกร์",
-  sat: "วันเสาร์",
-  sun: "วันอาทิตย์"
-};
+export const DAY_NAMES_THAI: Record<string, string> = THAI_DAY_NAMES;
 
 const TH_TIMES_PER_DAY: Record<number, string> = {
   1: "วันละครั้ง",
@@ -916,10 +985,11 @@ function formatDoseThaiShort(dose: CanonicalDoseExpr | undefined): string | unde
     }
   }
   if (dose.value !== undefined) {
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     if (dose.unit) {
-      return `${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "short")}`;
+      return `${quantity} ${formatUnitThai(dose.unit, dose.value, "short")}`;
     }
-    return stripTrailingZero(dose.value);
+    return quantity;
   }
   return undefined;
 }
@@ -961,10 +1031,11 @@ function formatDoseThaiLong(dose: CanonicalDoseExpr | undefined): string | undef
     }
   }
   if (dose.value !== undefined) {
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     if (dose.unit) {
-      return `ครั้งละ ${stripTrailingZero(dose.value)} ${formatUnitThai(dose.unit, dose.value, "long")}`;
+      return `ครั้งละ ${quantity} ${formatUnitThai(dose.unit, dose.value, "long")}`;
     }
-    return `ครั้งละ ${stripTrailingZero(dose.value)}`;
+    return `ครั้งละ ${quantity}`;
   }
   return undefined;
 }
@@ -986,9 +1057,10 @@ function formatDoseThaiPerTarget(dose: CanonicalDoseExpr | undefined): string | 
     }
   }
   if (dose.value !== undefined) {
+    const quantity = quantityComparatorText(dose.comparator, "th") + stripTrailingZero(dose.value);
     return dose.unit
-      ? `${stripTrailingZero(dose.value)} ${dose.unit.toLowerCase() === "spray" ? "ครั้ง" : formatUnitThai(dose.unit, dose.value, "long")}`
-      : stripTrailingZero(dose.value);
+      ? `${quantity} ${dose.unit.toLowerCase() === "spray" ? "ครั้ง" : formatUnitThai(dose.unit, dose.value, "long")}`
+      : quantity;
   }
   return undefined;
 }
@@ -1061,6 +1133,7 @@ function describeAlternateEventCadenceThai(
 ): string | undefined {
   if (
     schedule?.period !== 2 || schedule.periodUnit !== FhirPeriodUnit.Day ||
+    (schedule.periodMax !== undefined && schedule.periodMax !== 2) ||
     schedule.when?.length !== 1 || schedule.frequency !== undefined || schedule.frequencyMax !== undefined
   ) return undefined;
   if (schedule.when[0] === EventTiming.Night) return "วันเว้นคืน";
@@ -1076,12 +1149,20 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
+  const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
+  const countPrefix = frequency !== undefined &&
+    (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
+    ? frequencyMax !== undefined && frequencyMax !== frequency
+      ? `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง `
+      : `${stripTrailingZero(frequency)} ครั้ง `
+    : frequencyMax !== undefined && frequency === undefined
+      ? `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง ` : "";
 
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
     periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1)
+    (!period || period === 1) && !rangedPeriod
   ) {
     if (frequency === 1 && frequencyMax === 1) {
       return "วันละครั้ง";
@@ -1091,31 +1172,37 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     }
     return `วันละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
   }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
+  if (frequency === undefined && frequencyMax !== undefined &&
+      periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
+    return `วันละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
+  }
+  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
     return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
     }
-    return `ทุก ${stripTrailingZero(period)} นาที`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} นาที`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
     }
-    return `ทุก ${stripTrailingZero(period)} ชั่วโมง`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} ชั่วโมง`;
   }
-  if (periodUnit === FhirPeriodUnit.Day && period && period !== 1) {
-    if (period === 2 && (!periodMax || periodMax === 2)) {
+  if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
+    if (!countPrefix && period === 2 && (!periodMax || periodMax === 2)) {
       return "วันเว้นวัน";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} วัน`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} วัน`;
     }
-    return `ทุก ${stripTrailingZero(period)} วัน`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} วัน`;
   }
   if (periodUnit === FhirPeriodUnit.Week && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `สัปดาห์ละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
     if (
       period === 1 && (!periodMax || periodMax === 1) &&
       frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency
@@ -1134,11 +1221,13 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "สัปดาห์ละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
     }
-    return `ทุก ${stripTrailingZero(period)} สัปดาห์`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} สัปดาห์`;
   }
   if (periodUnit === FhirPeriodUnit.Month && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `เดือนละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
     if (period === 1 && (!periodMax || periodMax === 1)) {
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `เดือนละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
@@ -1149,11 +1238,13 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "เดือนละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
     }
-    return `ทุก ${stripTrailingZero(period)} เดือน`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} เดือน`;
   }
   if (periodUnit === FhirPeriodUnit.Year && period) {
+    if (frequency === undefined && frequencyMax !== undefined &&
+        period === 1 && (!periodMax || periodMax === 1)) return `ปีละไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
     if (period === 1 && (!periodMax || periodMax === 1)) {
       if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency) {
         return `ปีละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
@@ -1163,9 +1254,9 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "ปีละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
+      return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
     }
-    return `ทุก ${stripTrailingZero(period)} ปี`;
+    return `${countPrefix}ทุก ${stripTrailingZero(period)} ปี`;
   }
   if (timingCode) {
     const map: Record<string, string> = {
@@ -1266,7 +1357,14 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
-function formatEventOffsetQuantityThai(minutes: number): string {
+function describeEventWindowThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  const window = schedule?.eventWindow;
+  return window ? words.eventWindow(WHEN_TEXT_THAI[window.start] ?? window.start, WHEN_TEXT_THAI[window.end] ?? window.end) : undefined;
+}
+
+function formatEventOffsetQuantityThai(minutes: number, maximum?: number): string {
+  if (maximum !== undefined && maximum !== minutes)
+    return `${stripTrailingZero(minutes)}–${stripTrailingZero(maximum)} นาที`;
   const seconds = Number((minutes * 60).toFixed(9));
   if (minutes < 1 && Number.isInteger(seconds)) {
     return `${stripTrailingZero(seconds)} วินาที`;
@@ -1288,6 +1386,10 @@ function formatActivityTimingThai(schedule: CanonicalScheduleExpr | undefined): 
       : resolveMedicationInstructionConcept(timing.activity.text);
     const activity = timing.activity.i18n?.th ?? definition?.i18n?.th ?? timing.activity.text;
     const relation = timing.relation === "before" ? "ก่อน" : "หลัง";
+    if (timing.offsetMin !== undefined && timing.offsetMax !== undefined) {
+      result.push(`${relation}${activity} ${formatEventOffsetQuantityThai(timing.offsetMin, timing.offsetMax)}`);
+      continue;
+    }
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;
     if (value === undefined) {
       result.push(`${relation}${activity}`);
@@ -1309,6 +1411,8 @@ function formatEventOffsetThai(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
+  if (schedule.offsetMin !== undefined && schedule.offsetMax !== undefined)
+    return `${eventText} ${formatEventOffsetQuantityThai(schedule.offsetMin, schedule.offsetMax)}`;
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
   if (value === 0 && schedule.offset !== undefined) return `${eventText}ทันที`;
@@ -1342,16 +1446,7 @@ function collectWhenPhrasesThai(
 }
 
 export function joinWithAndThai(parts: string[]): string {
-  if (!parts.length) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return parts[0];
-  }
-  if (parts.length === 2) {
-    return `${parts[0]} และ ${parts[1]}`;
-  }
-  return `${parts.slice(0, -1).join(", ")} และ ${parts[parts.length - 1]}`;
+  return joinLocalizedList(parts, "และ");
 }
 
 function combineFrequencyAndEventsThai(
@@ -1714,7 +1809,7 @@ function describeCalendarEventsThai(
   if (!events?.length) return undefined;
   const parts: string[] = [];
   for (const event of events) {
-    const formatted = formatIsoCalendarDateThai(event.isoDate);
+    const formatted = event.fhirDateTime ?? formatIsoCalendarDateThai(event.isoDate);
     if (formatted) parts.push(formatted);
   }
   if (!parts.length) return undefined;
@@ -1757,15 +1852,22 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
 }
 
 function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | undefined {
-  if (schedule.duration === undefined || !schedule.durationUnit) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
-  const base = stripTrailingZero(schedule.duration);
-  const qualifier =
-    schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration
-      ? `${base}-${stripTrailingZero(schedule.durationMax)}`
-      : base;
-  return `x${qualifier}${schedule.durationUnit}`;
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit;
+  if (schedule.duration === undefined)
+    return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
+  const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== schedule.durationUnit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
+    return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
+  }
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
+  return `x${lowerBound}${base}${schedule.durationUnit}`;
 }
 
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1782,12 +1884,15 @@ function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined):
 }
 
 function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
-  if (!schedule || schedule.duration === undefined || !schedule.durationUnit) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
   const unit = schedule.durationUnit;
-  const label = (): string => {
-    switch (unit) {
+  const upperUnit = schedule.durationMaxUnit ?? unit;
+  const label = (endpointUnit = unit): string => {
+    switch (endpointUnit) {
+      case FhirPeriodUnit.Second:
+        return "วินาที";
       case FhirPeriodUnit.Minute:
         return "นาที";
       case FhirPeriodUnit.Hour:
@@ -1801,13 +1906,21 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
       case FhirPeriodUnit.Year:
         return "ปี";
       default:
-        return unit;
+        return endpointUnit;
     }
   };
-  if (schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration) {
-    return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ถึง ${stripTrailingZero(schedule.durationMax)} ${label()}`;
+  if (schedule.duration === undefined)
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(upperUnit)}`;
+  const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
+  if (schedule.durationMax !== undefined &&
+      (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
+        schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
+    const lowerUnit = upperUnit !== unit ? " " + label() : "";
+    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(upperUnit)}`;
   }
-  return `เป็นเวลา ${stripTrailingZero(schedule.duration)} ${label()}`;
+  const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
+    (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";
+  return `เป็นเวลา ${lowerBound}${lower} ${label()}`;
 }
 
 function describeAdministrationDurationThai(
@@ -1822,9 +1935,10 @@ function describeAdministrationDurationThai(
       : unit === FhirPeriodUnit.Second ? "วินาที"
         : unit === FhirPeriodUnit.Day ? "วัน" : unit;
   const max = schedule?.administrationDurationMax;
+  const lower = quantityComparatorText(schedule?.administrationDurationComparator, "th") + stripTrailingZero(value);
   return max !== undefined && max !== value
-    ? `${prefix} ${stripTrailingZero(value)} ถึง ${stripTrailingZero(max)} ${label}`
-    : `${prefix} ${stripTrailingZero(value)} ${label}`;
+    ? `${prefix} ${lower} ถึง ${stripTrailingZero(max)} ${label}`
+    : `${prefix} ${lower} ${label}`;
 }
 
 function findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
@@ -1849,7 +1963,9 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
   // we actually need to translate a non-Thai/no-source reason into Thai.
   const sourceText = reason.text?.trim();
   const sourceIsThai = Boolean(sourceText && /[\u0E00-\u0E7F]/u.test(sourceText));
-  let text = sourceIsThai ? sourceText : reason.coding?.display ?? sourceText;
+  const reasonTranslation = reason.i18n?.th?.trim();
+  const translated = reasonTranslation || reason.coding?.i18n?.th?.trim();
+  let text = sourceIsThai ? sourceText : translated ?? reason.coding?.display ?? sourceText;
   const coding = reason.coding;
   if (coding?.code) {
     const definition = findPrnReasonDefinitionByPossiblyPostcoordinatedCoding(
@@ -1871,7 +1987,12 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
       if (sourceIsRegisteredSurface) {
         text = definition?.conditionI18n?.th ?? text;
       }
-    } else {
+    } else if (!translated || translated === definition?.i18n?.th?.trim() ||
+        translated === definition?.conditionI18n?.th?.trim()) {
+      // Parser-produced translations may live on the reason or its coding.
+      // Only a registered noun/condition label takes the condition form
+      // ("ไข้" -> "มีไข้", "ไมเกรน" -> "มีอาการไมเกรน"); different authored
+      // wording remains intact in ordinary, coordinated and onset contexts.
       text = definition?.conditionI18n?.th ?? definition?.i18n?.th ?? text;
     }
   }
@@ -1914,7 +2035,7 @@ function formatAsNeededThai(
   return reason ? `${lead}${reason}` : `${lead}จำเป็น`;
 }
 
-function formatShortThai(clause: CanonicalSigClause): string {
+function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THAI_COURSE): string {
   const schedule = scheduleOf(clause);
   const parts: string[] = [];
   const dose = formatDoseThaiShort(clause.dose);
@@ -1930,6 +2051,10 @@ function formatShortThai(clause: CanonicalSigClause): string {
     }
   } else if (clause.route?.text) {
     parts.push(clause.route.text);
+  }
+  if (clause.site) {
+    const site = formatSiteThai(clause, resolveRouteGrammarThai(clause));
+    if (site) parts.push(site);
   }
   const timing = describeFrequencyThai(schedule);
   if (timing) {
@@ -1950,6 +2075,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
   if (events.length) {
     parts.push(events.join(" "));
   }
+  if (schedule.activityTiming?.length) parts.push(...formatActivityTimingThai(schedule));
+  const eventWindow = describeEventWindowThai(schedule, words);
+  if (eventWindow) parts.push(eventWindow);
   if (schedule.timeOfDay?.length) {
     const times: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -1969,7 +2097,7 @@ function formatShortThai(clause: CanonicalSigClause): string {
     parts.push(days.join(",") + (ordinal === undefined ? "" : ordinal === -1 ? "สุดท้าย" : `ครั้งที่${ordinal}`));
   }
   if (schedule.calendarEvents?.length) {
-    parts.push(`@${schedule.calendarEvents.map((event) => event.isoDate).join(",")}`);
+    parts.push(`@${schedule.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate).join(",")}`);
   }
   if (schedule.boundsStart) {
     parts.push(`ตั้งแต่${schedule.boundsStart}`);
@@ -1984,9 +2112,10 @@ function formatShortThai(clause: CanonicalSigClause): string {
   }
   if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
+    const lower = (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
     const duration = max !== undefined && max !== schedule.administrationDuration
-      ? `${stripTrailingZero(schedule.administrationDuration)}-${stripTrailingZero(max)}`
-      : stripTrailingZero(schedule.administrationDuration);
+      ? `${lower}-${stripTrailingZero(max)}`
+      : lower;
     parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
   }
   const durationShort = formatDurationShortThai(schedule);
@@ -2050,12 +2179,13 @@ function thaiIntegratedAdministrationQualifier(
 
 function formatLongThai(
   clause: CanonicalSigClause,
-  options?: TimingSummaryOptions
+  options?: TimingSummaryOptions,
+  words: CourseLanguage = THAI_COURSE
 ): string {
   if (
     options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
-    clause.instructionGraph.sourceText.trim()
+    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
@@ -2112,6 +2242,8 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
+  const eventWindowPart = describeEventWindowThai(schedule, words);
+  let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -2126,7 +2258,8 @@ function formatLongThai(
       timeStrings.push(`${displayHours}:${displayMinutes}`);
     }
     if (timeStrings.length) {
-      eventParts.push(`เวลา ${timeStrings.join(", ")}`);
+      clockPart = `เวลา ${timeStrings.join(", ")}`;
+      eventParts.push(clockPart);
     }
   }
   const timing = combineFrequencyAndEventsThai(schedule, frequencyPart, eventParts, options);
@@ -2181,6 +2314,7 @@ function formatLongThai(
   if (timing.event) {
     segments.push(timing.event);
   }
+  if (eventWindowPart) segments.push(eventWindowPart);
   for (const activityTiming of formatActivityTimingThai(schedule)) {
     segments.push(activityTiming);
   }
@@ -2226,10 +2360,10 @@ function formatLongThai(
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   const richPrimaryGraphAction = options?.realizationMode === "roundtrip"
-    ? instructionGraphRoundTripPrimaryAction(clause)
+    ? instructionGraphRoundTripPrimaryAction(clause) ?? instructionGraphRichPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeInstructionAction(richPrimaryGraphAction, "th")
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options)
     : undefined;
   const richPrimaryHasSite = Boolean(
     richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
@@ -2257,6 +2391,8 @@ function formatLongThai(
     if (richRoutePart) graphRegimenTail.push(richRoutePart);
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
+    else if (clockPart) graphRegimenTail.push(clockPart);
+    if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
@@ -2340,6 +2476,7 @@ function formatLongThai(
   const graphRealizationOptions = {
     includeWarnings: true,
     omitCanonicalAdministration: clause,
+    instructionActionMap: options?.instructionActionMap,
     preferSourceText: roundTrip,
     roundtripSafe: roundTrip,
     omitSourceTexts: graphRealizationOmissions
@@ -2472,13 +2609,14 @@ function formatLongThai(
       arg.quantity?.value === clause.dose?.value &&
       arg.quantity?.range?.low === clause.dose?.range?.low &&
       arg.quantity?.range?.high === clause.dose?.range?.high &&
-      arg.quantity?.unit === clause.dose?.unit
+      arg.quantity?.unit === clause.dose?.unit &&
+      arg.quantity?.comparator === clause.dose?.comparator
     )
   ));
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||

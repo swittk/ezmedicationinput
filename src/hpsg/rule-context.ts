@@ -11,7 +11,7 @@ import {
   MERIDIEM_TOKENS,
   POST_MERIDIEM_TOKENS
 } from "./lexical-classes";
-import { HpsgLexicalRule } from "./signature";
+import { HpsgLexicalRule, HpsgSign } from "./signature";
 import { HpsgProjectionDeps } from "./projection";
 import { HpsgUnificationContext } from "./unification";
 
@@ -23,8 +23,16 @@ export interface HpsgClauseContext {
   limit: number;
   deps: HpsgProjectionDeps & HpsgUnificationContext;
   clinicalCache: {
+    /** Existing lexical matches requested early by instruction body lookahead. */
+    quantityLookahead?: Map<number, HpsgSign[]>;
     medicationGuardScanned?: true;
     medicationGuard?: ParsedMedicationGuard;
+    /** Tokens already owned by a dimensional rate constituent. Site/advice
+     * fallbacks reuse this fact instead of treating a qualified rate as prose. */
+    rateTokenIndices?: Set<number>;
+    /** A recognized per-time expression still owns its numeral when no rate
+     * head licenses it. Scalar-dose fallback must not detach that numeral. */
+    unlicensedRateTokenIndices?: Set<number>;
   };
   project?: boolean;
 }

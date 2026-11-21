@@ -5,11 +5,11 @@
  * value without introducing a production compatibility API.
  */
 import { parseSig as parseR6, parseSigAsync as parseR6Async } from "../../src/index";
-import type { FhirDosage, FhirR6DosageDetails, ParseBatchResult, ParseOptions } from "../../src/types";
+import type { FhirDosage, FhirR6DosageInstruction, ParseBatchResult, ParseOptions } from "../../src/types";
 
 export type R5ParserTestResult = Omit<ParseBatchResult, "fhir" | "course"> & {
   fhir: FhirDosage;
-  dosageDetails: FhirR6DosageDetails;
+  dosageDetails: FhirR6DosageInstruction;
 };
 
 function forHistoricalAssertions(value: ParseBatchResult): R5ParserTestResult {

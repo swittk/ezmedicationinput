@@ -79,6 +79,7 @@ function applySchedule(
   if (schedule.treatmentStartOffsetDays !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.treatmentStartOffsetDays = schedule.treatmentStartOffsetDays;
+    target.phaseStartReference = schedule.phaseStartReference;
   }
   if (schedule.timingReference !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
@@ -557,6 +558,11 @@ export function projectHpsgSignToState(
       if (clinical.status === "resolved" && clinical.projectedDose) {
         state.dose = clinical.projectedDose.value;
         state.unit = clinical.projectedDose.unit;
+        // The setters above create the resolved scalar dose. Its authored
+        // qualifier belongs to that amount, not just the nonclinical path.
+        const comparator = clinical.projectedDose.comparator ?? dose.comparator;
+        if (comparator !== undefined && state.primaryClause.dose)
+          state.primaryClause.dose.comparator = comparator;
       } else {
         // A rate or unresolved expression is not a scalar medication dose.
         delete state.primaryClause.dose;
@@ -570,6 +576,9 @@ export function projectHpsgSignToState(
       }
       if (dose.unit !== undefined) {
         state.unit = dose.unit;
+      }
+      if (dose.comparator !== undefined) {
+        (state.primaryClause.dose ??= {}).comparator = dose.comparator;
       }
     }
   }
@@ -586,6 +595,7 @@ export function projectHpsgSignToState(
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     target.administrationDuration = clinicalDuration.value;
     target.administrationDurationUnit = clinicalDuration.unit;
+    target.administrationDurationComparator = clinicalDuration.comparator;
     // Duration qualifies each infusion. It is never regimen boundsDuration;
     // a single-occurrence count is only appropriate without a recurrence.
     // Keep a separately owned course duration (for example, daily for three

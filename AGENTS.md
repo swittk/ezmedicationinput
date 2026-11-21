@@ -1,3 +1,12 @@
+# PR #14 OWNER SCOPE CORRECTION — 2026-11-18
+
+**STOP public/native editing API work.** The owner did not request an EZMED editCanonicalCourse editor. Remove its public export, the callback-based draft/clone/deep-comparison machinery (src/canonical/edit-course.ts), its README use example, and editor-only tests/hardening. Do not replace it with a renamed editor, mutation wrapper, defensive validation, freezing, or another internal API. The canonical model is an implementation detail with NO caller-misuse support obligation. Internal helpers can change freely; no backward-compatibility or footgun protection required.
+
+**CONTINUE real correctness work already in progress.** This instruction does NOT permit clinically wrong parsing/formatting, stale source overriding current clinical facts, erased R5/R6 fields, incorrect dosage/route/time/laterality/limits, or incorrect scheduling/supply. Maintain import/export data integrity and existing R5 external interchange / current R6 interchange. Externally modified FHIR is a supported input state; reading its current values and preserving unrelated data is required, but EZMED need not offer the editing workflow that generated it.
+
+**Review gate:** Reject CodeRabbit comments existing solely because editCanonicalCourse was advertised, or that harden against direct mutation/misuse of unstable CanonicalCourse objects. Continue bounded related-family fixes for demonstrated correct clinical results on valid inputs, with performance discipline. Never add expensive array scans, recursive defensive equality, or deep clones just to accommodate careless users of an internal type. No additional full review requests. Preserve in-progress worker changes and do not alter downstream applications. This owner instruction overrides stale PR descriptions and edit-API examples.
+
+---
 # EZMedInput — mandatory product contract for all coding agents and reviewers
 
 **READ THIS FIRST before any audit, feature, fix, fuzz test, or CodeRabbit response.**

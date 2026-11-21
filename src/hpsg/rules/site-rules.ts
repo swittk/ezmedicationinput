@@ -42,6 +42,7 @@ import {
   INSTRUCTION_START_WORDS,
   NON_OCULAR_DOSE_UNITS,
   NON_SITE_ANCHORED_PHRASES,
+  nextDayOnsetAt,
   OCULAR_ROUTE_CODES,
   PRN_LEADS,
   PRN_STANDALONE_REASON_LEADS,
@@ -501,6 +502,13 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const signs: HpsgSign[] = [];
     const lower = normalizeTokenLower(token);
+    // A licensed "at ~100 mL/hr" rate is not an unknown body site.
+    // Reuse the preceding clinical lexical contribution; no extra scan.
+    if (context.clinicalCache.rateTokenIndices?.has(token.index)) return signs;
+    // The complete licensed NEXT + day/daypart nominal owns its modifier.
+    // Outside that constituent, ordinary site anchoring remains available.
+    const nextDay = nextDayOnsetAt(context.tokens, start, context.limit);
+    if (nextDay && tokensAvailable(context, start, nextDay.tokenEnd - start)) return signs;
     const relativeMarker = siteRelativeMarkerSign(token, lower);
     // Thai ที่ can introduce either a relative site predicate or a plain
     // administration site. Keep both daughters for the chart to select.

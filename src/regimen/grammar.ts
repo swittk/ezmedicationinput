@@ -77,13 +77,21 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
   )
 );
 
+/** An explicit later number may omit the repeated dose unit after THEN.
+ * The typed predecessor supplies the unit; the recipient keeps its own
+ * amount and comparator. Independent action heads require an explicit unit. */
+const hasContinuationDoseUnit = (f: BoundaryFacts): boolean =>
+  f.explicitRightUnit || f.site.kind === 'sequence' && !f.right.method &&
+    f.right.hasDose && !f.right.clause.dose?.unit &&
+    (Boolean(f.left.clause.dose?.unit) || f.inheritedAdministration && f.left.hasDose && !f.left.method);
+
 const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),
     constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose),
-    constraint('right.explicitUnit', f => f.explicitRightUnit),
+    constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
     constraint('left.hasSameDayAnchor', f => hasSameDayAnchor(f.left.clause)),
     constraint('right.hasSameDayAnchor', f => hasSameDayAnchor(f.right.clause)),
     constraint('left.omitsPhaseBoundary', f => !hasPhaseBoundary(f.left.clause)),
@@ -409,7 +417,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.dose-continuation', priority: 700, relation: 'coordination',
     semanticLicense: 'dose-continuation', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
-    constraint('right.explicitUnit', f => f.explicitRightUnit), constraint('left.hasDose', f => f.left.hasDose),
+    constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit), constraint('left.hasDose', f => f.left.hasDose),
     constraint('right.hasDose', f => f.right.hasDose), constraint('right.not-after-first-administration', f => !f.rightAfterFirstAdministration),
     constraint('right.schedule-method-target-or-adjunct', f => f.right.hasSchedule || f.right.method ||
       f.right.hasTargets || f.right.prn || hasAdministrationAdjunct(f.right.clause))
@@ -438,7 +446,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     constraint('connector.sequence', f => f.site.kind === 'sequence'),
     constraint('left.complete', f => f.left.complete),
     constraint('right.complete', f => f.right.complete),
-    constraint('left.dimensionalQuantity', f => Boolean(f.left.clause.clinicalQuantity)),
+    constraint('left.explicit-quantity', f => f.left.hasDose || Boolean(f.left.clause.clinicalQuantity)),
     constraint('right.dimensionalQuantity', f => Boolean(f.right.clause.clinicalQuantity)),
     constraint('right.not-procedural', f => !f.rightHasProcedure)
   ] },

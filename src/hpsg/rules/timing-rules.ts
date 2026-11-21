@@ -48,6 +48,9 @@ import {
   DURATION_LEAD_TOKENS,
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
+  nextDayOnsetAt,
+  isEndBoundDaypartAt,
+  NEXT_DAY_SCHEDULE_RULE,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -1498,6 +1501,7 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const when = EVENT_TIMING_TOKENS[lower];
     if (when) {
+      if (isEndBoundDaypartAt(context.tokens, start)) return [];
       // The same immediate lexeme cannot simultaneously schedule the whole
       // medication STAT and modify an explicit relative event. A typed
       // before/after + event daughter owns that atom compositionally.
@@ -2937,6 +2941,25 @@ export function treatmentRelativePeriodStartAt(tokens: readonly Token[], start: 
     ? { tokenEnd: header.tokenEnd, offsetDays: header.offsetDays } : undefined;
 }
 
+/** NEXT selects a day/daypart relative to the preceding administration phase.
+ * The lexical daughter owns its whole phrase and retains the relation in its
+ * typed evidence; regimen composition resolves the local day displacement. */
+function nextDayScheduleSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
+  const onset = nextDayOnsetAt(context.tokens, start, context.limit);
+  if (!onset) return undefined;
+  const members = tokensAvailable(context, start, onset.tokenEnd - start);
+  if (!members) return undefined;
+  const event = EVENT_TIMING_TOKENS[normalizeTokenLower(context.tokens[onset.headIndex])];
+  return lexicalSign({
+    type: "schedule-sign", rule: NEXT_DAY_SCHEDULE_RULE, tokens: members,
+    synsem: { head: { schedule: {
+      treatmentStartOffsetDays: 1, phaseStartReference: "treatment-day-start",
+      ...(event ? { when: [event] } : {})
+    } }, valence: {}, cont: { clauseKind: "administration" } },
+    score: 60 + members.length
+  });
+}
+
 function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number): HpsgSign | undefined {
   const header = treatmentRelativePeriodHeaderAt(context.tokens, start);
   if (!header) return undefined;
@@ -2946,6 +2969,7 @@ function treatmentRelativePeriodSign(context: HpsgClauseContext, start: number):
     type: "schedule-sign", rule: "hpsg.lex.schedule.treatmentRelativePeriod", tokens: members,
     synsem: { head: { schedule: {
       treatmentStartOffsetDays: header.offsetDays,
+      phaseStartReference: "treatment-day-start",
       ...(header.bounded ? { duration: 1, durationUnit: header.unit } : {})
     } }, valence: {}, cont: { clauseKind: "administration" } },
     score: 52 + members.length
@@ -3078,6 +3102,8 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     }
     const lower = normalizeTokenLower(token);
     const signs: HpsgSign[] = [];
+    const nextDay = nextDayScheduleSign(context, start);
+    if (nextDay) return [nextDay];
     const relativePeriod = treatmentRelativePeriodSign(context, start);
     if (relativePeriod) return [relativePeriod];
     const ordinalWeekStage = ordinalWeekStageHeaderAt(context.tokens, start);

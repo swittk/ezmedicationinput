@@ -64,6 +64,9 @@ const SUGGESTION_LEXEME_CACHE = new Map<string, {
   lexemes: ReturnType<typeof listMedicationLocaleLexemes>;
   /** Lazily sorted lexical equivalence classes for repeated trajectory lookups. */
   byCanonical: Map<string, ReturnType<typeof listMedicationLocaleLexemes>>;
+  sortedCanonical: Set<string>;
+  relations: ReturnType<typeof listMedicationLocaleLexemes>;
+  events: ReturnType<typeof listMedicationLocaleLexemes>;
 }>();
 function suggestionLexemes(locale: string) {
   const key = baseLanguageTag(locale) ?? locale.toLowerCase();
@@ -71,8 +74,17 @@ function suggestionLexemes(locale: string) {
   const cached = SUGGESTION_LEXEME_CACHE.get(key);
   if (cached?.revision === revision) return cached.lexemes;
   const lexemes = listMedicationLocaleLexemes(locale);
-  SUGGESTION_LEXEME_CACHE.set(key, { revision, lexemes,
-    byCanonical: new Map() });
+  const byCanonical=new Map<string,typeof lexemes>(),relations:typeof lexemes=[],events:typeof lexemes=[];
+  // Build stable lexical membership once per registered lexicon revision.
+  // Looking up ten completions must not rescan the full vocabulary ten times.
+  for(const lexeme of lexemes){
+    const canonical=normalizeKey(lexeme.canonical);
+    let group=byCanonical.get(canonical);if(!group)byCanonical.set(canonical,group=[]);group.push(lexeme);
+    if(WORKFLOW_ACTION_RELATION_LEADS.has(lexeme.canonical))relations.push(lexeme);
+    if(EVENT_TIMING_TOKENS[lexeme.canonical]!==undefined)events.push(lexeme);
+  }
+  relations.sort((a,b)=>b.surface.length-a.surface.length);
+  SUGGESTION_LEXEME_CACHE.set(key, { revision, lexemes,byCanonical,sortedCanonical:new Set(),relations,events });
   return lexemes;
 }
 const DEFAULT_SUGGESTION_ACTIONS = listMedicationInstructionActions();
@@ -398,8 +410,10 @@ function defaultPrnReasonsForLocale(locale: string): string[] {
 }
 
 function buildPrnReasons(options?: SuggestSigOptions): string[] {
-  const reasons = new Set<string>();
   const locale = baseLanguageTag(options?.locale) ?? "en";
+  if(!options?.prnReasons?.length&&!options?.prnReasonMap&&!options?.symptomMap)
+    return defaultPrnReasonsForLocale(locale);
+  const reasons = new Set<string>();
   const adapter = getSuggestLocaleAdapter(locale);
   const add = (reason: string | undefined) => {
     if (!reason) return;
@@ -565,21 +579,20 @@ function directLocalePrnReasonSuggestions(
   const adapter = getSuggestLocaleAdapter(locale);
   return adapter.directPrnCompletion(
     normalizeSpacing(input),
-    buildPrnReasons({ ...options, locale }),
+    buildPrnReasons({ ...options, locale }).slice(),
     limit
   );
 }
 
 function localeLexemeByCanonical(locale: string, canonical: string, preferred?: string): string | undefined {
-  const lexemes = suggestionLexemes(locale);
+  suggestionLexemes(locale);
   const localeKey = baseLanguageTag(locale) ?? locale.toLowerCase();
   const cache = SUGGESTION_LEXEME_CACHE.get(localeKey)!;
   const canonicalKey = normalizeKey(canonical);
-  let matches = cache.byCanonical.get(canonicalKey);
-  if (!matches) {
-    matches = lexemes.filter(lexeme => normalizeKey(lexeme.canonical) === canonicalKey)
-      .sort((left, right) => left.surface.length - right.surface.length);
-    cache.byCanonical.set(canonicalKey, matches);
+  const matches = cache.byCanonical.get(canonicalKey);
+  if(!matches)return undefined;
+  if(!cache.sortedCanonical.has(canonicalKey)){
+    matches.sort((left,right)=>left.surface.length-right.surface.length);cache.sortedCanonical.add(canonicalKey);
   }
   if (preferred) {
     const exact = matches.find((lexeme) => lexeme.surface === preferred);
@@ -818,7 +831,14 @@ function directRouteSuggestions(
   return suggestions.length ? suggestions : undefined;
 }
 
+const ENGLISH_RELATION_SURFACES:string[]=[];
+const ENGLISH_RELATION_MEMBERSHIP=new Set<string>();
+for(const surface of WORKFLOW_ACTION_RELATION_LEADS)if(surface.length>2){
+  ENGLISH_RELATION_SURFACES.push(surface);ENGLISH_RELATION_MEMBERSHIP.add(surface);
+}
+let naturalEventSurfaces:string[]|undefined;
 function naturalEventCompletionSurfaces(): string[] {
+  if(naturalEventSurfaces)return naturalEventSurfaces;
   const result: string[] = [];
   const seen = new Set<string>();
   const add = (surface: string) => {
@@ -835,7 +855,7 @@ function naturalEventCompletionSurfaces(): string[] {
   for (const surface of WHEN_TOKENS) {
     if (surface.length > 2) add(surface);
   }
-  return result;
+  return naturalEventSurfaces=result;
 }
 
 function relationAcceptsEventSurface(relation: string, event: string): boolean {
@@ -856,7 +876,7 @@ function directEnglishRelationSuggestions(
   const normalized = normalizeSpacing(input);
   const words = normalized.split(" ");
   if (!words.length) return undefined;
-  const relations = [...WORKFLOW_ACTION_RELATION_LEADS].filter((surface) => surface.length > 2);
+  const relations = ENGLISH_RELATION_SURFACES;
   const events = naturalEventCompletionSurfaces();
   const suggestions: string[] = [];
   const seen = new Set<string>();
@@ -867,7 +887,7 @@ function directEnglishRelationSuggestions(
     suggestions.push(candidate);
   };
 
-  if (words.length >= 2 && relations.indexOf(words[words.length - 2].toLowerCase()) !== -1) {
+  if (words.length >= 2 && ENGLISH_RELATION_MEMBERSHIP.has(words[words.length - 2].toLowerCase())) {
     const relation = words[words.length - 2].toLowerCase();
     const partial = words[words.length - 1].toLowerCase();
     const base = words.slice(0, -2).join(" ");
@@ -902,11 +922,9 @@ function directCompactRelationSuggestions(
   const localeAdapter = getSuggestLocaleAdapter(locale);
   if (!localeAdapter.compactRelationSuggestions) return undefined;
   const normalized = normalizeSpacing(input);
-  const lexemes = suggestionLexemes(locale);
-  const relations = lexemes
-    .filter((lexeme) => WORKFLOW_ACTION_RELATION_LEADS.has(lexeme.canonical))
-    .sort((left, right) => right.surface.length - left.surface.length);
-  const eventLexemes = lexemes.filter((lexeme) => EVENT_TIMING_TOKENS[lexeme.canonical] !== undefined);
+  suggestionLexemes(locale);
+  const cache=SUGGESTION_LEXEME_CACHE.get(baseLanguageTag(locale)??locale.toLowerCase())!;
+  const relations=cache.relations,eventLexemes=cache.events;
   for (const relation of relations) {
     const index = normalized.lastIndexOf(relation.surface);
     if (index < 0) continue;
@@ -974,7 +992,7 @@ function defaultDirectionSuggestions(
     pairs,
     limit,
     (canonical, preferred) => localeLexemeByCanonical(locale, canonical, preferred),
-    () => buildPrnReasons({ ...options, locale })
+    () => buildPrnReasons({ ...options, locale }).slice()
   );
 }
 

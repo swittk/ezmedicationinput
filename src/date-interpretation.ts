@@ -91,7 +91,16 @@ function matchedDateRelationLead(
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
   const id = resolver.id.trim().toLowerCase();
   if (!id) return;
-  DATE_RESOLVERS.set(id, { ...resolver, id });
+  // Registration fixes the descriptor associated with this ID. Reusing a
+  // caller's descriptor for another registration must not change this entry.
+  const normalized: MedicationDateResolver = Object.assign({}, resolver);
+  normalized.id = id;
+  const prototype = Object.getPrototypeOf(resolver);
+  if (prototype !== Object.prototype && prototype !== null) {
+    normalized.resolveYear = resolver.resolveYear.bind(resolver);
+    normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
+  }
+  DATE_RESOLVERS.set(id, normalized);
 }
 
 /** Return the currently registered calendar resolver ids. */
@@ -570,14 +579,12 @@ export function findMedicationDateListSpans(
     }
   }
   output.sort((left, right) => left.start - right.start || right.end - left.end);
-  return output.filter((span, index) =>
-    !output.some((other, otherIndex) =>
-      otherIndex !== index &&
-      other.start <= span.start &&
-      other.end >= span.end &&
-      (other.start < span.start || other.end > span.end)
-    )
-  );
+  // Sorted by start then descending end; any containing span precedes its
+  // child. One prefix maximum replaces an O(spans²) containment search.
+  const maximal:MedicationDateListMatch[]=[];
+  let greatestEnd=-1;
+  for(const span of output){if(span.end<=greatestEnd)continue;maximal.push(span);greatestEnd=span.end;}
+  return maximal;
 }
 
 /** Resolve a date list beginning exactly at the supplied source offset. */

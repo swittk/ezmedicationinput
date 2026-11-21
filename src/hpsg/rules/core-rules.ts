@@ -1,5 +1,5 @@
 import lexicalClasses from "../lexical-classes.json";
-import { timingLexicalRule, timeOfDayRule } from "./timing-rules";
+import { timingLexicalRule, timeOfDayRule, isScheduleLead } from "./timing-rules";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -8,7 +8,7 @@ import {
   normalizeBodySiteKey,
   ROUTE_TEXT
 } from "../../maps";
-import { getRouteMeaning } from "../../lexer/meaning";
+import { getRouteMeaning, getDayOfWeekMeaning } from "../../lexer/meaning";
 import { parseAdditionalInstructions } from "../../advice";
 import { LexKind } from "../../lexer/token-types";
 import { Token } from "../../parser-state";
@@ -31,11 +31,17 @@ import {
   BODY_SITE_PARTITIVE_CONNECTORS,
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
+  EVENT_PREPOSITIONS,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
   COUNT_CONNECTOR_WORDS_DATA,
   SUPPLEMENTAL_DOSE_MODIFIERS,
+  DOSE_COMPARATOR_PREFIXES,
+  DOSE_COMPARATOR_SYMBOLS,
+  doseComparatorNumberAt,
+  millionDoseNumberAt,
+  compactMillionDoseNumber,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
   DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS,
@@ -1036,6 +1042,9 @@ function numericTokenIsProcedureLocalQuantity(
     const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
     for (const arg of frame.args) {
       if (!arg.span || token.sourceStart < arg.span.start || token.sourceEnd > arg.span.end) continue;
+      // A source-spanned quantity on a complement is owned by that daughter,
+      // even when the action head may independently define a medication dose.
+      if (arg.quantity && arg.role !== AdviceArgumentRole.Amount) return true;
       if (arg.role === AdviceArgumentRole.Duration) return true;
       if (arg.role === AdviceArgumentRole.Amount && (!definition?.definesDose ||
           frame.args.some(complement => complement.role === AdviceArgumentRole.Time &&
@@ -1077,6 +1086,48 @@ export function perTargetCountDoseRule(): HpsgLexicalRule<HpsgClauseContext> {
   });
 }
 
+function comparativeDoseAt(
+  context: HpsgClauseContext, start: number, lower: string
+): HpsgSign | undefined {
+  const qualified = doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+  if (!qualified) return undefined;
+  const { comparator, value, numericIndex, rawUnit } = qualified;
+  const compactUnit = rawUnit ? normalizeUnit(rawUnit, context.options) : undefined;
+  if (rawUnit && !compactUnit) return undefined;
+  const unit = compactUnit ? undefined : unitAfter(context, numericIndex + 1);
+  // A scheduled later phase may omit its repeated unit. A bare temporal
+  // noun ("approximately one week") or unknown object is not a dose: the
+  // ordinary typed timing or route lead must license the omitted dose unit.
+  if (!compactUnit && !unit) {
+    const next = context.tokens[numericIndex + 1];
+    if (!next || mapIntervalUnit(normalizeTokenLower(next))) return undefined;
+    // Either typed timing or an explicit route licenses an omitted dose unit.
+    // The ordinary route matcher owns multi-word and institution vocabulary;
+    // an opaque suffix after a recognized route cannot erase the qualifier.
+    const weekday = context.tokens[numericIndex + 2];
+    const weekdayLead = EVENT_PREPOSITIONS.has(normalizeTokenLower(next)) &&
+      numericIndex + 2 < context.limit && weekday && !context.state.consumed.has(weekday.index) &&
+      getDayOfWeekMeaning(weekday);
+    if (!weekdayLead && !isScheduleLead(context, numericIndex + 1) &&
+        !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
+  }
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  const tokens = tokensAvailable(context, start, numericIndex + 1 - start);
+  if (!tokens) return undefined;
+  const attached = unit ? [...tokens, ...unit.tokens] : tokens;
+  return lexicalSign({
+    type: "dose-sign",
+    rule: "hpsg.lex.dose.comparativeQuantity",
+    tokens: attached,
+    synsem: {
+      head: { dose: { value, unit: compactUnit ?? unit?.unit, comparator } },
+      valence: {},
+      cont: { clauseKind: "administration" }
+    },
+    score: 19 + attached.length
+  });
+}
+
 export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.dose", (context, start) => {
     const tokens = tokensAvailable(context, start, 1);
@@ -1084,6 +1135,8 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (!tokens || !token) {
       return [];
     }
+    if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+        context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
     const supplementalDose = supplementalDoseAfter(context, start);
     if (supplementalDose) return [supplementalDose];
     if (quantityHasSupplementalPrefix(context.tokens, start)) return [];
@@ -1100,6 +1153,13 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       token.sourceEnd
     )) {
       return [];
+    }
+    // Avoid even constructing a comparator lexical candidate unless the
+    // first token can license one. Ordinary numeric dose signs stay cheap.
+    if (DOSE_COMPARATOR_PREFIXES.has(lower) ||
+        DOSE_COMPARATOR_SYMBOLS[lower] || /^[~≈<>≥≤]/u.test(lower)) {
+      const comparativeDose = comparativeDoseAt(context, start, lower);
+      if (comparativeDose) return [comparativeDose];
     }
     // A qualitative presentation cannot be converted into a fabricated
     // measured length. Preserve its typed product amount as source-backed
@@ -1153,23 +1213,27 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       ? DOSE_FRACTION_DENOMINATOR_WORDS.get(denominatorLower)
       : undefined;
     if (numerator !== undefined && denominatorToken && denominator !== undefined) {
-      const unit = unitAfter(context, start + 2);
+      const fraction = numerator * denominator;
+      const scaled = millionDoseNumberAt(context.tokens, start + 1, context.limit, fraction);
+      const numericEnd = scaled ? scaled.numericIndex + 1 : start + 2;
+      const unit = unitAfter(context, numericEnd);
+      const numberTokens = scaled ? context.tokens.slice(start, numericEnd) : [token, denominatorToken];
       return [
         lexicalSign({
           type: "dose-sign",
           rule: "hpsg.lex.dose.wordFractionNumerator",
-          tokens: unit ? [token, denominatorToken, ...unit.tokens] : [token, denominatorToken],
+          tokens: unit ? [...numberTokens, ...unit.tokens] : numberTokens,
           synsem: {
             head: {
               dose: {
-                value: numerator * denominator,
+                value: scaled?.value ?? fraction,
                 unit: unit?.unit
               }
             },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: unit ? 10 : 5
+          score: scaled && unit ? 19 + numberTokens.length + unit.tokens.length : unit ? 10 : 5
         })
       ];
     }
@@ -1228,8 +1292,29 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
     }
 
-    const millionMatch = lower.match(/^([0-9]+(?:\.[0-9]+)?)m$/);
-    if (millionMatch) {
+    // Ordinary spelled million and comparator-qualified million share
+    // one numeric multiplier; do not issue a fictitious 1-unit dose when
+    // the actual known amount is 1,000,000 units.
+    const wordFraction = numerator === undefined ? DOSE_FRACTION_WORDS.get(lower) : undefined;
+    const millionNumerator = numerator ?? wordFraction;
+    if (millionNumerator !== undefined && Number.isFinite(millionNumerator)) {
+      const millions = millionDoseNumberAt(context.tokens, start, context.limit, millionNumerator);
+      if (millions &&
+          tokensAvailable(context, start, millions.numericIndex + 1 - start)) {
+        const unit = unitAfter(context, millions.numericIndex + 1);
+        if (unit) return [lexicalSign({
+          type: "dose-sign", rule: "hpsg.lex.dose.million",
+          tokens: [...context.tokens.slice(start, millions.numericIndex + 1), ...unit.tokens],
+          synsem: { head: { dose: { value: millions.value, unit: unit.unit } },
+            valence: {}, cont: { clauseKind: "administration" } },
+          score: 19 + millions.numericIndex - start + unit.tokens.length
+        })];
+      }
+    }
+    const lexicalWord = token.canonical ?? token.lower;
+    const millionValue = compactMillionDoseNumber(lexicalWord.startsWith(".")
+      ? lexicalWord.replace(/\.+$/gu, "") : lower);
+    if (millionValue !== undefined) {
       const unit = unitAfter(context, start + 1);
       return [
         lexicalSign({
@@ -1239,7 +1324,7 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
           synsem: {
             head: {
               dose: {
-                value: parseFloat(millionMatch[1]) * 1_000_000,
+                value: millionValue,
                 unit: unit?.unit
               }
             },
@@ -1250,7 +1335,6 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
-    const wordFraction = DOSE_FRACTION_WORDS.get(lower);
     if (wordFraction !== undefined) {
       const unit = unitAfter(context, start + 1);
       return [

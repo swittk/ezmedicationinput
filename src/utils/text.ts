@@ -33,7 +33,15 @@ export function isLoosePhraseSeparatorChar(char: string): boolean {
   );
 }
 
+/** Short lexical keys are pure string facts shared across grammar, site,
+ * symptom and suggestion lookups. Avoid normalizing the same token repeatedly
+ * in one parse. This bounded string cache never retains a parsed object or
+ * changes behavior when custom dictionaries/locale packs are registered. */
+const loosePhraseKeys=new Map<string,string>();
+const LOOSE_KEY_CACHE_LIMIT=4096;
 export function normalizeLoosePhraseKey(value: string): string {
+  const retain=value.length<=128;
+  if(retain){const cached=loosePhraseKeys.get(value);if(cached!==undefined)return cached;}
   const lowered = value.trim().toLowerCase();
   let normalized = "";
   let pendingSpace = false;
@@ -52,5 +60,10 @@ export function normalizeLoosePhraseKey(value: string): string {
     normalized += char;
   }
 
-  return normalized.trim();
+  const result=normalized.trim();
+  if(retain){
+    if(loosePhraseKeys.size>=LOOSE_KEY_CACHE_LIMIT)loosePhraseKeys.delete(loosePhraseKeys.keys().next().value!);
+    loosePhraseKeys.set(value,result);
+  }
+  return result;
 }

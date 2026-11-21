@@ -5,9 +5,9 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
-  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition,
+  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition, FhirPeriodUnit,
   getDosageAlternativeChoice,
-  type FhirDosage, type FhirR6DosageDetails, type EzDosage, type FhirExtension
+  type FhirDosage, type FhirR6DosageInstruction, type EzDosage, type FhirExtension
 } from "../src";
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
@@ -63,7 +63,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("preserves ordinary R5 component extensions without inventing a R6 course modifier", () => {
-    const simple: FhirR6DosageDetails = {
+    const simple: FhirR6DosageInstruction = {
       step: [{ component: [{
         extension: [{ url: "urn:test:ordinary-metadata", valueString: "keep" }],
         modifierExtension: [{ url: "urn:test:ordinary-modifier", valueBoolean: true }],
@@ -186,8 +186,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(imported.fhir.timing).toEqual(original.timing);
       expect(imported.fhir.modifierExtension).toEqual([modifier]);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
-      expect(imported.longText).toContain("1 tablet");
-      const course: FhirR6DosageDetails = {
+      expect(imported.longText).toBe(text);
+      const course: FhirR6DosageInstruction = {
         step: [{ component: [{ ...original }] }]
       };
       const preservedCourse = JSON.parse(JSON.stringify(course));
@@ -293,8 +293,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const initial = calculateTotalUnits({ ...supply, dosage: edited });
     expect(initial.totalUnits).toBe(296);
     edited[3].timing!.repeat!.frequency = 3;
-    // The edited repeat is live data. The older QID code remains recoverable,
-    // but must not contribute four institution clock entries.
+    // Both external facts remain recoverable, but QID and a live TID repeat
+    // conflict. Execution requires resolving that contradiction explicitly.
     const reconciled = toDosageDetails(edited);
     expect(reconciled.step[1].component[1].timing?.repeat?.frequency).toBe(3);
     expect(reconciled.step[1].component[1].timing?.code?.coding?.[0]?.code).toBe("QID");
@@ -302,10 +302,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(reconciled.extension).toContainEqual(expect.objectContaining({
       url: DOSAGE_RECONCILIATION_WARNING_URL
     }));
-    expect(calculateTotalUnits({ ...supply, dosage: edited }).totalUnits).toBe(273);
-    expect(nextDueDoses(edited, {
+    expect(() => calculateTotalUnits({ ...supply, dosage: edited }))
+      .toThrow("The timing code conflicts with the complete repeat recurrence");
+    expect(() => nextDueDoses(edited, {
       ...scheduler, from: "2026-10-27T08:00:00+07:00"
-    }).length).toBeGreaterThan(0);
+    })).toThrow("The timing code conflicts with the complete repeat recurrence");
     delete edited[3].timing!.code;
     edited[3].text = "1 drop OS TID after day 7";
     const updated = toDosageDetails(edited);
@@ -343,10 +344,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       .toEqual(["06:00:00", "10:00:00", "14:00:00", "18:00:00"]);
     const edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
     edited.timing!.repeat!.frequency = 3;
-    const changedWithRetainedCode = nextDueDoses(edited, options);
-    expect(changedWithRetainedCode).toHaveLength(8);
-    expect(changedWithRetainedCode.slice(0, 3).map(v => v.slice(11, 19)))
-      .toEqual(["08:00:00", "14:00:00", "20:00:00"]);
+    expect(() => nextDueDoses(edited, options))
+      .toThrow("The timing code conflicts with the complete repeat recurrence");
     expect(edited.timing?.code?.coding?.[0]?.code).toBe("QID");
     delete edited.timing!.code;
     const changed = nextDueDoses(edited, options);
@@ -390,7 +389,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const after = toDosageDetails(updated);
     expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
     expect(after.renderedInstruction).toBe("2 tablets PO BID");
-    expect(formatSig(after)).toContain("2 tablets");
+    expect(formatSig(after, "long")).toContain("2 tablets");
     const resaved = toFhirR5Dosages(updated);
     const liveInstruction = resaved[0].extension?.find(e =>
       e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension
@@ -412,12 +411,18 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it.each([
-    "apply 1 mL to scalp where affected",
-    "apply 1 mL to scalp where there is hair loss",
-    "1 tab PO BID",
-    "1 drop OU BID",
-    "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID"
-  ])("keeps exact source for an unchanged primary editable projection: %s", (source) => {
+    ["apply 1 mL to scalp where affected", ["Apply 1 mL to the scalp where affected."]],
+    ["apply 1 mL to scalp where there is hair loss", ["Apply 1 mL to the scalp where there is hair loss."]],
+    ["1 tab PO BID", ["Take 1 tablet orally twice daily."]],
+    ["1 drop OU BID", ["Instill 1 drop twice daily in both eyes."]],
+    ["1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID", [
+      "From treatment start until 7 days after treatment start", "Instill 1 drop every 2 hours in the right eye", "Instill 1 drop four times daily in the left eye",
+      "From 7 days after treatment start until 1 month after treatment start",
+      "Instill 1 drop four times daily in the right eye", "Instill 1 drop four times daily in the left eye",
+      "From 1 month after treatment start onward",
+      "Instill 1 drop four times daily in the right eye", "Instill 1 drop twice daily in the left eye",
+    ]],
+  ] as const)("retains exact source and previews current fields for an unchanged projection: %s", (source, expected) => {
     const parsed = parseSig(source);
     const marker = parsed.fhir[0].extension?.find(extension =>
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
@@ -442,7 +447,12 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[]
     );
     expect(unchanged.renderedInstruction).toBe(source);
-    expect(formatSig(unchanged, "long")).toBe(source);
+    const preview = formatSig(unchanged, "long");
+    const complete = expected.length === 1 ? expected[0] :
+      expected[0] + ": " + expected[1] + "; " + expected[2] + ". " +
+      expected[3] + ": " + expected[4] + "; " + expected[5] + ". " +
+      expected[6] + ": " + expected[7] + "; " + expected[8] + ".";
+    expect(preview).toBe(complete);
   });
 
   it.each([
@@ -498,7 +508,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(details.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(2);
     expect(details.step[0].component[0].text).toBe(edited[0].text);
     expect(details.renderedInstruction).toBe(edited[0].text);
-    expect(formatSig(details, "long")).toBe(edited[0].text);
+    expect(formatSig(details, "long")).toBe("Take 2 tablets orally twice daily.");
     expect(details.extension?.find(extension =>
       extension.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension?.find(child =>
       child.url === "instruction")?.valueString).toBe(source);
@@ -589,7 +599,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
 
   it("deletes a component and its local expression without resurrecting either from other rows", () => {
     const original = parseSig(parallel).fhirNext;
-    const edited: FhirR6DosageDetails = JSON.parse(JSON.stringify(original));
+    const edited: FhirR6DosageInstruction = JSON.parse(JSON.stringify(original));
     edited.step[0].component[0].doseAndRate![0].doseExpression = {
       language: "text/fhirpath", expression: "%patient.weight * 0.5"
     };
@@ -636,7 +646,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("matches all unchanged components before positional edits when concurrent rows are swapped", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       renderedInstruction: "One drop in each eye twice daily",
       step: [{ component: [
         {
@@ -646,8 +656,8 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
             reference: { reference: "BodyStructure/right-eye" }
           },
           timing: { repeat: { frequency: 2, period: 1, periodUnit: "d" } },
+          // An expression-only choice is valid R6 and requires retained R5 semantics.
           doseAndRate: [{
-            doseQuantity: { value: 1, unit: "drop" },
             doseExpression: { language: "text/fhirpath", expression: "one right-eye drop" }
           }]
         },
@@ -679,12 +689,13 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(right.id).toBe("right-eye");
     expect(right.site?.reference?.reference).toBe("BodyStructure/right-eye");
     expect(right.doseAndRate?.[0].doseExpression?.expression).toBe("one right-eye drop");
-    expect(right.doseAndRate?.[0].doseQuantity?.value).toBe(1);
+    expect(right.doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(() => fromFhir(restored)).not.toThrow();
     expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
   });
 
   it("retains superseded R6 dose expressions only as inert provenance after a numeric R5 edit", () => {
-    const full: FhirR6DosageDetails = {
+    const full: FhirR6DosageInstruction = {
       renderedInstruction: "Weight-adjusted dose twice daily",
       step: [{ component: [{
         text: "Weight-adjusted dose twice daily",
@@ -728,7 +739,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("preserves exact R6 safety and coded conditions through unrelated R5 edits", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       step: [{ component: [{
         id: "component-id",
         route: { text: "oral" },
@@ -786,7 +797,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("reconciles edited R5 maxima without deleting R6-only safety semantics", () => {
-    const original: FhirR6DosageDetails = {
+    const original: FhirR6DosageInstruction = {
       step: [{ component: [{
         doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         safety: {
@@ -833,7 +844,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
   });
 
   it("does not invent a dose when only an unevaluated R6 expression exists", () => {
-    const details: FhirR6DosageDetails = {
+    const details: FhirR6DosageInstruction = {
       step: [{ component: [{
         text: undefined,
         route: { text: "oral" },
@@ -1062,19 +1073,23 @@ describe("FHIR projection structural comparison hygiene", () => {
     expect(toDosageDetails(reordered)).toEqual(expected);
   });
 
-  it("keeps unknown nested FHIR content isolated without JSON cloning", () => {
+  it("preserves unknown nested FHIR content with immutable-by-contract zero-copy outputs", () => {
     const shared: FhirDosage = {
       doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
       extension: [{ url: "urn:test:unknown", extension: [{ url: "detail", valueString: "retain" }] }]
     };
-    const input: FhirR6DosageDetails = { step: [{ component: [shared, shared] }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [shared, shared] }] };
     const output = toFhirR5Dosages(input);
-    output[0].doseAndRate![0].doseQuantity!.value = 2;
-    output[0].extension![0].extension![0].valueString = "edited";
+    // Public outputs are immutable by caller contract. Protecting callers
+    // who mutate returned nested values would require the defensive cloning
+    // explicitly rejected by the API owner. Conversion itself changes none.
+    expect(output[0].doseAndRate![0].doseQuantity).toBe(shared.doseAndRate![0].doseQuantity);
     expect(output[1].doseAndRate![0].doseQuantity!.value).toBe(1);
+    expect(output[0].extension![0]).toBe(shared.extension![0]);
     expect(output[1].extension![0].extension![0].valueString).toBe("retain");
     expect(shared.doseAndRate![0].doseQuantity!.value).toBe(1);
     expect(shared.extension![0].extension![0].valueString).toBe("retain");
+    expect(Object.isFrozen(output)).toBe(false);
   });
 
   it("preserves dose edits and original text when optional empty metadata is omitted", () => {
@@ -1175,14 +1190,19 @@ describe("structured FHIR extensions without serialization", () => {
     const preserved = inspectExtensions(rows).find(ext => ext.url === "urn:test:unknown-dosage");
     expect(preserved).toEqual(source.step[0].component[0].extension[0]);
     expect(inspectExtensions(rows).some(ext => ext.url === "retainedField" && ext.extension?.length)).toBe(true);
-    expect(inspectExtensions(rows).some(ext => ext.url === "comparator" && ext.valueCode === "~")).toBe(true);
+    expect(inspectExtensions(rows).some(ext =>
+      ext.url === "http://ema.europa.eu/fhir/extension/comparator" &&
+      ext.valueCoding?.system === "http://spor.ema.europa.eu/v1/lists/100000000008" &&
+      ext.valueCoding.code === "100000000055")).toBe(true);
+    expect(inspectExtensions(rows).some(ext =>
+      ext.url === "comparator" && ext.valueCode === "~")).toBe(false);
     expect(source.step[0].component[0].safety.futureMetadata.zero).toBe(0);
   });
 
   it("parses, exports, imports, edits and formats with JSON.parse/stringify disabled", () => {
     const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => { throw new Error("unexpected serialization"); });
     const parse = vi.spyOn(JSON, "parse").mockImplementation(() => { throw new Error("unexpected JSON parsing"); });
-    let course: FhirR6DosageDetails;
+    let course: FhirR6DosageInstruction;
     let formatted: string;
     try {
       const parsed = parseSig("apply 1 mL to scalp where affected twice daily only if BP > 160");
@@ -2541,6 +2561,33 @@ describe("rebased HPSG instruction scopes", () => {
       expect(calculateTotalUnits({ dosage, from: "2026-11-02T00:00:00Z",
         orderedAt: "2026-11-02T00:00:00Z", timeZone: "UTC", durationValue: days,
         durationUnit: "d" }).totalUnits).toBe(21);
+    }
+  });
+});
+
+
+describe("round 32 known cadence and repeat range intersection", () => {
+  const options = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    { code: "QID", repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    { code: "QID", repeat: { frequency: 5, frequencyMax: 6, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    { code: "QID", repeat: { frequency: 1, period: 8, periodMax: 12, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, period: 30, periodMax: 120, periodUnit: FhirPeriodUnit.Minute } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 12, periodMax: 24, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 5, periodMax: 7, periodUnit: FhirPeriodUnit.Hour } },
+    { code: "Q4H", repeat: { frequency: 1, frequencyMax: 2, period: 300, periodMax: 420, periodUnit: FhirPeriodUnit.Minute } },
+
+  ])("refuses disjoint code/repeat cadence from both public execution APIs: $code $repeat", ({ code, repeat }) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code }] }, repeat } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]]) {
+      const original = JSON.stringify(dosage);
+      expect(() => nextDueDoses(dosage, { ...options, limit: 2 }))
+        .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+      expect(() => calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
+      expect(JSON.stringify(dosage)).toBe(original);
     }
   });
 });

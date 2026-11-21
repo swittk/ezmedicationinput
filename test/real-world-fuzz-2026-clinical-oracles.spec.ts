@@ -6,7 +6,7 @@ import {
   getDosageAlternativeChoice, nextDueDoses, parseSig, toFhirR5Dosages,
   formatSig, formatSigBatch
 } from "../src";
-import type { FhirR6DosageDetails } from "../src";
+import type { FhirR6DosageInstruction } from "../src";
 import { cloneStructuredValue } from "../src/stable-structure";
 
 interface FuzzCase { id: string; category: string; input: string }
@@ -601,25 +601,37 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it.each([7, 14])("renders source-less relative day bounds with a start on day %i", secondStart => {
-    const course: FhirR6DosageDetails = { step: [
+    const course: FhirR6DosageInstruction = { step: [
       { end: relative(7), component: [component(1)] },
       { start: relative(secondStart), end: relative(secondStart + 7),
         component: [component(2)] }
     ] };
     const english = formatSig(course, "long");
-    expect(english).toContain("Days 1–7");
-    expect(english).toContain(`Days ${secondStart + 1}–${secondStart + 7}`);
-    if (secondStart === 14) expect(english).toContain("No doses on days 8–14");
+    expect(english).toContain("From treatment start until 7 days after treatment start");
+    expect(english).toContain(`From ${secondStart} days after treatment start until ${secondStart + 7} days after treatment start`);
+    if (secondStart === 14) expect(english).toContain("No doses from 7 days after treatment start until 14 days after treatment start");
     else expect(english).not.toContain("No doses");
     const thai = formatSig(course, "long", { locale: "th" });
-    expect(thai).toContain("วันที่ 1–7");
-    expect(thai).toContain(`วันที่ ${secondStart + 1}–${secondStart + 7}`);
+    expect(thai).toContain("ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา");
+    expect(thai).toContain(`ตั้งแต่${secondStart} วันหลังเริ่มการรักษาจนถึง${secondStart + 7} วันหลังเริ่มการรักษา`);
     if (secondStart === 14) expect(thai).toContain("งดยา");
+    else expect(thai).not.toContain("งดยา");
     const strict = toFhirR5Dosages(course);
-    expect(formatSigBatch(strict, "long")).toContain("Days 1–7");
-    expect(formatSigBatch(strict, "long")).toContain(`Days ${secondStart + 1}–${secondStart + 7}`);
+    const strictEnglish = formatSigBatch(strict, "long");
+    const strictThai = formatSigBatch(strict, "long", { locale: "th" });
+    expect(strictEnglish).toContain("From treatment start until 7 days after treatment start");
+    expect(strictEnglish).toContain(`From ${secondStart} days after treatment start until ${secondStart + 7} days after treatment start`);
+    expect(strictThai).toContain("ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา");
+    expect(strictThai).toContain(`ตั้งแต่${secondStart} วันหลังเริ่มการรักษาจนถึง${secondStart + 7} วันหลังเริ่มการรักษา`);
+    if (secondStart === 14) {
+      expect(strictEnglish).toContain("No doses from 7 days after treatment start until 14 days after treatment start");
+      expect(strictThai).toContain("งดยา");
+    } else {
+      expect(strictEnglish).not.toContain("No doses");
+      expect(strictThai).not.toContain("งดยา");
+    }
     const source = "keep the clinician-authored dosing text exactly";
-    expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(source);
+    expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(english);
   });
 });
 

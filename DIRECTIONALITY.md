@@ -57,6 +57,63 @@ Reasoning:
 - the current clause language is narrow enough that a local grammar is maintainable
 - suggestions can still be derived later from grammar productions without committing the package to a larger parser toolkit today
 
+## Language-pack boundary during native realization (2026-11-17)
+
+Future locales must plug into language-specific lexicons, grammar licensing,
+realization templates, and suggestion adapters; the canonical clinical facts,
+clinical composition, execution, and FHIR adapters must remain locale-neutral.
+While touching `canonical/format-course.ts`, extract hardcoded EN/TH
+course-level wording behind locale-owned realization rather than expanding
+language conditionals. Reuse existing locale registries; no second parser,
+full language-pack framework, or ordinary-path performance regression.
+The concrete EN/TH course realizers live under src/locales/course/ and use the existing SigLocalization registry.
+
+## Native course authority (2026-11-16)
+
+The canonical clause/regimen pipeline now continues into a complete native
+clinical course **before** either public FHIR projection. The parser remains
+one typed HPSG pass; this is not a second grammar or a competing parser IR.
+
+- `canonical/course.ts` defines the version-neutral clinical facts. No native
+  course or administration extends `FhirDosage` or `DosageInstruction`.
+- `canonical/compile.ts` composes existing scoped clauses and parallel regimen
+  phases. Syntax/source spans are evidence, not another editable dosage truth.
+- Native models have no public editor or mutation lifecycle. Externally
+  modified FHIR is reconciled at the interchange boundary; internal facts remain
+  free to change without defensive copying or compatibility obligations.
+- `canonical/format-course.ts` renders native facts without R5 lowering.
+- `execution/engine.ts` consumes native facts only. Its resolved administration
+  windows separately own recurrence origin, first eligibility, exclusive end,
+  completion point, and civil cap clock. Scheduling, repeat-cycle horizon, and
+  supply use that same phase resolution, not three interpretations of a Date.
+  `stage.count` repeats that individual stage; `course.cycleCount` bounds
+  whole-course cycles. The grammar's finite course count must never be stored
+  in the R6 step count. Its R6 course modifier and the existing R5 bridge retain
+  the finite bound, including the last cycle's remaining active interval.
+- `execution/calendar.ts` owns the existing timezone/DST/calendar primitives;
+  it knows no medication, FHIR, or parser representation.
+- `adapters/canonical-course.ts` imports R5/current R6 and exports them. Only
+  R5-boundary operations invoke `dosage-course.ts` persistence reconciliation.
+- `schedule.ts` is the public input-normalization facade; the old FHIR-shaped
+  execution implementation and alternate flat-course phase traversal are gone.
+
+`parseSig().meta.canonical.course` is the internal authority; `.fhir` stays R5
+and `.fhirNext` stays the current R6 export. `fromFhir` imports current R6
+straight into native meaning and formats that meaning; the returned R5 rows
+are outputs only. Existing R5 callers remain supported and do not migrate.
+
+Known clinical changes must override retained external data on export. Unknown
+source fields stay separate as provenance and must not silently execute. Native
+constraints use an owned list of scope/value/period limits, not the three
+R5 maximum-dose fields. Standard clinical codes/units can remain shared enums;
+sharing a stable code vocabulary is not permission to use a FHIR wire object
+as the internal course model.
+
+Do not add wire-extension decoding, R5/R6 conversion, or a second phase-boundary
+implementation to native compilation, formatting, or execution. Architecture
+and native-edit tests enforce those boundaries in addition to the established
+clinical regression corpus.
+
 ## Target Pipeline
 
 ### 1. Surface Scan
@@ -271,3 +328,77 @@ If learned behavior is added later, it should be:
 - optional
 - deterministic in integration behavior
 - scoped to ambiguity resolution, not full semantic generation
+
+
+## 2026-11-17 — Native model review and hard merge gates
+
+- Understood clinical concepts require explicit typed fields. Known safety
+  scopes, limits and exclusive quantity/count/expression choices, site
+  references, and event anchors are now typed. Truly unknown wire metadata
+  remains opaque provenance only, never executable clinical data.
+- Outputs are immutable **by caller contract**, not by defensive copying or
+  freezing. The explicit edit API creates a new course. Do not cache an
+  externally supplied wire input across imports: reimporting a changed input
+  must read its current contents, per existing editable-input tests.
+- Performance acceptance: no reproducible >4% slowdown in ANY parser,
+  import, formatter, scheduling or supply domain versus origin/master;
+  target faster in every domain, with no aggregate-median waiver.
+- Original audit blocker (resolved in the later direct-adapter checkpoint):
+  native-to-R5 used to construct R6 first. Complete R5 and R6 sibling
+  projection/import now independently own their source-compatibility codecs.
+  The historical issue remains documented here as context, not an active gate.
+- Preserve the original PR #13. Update stacked PR #14 only after source,
+  compatibility and per-domain performance acceptance is verified.
+
+
+## 2026-11-17 — Direct sibling adapters and course localization (supersedes prior R5 blocker)
+
+The historical CanonicalCourse -> R6 -> R5 blocker above was resolved
+at the complete interchange boundary, not hidden behind a limited fast
+path. Native clinical course remains the sole internal authority:
+
+- adapters/r5-course.ts emits strict R5 fields and complete retained edit
+  metadata directly from native facts.
+- adapters/r5-import.ts reconciles live R5 rows directly. It may decode an
+  R6-shaped historical *source snapshot* embedded in an older R5 extension,
+  but does not construct a new R6 processing intermediate.
+- adapters/canonical-course.ts imports/projects current R6 independently.
+  Native parsing, formatting, scheduling and supply do not transit either
+  external version on their internal paths.
+- Opaque source remains recoverable and inert; understood clinical fields
+  are explicit typed values, not generic executable property bags.
+
+Whole-course EN/TH words are a typed CourseLanguage facet on the existing
+SigLocalization registry. Shared canonical code computes clinical facts,
+dates, conditions and dose/rate scope only. Locale-owned modules in
+locales/course/ supply calendars, stages, temporal units, conjunctions,
+conditions, exclusions, rate/dose labels and technical fallbacks. A third
+language test covers registration and inheritance without a second parser.
+
+The all-public benchmark covers all legacy exports including autocomplete
+(suggestSig), date and locale registration, graph encode/decode, R5/R6
+interchange, scheduling and supply, not only parseSig/formatSig.
+The 4% regression ceiling applies independently to each measured domain
+against the exact built origin/master, never to an aggregate median.
+
+
+## 2026-11-17 — Chronological overlap and source replay ownership
+
+Overlapping capped repeat cycles MUST accept actual administrations
+in timestamp order, independent of source cycle ordinal. A typed
+min-heap is used ONLY when a full first-cycle horizon proves real
+overlap; ordinary capped one-stage courses use a cheap structural
+non-overlap proof and their established fast path. Supply and nextDue
+consume identical accepted timestamps and their clinical rolling-cap
+and finite-count allowance; neither makes a second calendar engine.
+
+FHIR R5 and current R6 are independent projections from canonical
+meaning. The ancillary instruction graph can lack an Amount even
+when the HPSG primary dosage owns an authored quantity. Source
+roundtrip may reuse that old text only with source evidence or
+verified persisted R5 projection. Editing a quantity invalidates
+its evidence and uses the typed canonical realizer. An inferred
+default does not claim to be an authored source quantity.
+Persisted source evidence is verified without reparsing or emitting
+a new FHIR metadata field; the ordinary parsing and formatting
+hot paths never pay a second realization/graph traversal.

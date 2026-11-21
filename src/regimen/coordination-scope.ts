@@ -163,9 +163,9 @@ const SCHEDULE_FEATURE_GROUPS = {
     'occurrenceCap', 'maxDosePerPeriod', 'eventWindow', 'clockWindow', 'weekdayOrdinal'
   ],
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
-  courseBounds: ['duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd'],
+  courseBounds: ['duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd'],
   administrationDuration: [
-    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit'
+    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator'
   ],
   calendarEvents: ['calendarEvents', 'cycleDayConstraint'],
   // A derived per-administration dependency is not a lexical trailing cadence.
@@ -173,7 +173,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   // A source anaphor is a typed request to the regimen donor, not an
   // executable inherited recurrence. Resolve before lowering to FHIR.
   sourceTimingReference: ['timingReference'],
-  sourcePhaseStart: ['treatmentStartOffsetDays'],
+  sourcePhaseStart: ['treatmentStartOffsetDays', 'phaseStartReference'],
   regimenCycle: ['repeatCycle', 'repeatCount']
 } as const satisfies Record<string, readonly ScheduleSemanticField[]>;
 
@@ -187,15 +187,15 @@ void scheduleFeatureCoverage;
 
 const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
 const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
-  'duration', 'durationMax', 'durationUnit', 'boundsStart', 'boundsEnd',
-  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit',
+  'duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd',
+  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator',
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [
   'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
   'activityTiming', 'eventWindow', 'clockWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
-  'timingReference', 'treatmentStartOffsetDays', 'repeatCycle', 'repeatCount'
+  'timingReference', 'treatmentStartOffsetDays', 'phaseStartReference', 'repeatCycle', 'repeatCount'
 ] as const satisfies readonly ScheduleSemanticField[];
 type CoordinatedScheduleField =
   | (typeof COORDINATED_ANCHOR_FIELDS)[number]
@@ -795,7 +795,7 @@ function sameDose(
 ): boolean {
   if (!left || !right) return left === right;
   return left.value === right.value && left.unit === right.unit &&
-    equalStructuredValues(left.range, right.range);
+    left.comparator === right.comparator && equalStructuredValues(left.range, right.range);
 }
 
 function sameSite(

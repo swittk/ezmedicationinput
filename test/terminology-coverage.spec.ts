@@ -219,7 +219,10 @@ describe("non-equivalent standardized constituents of local instruction actions"
       expect.objectContaining({ role, coding: expect.objectContaining({ code, system: SNOMED }) })
     ]));
     const again = getMedicationInstructionAction(action)!;
-    again.semanticComponents![0].coding.code = "changed";
+    // Lookup returns the immutable-by-contract dictionary definition, not a
+    // defensive copy of its full contextual vocabulary tree on every token.
+    expect(again).toBe(definition);
+    expect(Object.isFrozen(again)).toBe(false);
     expect(getMedicationInstructionAction(action)?.semanticComponents?.[0]?.coding.code).toBe(code);
   });
 
@@ -243,7 +246,7 @@ describe("non-equivalent standardized constituents of local instruction actions"
     const bare = getMedicationInstructionAction("rotate")!;
     expect(bare.semanticComponents).toBeUndefined();
     expect(bare.contextualSemanticComponents).toHaveLength(2);
-    bare.contextualSemanticComponents![0].component.coding.code = "bad";
+    expect(getMedicationInstructionAction("rotate")).toBe(bare);
     expect(getMedicationInstructionAction("rotate")!.contextualSemanticComponents![0].component.coding.code)
       .toBe("49572008");
   });
@@ -265,7 +268,7 @@ describe("non-equivalent standardized constituents of local instruction actions"
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
     const definition = getMedicationInstructionAction("reapply")!;
     expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
-    definition.semanticComponents![0].coding.code = "bad";
+    expect(getMedicationInstructionAction("reapply")).toBe(definition);
     expect(getMedicationInstructionAction("reapply")?.semanticComponents?.[0].coding.code).toBe("C47886");
     expect(getMedicationInstructionAction("tilt")?.semanticComponents?.[0].coding.code).toBe("257912008");
   });
@@ -308,7 +311,7 @@ describe("partial coded clinical concept constituents", () => {
       expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
     ]));
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
-    concept.components![0].coding!.code = "mutated";
+    expect(getMedicationInstructionConcept(name)).toBe(concept);
     expect(getMedicationInstructionConcept(name)?.components?.[0]?.coding?.code).toBe(code);
   });
 });
@@ -487,5 +490,43 @@ describe("Open English WordNet 2025 exact nonclinical result senses", () => {
       ["https://en-word.net/", "2025", code]
     ]);
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
+  });
+});
+
+
+describe("single-delimiter SNOMED postcoordination parsing", () => {
+  it("roundtrips the supported finding-site, topographical and laterality attributes", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    const focus = rules.buildSnomedFindingSitePostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedFindingSitePostcoordinationCode(focus))
+      .toEqual({ focusCode: "12345", siteCode: "67890" });
+    const topographical = rules.buildSnomedBodySiteTopographicalModifierPostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode(topographical))
+      .toEqual({ siteCode: "12345", modifierCode: "67890" });
+    const laterality = rules.buildSnomedBodySiteLateralityPostcoordinationCode("12345", "67890");
+    expect(rules.parseSnomedBodySiteLateralityPostcoordinationCode(laterality))
+      .toEqual({ siteCode: "12345", lateralityCode: "67890" });
+  });
+  it("does not reinterpret a nested later attribute as the first top-level relationship", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    for (const buildAndParse of [
+      [rules.buildSnomedFindingSitePostcoordinationCode, rules.parseSnomedFindingSitePostcoordinationCode],
+      [rules.buildSnomedBodySiteTopographicalModifierPostcoordinationCode,
+       rules.parseSnomedBodySiteTopographicalModifierPostcoordinationCode],
+      [rules.buildSnomedBodySiteLateralityPostcoordinationCode,
+       rules.parseSnomedBodySiteLateralityPostcoordinationCode]
+    ] as const) {
+      const [build, parse] = buildAndParse;
+      const valid = build("12345", "67890");
+      expect(parse("12345:unexpected=0" + valid.slice(5))).toBeUndefined();
+      expect(parse(valid)).toBeDefined();
+    }
+  });
+  it("retains the full parenthesized nested finding-site expression", async () => {
+    const rules = await import("../src/snomed-postcoordination");
+    const site = "67890:12345=45678";
+    const code = rules.buildSnomedFindingSitePostcoordinationCode("12345", site);
+    expect(rules.parseSnomedFindingSitePostcoordinationCode(code))
+      .toEqual({ focusCode: "12345", siteCode: site });
   });
 });

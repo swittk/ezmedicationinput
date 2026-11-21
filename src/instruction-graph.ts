@@ -1,4 +1,5 @@
-import { courseContinuationDurationAt } from "./hpsg/lexical-classes";
+import { objectValues } from "./utils/object";
+import { courseContinuationDurationAt, doseComparatorNumberAt, DOSE_COMPARATOR_PREFIXES } from "./hpsg/lexical-classes";
 import { composeCoordinatedActionDirective, composePreposedContactTheme, licensesPreposedContactTheme } from "./hpsg/constructions";
 import {
   resolveAdviceMannerModifier,
@@ -19,8 +20,9 @@ import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
+import { parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue } from "./localization";
+import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
 import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
@@ -85,6 +87,8 @@ import {
   medicationInstructionActionLocaleRealizerConfig,
   normalizeActionSurface,
   resolveMedicationInstructionAction,
+  resolveMedicationInstructionActionByMethod,
+  resolveMedicationInstructionActionForMethod,
   resolveMedicationInstructionSequenceAction,
   resolveMedicationInstructionSeparableAction,
   medicationInstructionActionSpanLimit
@@ -390,6 +394,16 @@ function timeArgumentFromParts(
   endExclusive: number,
   input: string
 ): AdviceArgument | undefined {
+  // The same bounded clock grammar supplies HPSG schedules and a complete
+  // temporal action daughter. Do not turn a clock into an opaque Object.
+  if (endExclusive - start <= 2) {
+    const clock = parseClockToken(parts[start], start + 1 < endExclusive ? parts[start + 1] : undefined);
+    if (clock && clock.tokens.length === endExclusive - start) return {
+      role: AdviceArgumentRole.Time,
+      text: trimSemanticText(sourceFor(parts, start, endExclusive, input)),
+      normalized: clock.value
+    };
+  }
   const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
   let event: EventTiming | undefined;
   for (let index = 0; index < canonicalParts.length; index += 1) {
@@ -671,8 +685,14 @@ function actionArgumentRelation(
 
 function relationIndex(parts: Lexeme[], start: number, endExclusive: number): number {
   for (let index = start; index < endExclusive; index += 1) {
+    const lower = key(parts[index]);
+    // AT in "at most 2 tablets" belongs to the amount, not the location.
+    // Reuse the bounded quantity lexeme inside this existing relation walk.
+    const quantity = DOSE_COMPARATOR_PREFIXES.has(lower)
+      ? doseComparatorNumberAt(parts, index, endExclusive, lower) : undefined;
+    if (quantity) { index = quantity.numericIndex; continue; }
     if (
-      Boolean(actionArgumentRelation(key(parts.slice(index, index + 1)[0]))) &&
+      Boolean(actionArgumentRelation(lower)) &&
       !tokenBelongsToBodySiteRelationPhrase(parts, index, start, endExclusive)
     ) return index;
   }
@@ -771,27 +791,36 @@ function parseQuantityArgument(
   endExclusive: number,
   input: string,
   offset: number,
-  options?: ParseOptions
+  options?: ParseOptions,
+  numberEndExclusive = endExclusive
 ): AdviceArgument | undefined {
-  for (let index = start; index + 1 < endExclusive; index += 1) {
+  for (let index = start; index < numberEndExclusive; index += 1) {
     const valueToken = parts[index];
     if (!valueToken) continue;
-    const modifier = parts[index + 1];
+    // Reuse the same bounded qualifier lexeme as scalar/infusion HPSG.
+    // The graph keeps the original source span, not an exact-dose rewrite.
+    const qualified = valueToken.kind === "NUMBER" ? undefined :
+      doseComparatorNumberAt(parts, index, numberEndExclusive, key(valueToken));
+    const numberIndex = qualified?.numericIndex ?? index;
+    const modifier = parts[numberIndex + 1];
     const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
-      ? index + 2 : index + 1;
-    const unitMatch = instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
-    if (!unitMatch) continue;
+      ? numberIndex + 2 : numberIndex + 1;
+    const compactUnit = qualified?.rawUnit ? normalizeUnit(qualified.rawUnit, options) : undefined;
+    const unitMatch = qualified?.rawUnit
+      ? compactUnit ? { unit: compactUnit, endExclusive: numberIndex + 1 } : undefined
+      : instructionQuantityUnitAt(parts, unitStart, endExclusive, options);
+    if (!unitMatch || unitMatch.endExclusive > numberEndExclusive) continue;
     const unitToken = parts[unitMatch.endExclusive - 1];
     if (!unitToken) continue;
     const unit = unitMatch.unit;
     const wordValue = INSTRUCTION_NUMBER_WORDS[key(valueToken)];
-    if ((valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
-      const value = valueToken.kind === "NUMBER" ? valueToken.value : wordValue;
+    if (qualified || (valueToken.kind === "NUMBER" && valueToken.value !== undefined) || wordValue !== undefined) {
+      const value = qualified?.value ?? (valueToken.kind === "NUMBER" ? valueToken.value : wordValue);
       return {
         role: AdviceArgumentRole.Amount,
         text: sourceFor(parts, index, unitMatch.endExclusive, input),
         normalized: unit,
-        quantity: { value, unit },
+        quantity: { value, unit, ...(qualified ? { comparator: qualified.comparator } : {}) },
         span: { start: offset + valueToken.sourceStart, end: offset + unitToken.sourceEnd }
       };
     }
@@ -991,7 +1020,7 @@ interface ActionArgumentParseContext {
   duration?: AdviceArgument;
   separableParticleIndex?: number;
 }
-interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; }
+interface ParsedActionArguments { args: AdviceArgument[]; semanticEnd?: number; tailRelationIndex?: number; }
 type ActionArgumentParser = (context: ActionArgumentParseContext) => ParsedActionArguments;
 function parsedArgs(...values: Array<AdviceArgument | undefined>): AdviceArgument[] {
   const args: AdviceArgument[] = [];
@@ -1035,9 +1064,12 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     objectEnd = start;
     break;
   }
-  const args = parsedArgs(argumentFromParts(
-    parts, argumentStart, objectEnd, input, undefined, options
-  ), finalManner);
+  const object = argumentFromParts(parts, argumentStart, objectEnd, input, undefined, options);
+  // The typed Amount already owns its exact source phrase and span. A second
+  // untyped copy must not turn a recognized qualified quantity into opaque text.
+  const amountOnly = object?.role === AdviceArgumentRole.Object && c.amount?.quantity &&
+    object.text === c.amount.text;
+  const args = parsedArgs(amountOnly ? undefined : object, finalManner);
   let typedLocalTime: AdviceArgument | undefined;
   for (let index = argumentStart; index < objectEnd; index += 1) {
     const candidate = internalArgument(key(parts[index]), parts[index].sourceText ?? parts[index].original, options);
@@ -1057,9 +1089,16 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       : undefined;
     const fallbackRole = relationHasGrammarFeature(relation, "activityFallback")
       ? AdviceArgumentRole.Activity : undefined;
-    pushArgument(args, time ?? relationDuration ?? argumentFromParts(
+    const complement = time ?? relationDuration ?? argumentFromParts(
       parts, relIndex + 1, relationTargetEnd, input, fallbackRole, options
-    ));
+    );
+    const accompaniment = relationHasGrammarFeature(relation, "accompanimentComplement");
+    const accompanyingQuantity = !time && !relationDuration && accompaniment
+      ? quantifiedEntityArgument(parts, relIndex + 1, relationTargetEnd, input, offset,
+          AdviceArgumentRole.Substance, options) : undefined;
+    const argument = accompanyingQuantity?.quantity ? accompanyingQuantity : complement;
+    if (argument && accompaniment) argument.relation = relation;
+    pushArgument(args, argument);
   }
   return { args };
 };
@@ -1115,7 +1154,7 @@ const OBJECT_AMOUNT_MATERIAL_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   return { args };
 };
 const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, amount } = c;
+  const { parts, argumentStart, segmentEnd, input, offset, options, relIndex, relation, relationTargetEnd, amount } = c;
   const args = parsedArgs(amount);
   const amountEnd = amount?.span
     ? partIndexAfterAbsoluteSourceEnd(parts, amount.span.end, offset)
@@ -1130,10 +1169,34 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
     parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
   ));
-  if (relIndex >= 0 && relIndex + 1 < segmentEnd) pushArgument(args, argumentFromParts(
-    parts, relIndex + 1, segmentEnd, input, AdviceArgumentRole.Destination, options
-  ));
-  return { args };
+  let targetIndex = relIndex;
+  let targetEnd = relationTargetEnd;
+  let targetRelation = relation;
+  let tailRelationIndex: number | undefined;
+  while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
+    const nominal = argumentFromParts(
+      parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
+    );
+    const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
+      nominal?.role ?? AdviceArgumentRole.Destination, options);
+    const target = quantified?.quantity ? quantified : nominal;
+    // Each local complement owns its relation, independently of noun role:
+    // saline WITH water TO 100 mL retains both targets.
+    if (target) target.relation = targetRelation;
+    pushArgument(args, target);
+    if (targetEnd >= segmentEnd) break;
+    targetIndex = targetEnd;
+    targetRelation = actionArgumentRelation(key(parts[targetIndex]));
+    // Temporal and conditional daughters are composed by the shared frame parser.
+    if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
+        relationHasGrammarFeature(targetRelation, "conditionalTail")) {
+      tailRelationIndex = targetIndex;
+      break;
+    }
+    const next = relationIndex(parts, targetIndex + 1, segmentEnd);
+    targetEnd = next >= 0 ? next : segmentEnd;
+  }
+  return { args, tailRelationIndex };
 };
 const AMOUNT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const activity = c.relIndex >= 0 && relationHasGrammarFeature(c.relation, "activityFallback")
@@ -1601,8 +1664,19 @@ function buildActionFrame(
       : segmentEnd;
   // A conditional daughter owns its own measurements and observation window.
   // They are not the preceding administration's amount or course duration.
+  // Material/destination complements own their quantities independently of
+  // the head Amount. Temporal adjuncts permit a later medication amount in
+  // flexible word order; other valences may license postdestination amounts
+  // too, e.g. Pour into a cup 5 mL.
+  const directObjectValence = !definition.argumentParser || definition.argumentParser === "default";
+  const headOwnsAmount = directObjectValence && relationHasGrammarFeature(relation, "accompanimentComplement") ||
+    (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
+      !relationHasSemanticClass(relation, "temporal");
+  const amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  // Unit meaning can depend on the full typed action context (a measured
+  // topical line and its destination), while its numeric head stays local.
   const amount = definition.acceptsAmount
-    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options)
+    ? parseQuantityArgument(parts, argumentStart, semanticEnd, input, offset, options, amountEnd)
     : undefined;
   const duration = parseAnyDurationArgument(parts, argumentStart, semanticEnd, input, offset);
 
@@ -1621,17 +1695,32 @@ function buildActionFrame(
   // Not every temporal/conditional connector licenses an Activity.
   // PRN WHEN is a condition daughter, never a "when symptoms" executable
   // activity that can duplicate medication dose and schedule realization.
-  const nextTemporal = nextRelationIndex >= 0 &&
-    relationHasSemanticClass(nextRelation, "temporal") &&
-    relationHasGrammarFeature(nextRelation, "activityFallback")
-      ? nextRelation : undefined;
-  if (nextTemporal && nextRelationIndex >= 0) {
-    const eventStart = nextRelationIndex + 1;
+  const temporalIndex = parsed.tailRelationIndex ?? nextRelationIndex;
+  const temporalRelation = temporalIndex === nextRelationIndex ? nextRelation
+    : actionArgumentRelation(key(parts[temporalIndex]), definition.preferredRelationSemanticClasses);
+  // A multi-complement valence can discover a condition after its second
+  // destination. End the action at that boundary so the existing graph
+  // relation owner keeps the condition and its complete source span.
+  if (temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "conditionalTail"))
+    semanticEnd = Math.min(semanticEnd, temporalIndex);
+  const nextTemporal = temporalIndex >= 0 &&
+    relationHasSemanticClass(temporalRelation, "temporal") &&
+    relationHasGrammarFeature(temporalRelation, "activityFallback")
+      ? temporalRelation : undefined;
+  if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
+    const result = argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
+    if (result) {
+      result.relation = temporalRelation;
+      pushArgument(args, result);
+    }
+  } else if (nextTemporal && temporalIndex >= 0) {
+    const eventStart = temporalIndex + 1;
     const sourceEvent = trimSemanticText(sourceFor(parts, eventStart, segmentEnd, input));
     let event = argumentFromParts(
       parts, eventStart, segmentEnd, input, AdviceArgumentRole.Activity, options
     );
-    if (event?.role !== AdviceArgumentRole.Activity || !event.conceptId) {
+    if ((event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) ||
+        !event.conceptId) {
       const target = resolveMedicationInstructionAction(key(parts[eventStart]), options);
       // Only an EXPLICIT declared event-activity concept licenses semantic
       // normalization. A method-coded verb is insufficient evidence:
@@ -1642,7 +1731,7 @@ function buildActionFrame(
         ? internalArgument(implicit, sourceEvent, options) : undefined;
       if (declared?.role === AdviceArgumentRole.Activity) {
         event = declared;
-      } else if (event?.role !== AdviceArgumentRole.Activity) {
+      } else if (event?.role !== AdviceArgumentRole.Activity && event?.role !== AdviceArgumentRole.Time) {
         event = undefined;
       }
     }
@@ -2086,6 +2175,13 @@ function actionTailIsRegimenModifier(
   // not license this boundary.
   for (let cursor = actionStart + 1; cursor < index - 1; cursor += 1) {
     const relation = resolveActionRelationSurface(key(parts[cursor]));
+    // A complete clock daughter also ends before a separate regimen cadence.
+    // Reuse the shared clock reader within this existing local-valence walk.
+    if (!negatedAction && relationHasGrammarFeature(relation, "timeComplement") &&
+        index - cursor <= 3) {
+      const clock = parseClockToken(parts[cursor + 1], cursor + 2 < index ? parts[cursor + 2] : undefined);
+      if (clock && clock.tokens.length === index - cursor - 1) return true;
+    }
     if (!relationHasGrammarFeature(relation, "accompanimentComplement")) continue;
     const complement = argumentFromParts(parts, cursor + 1, index, input, undefined, options);
     if (complement?.role === AdviceArgumentRole.Substance && complement.conceptId) {
@@ -2589,7 +2685,7 @@ function doseSourceRange(clause: CanonicalSigClause): TextRange | undefined {
 function amountText(dose: CanonicalDoseExpr, source: string): string {
   if (source.trim()) return source.trim();
   if (dose.range) return `${dose.range.low ?? ""}-${dose.range.high ?? ""} ${dose.unit ?? ""}`.trim();
-  return `${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
+  return `${dose.comparator ?? ""}${dose.value ?? ""} ${dose.unit ?? ""}`.trim();
 }
 
 function attachDoseToNearestAction(
@@ -2622,7 +2718,8 @@ function attachDoseToNearestAction(
     quantity: {
       value: clause.dose.value,
       range: clause.dose.range ? { ...clause.dose.range } : undefined,
-      unit: clause.dose.unit
+      unit: clause.dose.unit,
+      ...(clause.dose.comparator ? { comparator: clause.dose.comparator } : {})
     },
     span: range
   });
@@ -2802,6 +2899,7 @@ function sourceBackedTimeExtension(
       normalizedInstructionSurface(next.text ?? next.normalized ?? "") === surface &&
       next.quantity?.value === arg.quantity?.value &&
       next.quantity?.unit === arg.quantity?.unit &&
+      next.quantity?.comparator === arg.quantity?.comparator &&
       next.quantity?.range?.low === arg.quantity?.range?.low &&
       next.quantity?.range?.high === arg.quantity?.range?.high
     );
@@ -3079,23 +3177,24 @@ function promoteDoseFromDefiningAction(
   options?: ParseOptions
 ): void {
   if (clause.dose?.value !== undefined || clause.dose?.range) return;
-  const candidates = actions
-    .filter((action) => resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose)
-    .map((action) => action.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity)
-    .filter((quantity): quantity is NonNullable<AdviceArgument["quantity"]> => Boolean(quantity));
-  if (!candidates.length) return;
-  const first = candidates[0];
-  const same = candidates.every((candidate) =>
-    candidate.value === first.value &&
-    candidate.unit === first.unit &&
-    candidate.range?.low === first.range?.low &&
-    candidate.range?.high === first.range?.high
-  );
-  if (!same) return;
+  let first: AdviceArgument["quantity"];
+  for (const action of actions) {
+    if (action.polarity === AdvicePolarity.Negate ||
+        !resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) continue;
+    const quantity = action.args.find(arg =>
+      arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity;
+    if (!quantity) continue;
+    if (!first) first = quantity;
+    else if (quantity.value !== first.value || quantity.unit !== first.unit ||
+        quantity.comparator !== first.comparator ||
+        quantity.range?.low !== first.range?.low || quantity.range?.high !== first.range?.high) return;
+  }
+  if (!first) return;
   clause.dose = {
     value: first.value,
     range: first.range ? { ...first.range } : undefined,
-    unit: first.unit
+    unit: first.unit,
+    ...(first.comparator ? { comparator: first.comparator } : {})
   };
 }
 
@@ -3405,20 +3504,43 @@ function translatedQuantity(
   quantity: NonNullable<AdviceArgument["quantity"]>,
   locale: string
 ): string {
+  // Amounts without any numeric bound remain editable facts, not an
+  // administration quantity. Realizers must fall back to source argument
+  // text, rather than producing 'at most mg' without a number.
+  if (quantity.value === undefined && quantity.range?.low === undefined &&
+      quantity.range?.high === undefined) return "";
   const singular = quantity.value === 1 && !quantity.range;
   const labels = quantity.unit ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(quantity.unit) : undefined;
   const localizedLabels = labels ? localizedConfig(labels.locales, locale, "en") : undefined;
   const unit = localizedLabels
     ? (singular ? localizedLabels.one : localizedLabels.other)
     : (quantity.unit ?? "");
+  const qualifier = quantityComparatorText(quantity.comparator, locale);
   if (quantity.range) {
-    return `${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
+    return `${qualifier}${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
   }
-  return `${quantity.value ?? ""} ${unit}`.trim();
+  return `${qualifier}${quantity.value ?? ""} ${unit}`.trim();
 }
 
 function translatedArgument(arg: AdviceArgument, locale: string): string {
-  if (arg.quantity) return translatedQuantity(arg.quantity, locale);
+  // A comparator alone does not identify a numeric administration amount.
+  // Keep the original source argument for review instead of displaying
+  // a fabricated valueless "at most mg" quantity.
+  if (arg.quantity) {
+    if (arg.quantity.value !== undefined || arg.quantity.range?.low !== undefined ||
+        arg.quantity.range?.high !== undefined) {
+      const amount = translatedQuantity(arg.quantity, locale);
+      // A measured nominal keeps its entity; a bare quantity's normalized
+      // unit is already part of the amount realization.
+      const nominal = arg.normalized;
+      const entity = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme;
+      return entity && nominal && nominal !== arg.quantity.unit && !normalizeUnit(nominal)
+        ? joinLocalizedTokens(locale, [amount, translatedArgumentConcept(arg, locale)])
+        : amount;
+    }
+    return arg.text || arg.normalized || "";
+  }
   const looseQuantity = (arg.text ?? arg.normalized ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s+(.+)$/u);
   if (looseQuantity) {
     const unit = normalizeUnit(looseQuantity[2]);
@@ -3489,13 +3611,25 @@ type ActionRealizationContext = InstructionActionRealizationInput;
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
 const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
-  const objectArgs = c.frame.args.filter((arg) =>
-    arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-    arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance
-  );
-  const object = c.theme ?? c.site ?? c.substance;
-  const objectArg = objectArgs[0];
-  const amountArg = c.frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount);
+  let objectArg: AdviceArgument | undefined;
+  let relationTargetArg: AdviceArgument | undefined;
+  let amountArg: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
+    else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) {
+      // A WITH daughter remains an accompaniment when the medication object
+      // is implicit. A bare substance without that relation can be the object.
+      if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
+          arg.role === AdviceArgumentRole.Substance &&
+            relationHasSemanticClass(c.frame.relation, "accompaniment"))
+        relationTargetArg ??= arg;
+      else if (!objectArg) objectArg = arg;
+      else relationTargetArg ??= arg;
+    }
+  }
+  const object = !objectArg ? undefined : objectArg.role === AdviceArgumentRole.Site ? c.site
+    : objectArg.role === AdviceArgumentRole.Substance ? c.substance : c.theme;
   const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
   const amountSource = normalizedInstructionSurface(amountArg?.text ?? "");
   const amount = objectSource && amountSource && objectSource.includes(amountSource)
@@ -3512,8 +3646,8 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     return `${base}${base ? profile.quantitySeparator : ""}${phrase}`;
   };
 
-  const relationTargetArg = objectArgs.length > 1 ? objectArgs[1] : undefined;
   const relationTarget = relationTargetArg ? translatedArgument(relationTargetArg, c.locale) : undefined;
+  const targetRelation = relationTargetArg?.relation ?? c.frame.relation;
   const materialArgument = relationTargetArg && (
     relationTargetArg.role === AdviceArgumentRole.Substance ||
     relationTargetArg.role === AdviceArgumentRole.Material ||
@@ -3521,13 +3655,15 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     // of WITH (e.g. wipe excess with clean tissue). Treat its existing
     // semantic relation as the licence; do not silently discard it.
     (relationTargetArg.role === AdviceArgumentRole.Object &&
-      relationHasSemanticClass(c.frame.relation, "accompaniment"))
+      relationHasSemanticClass(targetRelation, "accompaniment"))
   );
-  const withTarget = materialArgument && c.frame.relation &&
-    (relationHasSemanticClass(c.frame.relation, "accompaniment") ||
-      relationHasSemanticClass(c.frame.relation, "locative"))
+  const withTarget = materialArgument && targetRelation &&
+    (relationHasSemanticClass(targetRelation, "accompaniment") ||
+      relationHasSemanticClass(targetRelation, "locative"))
     ? relationTarget : undefined;
-  const activityRelation = c.activity && relationHasGrammarFeature(c.frame.relation, "activityFallback")
+  const activityRelation = c.activity &&
+    (relationHasGrammarFeature(c.frame.relation, "activityFallback") ||
+      relationHasSemanticClass(c.frame.relation, "accompaniment"))
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   const activityPhrase = activityRelation && c.activity
@@ -3560,10 +3696,10 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
   text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
-  if (withTarget && c.frame.relation) {
+  if (withTarget && targetRelation) {
     const materialRelation = localizeAdviceRelation(
-      c.frame.relation, c.locale, "complement"
-    ) ?? c.frame.relation;
+      targetRelation, c.locale, "complement"
+    ) ?? targetRelation;
     text = appendLocale(text, joinLocalizedTokens(c.locale, [materialRelation, withTarget]));
   }
   text = appendLocale(text, activityPhrase);
@@ -3611,14 +3747,42 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
 
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  const relation = c.destination && c.frame.relation
+  let targetArgument: AdviceArgument | undefined;
+  let materialArgument: AdviceArgument | undefined;
+  for (const arg of c.frame.args) {
+    if (arg.relation && arg.relation === c.frame.relation) {
+      targetArgument ??= arg;
+    } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
+        arg.role !== AdviceArgumentRole.Time && arg.role !== AdviceArgumentRole.Duration &&
+        arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
+      materialArgument ??= arg;
+    }
+  }
+  // The parser owns the relation daughter independently from lexical noun
+  // roles. Retain the role-based fallback for older structured frames.
+  const relationTarget = targetArgument
+    ? translatedArgument(targetArgument, c.locale) : c.destination ?? c.substance;
+  const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
-  const destination = relation && c.destination
-    ? joinLocalizedTokens(c.locale, [relation, c.destination])
-    : undefined;
-  const material = c.material
-    ? joinLocalizedTokens(c.locale, [profile.materialPrefix || undefined, c.material])
+  const destinations: string[] = [];
+  if (relation && relationTarget) destinations.push(
+    joinLocalizedTokens(c.locale, [relation, relationTarget]));
+  for (const arg of c.frame.args) {
+    if (arg === targetArgument || !arg.relation ||
+        relationHasSemanticClass(arg.relation, "temporal") ||
+        relationHasGrammarFeature(arg.relation, "conditionalTail")) continue;
+    const text = translatedArgument(arg, c.locale);
+    if (text) destinations.push(joinLocalizedTokens(c.locale, [
+      localizeAdviceRelation(arg.relation, c.locale) ?? arg.relation, text
+    ]));
+  }
+  const destination = joinLocalizedTokens(c.locale, destinations);
+  const materialValue = targetArgument
+    ? materialArgument && translatedArgument(materialArgument, c.locale)
+    : c.material ?? (!relation || c.destination ? c.substance : undefined);
+  const material = materialValue
+    ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
   return renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
@@ -3642,8 +3806,19 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
       hasUntranslatedThaiArgument(frame, locale)) {
     return trimSemanticText(frame.sourceText);
   }
+  const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
+  let temporalAdjunct: AdviceArgument | undefined;
+  const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
+  for (const arg of frame.args) {
+    if (independentTemporal && arg.relation &&
+        (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
+          arg.role === AdviceArgumentRole.Result) &&
+        relationHasSemanticClass(arg.relation, "temporal")) {
+      temporalAdjunct ??= arg;
+    } else firstArguments[arg.role] ??= arg;
+  }
   const first = (role: AdviceArgumentRole): string | undefined => {
-    const arg = frame.args.filter((candidate) => candidate.role === role).slice(0, 1)[0];
+    const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
   const label = actionLabel(frame, locale, roundtripSafe);
@@ -3655,7 +3830,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const substance = first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
-  const timeArg = frame.args.find((arg) => arg.role === AdviceArgumentRole.Time);
+  const timeArg = firstArguments[AdviceArgumentRole.Time];
   const time = timeArg ? translatedArgument(timeArg, locale) : undefined;
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
@@ -3671,23 +3846,18 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   };
   const adapter = getInstructionActionLocaleAdapter(locale);
   input = adapter.selectLexicalRealization?.(input) ?? input;
-  if (frame.polarity === AdvicePolarity.Negate) {
-    return adapter.renderNegated(input);
-  }
+  const negated = frame.polarity === AdvicePolarity.Negate;
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const genericRealizer = ACTION_REALIZERS[realizerKey];
-  const realized = genericRealizer
+  const realized = negated ? adapter.renderNegated(input,
+    realizerKey === "amount-material-destination" ||
+      realizerKey === "default" && firstArguments[AdviceArgumentRole.Amount]?.quantity
+      ? genericRealizer?.(input) : undefined) : genericRealizer
     ? genericRealizer(input)
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
-  const temporalAdjunct = frame.args.find((arg) =>
-    arg.role === AdviceArgumentRole.Activity && arg.relation &&
-    relationHasSemanticClass(arg.relation, "temporal")
-  );
-  const temporalRelation = temporalAdjunct?.relation && (
-    !frame.relation || !relationHasSemanticClass(frame.relation, "temporal")
-  ) ? temporalAdjunct.relation : undefined;
+  const temporalRelation = temporalAdjunct?.relation;
   // Avoid duplicating an event already entailed by an explicitly registered
   // compound noun ("before first use"). It remains a fully typed independent
   // action argument in source and FHIR; only redundant display is omitted.
@@ -3704,14 +3874,68 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
         translatedArgumentConcept(temporalAdjunct, locale)
       ])
     : undefined;
-  return adapter.applyPositiveModality(
-    temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized,
-    frame
-  );
+  const complete = temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized;
+  return negated ? complete : adapter.applyPositiveModality(complete, frame);
 }
 
 export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): string {
   return realizeAction(frame, locale);
+}
+
+/** A rich source action can carry its own Manner/Time but no Amount because a
+ * preceding preparatory verb supplied the original quantity. When the
+ * clinician edits the canonical dose, never let that amountless rich action
+ * replace the numeric administration text without the CURRENT dose.
+ * This is a display-only frame copy, not an edit of source graph/provenance. */
+export function realizeRichPrimaryWithCanonicalDose(
+  frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): string {
+  const sourceFrame = frame;
+  frame = frameWithCanonicalPrimaryContext(frame, clause);
+  if (primaryActionAmountConflicts(frame, clause.dose,
+      !clause.dose && clause.sourceProjectionVerified === false))
+    frame = frameWithoutSupersededAmount(frame, clause.dose);
+  if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
+    const method = clause.method;
+    const definition = resolveMedicationInstructionActionForMethod(method, options);
+    const sourceDefinition = options?.instructionActionMap
+      ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
+      : getMedicationInstructionAction(frame.predicate.lemma);
+    const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
+    const methodBoundManners = sourceDefinition?.methodBoundMannerConcepts;
+    // Independent material, manner and event daughters stay with the edited
+    // action. Only the source method's declared bound qualifiers are superseded.
+    frame = { ...frame, sourceText: "",
+      args: methodBoundManners?.length ? frame.args.filter(arg =>
+        arg.role !== AdviceArgumentRole.Manner || !arg.conceptId ||
+        methodBoundManners.indexOf(arg.conceptId) < 0) : frame.args,
+      predicate: definition ? {
+      lemma: definition.code, display: definition.display, i18n: definition.i18n,
+      semanticClass: definition.semanticClass, realizer: sourceRealizer,
+      realizerConfig: frame.predicate.realizerConfig, codings: medicationInstructionActionCodings(definition)
+    } : { lemma: method.text ?? method.coding?.display ?? method.coding?.code ?? "",
+      display: method.text ?? method.coding?.display, realizer: sourceRealizer,
+      realizerConfig: frame.predicate.realizerConfig,
+      codings: method.coding ? [method.coding] : undefined } };
+  }
+  const dose = clause.dose;
+  if (!dose || frame.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+    (dose.value === undefined && !dose.range)) return realizeAction(frame, locale);
+  // A preceding preparation already supplies the unchanged amount. Add the
+  // live dose only when no independently rendered owner still supplies it.
+  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
+  if (owner && owner !== sourceFrame && !primaryActionAmountConflicts(owner, dose))
+    return realizeAction(frame, locale);
+  const { value, range, unit, comparator } = dose;
+  return realizeAction({
+    ...frame, sourceText: "",
+    args: [{
+      role: AdviceArgumentRole.Amount,
+      text: "", quantity: { value, range, unit, comparator }
+    }, ...frame.args.filter(arg => arg.role !== AdviceArgumentRole.Amount)]
+  }, locale);
 }
 
 function normalizedInstructionSurface(value: string): string {
@@ -3816,6 +4040,7 @@ export function instructionGraphCoversTypedWarnings(
           (!arg.quantity || Boolean(candidate.quantity &&
             arg.quantity.value === candidate.quantity.value &&
             arg.quantity.unit === candidate.quantity.unit &&
+            arg.quantity.comparator === candidate.quantity.comparator &&
             arg.quantity.range?.low === candidate.quantity.range?.low &&
             arg.quantity.range?.high === candidate.quantity.range?.high))
         )
@@ -3945,7 +4170,8 @@ function quantityCoveredByDose(arg: AdviceArgument, dose: CanonicalDoseExpr | un
   return arg.quantity.value === dose.value &&
     arg.quantity.range?.low === dose.range?.low &&
     arg.quantity.range?.high === dose.range?.high &&
-    arg.quantity.unit === dose.unit;
+    arg.quantity.unit === dose.unit &&
+    arg.quantity.comparator === dose.comparator;
 }
 
 function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigClause): boolean {
@@ -3956,15 +4182,30 @@ function siteArgumentCoveredByClause(arg: AdviceArgument, clause: CanonicalSigCl
   return Boolean(left && right && left === right);
 }
 
-function actionMatchesCanonicalMethod(frame: AdviceFrame, clause: CanonicalSigClause): boolean {
+function actionMatchesCanonicalMethod(
+  frame: AdviceFrame, clause: Pick<CanonicalSigClause, "method">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
   const method = clause.method;
   if (!method) return false;
-  if (method.coding?.code && frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) {
-    return true;
+  const definition = options?.instructionActionMap
+    ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
+    : getMedicationInstructionAction(frame.predicate.lemma);
+  // Distinct authored actions may share an administration code (Apply/Reapply).
+  // Compare declared identities; an unknown custom source cannot be treated as
+  // a different default action merely because its local lemma is unfamiliar.
+  if (definition && method.text?.trim()) {
+    const current = resolveMedicationInstructionActionForMethod(method, options);
+    if (current) return current.code === definition.code;
+  }
+  if (method.coding?.code) {
+    if (frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) return true;
+    const declared = definition?.administrationMethod;
+    if (declared && codingEquivalent(declared, method.coding)) return true;
+    if (resolveMedicationInstructionActionByMethod(method.coding, options)) return false;
   }
   const methodText = normalizeActionSurface(method.text ?? "");
   if (!methodText) return false;
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
   const candidates = [
     frame.predicate.lemma,
     frame.predicate.display ?? "",
@@ -4028,11 +4269,61 @@ function timeArgumentCoveredBySchedule(
     return false;
   }
   const timing = arg.normalized as EventTiming;
-  if (clause.schedule.when.indexOf(timing) >= 0) return true;
-  const related = frame.relation
-    ? MEAL_TIMING_BY_RELATION.get(frame.relation as "before" | "after" | "with")?.get(timing)
+  const relation = arg.relation ?? frame.relation;
+  const related = relation
+    ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
     : undefined;
-  return Boolean(related && clause.schedule.when.indexOf(related) >= 0);
+  return clause.schedule.when.indexOf(related ?? timing) >= 0;
+}
+
+const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
+
+/** Apply the selected primary's live schedule/site in one display-only pass.
+ * A source graph clock is independent unless the wire source established
+ * structured clock ownership. Source arguments and other actions stay intact. */
+function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalSigClause): AdviceFrame {
+  const schedule = clause.schedule;
+  const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
+    schedule?.offsetMax !== undefined;
+  const hasClocks = Boolean(schedule?.timeOfDay?.length);
+  const ownsClocks = hasClocks || clause.sourceHasStructuredClocks === true;
+  const ownsEvents = hasOffset || Boolean(schedule?.when?.length) || clause.sourceHasStructuredEvents === true;
+  const site = clause.site;
+  const ownsSite = Boolean(site) || clause.sourceHasStructuredSite === true;
+  // Both callers have already selected the source primary. A simultaneous
+  // method edit cannot revoke its current schedule/site ownership.
+  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !ownsSite) return frame;
+  const args: AdviceArgument[] = [];
+  let changed = false;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
+      const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
+      if (clock && ownsClocks || ownsEvents && KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
+          (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) {
+        changed = true;
+        continue;
+      }
+    }
+    if (arg.role === AdviceArgumentRole.Site && !site && clause.sourceHasStructuredSite === true) {
+      changed = true;
+      continue;
+    }
+    if (arg.role === AdviceArgumentRole.Site && site &&
+        (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||
+          arg.coding?.system !== site.coding?.system)) {
+      changed = true;
+      const text = site.text ?? site.coding?.display ?? site.coding?.code ?? "";
+      args.push({ ...arg, text, normalized: text, conceptId: undefined,
+        coding: site.coding, codings: site.coding ? [site.coding] : undefined,
+        i18n: site.i18n ?? site.coding?.i18n ?? codingFromSite(text)?.i18n });
+      continue;
+    }
+    args.push(arg);
+  }
+  // A failed proof forbids old raw wording, even when a graph-only clock
+  // survives as an independent typed argument.
+  if (!changed && clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks) return frame;
+  return { ...frame, sourceText: "", args: changed ? args : frame.args };
 }
 
 /**
@@ -4045,10 +4336,12 @@ export function instructionGraphActionCoversSingleScheduledEvent(
   frame: AdviceFrame,
   clause: CanonicalSigClause
 ): boolean {
-  if (clause.schedule?.when?.length !== 1) return false;
+  if (clause.schedule?.when?.length !== 1 || clause.schedule.offset !== undefined ||
+      clause.schedule.offsetMin !== undefined || clause.schedule.offsetMax !== undefined) return false;
   return frame.args.some((arg) => {
     if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
-    if (arg.role !== AdviceArgumentRole.Time) return false;
+    if (arg.role !== AdviceArgumentRole.Time ||
+        arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
     const words = normalizeActionSurface(arg.normalized ?? arg.text)
       .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
     for (let index = 0; index < words.length; index += 1) {
@@ -4061,14 +4354,29 @@ export function instructionGraphActionCoversSingleScheduledEvent(
 function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  selectedOwner?: AdviceFrame,
+  sourceFrame: AdviceFrame = frame
 ): boolean {
   if (!actionMatchesCanonicalMethod(frame, clause)) return false;
-  const matching = actions
-    .filter((candidate) => candidate.polarity !== AdvicePolarity.Negate && actionMatchesCanonicalMethod(candidate, clause))
-    .slice()
-    .sort((left, right) => left.span.start - right.span.start || left.span.end - right.span.end);
-  if (!matching.length || matching[0] !== frame) return false;
+  if (selectedOwner) {
+    // An explicit primary source span owns the canonical dose, even when a
+    // different earlier administration happens to use the same verb.
+    if (sourceFrame !== selectedOwner) return false;
+  } else {
+    // Without a selected source owner, retain the historical first-matching
+    // method behavior. A single scan avoids sorting/cloning the actions.
+    let first: AdviceFrame | undefined;
+    for (const candidate of actions) {
+      if (candidate.polarity === AdvicePolarity.Negate ||
+          !actionMatchesCanonicalMethod(candidate, clause)) continue;
+      if (!first || candidate.span.start < first.span.start ||
+          (candidate.span.start === first.span.start && candidate.span.end < first.span.end)) {
+        first = candidate;
+      }
+    }
+    if (first !== sourceFrame) return false;
+  }
   return frame.args.every((arg) =>
     (arg.role === AdviceArgumentRole.Site && siteArgumentCoveredByClause(arg, clause)) ||
     (arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose)) ||
@@ -4076,6 +4384,148 @@ function primaryActionCoveredByCanonicalClause(
     argumentCoveredByCanonicalText(arg, clause) ||
     freeArgumentCoveredByCanonicalAdministration(arg, clause)
   );
+}
+
+/** The normalized and source-preserving primary selectors must honor the
+ * same current dose, while leaving superseded graph/source data untouched. */
+function primaryActionAmountConflicts(
+  action: AdviceFrame, dose: CanonicalDoseExpr | undefined, removed = false
+): boolean {
+  return Boolean((dose || removed) && action.args.some(arg => arg.role === AdviceArgumentRole.Amount &&
+    arg.quantity && (!dose || !quantityCoveredByDose(arg, dose))));
+}
+
+/** Realize an edited administration without rewriting its saved graph.
+ * Its old Amount may also be embedded in a larger Object ('1 tablet of
+ * amoxicillin'); remove only the source-owned amount, keep the drug name and
+ * the action's independent material/target. No raw-source fallback is valid
+ * after a numeric edit. */
+function frameWithoutSupersededAmount(
+  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined
+): AdviceFrame {
+  const superseded = frame.args.filter(arg =>
+    arg.role === AdviceArgumentRole.Amount && arg.quantity &&
+    !quantityCoveredByDose(arg, currentDose));
+  const args: AdviceArgument[] = [];
+  for (const arg of frame.args) {
+    // Only the dose-bearing Amount belongs to the canonical dose. An
+    // independent 100 mL mixing Substance or 5-minute Duration must never
+    // disappear because the tablet amount changed.
+    if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
+        !quantityCoveredByDose(arg, currentDose)) continue;
+    if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
+      const text = arg.text ?? "";
+      let sourceAmount: AdviceArgument | undefined;
+      let labelOffset = -1;
+      for (const amount of superseded) {
+        const label = amount.text ?? "";
+        const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
+        const hasLabel = at >= 0 &&
+          (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
+          (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length]));
+        // Disjoint source spans identify independent quantities even when
+        // their values and units happen to match.
+        const ownsSource = arg.span && amount.span
+          ? arg.span.start <= amount.span.start && arg.span.end >= amount.span.end
+          : hasLabel;
+        if (ownsSource) {
+          sourceAmount = amount;
+          labelOffset = hasLabel ? at : -1;
+          break;
+        }
+      }
+      if (sourceAmount) {
+        const remaining = labelOffset >= 0
+          ? (text.slice(0, labelOffset) + " " +
+              text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
+          : text;
+        if (!remaining) continue;
+        const quantity = sourceAmount.quantity;
+        const sharesSupersededQuantity = quantity && arg.quantity &&
+          quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
+          quantity.comparator === arg.quantity.comparator &&
+          quantity.range?.low === arg.quantity.range?.low &&
+          quantity.range?.high === arg.quantity.range?.high;
+        args.push({ ...arg,
+          ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
+          text: remaining, normalized: remaining, i18n: undefined });
+        continue;
+      }
+    }
+    args.push(arg);
+  }
+  return { ...frame, sourceText: "", args };
+}
+
+/** Identify which source-backed Amount belongs to the canonical dose.
+ * An explicit HPSG primary span takes precedence. Imported action graphs
+ * without that span use a matching unit/method, then the first ordered
+ * administration amount. Later independent actions keep their own amounts.
+ * No source text is parsed or changed to make this selection. */
+/** The source graph is immutable during realization. One pass establishes
+ * amount ownership, honoring an explicitly registered dose-defining action
+ * without rebuilding the institution's vocabulary on the default path.
+ * Standard coded built-ins continue to use the original code registry. */
+function primaryDoseAmountOwner(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): AdviceFrame | undefined {
+  if (!clause.dose && clause.sourceProjectionVerified !== false) return undefined;
+  const primary=graph.primaryAdministrationSpan;
+  let earliest:AdviceFrame|undefined,overlap:AdviceFrame|undefined;
+  let earlier:AdviceFrame|undefined,earlierCount=0;
+  for(const action of graph.actions) {
+    if(action.polarity===AdvicePolarity.Negate)continue;
+    let hasAmount=false;
+    for(const arg of action.args)
+      if(arg.role===AdviceArgumentRole.Amount&&arg.quantity){hasAmount=true;break;}
+    if(!hasAmount)continue;
+    if(!earliest||action.span.start<earliest.span.start)earliest=action;
+    if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
+      overlap=action;
+    if(!primary || action.span.end<=primary.start) {
+      const custom=options?.instructionActionMap
+        ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
+      if((custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose) {
+        earlierCount++;earlier=action;
+      }
+    }
+  }
+  if(primary)return overlap??(earlierCount===1?earlier:undefined);
+  // Source-declared dose ownership precedes device preparation in spanless
+  // saved graphs. Multiple independent dose definers keep the original first
+  // amount owner; a live method/unit edit never changes this source decision.
+  return earlierCount === 1 ? earlier : earliest;
+}
+
+/** Whole-source replay and action realization have the same amount owner.
+ * Unrelated later-stage Amounts are not evidence the canonical dose changed. */
+export function instructionGraphSourceConflictsWithDose(
+  clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
+  const graph = clause.instructionGraph;
+  const dose = clause.dose;
+  if (!graph) return false;
+  if (clause.sourceProjectionVerified === false) return true;
+  if (!dose || (dose.value === undefined && !dose.range)) return false;
+  // A failed live timing/dose proof takes precedence over source ownership.
+  if (dose.sourceDoseVerified === false) return true;
+  // The single-dose default is precisely one discrete unit. Changing that
+  // amount does not inherit permission to replay the old amountless wording.
+  if (dose.defaulted && dose.value === 1 && dose.unit === dose.defaultedUnit &&
+      !dose.range && !dose.comparator) return false;
+  const owner = primaryDoseAmountOwner(graph, clause, options);
+  if (!owner) {
+    // HPSG primary-dose facts need not be repeated in auxiliary actions.
+    // Failed live-source proof was handled above; an Amount owner below
+    // remains independent evidence and is compared with the live dose.
+    if (dose.sourceDoseVerified) return false;
+    for (const evidence of clause.evidence ?? [])
+      if (evidence.lexicalCategory === "dose") return false;
+    return true;
+  }
+  return primaryActionAmountConflicts(owner, dose);
 }
 
 export function instructionGraphRichPrimaryAction(
@@ -4087,11 +4537,7 @@ export function instructionGraphRichPrimaryAction(
   const dose = clause.dose;
   const matchesDose = (action: AdviceFrame): boolean => Boolean(
     dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount &&
-      arg.quantity?.value === dose.value &&
-      arg.quantity?.range?.low === dose.range?.low &&
-      arg.quantity?.range?.high === dose.range?.high &&
-      arg.quantity?.unit === dose.unit
+      arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, dose)
     )
   );
   return graph.actions.find((action) => {
@@ -4123,21 +4569,13 @@ export function instructionGraphRichPrimaryAction(
         ].indexOf(arg.role) >= 0
       )
     );
-    // A selected HPSG dose may live on the canonical administration while
-    // its richer action frame carries only a typed manner/time adjunct.
-    // It is still the SAME primary event when the predicate unifies and its
-    // source overlaps the HPSG-owned primary span. Reject any conflicting
-    // explicit action quantity; do not infer a quantity from wording.
-    const conflictingAmount = Boolean(dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-      !quantityCoveredByDose(arg, dose)
-    ));
-    const samePrimaryWithCanonicalDose = Boolean(
-      dose && overlapsPrimary && actionMatchesCanonicalMethod(action, clause) &&
-      !conflictingAmount
-    );
-    return (rich || suppliesMissingHead) &&
-      (!dose || matchesDose(action) || samePrimaryWithCanonicalDose);
+    // The selected source span continues to identify the SAME event after a
+    // method or dose edit. Its renderer applies current facts to a display copy
+    // and preserves independent adjuncts; another action cannot inherit it.
+    if (overlapsPrimary) return rich || suppliesMissingHead;
+    return !primaryActionAmountConflicts(action, dose,
+      !dose && clause.sourceProjectionVerified === false) &&
+      (rich || suppliesMissingHead) && (!dose || matchesDose(action));
   });
 }
 
@@ -4159,7 +4597,13 @@ export function instructionGraphRoundTripPrimaryAction(
       ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
         /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
     );
-    return hasLocalRelation || hasRichArgument;
+    // Source wording may be replayed only when its explicit Amount still
+    // agrees with the current canonical dose. Keep the graph unchanged for
+    // editing/provenance; it must not overwrite a clinician's new quantity.
+    const conflictingAmount = primaryActionAmountConflicts(action, clause.dose,
+      !clause.dose && clause.sourceProjectionVerified === false);
+    return !conflictingAmount && (!clause.method || actionMatchesCanonicalMethod(action, clause)) &&
+      (hasLocalRelation || hasRichArgument);
   });
 }
 
@@ -4303,6 +4747,7 @@ export function realizeInstructionGraph(
     position?: "all" | "pre" | "post";
     /** Prefer deliberately unambiguous lexical labels when generating parse-safe text. */
     roundtripSafe?: boolean;
+    instructionActionMap?: ParseOptions["instructionActionMap"];
   }
 ): string | undefined {
   const omittedSources = (options?.omitSourceTexts ?? [])
@@ -4310,6 +4755,8 @@ export function realizeInstructionGraph(
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
+  const amountOwner = options?.omitCanonicalAdministration
+    ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration, options) : undefined;
   const primaryAction = primary ? graph.actions.findIndex(frame =>
     frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();
@@ -4343,15 +4790,29 @@ export function realizeInstructionGraph(
     if (position === "pre") return end <= primary.start;
     return start >= primary.start;
   };
-  const frames = graph.actions.filter((frame) => {
-    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) return false;
-    const frameSource = normalizedInstructionSurface(frame.sourceText);
+  const frames: AdviceFrame[] = [];
+  let displayedAmountOwner = amountOwner;
+  for (const sourceFrame of graph.actions) {
+    const ownsPrimary = primaryAction >= 0
+      ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
+    const frame = ownsPrimary && options?.omitCanonicalAdministration
+      ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
+    if (sourceFrame === amountOwner) displayedAmountOwner = frame;
+    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) continue;
+    const frameSource = normalizedInstructionSurface(sourceFrame.sourceText);
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
-    if (frameSource && omittedSources.indexOf(frameSource) >= 0) return false;
+    if (frameSource && omittedSources.indexOf(frameSource) >= 0) continue;
     if (options?.omitCanonicalAdministration &&
-      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration)) {
-      return false;
+      // A later, independent action may now happen to match the clinician's
+      // EDITED method and dose. Only the source-backed amount owner may be
+      // removed as the canonical administration; other quantified actions
+      // keep their separate meaning and original temporal relationship.
+      (!frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+        amountOwner === sourceFrame) &&
+      primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
+        primary ? amountOwner : undefined, sourceFrame)) {
+      continue;
     }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     if (
@@ -4364,12 +4825,12 @@ export function realizeInstructionGraph(
       frame.span.end <= primary.start &&
       primary.start - frame.span.end <= 1
     ) {
-      return false;
+      continue;
     }
     const warning = frame.polarity === AdvicePolarity.Negate;
-    if (options?.onlyWarnings) return warning;
-    return options?.includeWarnings !== false || !warning;
-  });
+    if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
+    frames.push(frame);
+  }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
   const nodes: Array<{
     start: number;
@@ -4383,7 +4844,16 @@ export function realizeInstructionGraph(
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
-  for (const frame of frames) {
+  for (const sourceFrame of frames) {
+    const currentDose = options?.omitCanonicalAdministration?.dose;
+    const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
+      primaryActionAmountConflicts(sourceFrame, currentDose,
+        !currentDose && options?.omitCanonicalAdministration?.sourceProjectionVerified === false));
+    // The canonical body owns the edited dose. Preserve the original graph
+    // verbatim; a source-free display copy cannot revive its obsolete amount.
+    const frame = editedPrimary
+      ? frameWithoutSupersededAmount(sourceFrame, currentDose)
+      : sourceFrame;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(
       definition?.administrationMethod?.code &&
@@ -4391,7 +4861,7 @@ export function realizeInstructionGraph(
       (frame.span.end <= graph.primaryAdministrationSpan.start ||
        frame.span.start >= graph.primaryAdministrationSpan.end)
     );
-    const sourceFaithful = (
+    const sourceFaithful = !editedPrimary && (
       options?.preferSourceText || secondaryAdministration ||
       frame.polarity === AdvicePolarity.Negate
     ) && frame.polaritySource !== "shared" &&
