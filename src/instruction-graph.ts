@@ -3825,7 +3825,9 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const genericRealizer = ACTION_REALIZERS[realizerKey];
   const realized = negated ? adapter.renderNegated(input,
-    realizerKey === "amount-material-destination" ? genericRealizer?.(input) : undefined) : genericRealizer
+    realizerKey === "amount-material-destination" ||
+      realizerKey === "default" && firstArguments[AdviceArgumentRole.Amount]?.quantity
+      ? genericRealizer?.(input) : undefined) : genericRealizer
     ? genericRealizer(input)
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
@@ -3864,15 +3866,26 @@ export function realizeRichPrimaryWithCanonicalDose(
   frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
   options?: Pick<ParseOptions, "instructionActionMap">
 ): string {
+  const sourceFrame = frame;
   frame = frameWithoutSupersededTime(frame, clause);
+  if (primaryActionAmountConflicts(frame, clause.dose,
+      !clause.dose && clause.sourceProjectionVerified === false))
+    frame = frameWithoutSupersededAmount(frame, clause.dose);
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
-    const sourceRealizer = frame.predicate.realizer ??
-      getMedicationInstructionAction(frame.predicate.lemma)?.realizer ?? "default";
-    // The current method replaces only the action head. Its independent typed
-    // dose, material, manner and event daughters remain attached to that action.
-    frame = { ...frame, sourceText: "", predicate: definition ? {
+    const sourceDefinition = options?.instructionActionMap
+      ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
+      : getMedicationInstructionAction(frame.predicate.lemma);
+    const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
+    const methodBoundManners = sourceDefinition?.methodBoundMannerConcepts;
+    // Independent material, manner and event daughters stay with the edited
+    // action. Only the source method's declared bound qualifiers are superseded.
+    frame = { ...frame, sourceText: "",
+      args: methodBoundManners?.length ? frame.args.filter(arg =>
+        arg.role !== AdviceArgumentRole.Manner || !arg.conceptId ||
+        methodBoundManners.indexOf(arg.conceptId) < 0) : frame.args,
+      predicate: definition ? {
       lemma: definition.code, display: definition.display, i18n: definition.i18n,
       semanticClass: definition.semanticClass, realizer: sourceRealizer,
       realizerConfig: frame.predicate.realizerConfig, codings: medicationInstructionActionCodings(definition)
@@ -3888,7 +3901,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   // A preceding preparation already supplies the unchanged amount. Add the
   // live dose only when no independently rendered owner still supplies it.
   const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
-  if (owner && owner !== frame && !primaryActionAmountConflicts(owner, dose))
+  if (owner && owner !== sourceFrame && !primaryActionAmountConflicts(owner, dose))
     return realizeAction(frame, locale);
   const { value, range, unit, comparator } = dose;
   return realizeAction({
@@ -4502,19 +4515,13 @@ export function instructionGraphRichPrimaryAction(
         ].indexOf(arg.role) >= 0
       )
     );
-    // A selected HPSG dose may live on the canonical administration while
-    // its richer action frame carries only a typed manner/time adjunct.
-    // It is still the SAME primary event when the predicate unifies and its
-    // source overlaps the HPSG-owned primary span. Reject any conflicting
-    // explicit action quantity; do not infer a quantity from wording.
-    const conflictingAmount = primaryActionAmountConflicts(action, dose,
-      !dose && clause.sourceProjectionVerified === false);
-    const samePrimaryWithCanonicalDose = Boolean(
-      dose && overlapsPrimary && actionMatchesCanonicalMethod(action, clause) &&
-      !conflictingAmount
-    );
-    return !conflictingAmount && (rich || suppliesMissingHead) &&
-      (!dose || matchesDose(action) || samePrimaryWithCanonicalDose);
+    // The selected source span continues to identify the SAME event after a
+    // method or dose edit. Its renderer applies current facts to a display copy
+    // and preserves independent adjuncts; another action cannot inherit it.
+    if (overlapsPrimary) return rich || suppliesMissingHead;
+    return !primaryActionAmountConflicts(action, dose,
+      !dose && clause.sourceProjectionVerified === false) &&
+      (rich || suppliesMissingHead) && (!dose || matchesDose(action));
   });
 }
 
@@ -4732,8 +4739,8 @@ export function realizeInstructionGraph(
   const frames: AdviceFrame[] = [];
   let displayedAmountOwner = amountOwner;
   for (const sourceFrame of graph.actions) {
-    const ownsPrimary = sourceFrame === amountOwner ||
-      primaryAction >= 0 && sourceFrame === graph.actions[primaryAction];
+    const ownsPrimary = primaryAction >= 0
+      ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
     const frame = ownsPrimary && options?.omitCanonicalAdministration
       ? frameWithoutSupersededTime(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
     if (sourceFrame === amountOwner) displayedAmountOwner = frame;

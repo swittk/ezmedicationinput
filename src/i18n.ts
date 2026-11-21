@@ -1127,12 +1127,18 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
+  const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
+  const rangeFrequency = rangedPeriod && frequency !== undefined
+    ? frequencyMax !== undefined && frequencyMax !== frequency
+      ? `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง `
+      : `${stripTrailingZero(frequency)} ครั้ง `
+    : "";
 
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
     periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1)
+    (!period || period === 1) && !rangedPeriod
   ) {
     if (frequency === 1 && frequencyMax === 1) {
       return "วันละครั้ง";
@@ -1142,27 +1148,27 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     }
     return `วันละ ${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
   }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
+  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
     return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;
     }
     return `ทุก ${stripTrailingZero(period)} นาที`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ชั่วโมง`;
     }
     return `ทุก ${stripTrailingZero(period)} ชั่วโมง`;
   }
-  if (periodUnit === FhirPeriodUnit.Day && period && period !== 1) {
+  if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
     if (period === 2 && (!periodMax || periodMax === 2)) {
       return "วันเว้นวัน";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} วัน`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} วัน`;
     }
     return `ทุก ${stripTrailingZero(period)} วัน`;
   }
@@ -1185,7 +1191,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "สัปดาห์ละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} สัปดาห์`;
     }
     return `ทุก ${stripTrailingZero(period)} สัปดาห์`;
   }
@@ -1200,7 +1206,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "เดือนละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} เดือน`;
     }
     return `ทุก ${stripTrailingZero(period)} เดือน`;
   }
@@ -1214,7 +1220,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
         : "ปีละครั้ง";
     }
     if (periodMax && periodMax !== period) {
-      return `ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
+      return `${rangeFrequency}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} ปี`;
     }
     return `ทุก ${stripTrailingZero(period)} ปี`;
   }
@@ -1317,7 +1323,14 @@ function summarizeMealTimingGroupThai(group: MealTimingGroup): string {
   return `${relationText[group.relation]}${joinMealNamesThai(meals)}`;
 }
 
-function formatEventOffsetQuantityThai(minutes: number): string {
+function describeEventWindowThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const window = schedule?.eventWindow;
+  return window ? THAI_COURSE.eventWindow(WHEN_TEXT_THAI[window.start] ?? window.start, WHEN_TEXT_THAI[window.end] ?? window.end) : undefined;
+}
+
+function formatEventOffsetQuantityThai(minutes: number, maximum?: number): string {
+  if (maximum !== undefined && maximum !== minutes)
+    return `${stripTrailingZero(minutes)}–${stripTrailingZero(maximum)} นาที`;
   const seconds = Number((minutes * 60).toFixed(9));
   if (minutes < 1 && Number.isInteger(seconds)) {
     return `${stripTrailingZero(seconds)} วินาที`;
@@ -1339,6 +1352,10 @@ function formatActivityTimingThai(schedule: CanonicalScheduleExpr | undefined): 
       : resolveMedicationInstructionConcept(timing.activity.text);
     const activity = timing.activity.i18n?.th ?? definition?.i18n?.th ?? timing.activity.text;
     const relation = timing.relation === "before" ? "ก่อน" : "หลัง";
+    if (timing.offsetMin !== undefined && timing.offsetMax !== undefined) {
+      result.push(`${relation}${activity} ${formatEventOffsetQuantityThai(timing.offsetMin, timing.offsetMax)}`);
+      continue;
+    }
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;
     if (value === undefined) {
       result.push(`${relation}${activity}`);
@@ -1360,6 +1377,8 @@ function formatEventOffsetThai(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
+  if (schedule.offsetMin !== undefined && schedule.offsetMax !== undefined)
+    return `${eventText} ${formatEventOffsetQuantityThai(schedule.offsetMin, schedule.offsetMax)}`;
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
   if (value === 0 && schedule.offset !== undefined) return `${eventText}ทันที`;
@@ -2022,6 +2041,9 @@ function formatShortThai(clause: CanonicalSigClause): string {
   if (events.length) {
     parts.push(events.join(" "));
   }
+  if (schedule.activityTiming?.length) parts.push(...formatActivityTimingThai(schedule));
+  const eventWindow = describeEventWindowThai(schedule);
+  if (eventWindow) parts.push(eventWindow);
   if (schedule.timeOfDay?.length) {
     const times: string[] = [];
     for (const time of schedule.timeOfDay) {
@@ -2185,6 +2207,7 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
+  const eventWindowPart = describeEventWindowThai(schedule);
   let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
@@ -2256,6 +2279,7 @@ function formatLongThai(
   if (timing.event) {
     segments.push(timing.event);
   }
+  if (eventWindowPart) segments.push(eventWindowPart);
   for (const activityTiming of formatActivityTimingThai(schedule)) {
     segments.push(activityTiming);
   }
@@ -2333,6 +2357,7 @@ function formatLongThai(
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     else if (clockPart) graphRegimenTail.push(clockPart);
+    if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
     graphRegimenTail.push(...formatActivityTimingThai(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
@@ -2556,7 +2581,7 @@ function formatLongThai(
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||

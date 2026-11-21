@@ -1955,12 +1955,13 @@ describe("round30 qualified scalar infusion duration", () => {
     const inputs = [parsed.fhir, parsed.fhirNext, toDosageDetails(parsed.fhir), toFhirR5Dosages(parsed.fhirNext)];
     for (const input of inputs) {
       const before = JSON.stringify(input);
-      const recurrence = importCanonicalCourse(JSON.parse(before)).stages[0].administrations[0].schedule!.recurrence!;
+      const imported = JSON.parse(before);
+      const recurrence = importCanonicalCourse(imported).stages[0].administrations[0].schedule!.recurrence!;
       expect(recurrence).toMatchObject({
         occurrenceDuration: 2, occurrenceDurationUnit: "h", occurrenceDurationComparator: comparator
       });
       expect(recurrence.courseLength).toBeUndefined();
-      expect(JSON.stringify(input)).toBe(before);
+      expect(JSON.stringify(imported)).toBe(before);
     }
     expect(parsed.fhir[0].doseAndRate![0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
     expect(getQuantityComparator(parsed.fhir[0].doseAndRate![0].rateQuantity!)).toBeUndefined();
@@ -2019,5 +2020,57 @@ describe("round30 qualified duration unit ownership", () => {
     repeat.duration = 4;
     expect(importCanonicalCourse([row]).stages[0].administrations[0].schedule!.recurrence)
       .toMatchObject({ occurrenceDuration: 4, occurrenceDurationUnit: "h", occurrenceDurationComparator: undefined });
+  });
+});
+
+describe("round31 independent and compact infusion durations", () => {
+  it.each(["self", "carrier"] as const)("keeps a distinct duration beside the %s carrier rate denominator", kind => {
+    const row: FhirDosage = JSON.parse(JSON.stringify(parsePublicSig(kind === "self"
+      ? "Infuse 120 mL over approximately 2 hours"
+      : "Infuse 20 mg in 120 mL saline over approximately 2 hours").fhir[0]));
+    (row.timing ??= {}).repeat ??= {};
+    row.timing.repeat!.extension = [{
+      url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration",
+      valueQuantity: { value: 3, code: "h", unit: "hours", system: "http://unitsofmeasure.org", comparator: ">=" }
+    }];
+    const before = JSON.stringify(row);
+    const clause = canonicalFromFhir(row);
+    expect(clause.schedule).toMatchObject({
+      administrationDuration: 3, administrationDurationUnit: "h", administrationDurationComparator: ">="
+    });
+    for (const input of [[row], [canonicalToFhir(clause)], toDosageDetails([row]),
+      toDosageDetails([canonicalToFhir(clause)])]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages[0].administrations[0].schedule!.recurrence).toMatchObject({
+        occurrenceDuration: 3, occurrenceDurationUnit: "h", occurrenceDurationComparator: ">="
+      });
+      const projected = toFhirR5Dosages(input)[0];
+      const denominator = projected.doseAndRate![0].rateRatio!.denominator!;
+      expect(denominator).toMatchObject({ value: 2, code: "h" });
+      expect(getQuantityComparator(denominator)).toBe("~");
+      expect(canonicalFromFhir(projected).schedule).toMatchObject({
+        administrationDuration: 3, administrationDurationUnit: "h", administrationDurationComparator: ">="
+      });
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each([
+    ["Infuse at 100 mL/hr for ~2h", "~", 2, "h"],
+    ["Infuse at 100 mL/hr for ≤2h", "<=", 2, "h"],
+    ["Infuse at 100 mL/hr for ≥30min", ">=", 30, "min"],
+    ["Infuse at 100 mL/hr for 2h", undefined, 2, "h"],
+    ["Infuse at 2 mcg/kg/min for ~2h", "~", 2, "h"]
+  ] as const)("retains the trailing joined duration in %s", (source, comparator, value, unit) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity!.administrationDuration)
+      .toEqual({ value, unit, ...(comparator ? { comparator } : {}) });
+    for (const input of [parsed.fhir, parsed.fhirNext]) {
+      const before = JSON.stringify(input);
+      const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!;
+      expect(recurrence).toMatchObject({ occurrenceDuration: value, occurrenceDurationUnit: unit });
+      expect(recurrence.occurrenceDurationComparator).toBe(comparator);
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 });

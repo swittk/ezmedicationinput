@@ -358,11 +358,14 @@ export function projectNativeR5Course(
         if (hasExpressions) row.doseAndRate = strict.doseAndRate?.map((entry) => Object.assign({}, entry));
       }
       const missingContext = a.missingContexts;
+      let contextAnnotations: FhirExtension[] | undefined;
       if (strict.modifierExtension?.length) {
         let remaining: FhirExtension[] | undefined;
         for (let index = 0; index < strict.modifierExtension.length; index++) {
           const e = strict.modifierExtension[index];
           if (e.url !== DOSAGE_DETAILS_R5_URL) { remaining?.push(e); continue; }
+          if (a.provenance?.format === "r6" || a.provenance?.retained?.modifierExtension !== undefined)
+            (contextAnnotations ??= []).push(e);
           remaining ??= strict.modifierExtension.slice(0, index);
         }
         // This output's bridge is rebuilt from live facts. In particular,
@@ -372,7 +375,7 @@ export function projectNativeR5Course(
           if (row !== strict) row.modifierExtension = strict.modifierExtension;
         }
       }
-      if (needsBridge || missingContext?.length) {
+      if (needsBridge || missingContext?.length || contextAnnotations) {
         const common = {
           rowIndex,
           sequence: stageIndex + 1,
@@ -389,6 +392,11 @@ export function projectNativeR5Course(
         };
         const write = (target: EzDosage, extended: boolean) => {
           const delta = retentionForAdministration(a, target, extended, freshlyCompiled);
+          // The compact missingContext values own current reasons. Retain the
+          // original native modifier only for its Element/child annotations;
+          // reimport does not derive executable reasons from this snapshot.
+          if (contextAnnotations)
+            (delta.component ??= {}).modifierExtension = contextAnnotations;
           if (
             hasStep ||
             delta.component ||

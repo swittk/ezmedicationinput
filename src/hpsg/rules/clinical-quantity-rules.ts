@@ -199,7 +199,7 @@ function durationAfter(
   start: number
 ): { value: number; unit: FhirPeriodUnit.Hour | FhirPeriodUnit.Minute; comparator?: NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]>["comparator"]; indices: number[] } | undefined {
   const limit = Math.min(context.limit, start + 8);
-  for (let index = start; index + 2 < limit; index += 1) {
+  for (let index = start; index + 1 < limit; index += 1) {
     if (!available(context, index)) break;
     const token = normalizeTokenLower(context.tokens[index]);
     if (!INFUSION_DURATION_LEADS.has(token)) {

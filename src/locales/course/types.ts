@@ -30,6 +30,8 @@ export interface CourseLanguage {
   readonly maxDosageLabel: string;
   readonly courseLimitsLabel: string;
   readonly stageLimitsLabel: string;
+  ifLimitExceeded(action: string): string;
+  eventWindow(start: string, end: string): string;
   weekdayName(day: string): string;
   measurementName(name: string): string;
   joinList(items: readonly string[]): string;

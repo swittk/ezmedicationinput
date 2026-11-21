@@ -1,5 +1,5 @@
 import {courseFromR5} from "./adapters/r5-import";
-import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "./fhir";
+import { TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -60,11 +60,16 @@ export function r6StepMetadata(step: Partial<EzCourseStep>): Omit<FhirR6DosageSt
   const { sequence: _sequence, modifierExtension, extension, ...fields } = step;
   // R5's current modifier value supersedes any older embedded R6 wrapper.
   // A single wrapper can own this field; unrelated extensions stay intact.
-  const existing = extension?.find(item => item.url === R5_STEP_MODIFIERS_R6_URL);
+  let existing: FhirExtension | undefined;
+  const extensions: FhirExtension[] = [];
+  for (const item of extension ?? []) {
+    if (item.url !== R5_STEP_MODIFIERS_R6_URL) extensions.push(item);
+    else if (!existing) existing = item;
+    else extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+  }
   const modifiers = modifierExtension ?? existing?.extension;
-  const native = extension?.filter(item => item.url !== R5_STEP_MODIFIERS_R6_URL) ?? [];
-  const extensions = modifiers?.length
-    ? [...native, { ...existing, url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers }] : native;
+  if (modifiers?.length)
+    extensions.push({ ...existing, url: R5_STEP_MODIFIERS_R6_URL, extension: modifiers });
   if (!modifiers?.length && existing && hasOtherOwnField(existing, "extension"))
     extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
   // Empty arrays are explicit edits, not missing metadata. Omitting them
@@ -80,7 +85,11 @@ export function r5StepMetadata(step: Omit<FhirR6DosageStep, "component">):
   let extensions: FhirExtension[] | undefined;
   for (const item of extension ?? []) {
     if (item.url === R5_STEP_MODIFIERS_R6_URL) {
-      if (!retained) retained = item;
+      if (retained) {
+        (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+        continue;
+      }
+      retained = item;
       // The editable modifier list owns the children. Keep authored wrapper
       // annotations so rebuilding that list cannot erase the source envelope.
       if (hasOtherOwnField(item, "extension")) (extensions ??= []).push(item);
@@ -920,13 +929,26 @@ export function sourceWithoutNestedHistory(marker: FhirExtension): FhirExtension
   let changed = false;
   const extensions = marker.extension?.map(item => {
     if (item.url !== "dosageDetails" || !item.extension) return item;
-    const fields = item.extension.filter(field => {
-      const nestedSource = field.url === "extension" && field.extension?.length === 1 &&
-        field.extension[0].url === DOSAGE_RECONCILIATION_SOURCE_URL;
-      if (nestedSource) changed = true;
-      return !nestedSource;
-    });
-    return fields.length === item.extension.length ? item : { ...item, extension: fields };
+    let fields: FhirExtension[] | undefined;
+    for (let index = 0; index < item.extension.length; index++) {
+      const field = item.extension[index];
+      const history = field.url === "extension" && field.extension?.length === 1 &&
+        field.extension[0].url === DOSAGE_RECONCILIATION_SOURCE_URL ? field.extension[0] : undefined;
+      if (!history?.extension) {
+        fields?.push(field);
+        continue;
+      }
+      changed = true;
+      fields ??= item.extension.slice(0, index);
+      // The children have already moved into flat live history. Retain only
+      // authored envelope fields here, so an Element ID is not lost or its
+      // complete history copied a second time.
+      if (hasOtherOwnField(history, "extension") || hasOtherOwnField(field, "extension")) {
+        const { extension: _history, ...envelope } = history;
+        fields.push({ ...field, extension: [envelope] });
+      }
+    }
+    return fields ? { ...item, extension: fields } : item;
   });
   return changed ? { ...marker, extension: extensions } : marker;
 }
@@ -1280,7 +1302,46 @@ interface SourcePredicateObservation {
   children?: FhirExtension[];
   fields: Array<{ original: FhirExtension; url: string; value: string | number | boolean | undefined }>;
 }
-interface SourceConditionObservation {
+/** Only the authored duration fields are live. Retained range projection
+ * metadata stays opaque; its current bounds are observed by the timing proof. */
+interface SourceAnchoredDurationObservation {
+  original: FhirExtension;
+  quantity?: SourceMeasureObservation;
+  low?: SourceMeasureObservation;
+  high?: SourceMeasureObservation;
+  authoredLow?: SourceMeasureObservation;
+  authoredHigh?: SourceMeasureObservation;
+}
+function captureReplayAnchoredDuration(marker: FhirExtension | undefined): SourceAnchoredDurationObservation | undefined {
+  if (!marker) return undefined;
+  let low: FhirQuantity | undefined, high: FhirQuantity | undefined;
+  let lowSeen = false, highSeen = false;
+  for (const child of marker.extension ?? []) {
+    if (child.url === "low" && !lowSeen) { low = child.valueQuantity; lowSeen = true; }
+    else if (child.url === "high" && !highSeen) { high = child.valueQuantity; highSeen = true; }
+  }
+  return { original: marker, quantity: capturedReplayMeasure(marker.valueQuantity),
+    low: capturedReplayMeasure(marker.valueRange?.low), high: capturedReplayMeasure(marker.valueRange?.high),
+    authoredLow: capturedReplayMeasure(low), authoredHigh: capturedReplayMeasure(high) };
+}
+function matchesReplayAnchoredDuration(
+  marker: FhirExtension | undefined, proof: SourceAnchoredDurationObservation | undefined
+): boolean {
+  if (!marker || !proof) return marker === undefined && proof === undefined;
+  if (marker !== proof.original ||
+      !unchangedReplayMeasure(marker.valueQuantity, proof.quantity) ||
+      !unchangedReplayMeasure(marker.valueRange?.low, proof.low) ||
+      !unchangedReplayMeasure(marker.valueRange?.high, proof.high)) return false;
+  let low: FhirQuantity | undefined, high: FhirQuantity | undefined;
+  let lowSeen = false, highSeen = false;
+  for (const child of marker.extension ?? []) {
+    if (child.url === "low" && !lowSeen) { low = child.valueQuantity; lowSeen = true; }
+    else if (child.url === "high" && !highSeen) { high = child.valueQuantity; highSeen = true; }
+  }
+  return unchangedReplayMeasure(low, proof.authoredLow) && unchangedReplayMeasure(high, proof.authoredHigh);
+}
+interface SourceModifierObservation {
+  duration?: SourceAnchoredDurationObservation;
   modifier?: FhirExtension;
   predicate?: SourcePredicateObservation[];
   dateModifier?: FhirExtension;
@@ -1333,16 +1394,17 @@ function matchesReplayPredicate(proof: SourcePredicateObservation[] | undefined)
   }
   return true;
 }
-export function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): SourceConditionObservation | undefined {
-  let modifier: FhirExtension | undefined, dateModifier: FhirExtension | undefined;
+export function captureSourceReplayModifiers(dosage: FhirDosage | EzDosage): SourceModifierObservation | undefined {
+  let modifier: FhirExtension | undefined, dateModifier: FhirExtension | undefined, duration: FhirExtension | undefined;
   for (const item of dosage.modifierExtension ?? []) {
     if (item.url === DOSAGE_CONDITION_R5_URL) modifier ??= item;
     else if (item.url === DOSAGE_EXCLUDED_DATES_R5_URL) dateModifier ??= item;
+    else if (item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL) duration ??= item;
   }
   const weekdayExtension = dosage.extension?.find(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
   const conditions = (dosage as EzDosage).condition, dates = (dosage as EzDosage).excludedDates;
-  if (!modifier && !conditions?.length && !dateModifier && !weekdayExtension && !dates) return undefined;
-  const native: SourceConditionObservation["native"] = [];
+  if (!modifier && !conditions?.length && !dateModifier && !weekdayExtension && !dates && !duration) return undefined;
+  const native: SourceModifierObservation["native"] = [];
   for (const original of conditions ?? []) {
     const logic = original.extension?.find(item => item.url === DOSAGE_CONDITION_R6_LOGIC_URL);
     native.push({ original, operation: original.operation, text: original.text,
@@ -1350,20 +1412,22 @@ export function captureSourceReplayCondition(dosage: FhirDosage | EzDosage): Sou
       code: captureSourceReplayConcept(original.code), details: captureSourceReplayConcept(original.details),
       logic, predicate: captureReplayPredicate(logic) });
   }
-  return { modifier, predicate: captureReplayPredicate(modifier), native,
+  return { modifier, predicate: captureReplayPredicate(modifier), native, duration: captureReplayAnchoredDuration(duration),
     dateModifier, datePredicate: captureReplayPredicate(dateModifier), dates: dates?.slice(),
     weekdayExtension, weekdayPredicate: captureReplayPredicate(weekdayExtension) };
 }
-export function matchesSourceReplayCondition(dosage: FhirDosage | EzDosage, proof: SourceConditionObservation | undefined): boolean {
-  let modifier: FhirExtension | undefined, dateModifier: FhirExtension | undefined;
+export function matchesSourceReplayModifiers(dosage: FhirDosage | EzDosage, proof: SourceModifierObservation | undefined): boolean {
+  let modifier: FhirExtension | undefined, dateModifier: FhirExtension | undefined, duration: FhirExtension | undefined;
   for (const item of dosage.modifierExtension ?? []) {
     if (item.url === DOSAGE_CONDITION_R5_URL) modifier ??= item;
     else if (item.url === DOSAGE_EXCLUDED_DATES_R5_URL) dateModifier ??= item;
+    else if (item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL) duration ??= item;
   }
   const weekdayExtension = dosage.extension?.find(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
   const conditions = (dosage as EzDosage).condition, dates = (dosage as EzDosage).excludedDates;
-  if (!proof) return !modifier && !conditions?.length && !dateModifier && !weekdayExtension && !dates;
+  if (!proof) return !modifier && !conditions?.length && !dateModifier && !weekdayExtension && !dates && !duration;
   if (modifier !== proof.modifier || !matchesReplayPredicate(proof.predicate) ||
+      !matchesReplayAnchoredDuration(duration, proof.duration) ||
       dateModifier !== proof.dateModifier || !matchesReplayPredicate(proof.datePredicate) ||
       weekdayExtension !== proof.weekdayExtension || !matchesReplayPredicate(proof.weekdayPredicate) ||
       !unchangedReplayList(dates, proof.dates) ||
@@ -1385,7 +1449,7 @@ interface SourceReplayProof {
   top: Array<[string, unknown]>;
   amounts: SourceDoseObservation[];
   maxima?: SourceMaximaObservation;
-  condition?: SourceConditionObservation;
+  modifiers?: SourceModifierObservation;
   timing?: SourceTimingObservation;
   site?: SourceConceptObservation;
   route?: SourceConceptObservation;
@@ -1404,6 +1468,7 @@ interface SourceTimingObservation {
   monthDays?: number[];
   weekdayOrdinal?: number;
   clockWindow?: { start?: string; end?: string; endInclusive?: boolean };
+  eventWindow?: { start?: string; end?: string };
   occurrenceCap?: { max?: number; period?: SourceMeasureObservation };
   administrationDuration?: { quantity?: SourceMeasureObservation };
   activities?: Array<{ relation?: string; activity?: SourceConceptObservation;
@@ -1462,6 +1527,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let monthDays: number[] | undefined, weekdayOrdinal: number | undefined;
   let clockWindow: SourceTimingObservation["clockWindow"];
+  let eventWindow: SourceTimingObservation["eventWindow"];
   let occurrenceCap: SourceTimingObservation["occurrenceCap"];
   let administrationDuration: SourceTimingObservation["administrationDuration"];
   let activities: SourceTimingObservation["activities"];
@@ -1497,6 +1563,14 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
       }
       (activities ??= []).push(activity);
     }
+    else if (extension.url === TIMING_EVENT_WINDOW_EXTENSION_URL && !eventWindow) {
+      eventWindow = {};
+      let startSeen = false, endSeen = false;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "start" && !startSeen) { eventWindow.start = part.valueCode; startSeen = true; }
+        else if (part.url === "end" && !endSeen) { eventWindow.end = part.valueCode; endSeen = true; }
+      }
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindow) {
       clockWindow = {};
       for (const part of extension.extension ?? []) {
@@ -1511,7 +1585,7 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
     // The shallow snapshot owns scalar values only. Lists and bound quantities
     // have explicit observations below; retained source graphs are not traversed.
     repeatValues: repeat ? { ...repeat } : undefined,
-    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, occurrenceCap, administrationDuration, activities,
+    offsetExact, offsetMin, offsetMax, monthDays, weekdayOrdinal, clockWindow, eventWindow, occurrenceCap, administrationDuration, activities,
     events: timing.event?.slice(),
     clocks: repeat?.timeOfDay?.slice(),
     weekdays: repeat?.dayOfWeek?.slice(),
@@ -1546,7 +1620,7 @@ export function matchesSourceReplayTiming(
   const repeat = timing.repeat, prior = proof.repeatValues;
   let offsetExact: number | undefined, offsetMin: number | undefined, offsetMax: number | undefined;
   let monthDayIndex = 0, weekdayOrdinal: number | undefined;
-  let clockWindowSeen = false, occurrenceCapSeen = false, administrationDurationSeen = false, activityIndex = 0;
+  let eventWindowSeen = false, clockWindowSeen = false, occurrenceCapSeen = false, administrationDurationSeen = false, activityIndex = 0;
   if (repeat?.extension) for (const extension of repeat.extension) {
     const value = extension.valueInteger ?? extension.valueDecimal;
     if (extension.url === TIMING_OFFSET_EXACT_EXTENSION_URL) offsetExact ??= value;
@@ -1587,6 +1661,17 @@ export function matchesSourceReplayTiming(
           !unchangedReplayMeasure(offset, activity.offset) || !unchangedReplayMeasure(offsetMin, activity.offsetMin) ||
           !unchangedReplayMeasure(offsetMax, activity.offsetMax)) return false;
     }
+    else if (extension.url === TIMING_EVENT_WINDOW_EXTENSION_URL && !eventWindowSeen) {
+      eventWindowSeen = true;
+      if (!proof.eventWindow) return false;
+      let start: string | undefined, end: string | undefined;
+      let startSeen = false, endSeen = false;
+      for (const part of extension.extension ?? []) {
+        if (part.url === "start" && !startSeen) { start = part.valueCode; startSeen = true; }
+        else if (part.url === "end" && !endSeen) { end = part.valueCode; endSeen = true; }
+      }
+      if (start !== proof.eventWindow.start || end !== proof.eventWindow.end) return false;
+    }
     else if (extension.url === TIMING_CLOCK_WINDOW_EXTENSION_URL && !clockWindowSeen) {
       clockWindowSeen = true;
       if (!proof.clockWindow) return false;
@@ -1601,6 +1686,7 @@ export function matchesSourceReplayTiming(
     }
   }
   if (weekdayOrdinal !== proof.weekdayOrdinal || clockWindowSeen !== Boolean(proof.clockWindow) ||
+      eventWindowSeen !== Boolean(proof.eventWindow) ||
       occurrenceCapSeen !== Boolean(proof.occurrenceCap) ||
       administrationDurationSeen !== Boolean(proof.administrationDuration)) return false;
   if (monthDayIndex !== (proof.monthDays?.length ?? 0) || activityIndex !== (proof.activities?.length ?? 0)) return false;
@@ -1669,7 +1755,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
     });
   }
   return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
-    timing: captureSourceReplayTiming(dosage.timing), condition: captureSourceReplayCondition(dosage),
+    timing: captureSourceReplayTiming(dosage.timing), modifiers: captureSourceReplayModifiers(dosage),
     site: captureSourceReplayConcept(dosage.site), route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
     asNeededFor: captureSourceReplayConceptList(dosage.asNeededFor),
@@ -1702,7 +1788,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
     matchesSourceReplayConcept(dosage.method, proof.method) &&
     matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, proof.additionalInstructions) &&
-    matchesSourceReplayCondition(dosage, proof.condition) &&
+    matchesSourceReplayModifiers(dosage, proof.modifiers) &&
     matchesSourceReplayMaxima(dosage, proof.maxima) &&
     matchesSourceReplayTiming(dosage.timing, proof.timing);
 }

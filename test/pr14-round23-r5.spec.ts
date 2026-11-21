@@ -8,7 +8,7 @@ import {
 } from "../src/index";
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL,
-  setDosageCondition, toEzDosages, isExactConditionBridge, DOSAGE_DETAILS_R5_URL, decodeR5RetainedFields,
+  setDosageCondition, toEzDosages, isExactConditionBridge, DOSAGE_DETAILS_R5_URL, decodeR5RetainedFields, encodeR5RetainedFields,
   decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, withDosageEditProvenance, isRenderedInstructionMarker,
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
@@ -17,7 +17,7 @@ import {
 } from "../src/dosage-course";
 import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
-  simpleQuantityForR5, quantityForR5, getQuantityComparator,
+  simpleQuantityForR5, quantityForR5, quantityFromR5, getQuantityComparator,
 } from "../src/fhir-quantity-operator";
 import {
   TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL,
@@ -1764,6 +1764,8 @@ describe("round29 interchange ownership", () => {
       if (field === "relation") expect(warm).toContain("before dialysis");
       if (field === "activity") expect(warm).toContain("physiotherapy");
       if (field === "offset") expect(warm).toMatch(/60 minutes|1 hour/u);
+      if (field === "offsetMin") expect(warm).toMatch(/15(?:–|-| to )60 minutes|0\.25(?:–|-| to )1 hour/u);
+      if (field === "offsetMax") expect(warm).toMatch(/30(?:–|-| to )90 minutes|0\.5(?:–|-| to )1\.5 hour/u);
       expect(row.text).toBe(text);
     });
 
@@ -2120,4 +2122,223 @@ describe("round30 interchange meaning", () => {
     }
     expect(saved.text).toBe(row.text);
   });
+});
+
+
+describe("round31 interchange owners and retained annotations", () => {
+  const historicalMarker = (source: FhirR6DosageInstruction): FhirExtension => {
+    const { step, ...header } = source;
+    const fields = encodeR5RetainedFields({ course: header }).find(item => item.url === "course")?.extension ?? [];
+    return { url: DOSAGE_DETAILS_R5_URL, extension: [{ url: "dosageDetails",
+      extension: [...fields, ...(step ?? []).map(value => encodeR6SourceMetadata("step", value, "step"))] }] };
+  };
+  const compactRow = (sequence = 1): FhirDosage => {
+    const row = toFhirR5Dosages(course({ doseAndRate: [
+      { doseQuantity: simpleQuantityForR5({ ...q(2), comparator: "~" })! }
+    ] }))[0];
+    row.sequence = sequence;
+    const marker = row.modifierExtension!.find(item => item.url === DOSAGE_DETAILS_R5_URL)!;
+    marker.extension!.find(item => item.url === "sequence")!.valueInteger = sequence;
+    marker.extension!.find(item => item.url === "stepCount")!.valueInteger = sequence;
+    return row;
+  };
+
+  it.each([1, 2])("keeps a historical exact-match offset on its external sequence %s", sequence => {
+    const repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+    const offset = { value: 2, unit: "d", code: "d" };
+    const member = { id: "historical-dose", doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { ...repeat, startOffset: offset } } };
+    const steps = sequence === 1 ? [{ component: [member] }]
+      : [{ component: [{ doseAndRate: [{ doseQuantity: q(3) }] }] }, { component: [member] }];
+    const historical: FhirDosage = { id: member.id, sequence, doseAndRate: member.doseAndRate,
+      timing: { repeat }, modifierExtension: [historicalMarker({ step: steps })] };
+    const input = persist([compactRow(sequence === 1 ? 2 : 1), historical]);
+    const before = JSON.stringify(input);
+    let actual = toDosageDetails(input);
+    for (let save = 0; save < 3; save++) {
+      const found = actual.step![sequence - 1].component.find(item => item.id === member.id)!;
+      expect(found.timing!.repeat!.startOffset).toEqual(offset);
+      expect(found.doseAndRate![0].doseQuantity!.value).toBe(1);
+      actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each([false, true])("carries an unambiguous historical course repeat beside a local compact row (reverse %s)", reverse => {
+    const repeatCycle = { value: 28, unit: "d", code: "d" };
+    const historical: FhirDosage = { sequence: 1, doseAndRate: [{ doseQuantity: q(1) }],
+      modifierExtension: [historicalMarker({ repeatCycle, step: [{ component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] }] })] };
+    const rows = reverse ? [compactRow(), historical] : [historical, compactRow()];
+    let actual = toDosageDetails(persist(rows));
+    for (let save = 0; save < 3; save++) {
+      expect(actual.repeatCycle).toEqual(repeatCycle);
+      expect(actual.step![0].component.map(value => value.doseAndRate![0].doseQuantity!.value).sort()).toEqual([1, 2]);
+      actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+    }
+    expect(toDosageDetails(rows, undefined, { repeatCycle: { value: 14, unit: "d", code: "d" } }).repeatCycle)
+      .toEqual({ value: 14, unit: "d", code: "d" });
+  });
+
+  it("marks incompatible historical and compact shared headers unresolved while retaining both", () => {
+    const oldCycle = { value: 28, unit: "d", code: "d" }, newCycle = { value: 14, unit: "d", code: "d" };
+    const historical: FhirDosage = { sequence: 1, doseAndRate: [{ doseQuantity: q(1) }],
+      modifierExtension: [historicalMarker({ repeatCycle: oldCycle,
+        step: [{ component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] }] })] };
+    const compact = toFhirR5Dosages({ repeatCycle: newCycle, step: [{ component: [{
+      doseAndRate: [{ doseQuantity: simpleQuantityForR5({ ...q(2), comparator: "~" })! }]
+    }] }] })[0];
+    const rows = persist([historical, compact]);
+    expect(importCanonicalCourse(rows).contextIssue).toBe("missing-course-context");
+    const actual = toDosageDetails(rows);
+    expect(JSON.stringify(actual)).toContain('"value":28');
+    expect(JSON.stringify(actual)).toContain('"value":14');
+    expect(() => nextDueDoses(actual, { from: "2026-01-01T00:00:00Z",
+      orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 2 })).toThrow(/shared course metadata/i);
+  });
+
+  it("unions phase and missing-header reasons and retains the phase conflict when the header is supplied", () => {
+    const rows: FhirDosage[] = [1, 2].map((count, rowIndex) => ({
+      sequence: 1, doseAndRate: [{ doseQuantity: q(count) }], modifierExtension: [{
+        url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({
+          rowIndex, sequence: 1, stepCount: 1, context: "absent-header", contextRequired: true, step: { count },
+        }),
+      }],
+    }));
+    const absent = importCanonicalCourse(persist(rows));
+    expect(absent.contextIssue).toBe("conflicting-course-phase");
+    for (const member of absent.stages[0].administrations)
+      expect(new Set(member.missingContexts)).toEqual(new Set(["conflicting-phase", "absent-header"]));
+    rows[0].modifierExtension![0].extension!.push(...encodeR5RetainedFields({ course: { id: "shared-header" } }));
+    const resolved = importCanonicalCourse(persist(rows));
+    expect(resolved.contextIssue).toBe("conflicting-course-phase");
+    for (const member of resolved.stages[0].administrations)
+      expect(member.missingContexts).toEqual(["conflicting-phase"]);
+  });
+
+  it.each(["course", "step"] as const)("reserves the edited %s ID before anonymous safety shape matching", owner => {
+    const identified = { doseLimit: [{ id: "daily-cap", scope: "period" as const,
+      valueQuantity: q(8), period: { value: 1, unit: "d" } }],
+      modifierExtension: [{ url: "urn:test:identified-policy", valueString: owner }] };
+    const anonymous = { doseLimit: [{ scope: "administration" as const, valueQuantity: q(2) }],
+      modifierExtension: [{ url: "urn:test:anonymous-policy", valueString: "deleted" }] };
+    const source = { safety: owner === "course" ? identified : anonymous,
+      step: [{ sequence: 1, safety: owner === "step" ? identified : anonymous }] };
+    let actual = persist(toDosageDetails([{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }] }], undefined, source));
+    const replacement = { id: "daily-cap", scope: "administration" as const, valueQuantity: q(2) };
+    actual.safety!.doseLimit = [replacement];
+    for (let save = 0; save < 3; save++) {
+      actual = r6Save(actual);
+      const marker = actual.safety!.modifierExtension!.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL)!;
+      const scoped = decodeR6SourceMetadata(marker, "safety") as { course: typeof identified; step: typeof identified };
+      expect(scoped[owner].doseLimit).toEqual([replacement]);
+      expect(scoped[owner === "course" ? "step" : "course"].doseLimit).toBeUndefined();
+      expect(JSON.stringify(actual.safety!.extension)).toContain("urn:test:anonymous-policy");
+      expect(actual.safety!.doseLimit).toEqual([replacement]);
+    }
+  });
+
+  it("keeps the unique anonymous amount edit on its original policy", () => {
+    const source = { safety: { doseLimit: [{ scope: "period" as const, valueQuantity: q(8), period: { value: 1, unit: "d" } }] },
+      step: [{ sequence: 1, safety: { doseLimit: [{ scope: "administration" as const, valueQuantity: q(2) }],
+        modifierExtension: [{ url: "urn:test:anonymous-policy", valueString: "keep" }] } }] };
+    let actual = persist(toDosageDetails([{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }] }], undefined, source));
+    actual.safety!.doseLimit![1].valueQuantity!.value = 3;
+    actual = r6Save(actual);
+    const marker = actual.safety!.modifierExtension!.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL)!;
+    const scoped = decodeR6SourceMetadata(marker, "safety") as { step: typeof source.step[0]["safety"] };
+    expect(scoped.step.doseLimit).toEqual([{ scope: "administration", valueQuantity: q(3) }]);
+    expect(scoped.step.modifierExtension).toEqual(source.step[0].safety.modifierExtension);
+  });
+
+  it("keeps missing-context wrapper annotations as current reasons change and resolve", () => {
+    const marker: FhirExtension = { id: "context-wrapper", url: DOSAGE_DETAILS_R5_URL, extension: [
+      { id: "reason-note", url: "missingContext", valueString: "missing-one" },
+      { url: "urn:test:context-note", valueString: "retain authored note" },
+    ] };
+    let actual = r6Save(course({ modifierExtension: [marker] }));
+    expect(actual.step![0].component[0].modifierExtension).toContainEqual(marker);
+    for (let save = 0; save < 2; save++) {
+      const rows = persist(toFhirR5Dosages(actual));
+      const currentAnnotation = { url: "urn:test:live-modifier", valueString: "current" };
+      if (!save) rows[0].modifierExtension!.push(currentAnnotation);
+      actual = toDosageDetails(rows);
+      expect(actual.step![0].component[0].modifierExtension).toContainEqual(marker);
+      expect(actual.step![0].component[0].modifierExtension).toContainEqual(currentAnnotation);
+    }
+    const current = actual.step![0].component[0].modifierExtension!.find(item => item.url === marker.url)!;
+    current.extension![0].valueString = "missing-two";
+    actual = r6Save(actual);
+    expect(actual.step![0].component[0].modifierExtension).toContainEqual({
+      ...marker, extension: [{ ...marker.extension![0], valueString: "missing-two" }, marker.extension![1]],
+    });
+    const resolved = actual.step![0].component[0].modifierExtension!.find(item => item.url === marker.url)!;
+    resolved.extension = resolved.extension!.filter(item => item.url !== "missingContext");
+    actual = r6Save(actual);
+    expect(importCanonicalCourse(actual).contextIssue).toBeUndefined();
+    expect(JSON.stringify(actual.step![0].component[0].extension)).toContain("context-wrapper");
+    expect(JSON.stringify(actual.step![0].component[0].extension)).toContain("retain authored note");
+    expect(JSON.stringify(actual.step![0].component[0].modifierExtension ?? [])).not.toContain("missing-two");
+    const compact = persist(toFhirR5Dosages(course({ modifierExtension: [marker] })));
+    const active = compact[0].modifierExtension!.find(item => item.url === marker.url)!;
+    active.extension = active.extension!.filter(item => item.url !== "missingContext");
+    const cleared = toDosageDetails(compact);
+    expect(importCanonicalCourse(cleared).contextIssue).toBeUndefined();
+    expect(JSON.stringify(cleared.step![0].component[0].extension)).toContain("context-wrapper");
+    expect(JSON.stringify(cleared.step![0].component[0].modifierExtension ?? [])).not.toContain("missing-one");
+  });
+
+  it.each([false, true])("keeps a second step modifier wrapper as inert source (annotated %s)", annotated => {
+    const url = "urn:ezmedicationinput:StructureDefinition:r5-step-modifier-extensions";
+    const first = { id: "owner-wrapper", url, extension: [{ url: "urn:test:owner", valueString: "first" }] };
+    const second = { ...(annotated ? { id: "secondary-wrapper" } : {}), url,
+      extension: [{ url: "urn:test:secondary", valueString: "second" }] };
+    const input = course(); input.step![0].extension = [first, second];
+    const edit = persist(fromDosageDetails(input));
+    edit.course.step![0].modifierExtension = [{ url: "urn:test:owner", valueString: "edited" }];
+    let actual = toDosageDetails(edit.dosages, undefined, edit.course);
+    for (let save = 0; save < 3; save++) {
+      const extensions = actual.step![0].extension!;
+      expect(extensions.filter(item => item.url === url)).toEqual([{ ...first, extension: edit.course.step![0].modifierExtension }]);
+      expect(extensions.find(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL)!.extension).toContainEqual(second);
+      actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+    }
+  });
+
+  it.each(["historical", "compact"] as const)("keeps a flattened %s reconciliation envelope ID without copying its children twice", codec => {
+    const child = { url: "urn:test:history-child", valueString: "unique-leaf" };
+    const wrapper = { id: "history-envelope", url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [child] };
+    const source = { extension: [wrapper], step: [{ component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] }] };
+    const rows: FhirDosage[] = codec === "historical"
+      ? [{ sequence: 1, doseAndRate: [{ doseQuantity: q(1) }], modifierExtension: [historicalMarker(source)] }]
+      : toFhirR5Dosages(source);
+    let actual = toDosageDetails(persist(rows), undefined, { extension: [{ url: "urn:test:current-note", valueString: "current" }] });
+    for (let save = 0; save < 3; save++) {
+      const encoded = JSON.stringify(actual.extension);
+      expect(encoded).toContain("history-envelope");
+      expect(encoded.match(/unique-leaf/g)).toHaveLength(1);
+      expect(encoded).toContain("urn:test:current-note");
+      actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+    }
+  });
+
+  it.each(["approximately equal to", "custom local wording", "less than or equal to"])(
+    "reconciles a code-only EMA edit with %s without dropping original annotations", display => {
+      const coding = { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000052", display,
+        _display: { id: "display-note" } };
+      const original = { ...q(5), extension: [{ id: "operator-wrapper", url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL, valueCoding: coding }] };
+      const before = JSON.stringify(original);
+      const projected = simpleQuantityForR5(quantityFromR5(original))!;
+      const publicProjection = toFhirR5Dosages([{ doseAndRate: [{ doseQuantity: original }] }])[0]
+        .doseAndRate![0].doseQuantity!;
+      expect(publicProjection.extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!.valueCoding)
+        .toEqual(projected.extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!.valueCoding);
+      const active = projected.extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!;
+      expect(getQuantityComparator(projected)).toBe("<=");
+      expect(active.id).toBe("operator-wrapper");
+      if (display === "approximately equal to") {
+        expect(active.valueCoding!.display).toBe("less than or equal to");
+        expect(projected.extension).toContainEqual({ url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source", valueCoding: coding });
+      } else expect(active.valueCoding).toEqual(coding);
+      expect(JSON.stringify(original)).toBe(before);
+    });
 });

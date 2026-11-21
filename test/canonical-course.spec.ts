@@ -22,6 +22,7 @@ import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
   TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
   TIMING_CLOCK_WINDOW_EXTENSION_URL,
+  TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL,
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
@@ -1406,5 +1407,86 @@ describe("round30 current cadence and duration metadata", () => {
     expect(restored._value).toBeUndefined();
     expect(JSON.stringify(input)).toBe(before);
     expect(JSON.stringify(source)).toBe(sourceBefore);
+  });
+});
+
+describe("round31 live source replay observations", () => {
+  const options = { locale: "en", realizationMode: "roundtrip" as const };
+  it("shows an edited meal-window endpoint after warming a saved capped R5 row", () => {
+    const text = "Take 1 tablet every 4 hours between breakfast and dinner, maximum 4 tablets per day.";
+    const raw: FhirDosage = { text,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      maxDosePerPeriod: [{ numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
+      timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour, extension: [{
+        url: TIMING_EVENT_WINDOW_EXTENSION_URL,
+        extension: [{ url: "start", valueCode: "CM" }, { url: "end", valueCode: "CV" }]
+      }] } }
+    };
+    const row: FhirDosage = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0]));
+    expect(formatSig(row, "long", options)).toContain("dinner");
+    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    row.timing!.repeat!.extension![0].extension![1].valueCode = "CD";
+    const before = JSON.stringify(row);
+    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    for (const input of [row, JSON.parse(before)]) {
+      for (const output of [formatSig(input, "long", options), fromFhirDosage(input, options).longText]) {
+        expect(output).toContain("between breakfast and lunch");
+        expect(output).not.toContain("dinner");
+      }
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(row.text).toBe(text);
+  });
+
+  it.each(["quantity", "range", "mixed"] as const)("shows an edited anchored %s after warming its saved proof", kind => {
+    const text = "Take 1 tablet daily from 2026-11-21 for " + (kind === "quantity" ? "7 days" : kind === "range" ? "7–9 days" : "1 week to 10 days") +
+      ", maximum 2 tablets per day.";
+    const duration = kind === "quantity" ? { valueQuantity: { value: 7, code: "d", unit: "days" } }
+      : kind === "mixed" ? { extension: [
+        { url: "low", valueQuantity: { value: 1, code: "wk", unit: "weeks" } },
+        { url: "high", valueQuantity: { value: 10, code: "d", unit: "days" } }
+      ] } : { valueRange: { low: { value: 7, code: "d", unit: "days" }, high: { value: 9, code: "d", unit: "days" } } };
+    const raw: FhirDosage = { text,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
+      modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, ...duration }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        boundsPeriod: { start: "2026-11-21", end: "2026-11-27" } } }
+    };
+    const row: FhirDosage = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0]));
+    expect(formatSig(row, "long", options)).toContain(kind === "mixed" ? "1 week" : "7");
+    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    const marker = row.modifierExtension![0];
+    if (kind === "quantity") marker.valueQuantity!.value = 10;
+    else if (kind === "mixed") {
+      marker.extension![0].valueQuantity!.value = 2; marker.extension![1].valueQuantity!.value = 17;
+    } else { marker.valueRange!.low!.value = 10; marker.valueRange!.high!.value = 12; }
+    const before = JSON.stringify(row);
+    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    for (const input of [row, JSON.parse(before)]) {
+      expect(getAnchoredCourseDuration(input)).toMatchObject(kind === "quantity"
+        ? { valueQuantity: { value: 10 } } : kind === "mixed"
+          ? { valueRange: { low: { value: 2, code: "wk" }, high: { value: 17, code: "d" } } }
+          : { valueRange: { low: { value: 10 }, high: { value: 12 } } });
+      for (const output of [formatSig(input, "long", options), fromFhirDosage(input, options).longText])
+        expect(output).toMatch(kind === "quantity" ? /for 10 days/u : kind === "mixed"
+          ? /for 2 weeks to 17 days/u : /for 10(?:[–-]| to )12 days/u);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(row.text).toBe(text);
+  });
+
+  it.each(["1 tab BID only if BP > 160", "1 tab BID"])("adds patient instructions to fresh %s without replaying stale text", source => {
+    const row = parseSig(source).items[0].fhir;
+    const originalText = row.text;
+    formatSig(row, "long", options);
+    row.patientInstruction = "Swallow whole.";
+    const before = JSON.stringify(row);
+    for (const output of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(output).toMatch(/swallow whole/iu);
+      if (source.includes("BP")) expect(output).toMatch(/BP.*(?:160|greater than)/u);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(row.text).toBe(originalText);
   });
 });

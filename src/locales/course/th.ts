@@ -39,6 +39,8 @@ export const THAI_COURSE: CourseLanguage = {
   maxDosageLabel: "max per dosage: ",
   courseLimitsLabel: "ตลอดแผนการใช้ยานี้: ",
   stageLimitsLabel: "ในขั้นตอนนี้: ",
+  ifLimitExceeded: (action) => "หากเกินขีดจำกัด: " + action,
+  eventWindow: (start, end) => `ระหว่าง${start.replace(/^พร้อม/u, "")}ถึง${end.replace(/^พร้อม/u, "")}`,
   weekdayName: (day) => THAI_DAY_NAMES[day] ?? day,
   measurementName: (name) => MEASUREMENT_NAMES[name] ?? name,
   joinList: (items) => joinLocalizedList(items,"และ"),

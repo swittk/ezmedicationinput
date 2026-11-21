@@ -53,6 +53,10 @@ const emaDisplayByComparator: Record<NonNullable<FhirR6Quantity["comparator"]>, 
   ad: "quantity sufficient"
 };
 
+const knownEmaDisplays = new Set<string>();
+for (const comparator of ["<", "<=", ">", ">=", "~", "ad"] as const)
+  knownEmaDisplays.add(emaDisplayByComparator[comparator]);
+
 /** Read the published EMA Coding without treating "average", "equivalent"
  * or "range" as invented HL7 comparator semantics. */
 export function getEmaQuantityComparator(
@@ -134,7 +138,9 @@ export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
         coding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM ||
         !coding.code || !(comparatorByEmaCode[coding.code] || coding.code === EMA_EQUALITY_OPERATOR_CODE)) return ext;
     found = true;
-    return coding.code === code ? ext : editedOperator(ext, comparator, sources);
+    const staleDisplay = coding.display !== undefined &&
+      coding.display !== emaDisplayByComparator[comparator] && knownEmaDisplays.has(coding.display);
+    return coding.code === code && !staleDisplay ? ext : editedOperator(ext, comparator, sources);
   });
   extensions.push(...sources);
   if (!found) extensions.push({

@@ -115,16 +115,34 @@ describe("review 21 current structured course preview", () => {
       for (const numeric of [false, true]) {
         const safety = { ...(numeric ? cap : {}), ifExceeded: action };
         const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...tablet }] }] };
-        if (scope === "component") raw.step[0].component[0].safety = safety;
+        if (scope === "component") {
+          raw.step[0].component[0].safety = safety;
+          raw.step[0].component.push({ ...tablet,
+            doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] });
+        }
         else if (scope === "stage") {
           raw.step[0].safety = safety;
           raw.step.push({ component: [tablet] });
         }
         else raw.safety = safety;
         const text = fromFhir(raw, normalized).longText;
-        expect(text).toContain(action);
+        expect(text).toContain("If the limit is exceeded: " + action);
         expect(text.split(action)).toHaveLength(2);
         if (numeric) expect(text).toContain("8 tab / 1 d");
+        if (scope === "component") {
+          expect(text).not.toContain("Across this course:");
+          expect(text).not.toContain("Within this stage:");
+          const [firstComponent, secondComponent] = text.split("2 tablets");
+          expect(firstComponent).toContain("1 tablet");
+          expect(firstComponent).toContain(action);
+          if (numeric) expect(firstComponent).toContain("8 tab / 1 d");
+          expect(secondComponent).toBeDefined();
+          expect(secondComponent).not.toContain(action);
+          expect(secondComponent).not.toContain("8 tab / 1 d");
+        }
+        const thai = fromFhir(raw, { ...normalized, locale: "th" }).longText;
+        expect(thai).toContain("หากเกินขีดจำกัด: " + action);
+        expect(thai.split(action)).toHaveLength(2);
         if (scope === "stage") {
           const stageSection = text.split("Within this stage: ")[1]?.split(" then ")[0];
           expect(stageSection).toContain(action);
@@ -143,7 +161,7 @@ describe("review 21 current structured course preview", () => {
     expect(formatSig(raw, "long", normalized)).toBe(fromFhir(raw, normalized).longText);
     expect(formatSig(raw, "long", normalized)).toContain("8 tab / 1 d");
     expect(formatSig({ safety: { ifExceeded: "Call the clinic" } }, "long", normalized))
-      .toContain("Across this course: Call the clinic");
+      .toContain("Across this course: If the limit is exceeded: Call the clinic");
   });
 
   it("renders a later ordinary dose after a rate-only entry without duplicating a first dose", () => {

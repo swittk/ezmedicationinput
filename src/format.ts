@@ -1,5 +1,6 @@
 import { TIMING_ABBREVIATIONS } from "./maps";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
+import { ENGLISH_COURSE } from "./locales/course/en";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   collectLocalizedWhenPhrases,
@@ -420,12 +421,18 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
+  const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
+  const rangeFrequency = rangedPeriod && frequency !== undefined
+    ? frequencyMax !== undefined && frequencyMax !== frequency
+      ? `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times `
+      : frequency === 1 ? "once " : frequency === 2 ? "twice " : `${stripTrailingZero(frequency)} times `
+    : "";
 
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
     periodUnit === FhirPeriodUnit.Day &&
-    (!period || period === 1)
+    (!period || period === 1) && !rangedPeriod
   ) {
     if (frequency === 1 && frequencyMax === 1) {
       return "once daily";
@@ -435,7 +442,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     }
     return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times daily`;
   }
-  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1)) {
+  if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
     const dailyText = EN_TIMES_PER_DAY[frequency];
     if (dailyText) {
       return dailyText;
@@ -444,22 +451,22 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;
     }
     return `every ${stripTrailingZero(period)} minute${period === 1 ? "" : "s"}`;
   }
   if (periodUnit === FhirPeriodUnit.Hour && period) {
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} hours`;
     }
     return `every ${stripTrailingZero(period)} hour${period === 1 ? "" : "s"}`;
   }
-  if (periodUnit === FhirPeriodUnit.Day && period && period !== 1) {
+  if (periodUnit === FhirPeriodUnit.Day && period && (period !== 1 || rangedPeriod)) {
     if (period === 2 && (!periodMax || periodMax === 2)) {
       return "every other day";
     }
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} days`;
     }
     return `every ${stripTrailingZero(period)} days`;
   }
@@ -483,7 +490,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once weekly";
     }
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} weeks`;
     }
     return `every ${stripTrailingZero(period)} weeks`;
   }
@@ -499,7 +506,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once monthly";
     }
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} months`;
     }
     return `every ${stripTrailingZero(period)} months`;
   }
@@ -514,7 +521,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
         : "once yearly";
     }
     if (periodMax && periodMax !== period) {
-      return `every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
+      return `${rangeFrequency}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} years`;
     }
     return `every ${stripTrailingZero(period)} years`;
   }
@@ -681,7 +688,14 @@ function summarizeMealTimingGroup(group: MealTimingGroup): string {
   return `${relationText} ${joinWithAnd(group.meals)}`;
 }
 
-function formatEventOffsetQuantityEnglish(minutes: number): string {
+function describeEventWindowEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+  const window = schedule?.eventWindow;
+  return window ? ENGLISH_COURSE.eventWindow(WHEN_TEXT[window.start] ?? window.start, WHEN_TEXT[window.end] ?? window.end) : undefined;
+}
+
+function formatEventOffsetQuantityEnglish(minutes: number, maximum?: number): string {
+  if (maximum !== undefined && maximum !== minutes)
+    return `${stripTrailingZero(minutes)}–${stripTrailingZero(maximum)} minutes`;
   const seconds = Number((minutes * 60).toFixed(9));
   if (minutes < 1 && Number.isInteger(seconds)) {
     return `${stripTrailingZero(seconds)} second${seconds === 1 ? "" : "s"}`;
@@ -705,6 +719,10 @@ function formatActivityTimingEnglish(schedule: CanonicalScheduleExpr | undefined
       : undefined;
     const activity = definition?.display ?? timing.activity.text;
     const relation = timing.relation;
+    if (timing.offsetMin !== undefined && timing.offsetMax !== undefined) {
+      result.push(`${formatEventOffsetQuantityEnglish(timing.offsetMin, timing.offsetMax)} ${relation} ${activity}`);
+      continue;
+    }
     const value = timing.offsetMin ?? timing.offsetMax ?? timing.offset;
     if (value === undefined) {
       result.push(`${relation} ${activity}`);
@@ -726,6 +744,8 @@ function formatEventOffsetEnglish(
   eventText: string,
   schedule: CanonicalScheduleExpr
 ): string {
+  if (schedule.offsetMin !== undefined && schedule.offsetMax !== undefined)
+    return `${formatEventOffsetQuantityEnglish(schedule.offsetMin, schedule.offsetMax)} ${eventText}`;
   const value = schedule.offsetMin ?? schedule.offsetMax ?? schedule.offset;
   if (value === undefined) return eventText;
   if (value === 0 && schedule.offset !== undefined) return `immediately ${eventText}`;
@@ -1200,9 +1220,12 @@ function formatShort(clause: CanonicalSigClause): string {
     } else parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
   if (schedule.when?.length) {
-    parts.push(schedule.when.join(" "));
+    parts.push(schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
+      ? collectWhenPhrases(schedule).join(" ") : schedule.when.join(" "));
   }
   if (schedule.activityTiming?.length) parts.push(...formatActivityTimingEnglish(schedule));
+  const eventWindow = describeEventWindowEnglish(schedule);
+  if (eventWindow) parts.push(eventWindow);
   if (schedule.dayOfMonth?.length) {
     parts.push(describeDayOfMonth(schedule)!);
   }
@@ -1316,6 +1339,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
+  const eventWindowPart = describeEventWindowEnglish(schedule);
   let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {
     const timeStrings: string[] = [];
@@ -1378,6 +1402,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   if (timing.event) {
     segments.push(timing.event);
   }
+  if (eventWindowPart) segments.push(eventWindowPart);
   for (const activityTiming of formatActivityTimingEnglish(schedule)) {
     segments.push(activityTiming);
   }
@@ -1451,6 +1476,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     else if (clockPart) graphRegimenTail.push(clockPart);
+    if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);
     if (dayPart) graphRegimenTail.push(dayPart);
@@ -1737,7 +1763,7 @@ function formatLong(clause: CanonicalSigClause, options?: TimingSummaryOptions):
   const hasAdministrationTiming = Boolean(
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
-    schedule.when?.length || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
+    schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||

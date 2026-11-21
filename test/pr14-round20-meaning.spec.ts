@@ -13,7 +13,7 @@ import {
   parseInstructionActions, realizeRichPrimaryWithCanonicalDose, instructionGraphSourceConflictsWithDose,
 } from "../src/instruction-graph";
 import { AdviceArgumentRole } from "../src/types";
-import { simpleQuantityForR5 } from "../src/fhir-quantity-operator";
+import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 
 function tablet(): CanonicalAdministration {
   return { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
@@ -65,10 +65,22 @@ describe("review family: current quantity and scope own meaning", () => {
   });
 
   it("does not coalesce unequal dose qualifiers into one timed administration", () => {
-    const clauses = parseSig("Take 1 tablet at 08:00 and take at least 1 tablet at 20:00").meta.canonical.clauses;
+    const parsed = parseSig("Take 1 tablet at 08:00 and take at least 1 tablet at 20:00");
+    const clauses = parsed.meta.canonical.clauses;
     expect(clauses).toHaveLength(2);
     expect(clauses.map(c => c.dose?.comparator)).toEqual([undefined, ">="]);
     expect(clauses.map(c => c.schedule?.timeOfDay)).toEqual([["08:00:00"], ["20:00:00"]]);
+    for (const rows of [parsed.fhir, parsed.fhirNext.step[0].component]) {
+      expect(rows).toHaveLength(2);
+      expect(rows.map(row => ({
+        clocks: row.timing?.repeat?.timeOfDay,
+        quantity: row.doseAndRate?.[0].doseQuantity,
+        comparator: getQuantityComparator(row.doseAndRate?.[0].doseQuantity)
+      }))).toMatchObject([
+        { clocks: ["08:00:00"], quantity: { value: 1, unit: "tab" }, comparator: undefined },
+        { clocks: ["20:00:00"], quantity: { value: 1, unit: "tab" }, comparator: ">=" }
+      ]);
+    }
     const matching = parseSig("Take at least 1 tablet at 08:00 and take at least 1 tablet at 20:00");
     expect(matching.items).toHaveLength(1);
     expect(matching.items[0].fhir.timing?.repeat?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
@@ -244,10 +256,8 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     const snapshot = JSON.stringify(graph);
     expect(instructionGraphSourceConflictsWithDose(clause)).toBe(true);
     const text = formatCanonicalClause(clause, "long", resolveSigLocalization("en"));
-    expect(text).toContain("3 tablets");
-    expect(text).toContain("2 tablets");
-    expect(text.toLowerCase()).toContain("dissolve");
-    expect(text.toLowerCase()).toContain("water");
+    expect(text).toMatch(/\bTake 3 tablets\b/i);
+    expect(text).toMatch(/\bdissolve 2 tablets (?:in|into) water\b/i);
     expect(text).not.toContain("Take 1 tablet");
     expect(JSON.stringify(graph)).toBe(snapshot);
   });

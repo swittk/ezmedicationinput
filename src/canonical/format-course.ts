@@ -225,6 +225,7 @@ function treatmentStepOffsetQuantity(
   if (!relative || (relative.anchor !== "treatment-start" && relative.anchor !== "treatment-day-start") ||
       relative.displacementRange) return undefined;
   const quantity = relative.displacement;
+  if (!quantity && relative.anchor === "treatment-day-start") return { value: 0, unit: "d" };
   return quantity && quantity.value !== undefined && Number.isFinite(quantity.value) && quantity.value >= 0
     ? quantity
     : undefined;
@@ -443,7 +444,8 @@ function appendDoseLimits(
   const label = owner === "course" ? words.courseLimitsLabel
     : owner === "stage" ? words.stageLimitsLabel : "";
   const values = limits?.length ? formatDoseLimits(limits, words) : "";
-  const rendered = label + (action && values ? joinGeneratedClauses([values, action]) : values || action);
+  const response = action ? words.ifLimitExceeded(action) : "";
+  const rendered = label + (response && values ? joinGeneratedClauses([values, response]) : values || response);
   return text ? joinGeneratedClauses([text, rendered]) : rendered;
 }
 

@@ -1280,6 +1280,9 @@ export interface MedicationInstructionActionDefinition {
     implicitMatchedRole?: AdviceArgumentRole;
   };
   realizerConfig?: MedicationInstructionActionRealizerConfig;
+  /** Typed manner concepts tied to this administration method. An edited
+   * method drops these from its display copy while keeping source evidence. */
+  methodBoundMannerConcepts?: string[];
   continuationLicenses?: Array<{
     candidateAction: string;
     previousConcepts?: string[];

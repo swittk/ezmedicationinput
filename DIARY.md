@@ -12026,3 +12026,90 @@ Representative equivalent-work public measurements (microseconds; change is the 
 | toFhirR5Dosages/R6-complex | 331.66 | 262.45 | -19.83% |
 
 The preliminary benchmark was stopped after the demonstrated qualified-duration unit ownership fix; its partial timings are not used in the final gate. Final source, build, distribution, storage, full benchmark and confirmations all refer to the final candidate artifact above. Review communication is limited to concise replies in the 13 original threads, followed by resolution; no top-level comment or new full-review request.
+
+## PR #14 review round 31 — 2026-11-21
+
+### Active inventory and ownership
+
+The owner requested the next thorough review loop. Preflight is clean at 325d8a7, with master 7d62823 and the original 100 PR paths unchanged. Both review batches 6005002425 / 6005005662 are inventoried: 37 findings, including 17 new inline threads, 2 outside-diff findings, 16 minor findings and 2 test-oracle nits. Three bounded workers cover execution (7), meaning/display (10), and interchange (10); the coordinator owns the remaining 10 action, replay and quantity findings and personally integrates/reviews all changes.
+
+The established owner contract applies: native model is an unstable implementation detail without an editor/misuse/backwards-compatibility lifecycle; public R5 stays; current pinned R6 only; no downstream changes; no schema-only trimming of supplied data. Each finding must pass the documented clinical/product gate, reuse typed owners and existing traversals, preserve source, and meet the 4% per-equivalent-scenario public-API performance limit. Stay within 100 existing PR paths. GitHub access is CLI-only, with concise replies in original threads and resolution; no top-level comment or additional full-review request.
+
+### Directional decisions and integration
+
+All 37 findings are accounted for: 29 required a production correction (including display gaps exposed by stronger oracles), and eight are test-only improvements. The hourly-code concern in #15 is valid, but its proposed blanket rejection is not the chosen behavior: Q4H plus six doses/day is a consistent representation of a four-hour cadence. The existing coded recurrence projection now preserves that spacing when explicit events/clocks are absent; genuinely inconsistent counts retain the existing rejection.
+
+Each accepted correction has a concrete clinical or source-preservation failure, an existing typed owner, bounded cost, a preservation rule and an independent oracle. Detailed per-item ledgers and raw failed-before logs are retained under the round31 audit prefix. The compact inventory below records the resulting decisions in the repository.
+
+| Finding | Accepted correction / typed owner | Independent check |
+| --- | --- | --- |
+| 1 | Historical R5 member identity keeps its normalized live sequence. | A mixed historical/compact sequence-2 member retains its stage offset. |
+| 2 | Mixed R5 imports retain the unambiguous shared header; current explicit fields win, conflicting supplied clinical headers stay unresolved. | Shared cycle survives; conflict retains both sources. |
+| 3 | Shared missing reasons augment each administration's existing reasons. | Missing header cannot erase or weaken a phase conflict. |
+| 4 | Scoped safety reserves exact/ID matches before anonymous shape matching and claims each current cap once. | Cross-policy ID/shape collision, duplicate multiplicity and anonymous ambiguity controls. |
+| 5 | Existing shared-delay eligibility leaves a delay on a member with an independent onset. | Two-hour contextual and mixed-member-origin due dates across native, R6 and persisted R5. |
+| 6 | Existing EN/TH course facets make ifExceeded responses explicitly conditional at each scope. | Component/stage/course cap and condition wording remain associated. |
+| 7 | Existing timing proof observes event-window endpoints; existing locale rendering now displays the ordered window. | Warm dinner-to-lunch edit, cold preview, meal/overnight/qualified windows, rich primary's separate event and water. |
+| 8 | Existing modifier proof observes authored anchored scalar/range/mixed-unit durations. | Warm 7-to-10-day, 7–9-to-10–12-day and 1-week–10-day-to-2-week–17-day edits; source unchanged. |
+| 9 | Singleton fractional days use the existing elapsed stepper. | 0.5 day equals 12 hours; quarter-day and fractional-week siblings; exact daily clock control. |
+| 10 | Explicit events exclude the scalar supply path's alternative inferred range plan. | Standalone native/R5 event count plus already-correct complete-course/R6 controls. |
+| 11 | Only identical value/unit/operator can share the carrier denominator as occurrence duration. | Independent >=3-hour timing survives beside an approximately 2-hour rate denominator in self/active-plus-carrier cases. |
+| 12 | The existing locale negation adapter receives the completed default action with typed Amount. | Greater-than-one-tablet prohibition and exact two-tablet control in EN/TH. |
+| 13 | Action terminology declares method-bound manner concepts. Only those qualifiers are suppressed in an edited display copy. | Swallow keeps whole; Chew drops it; independent slowly and water survive. |
+| 14 | Schedule cleanup uses the selected administration; amount ownership remains separate. Existing mixing realizers retain their translated Time. | Preparation 08:00 survives drinking 09:00-to-10:00 edit in source-preserving and normalized EN/TH. |
+| 15 | Matching hourly code plus aggregate count uses the code's elapsed cadence, not rejection or inferred daytime clocks. | Native/R6/R5 Q4H spacing and supply; explicit anchors and genuine conflicts remain authoritative. |
+| 16 | Initial clock anchoring searches past a nonexistent DST clock before starting the elapsed sequence. | Missing-date start and already-established-origin controls across three forms. |
+| 17 | The selected source span retains primary event identity after joint method/dose edits; existing amount cleanup renders current facts. | One Chew 2-tablet instruction with water, no stale Swallow; independent material/target and source graph retained. |
+| 18 | EN frequency rendering preserves the count and both period endpoints. | Fixed and ranged counts within 1–2-day periods. |
+| 19 | TH frequency rendering preserves the same period/count facts in short and long previews. | Localized period/frequency-range and exact daily controls. |
+| 20 | Existing R6 missing-context emission and compact R5 retention preserve wrapper/child annotations. | Native save and R6-to-R5-to-R6 retain IDs/foreign children; removed reasons remain inert source. |
+| 21 | Existing step wrapper traversal selects one active owner and retains displaced wrappers as inert source. | Annotated and unannotated second wrappers survive. |
+| 22 | Existing history flattening preserves reconciliation envelope identity without duplicating moved children. | Historical and compact header replacement retain IDs and one copy of history. |
+| 23 | Existing EMA operator conversion replaces a known stale display, retaining its original annotations. | Code-only edit, custom display and already-consistent controls. |
+| 24 | Independent endpoint assertions exposed actual offset display loss; existing EN/TH event/activity renderers now show both bounds. | Edited 15–60 and 30–90 endpoints; short/long, scalar, single-bound, immediate, equal-bound and zero-lower controls. |
+| 25 | Test-only: strict current-profile offset fixtures and permissive excess-field retention are tested separately. | EMA SimpleQuantity strict import passes; native comparator strict rejection and permissive retention remain distinct. |
+| 26 | FreshDoseProof observes patientInstruction before its ordinary replay shortcut. | Exact public items[0].fhir guarded/ordinary rows show added instruction and retain original text/BP guard. |
+| 27 | Existing HPSG duration lead bound admits a final joined duration token. | Fixed/weight rates with ~2h, <=2h, >=30min and exact 2h through native/R5/R6. |
+| 28 | Test-only: bind each dose to its own action. | Independent action/amount association. |
+| 29 | Test-only: unequal qualifiers remain distinct in projected rows. | Qualifier, clock and quantity remain paired through both FHIR outputs. |
+| 30 | Test-only: a component cap stays scoped to that component. | No fabricated course cap. |
+| 31 | Test-only: the successor remains visible after a repeated stage. | Positive successor dose/end facts remain present. |
+| 32 | Test-only: verify the second administration's otic route. | Exact coded ear route assertion. |
+| 33 | Existing local-day boundary renderer recognizes an omitted displacement as day zero. | Bare and explicit zero agree; incomplete/unresolved controls stay uncertain. |
+| 34 | Existing meal offset arithmetic retains authored fractional seconds. | Millisecond and midnight rollover cases preserve their precision. |
+| 35 | The existing limit pass measures a rate only when its first numeric periodic cap needs a dose count. | Per-administration/lifetime/expression-only controls avoid irrelevant measurement failures. |
+| 36 | Test-only: snapshot the clone actually supplied to import. | Nonmutation assertion checks that same object after import. |
+| 37 | Test-only: extend bare-QOD oracle to multiple dates and supply. | January 1/3/5 at 09:00 and six-day total 3 across native/R6/R5. |
+
+The coordinator reviewed and integrated all worker changes. A separate read-only cross-check found no blocker in the action and replay/duration changes. A previous implementation assertion that a rich selector must return undefined after a dose edit was replaced with clinical output assertions: raw source replay still fails, while the selected event renders the new amount and preserves material/target. The internal model has no new lifecycle or compatibility requirement.
+
+Runtime costs stay with existing owners: temporal markers join existing extension passes; source history is never hashed or recursively walked for replay; the shared delay uses its existing eligibility pass; cap measurement is lazy inside the existing limit pass; scoped safety indexes live only inside its existing scoped-marker path. Missing-context emission uses one Map for membership and retained-child state, avoiding repeated array membership walks while preserving duplicate authored annotations and order. No new vocabulary registry, parser fallback, generic validation layer, editing wrapper, or downstream migration was added.
+
+### Final validation
+
+- Source gate: npm test passed the strict ES6 gate and all **5,445 tests in 56 files**, an increase of 83 tests from round 30.
+- Distribution gate: npm run test:dist passed ES6 ESM/CJS builds, declarations, and all **4 distribution tests**.
+- Actual downstream converter -> usage map -> medication statements preserved complete dosage JSON for simple daily, Thai parallel doses, multi-stage taper and independent eye regimens. R5 row counts remain 1/2/4/2. No downstream code changed.
+- The full path union remains **100 original files**, with zero additional paths.
+- Raw failed-before evidence and each worker's bounded verification remain retained; no benchmark or test failure report is overwritten.
+- Final artifact for the performance gate: candidate SHA-256 d79a9b27071f877cc7cbf06f65f4d6343357f811c2f7a3e1ef334680b6723056; built master 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb SHA-256 a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Benchmark blob remains 92ddc9cc49685de69028665fadbad022753e7151.
+
+Performance gate passed for **174 equivalent-work comparisons across all 117 shared public functions**. The unchanged full harness measured 181 comparisons (21 paired rounds, 35 ms target): 173 passed initially, one was flagged, and the same seven known non-equivalent cases remain separately classified with raw timings and current clinical oracles. The single flagged helper passed the preselected longer confirmation (71 paired rounds, 140 ms target) on the identical candidate artifact. The worst accepted paired change is **+3.626% (getAdviceRelationDefinition)**, within the 4% per-scenario limit. No aggregate waiver or non-equivalent performance pass. Seven candidate-only measurements cover six new exports; no missing functions or measurement errors.
+
+The first-pass result is retained: parseBodySiteSpatialRelationExtension measured **+4.035%** initially and **-13.572%** in the longer confirmation. Raw reports: ezmed14-round31-master-full.json and ezmed14-round31-master-confirm.json; acceptance ledger: ezmed14-round31-performance-accepted.json.
+
+Representative median paired runtime changes against built master:
+
+| Scenario | Runtime change |
+| --- | ---: |
+| Ordinary parse | -3.10% |
+| Thai parse | -8.32% |
+| R5 English preview | -4.43% |
+| Native R6 next doses | -80.93% |
+| Native R6 supply | -83.15% |
+| Complex R6 to R5 | -19.37% |
+
+Negative values indicate less runtime. These are medians of paired ratios, not ratios of independently aggregated absolute medians. Final source, distribution, storage and performance gates all refer to the immutable candidate artifact above.
+
+
+Review communication is limited to concise replies in the 17 original threads after the final validated commit is pushed, followed by resolution. No top-level comment or new full-review request.

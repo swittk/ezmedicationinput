@@ -8,7 +8,7 @@ import { formatCanonicalCourse } from "../src/canonical/format-course";
 import { administrationFromClause, clauseForAdministration, courseFromAdministrations, courseFromPartialParallel, courseFromParallel } from "../src/canonical/compile";
 import { courseFromR6, courseToR6 } from "../src/adapters/canonical-course";
 import type { CanonicalCourse, CanonicalBoundary } from "../src/canonical/course";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization, type SigFormatContext } from "../src/i18n";
 import { parseInstructionActions, realizeInstructionAction } from "../src/instruction-graph";
@@ -1568,8 +1568,8 @@ describe("round 28: explicit routes delimit inherited administration sites", () 
     const source = "Instill 1 drop in the right eye at 08:00, instill 1 drop in the left ear at 12:00";
     const parsed = parseSig(source);
     expect(parsed.items).toHaveLength(2);
-    expect(parsed.meta.canonical.clauses[1].route?.code)
-      .not.toBe(parsed.meta.canonical.clauses[0].route?.code);
+    expect(parsed.meta.canonical.clauses[1].route?.code).toBe("10547007");
+    expect(parsed.fhir[1].route?.coding?.[0].code).toBe("10547007");
     expect(parsed.meta.canonical.clauses[1].site?.coding?.code).toBe("89644007");
     expect(parsed.fhir[1].site?.coding?.[0].code).toBe("89644007");
     expect(parsed.meta.canonical.course?.instruction).toBe(source);
@@ -1914,9 +1914,255 @@ describe("round 30: completed phase origins and exact boundary display", () => {
     for (const text of [formatCanonicalCourse(native, "long", { locale: "en" }),
       formatSig(r6, "long", { locale: "en" }),
       formatSig(toFhirR5Dosages(r6), "long", { locale: "en" })]) {
+      expect(text).toContain("2 tablets");
+      expect(text).toContain("4 days after treatment start");
       if (count === 2) expect(text).not.toContain("From 48 hours after treatment start");
       else expect(text).toContain("From 48 hours after treatment start until 4 days after treatment start");
     }
     expect(JSON.stringify(native)).toBe(before);
+  });
+});
+
+describe("round 31: conditional and qualified timing display", () => {
+  it("keeps a shared two-hour delay after the previous phase's next-day origin", () => {
+    const members = [
+      { kind: "administration" as const, stageOrdinal: 1,
+        amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } } },
+      { kind: "administration" as const, stageOrdinal: 2,
+        onsetReference: "previous-phase-next-day" as const, delayMinutes: 120,
+        amounts: [{ quantity: { value: 2, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } } }
+    ];
+    const before = JSON.stringify(members);
+    const native = courseFromAdministrations(members,
+      "Take one tablet now; on the next day wait two hours before taking two tablets once");
+    expect(native.stages[1].start).toMatchObject({ anchor: "previous-phase-next-day" });
+    expect(native.stages[1].administrations[0].delayMinutes).toBe(120);
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
+        from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 })).toEqual([
+        "2026-11-21T00:00:00+00:00", "2026-11-22T02:00:00+00:00"
+      ]);
+    }
+    expect(JSON.stringify(members)).toBe(before);
+  });
+
+  it("keeps the same delay relative to each member's independent calendar origin", () => {
+    const native = courseFromAdministrations([
+      { kind: "administration", onsetReference: "treatment-day-start", onsetDays: 1, delayMinutes: 120,
+        amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } } },
+      { kind: "administration", delayMinutes: 120,
+        amounts: [{ quantity: { value: 2, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } } }
+    ], "Take two tablets two hours after treatment begins and one tablet two hours after the next day begins");
+    expect(native.stages[0].start).toBeUndefined();
+    expect(native.stages[0].administrations.map(a => a.delayMinutes)).toEqual([120, 120]);
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z",
+        from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 })).toEqual([
+        "2026-11-21T02:00:00+00:00", "2026-11-22T02:00:00+00:00"
+      ]);
+    }
+  });
+
+  it.each([
+    [1, undefined, "once", "1 ครั้ง"],
+    [2, undefined, "twice", "2 ครั้ง"],
+    [1, 2, "1 to 2 times", "1 ถึง 2 ครั้ง"]
+  ] as const)("preserves count %s–%s within a ranged period in English and Thai", (frequency, frequencyMax, englishCount, thaiCount) => {
+    for (const [unit, englishUnit, thaiUnit] of [
+      [FhirPeriodUnit.Day, "days", "วัน"], [FhirPeriodUnit.Hour, "hours", "ชั่วโมง"],
+      [FhirPeriodUnit.Minute, "minutes", "นาที"], [FhirPeriodUnit.Week, "weeks", "สัปดาห์"],
+      [FhirPeriodUnit.Month, "months", "เดือน"], [FhirPeriodUnit.Year, "years", "ปี"]
+    ] as const) {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency, frequencyMax, period: 1, periodMax: 2, periodUnit: unit } }
+      }] }] };
+      const before = JSON.stringify(source);
+      const native = courseFromR6(source);
+      expect(native.stages[0].administrations[0].schedule?.recurrence).toMatchObject({
+        frequency, ...(frequencyMax === undefined ? {} : { frequencyMax }),
+        period: 1, periodMax: 2, periodUnit: unit
+      });
+      for (const input of [source, native, JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toContain(englishCount + " every 1 to 2 " + englishUnit);
+        for (const style of ["short", "long"] as const) {
+          expect(formatSig(input, style, { locale: "th", realizationMode: "normalized" }))
+            .toContain(thaiCount + " ทุก 1 ถึง 2 " + thaiUnit);
+        }
+      }
+      expect(JSON.stringify(source)).toBe(before);
+    }
+  });
+
+  it.each([undefined, 1])("keeps fixed daily wording when periodMax is %s", periodMax => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodMax, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" })).toContain("once daily");
+    expect(formatSig(source, "long", { locale: "th", realizationMode: "normalized" })).toContain("วันละครั้ง");
+  });
+
+  it("does not add a conditional response to a cap that has none", () => {
+    const source: FhirR6DosageInstruction = {
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" },
+        period: { value: 1, unit: "d" } }] },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }] }]
+    };
+    for (const locale of ["en", "th"]) {
+      const text = formatSig(source, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("4 tab / 1 d");
+      expect(text).not.toContain("If the limit is exceeded");
+      expect(text).not.toContain("หากเกินขีดจำกัด");
+    }
+  });
+
+  it.each([false, true])("shows a known local treatment-day start without guessing offsets (explicit zero %s)", explicit => {
+    const contextCode = { coding: [{
+      system: "urn:ezmedicationinput:CodeSystem:course-phase-event", code: "treatment-day-start"
+    }] };
+    const source: FhirR6DosageInstruction = { step: [{
+      start: { contextCode, ...(explicit ? { offsetDuration: { value: 0, unit: "d" } } : {}) },
+      end: { contextCode, offsetDuration: { value: 2, unit: "d" } },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } } }]
+    }] };
+    const before = JSON.stringify(source);
+    for (const input of [source, courseFromR6(source), JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("Days 1–2");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toContain("วันที่ 1–2");
+      const context = { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-21T12:00:00Z", timeZone: "UTC" };
+      expect(nextDueDoses(input, { ...context, limit: 3 })).toEqual(["2026-11-22T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...context,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+    source.step[0].start!.offsetDuration = { unit: "d" };
+    const incomplete = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+    expect(incomplete).toContain("requires review");
+    expect(incomplete).not.toContain("Days 1–2");
+    source.step[0].start = { contextCode: { text: "follow-up" } };
+    const unresolved = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+    expect(unresolved).toContain("follow-up");
+    expect(unresolved).not.toContain("Days 1–2");
+  });
+});
+
+describe("round 31: complete event-relative offset windows", () => {
+  it.each([
+    ["activity", "en"], ["activity", "th"], ["event", "en"], ["event", "th"]
+  ] as const)("keeps both endpoints of a %s window in %s", (kind, locale) => {
+    for (const [low, high] of [[15, 60], [30, 90], [0, 30]]) {
+      const clause = canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] });
+      clause.schedule = kind === "activity"
+        ? { activityTiming: [{ relation: "after", activity: { text: "dialysis", i18n: { th: "การฟอกไต" } },
+          offsetMin: low, offsetMax: high }] }
+        : { when: [EventTiming["After Breakfast"]], offsetMin: low, offsetMax: high };
+      const before = JSON.stringify(clause);
+      for (const style of ["short", "long"] as const) {
+        const text = formatCanonicalClause(clause, style, resolveSigLocalization(locale));
+        expect(text).toContain(low + "–" + high + (locale === "en" ? " minutes" : " นาที"));
+        expect(text).toContain(kind === "activity"
+          ? locale === "en" ? "after dialysis" : "หลังการฟอกไต"
+          : locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+        expect(text).not.toMatch(/at least|at most|อย่างน้อย|ไม่เกิน|immediately|ทันที/u);
+      }
+      expect(JSON.stringify(clause)).toBe(before);
+    }
+  });
+
+  it.each(["activity", "event"] as const)("retains scalar and one-sided %s offsets", kind => {
+    for (const [offsets, english, thai] of [
+      [{ offsetMin: 15 }, "at least 15 minutes", "อย่างน้อย 15 นาที"],
+      [{ offsetMax: 60 }, "at most 1 hour", "ไม่เกิน 1 ชั่วโมง"],
+      [{ offset: 30 }, "30 minutes", "30 นาที"],
+      [{ offset: 0 }, "immediately", "ทันที"],
+      [{ offsetMin: 15, offsetMax: 15 }, "15 minutes", "15 นาที"]
+    ] as const) {
+      const clause = canonicalFromFhir({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] });
+      clause.schedule = kind === "activity"
+        ? { activityTiming: [{ relation: "after", activity: { text: "dialysis" }, ...offsets }] }
+        : { when: [EventTiming["After Breakfast"]], ...offsets };
+      expect(formatCanonicalClause(clause, "long", resolveSigLocalization("en"))).toContain(english);
+      expect(formatCanonicalClause(clause, "long", resolveSigLocalization("th"))).toContain(thai);
+      if ("offsetMin" in offsets && "offsetMax" in offsets) {
+        expect(formatCanonicalClause(clause, "long", resolveSigLocalization("en")))
+          .not.toMatch(/at least|at most/u);
+      }
+    }
+  });
+});
+
+describe("round 31: bounded event windows remain in preview", () => {
+  it.each([
+    [EventTiming.Breakfast, EventTiming.Lunch, "between breakfast and lunch", "ระหว่างอาหารเช้าถึงอาหารกลางวัน"],
+    [EventTiming.Night, EventTiming.Morning, "between night and morning", "ระหว่างตอนกลางคืนถึงตอนเช้า"],
+    [EventTiming["Before Breakfast"], EventTiming["After Lunch"],
+      "between before breakfast and after lunch", "ระหว่างก่อนอาหารเช้าถึงหลังอาหารกลางวัน"]
+  ] as const)("keeps the ordered %s–%s window without inventing clocks", (start, end, english, thai) => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour, extension: [{
+        url: TIMING_EVENT_WINDOW_EXTENSION_URL,
+        extension: [{ url: "start", valueCode: start }, { url: "end", valueCode: end }]
+      }] } }
+    };
+    const before = JSON.stringify(row);
+    const clause = canonicalFromFhir(row);
+    expect(clause.schedule?.eventWindow).toEqual({ start, end });
+    for (const [locale, expected] of [["en", english], ["th", thai]]) {
+      for (const style of ["short", "long"] as const) {
+        expect(formatCanonicalClause(clause, style, resolveSigLocalization(locale))).toContain(expected);
+        expect(formatSig(row, style, { locale, realizationMode: "normalized" })).toContain(expected);
+      }
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("keeps a window beside an already owned rich event and accompaniment", () => {
+    const source = "Take 1 tablet in the morning with water";
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
+    const originalText = row.text;
+    formatSig(row, "long", { locale: "en" });
+    const repeat = row.timing!.repeat!;
+    repeat.extension = [...repeat.extension ?? [], {
+      url: TIMING_EVENT_WINDOW_EXTENSION_URL,
+      extension: [{ url: "start", valueCode: EventTiming.Breakfast }, { url: "end", valueCode: EventTiming.Lunch }]
+    }];
+    const before = JSON.stringify(row);
+    for (const mode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(row, "long", { locale: "en", realizationMode: mode });
+      const th = formatSig(row, "long", { locale: "th", realizationMode: mode });
+      expect(en).toContain("between breakfast and lunch");
+      expect(en).toContain("water");
+      expect(en).toContain("morning");
+      expect(th).toContain("ระหว่างอาหารเช้าถึงอาหารกลางวัน");
+      // The authored object may retain its English source lexeme in Thai.
+      expect(th).toMatch(/(?:พร้อม|กับ)\s*(?:น้ำ|water)/u);
+      expect(th).toContain("เช้า");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(row.text).toBe(originalText);
+  });
+
+  it("does not turn an ordinary cadence into an event window", () => {
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 4, periodUnit: FhirPeriodUnit.Hour } }
+    };
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("every 4 hours");
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      expect(formatSig(row, style, { locale, realizationMode: "normalized" })).not.toMatch(/between|ระหว่าง/u);
+    }
   });
 });

@@ -173,19 +173,19 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
             (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
             getQuantityComparator(ap) === getQuantityComparator(bp);
         };
+        const claimed = new Set<FhirR6DoseLimit>();
+        const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
         const shapeMatch = (limit: FhirR6DoseLimit): FhirR6DoseLimit | undefined => {
           // Only unmatched anonymous edits need this short clinical comparison.
           // No object serialization or opaque metadata participates in identity.
           let replacement: FhirR6DoseLimit | undefined;
-          for (const item of current) if (sameShape(limit, item)) {
+          for (const item of current) if (!claimed.has(item) && sameShape(limit, item)) {
             if (replacement) return undefined;
             replacement = item;
           }
           if (!replacement) return undefined;
           let sourceCount = 0;
-          for (const item of saved.course?.doseLimit ?? [])
-            if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
-          for (const item of saved.step?.doseLimit ?? [])
+          for (const item of sourceGroups.keys())
             if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
           return sourceCount === 1 ? replacement : undefined;
         };
@@ -205,32 +205,51 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
           bucket.push(group);
           return group;
         };
-        for (const limit of current) exactGroup(limit).live.push(limit);
+        const liveIds = new Map<string, FhirR6DoseLimit | undefined>();
+        const sourceIds = new Map<string, number>();
+        for (const limit of current) {
+          exactGroup(limit).live.push(limit);
+          if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : limit);
+        }
         for (const policy of [saved.course, saved.step])
           for (const limit of policy?.doseLimit ?? []) {
             const group = exactGroup(limit);
             group.sourceCount++;
             sourceGroups.set(limit, group);
+            if (limit.id) sourceIds.set(limit.id, (sourceIds.get(limit.id) ?? 0) + 1);
           }
+        // Reserve exact survivors and unique declared identities across BOTH
+        // policies before any anonymous edit can claim a live clinical shape.
+        for (const [limit, group] of sourceGroups) {
+          const exact = group.sourceCount === group.live.length ? group.live[group.cursor++] : undefined;
+          const replacement = exact ?? (group.live.length === 0 && limit.id && sourceIds.get(limit.id) === 1
+            ? liveIds.get(limit.id) : undefined);
+          if (replacement && !claimed.has(replacement)) {
+            matches.set(limit, replacement);
+            claimed.add(replacement);
+          }
+        }
         const reconcile = (policy: FhirR6DosageSafety | undefined) => {
           if (!policy) return policy;
           let changed = false;
           const limits: FhirR6DoseLimit[] = [];
           for (const limit of policy.doseLimit ?? []) {
             const group = sourceGroups.get(limit)!;
-            const unchanged = group.sourceCount === group.live.length
-              ? group.live[group.cursor++] : undefined;
-            if (unchanged) { limits.push(unchanged); continue; }
+            const assigned = matches.get(limit);
+            if (assigned) {
+              limits.push(assigned);
+              if (group.sourceCount !== group.live.length) changed = true;
+              continue;
+            }
             changed = true;
             // A changed multiplicity is not an amount edit. Neither an ID
             // fallback nor shape matching can prove which identical copy won.
-            if (group.live.length) continue;
-            if (limit.id) {
-              const matches = current.filter(value => value.id === limit.id);
-              if (matches.length === 1) limits.push(matches[0]);
-            } else {
-              const replacement = shapeMatch(limit);
-              if (replacement) limits.push(replacement);
+            if (group.live.length || limit.id) continue;
+            const replacement = shapeMatch(limit);
+            if (replacement) {
+              limits.push(replacement);
+              matches.set(limit, replacement);
+              claimed.add(replacement);
             }
           }
           const action = policy.ifExceeded;

@@ -272,13 +272,16 @@ function estimateIngredientQuantity(
  * rollover that might occur.
  */
 function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
-  const [hour, minute, second] = clock.split(":").map((part) => Number(part));
+  const [hour, minute, second] = clock.split(":");
+  const fractionAt = second.indexOf(".");
+  const fraction = fractionAt < 0 ? "" : second.slice(fractionAt);
+  const wholeSecond = Number(fractionAt < 0 ? second : second.slice(0, fractionAt));
   const secondsPerHour = SECONDS_PER_MINUTE * SECONDS_PER_MINUTE;
   const secondsPerDay = MINUTES_PER_DAY * SECONDS_PER_MINUTE;
   let totalSeconds =
-    hour * secondsPerHour +
-    minute * SECONDS_PER_MINUTE +
-    second +
+    Number(hour) * secondsPerHour +
+    Number(minute) * SECONDS_PER_MINUTE +
+    wholeSecond +
     Math.round(offsetMinutes * SECONDS_PER_MINUTE);
   let dayShift = 0;
   while (totalSeconds < 0) {
@@ -294,7 +297,7 @@ function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   const adjustedMinute = Math.floor(remainder / SECONDS_PER_MINUTE);
   const adjustedSecond = remainder % SECONDS_PER_MINUTE;
   return {
-    time: `${pad(adjustedHour)}:${pad(adjustedMinute)}:${pad(adjustedSecond)}`,
+    time: `${pad(adjustedHour)}:${pad(adjustedMinute)}:${pad(adjustedSecond)}${fraction}`,
     dayShift,
   };
 }
@@ -503,7 +506,7 @@ function usesIntervalCadence(repeat: CanonicalRecurrence): boolean {
   if (!repeat.period || !repeat.periodUnit) return false;
   if (repeat.frequency === undefined) return true;
   if (repeat.frequency !== 1) return false;
-  return repeat.periodUnit !== DurationUnit.Day || repeat.period > 1;
+  return repeat.periodUnit !== DurationUnit.Day || repeat.period !== 1;
 }
 function calendarScanLimit(start: Date, end: Date | null | undefined, resultLimit: number): number {
   const minimum = Math.max(366, Math.ceil(resultLimit) * 366);
@@ -1017,15 +1020,26 @@ function resolveFrequencyClocks(
   }
   return Array.from(collected).sort();
 }
-/** QOD's alternate calendar days use institution clocks, while an uncoded
- * two-day interval retains its elapsed treatment-start origin. */
-function codedCalendarRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
+/** Realize known code cadence without changing the authored recurrence:
+ * QOD uses alternate-day institution clocks; hourly codes retain elapsed spacing. */
+function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: NextDueDoseConfig): CanonicalRecurrence | undefined {
   const repeat = timing?.recurrence;
-  if (!repeat || repeat.frequency !== 1 || repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day ||
-      repeat.clocks?.length || repeat.anchors?.length) return repeat;
-  const coding = executionTimingCoding(timing!);
-  return standardTimingCodeFrequency(coding) === 0.5
-    ? { ...repeat, clocks: resolveFrequencyClocks(timing!, config, coding) } : repeat;
+  if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
+      timing.explicitEvents?.length) return repeat;
+  if (repeat.frequency === 1) {
+    if (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day) return repeat;
+    const coding = executionTimingCoding(timing);
+    return standardTimingCodeFrequency(coding) === 0.5
+      ? { ...repeat, clocks: resolveFrequencyClocks(timing, config, coding) } : repeat;
+  }
+  // A matching aggregate count (Q4H + 6/day) does not erase the code's
+  // elapsed spacing. Explicit events and clocks remain authoritative above.
+  const coding = executionTimingCoding(timing);
+  const hours = isStandardTimingCoding(coding) && coding?.code
+    ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
+  return hours && repeat.frequency && repeat.period && repeat.periodUnit &&
+      matchesDailyCodeCadence(24 / hours, repeat)
+    ? { ...repeat, frequency: 1, period: hours, periodUnit: DurationUnit.Hour } : repeat;
 }
 function recognizedDailyTimingCode(timing: CanonicalTiming): number | undefined {
   const daily = standardTimingCodeFrequency(executionTimingCoding(timing));
@@ -1743,21 +1757,28 @@ function executableQuantityCaps(
 ): CanonicalOccurrenceCapExpr[] {
   const limits = dosage.limits ?? [];
   if (!limits.length) return [];
-  const doseRates = dosage.amounts ?? [];
-  const first = doseRates.length === 1 ? doseRates[0] : undefined;
-  const dose = first?.quantity ??
-    (first && !first.expression && !first.rateExpression &&
-      (first.rate || first.rateRatio)
-      ? measuredRateQuantity(first, dosage.schedule?.recurrence) : undefined);
-  const doseOperator = getQuantityComparator(dose);
-  // Approximate amounts deliberately use their authored nominal values.
-  // An inequality does not determine a unique dose-count conversion.
-  const hasNumericDose = dose?.value !== undefined && Number.isFinite(dose.value) && dose.value > 0 &&
-    (!doseOperator || doseOperator === "~" ||
-      (asQuantity && (doseOperator === "<" || doseOperator === "<=")));
+  let dose: CanonicalMeasure | undefined;
+  let hasNumericDose = false;
+  let doseMeasured = false;
   const caps: CanonicalOccurrenceCapExpr[] = [];
   for (const limit of limits) {
     if (limit.scope !== "period" || limit.expression) continue;
+    if (!doseMeasured) {
+      // Only an executable periodic limit needs a dose-count conversion.
+      // Retained lifetime/per-administration/expression limits do not.
+      const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
+      dose = first?.quantity ??
+        (first && !first.expression && !first.rateExpression &&
+          (first.rate || first.rateRatio)
+          ? measuredRateQuantity(first, dosage.schedule?.recurrence) : undefined);
+      const doseOperator = getQuantityComparator(dose);
+      // Approximate amounts deliberately use their authored nominal values.
+      // An inequality does not determine a unique dose-count conversion.
+      hasNumericDose = dose?.value !== undefined && Number.isFinite(dose.value) && dose.value > 0 &&
+        (!doseOperator || doseOperator === "~" ||
+          (asQuantity && (doseOperator === "<" || doseOperator === "<=")));
+      doseMeasured = true;
+    }
     const numerator = limit.amount,
       denominator = limit.period;
     const maximum = numerator?.value;
@@ -4270,7 +4291,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     frequencyDefaults,
   };
   const timing: CanonicalTiming | undefined = dosage.schedule;
-  const repeat = codedCalendarRecurrence(timing, config);
+  const repeat = codedExecutionRecurrence(timing, config);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
   const boundsStart = boundsPeriod.start;
   if (boundsStart && boundsStart > from) {
@@ -4825,10 +4846,17 @@ function clockAnchoredElapsedOrigin(
   )
     return undefined;
   const clock = normalizeClock(repeat.clocks[0]);
-  const day = startOfLocalDay(baseTime, timeZone);
+  let day = startOfLocalDay(baseTime, timeZone);
   const first = makeZonedDateFromDay(day, timeZone, clock);
   if (first && first >= baseTime) return first;
-  return makeZonedDateFromDay(addLocalDays(day, 1, timeZone), timeZone, clock) ?? undefined;
+  // A missing wall clock on the following date is a DST gap, not a change
+  // from elapsed recurrence to a once-daily clock list.
+  let next: Date | null;
+  do {
+    day = addLocalDays(day, 1, timeZone);
+    next = makeZonedDateFromDay(day, timeZone, clock);
+  } while (!next);
+  return next;
 }
 /** Seek by source recurrence arithmetic, NOT by the requested output limit.
  * Elapsed seconds/minutes/hours jump by a fixed timestamp multiplier. Whole
@@ -5325,7 +5353,7 @@ function countScheduleEvents(
   derivePriorCount = true
 ): number {
   const timing = dosage.schedule;
-  const repeat = codedCalendarRecurrence(timing, config);
+  const repeat = codedExecutionRecurrence(timing, config);
   if (!timing || !repeat) return 0;
   const normalizedCount = repeatOccurrenceCap(repeat);
   if (normalizedCount === 0) {
@@ -6404,7 +6432,7 @@ function calculateTotalUnitsSingle(
             options.priorCount === undefined && !dosage.asNeeded && !unresolvedOneTimeActivity
           );
   }
-  if (acceptedEventCount === undefined && !rangePlan &&
+  if (acceptedEventCount === undefined && !rangePlan && !dosage.schedule?.explicitEvents?.length &&
       (maximalTiming.frequencyMaximum || maximalTiming.periodMinimum) && dosage.schedule?.recurrence) {
     // Scheduling keeps every stated clock/code as the concrete partial plan.
     // Numeric supply can still report the prescribed upper bound without

@@ -2758,8 +2758,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       types: ["Element"]
     });
     expect(field("Dosage", "Dosage.doseAndRate")).toMatchObject({ types: ["Element"] });
-    expect(field("Timing", "Timing.repeat.startOffset")).toMatchObject({ max: "1", types: ["Quantity"] });
-    expect(field("Timing", "Timing.repeat.endOffset")).toMatchObject({ max: "1", types: ["Quantity"] });
+    expect(field("Timing", "Timing.repeat.startOffset")).toMatchObject({ max: "1", types: ["Quantity"],
+      typeProfiles: { Quantity: ["http://hl7.org/fhir/StructureDefinition/SimpleQuantity"] } });
+    expect(field("Timing", "Timing.repeat.endOffset")).toMatchObject({ max: "1", types: ["Quantity"],
+      typeProfiles: { Quantity: ["http://hl7.org/fhir/StructureDefinition/SimpleQuantity"] } });
     expect(field("Dosage", "Dosage.sequence")).toBeUndefined();
 
     const permitted = (name: keyof typeof profiles, parent: string) =>
@@ -5014,7 +5016,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(toDosageDetails(toFhirR5Dosages(ranged))).toEqual(ranged);
   });
 
-  it("treats EMA-only and native-edited active/rest offsets consistently", () => {
+  it("executes current-profile EMA active/rest offsets consistently", () => {
     const coding = (code: string) => [{
       url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
       valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code }
@@ -5029,7 +5031,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       ["100000000050", "<", false]
     ] as const) {
       const startOffset = { value: 2, unit: "d", code: "d", extension: coding(code) };
-      for (const offset of [startOffset, { ...startOffset, comparator: native }]) {
+      for (const offset of [startOffset]) {
         const course: FhirR6DosageInstruction = { step: [{ component: [{
           timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
             startOffset: offset, endOffset: { value: 5, unit: "d", code: "d" } } },
@@ -5038,7 +5040,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         const r5 = toFhirR5Dosages(course);
         expect(getQuantityComparator(toDosageDetails(r5).step[0]
           .component[0].timing?.repeat?.startOffset)).toBe(native);
-        for (const dosage of [course, r5, toDosageDetails(r5)]) {
+        for (const dosage of [course, fromFhir(course), r5, toDosageDetails(r5)]) {
           if (allowed) {
             const due = nextDueDoses(dosage, options);
             expect(due[0]).toBe("2026-11-04T00:00:00+00:00");
@@ -5053,6 +5055,20 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }
     }
   });
+
+  it.each(["~", ">=", "<=", ">", "<"] as const)(
+    "keeps permissive offset comparator %s source separate from strict current-profile acceptance", comparator => {
+      const startOffset = { value: 2, unit: "d", code: "d", comparator };
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+          startOffset, endOffset: { value: 5, unit: "d", code: "d" } } },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      }] }] };
+      expect(() => fromFhir(source)).toThrow(/SimpleQuantity/);
+      const restored = toDosageDetails(toFhirR5Dosages(source));
+      expect(getQuantityComparator(restored.step[0].component[0].timing!.repeat!.startOffset)).toBe(comparator);
+    }
+  );
 
   it("imports only the current R6 shape and enforces the published Element and choice constraints", () => {
     const base = parseSig("1 tab PO qd").fhirNext;

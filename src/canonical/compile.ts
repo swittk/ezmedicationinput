@@ -581,6 +581,9 @@ export function courseFromAdministrations(
       administrations.every(
         (a) =>
           a.delayMinutes === minutes &&
+          // An independently stated origin owns the member delay. Promoting
+          // it here would consume it before the contextual boundary replaces it.
+          a.onsetDays === undefined && !a.onsetReference &&
           !a.schedule?.recurrence?.clocks?.length &&
           !a.schedule?.recurrence?.anchors?.length
       )

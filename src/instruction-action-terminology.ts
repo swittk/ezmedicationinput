@@ -45,6 +45,7 @@ interface ActionSource {
   realizer?: MedicationInstructionActionDefinition["realizer"];
   argumentParserConfig?: MedicationInstructionActionDefinition["argumentParserConfig"];
   realizerConfig?: MedicationInstructionActionDefinition["realizerConfig"];
+  methodBoundMannerConcepts?: string[];
   continuationLicenses?: MedicationInstructionActionDefinition["continuationLicenses"];
   continuationAfterRelations?: MedicationInstructionActionDefinition["continuationAfterRelations"];
   administrationDurationIntroducers?: MedicationInstructionActionDefinition["administrationDurationIntroducers"];
@@ -318,6 +319,7 @@ function cloneDefinition(
       secondaryConcepts: definition.argumentParserConfig.secondaryConcepts ? [...definition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
+    methodBoundMannerConcepts: definition.methodBoundMannerConcepts ? [...definition.methodBoundMannerConcepts] : undefined,
     continuationLicenses: cloneContinuationLicenses(definition.continuationLicenses),
     continuationAfterRelations: definition.continuationAfterRelations ? [...definition.continuationAfterRelations] : undefined,
     administrationDurationIntroducers: definition.administrationDurationIntroducers ? [...definition.administrationDurationIntroducers] : undefined,
@@ -361,6 +363,7 @@ function normalizeDefinition(sourceDefinition: ActionSource): MedicationInstruct
       secondaryConcepts: sourceDefinition.argumentParserConfig.secondaryConcepts ? [...sourceDefinition.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(sourceDefinition.realizerConfig),
+    methodBoundMannerConcepts: sourceDefinition.methodBoundMannerConcepts ? [...sourceDefinition.methodBoundMannerConcepts] : undefined,
     continuationLicenses: cloneContinuationLicenses(sourceDefinition.continuationLicenses),
     continuationAfterRelations: sourceDefinition.continuationAfterRelations ? [...sourceDefinition.continuationAfterRelations] : undefined,
     administrationDurationIntroducers: sourceDefinition.administrationDurationIntroducers ? [...sourceDefinition.administrationDurationIntroducers] : undefined,
@@ -409,6 +412,7 @@ function normalizeCustomDefinition(
       secondaryConcepts: input.argumentParserConfig.secondaryConcepts ? [...input.argumentParserConfig.secondaryConcepts] : undefined
     } : undefined,
     realizerConfig: cloneMedicationInstructionActionRealizerConfig(input.realizerConfig),
+    methodBoundMannerConcepts: input.methodBoundMannerConcepts ? [...input.methodBoundMannerConcepts] : undefined,
     continuationLicenses: cloneContinuationLicenses(input.continuationLicenses),
     continuationAfterRelations: input.continuationAfterRelations ? [...input.continuationAfterRelations] : undefined,
     administrationDurationIntroducers: input.administrationDurationIntroducers ? [...input.administrationDurationIntroducers] : undefined,

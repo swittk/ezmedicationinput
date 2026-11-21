@@ -613,7 +613,8 @@ function baseAdministration(
   const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
   let schedule = timing(raw.timing, format === "r5");
   const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
-  if (denominator && raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator)) {
+  if (denominator && schedule?.recurrence?.occurrenceDuration === undefined &&
+      raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator)) {
     // Only an explicitly recognized carrier/self-carrier infusion supplies an
     // administration duration. An arbitrary rate denominator is not a dose time.
     const administrationDuration = clinicalCarrierQuantityFromFhir(raw as FhirDosage)?.administrationDuration;
@@ -1559,10 +1560,19 @@ function administrationToWire(
     // Saved row-profile markers do not belong inside an emitted native R6
     // component. The importer already restored them into native facts.
     const oldModifiers = output.modifierExtension as FhirExtension[] | undefined;
+    let contextMarker: FhirExtension | undefined, contextSources: FhirExtension[] | undefined;
     if (oldModifiers) {
       const kept: FhirExtension[] = [];
       for (const extension of oldModifiers) {
-        if (extension.url === DOSAGE_DETAILS_R5_URL) continue;
+        if (extension.url === DOSAGE_DETAILS_R5_URL) {
+          // R6's missing-context modifier can carry authored Element/child
+          // annotations. R5 row codec markers retain their separate owner.
+          if (a.provenance?.format === "r6" || a.provenance?.retained?.modifierExtension !== undefined) {
+            if (!contextMarker) contextMarker = extension;
+            else (contextSources ??= []).push(extension);
+          }
+          continue;
+        }
         if (extension.url === DOSAGE_CONDITION_R5_URL) {
           if (isExactConditionBridge(extension)) continue;
           const nativeCondition = Boolean((output.condition as FhirR6Dosage["condition"])?.length);
@@ -1588,14 +1598,27 @@ function administrationToWire(
       assign(output, "modifierExtension", kept.length ? kept : undefined);
     }
 
-    if (a.missingContexts?.length)
+    if (a.missingContexts?.length) {
+      const reasons = new Map<string, boolean>();
+      for (const reason of a.missingContexts) reasons.set(reason, false);
+      const children: FhirExtension[] = [];
+      for (const child of contextMarker?.extension ?? []) {
+        if (child.url !== "missingContext") children.push(child);
+        else if (child.valueString !== undefined && reasons.has(child.valueString)) {
+          children.push(child);
+          reasons.set(child.valueString, true);
+        }
+      }
+      for (const [valueString, retained] of reasons)
+        if (!retained) children.push({ url: "missingContext", valueString });
       output.modifierExtension = [
         ...((output.modifierExtension as FhirExtension[]) ?? []),
-        {
-          url: DOSAGE_DETAILS_R5_URL,
-          extension: a.missingContexts.map((valueString) => ({ url: "missingContext", valueString })),
-        },
+        { ...contextMarker, url: DOSAGE_DETAILS_R5_URL, extension: children },
       ];
+    } else if (contextMarker) (contextSources ??= []).push(contextMarker);
+    if (contextSources)
+      output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+        { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: contextSources }];
     delete output.siteReference;
     delete output.excludedDates;
     delete output.maxDosePerPeriod;

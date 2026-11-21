@@ -24,6 +24,7 @@ interface FreshDosePart {
 interface FreshDoseProof {
   length: number;
   text?: string;
+  patientInstruction?: string;
   defaulted?: boolean;
   site?: ReturnType<typeof captureSourceReplayConcept>;
   route?: ReturnType<typeof captureSourceReplayConcept>;
@@ -36,7 +37,7 @@ interface FreshDoseProof {
   high?: FreshDosePart;
   timing?: ReturnType<typeof captureSourceReplayTiming>;
   maxima?: ReturnType<typeof captureSourceReplayMaxima>;
-  condition?: ReturnType<typeof captureSourceReplayCondition>;
+  modifiers?: ReturnType<typeof captureSourceReplayModifiers>;
   rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
     numerator?: FreshDosePart; denominator?: FreshDosePart };
 }
@@ -63,6 +64,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     length: dosage.doseAndRate?.length ?? 0,
     text: dosage.text,
+    patientInstruction: dosage.patientInstruction,
     defaulted,
     site: captureSourceReplayConcept(dosage.site),
     route: captureSourceReplayConcept(dosage.route),
@@ -75,7 +77,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
     high: captureDosePart(first?.doseRange?.high),
     timing: captureSourceReplayTiming(dosage.timing),
     maxima: captureSourceReplayMaxima(dosage),
-    condition: captureSourceReplayCondition(dosage),
+    modifiers: captureSourceReplayModifiers(dosage),
     rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
       quantity: captureDosePart(first.rateQuantity),
       low: captureDosePart(first.rateRange?.low),
@@ -89,7 +91,7 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   const current = dosage.doseAndRate;
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
-  return dosage.asNeeded === original.asNeeded &&
+  return dosage.patientInstruction === original.patientInstruction && dosage.asNeeded === original.asNeeded &&
     matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
     matchesSourceReplayConcept(dosage.site, original.site) &&
@@ -105,7 +107,7 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
     sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
     matchesSourceReplayTiming(dosage.timing, original.timing) &&
     matchesSourceReplayMaxima(dosage, original.maxima) &&
-    matchesSourceReplayCondition(dosage, original.condition);
+    matchesSourceReplayModifiers(dosage, original.modifiers);
 }
 
 /** Source edits are separate from clinical edits: replacement clinician text
@@ -117,7 +119,8 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const textChanged = fresh ? fresh.text !== dosage.text
     : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
-  if (fresh && !fresh.condition && !dosage.modifierExtension?.length &&
+  if (fresh && fresh.patientInstruction !== dosage.patientInstruction) return true;
+  if (fresh && !fresh.modifiers && !dosage.modifierExtension?.length &&
       !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
       !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
       !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
@@ -174,7 +177,7 @@ import {
   withDosageEditProvenance,
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
   captureSourceReplayMaxima, matchesSourceReplayMaxima,
-  captureSourceReplayCondition, matchesSourceReplayCondition,
+  captureSourceReplayModifiers, matchesSourceReplayModifiers,
   captureSourceReplayConcept, matchesSourceReplayConcept,
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
   getDosageSourceTextFingerprint, dosageTextFingerprint,

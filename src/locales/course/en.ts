@@ -37,6 +37,8 @@ export const ENGLISH_COURSE: CourseLanguage = {
   maxDosageLabel: "max per dosage: ",
   courseLimitsLabel: "Across this course: ",
   stageLimitsLabel: "Within this stage: ",
+  ifLimitExceeded: (action) => "If the limit is exceeded: " + action,
+  eventWindow: (start, end) => `between ${start.replace(/^(?:with |at |in the )/u, "")} and ${end.replace(/^(?:with |at |in the )/u, "")}`,
   weekdayName: (day) => ENGLISH_DAY_NAMES[day] ?? day,
   measurementName: (name) => MEASUREMENT_NAMES[name] ?? name,
   joinList: (items) => joinLocalizedList(items,"and"),

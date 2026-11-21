@@ -817,6 +817,7 @@
     {
       "code": "swallow",
       "semanticClass": "ingest",
+      "methodBoundMannerConcepts": ["whole"],
       "acceptsAmount": true,
       "definesDose": true,
       "display": "Swallow",

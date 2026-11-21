@@ -1612,9 +1612,13 @@ export function serializeCanonicalSchedule(
     }
     hasRepeat = true;
   } else if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit &&
-      schedule.administrationDurationComparator && clinicalQuantity?.representation !== "dose-with-rate-ratio") {
-    // A carrier infusion already owns this quantity in its rate denominator.
-    // Scalar rates need a separate duration, never a second active owner.
+      schedule.administrationDurationComparator &&
+      !(clinicalQuantity?.representation === "dose-with-rate-ratio" &&
+        clinicalQuantity.administrationDuration?.value === schedule.administrationDuration &&
+        clinicalQuantity.administrationDuration.unit === schedule.administrationDurationUnit &&
+        clinicalQuantity.administrationDuration.comparator === schedule.administrationDurationComparator)) {
+    // Share the carrier denominator only when it carries this exact duration.
+    // A distinct authored occurrence duration remains independently editable.
     repeat.extension = [...(repeat.extension ?? []), {
       url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
       valueQuantity: buildFhirDurationQuantity(schedule.administrationDuration,

@@ -191,15 +191,23 @@ function withMissingCourseContext(
   contexts: readonly string[]
 ): CanonicalAdministration {
   if (!contexts.length) return a;
-  let conflict = false;
-  for (const context of contexts)
+  const missing = a.missingContexts?.length ? [...a.missingContexts] : [];
+  if (missing.length) {
+    const known = new Set(missing);
+    for (const context of contexts) if (!known.has(context)) {
+      known.add(context);
+      missing.push(context);
+    }
+  } else missing.push(...contexts);
+  let conflict = a.contextIssue === "conflicting-course-phase";
+  for (const context of missing)
     if (context === "conflicting-phase") {
       conflict = true;
       break;
     }
   return {
     ...a,
-    missingContexts: [...contexts],
+    missingContexts: missing,
     contextIssue: conflict ? "conflicting-course-phase" : "missing-course-context",
   };
 }
@@ -221,6 +229,16 @@ function restoreComponentDelta(
   let superseded = false;
   if (!delta && !local.timingOffsets) return { dosage: fresh, superseded };
   const retained: Partial<FhirR6Dosage> = {};
+  if (delta?.modifierExtension?.length) {
+    // Current external modifiers remain live. The compact row-profile marker
+    // is a storage owner, while retained native context annotations are
+    // rebuilt against the separately imported current missingContext facts.
+    const modifiers: FhirExtension[] = [];
+    for (const item of row.modifierExtension ?? [])
+      if (item.url !== DOSAGE_DETAILS_R5_URL) modifiers.push(item);
+    modifiers.push(...delta.modifierExtension);
+    retained.modifierExtension = modifiers;
+  }
   if (delta?.condition !== undefined) {
     if (
       row.condition === undefined &&
@@ -656,8 +674,14 @@ function reconcileNativeCompactCourse(
   // reference-only site or other known row fact from its full source marker.
   let historicalMembers: Map<number, CanonicalAdministration> | undefined;
   let historicalStages: Map<number, CanonicalStage> | undefined;
+  let historicalHeader: Omit<FhirR6DosageInstruction, "step"> | undefined;
   if (historicalRows) {
     const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext);
+    // A saved full-course row owns its shared clinical header as well as its
+    // members. Its old complete SIG is not wording for the newly mixed rows.
+    const { renderedInstruction: _historicalInstruction, ...fields } =
+      restored.provenance?.data ?? {};
+    historicalHeader = fields;
     const cursors = new Map<number, number>();
     const membersBySequence = new Map<number, readonly CanonicalAdministration[]>();
     historicalStages = new Map();
@@ -852,6 +876,18 @@ function reconcileNativeCompactCourse(
     return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
+  if (historicalHeader && header?.course) {
+    // Different supplied shared owners cannot silently choose clinical course
+    // meaning. An explicit current course-field edit resolves that field.
+    for (const key of ["repeatCycle", "safety", "modifierExtension"] as const)
+      if (historicalHeader[key] !== undefined && header.course[key] !== undefined &&
+          courseEdits[key] === undefined && !equalStructuredValues(historicalHeader[key], header.course[key])) {
+        missing.add("conflicting-shared-course");
+        addWarning(warnings,
+          "Historical and current shared course metadata conflict; both sources remain available for resolution.");
+        break;
+      }
+  }
   if (editedCourse && !equivalentProjection(header?.course ?? {}, { ...header?.course, ...courseEdits })) {
     instructionMatches = false;
     if (header?.course) {
@@ -860,11 +896,20 @@ function reconcileNativeCompactCourse(
       // metadata, even when no renderedInstruction baseline was ever stored.
       // Never recursively embed already-flat reconciliation history.
       const priorExtensions = header.course.extension;
+      let envelopes: FhirExtension[] | undefined;
+      if (priorExtensions) {
+        envelopes = [];
+        for (const item of priorExtensions) {
+          if (item.url !== DOSAGE_RECONCILIATION_SOURCE_URL) envelopes.push(item);
+          else {
+            const { extension: _children, ...envelope } = item;
+            if (Object.keys(envelope).length > 1) envelopes.push(envelope);
+          }
+        }
+      }
       const original = {
         ...header.course,
-        ...(priorExtensions
-          ? { extension: priorExtensions.filter((item) => item.url !== DOSAGE_RECONCILIATION_SOURCE_URL) }
-          : {}),
+        ...(envelopes ? { extension: envelopes } : {}),
       };
       sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({ course: original }) });
       if (courseEdits.extension !== undefined)
@@ -949,9 +994,10 @@ function reconcileNativeCompactCourse(
   }
   if (missing.size) {
     addWarning(warnings, "Required course context is missing; surviving dosage fields remain editable.");
+    const sharedMissing = [...missing];
     for (const step of steps)
       step.administrations = step.administrations.map((component) =>
-        withMissingCourseContext(component, [...missing])
+        withMissingCourseContext(component, sharedMissing)
       );
     instructionMatches = false;
   }
@@ -974,6 +1020,7 @@ function reconcileNativeCompactCourse(
     }
   }
   const currentHeader = {
+    ...historicalHeader,
     ...header?.course,
     ...courseEdits,
     ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
@@ -1065,6 +1112,9 @@ function reconcileNativeRetainedCourse(
     let existing = phases.get(sequence);
     if (existing) return existing;
     const native = administrationFromR6(component, sourceContext);
+    // Exact historical matches still have the normalized live R5 sequence.
+    // Mixed codecs use that typed identity to restore the owning stage.
+    native.stageOrdinal = sequence;
     existing = { native, row: administrationToR5(native, sequence) };
     phases.set(sequence, existing);
     return existing;
