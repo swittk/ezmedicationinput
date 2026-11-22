@@ -2253,6 +2253,8 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
           actions: parseInstructionActions(source) };
       const saved = JSON.stringify(graph);
       clause.dose = { value: amount, unit };
+      const editedPublic = source.startsWith("Dissolve") ? JSON.parse(JSON.stringify(parsed.fhirNext)) : undefined;
+      if (editedPublic) editedPublic.step[0].component[0].doseAndRate[0].doseQuantity.value = amount;
       for (const locale of ["en", "th"] as const) {
         const rendered = realizeInstructionGraph(graph, locale, {
           omitCanonicalAdministration: clause, preferSourceText: true
@@ -2282,7 +2284,17 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
             expect(long).toContain("5 นาที");
           }
         }
-        expect(long).toContain(String(amount));
+        if (source.startsWith("Dissolve")) {
+          expect(long).toContain(locale === "en" ? "Dissolve 3 tablets" : "ละลาย3 เม็ด");
+          const expected = source.includes("water")
+            ? locale === "en"
+              ? "Dissolve 3 tablets in 100 mL water; then wait 5 minutes. Drink the medication orally."
+              : "ละลาย3 เม็ดในน้ำ 100 มิลลิลิตร จากนั้นรอ 5 นาที. ดื่ม."
+            : locale === "en" ? "Dissolve 3 tablets in 100 mL solvent." : "ละลาย3 เม็ดในsolvent 100 มิลลิลิตร.";
+          const originalPublic = JSON.stringify(editedPublic);
+          expect(formatSig(editedPublic, "long", { locale, realizationMode: "roundtrip" })).toBe(expected);
+          expect(JSON.stringify(editedPublic)).toBe(originalPublic);
+        } else expect(long).toContain(String(amount));
         if (source === "Take 1 tablet, then drink 5 mL") {
           expect(long).toMatch(locale === "en" ? /Take 3 mL/u : /(?:รับประทาน|ใช้ยา) 3 มิลลิลิตร/u);
           expect(long).toContain(locale === "en" ? "5 mL" : "5 มิลลิลิตร");
@@ -2310,7 +2322,7 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
     for (const locale of ["en", "th"] as const) {
       const display = formatCanonicalClause(clause, "long",
         resolveSigLocalization(locale), { realizationMode: "roundtrip" });
-      expect(display).toContain("3");
+      expect(display).toContain(locale === "en" ? "Dissolve 3 tablets" : "ละลาย3 เม็ด");
       expect(display).not.toContain("2 tablets");
       expect(display).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
       expect(display).toContain(locale === "en" ? "5 minutes" : "5 นาที");
@@ -5127,5 +5139,444 @@ describe("round45 saved instruction meaning", () => {
     }
     expect(JSON.stringify(saved)).toBe(before);
     expect(parseInstructionGraphExtension(saved.extension)!.sourceText).toBe("Swallow 1 tablet whole after sleep");
+  });
+});
+
+
+describe("round47 public saved graph conditions and partial quantities", () => {
+  // Frozen public R5 rows retain the graph array target independently of optional action labels.
+  const conditionFixtures: { postposed: boolean; wire: FhirDosage }[] = [
+    {
+      "postposed": false,
+      "wire": {
+        "method": {"text": "Swallow"},
+        "doseAndRate": [{"doseQuantity": {"value": 1, "unit": "tab"}}],
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": "if able to swallow, Swallow 1 tablet"},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {"url": "primaryAdministrationStart", "valueInteger": 20},
+              {"url": "primaryAdministrationEnd", "valueInteger": 36},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {"url": "predicateLemma", "valueString": "swallow"},
+                  {"url": "predicateDisplay", "valueString": "Swallow"},
+                  {"url": "semanticClass", "valueString": "ingest"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "กลืน"}]},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "738995006", "display": "Swallow"}},
+                  {
+                    "url": "predicateCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421521009", "display": "Swallow - dosing instruction imperative"}
+                  },
+                  {"url": "spanStart", "valueInteger": 20},
+                  {"url": "spanEnd", "valueInteger": 36},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "amount"},
+                      {"url": "text", "valueString": "1 tablet"},
+                      {"url": "normalized", "valueString": "tab"},
+                      {"url": "spanStart", "valueInteger": 8},
+                      {"url": "spanEnd", "valueInteger": 16},
+                      {"url": "quantity", "extension": [{"url": "value", "valueDecimal": 1}, {"url": "unit", "valueString": "tab"}]}
+                    ]
+                  }
+                ]
+              },
+              {
+                "url": "graphRelation",
+                "extension": [
+                  {"url": "kindCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421803000", "display": "If - dosing instruction fragment"}},
+                  {"url": "toActionIndex", "valueInteger": 0},
+                  {"url": "text", "valueString": "if able to swallow"},
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 18}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "postposed": true,
+      "wire": {
+        "method": {"text": "Swallow"},
+        "doseAndRate": [{"doseQuantity": {"value": 1, "unit": "tab"}}],
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": "Swallow 1 tablet if able to swallow"},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {"url": "primaryAdministrationStart", "valueInteger": 0},
+              {"url": "primaryAdministrationEnd", "valueInteger": 16},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {"url": "predicateLemma", "valueString": "swallow"},
+                  {"url": "predicateDisplay", "valueString": "Swallow"},
+                  {"url": "semanticClass", "valueString": "ingest"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "กลืน"}]},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "738995006", "display": "Swallow"}},
+                  {
+                    "url": "predicateCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421521009", "display": "Swallow - dosing instruction imperative"}
+                  },
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 16},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "amount"},
+                      {"url": "text", "valueString": "1 tablet"},
+                      {"url": "normalized", "valueString": "tab"},
+                      {"url": "spanStart", "valueInteger": 8},
+                      {"url": "spanEnd", "valueInteger": 16},
+                      {"url": "quantity", "extension": [{"url": "value", "valueDecimal": 1}, {"url": "unit", "valueString": "tab"}]}
+                    ]
+                  }
+                ]
+              },
+              {
+                "url": "graphRelation",
+                "extension": [
+                  {"url": "kindCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421803000", "display": "If - dosing instruction fragment"}},
+                  {"url": "toActionIndex", "valueInteger": 0},
+                  {"url": "text", "valueString": "if able to swallow"},
+                  {"url": "spanStart", "valueInteger": 17},
+                  {"url": "spanEnd", "valueInteger": 35}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ];
+
+  it.each(conditionFixtures.flatMap(fixture => ["present", "absent", "other"].map(indexMode => ({
+    ...fixture, indexMode
+  }))))("retains a saved graph condition for action position zero ($postposed, $indexMode)", ({ postposed, wire, indexMode }) => {
+    const row: FhirDosage = JSON.parse(JSON.stringify(wire));
+    const action = row.extension![0].extension!.find(field => field.url === "action")!;
+    const index = action.extension!.find(field => field.url === "sequenceIndex")!;
+    if (indexMode === "absent") action.extension = action.extension!.filter(field => field !== index);
+    else index.valueInteger = indexMode === "other" ? 9 : 0;
+    const original = JSON.stringify(row);
+    const decoded = parseInstructionGraphExtension(row.extension)!;
+    expect(decoded.actions).toHaveLength(1);
+    expect(decoded.actions[0].sequenceIndex).toBe(indexMode === "absent" ? undefined : indexMode === "other" ? 9 : 0);
+    expect(decoded.relations).toContainEqual(expect.objectContaining({
+      kind: AdviceRelation.If, toActionIndex: 0, text: "if able to swallow"
+    }));
+    const direct = postposed ? "Swallow 1 tablet if able to swallow" : "if able to swallow, swallow 1 tablet";
+    for (const graph of [decoded, parseInstructionGraphExtension([buildInstructionGraphExtension(decoded)!])!])
+      expect(realizeInstructionGraph(graph, "en")).toBe(direct);
+    const r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toBe(postposed ? "Swallow 1 tablet. If able to swallow." : "If able to swallow. Swallow 1 tablet.");
+      expect(thai).toBe(postposed ? "รับประทานครั้งละ 1 เม็ด. If able to swallow." : "If able to swallow. รับประทานครั้งละ 1 เม็ด.");
+    }
+    expect(JSON.stringify(row)).toBe(original);
+  });
+
+  // The saved input is fixed independently of the current parser and encoder.
+  const mixingFixtures: { side: string; status: string; wire: FhirDosage; expected: { en: string; th: string } }[] = [
+    {
+      "side": "companion",
+      "status": "complete",
+      "wire": {
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": ""},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                  },
+                  {"url": "predicateLemma", "valueString": "mix"},
+                  {"url": "predicateDisplay", "valueString": "Mix"},
+                  {"url": "semanticClass", "valueString": "prepare"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ผสม"}]},
+                  {"url": "predicateRealizer", "valueCode": "mix-substance"},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421826007", "display": "Mix"}},
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 22},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "object"},
+                      {"url": "text", "valueString": "tablet"},
+                      {"url": "normalized", "valueString": "tablet"},
+                      {"url": "conceptId", "valueString": "medication-tablet"},
+                      {"url": "coding", "valueCoding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://standardterms.edqm.eu", "code": "15054000", "display": "Tablet"}},
+                      {"url": "spanStart", "valueInteger": 4},
+                      {"url": "spanEnd", "valueInteger": 10},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "en"}, {"url": "text", "valueString": "tablet"}]},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ยาเม็ด"}]}
+                    ]
+                  },
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "material"},
+                      {
+                        "url": "relationCoding",
+                        "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                      },
+                      {"url": "text", "valueString": "100 mL"},
+                      {"url": "normalized", "valueString": "mL"},
+                      {"url": "spanStart", "valueInteger": 16},
+                      {"url": "spanEnd", "valueInteger": 22},
+                      {"url": "quantity", "extension": [{"url": "value", "valueDecimal": 100}, {"url": "unit", "valueString": "mL"}]}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {"en": "Mix tablet with 100 mL.", "th": "ผสมยาเม็ดกับ100 มิลลิลิตร."}
+    },
+    {
+      "side": "companion",
+      "status": "partial",
+      "wire": {
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": ""},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                  },
+                  {"url": "predicateLemma", "valueString": "mix"},
+                  {"url": "predicateDisplay", "valueString": "Mix"},
+                  {"url": "semanticClass", "valueString": "prepare"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ผสม"}]},
+                  {"url": "predicateRealizer", "valueCode": "mix-substance"},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421826007", "display": "Mix"}},
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 22},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "object"},
+                      {"url": "text", "valueString": "tablet"},
+                      {"url": "normalized", "valueString": "tablet"},
+                      {"url": "conceptId", "valueString": "medication-tablet"},
+                      {"url": "coding", "valueCoding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "732936001", "display": "Tablet"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://standardterms.edqm.eu", "code": "15054000", "display": "Tablet"}},
+                      {"url": "spanStart", "valueInteger": 4},
+                      {"url": "spanEnd", "valueInteger": 10},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "en"}, {"url": "text", "valueString": "tablet"}]},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ยาเม็ด"}]}
+                    ]
+                  },
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "material"},
+                      {
+                        "url": "relationCoding",
+                        "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                      },
+                      {"url": "text", "valueString": "mL"},
+                      {"url": "normalized", "valueString": "mL"},
+                      {"url": "quantity", "extension": [{"url": "unit", "valueString": "mL"}]}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {"en": "Mix tablet with mL.", "th": "ผสมยาเม็ดกับmL."}
+    },
+    {
+      "side": "theme",
+      "status": "complete",
+      "wire": {
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": ""},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                  },
+                  {"url": "predicateLemma", "valueString": "mix"},
+                  {"url": "predicateDisplay", "valueString": "Mix"},
+                  {"url": "semanticClass", "valueString": "prepare"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ผสม"}]},
+                  {"url": "predicateRealizer", "valueCode": "mix-substance"},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421826007", "display": "Mix"}},
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 19},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "theme"},
+                      {"url": "text", "valueString": "5 mL"},
+                      {"url": "normalized", "valueString": "mL"},
+                      {"url": "spanStart", "valueInteger": 4},
+                      {"url": "spanEnd", "valueInteger": 8},
+                      {"url": "quantity", "extension": [{"url": "value", "valueDecimal": 5}, {"url": "unit", "valueString": "mL"}]}
+                    ]
+                  },
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "substance"},
+                      {
+                        "url": "relationCoding",
+                        "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                      },
+                      {"url": "text", "valueString": "water"},
+                      {"url": "normalized", "valueString": "water"},
+                      {"url": "conceptId", "valueString": "water"},
+                      {"url": "coding", "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}},
+                      {"url": "spanStart", "valueInteger": 14},
+                      {"url": "spanEnd", "valueInteger": 19},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "en"}, {"url": "text", "valueString": "water"}]},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "น้ำ"}]}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {"en": "Mix 5 mL with water.", "th": "ผสม5 มิลลิลิตรกับน้ำ."}
+    },
+    {
+      "side": "theme",
+      "status": "partial",
+      "wire": {
+        "extension": [
+          {
+            "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+            "extension": [
+              {"url": "sourceText", "valueString": ""},
+              {"url": "sourceLocale", "valueCode": "en"},
+              {
+                "url": "action",
+                "extension": [
+                  {"url": "sequenceIndex", "valueInteger": 0},
+                  {"url": "force", "valueCode": "sequence"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                  },
+                  {"url": "predicateLemma", "valueString": "mix"},
+                  {"url": "predicateDisplay", "valueString": "Mix"},
+                  {"url": "semanticClass", "valueString": "prepare"},
+                  {"url": "predicateTranslation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "ผสม"}]},
+                  {"url": "predicateRealizer", "valueCode": "mix-substance"},
+                  {"url": "predicateCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "421826007", "display": "Mix"}},
+                  {"url": "spanStart", "valueInteger": 0},
+                  {"url": "spanEnd", "valueInteger": 19},
+                  {"url": "sourceText", "valueString": ""},
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "theme"},
+                      {"url": "text", "valueString": "mL"},
+                      {"url": "normalized", "valueString": "mL"},
+                      {"url": "quantity", "extension": [{"url": "unit", "valueString": "mL"}]}
+                    ]
+                  },
+                  {
+                    "url": "argument",
+                    "extension": [
+                      {"url": "role", "valueCode": "substance"},
+                      {
+                        "url": "relationCoding",
+                        "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                      },
+                      {"url": "text", "valueString": "water"},
+                      {"url": "normalized", "valueString": "water"},
+                      {"url": "conceptId", "valueString": "water"},
+                      {"url": "coding", "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}},
+                      {"url": "argumentCoding", "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}},
+                      {"url": "spanStart", "valueInteger": 14},
+                      {"url": "spanEnd", "valueInteger": 19},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "en"}, {"url": "text", "valueString": "water"}]},
+                      {"url": "translation", "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "น้ำ"}]}
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {"en": "Mix mL with water.", "th": "ผสมmLกับน้ำ."}
+    }
+  ];
+
+  it.each(mixingFixtures)("retains the saved $status quantity-only $side without inventing a value", ({ side, status, wire, expected }) => {
+    const row: FhirDosage = JSON.parse(JSON.stringify(wire));
+    const original = JSON.stringify(row), decoded = parseInstructionGraphExtension(row.extension)!;
+    const quantityArgument = decoded.actions[0].args.find(argument => argument.quantity?.unit === "mL")!;
+    expect(quantityArgument.normalized).toBe("mL");
+    expect(quantityArgument.text).toBe(status === "partial" ? "mL" : side === "theme" ? "5 mL" : "100 mL");
+    expect(quantityArgument.quantity?.value).toBe(status === "partial" ? undefined : side === "theme" ? 5 : 100);
+    expect(quantityArgument.quantity?.unit).toBe("mL");
+    const companion = side === "companion" ? quantityArgument : decoded.actions[0].args.find(argument => argument.normalized === "water")!;
+    expect(companion.relation).toBe(AdviceRelation.With);
+    const r6 = toDosageDetails([row]);
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [row, r6, cold]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected.en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(expected.th);
+    }
+    const restored = parseInstructionGraphExtension(cold[0].extension)!;
+    expect(restored.actions[0].args.find(argument => argument.quantity?.unit === "mL")?.quantity)
+      .toEqual(quantityArgument.quantity);
+    expect(JSON.stringify(row)).toBe(original);
   });
 });
