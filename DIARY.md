@@ -13650,3 +13650,112 @@ Representative accepted measurements (microseconds per call):
 All 53 dispositions and gate evidence are retained under ezmed14-round40: ledger.json, source-final.log, dist-final.log, storage-check.json, consolidation-proof.json, benchmark-oracle-amendment.json, benchmark-oracle-controls.json, master-full.json, master-confirm.json (when needed), and performance-accepted.json.
 
 Delivery completes the existing master merge and uses a normal push to the existing PR branch. GitHub access is CLI-only. This review has no new inline roots; no replacement top-level comment or full-review request is created. The local AgentBoard thread carries the handoff and scope state.
+
+
+## PR14 round41
+
+The owner explicitly resumed the loop on 2026-11-22: fix broken supported behavior, including pre-existing correctness defects, and reject speculative malformed-input, internal-mutation and feature-expansion work. This changes the previous round's disposition for the 18 supported findings listed below; the historical record above remains intact. The latest review is 6012495942 on 947a5ff. All 13 inline findings,17 body minor findings and one import nitpick were assessed: **30 addressed, one rejected**.
+
+Root performed the preview fixes and integration, using three ChatGPT collaboration workers for execution, grammar and interop in isolated worktrees. No HPSERVER Codex/Gemini CLI workers were started. Root independently reviewed worker diffs; execution independently reviewed grammar and grammar reviewed root's formatting. That review caught an omitted explicit-daily infusion division: two 50 mL portions were still scheduled once daily. Final projection now uses the authored daily schedule for cardinality; the rate denominator never creates a recurrence.
+
+### Scope and invariants
+
+The native course remains the semantic model; .fhir remains the shipping R5 boundary and .fhirNext follows the pinned R6 contract. Existing external FHIR edits, metadata, source wording and independent quantity endpoints remain preserved. Interpreting an existing supported quantity does not rewrite its authored unit/value. No new native editor, compatibility framework, automatic conversion, downstream application or storage migration was added.
+
+Production corrections stay in their existing owners: grammatical attachment/unification, typed schedule execution, boundary reconciliation and locale realization. The dose-target unit rule is shared with the existing native renderer. The extra anonymous-limit fingerprints run only for repeated period identities; normal quantities return immediately from the existing decoder; no new whole-course scans, deep-clone layer or defensive validation framework was added.
+
+### Current review dispositions
+
+| Finding | Requirement and result | Owner / evidence |
+|---|---|---|
+| I1 | A retained reference-only site cannot hide a new live safety policy; current ifExceeded and modifiers survive. | Boundary safety source selection; repeated public R5/R6 save-reopen. |
+| I2 | Annotation-only edits to an identified phase cap do not widen it to maintenance. | Existing safety reconciliation; exact clinical identity, live metadata and phase scope. |
+| I3 | Numeric lower dose endpoint determines comparable cap unit when the upper endpoint contains only metadata. | Existing numeric-limit selection; both cap orders give 10 mL and preserve the incomparable mg cap. |
+| I4 | Local-day occurrence count includes midnight throughout the 25-hour New York day. | Existing civil-bucket retention, separate from rolling quantity windows; one administration on November 1. |
+| I5 | Scheduled count ceilings consume accepted occurrences after exclusions. | Existing eligibility replay; excluded January 1 leaves January 2 and 3, without proving an exact phase end. |
+| I6 | Bounded rate-duration quantity reaches the shared cap ledger. | Existing execution measurement; three opportunities give 105 mL under 35 mL/admin, 120 mL without it. |
+| I7 | Total 1 mL across both nostrils never becomes 1 mL each. | Shared discrete-target predicate; EN/TH, current R6 and cold R5; spray control remains per-target. |
+| I8 | Unrecognized stale Timing.code text cannot replace typed cadence. | Existing abbreviation selection; once-daily rate preview and agreeing BID control. |
+| I9 | BEFORE next appointment cannot acquire the UNTIL condition code. | Existing coded condition rule; BEFORE source and UNTIL control retained. |
+| I10 | Registered stale Thai fever wording cannot override a current migraine text/code pair. | Exact terminology lookup in mismatched-translation path; custom wording and wire extension retained. |
+| I11 | Mixed clock/event THEN keeps source order without inventing event clocks. | Existing same-day constraint falls back to sequence; normal ordered clock pair remains unchanged. |
+| I12 | A dated partial-parallel cutoff has one FHIR bounds choice and retains its authored duration. | Existing anchoredLength compiler and writer; December 4 supplies 2 drops after detached R5/R6 roundtrip. |
+| I13 | Foreign duration codes do not acquire UCUM meaning from a matching symbol. | Existing duration interpretation boundary; local half-hour blocks remain preserved and unresolved, standard/annotated/systemless controls work. |
+| B1 | Opening draft survives successor cadence edit: Completion checks apply only to predecessors that can determine retained draft boundaries; changing successor cadence preserves the opening draft and its end. | fix; src/adapters/r6-editable-metadata.ts. |
+| B2 | Course-count-only R6 header classification: Existing valid course-count marker identifies R6 after explicit R5 fields have priority; shared generic formatting retains count three. | fix; src/adapters/canonical-course.ts. |
+| B3 | Unchanged anonymous period-limit text: Reserve unique unchanged projection at its existing position; retain no-swap behavior for ambiguous amounts edited from [4,8] to [8,10]. | fix; src/dosage-course.ts. |
+| B4 | Late query requires prior cap history: 48-hour cap oracle depends on January 1 history: January 2–4 supplies ten mL, not twenty; retain the 24-hour control. | oracle; test/canonical-course.spec.ts. |
+| B5 | Range is a preceding administered amount: Existing NumberRange token stops a later cap borrowing the administration head. Give 1–2 mL, maximum 10 mL for 1 hour retains dose range without creating a rate. | fix; src/hpsg/rules/clinical-quantity-rules.ts. |
+| B6 | All active rate choices checked: Maximum-only fixtures require rateQuantity, rateRatio and rateRange all absent through R5 and R6. | oracle; test/hpsg-clinical-quantity.spec.ts. |
+| B7 | ADD onset queried from order time: Expected predecessor doses are checked before November 25 ADD, so a premature November 24 ADD fails. | oracle; test/pr14-round23-meaning.spec.ts. |
+| B8 | Staggered phase dose split: First seven days independently require seven tablets, alongside21-tablet whole-course result. | oracle; test/pr14-round23-meaning.spec.ts. |
+| B9 | Active comparator primitive annotation: Existing graph codec carries _comparator metadata in a typed comparatorElement field and returns it to the existing R5 quantity encoder. | fix; src/instruction-graph-fhir.ts. |
+| B10 | Administration duration survives graph-only guard: All four administration duration fields prevent early exit; scalar, numeric range and independent30 min–1h endpoints remain visible in both locales. | fix; src/format.ts; src/i18n.ts. |
+| B11 | Distinct Thai method oracle: Ordinary Chew explicitly rejects the slow-chewing label in saved graph and persisted previews. | oracle; test/instruction-graph.spec.ts. |
+| B12 | AM clock cannot match PM suffix: Complete 08:00/10:00 matchers reject PM suffixes; same boolean checks cover required presence and absence. | oracle; test/instruction-graph.spec.ts. |
+| B13 | Complete numeric dose token: Edited 2g matcher excludes decimal/multi-digit/sign prefixes while accepting normal Thai verb adjacency. | oracle; test/instruction-graph.spec.ts. |
+| B14 | Complete frequency token: Exact short output equality replaces substring matching for exact/ranged daily frequencies. | oracle; test/instruction-graph.spec.ts. |
+| B15 | Removed dose absent in Thai: Superseded tablet amount is rejected in Thai as well as English while independent later actions remain. | oracle; test/instruction-graph.spec.ts. |
+| B16 | Cleared dose in both realization modes: Current R6 and cold R5 are checked in normalized and roundtrip modes, both locales; saved graph remains unchanged. | oracle; test/instruction-graph.spec.ts. |
+| B17 | Historical Nuuk nominal-date machinery: No supported ordinary-use small correction established. The proposed historical cross-midnight logical-date stepper/seek/distribution framework is explicitly excluded; ordinary civil-day occurrence correctness is separately fixed under I4. | reject; src/execution/calendar.ts. |
+| B18 | Shared test import bindings: One binding per shared dependency, with existing block-scoped fixtures and all tests retained. | cleanup; test/pr14-round23-meaning.spec.ts. |
+
+
+The I7/I8/I10 public R5 comparisons were replayed against pinned master 7d62823 and reviewed 947a5ff; they are branch regressions. Worker notes distinguish additional branch regressions from supported baseline defects. The benchmark baseline remains the actual PR base 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb, not the old application checkout.
+
+### Reopened supported findings from round40
+
+Prior findings **1,2,3,9,12,14,19,20,25,27,28,32,38,39,41,45,46,47** are now fixed under the owner's resumed supported-correctness scope. Findings 14,25 and 45 overlap current I11,I5 and B10 respectively.
+
+- Grammar: finite/daily divided-infusion cardinality, accepted resolver realizer/configuration, and mixed clock/event sequence.
+- Interop: replacement/clear of exact offsets through both public R5 and R6, cleared Ratio annotations, source-less expression previews, stale standard equality labels, restored draft-only and batch stage policies.
+- Execution: counted occurrences after exclusions, lifetime-capped rounding consistent across scalar/array/native/R6/R5, and variable infusion duration never proving an early successor start.
+- Realization: explicit mixing vehicle retained when ingredient is a Substance/Material, graph-only condition retained beside canonical administration, quantity-only mixing without a duplicate unit noun, administration durations and event windows retained, and locative target count shown.
+
+Prior findings **11,18,22,29,30,34,36,37** remain rejected: new gauge-device grammar; manufactured custom-action collision; test-file splitting beyond the reviewability budget; historical Nuuk logical-date machinery; unsupported removed-predecessor import acceptance; internal proof stamping; unspecified-unit display behavior for incomplete endpoints; and ambiguous 30m interpretation. No source change was retained solely to satisfy one of those requests. Pure-event same-day pairing keeps its existing policy; no event chronology or clock mapping was invented.
+
+### Verification
+
+- **6,394 source tests in 48 suites**, including the strict ES6 type gate, pass.
+- **Four distribution tests** pass after ESM/CommonJS/declaration builds.
+- **48 actual converter/storage save-reopen cases** preserve complete JSON, including 11 new round41 cases. One additional raw core timeOfDay null case still reports the established downstream consumer limitation. It was passed directly and not trimmed or normalized.
+- Source data remains unchanged in preservation fixtures; scalar/range values, independent units, annotations, and inactive source are checked.
+- The daily divided-infusion neighbor now supplies 100 mL/day or 20 mg/day as authored. Finite count 2 and explicit twice-daily controls remain correct.
+- The PR remains at **100 changed paths**, with no new repository file this round.
+
+Frozen source, build, storage, causal and per-finding evidence is retained in /tmp/ezmed14-round41-*, including the ledger, four lane notes, independent review probes and complete test logs. Performance results and review-thread delivery follow below after their gates complete.
+
+
+### Final performance gate
+
+All **117/117 public functions** are covered and measured. The unchanged harness runs **181 paired scenarios**: all **174 semantically equivalent scenarios pass the 4% individual ceiling**, with the same seven previously documented non-equivalent scenarios visible separately. Candidate-only APIs retain their separate measurements. No timing scenario, threshold or equivalence exclusion changed.
+
+The first pass uses 22 balanced paired rounds at 35ms; every initial flag receives 72 balanced paired rounds at 140ms with reversed first order on the same artifacts. Changes are median-log paired ratios, never averages across APIs or scenarios. The benchmark source is byte-identical to round40.
+
+| Initially flagged scenario | First pass | Longer confirmation |
+|---|---:|---:|
+| formatSig/R5/en | +12.790% | -2.410% |
+| hasSnomedBodySiteLateralityPostcoordination | +4.461% | +3.793% |
+
+Highest accepted equivalent-scenario change: **+3.793%**, for **hasSnomedBodySiteLateralityPostcoordination**.
+
+| Representative scenario | Paired change |
+|---|---:|
+| parseSig/ordinary | -4.909% |
+| parseSig/thai | -3.103% |
+| parseSig/staged | -3.954% |
+| formatSig/R5/en | -2.410% |
+| formatSig/R6/en | -14.146% |
+| fromFhirDosage/en | +2.171% |
+| calculateTotalUnits/scalar | -86.187% |
+
+Source SHA-256 (sorted tracked src path, NUL, file bytes, NUL): 3cf18969cf264f0f21871649f74a8c9a14744c5c816d58ea2e0d322c65a4871b.
+Built ESM SHA-256: 6bf50cc1583a7f06006b8e6ff85ad78a7327111a725be0c9ffcda1bf0fd18178.
+Pinned master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
+Harness SHA-256: 10aae1e96f04edeefdd53471f1508998897f30ce34e99d7ab042fa97d109f1fb (git blob 42a4c7b898a778a092be550cd454d6bf39041879).
+
+All48 previously collected test files remain present. Test counts rise from6,332 to6,394; no suite loses cases. Root's ordinary daily divided-infusion addition is included in this frozen build.
+
+### Review delivery
+
+The owner's resumed loop authorizes the normal review cycle for this work. Delivery uses a normal push to the existing PR14 branch, detailed replies in all13 original inline threads, resolution of addressed threads, and one full-review request after replies. Body-only findings and the18 reopened historical dispositions are documented above and linked from the relevant original threads; no replacement top-level findings summary is used. No merge, package publication or deployment is part of this delivery.
