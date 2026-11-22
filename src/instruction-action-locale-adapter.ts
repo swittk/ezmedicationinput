@@ -295,8 +295,11 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     case "object-time": {
       const object = c.theme ?? c.site;
       const timeRelation = c.timeRelation ?? c.frame.relation;
-      const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
-        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
+      // Unmarked dayparts retain this realizer's established English
+      // preposition; an authored relation always owns its own wording.
+      const relation = c.time && !timeRelation ? "in"
+        : c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
+          ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
       if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
       return c.label + (object ? " " + object : "") + (c.time ? " " + (relation ? relation + " " : "") + c.time : "");
     }
