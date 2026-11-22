@@ -14,7 +14,7 @@ import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, resolveMedicationInstructionAction as resolvePublicAction, resolveMedicationInstructionSequenceAction, resolveMedicationInstructionConcept as resolvePublicConcept, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
 import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
-import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
+import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
 
@@ -1573,9 +1573,12 @@ describe("composed instruction concepts", () => {
     }
   });
 
-  it("reuses immutable constituent definitions and preserves an explicitly supplied expression as one coding", () => {
-    const first = getMedicationInstructionConcept("new_patch")!;
-    expect(getMedicationInstructionConcept("new_patch")).toBe(first);
+  it("reuses internal constituent definitions and preserves an explicitly supplied expression as one coding", () => {
+    const first = getInternalInstructionConcept("new_patch")!;
+    expect(getInternalInstructionConcept("new_patch")).toBe(first);
+    const publicValue = getMedicationInstructionConcept("new_patch");
+    expect(publicValue).not.toBe(first);
+    expect(publicValue).toEqual(first);
     expect(Object.isFrozen(first)).toBe(false);
     expect(getMedicationInstructionConcept("new_patch")?.components?.[0].coding?.code).toBe("733005001");
     const expression = "22253000:363698007=(78883009:272741003=24028007)";
