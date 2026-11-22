@@ -2249,7 +2249,7 @@ describe("round34 successor and member origins", () => {
   it("keeps an independently dated sibling outside the shared dated pause", () => {
     const parsed = parseSig("Take 1 tablet on 2026-11-25 at 22:00, then stop for 2 days, then take 2 tablets at 06:00 the next morning and take 3 tablets on 2026-11-30 at 07:00");
     expect(parsed.meta.canonical.clauses.slice(1).map(clause => clause.schedule?.boundsStart)).toEqual(["2026-11-28", undefined]);
-    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-28T00:00:00Z",
+    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-26T00:00:00Z",
       timeZone: "UTC", limit: 4 })).toEqual([
         "2026-11-28T06:00:00+00:00", "2026-11-29T06:00:00+00:00",
         "2026-11-30T06:00:00+00:00", "2026-11-30T07:00:00+00:00"

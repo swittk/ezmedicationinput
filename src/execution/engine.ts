@@ -2970,7 +2970,9 @@ function scheduleTreatmentRelativeCourse(
         // Actual use spends a finite quota even when an authored end keeps
         // phase completion independent of that quota.
         if (collect && quota.remaining !== undefined) {
-          quota.historyStart = member.eligibleFrom.getTime();
+          // Absolute calendar eligibility may predate this repeated cycle.
+          // Its earlier records still constrain rolling caps, not this quota.
+          quota.historyStart = Math.max(member.eligibleFrom.getTime(), anchor.getTime());
           quota.historyEnd = effectiveEnd?.getTime();
         }
         // Only the acceptor can spend an overlapping phase's count/caps.
@@ -3026,7 +3028,12 @@ function scheduleTreatmentRelativeCourse(
           quota.advance = (at, accepted) => {
             if (accepted && quota.remaining === 0) {
               const completion = completionAfterAcceptedAdministration(original, new Date(at), timeZone);
-              if (!completion) return;
+              if (!completion) {
+                // The authored fence still completes this window when the
+                // accepted infusion cannot supply an exact completion point.
+                if (effectiveEnd) completeMember({ end: effectiveEnd });
+                return;
+              }
               const end = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
               completeMember(effectiveEnd && end > effectiveEnd ? { end: effectiveEnd } :
                 { end, point: completion.point ? completion.end : undefined });
@@ -3985,6 +3992,25 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     return scheduleTreatmentRelativeCourse(course, options);
   }
   const one = dosage as CanonicalAdministration;
+  const choice = executionChoice(one);
+  if (choice) {
+    const selected = options.alternativeChoices?.[choice.groupId];
+    if (!selected) {
+      throw new MedicationQuantityCalculationError(
+        "alternative-choice-required",
+        `Select a branch for '${choice.groupId}' in alternativeChoices before scheduling. This dosage is '${choice.branchId}'; all alternatives remain editable.`
+      );
+    }
+    if (selected !== choice.branchId) return [];
+    return nextDueDoses(
+      {
+        ...one,
+        choice: undefined,
+        choiceIssue: undefined,
+      },
+      options
+    );
+  }
   requireConsistentTimingCode(one.schedule);
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
@@ -4071,25 +4097,6 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     return candidates
       .filter((iso) => Date.parse(iso) >= requestedFrom.getTime())
       .slice(0, Math.floor(requestedLimit));
-  }
-  const choice = executionChoice(one);
-  if (choice) {
-    const selected = options.alternativeChoices?.[choice.groupId];
-    if (!selected) {
-      throw new MedicationQuantityCalculationError(
-        "alternative-choice-required",
-        `Select a branch for '${choice.groupId}' in alternativeChoices before scheduling. This dosage is '${choice.branchId}'; all alternatives remain editable.`
-      );
-    }
-    if (selected !== choice.branchId) return [];
-    return nextDueDoses(
-      {
-        ...one,
-        choice: undefined,
-        choiceIssue: undefined,
-      },
-      options
-    );
   }
   if (unscheduledOccurrenceCapacity(one)) return [];
   const guard = getDosageCondition(one);
@@ -6003,6 +6010,18 @@ function maximumChronologicalSupplyCourse(
       const source = stage.administrations[j];
       const maximal = prepareMaximumSupplyTiming(source, preserveClocks);
       let generated = maximal.dosage;
+      if (maximal.infusionDurationMaximum && !source.schedule?.recurrence?.occurrenceDurationRange) {
+        const authored = source.schedule!.recurrence!;
+        // Measure the upper infusion amount, but keep the authored duration
+        // bounds for the planner's independent exact-completion decision.
+        generated = prepareMeasuredDose(generated, options);
+        generated = { ...generated, schedule: { ...generated.schedule, recurrence: {
+          ...generated.schedule!.recurrence,
+          occurrenceDuration: authored.occurrenceDuration,
+          occurrenceDurationMax: authored.occurrenceDurationMax,
+          occurrenceDurationComparator: authored.occurrenceDurationComparator,
+        } } };
+      }
       // The cap ledger must count the same per-administration quantity as
       // numeric supply. A range has no scalar amount until its applicable
       // maximum is selected; otherwise overlapping cycles bypass the cap
@@ -7292,7 +7311,8 @@ function calculateCourseTotalUnits(
           plan.windows.push({ start: Math.max(begin.getTime(), queryStart.getTime()), end: end.getTime(),
             ...(count === undefined ? {} : { quota: {
               id: (cycleIndex ?? 0) + ":" + window.start.getTime(), maximum: count,
-              start: begin.getTime(), end: nativeEnd?.getTime() ?? cycleDefaultEnd?.getTime() ?? Infinity,
+              start: Math.max(member.eligibleFrom.getTime(), treatmentStart.getTime()),
+              end: nativeEnd?.getTime() ?? cycleDefaultEnd?.getTime() ?? Infinity,
             } }) });
           continue;
         }
