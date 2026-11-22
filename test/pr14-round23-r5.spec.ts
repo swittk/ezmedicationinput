@@ -6824,6 +6824,14 @@ describe("round44 interop ownership", () => {
     expect(normalized).toContain("20 mg");
     expect(normalized).toContain("100 mL");
     expect(normalized).not.toContain("saline");
+    const saved = persist(toFhirR5Dosages([row]))[0];
+    expect(saved.text).toBe(row.text);
+    expect(formatSig(saved, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+    const savedNormalized = formatSig(saved, "long", { locale: "en", realizationMode: "normalized" });
+    expect(savedNormalized).toContain("dextrose");
+    expect(savedNormalized).toContain("20 mg");
+    expect(savedNormalized).toContain("100 mL");
+    expect(savedNormalized).not.toContain("saline");
     expect(row).toEqual(authored);
   });
 

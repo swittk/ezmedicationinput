@@ -826,9 +826,11 @@ export function administrationFromR5(
 ): CanonicalAdministration {
   const result = baseAdministration(raw, "r5", sourceContext);
   // Reuse the original parser-row proof at this external import boundary.
-  // A fresh conversion cannot certify stale wording after a live dose edit.
+  // A fresh conversion cannot certify stale wording after a live dose edit;
+  // explicitly replaced clinician text keeps its existing display authority.
   const fresh = getFreshDoseProof(raw);
-  if (fresh && !sameFreshDose(raw, fresh)) result.provenance!.sourceTextVerified = false;
+  if (fresh && (!raw.text?.trim() || raw.text === fresh.text) && !sameFreshDose(raw, fresh))
+    result.provenance!.sourceTextVerified = false;
   // Most rows have only R5 maxima and need no mirror reconciliation.
   // Lifted safety has a persisted baseline so either current view can own an edit.
   if ((raw as EzDosage).safety) {
