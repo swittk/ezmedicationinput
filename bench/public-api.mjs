@@ -580,7 +580,12 @@ function completeThaiDose(output, action, unit, expected, requiredSite) {
     Number(quantities[0][1]) === expected && (!requiredSite || phrase[0].includes(requiredSite));
 }
 function completeThaiRightEyeDose(output) {
-  return completeThaiDose(output, "หยอด", "หยด", 2, "ตาขวา") && !output.includes("ตาซ้าย");
+  if (!completeThaiDose(output, "หยอด", "หยด", 2, "ตาขวา") || output.includes("ตาซ้าย")) return false;
+  const preparation = "ล้างมือก่อนหยอดตา";
+  const wash = output.indexOf(preparation);
+  const dose = output.indexOf("หยอด", wash + preparation.length);
+  const closure = output.indexOf("หลับตา", dose);
+  return wash >= 0 && dose > wash && closure > dose;
 }
 const equivalenceOracles = new Map([
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
@@ -672,12 +677,13 @@ for (const [action, unit] of [["หยอด", "หยด"], ["ดื่ม", "�
   if (completeThaiDose(`${action} 2 ${unit}; ${action} 1 ${unit}.`, action, unit, 2))
     throw new Error("Complete-dose oracle accepted the superseded administration");
 }
-for (const text of ["หยอดตาขวา 2 หยด แล้วหลับตา.", "หยอดตาขวา ครั้งละ 2 หยด.", "หยอด 2 หยด ตาขวา.",
-  "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วหลับตา.",
+for (const text of ["ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วหลับตา.",
+  "ล้างมือก่อนหยอดตา หยอด 2 หยด ตาขวา แล้วหลับตา.",
   "ล้างมือก่อนหยอดตา จากนั้นหยอดตาขวา ครั้งละ 2 หยด จากนั้นหลับตา."])
   if (!completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle rejected the authored site placement");
-for (const text of ["หยอด 2 หยด.", "หยอด 2 หยด แล้วหลับตาขวา.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
+for (const text of ["หยอดตาขวา 2 หยด.", "หยอดตาขวา 2 หยด แล้วหลับตา.",
+  "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หลับตา ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หยอด 2 หยด.", "หยอด 2 หยด แล้วหลับตาขวา.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
   "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา."])
   if (completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");

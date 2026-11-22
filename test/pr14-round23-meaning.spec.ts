@@ -3980,3 +3980,106 @@ describe("round39 locale-owned target count and duration words", () => {
     expect(text).not.toContain("ชั่วโมง");
   });
 });
+
+describe("round 44: course-wide choice and timing ownership", () => {
+  const boundary = (value: number): CanonicalBoundary => ({
+    anchor: "treatment-start", displacement: { value, system: "http://unitsofmeasure.org", code: "d" }
+  });
+  const member = (value: number, branch?: string): CanonicalAdministration => ({
+    kind: "administration", amounts: [{ quantity: { value, unit: "tab" } }],
+    schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } },
+    ...(branch ? { choice: { groupId: "taper", branchId: branch } } : {})
+  });
+  const views = (course: CanonicalCourse) => {
+    const r6 = courseToR6(course);
+    return [r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))];
+  };
+
+  it.each(["en", "th"])("retains text-only application directions beside a member end in %s", locale => {
+    const text = "Apply a thin layer to the affected area";
+    const course: CanonicalCourse = { kind: "course", instruction: text, stages: [{
+      administrations: [{ kind: "administration", text, phaseEnd: boundary(3) }]
+    }] };
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" }))
+        .toBe((locale === "en" ? "Until 3 days after treatment start: " : "จนถึง3 วันหลังเริ่มการรักษา: ") + text);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const untimed = courseToR6({ ...course, stages: [{ administrations: [{ kind: "administration", text }] }] });
+    expect(formatSig(untimed, "long", { locale, realizationMode: "normalized" })).toBe(text);
+  });
+
+  it.each(["en", "th"])("ties each taper branch to one choice across reordered stages in %s", locale => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: boundary(0), end: boundary(7), administrations: [member(2, "A"), member(4, "B")] },
+      { end: boundary(14), administrations: [member(3, "B"), member(1, "A")] }
+    ] };
+    const expected = locale === "en" ? [
+      "Choose one: (1) or (2).",
+      "From treatment start until 7 days after treatment start: (1) Use 2 tablets once daily at 8:00 am; (2) Use 4 tablets once daily at 8:00 am.",
+      "From 7 days after treatment start until 14 days after treatment start: (2) Use 3 tablets once daily at 8:00 am; (1) Use 1 tablet once daily at 8:00 am."
+    ] : [
+      "เลือกอย่างใดอย่างหนึ่ง: (1) หรือ (2).",
+      "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: (1) ใช้ครั้งละ 2 เม็ด วันละครั้ง เวลา 08:00; (2) ใช้ครั้งละ 4 เม็ด วันละครั้ง เวลา 08:00.",
+      "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา: (2) ใช้ครั้งละ 3 เม็ด วันละครั้ง เวลา 08:00; (1) ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00."
+    ];
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(expected.join(" "));
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["en", "th"])("qualifies the B-only pause without forbidding A's successor doses in %s", locale => {
+    const course: CanonicalCourse = { kind: "course", stages: [
+      { start: boundary(0), end: boundary(2), administrations: [member(1, "A")] },
+      { start: boundary(4), end: boundary(6), administrations: [member(2, "B")] },
+      { end: boundary(8), administrations: [member(3)] }
+    ] };
+    const pause = locale === "en" ? "No doses from treatment start until 4 days after treatment start."
+      : "งดยาตั้งแต่เริ่มการรักษาจนถึง4 วันหลังเริ่มการรักษา.";
+    for (const input of views(course)) {
+      const before = JSON.stringify(input);
+      const preview = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(preview.endsWith("(2): " + pause)).toBe(true);
+      expect(preview.split(locale === "en" ? "No doses" : "งดยา")).toHaveLength(2);
+      expect(preview).toContain(locale === "en"
+        ? "After the previous phase; Until 8 days after treatment start: Use 3 tablets"
+        : "หลังขั้นตอนก่อนหน้า; จนถึง8 วันหลังเริ่มการรักษา: ใช้ครั้งละ 3 เม็ด");
+      const options = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-03T00:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, { ...options, alternativeChoices: { taper: "A" } })).toEqual([
+        "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"
+      ]);
+      expect(nextDueDoses(input, { ...options, alternativeChoices: { taper: "B" } })).toEqual([
+        "2026-01-05T08:00:00+00:00", "2026-01-06T08:00:00+00:00"
+      ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    for (const input of views({ ...course, stages: course.stages.slice(1) })) {
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" }).endsWith(pause)).toBe(true);
+    }
+  });
+
+  it.each(["en", "th"])("uses the selected %s facet for scalar and ranged long duration units", locale => {
+    const base = locale === "en" ? ENGLISH_COURSE : THAI_COURSE;
+    const course = { ...base, timeUnit: (unit: string, value: number | undefined) =>
+      unit === "h" ? "custom-hours" : base.timeUnit(unit, value) };
+    const options = { locale, realizationMode: "normalized" as const, i18n: { course } };
+    const quantities = [
+      { duration: 2, durationUnit: FhirPeriodUnit.Hour },
+      { boundsDuration: { value: 2, code: "h", unit: "h", system: "http://unitsofmeasure.org" } },
+      { boundsRange: {
+        low: { value: 1, code: "min", unit: "min", system: "http://unitsofmeasure.org" },
+        high: { value: 2, code: "h", unit: "h", system: "http://unitsofmeasure.org" }
+      } }
+    ];
+    for (const repeat of quantities) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat } };
+      const saved = JSON.stringify(row);
+      expect(formatSig(row, "long", options)).toContain("2 custom-hours");
+      expect(formatSig(row, "short", options)).not.toContain("custom-hours");
+      expect(JSON.stringify(row)).toBe(saved);
+    }
+  });
+});

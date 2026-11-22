@@ -385,7 +385,8 @@ export function formatCourseChoices<T>(
   render: (member: T) => string,
   choiceOf: (member: T) => CanonicalAdministration["choice"],
   words: CourseLanguage,
-  separator = "; "
+  separator = "; ",
+  courseLabels?: ReadonlyMap<string, ReadonlyMap<string, string>>
 ): string {
   if (members.length === 1 && !choiceOf(members[0])) return render(members[0]).trim();
   const slots: Array<{ text: string } | { group: string }> = [];
@@ -413,16 +414,106 @@ export function formatCourseChoices<T>(
       continue;
     }
     let body = "";
-    for (const branch of groups.get(slot.group)!.values()) {
+    const labels = courseLabels?.get(slot.group);
+    for (const [branchId, branch] of groups.get(slot.group)!) {
       const text = branch.join(separator);
       if (!text) continue;
-      if (body) body += words.anySeparator;
-      body += branch.length > 1 ? `(${text})` : text;
+      if (body) body += labels ? separator : words.anySeparator;
+      const grouped = branch.length > 1 ? "(" + text + ")" : text;
+      body += labels ? "(" + labels.get(branchId) + ") " + grouped : grouped;
     }
-    if (body) output.push(words.choicePrefix + body + ".");
+    if (body) output.push((labels ? "" : words.choicePrefix) + body + ".");
   }
   return joinGeneratedClauses(output, separator);
 }
+type PreviewChoiceGroups = Map<string, { branches: Set<string>; stages: Set<number> }>;
+/** Branch labels are stable across stage headings. The choice is made once
+ * for the course, while each stage retains its own timing and dose wording. */
+function previewChoiceGroups(course: CanonicalCourse): PreviewChoiceGroups {
+  const groups: PreviewChoiceGroups = new Map();
+  for (let index = 0; index < course.stages.length; index++) {
+    for (const member of course.stages[index].administrations) {
+      const choice = member.choice;
+      if (!choice) continue;
+      let group = groups.get(choice.groupId);
+      if (!group) groups.set(choice.groupId, group = { branches: new Set(), stages: new Set() });
+      group.branches.add(choice.branchId);
+      group.stages.add(index);
+    }
+  }
+  return groups;
+}
+function previewStageCanDisappear(
+  members: readonly CanonicalAdministration[],
+  groups: PreviewChoiceGroups,
+  selectedGroup?: string
+): boolean {
+  if (!members.length || members.some(member => !member.choice || member.choice.groupId === selectedGroup)) return false;
+  const present = new Map<string, Set<string>>();
+  for (const member of members) {
+    const choice = member.choice!;
+    let branches = present.get(choice.groupId);
+    if (!branches) present.set(choice.groupId, branches = new Set());
+    branches.add(choice.branchId);
+  }
+  for (const [group, branches] of present) {
+    if (branches.size === groups.get(group)!.branches.size) return false;
+  }
+  return true;
+}
+/** Unknown branch-dependent starts cannot license a global no-dose window.
+ * Selecting one branch uses the same member/stage filtering as execution;
+ * other independent choices stay conservative, without enumerating combinations. */
+function previewCourseWindows(
+  course: CanonicalCourse,
+  groups: PreviewChoiceGroups,
+  selected?: { groupId: string; branchId: string }
+) {
+  let priorEndDays: number | undefined, priorEndAnchor: CanonicalBoundary["anchor"] | undefined;
+  let priorOptional = false, included = 0, hasTimedStages = false;
+  let gapAnchor: CanonicalBoundary["anchor"] | undefined, mixedGapOrigins = false;
+  const windows: Array<{
+    start: number | undefined; end: number | undefined;
+    startAnchor: CanonicalBoundary["anchor"] | undefined;
+    endAnchor: CanonicalBoundary["anchor"] | undefined;
+    choiceDependentStart: boolean;
+  }> = [];
+  const activeWindows: Array<{ start: number | undefined; end: number | undefined }> = [];
+  for (const step of course.stages) {
+    const members = selected ? step.administrations.filter(member =>
+      !member.choice || member.choice.groupId !== selected.groupId || member.choice.branchId === selected.branchId)
+      : step.administrations;
+    if (selected && !members.length) continue;
+    if (step.start || step.end) hasTimedStages = true;
+    const start = step.start ? treatmentStepOffsetDays(step.start) : included === 0 ? 0 : priorEndDays;
+    const startAnchor = step.start?.anchor ?? (included === 0 ? "treatment-start" : priorEndAnchor);
+    const endAnchor = step.end?.anchor, end = treatmentStepOffsetDays(step.end);
+    const choiceDependentStart = !step.start && priorOptional;
+    windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart });
+    let activeEnd = end, repetitionResolved = true;
+    if (step.count !== undefined && step.count !== 1) {
+      if (Number.isInteger(step.count) && step.count > 0 &&
+          start !== undefined && end !== undefined && end > start && startAnchor === endAnchor) {
+        activeEnd = start + (end - start) * step.count;
+      } else {
+        repetitionResolved = false;
+        activeEnd = undefined;
+      }
+    }
+    priorOptional = groups.size > 0 && previewStageCanDisappear(members, groups, selected?.groupId);
+    priorEndDays = priorOptional ? undefined : activeEnd;
+    priorEndAnchor = priorOptional ? undefined : endAnchor;
+    included++;
+    if (members.length) {
+      if (gapAnchor === undefined) gapAnchor = startAnchor;
+      if (startAnchor !== gapAnchor || (endAnchor !== undefined && endAnchor !== gapAnchor))
+        mixedGapOrigins = true;
+      activeWindows.push({ start: repetitionResolved ? start : undefined, end: activeEnd });
+    }
+  }
+  return { windows, activeWindows, hasTimedStages, gapAnchor, mixedGapOrigins };
+}
+
 /** Render the value and scope of each authored limit without evaluating it.
  * Member, stage and course owners share this value rendering; their enclosing
  * wording remains separate so a shared allowance is never repeated per dose.
@@ -475,7 +566,7 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
 
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
-function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
+function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
         amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
@@ -483,7 +574,8 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
-      a.limits?.length || safetyHasClinicalFacts(a.safety) || a.choice || a.phaseOrigin || a.phaseStart || a.anchoredLength ||
+      a.limits?.length || safetyHasClinicalFacts(a.safety) || a.choice || a.phaseOrigin ||
+      (includeMemberBounds && (a.phaseStart || a.phaseEnd)) || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
   const timing = a.schedule;
   if (timing?.explicitEvents?.length || timing?.code) return true;
@@ -532,7 +624,8 @@ function formatCanonicalBase(
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a
 ): string {
-  if (a.text?.trim() && !administrationHasClinicalFacts(source)) return a.text;
+  // Member bounds are rendered beside the clause; they do not replace its only directions.
+  if (a.text?.trim() && !administrationHasClinicalFacts(source, false)) return a.text;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
   const primary = a.amounts?.[0];
@@ -724,54 +817,21 @@ export function formatCanonicalCourse(
   }
   // Rendering needs each component's projection, not a persisted copy of
   // the whole course plus edit markers on every component.
+  const groups = previewChoiceGroups(oneOrCourse);
+  const labels = new Map<string, Map<string, string>>();
   const stages: string[] = [];
-  let priorEndDays: number | undefined,
-    priorEndAnchor: CanonicalBoundary["anchor"] | undefined,
-    hasTimedStages = false,
-    gapAnchor: CanonicalBoundary["anchor"] | undefined,
-    mixedGapOrigins = false;
-  const windows: Array<{
-    start: number | undefined; end: number | undefined;
-    startAnchor: CanonicalBoundary["anchor"] | undefined;
-    endAnchor: CanonicalBoundary["anchor"] | undefined;
-  }> = [];
-  const activeWindows: Array<{ start: number | undefined; end: number | undefined }> = [];
-  // One traversal establishes source windows and explicit boundaries;
-  // no separate every/map/some/filter chain.
-  for (let index = 0; index < oneOrCourse.stages.length; index++) {
-    const step = oneOrCourse.stages[index];
-    if (step.start || step.end) hasTimedStages = true;
-    const start = step.start ? treatmentStepOffsetDays(step.start) : index === 0 ? 0 : priorEndDays;
-    const startAnchor = step.start?.anchor ?? (index === 0 ? "treatment-start" : priorEndAnchor);
-    const endAnchor = step.end?.anchor;
-    const end = treatmentStepOffsetDays(step.end),
-      window = { start, end, startAnchor, endAnchor };
-    let activeEnd = end;
-    let repetitionResolved = true;
-    if (step.count !== undefined && step.count !== 1) {
-      if (Number.isInteger(step.count) && step.count > 0 &&
-          start !== undefined && end !== undefined && end > start && startAnchor === endAnchor) {
-        activeEnd = start + (end - start) * step.count;
-      } else {
-        repetitionResolved = false;
-        activeEnd = undefined;
-      }
-    }
-    priorEndDays = activeEnd;
-    priorEndAnchor = endAnchor;
-    windows.push(window);
-    // The heading describes one stage iteration; global gaps must cover all
-    // iterations. An unresolved repeat cannot license a no-dose instruction.
-    if (step.administrations.length) {
-      if (gapAnchor === undefined) gapAnchor = startAnchor;
-      if (startAnchor !== gapAnchor || (endAnchor !== undefined && endAnchor !== gapAnchor))
-        mixedGapOrigins = true;
-      activeWindows.push({ start: repetitionResolved ? start : undefined, end: activeEnd });
-    }
+  let labelIndex = 1;
+  for (const [groupId, group] of groups) {
+    if (group.stages.size < 2 || group.branches.size < 2) continue;
+    const branches = new Map<string, string>();
+    for (const branchId of group.branches) branches.set(branchId, String(labelIndex++));
+    labels.set(groupId, branches);
+    stages.push(words.choicePrefix + [...branches.values()].map(label => "(" + label + ")").join(words.anySeparator) + ".");
   }
+  const { windows, activeWindows, hasTimedStages, gapAnchor, mixedGapOrigins } = previewCourseWindows(oneOrCourse, groups);
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
-    const { start: startDays, end: endDays, startAnchor, endAnchor } = windows[index];
+    const { start: startDays, end: endDays, startAnchor, endAnchor, choiceDependentStart } = windows[index];
     let rendered = formatCourseChoices(
       step.administrations,
       (component) => {
@@ -902,6 +962,7 @@ export function formatCanonicalCourse(
           const denominator = amount.rateRatio?.denominator;
           const numeratorUnit = numerator?.unit ?? numerator?.code;
           const denominatorUnit = denominator?.unit ?? denominator?.code;
+          const carrierMaterial = component.syntax?.clinicalQuantity?.carrierMaterial?.text;
           const hasNumerator = numerator?.value !== undefined || Boolean(numeratorUnit);
           const hasDenominator = denominator?.value !== undefined || Boolean(denominatorUnit);
           if (hasNumerator || hasDenominator) {
@@ -918,6 +979,7 @@ export function formatCanonicalCourse(
               amountLabel(amount, "rate", words) +
                 numeratorValue +
                 (numeratorUnit ? " " + numeratorUnit : "") +
+                (carrierMaterial ? " " + carrierMaterial : "") +
                 (hasDenominator
                   ? " / " + denominatorValue + (denominatorUnit ? " " + denominatorUnit : "")
                   : "")
@@ -972,14 +1034,15 @@ export function formatCanonicalCourse(
       },
       (member) => member.choice,
       words,
-      options?.separator
+      options?.separator,
+      labels
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
     if (!rendered.trim()) continue;
     let timing = "";
     if (step.start || step.end || index > 0) {
-      const previous = !step.start && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
+      const previous = !step.start && !choiceDependentStart && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
       const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
         ? treatmentStepOffsetQuantity(previous.end) : undefined;
       const reversedWindow = startAnchor === endAnchor &&
@@ -1068,16 +1131,24 @@ export function formatCanonicalCourse(
     const heading = [timing, stageCount].filter(Boolean).join("; ");
     stages.push(heading ? `${heading}: ${rendered}` : rendered);
   }
-  if (hasTimedStages && !mixedGapOrigins) {
-    const pauses = medicationFreeCourseWindows(activeWindows, oneOrCourse.cycleInterval);
-    for (const pause of pauses) {
-      stages.push(gapAnchor === "treatment-day-start"
-        ? words.noDoseDays(pause.start + 1, pause.end)
-        : words.noDoseWindow(
-            pause.start === 0 ? cycleStart ?? words.treatmentStart
-              : afterCourseStart(formatCourseTimeQuantity({ value: pause.start, code: "d" }, words), words, cycleStart),
-            afterCourseStart(formatCourseTimeQuantity({ value: pause.end, code: "d" }, words), words, cycleStart)
-          ));
+  const pauseText = (pause: { start: number; end: number }, anchor: CanonicalBoundary["anchor"] | undefined): string =>
+    anchor === "treatment-day-start"
+      ? words.noDoseDays(pause.start + 1, pause.end)
+      : words.noDoseWindow(
+          pause.start === 0 ? cycleStart ?? words.treatmentStart
+            : afterCourseStart(formatCourseTimeQuantity({ value: pause.start, code: "d" }, words), words, cycleStart),
+          afterCourseStart(formatCourseTimeQuantity({ value: pause.end, code: "d" }, words), words, cycleStart));
+  const pauses = hasTimedStages && !mixedGapOrigins
+    ? medicationFreeCourseWindows(activeWindows, oneOrCourse.cycleInterval) : [];
+  for (const pause of pauses) stages.push(pauseText(pause, gapAnchor));
+  for (const [groupId, branches] of labels) {
+    for (const [branchId, label] of branches) {
+      const selected = previewCourseWindows(oneOrCourse, groups, { groupId, branchId });
+      if (!selected.hasTimedStages || selected.mixedGapOrigins) continue;
+      for (const pause of medicationFreeCourseWindows(selected.activeWindows, oneOrCourse.cycleInterval)) {
+        if (selected.gapAnchor === gapAnchor && pauses.some(global => global.start === pause.start && global.end === pause.end)) continue;
+        stages.push("(" + label + "): " + pauseText(pause, selected.gapAnchor));
+      }
     }
   }
   if (oneOrCourse.cycleInterval) {

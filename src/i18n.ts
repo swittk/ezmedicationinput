@@ -1906,44 +1906,25 @@ function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined):
   return `ไม่เกิน ${stripTrailingZero(cap.max)} ครั้งต่อ${period}`;
 }
 
-function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeDurationThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
   const unit = schedule.durationUnit;
   const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (endpointUnit = unit): string => {
-    switch (endpointUnit) {
-      case FhirPeriodUnit.Second:
-        return "วินาที";
-      case FhirPeriodUnit.Minute:
-        return "นาที";
-      case FhirPeriodUnit.Hour:
-        return "ชั่วโมง";
-      case FhirPeriodUnit.Day:
-        return "วัน";
-      case FhirPeriodUnit.Week:
-        return "สัปดาห์";
-      case FhirPeriodUnit.Month:
-        return "เดือน";
-      case FhirPeriodUnit.Year:
-        return "ปี";
-      default:
-        return endpointUnit;
-    }
-  };
+  const label = (value: number | undefined, endpointUnit = unit): string => words.timeUnit(endpointUnit, value) ?? endpointUnit;
   if (schedule.duration === undefined)
-    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(upperUnit)}`;
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit)}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    const lowerUnit = upperUnit !== unit ? " " + label() : "";
-    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(upperUnit)}`;
+    const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
+    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";
-  return `เป็นเวลา ${lowerBound}${lower} ${label()}`;
+  return `เป็นเวลา ${lowerBound}${lower} ${label(schedule.duration)}`;
 }
 
 function describeAdministrationDurationThai(
@@ -1972,10 +1953,10 @@ function describeAdministrationDurationThai(
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
   if ((value === undefined && max === undefined) || !unit) return undefined;
-  const label = unit === FhirPeriodUnit.Minute ? "นาที"
-    : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
-      : unit === FhirPeriodUnit.Second ? "วินาที"
-        : unit === FhirPeriodUnit.Day ? "วัน" : unit;
+  const label = short
+    ? unit === FhirPeriodUnit.Minute ? "นาที" : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
+      : unit === FhirPeriodUnit.Second ? "วินาที" : unit === FhirPeriodUnit.Day ? "วัน" : unit
+    : words.timeUnit(unit, value ?? max) ?? unit;
   if (value === undefined) return `${prefix} ไม่เกิน ${stripTrailingZero(max!)} ${label}`;
   const lower = quantityComparatorText(schedule?.administrationDurationComparator, "th") + stripTrailingZero(value);
   return max !== undefined && max !== value
@@ -2342,7 +2323,7 @@ function formatLongThai(
     false,
     words
   );
-  const durationPart = describeDurationThai(schedule);
+  const durationPart = describeDurationThai(schedule, words);
   const occurrenceCapPart = describeOccurrenceCapThai(schedule);
 
   const segments: string[] = [];

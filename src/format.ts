@@ -1090,32 +1090,13 @@ function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefine
   return `maximum ${stripTrailingZero(cap.max)} doses per ${period}`;
 }
 
-function describeDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeDuration(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
   const unit = schedule.durationUnit;
   const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (value: number, endpointUnit = unit): string => {
-    switch (endpointUnit) {
-      case FhirPeriodUnit.Second:
-        return value === 1 ? "second" : "seconds";
-      case FhirPeriodUnit.Minute:
-        return value === 1 ? "minute" : "minutes";
-      case FhirPeriodUnit.Hour:
-        return value === 1 ? "hour" : "hours";
-      case FhirPeriodUnit.Day:
-        return value === 1 ? "day" : "days";
-      case FhirPeriodUnit.Week:
-        return value === 1 ? "week" : "weeks";
-      case FhirPeriodUnit.Month:
-        return value === 1 ? "month" : "months";
-      case FhirPeriodUnit.Year:
-        return value === 1 ? "year" : "years";
-      default:
-        return endpointUnit;
-    }
-  };
+  const label = (value: number, endpointUnit = unit): string => words.timeUnit(endpointUnit, value) ?? endpointUnit;
   if (schedule.duration === undefined)
     return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit)}`;
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
@@ -1459,7 +1440,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         : `for ${stripTrailingZero(schedule.count)} doses`
       : undefined;
   const administrationDurationPart = describeAdministrationDuration(schedule, false, words);
-  const durationPart = describeDuration(schedule);
+  const durationPart = describeDuration(schedule, words);
   const occurrenceCapPart = describeOccurrenceCapEnglish(schedule);
   const reason = getLocalizedCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons, "en");
   const triggerReason = clause.prn?.reasons?.find((candidate) => candidate.triggerPhase === "onset") ??
