@@ -642,11 +642,21 @@ function completeThaiRightEyeDose(output) {
     /^(?:\s*(?:ที่)?ตาขวา)?\s*[.;,]?\s*(?:(?:จากนั้น|แล้ว)\s*)?หลับตา[.;,]?\s*$/u.test(afterDose);
 }
 function completeThaiPreparedDrink(output) {
-  return completeThaiDose(output, "ดื่ม", "เม็ด", 2) && output.trimStart().startsWith("ผสมน้ำ");
+  return completeThaiDose(output, "ดื่ม", "เม็ด", 2) &&
+    /^\s*ผสมน้ำ\s*(?:[.;,]\s*|(?:จากนั้น|แล้ว)\s*)?ดื่ม\s*(?:ครั้งละ\s*)?\+?2(?:\.0+)?\s*เม็ด\s*[.;,]?\s*$/u.test(output);
+}
+function completeStagedBatch(output) {
+  if (typeof output !== "string") return false;
+  const stages = output.trim().replace(/\s+/gu, " ").split(" then ");
+  return stages.length === 3 &&
+    stages[0] === "2 tabs morning, 1 tab evening for 1 week" &&
+    stages[1] === "2 tabs morning for 1 month" &&
+    stages[2] === "1/2 tab PO on monday-friday";
 }
 const equivalenceOracles = new Map([
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
   ["formatSig/R5-roundtrip-added-dose-thai", completeThaiPreparedDrink],
+  ["formatParseBatch/staged-own-batch", completeStagedBatch],
 ]);
 // Source-bearing R6 fixtures used to return the saved input verbatim. The
 // current public contract generates requested previews from editable facts.
@@ -747,9 +757,26 @@ for (const text of ["หยอดตาขวา 2 หยด.", "หยอดต
   if (completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");
 if (!completeThaiPreparedDrink("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด.") ||
+    !completeThaiPreparedDrink("ผสมน้ำ. ดื่ม 2 เม็ด.") ||
+    !completeThaiPreparedDrink("ผสมน้ำ;\nดื่มครั้งละ 2.0 เม็ด.") ||
     completeThaiPreparedDrink("ดื่มครั้งละ 2 เม็ด.") ||
-    completeThaiPreparedDrink("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด."))
-  throw new Error("Complete-dose oracle lost the preparation or negation boundary");
+    completeThaiPreparedDrink("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด.") ||
+    completeThaiPreparedDrink("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด เมื่อมีอาการปวด"))
+  throw new Error("Complete-dose oracle lost the preparation or unconditional administration");
+const stagedBatchControl =
+  "2 tabs morning, 1 tab evening for 1 week then 2 tabs morning for 1 month then 1/2 tab PO on monday-friday";
+if (!completeStagedBatch(stagedBatchControl) ||
+    !completeStagedBatch(stagedBatchControl.replaceAll(" then ", "\nthen  ")))
+  throw new Error("Staged-batch oracle rejected the complete three-stage preview");
+for (const changed of [
+  stagedBatchControl.replace("2 tabs morning,", "1 tab morning,"),
+  stagedBatchControl.replace("2 tabs morning for 1 month", "2 tabs evening for 1 month"),
+  stagedBatchControl.replace("for 1 week", "for 2 weeks"),
+  stagedBatchControl.replace("monday-friday", "monday"),
+  stagedBatchControl.split(" then ").slice(0, 2).join(" then "),
+])
+  if (completeStagedBatch(changed))
+    throw new Error("Staged-batch oracle accepted a changed or missing stage");
 const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
