@@ -799,19 +799,27 @@ export function reconcileR5SafetyEdits(
     const exactKey = (limit: FhirR6DoseLimit) =>
       compactProjectionFingerprint(periodMaximumToR5(limit.valueQuantity!, limit.period!, limit));
     const oldExact = new Map<string, number>(), liveExact = new Map<string, number>();
+    const oldPeriodPositions: number[] = [], livePeriodPositions: number[] = [];
+    let oldPosition = 0, livePosition = 0;
     oldLimits.forEach((limit, index) => {
-      if (!representable[index] || usedOld.has(index) || limit.scope !== "period") return;
+      if (!representable[index] || limit.scope !== "period") return;
+      oldPeriodPositions[index] = oldPosition++;
+      if (usedOld.has(index)) return;
       const key = exactKey(limit);
       oldExact.set(key, oldExact.has(key) ? -1 : index);
     });
     live.forEach((limit, index) => {
-      if (matched.has(index) || limit.scope !== "period") return;
+      if (limit.scope !== "period") return;
+      livePeriodPositions[index] = livePosition++;
+      if (matched.has(index)) return;
       const key = exactKey(limit);
       liveExact.set(key, liveExact.has(key) ? -1 : index);
     });
     for (const [key, oldIndex] of oldExact) {
       const liveIndex = liveExact.get(key);
-      if (oldIndex < 0 || liveIndex !== oldIndex) continue;
+      // R5 owns the period Ratio list separately from singular maxima.
+      if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0 ||
+          oldPeriodPositions[oldIndex] !== livePeriodPositions[liveIndex]) continue;
       matched.set(liveIndex, oldIndex); usedOld.add(oldIndex);
     }
   }

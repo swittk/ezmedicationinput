@@ -6588,3 +6588,112 @@ describe("round42 public compatibility output and explicit source clears", () =>
     expect(row.text).toBe("");
   });
 });
+
+
+describe("round43 live editable exclusions and safety metadata", () => {
+  const marker: FhirExtension = { id: "date-source", url: DOSAGE_EXCLUDED_DATES_R5_URL,
+    extension: [{ url: "date", valueDate: "2026-11-23", id: "date-child" },
+      { url: "urn:test:exclusion-note", valueString: "keep original date annotation" }] };
+  const daily: FhirR6Dosage = { text: "Take 1 tablet daily.", doseAndRate: [{ doseQuantity: q(1) }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, modifierExtension: [marker] };
+
+  it("clears an excluded date despite a separately retained site wrapper", () => {
+    const site = { id: "site-wrapper", concept: { text: "left arm" },
+      extension: [{ url: "urn:test:site-note", valueString: "keep site annotation" }] };
+    const source = course({ ...daily, site });
+    const original = JSON.stringify(source);
+    const edited = fromDosageDetails(persist(source));
+    expect(edited.dosages[0].excludedDates).toEqual(["2026-11-23"]);
+    const unchanged = toDosageDetails(persist(edited.dosages), undefined, edited.course);
+    expect(unchanged.step![0].component[0].modifierExtension).toContainEqual(marker);
+    edited.dosages[0].excludedDates = [];
+    let wire = toDosageDetails(edited.dosages, undefined, edited.course);
+    for (let pass = 0; pass < 3; pass++) {
+      const component = wire.step![0].component[0];
+      expect(getDosageExcludedDates({ modifierExtension: component.modifierExtension })).toEqual([]);
+      expect(component.site).toEqual(site);
+      expect(JSON.stringify(component.extension)).toContain("date-source");
+      expect(nextDueDoses(wire, { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z",
+        timeZone: "UTC", limit: 3 })).toEqual([
+        "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00", "2026-11-24T09:00:00+00:00",
+      ]);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+    expect(JSON.stringify(source)).toBe(original);
+  });
+
+  it.each([false, true])("lifts editable dates independently of unrelated step metadata (%s)", annotated => {
+    const source = course(persist(daily));
+    if (annotated) source.step![0].extension = [{ url: "urn:test:step-note", valueString: "keep" }];
+    const edited = fromDosageDetails(source);
+    const imported = fromFhir(source);
+    expect(edited.dosages[0].excludedDates).toEqual(["2026-11-23"]);
+    expect(imported.fhir[0].excludedDates).toEqual(["2026-11-23"]);
+    expect(imported.items[0].fhir).not.toHaveProperty("excludedDates");
+    expect(imported.items[0].fhir.modifierExtension).toContainEqual(marker);
+    expect(toEzDosages([persist(daily) as FhirDosage])[0].excludedDates).toEqual(["2026-11-23"]);
+    const strict = toFhirR5Dosages(source)[0];
+    expect(strict).not.toHaveProperty("excludedDates");
+    expect(strict.modifierExtension).toContainEqual(marker);
+  });
+
+  it("shows a lifted safety-only cap in normalized standalone R5 previews", () => {
+    const row: EzDosage = { text: "Take 1 tablet daily.", doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      safety: { doseLimit: [{ scope: "administration", valueQuantity: q(2) }],
+        extension: [{ url: "urn:test:safety-note", valueString: "keep" }] } };
+    const before = JSON.stringify(row);
+    const options: FormatOptions = { locale: "en", realizationMode: "normalized" };
+    const imported = fromFhirDosage(row, options);
+    for (const text of [formatSig(row, "short", options), formatSig(row, "long", options),
+      imported.shortText, imported.longText]) {
+      expect(text).toContain("max per administration: 2 tab");
+      expect(text).toMatch(/1 tab(?:let)?/u);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+  });
+
+  it.each([false, true])("keeps period text at its own Ratio-list position (reordered %s)", reordered => {
+    const wire = course({ doseAndRate: [{ doseQuantity: q(1) }], safety: { doseLimit: [
+      { scope: "administration", valueQuantity: q(3), text: "each dose" },
+      { scope: "period", valueQuantity: q(4), period: { value: 1, unit: "d" }, text: "first daily ceiling" },
+      { scope: "period", valueQuantity: q(8), period: { value: 1, unit: "d" }, text: "second daily ceiling" },
+    ] } });
+    const rows = persist(toFhirR5Dosages(wire));
+    rows[0].maxDosePerAdministration!.value = 5;
+    if (reordered) rows[0].maxDosePerPeriod!.reverse();
+    let saved = toDosageDetails(rows);
+    for (let pass = 0; pass < 3; pass++) {
+      const limits = saved.step![0].component[0].safety!.doseLimit!;
+      const periods = limits.filter(limit => limit.scope === "period");
+      expect(periods.map(limit => limit.valueQuantity!.value)).toEqual(reordered ? [8, 4] : [4, 8]);
+      expect(periods.map(limit => limit.text)).toEqual(reordered ? [undefined, undefined]
+        : ["first daily ceiling", "second daily ceiling"]);
+      expect(JSON.stringify(saved)).toContain("first daily ceiling");
+      expect(JSON.stringify(saved)).toContain("second daily ceiling");
+      expect(limits.find(limit => limit.scope === "administration")).toMatchObject({
+        text: "each dose", valueQuantity: q(5),
+      });
+      saved = toDosageDetails(persist(toFhirR5Dosages(saved)));
+    }
+  });
+
+  it("preserves a foreign-coded duration endpoint through public import/export", () => {
+    const range = { low: { value: 30, unit: "minutes", system: "http://unitsofmeasure.org", code: "min", id: "lower" },
+      high: { value: 2, unit: "half-hour blocks", system: "urn:test:duration-units", code: "half-hour-block", id: "upper",
+        extension: [{ url: "urn:test:duration-note", valueString: "keep authored coding" }] } };
+    const source: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { boundsRange: range } } };
+    const before = JSON.stringify(source);
+    let wire = toDosageDetails([persist(source)]);
+    for (let pass = 0; pass < 3; pass++) {
+      const strict = persist(toFhirR5Dosages(wire));
+      expect(strict[0].timing!.repeat!.boundsRange).toEqual(range);
+      expect(fromFhir(wire).fhir[0].timing!.repeat!.boundsRange).toEqual(range);
+      expect(fromFhirDosage(strict[0]).fhir.timing!.repeat!.boundsRange).toEqual(range);
+      wire = toDosageDetails(strict);
+      expect(wire.step![0].component[0].timing!.repeat!.boundsRange).toEqual(range);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+});

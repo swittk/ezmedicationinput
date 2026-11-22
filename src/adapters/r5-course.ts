@@ -99,7 +99,6 @@ function retentionForAdministration(
     if (condition?.length) row.condition = condition;
     if (safety) row.safety = safety;
     if (a.siteReference) row.siteReference = a.siteReference;
-    if (a.excludedDates?.length) row.excludedDates = a.excludedDates;
   }
   const predicate = r5ConditionBaseline(row);
   const regeneratedCondition = row.condition ?? (predicate ? [conditionToR6(predicate)] : undefined);
@@ -371,6 +370,9 @@ export function projectNativeR5Course(
         row = Object.assign({}, strict);
         if (hasExpressions) row.doseAndRate = strict.doseAndRate?.map((entry) => Object.assign({}, entry));
       }
+      // Date exclusions are an editable row field even without retained
+      // course metadata. Only the editable copy receives the lifted value.
+      if (editable && a.excludedDates?.length) row.excludedDates = a.excludedDates;
       const missingContext = a.missingContexts;
       let contextAnnotations: FhirExtension[] | undefined;
       if (strict.modifierExtension?.length) {

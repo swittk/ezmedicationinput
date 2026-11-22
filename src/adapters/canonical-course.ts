@@ -1628,7 +1628,9 @@ function administrationToWire(
   if (a.calendarPredicate) setDosageCondition(output as FhirDosage, a.predicate, a.calendarPredicate);
   if (
     a.excludedDates?.length ||
-    (source && !same(getDosageExcludedDates(source as EzDosage), a.excludedDates ?? []))
+    (output.modifierExtension && !same(getDosageExcludedDates({
+      modifierExtension: output.modifierExtension as FhirExtension[],
+    }), a.excludedDates ?? []))
   )
     setDosageExcludedDates(output as FhirDosage, a.excludedDates ?? []);
   if (
