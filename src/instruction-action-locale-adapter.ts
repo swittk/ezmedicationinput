@@ -172,7 +172,7 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   // no ingredient noun to repeat as "5 mL of mL".
   const quantityOnlyTheme = themeArg?.quantity && !themeArg.conceptId && !themeArg.coding &&
     !themeArg.codings?.length && themeArg.normalized === themeArg.quantity.unit;
-  const theme = themeArg && !quantityOnlyTheme
+  const theme = themeArg && (!quantityOnlyTheme || !themeAmount)
     ? themeArg.quantity && !themeAmount
       ? themeArg.text || themeArg.normalized
       : c.translateArgumentConcept(themeArg)
@@ -180,7 +180,7 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
   const quantityOnlySubstance = substanceArg?.quantity && !substanceArg.conceptId && !substanceArg.coding &&
     !substanceArg.codings?.length && substanceArg.normalized === substanceArg.quantity.unit;
-  const substance = substanceArg && !quantityOnlySubstance
+  const substance = substanceArg && (!quantityOnlySubstance || !substanceQuantity)
     ? substanceArg.quantity && !substanceQuantity
       ? substanceArg.text || substanceArg.normalized
       : c.translateArgumentConcept(substanceArg)

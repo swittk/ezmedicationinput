@@ -168,8 +168,12 @@ function calendarPhaseMembers(
     const durationEnd = anchoredScheduleDurationEnd(schedule);
     const durationCutsEarlier = Boolean(durationEnd && schedule.boundsEnd &&
       durationEnd < schedule.boundsEnd);
-    const effectiveEnd = durationCutsEarlier ? durationEnd : schedule.boundsEnd ?? inferredEnd;
-    if ((nextStart && (!effectiveEnd || !orderedCalendarBounds(effectiveEnd, nextStart))) ||
+    // Authored dates are already finite. A previous-day cutoff is needed
+    // only for an open recurrence, not another event on the successor's day.
+    const explicitEvents = Boolean(schedule.calendarEvents?.length);
+    const effectiveEnd = durationCutsEarlier ? durationEnd :
+      schedule.boundsEnd ?? (explicitEvents ? undefined : inferredEnd);
+    if ((nextStart && (effectiveEnd ? !orderedCalendarBounds(effectiveEnd, nextStart) : !explicitEvents)) ||
         (effectiveEnd && schedule.boundsStart && orderedCalendarBounds(effectiveEnd, schedule.boundsStart)))
       return 'parallel-regimen-calendar-phase-overlap';
     normalized.push(!effectiveEnd || effectiveEnd === schedule.boundsEnd ? item : {

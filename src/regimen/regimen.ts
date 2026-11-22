@@ -625,11 +625,13 @@ export function scopeSequentialPhaseSemantics(
           period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
           timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
-          when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
+          when: schedule.clockWindow ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
           timeOfDay: schedule.clockWindow ? undefined : shared.timeOfDay,
           clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
           activityTiming: shared.activityTiming,
-          offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
+          offset: schedule.clockWindow ? undefined : shared.offset,
+          offsetMin: schedule.clockWindow ? undefined : shared.offsetMin,
+          offsetMax: schedule.clockWindow ? undefined : shared.offsetMax
         };
         // ParserState setters may create own keys with an undefined value;
         // only an actually defined local value can override inherited recurrence.

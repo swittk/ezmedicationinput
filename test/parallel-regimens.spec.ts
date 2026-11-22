@@ -1396,8 +1396,10 @@ describe("round46 source-owned continuation timing", () => {
     }
   });
 
-  it.each(["and again", "and", "then"])("keeps the first clock before a distinct NEXT-day administration: %s", connector => {
-    const parsed = parseSig(`Take 1 tablet at 18:00 ${connector} the next morning`);
+  it.each(["and again", "and  again", ", and  again", "and", "then"])("keeps the first clock before a distinct NEXT-day administration: %s", connector => {
+    const source = `Take 1 tablet at 18:00 ${connector} the next morning`;
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
     expect(parsed.meta.canonical.clauses).toHaveLength(2);
     expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual([1, 1]);
     expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
@@ -1412,5 +1414,84 @@ describe("round46 source-owned continuation timing", () => {
       expect(nextDueDoses(input, query)).toEqual(["2026-11-21T18:00:00+00:00", "2026-11-22T08:00:00+00:00"]);
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 5, durationUnit: "d" }).totalUnits).toBe(2);
     }
+  });
+});
+
+
+describe("round47 authored timing ownership", () => {
+  it.each([false, true])("preserves an authored unresolved end before a dated successor (relative end %s)", relativeEnd => {
+    const source = "Instill 1 drop OD Q6H" + (relativeEnd ? " until the next morning" : "") +
+      ", then from day 4 instill 2 drops OD BID; instill 1 drop OS BID";
+    const parsed = parseSig(source, { datePolicy: { referenceDate: "2026-12-01" } });
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    const strict = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const dosage of [parsed, parsed.fhirNext, strict]) {
+      const native = importCanonicalCourse(dosage), members = native.stages[0].administrations;
+      expect(members[0].phaseEnd).toMatchObject(relativeEnd
+        ? { anchor: "unresolved", description: "until the next morning" }
+        : { anchor: "treatment-day-start", displacement: { value: 3, unit: "d", code: "d", system: "http://unitsofmeasure.org" } });
+      expect(members[1].phaseStart).toMatchObject({
+        anchor: "treatment-day-start", displacement: { value: 3, unit: "d" }
+      });
+      expect(members[2].phaseStart).toBeUndefined();
+      expect(members[2].phaseEnd).toBeUndefined();
+      expect(members.map(member => ({ value: member.amounts?.[0].quantity?.value, unit: member.amounts?.[0].quantity?.unit }))).toEqual([
+        { value: 1, unit: "drop" }, { value: 2, unit: "drop" }, { value: 1, unit: "drop" }
+      ]);
+      if (relativeEnd) {
+        const message = "Unsupported R6 step RelativeTime: requires a treatment-start offset";
+        expect(() => nextDueDoses(dosage, query)).toThrow(message);
+        expect(() => calculateTotalUnits({ ...query, dosage, durationValue: 3, durationUnit: "d" })).toThrow(message);
+      } else {
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-12-01T00:00:00+00:00", "2026-12-01T06:00:00+00:00", "2026-12-01T08:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ ...query, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(18);
+      }
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+  });
+
+  it("retains both explicitly dated doses on the same day in an independent eye track", () => {
+    const source = "Instill 1 drop OD on 2026-12-05 at 08:00, then instill 2 drops OD on 2026-12-05 at 20:00; instill 1 drop OS BID";
+    const parsed = parseSig(source, { datePolicy: { referenceDate: "2026-12-01" } });
+    const strict = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 6 };
+    for (const dosage of [parsed, parsed.fhirNext, strict]) {
+      const members = importCanonicalCourse(dosage).stages[0].administrations;
+      expect(members[0].schedule?.explicitEvents).toEqual(["2026-12-05"]);
+      expect(members[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+      expect(members[1].schedule?.explicitEvents).toEqual(["2026-12-05"]);
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00",
+        "2026-12-06T08:00:00+00:00", "2026-12-06T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(5);
+      expect(calculateTotalUnits({ ...query, from: "2026-12-06T00:00:00Z", dosage,
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(2);
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+  });
+
+  it.each([
+    ["after breakfast", "", "08:00", "PCM", undefined],
+    ["after breakfast", "between 18:00 and 20:00", "18:00", undefined, undefined],
+    ["30 minutes before breakfast", "", "07:30", "ACM", 30],
+    ["30 minutes before breakfast", "between 18:00 and 20:00", "18:00", undefined, undefined]
+  ] as const)("keeps local window ownership after %s: %s", (prior, local, clock, event, offset) => {
+    const source = `Take 1 tablet daily ${prior} for 7 days, then from day 11 take 2 tablets ${local}`;
+    const parsed = parseSig(source), successor = parsed.meta.canonical.clauses[1];
+    expect(successor.schedule).toMatchObject({ treatmentStartOffsetDays: 10, frequency: 1, period: 1, periodUnit: "d" });
+    expect(successor.schedule?.when).toEqual(event ? [event] : undefined);
+    expect(successor.schedule?.offset).toBe(offset);
+    if (local) expect(successor.schedule?.clockWindow).toEqual({ start: "18:00:00", end: "20:00:00", endInclusive: true });
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-11T00:00:00Z", timeZone: "UTC",
+      eventClock: { PCM: "08:00", ACM: "08:00" }, limit: 3 };
+    for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(dosage, query)).toEqual([11, 12, 13].map(day => `2026-12-${day}T${clock}:00+00:00`));
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(6);
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSig, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
+import { formatSig, resolveMedicationInstructionAction, listMedicationInstructionActions, getMedicationInstructionAction, getMedicationInstructionConcept, parseInstructionActions, buildMedicationInstructionConceptCodeSystem, buildMedicationInstructionActionCodeSystem } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
@@ -542,5 +542,20 @@ describe("single-delimiter SNOMED postcoordination parsing", () => {
     const code = rules.buildSnomedFindingSitePostcoordinationCode("12345", site);
     expect(rules.parseSnomedFindingSitePostcoordinationCode(code))
       .toEqual({ focusCode: "12345", siteCode: site });
+  });
+});
+
+
+describe("registered action generated code lookup", () => {
+  it.each([undefined, "clinic-clean-applicator"])("resolves the same saved code that registration exposes (explicit code %s)", code => {
+    const options = { instructionActionMap: { "clean applicator": {
+      ...(code ? { code } : {}), display: "Clean applicator", semanticClass: "clean", procedural: true
+    } } };
+    const definition = resolveMedicationInstructionAction("clean applicator", options)!;
+    expect(definition.code).toBe(code ?? "clean-applicator");
+    expect(resolveMedicationInstructionAction(definition.code, options)).toEqual(definition);
+    expect(getMedicationInstructionAction(definition.code, options)).toEqual(definition);
+    expect(resolveMedicationInstructionAction(definition.code, options, false)).toBeUndefined();
+    expect(parseInstructionActions("clean applicator", 0, options)[0].predicate.lemma).toBe(definition.code);
   });
 });

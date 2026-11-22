@@ -526,8 +526,10 @@ export function resolveMedicationInstructionAction(
       const input = map[configuredSurface];
       if (customDefinitionMatchesSurface(configuredSurface, input, target))
         return normalizeCustomDefinition(configuredSurface, input);
-      if (includeCode && !builtin && codeFallback === undefined && input.code &&
-          normalizeActionSurface(input.code) === target) codeFallback = configuredSurface;
+      if (includeCode && !builtin && codeFallback === undefined) {
+        const code = input.code?.trim() || normalizeActionSurface(configuredSurface).replace(/\s+/g, "-");
+        if (normalizeActionSurface(code) === target) codeFallback = configuredSurface;
+      }
     }
   }
   return builtin ?? (codeFallback !== undefined ? normalizeCustomDefinition(codeFallback, map![codeFallback]) : undefined);

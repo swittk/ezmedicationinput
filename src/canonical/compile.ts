@@ -303,7 +303,8 @@ export function courseFromPartialParallel(
       for (const item of phase.members) {
         const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
         a.sourceMember = item.member;
-        if (phase.phaseEnd) a.phaseEnd = phase.phaseEnd;
+        // An inferred successor cut cannot replace the clause's authored end.
+        if (!a.phaseEnd && phase.phaseEnd) a.phaseEnd = phase.phaseEnd;
         // Keep the authored clause in syntax; only this owned execution window
         // receives the calendar end inferred within its independent track.
         if (item.effectiveBoundsEnd) {

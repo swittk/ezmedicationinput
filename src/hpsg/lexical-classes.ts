@@ -585,7 +585,7 @@ const CONJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("and", ["and"])
 const DISJUNCTIVE_COORDINATION_SURFACES = coordinationSurfaceSet("or", ["or", "and/or"]);
 export function coordinationConnectorKind(surface: string):
   "conjunction" | "disjunction" | "unknown" {
-  const normalized = surface.trim().replace(/^[,;]+|[,;]+$/gu, "").trim().toLowerCase();
+  const normalized = surface.trim().replace(/^[,;]+|[,;]+$/gu, "").trim().replace(/\s+/gu, " ").toLowerCase();
   if (DISJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "disjunction";
   if (CONJUNCTIVE_COORDINATION_SURFACES.has(normalized)) return "conjunction";
   return "unknown";
