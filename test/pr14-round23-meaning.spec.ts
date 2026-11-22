@@ -4129,8 +4129,110 @@ describe("round45 authored directions with independent administration caps", () 
       const current = JSON.parse(before) as FhirR6DosageInstruction;
       current.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
       const text = formatSig(current, "long", { locale, realizationMode: "normalized" });
-      expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+      expect(text).toMatch(locale === "en"
+        ? /(?:^|\s)2 tablets(?:\s|[.;,]|$)/u
+        : /(?:^|\s)2 เม็ด(?:\s|[.;,]|$)/u);
       expect(text).not.toContain(directions);
+    }
+  });
+});
+
+describe("round47 public preview timing and resolver ownership", () => {
+  it.each([false, true])("keeps a range-start heading open only for a final stage (%s)", final => {
+    const range = {
+      low: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org", id: "low" },
+      high: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org", id: "high" }
+    };
+    const contextCode = { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] };
+    const start = { contextCode, offsetRange: range };
+    const component = (value: number): FhirR6Dosage => ({
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } }
+    });
+    const raw: FhirR6DosageInstruction = { step: [
+      { start, component: [component(2)] },
+      ...(final ? [] : [{ start: { contextCode, offsetDuration: {
+        value: 7, unit: "d", code: "d", system: "http://unitsofmeasure.org"
+      } }, component: [component(1)] }])
+    ] };
+    const rows = toFhirR5Dosages(raw), cold = JSON.parse(JSON.stringify(rows));
+    const english = final
+      ? "From 1 day – 1 day after treatment start onward: Use 2 tablets once daily at 8:00 am."
+      : "1 day – 1 day after treatment start: Use 2 tablets once daily at 8:00 am. "
+        + "From 7 days after treatment start onward: Use 1 tablet once daily at 8:00 am.";
+    const thai = final
+      ? "ตั้งแต่1 วัน – 1 วันหลังเริ่มการรักษาเป็นต้นไป: ใช้ครั้งละ 2 เม็ด วันละครั้ง เวลา 08:00."
+      : "1 วัน – 1 วันหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง เวลา 08:00. "
+        + "ตั้งแต่7 วันหลังเริ่มการรักษาเป็นต้นไป: ใช้ครั้งละ 1 เม็ด วันละครั้ง เวลา 08:00.";
+    for (const input of [raw, rows, cold]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(english);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(thai);
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[0].start).toEqual(start);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("snapshots own class resolver methods separately for explicit and yearless dates", () => {
+    class Calendar implements MedicationDateResolver {
+      id = "round47-own-calendar-a";
+      offset = 1000;
+      resolveYear: MedicationDateResolver["resolveYear"];
+      calendarYearFromIsoYear: NonNullable<MedicationDateResolver["calendarYearFromIsoYear"]>;
+      constructor() {
+        this.resolveYear = function (this: Calendar, year: number, digits: number) {
+          return digits === 4 && year >= 3000
+            ? { isoYear: year - this.offset, calendarYear: year, inferredYear: false }
+            : undefined;
+        };
+        this.calendarYearFromIsoYear = function (this: Calendar, year: number) {
+          return year + this.offset;
+        };
+      }
+    }
+    const resolver = new Calendar();
+    registerMedicationDateResolver(resolver);
+    resolver.id = "round47-own-calendar-b";
+    resolver.offset = 1001;
+    registerMedicationDateResolver(resolver);
+    for (const [calendar, explicitDate, inferredYear] of [
+      ["round47-own-calendar-a", "2026-09-28", 3026],
+      ["round47-own-calendar-b", "2025-09-28", 3027]
+    ] as const) {
+      for (const source of ["28/9/3026", "28/9"]) {
+        const parsed = parseSig("Take 1 tablet on " + source, {
+          datePolicy: { calendars: [calendar], referenceDate: "2026-09-01" }
+        });
+        expect(parsed.fhirNext.step[0].component[0].timing?.event)
+          .toEqual([source === "28/9/3026" ? explicitDate : "2026-09-28"]);
+        expect(parsed.meta.canonical.clauses[0].schedule?.calendarEvents?.[0]).toMatchObject({
+          calendar, calendarYear: source === "28/9/3026" ? 3026 : inferredYear
+        });
+      }
+    }
+  });
+
+  it.each([
+    { name: "code-only", period: undefined, short: "1 tab QAM" },
+    { name: "daily", period: 1, short: "1 tab QAM MORN" },
+    { name: "every two days", period: 2, short: "1 tab Q2D MORN" }
+  ])("renders the live $name morning cadence without changing the source code", ({ period, short }) => {
+    const timing: FhirDosage["timing"] = {
+      code: { text: "QAM" },
+      ...(period === undefined ? {} : { repeat: {
+        frequency: 1, period, periodUnit: FhirPeriodUnit.Day, when: [EventTiming.Morning]
+      } })
+    };
+    const raw: FhirDosage[] = [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing }];
+    const r6 = toDosageDetails(raw), cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [raw, r6, cold]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "short", { locale: "en" })).toBe(short);
+      expect(toFhirR5Dosages(input)[0].timing).toEqual(timing);
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[0].component[0].timing).toEqual(timing);
+      expect(JSON.stringify(input)).toBe(before);
     }
   });
 });

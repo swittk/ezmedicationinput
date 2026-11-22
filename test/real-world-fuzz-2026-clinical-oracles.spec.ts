@@ -753,6 +753,12 @@ describe("round38 implicit successor with calendar end", () => {
       const thaiStart = exactPredecessor ? "ตั้งแต่7 วันหลังเริ่มการรักษา" : "หลังขั้นตอนก่อนหน้า";
       expect(english.indexOf(englishStart)).toBeGreaterThanOrEqual(0);
       expect(thai.indexOf(thaiStart)).toBeGreaterThanOrEqual(0);
+      expect(english.slice(0, english.indexOf(englishStart)).trim()).toBe(exactPredecessor
+        ? "From treatment start until 7 days after treatment start: Use 1 tablet once daily for 7 days."
+        : "treatment start: Use 1 tablet once daily for 7 days.");
+      expect(thai.slice(0, thai.indexOf(thaiStart)).trim()).toBe(exactPredecessor
+        ? "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ 1 เม็ด วันละครั้ง เป็นเวลา 7 วัน."
+        : "เริ่มการรักษา: ใช้ครั้งละ 1 เม็ด วันละครั้ง เป็นเวลา 7 วัน.");
       const englishSuccessor = english.slice(english.indexOf(englishStart)).trim();
       const thaiSuccessor = thai.slice(thai.indexOf(thaiStart)).trim();
       expect(englishSuccessor).toMatch(exactPredecessor
