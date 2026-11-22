@@ -4211,3 +4211,79 @@ describe("round46 supported execution boundaries", () => {
       }
     });
 });
+
+
+describe("round47 calendar quantity and month-day ownership", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]];
+  };
+
+  it.each(["monthly delayed", "monthly undisplaced", "elapsed thirty days", "yearly delayed"] as const)(
+    "admits the actual administration under %s limits", variant => {
+      const yearly = variant === "yearly delayed", elapsed = variant === "elapsed thirty days";
+      const delayed = variant !== "monthly undisplaced";
+      const from = yearly ? "2025-03-01T00:00:00Z" : "2026-03-31T00:00:00Z";
+      const orderedAt = yearly ? "2024-01-01T00:00:00Z" : "2026-01-01T00:00:00Z";
+      const end = yearly ? "2025-03-01T02:00:00Z" : "2026-03-31T02:00:00Z";
+      const row: FhirDosage = {
+        id: "r47-delayed-dose",
+        extension: [{ url: "urn:test:r47:authored", valueString: "retain" }],
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        ...(delayed ? { modifierExtension: [{
+          url: "urn:ezmedicationinput:StructureDefinition:medication-administration-offset",
+          valueQuantity: { value: 120, unit: "min", code: "min", system: ucum }
+        }] } : {}),
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day,
+          timeOfDay: [delayed ? "23:00:00" : "01:00:00"], boundsPeriod: { start: orderedAt, end } } },
+        maxDosePerPeriod: [{ numerator: { value: 1, unit: "tab" }, denominator: {
+          value: elapsed ? 30 : 1, unit: elapsed ? "d" : yearly ? "a" : "mo",
+          code: elapsed ? "d" : yearly ? "a" : "mo", system: ucum
+        } }]
+      };
+      const query = { from, orderedAt, timeZone: "UTC", limit: 2,
+        priorDoseTimes: [yearly ? "2024-03-01T00:30:00Z" : "2026-03-01T00:30:00Z"] };
+      // At March31 01:00 the monthly cutoff is February28 01:00,
+      // so March1 00:30 still consumes the allowance. The 30-day cutoff
+      // is March1 01:00 instead. Across the leap year, the actual yearly
+      // cutoff is March1 01:00; shifting to February28 changes that date.
+      const accepted = elapsed || yearly;
+      const expected = accepted ? [yearly ? "2025-03-01T01:00:00+00:00" : "2026-03-31T01:00:00+00:00"] : [];
+      for (const dosage of forms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: accepted ? 1 : 0, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each(["fifteenth", "every two months", "aligned fifteenth", "order-day clamp"] as const)(
+    "uses the prescribed date within eligible months (%s)", variant => {
+      const explicit = variant !== "order-day clamp";
+      const period = variant === "every two months" ? 2 : 1;
+      const from = variant === "aligned fifteenth" ? "2026-01-15T00:00:00Z"
+        : explicit ? "2026-01-01T00:00:00Z" : "2026-01-31T00:00:00Z";
+      const row: FhirDosage = { id: "r47-month-day",
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period, periodUnit: Unit.Month,
+          timeOfDay: ["09:00:00"], ...(explicit ? { extension: [{
+            url: "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth", valuePositiveInt: 15
+          }] } : {}) } }
+      };
+      const dates = variant === "every two months"
+        ? ["2026-01-15", "2026-03-15", "2026-05-15"]
+        : explicit ? ["2026-01-15", "2026-02-15", "2026-03-15"]
+        : ["2026-01-31", "2026-02-28", "2026-03-31"];
+      const query = { from, orderedAt: from, timeZone: "UTC", limit: 3 };
+      for (const dosage of forms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(dates.map(date => date + "T09:00:00+00:00"));
+        expect(calculateTotalUnits({ dosage, ...query,
+          durationValue: period === 2 ? 5 : 3, durationUnit: Unit.Month }))
+          .toMatchObject({ totalUnits: 3, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+});

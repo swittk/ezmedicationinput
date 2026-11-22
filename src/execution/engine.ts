@@ -1491,18 +1491,26 @@ function maximumRangedCapacity(
         // A calendar cutoff can release, re-include, and release the same
         // history again. Enumerate every civil/offset monotone piece.
         for (const interval of intervals) {
-          const cuts = calendarQuantityWindowCuts(interval.start, interval.end, limit, zone);
-          for (let index = 0; index + 1 < cuts.length; index++) {
-            spend();
-            let low = cuts[index], high = cuts[index + 1] - 1;
-            out.add(low);
-            if (quantityCapWindowStart(new Date(high), limit, zone) < oldest) continue;
-            while (low < high) {
-              const middle = low + Math.floor((high - low) / 2);
-              if (quantityCapWindowStart(new Date(middle), limit, zone) >= oldest) high = middle;
-              else low = middle + 1;
+          // Pooled windows can cross midnight while retaining one phase
+          // quota. Month-end clamping can retreat at each civil boundary.
+          let day = startOfLocalDay(new Date(interval.start), zone);
+          while (day.getTime() < interval.end) {
+            const nextDay = addLocalDays(day, 1, zone);
+            const cuts = calendarQuantityWindowCuts(
+              Math.max(interval.start, day.getTime()), Math.min(interval.end, nextDay.getTime()), limit, zone);
+            for (let index = 0; index + 1 < cuts.length; index++) {
+              spend();
+              let low = cuts[index], high = cuts[index + 1] - 1;
+              out.add(low);
+              if (quantityCapWindowStart(new Date(high), limit, zone) < oldest) continue;
+              while (low < high) {
+                const middle = low + Math.floor((high - low) / 2);
+                if (quantityCapWindowStart(new Date(middle), limit, zone) >= oldest) high = middle;
+                else low = middle + 1;
+              }
+              out.add(low);
             }
-            out.add(low);
+            day = nextDay;
           }
         }
       }
@@ -6479,14 +6487,18 @@ function calculateTotalUnitsSingle(
   if (!timeZone) throw new Error("timeZone is required for calculateTotalUnits");
   const from = coerceDate(options.from, "from");
   const administrationOffset = getAdministrationOffsetMinutes(sourceDosage);
-  // Civil occurrence allowances must see actual dates. Keep the scalar
-  // arithmetic shift for unconstrained clocks, but let the existing filtered
-  // enumerator own displaced candidates when a civil allowance applies.
-  const shiftedOccurrence = administrationOffset !== undefined &&
-    !!getTimingOccurrenceCap(sourceDosage.schedule?.recurrence) &&
+  // Civil occurrence allowances and month/year quantity caps must see
+  // actual dates. Keep elapsed-cap arithmetic shifted, while the existing
+  // filtered enumerator owns displaced candidates for civil admission.
+  const shiftedAdmission = administrationOffset !== undefined &&
+    (!!getTimingOccurrenceCap(sourceDosage.schedule?.recurrence) ||
+      !!sourceDosage.limits?.some(limit => {
+        const unit = limit.scope === "period" ? parseBoundsDurationUnit(limit.period) : undefined;
+        return unit === DurationUnit.Month || unit === DurationUnit.Year;
+      })) &&
     !unscheduledOccurrenceCapacity(sourceDosage);
-  const admissionDisplacement = shiftedOccurrence ? administrationOffset * 60000 : 0;
-  if (administrationOffset !== undefined && !shiftedOccurrence) {
+  const admissionDisplacement = shiftedAdmission ? administrationOffset * 60000 : 0;
+  if (administrationOffset !== undefined && !shiftedAdmission) {
     const delta = administrationOffset * 60000;
     const shift = (value: Date | string, amount: number) =>
       new Date(coerceDate(value, "administration time").getTime() + amount);
@@ -7642,6 +7654,8 @@ function clockCadenceEligible(
     const months = getLocalMonthIndex(day, timeZone) - getLocalMonthIndex(anchor, timeZone);
     const period = repeat.period * (repeat.periodUnit === "a" ? 12 : 1);
     if (months < 0 || months % period !== 0) return false;
+    // The explicit selector already owns the date within an eligible month.
+    if (repeat.monthDays?.length) return true;
     return (
       getTimeParts(day, timeZone).day ===
       getTimeParts(addCalendarMonths(anchor, months, timeZone), timeZone).day

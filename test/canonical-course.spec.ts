@@ -3044,3 +3044,50 @@ describe("round 43 supported supply bounds", () => {
     expect(raw).toEqual(before);
   });
 });
+
+
+describe("round47 pooled calendar release windows", () => {
+  const ucum = "http://unitsofmeasure.org";
+  it.each([
+    ["before release", 20, false, false, 1],
+    ["within one day", 60, false, false, 2],
+    ["across midnight", 1455, false, false, 2],
+    ["fixed elapsed cap", 1455, true, false, 2],
+    ["spent phase quota", 1455, false, true, 0]
+  ] as const)("keeps the exact feasible maximum %s", (_name, minutes, elapsed, spent, expected) => {
+    const raw: FhirR6DosageInstruction = {
+      repeatCycle: { value: 2, unit: "d", code: "d", system: ucum },
+      step: [{ component: [{
+        id: "r47-bounded-prn", asNeeded: true,
+        extension: [{ url: "urn:test:r47:source", valueString: "retain" }],
+        doseAndRate: [{ doseRange: {
+          low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" }
+        } }],
+        timing: { repeat: { countMax: 1,
+          boundsDuration: { value: 2, unit: "d", code: "d", system: ucum },
+          extension: [{ url: TIMING_OCCURRENCE_CAP_EXTENSION_URL, extension: [
+            { url: "max", valueInteger: 1 },
+            { url: "period", valueQuantity: { value: 1, unit: "d", code: "d", system: ucum } }
+          ] }]
+        } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 3, unit: "tab" },
+          period: { value: elapsed ? 30 : 1, unit: elapsed ? "d" : "mo",
+            code: elapsed ? "d" : "mo", system: ucum } }] }
+      }] }]
+    };
+    const query = { from: spent ? "2026-03-30T08:00:00Z" : "2026-03-30T07:00:00Z",
+      orderedAt: "2026-03-30T07:00:00Z", timeZone: "UTC",
+      priorDoseTimes: [spent ? "2026-03-30T07:15:00Z" : "2026-02-28T07:30:00Z"] };
+    // At March30 07:30 the old two-tablet record leaves the monthly
+    // window. A single two-tablet use then fits and attains the phase's
+    // one-use maximum. Extending the horizon past midnight cannot erase it.
+    const rows = toFhirR5Dosages(raw);
+    for (const dosage of [raw, rows, JSON.parse(JSON.stringify(rows)) as FhirDosage[]]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: minutes, durationUnit: FhirPeriodUnit.Minute }))
+        .toMatchObject({ totalUnits: expected, unit: "tab" });
+      expect(nextDueDoses(dosage, { ...query, limit: 2 })).toEqual([]);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+});
