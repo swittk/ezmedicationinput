@@ -14067,3 +14067,97 @@ The delivery retains one individual reply per original round 44 inline thread, w
 The complete gate at source 30a1617 rejected four equivalent scenarios after the prescribed confirmation: formatParseBatch/staged +16.017857%, getMedicationInstructionConcept +1482.762509%, resolveMedicationInstructionConcept +804.712106%, and listMedicationInstructionConcepts +1412.637569%. Those failed reports are retained under /tmp/ezmed14-round44-pre-optimization-*. No cases were reclassified and no threshold was relaxed. Independent source and frozen-dist inspection confirmed that pinned master already clones all three public concept API results. The copy implementation's spread-and-override descriptors were the bounded optimization target; authored custom Coding metadata and detached values remain required. The staged fixture returns cached text and never runs the new branch-preview code, so its direct multistage return was restored before native metadata inspection. Final acceptance is established by the fresh unchanged full gate at the optimized source recorded above.
 
 The bounded optimization is committed at 428709ab2f8fbc19bff70b18290fbafbb8029c72. Bundled catalog initialization/public copies now use the original direct typed Coding fields (including version); custom vocabulary and escaped parsed components retain the metadata-preserving copier. The already-fresh custom public resolution is returned directly, matching master. The staged formatter keeps a small cached-text return with an explicit optional-array check and moves unchanged remaining logic to a private helper. Independent execution/grammar reviews found no supported semantic or metadata loss. All four targeted scenarios pass the diagnostic at candidate ESM 4d6ba419d2951bfb4032541c0d984981e579cab4a75272f9055e0ec24a7e50f6; this diagnostic does not replace the fresh complete gate.
+
+
+## 2026-11-23 — PR14 full-review round45
+
+The actual full review 6014345996 examined delivery 4bec29cfa1f635ea1937f88e1aa81103d4db9070 and contained 13 inline plus 15 body findings. The owner renewed the loop and scope rule: fix broken supported behavior, including baseline defects; reject hypothetical malformed/internal-state defenses and expansions. Work used the coordinator's own execution, grammar and interop workers with isolated worktrees. HPSERVER supplied ordinary execution only.
+
+The pinned contract remains public .fhir as R5 and .fhirNext as R6 Snapshot 1, preserving authored numeric values, independent endpoint units, raw source and opaque annotations. No native authoring API, new clinical model, general ambiguity machinery, downstream app/database edits, release or merge is included.
+
+### Complete disposition ledger
+
+| Finding | Disposition | Public evidence and bounded change |
+|---|---|---|
+| I1, r4659867008 | Fixed | A frozen previous-writer course repetition plus a current explicit first-step count can share the same number while disagreeing on ownership. The existing first-phase conflict path now observes explicitly marked current rows across header contexts. Exact markers survive, unresolved numeric execution remains blocked, and legacy-only/current-only controls remain. No nested repetition is inferred. |
+| I2, r4659867016 | Fixed | An outer compact-course comparison invalidated stale one-tablet wording after a two-tablet edit, but a restored historical member ignored that decision. The outer text decision now reaches that member; independent restored site and original source remain. Master already suppresses the stale text. |
+| I3, r4659867019 | Fixed | A safety cap as the sole structured fact no longer replaces the only authored directions with Use. The existing limit appender adds current caps of 2 or 3 tablets to Swallow 1 tablet whole every morning. R6, R5 and cold saves cover both locales and all realization modes. Master retains directions but omits the independent cap, so its preview is not the complete oracle. |
+| I4, r4659867022 | Fixed supported baseline defect | A coherent coded Ear target with an uncoded below relation, changed to above, exposed both stale warm replay and an English cold-format omission. Existing observation includes the spatial marker; existing English spatial rendering handles a target-only label. Full authored labels and metadata remain. A contradictory relationCoding/text edit is not assigned a new precedence policy. |
+| I5, r4659867035 | Fixed | Range-plan upper bounds now account for remaining civil occurrence buckets and required pre-query count consumption. A 1–2 tablet schedule with one occurrence per day has 56 tablets over 28 days, versus 112 without that occurrence limit. Exhausted finite-count supply is known zero. Existing admission rules and 32-slot/50,000-search limits remain. |
+| I6, r4659867043 | Fixed | Eligible actual history consumes finite count once. A dose recorded at 09:00 no longer also spends its nominal 08:00 slot before a later query. Remaining slots retain original cadence and actual rolling-cap timestamps. No-history, on-time and pre-order controls remain; the late-actual cap control also fixes a baseline defect. |
+| I7, r4659867047 | Rejected | Bounded public producer traces do not yield the alleged selected procedure-owned NEXT sign that leaks a medication count. Ordinary procedure examples lack the asserted NEXT construction; the normal next-morning administration still gets its supported finite count. No grammar is added to manufacture the internal state and no defensive projection branch is added. |
+| I8, r4659867051 | Fixed | The reachable same-sign public instruction Take 1 tablet starting the next day as needed for pain retains next-day eligibility and PRN meaning without an invented lifetime count of one. The comma-separated review wording is a different split; the baseline also has incomplete NEXT recognition, which is not mislabeled as complete baseline correctness. |
+| I9, r4659867056 | Already correct; oracle added | The exact IV instruction with 100 mL and no more than 50 mL/hr already retains the dose plus hourly maximum without an administered rate. Six ordinary variants and no-dose/uncapped positive controls establish ownership. No route-license production guard is added. |
+| I10, r4659867061 | Fixed supported baseline defect | The alternate supported order Infuse 100 mL in 2 divided doses at 30 mL/hr had divided the rate into a 15 mL dose. The merged authored total now produces 50 mL per dose with the independent 30 mL/hr unchanged. Both word orders and rate-only controls are covered. |
+| I11, r4659867066 | Fixed authentic saved-row regression | Exact master R5 rows for Mix powder with household spoon and Mix powder with bottle retain their unmarked Object/Container companion under an existing With frame. Explicit argument attachment still wins. The article-bearing default example already worked; the demonstrated public loss was English, while Thai source fallback retained the companion. |
+| I12, r4659867073 | Fixed supported baseline defect | Retention, primary coverage and lexical single-event coverage share the qualified-event comparison. After sleep cannot establish HS after a supported PHS-to-HS edit. The already-defined Before Sleep/HS qualifier remains valid. Dose, whole manner, source and saved graph remain intact across current/cold representations. |
+| I13, r4659867080 | Fixed supported baseline defect | An explicit dated successor supplies its track's predecessor cutoff through its earliest event date when no boundsStart owns the start. OD QID stops before the dated OD dose, while OS BID continues. December 5 and 6 totals are independently 4 and 2 drops. Event array order and the explicit boundsStart control remain. |
+| B1 | Fixed | A displaced annotated zero-minimum-frequency marker moves into existing inert source history while frequency 2 stays active. IDs, primitive annotation and independent notes survive repeated saves; unchanged markers remain exact and active. |
+| B2 | Fixed | The existing pause-completion comparison ignores only boundsDuration Element ID on its comparison copy. An ID-only edit retains the editable pause; changing seven days to ten still invalidates it. Live duration metadata is not removed. |
+| B3 | Oracle strengthened | Existing mixed quantity cases now independently assert administered value, unit and comparator across fresh R5, R6 and saved R5/R6. Fraction comparisons retain their meaningful tolerance. |
+| B4 | Oracle strengthened | Directional before-08:00 and the independently owned point clock both appear in EN/TH. The relationless matching-clock control still appears once. |
+| B5 | Fixed valid configured regression | Agitate bottle ten seconds uses existing custom action/realizer, unitMap s and accepted source-backed Container/Duration arguments. Both container and ten-second duration now render in both locales. The review's numeric literal does not supply the required opaque resolver span; no validator relaxation or invented quantity is introduced. |
+| B6 | Oracle strengthened | Complete authored Timing.event, including partial year and month entries, is compared after persisted-R5 restoration alongside existing execution checks. |
+| B7 | Oracle strengthened | A third due result must fall at March 10 midnight after two March 9 midnight doses under the shared two-tablet/two-hour cap. |
+| B8 | Oracle strengthened | Due and supply observation extends beyond the possible November 22 evening predecessor. Three order-time controls require totals 6, 5 and 3. |
+| B9 | Oracle strengthened | Each of three dated phase headings is bound to its exact independent dose/clock section in EN/TH and strict-R5 previews. Swapping sections no longer passes global token checks. |
+| B10 | Rejected | A removed/missing build directory is an invalid benchmark setup and its command fails. No recovery framework is added for a hypothetical consumer treating an older report as a successful current run. Actual exit, completion and frozen artifact verification remain mandatory. |
+| B11 | Fixed report semantics | Smoke mode and its comparative/candidate-only checks are separated from measured functions and timing verdicts in checkpoints and console output. Successful smoke produces zero performance passes. |
+| B12 | Oracle strengthened | The specific added-dose Thai drink fixture must include its authored mixing preparation. The exact dose-only string fails; generic quantity recognition is unchanged. |
+| B13 | Supported benchmark coverage added | Ordinary and staged batches are each parsed by the build that formats them, outside timing. Both previous shared-baseline compatibility workloads remain. |
+| B14 | Oracle strengthened | The specific Thai eye fixture requires the complete positive final close-eye action. Existing positive separator variants remain accepted; exact negated closures fail. No general negation grammar is added. |
+| B15 | Supported benchmark coverage added | A separate fresh-calendar workload retains the established warm 97-date workload. Both builds advance matching monotonic query ordinals across probes, warmup, calibration and rounds. Query preparation stays outside timing and production caches are untouched. |
+
+### Reproduction and integration qualifications
+
+The baseline is pinned at 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. Evidence distinguishes regression, baseline defect and inaccurate example. I4 uses consistent typed target/relation data, not conflicting coding and text. I10's review order already worked on the reviewed head; the alternate normal order reproduced the error. I11 embeds authentic old public R5 output instead of regenerating a purported historical shape with the new parser. B5's accepted arguments come from the supported resolver and vocabulary extension points; master retained duration but omitted container, while the reviewed configured realizer had the opposite omission.
+
+The coordinator implemented I3/I11/I12/B5, strengthened B4/B9, independently inspected every worker source diff, integrated all lanes and prepared the actual converter/storage fixtures. Own-worker cross-reviews inspected execution, grammar and the benchmark methodology. The integrated source retained 99 changed PR paths.
+
+The first frozen source run at 2946e3076bb9929f8a5f23dc75b4a82849095ef7 passed 6609 of 6610 cases and correctly rejected one integration regression: the first I12 comparison dropped the existing before-bedtime qualifier from the Thai shampoo/overnight procedure. That test was not weakened. The existing EventTiming Before Sleep = HS meaning is retained in the comparison, while after-sleep cannot claim HS. All 543 instruction/outpatient cases then passed. Initial failed evidence remains under /tmp/ezmed14-round45-before-bedtime-correction-*. No dist or timing work ran in that rejected gate. The unchanged corrected source then produced a complete successful 6610/6610 report but Node v24.14.1 aborted afterward in the native CJS lexer (exit 134, v8::ToLocalChecked Empty MaybeLocal). That process was not accepted. Its report and crash log are retained under /tmp/ezmed14-round45-native-abort-*, and the exact unchanged gate was restarted to obtain a clean process result.
+
+### Validation and frozen evidence
+
+Frozen source: 252f545b2b8d69b39175f277924e028ccabe9e3f.
+
+- Required strict ES6 source/type gate and 6610/6610 source cases across 48 existing files pass with a clean process exit. All prior per-file counts remain; 43 cases were added.
+- ESM/CommonJS/declaration build and 4/4 distribution tests pass.
+- Actual Shinebright converter/storage: 98 complete-input attempts, 97 exact full-JSON save/reopen preservations. The sole established downstream limitation remains raw timeOfDay:[null,"08:00:00"] raising Invalid FHIR timeOfDay: null. The input is passed directly without trimming, conversion or downstream edits.
+- PR scope: 99 paths against pinned master; diff check passes.
+
+| Frozen evidence | SHA-256 |
+|---|---|
+| Source files | a841dc46590265b7a1e60297c10bc24330b8300e461066a97aa04b3f97413577 |
+| Candidate ESM | 5664493bdb4db472a9e059b3e7d88aebfa3a7a1abd659aedcc425baa84d1b827 |
+| Pinned master ESM | a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2 |
+| Benchmark harness | 8fb212370ecf3071cb7d7cfc9a386e808ea6ecab97e7577ca87f8fd6e274582e |
+
+
+### Benchmark workload and acceptance
+
+All 181 previous name/API pairs retain their order and the same seven semantic exclusions. Exactly three scenarios are added: formatParseBatch/ordinary-own-batch, formatParseBatch/staged-own-batch and nextDueDoses/fresh-calendars. The resulting inventory is 184 comparative scenarios, 177 equivalent comparisons and 117 public functions; new-API measurements remain separately visible.
+
+The fresh-calendar fixture cycles the original 97 weekly base instants and adds one millisecond per completed cycle. Per-build ordinals never restart during a run; equal block histories demonstrate matched inputs. Full millisecond instants are part of the existing calendar cache key. Preparation and evidence recording precede performance.now(), while the public API invocation remains timed. No production cache controls or unbounded year growth are introduced.
+
+Calibration, balanced paired ordering, the median log paired ratio, the 22-round/35-ms full sweep, the exact-flag 72-round/140-ms candidate-first confirmation, and the individual +4% ceiling are unchanged. There is no cross-case averaging, semantic reclassification to hide a regression, or acceptance based on smoke.
+
+All 177 equivalent scenarios meet the individual +4% ceiling. The largest accepted change is 3.156% for resolveMedicationInstructionSequenceAction. The full 184-scenario sweep uses 22 paired rounds at a 35 ms target; exactly the eight first-pass flags receive the prescribed 72-round, 140 ms candidate-first confirmation. All eight confirmations pass. The accepted set comprises 169 full-sweep and 8 confirmation results; no best-of reruns, changed inputs or reclassification are used.
+
+| First-pass flag | Full sweep | Prescribed confirmation |
+|---|---:|---:|
+| formatSig/R5/en | 12.458% | -4.949% |
+| formatParseBatch/staged-own-batch | 4.099% | 3.140% |
+| parseStrengthComponents | 12.207% | -0.878% |
+| buildBodySiteSpatialRelationExtension | 11.418% | -6.984% |
+| buildBodySiteSpatialRelationExtensions | 9.845% | -7.008% |
+| hasSnomedBodySiteLateralityPostcoordination | 4.899% | -0.198% |
+| buildSnomedBodySiteTopographicalModifierPostcoordinationCode | 7.668% | -1.006% |
+| registerSigLocalization | 7.879% | -0.833% |
+
+The source, candidate ESM, pinned master ESM and benchmark harness remain unchanged through both runs. All 181 previous name/API pairs remain in order, and the same seven inequivalences remain recorded without performance verdicts. The full report confirms matching fresh-calendar preparation sequences. Raw source, distribution, storage, full/confirmation timings and frozen manifests are retained under /tmp/ezmed14-round45-*.
+
+Independent own-worker audit recomputed every raw median, paired-log ratio, spread and acceptance flag for all 184 full cases and exactly 8 confirmations. It verified the actual successful managed-process exit, all frozen artifact digests, all prior test-file counts, the unchanged exclusions and the three added workloads. The fresh-calendar sequences match at 3,025 calls in 38 blocks per build, with contiguous ordinals and independently derived dates; the measured portion uses 22 batches of 128 calls. All 2,561 audit checks pass. The audit performed no additional tests, builds or benchmark runs; its report is retained as /tmp/ezmed14-round45-independent-audit.json.
+
+### Review delivery
+
+Each of the 13 original inline threads receives its own reply. Related body items are mapped to those replies, with this complete 28-item ledger retaining individual dispositions. I7 and B10 remain rejected, and I9 has no unnecessary production patch. After verified replies/resolution and paginated audit, the coordinator updates the PR body, requests the exact full review command and waits for its actual new review body before triage. No merge, release, publication, deployment or downstream edit is part of this delivery.
