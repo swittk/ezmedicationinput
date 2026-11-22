@@ -967,6 +967,8 @@ export interface AdviceArgument {
     unit?: string;
     /** Authored qualifier follows this amount through graph matching and FHIR. */
     comparator?: FhirR6Quantity["comparator"];
+    /** Active primitive metadata follows the current operator through FHIR. */
+    comparatorElement?: FhirElement;
     /** Original wire operator annotations; the current comparator owns meaning. */
     comparatorExtensions?: FhirExtension[];
   };

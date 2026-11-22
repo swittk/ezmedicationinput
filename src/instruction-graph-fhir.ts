@@ -144,8 +144,9 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     add(quantity, valueString("unit", argument.quantity.unit));
     // Use the published EMA Coding for an operator, not a private graph code.
     // Exact graph quantities keep their existing wire shape.
-    if (argument.quantity.comparator || argument.quantity.comparatorExtensions?.length) quantity.push(
+    if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) quantity.push(
       ...(simpleQuantityForR5({ comparator: argument.quantity.comparator,
+        _comparator: argument.quantity.comparatorElement,
         extension: argument.quantity.comparatorExtensions })?.extension ?? [])
     );
     nested.push({ url: "quantity", extension: quantity });
@@ -338,11 +339,12 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     }
     const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;
     const current=comparatorExtensions?quantityFromWire({extension:comparatorExtensions}):undefined;
-    const comparator=current?.comparator;
+    const comparator=current?.comparator,comparatorElement=current?._comparator;
     comparatorExtensions=current?.extension;
-    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorExtensions?.length)
+    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorElement||comparatorExtensions?.length)
       result.quantity={value:amount,range:lower!==undefined||upper!==undefined?{low:lower,high:upper}:undefined,
-        unit:units,...(comparator?{comparator}:{}),...(comparatorExtensions?{comparatorExtensions}:{})};
+        unit:units,...(comparator?{comparator}:{}),...(comparatorElement?{comparatorElement}:{}),
+        ...(comparatorExtensions?{comparatorExtensions}:{})};
   }
   if(i18n)result.i18n=i18n;
   return result;

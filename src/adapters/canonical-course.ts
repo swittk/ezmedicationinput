@@ -123,6 +123,7 @@ import {
   simpleQuantityForR5,
   quantityForR5 as generalQuantityForR5,
   quantityFromR5,
+  quantityFromWire,
   quantityForR6,
 } from "../fhir-quantity-operator";
 import { equalStructuredValues } from "../stable-structure";
@@ -183,9 +184,7 @@ function measureFromR5(q: FhirQuantity | undefined): CanonicalMeasure | undefine
   return quantityFromR5(q);
 }
 export function measureFromWire(q: FhirQuantity | FhirR6Quantity | undefined): CanonicalMeasure | undefined {
-  if (!q) return undefined;
-  const operator = getQuantityComparator(q);
-  return operator && operator !== q.comparator ? { ...q, comparator: operator } : (q as CanonicalMeasure);
+  return quantityFromWire(q);
 }
 function rangeFromWire(r: FhirRange | undefined, r5 = false): CanonicalRange | undefined {
   if (!r) return undefined;
@@ -845,7 +844,7 @@ export function isR6DosageInstruction(input: object): input is FhirR6DosageInstr
       "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
       "patientInstruction" in input || "maxDosePerPeriod" in input ||
       "maxDosePerAdministration" in input || "maxDosePerLifetime" in input) return false;
-  if ("safety" in input) return true;
+  if ("safety" in input || getCourseCycleCount(input as FhirR6DosageInstruction) !== undefined) return true;
   for (const marker of (input as FhirR6DosageInstruction).extension ?? []) {
     if (marker.url === R6_DRAFT_STEPS_SOURCE_URL || marker.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL) return true;
     if (marker.url === DOSAGE_RECONCILIATION_SOURCE_URL && marker.extension?.some(child =>
@@ -1046,8 +1045,8 @@ function updateNativeTimingAnnotations(
   const raw = a.provenance.data as FhirR6Dosage;
   const live = a.schedule?.recurrence;
   const original = raw.timing?.repeat;
-  // The R5 boundary already owns its other annotations. Only a surviving
-  // duration marker needs this shared reconciliation before either projection.
+  // The R5 boundary normally owns its annotations. Surviving duration
+  // markers and superseded exact offsets still need shared reconciliation.
   if (!fromR6 && !original?.extension?.length) return target;
   if (
     !original?.extension?.length &&
@@ -1071,9 +1070,18 @@ function updateNativeTimingAnnotations(
   const durationChanged = duration && (duration.value !== live?.occurrenceDuration ||
     duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
     !same(duration.range, live?.occurrenceDurationRange));
-  if (!fromR6 && !durationChanged) return target;
+  const exactOffset = original?.offset !== undefined
+    ? original.extension?.find(item => item.url === TIMING_OFFSET_EXACT_EXTENSION_URL) : undefined;
+  const supersededOffset = exactOffset &&
+    getExactTimingOffsetMinutes({ extension: [exactOffset] }) !== original?.offset;
+  if (!fromR6 && !durationChanged && !supersededOffset) return target;
   const oldMarkers = original ? { extension: original.extension, offset: original.offset } : undefined;
   const changes = new Set<string>();
+  if (supersededOffset) {
+    changes.add(TIMING_OFFSET_EXACT_EXTENSION_URL);
+    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [exactOffset] }];
+  }
   const changed = (url: string, before: unknown, after: unknown) => {
     if (!same(before, after)) changes.add(url);
   };
@@ -1320,12 +1328,16 @@ function administrationToWire(
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
   if (projection?.source || oldDuration && (wireTiming?.repeat?.boundsRange || wireTiming?.repeat?.boundsDuration) ||
       oldDuration?.extension?.some(child => child.url === "projectedRange") ||
-      a.anchoredLength?.range && !oldDuration) {
+      (a.anchoredLength?.range || a.anchoredLength?.quantity) && !oldDuration) {
     const replacement: FhirExtension | undefined = projection?.source
       ? { ...projection.source, extension: wireTiming?.repeat?.boundsRange ? projection.source.extension :
           projection.source.extension!.filter(child => child.url !== "projectedRange") }
       : a.anchoredLength?.range && projection
-        ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, valueRange: projection.range } : undefined;
+        ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, valueRange: projection.range }
+        : a.anchoredLength?.quantity
+          ? { url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+              valueQuantity: generalQuantityForR5(clause ? serializeDuration(a.anchoredLength.quantity) : a.anchoredLength.quantity) }
+          : undefined;
     const next = modifiers?.filter(item => item !== oldDuration) ?? [];
     if (replacement) {
       const { valueRange: _oldRange, valueQuantity: _oldQuantity, extension: priorChildren, ...metadata } = oldDuration ?? {};
@@ -1788,8 +1800,12 @@ function administrationToWire(
     // An explicit native removal must not resurrect an imported clinical
     // doseLimit. But an ordinary dosage with no authored safety must not
     // grow a synthetic empty R6 safety policy merely because limits=undefined.
-    const limits = a.limits ?? (source?.safety?.doseLimit !== undefined ? [] : undefined);
-    assign(output, "safety", safetyToWire(a.safety, source?.safety, limits, Boolean(clause)));
+    // A sparse retained field (for example a reference-only site) does not
+    // own a policy subsequently authored on the live editable R5 dosage.
+    const safetySource = source?.safety ??
+      (a.provenance?.format === "r5" ? (a.provenance.data as EzDosage).safety : undefined);
+    const limits = a.limits ?? (safetySource?.doseLimit !== undefined ? [] : undefined);
+    assign(output, "safety", safetyToWire(a.safety, safetySource, limits, Boolean(clause)));
   } else {
     delete output.safety;
     delete output.maxDosePerPeriod;
@@ -1994,7 +2010,9 @@ export function unchangedR6SourceDisplay(
 ): string | undefined {
   return raw.renderedInstruction && !raw.step?.length && !raw.repeatCycle &&
     !raw.safety?.doseLimit?.length && !raw.safety?.ifExceeded &&
-    getCourseCycleCount(raw) === undefined && options?.realizationMode !== "normalized"
+    getCourseCycleCount(raw) === undefined &&
+    !raw.extension?.some(item => item.url === R6_DRAFT_STEPS_SOURCE_URL) &&
+    options?.realizationMode !== "normalized"
     ? raw.renderedInstruction : undefined;
 }
 

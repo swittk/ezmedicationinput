@@ -73,7 +73,8 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
   const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
   return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
 }
-function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[], firstIsTreatmentOrigin: boolean): boolean {
+function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
+  drafts: readonly { index: number }[]): boolean {
   if (!Array.isArray(saved) || active.length < saved.length) return false;
   // Unchanged projections need no identity index or boundary hashes. Remember
   // the compared prefix so reconciliation never deep-walks those stages twice.
@@ -83,6 +84,10 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
   if (firstChanged === saved.length && active.length === saved.length) return true;
   const identities = new Map<string, number>();
   const changed: string[] = [];
+  const firstIsTreatmentOrigin = drafts[0]?.index !== 0;
+  // Only earlier phases can supply a retained draft's completion.
+  // An opening draft supplies its successor's start, not its completion.
+  const lastDraftPredecessor = drafts.length ? drafts[drafts.length - 1].index - drafts.length : -1;
   const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
     step.start || step.end ? "boundary:" + compactProjectionFingerprint({
       start: step.start, end: step.end, count: step.count,
@@ -100,7 +105,7 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     // without an explicit step.end. Dose edits leave that declared completion.
     for (let member = 0; member < prior.component.length; member++)
       if (prior.component[member].id !== current.component[member].id ||
-          !prior.end && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
+          !prior.end && index <= lastDraftPredecessor && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
             draftCompletionTiming(current.component[member].timing)))
         return false;
     changed.push(identity);
@@ -127,7 +132,7 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
       projected: FhirR6DosageStep[];
       synthesizedStarts?: number[];
     } | undefined;
-    if (!saved || !Array.isArray(saved.drafts) || !sameDraftStageOwnership(active, saved.projected, saved.drafts[0]?.index !== 0)) return active;
+    if (!saved || !Array.isArray(saved.drafts) || !sameDraftStageOwnership(active, saved.projected, saved.drafts)) return active;
     const restored: FhirR6DosageStep[] = [];
     const inferred = new Set(saved.synthesizedStarts ?? []);
     let draft = 0, member = 0;
@@ -302,6 +307,11 @@ function reconcileSafetyScopes(
       (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
       getQuantityComparator(ap) === getQuantityComparator(bp);
   };
+  const sameClinicalValue = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean =>
+    left.valueQuantity?.value === right.valueQuantity?.value &&
+    getQuantityComparator(left.valueQuantity) === getQuantityComparator(right.valueQuantity) &&
+    left.valueInteger === right.valueInteger &&
+    equalStructuredValues(left.valueExpression, right.valueExpression);
   const claimed = new Set<FhirR6DoseLimit>();
   const stepLimits = new Set<FhirR6DoseLimit>();
   const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
@@ -311,10 +321,7 @@ function reconcileSafetyScopes(
     let replacement: FhirR6DoseLimit | undefined;
     for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
         (!item.id || !sourceIds.has(item.id) &&
-          item.valueQuantity?.value === limit.valueQuantity?.value &&
-          getQuantityComparator(item.valueQuantity) === getQuantityComparator(limit.valueQuantity) &&
-          item.valueInteger === limit.valueInteger &&
-          equalStructuredValues(item.valueExpression, limit.valueExpression))) {
+          sameClinicalValue(item, limit))) {
       if (replacement) return undefined;
       replacement = item;
     }
@@ -371,7 +378,8 @@ function reconcileSafetyScopes(
     for (const limit of policy.doseLimit ?? []) {
       const group = sourceGroups.get(limit)!;
       const assigned = matches.get(limit);
-      if (assigned && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length)) {
+      if (assigned && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length ||
+          limit.id !== undefined && sameShape(limit, assigned) && sameClinicalValue(limit, assigned))) {
         limits.push(assigned);
         if (phase) stepLimits.add(assigned);
         if (group.sourceCount !== group.live.length) changed = true;

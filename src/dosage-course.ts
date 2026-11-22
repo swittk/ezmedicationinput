@@ -772,11 +772,13 @@ export function reconcileR5SafetyEdits(
       : limit.scope + ":" + windowKey(limit);
   const oldKeys = new Map<string, number>();
   const liveKeys = new Map<string, number>();
+  let repeatedPeriodIdentity = false;
   const indexKeys = (items: readonly FhirR6DoseLimit[], keys: Map<string, number>,
     allowed?: readonly boolean[]) => {
     items.forEach((limit, index) => {
       if (allowed && !allowed[index]) return;
       const key = signature(limit);
+      if (limit.scope === "period" && keys.has(key)) repeatedPeriodIdentity = true;
       keys.set(key, keys.has(key) ? -1 : index);
     });
   };
@@ -789,6 +791,29 @@ export function reconcileR5SafetyEdits(
     if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0) continue;
     matched.set(liveIndex, oldIndex);
     usedOld.add(oldIndex);
+  }
+  if (repeatedPeriodIdentity) {
+    // Equal windows are not equal limits. Reserve a uniquely unchanged R5
+    // projection at its existing position before matching an edited neighbor.
+    // A moved amount alone cannot distinguish a reorder from two amount edits.
+    const exactKey = (limit: FhirR6DoseLimit) =>
+      compactProjectionFingerprint(periodMaximumToR5(limit.valueQuantity!, limit.period!, limit));
+    const oldExact = new Map<string, number>(), liveExact = new Map<string, number>();
+    oldLimits.forEach((limit, index) => {
+      if (!representable[index] || usedOld.has(index) || limit.scope !== "period") return;
+      const key = exactKey(limit);
+      oldExact.set(key, oldExact.has(key) ? -1 : index);
+    });
+    live.forEach((limit, index) => {
+      if (matched.has(index) || limit.scope !== "period") return;
+      const key = exactKey(limit);
+      liveExact.set(key, liveExact.has(key) ? -1 : index);
+    });
+    for (const [key, oldIndex] of oldExact) {
+      const liveIndex = liveExact.get(key);
+      if (oldIndex < 0 || liveIndex !== oldIndex) continue;
+      matched.set(liveIndex, oldIndex); usedOld.add(oldIndex);
+    }
   }
   const oldByScope = new Map<string, number[]>();
   const liveByScope = new Map<string, number[]>();
@@ -859,6 +884,9 @@ export function reconcileR5SafetyEdits(
       valueQuantity: _quantity, valueInteger: _integer,
       valueExpression: _expression, ...metadata
     } = original;
+    // A Ratio's live annotation array owns an explicit clear. R6-only
+    // fields such as text still belong to the identified retained limit.
+    if (replacement.scope === "period") delete metadata.extension;
     return { ...metadata, ...replacement } as FhirR6DoseLimit;
   });
   // Keep singular hidden siblings before the edited field. Comparable

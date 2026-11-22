@@ -1111,7 +1111,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     return true;
   const primary = dosage.doseAndRate?.[0];
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
-  if ((primary?.rateQuantity || primary?.rateRatio) && !dosage.text?.trim()) return true;
+  if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
+      !dosage.text?.trim()) return true;
   // Explicit normalization uses the existing rich native realizer; source
   // replay must not hide a retained infusion qualifier or requested locale.
   if (options?.realizationMode === "normalized" &&
@@ -1248,7 +1249,7 @@ export function formatSigBatch(
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
-  const steps=batch.fhirNext.step;
+  const steps=batch.meta.canonical.course?.stages??batch.fhirNext.step;
   if(steps&&steps.length>1)return style==="short"?batch.shortText:batch.longText;
   if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
     return style==="short"?batch.shortText:batch.longText;
