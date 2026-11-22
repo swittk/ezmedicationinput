@@ -4004,7 +4004,7 @@ describe("round45 finite history and ranged occurrence bounds", () => {
     ["partial first and last days", true, "2026-01-01T12:00:00Z", undefined, 58],
     ["recorded first-day allowance", true, "2026-01-01T12:00:00Z", "2026-01-01T08:00:00Z", 56]
   ] as const)("proves an attainable ranged maximum from %s", (_name, occurrence, from, record, expected) => {
-    const row: FhirDosage = { asNeededBoolean: true, doseAndRate: [rangedDose],
+    const row: FhirDosage = { asNeeded: true, doseAndRate: [rangedDose],
       timing: { repeat: { frequency: 2, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00", "20:00:00"],
         ...(occurrence ? { extension: [oncePerDay] } : {}) } }, maxDosePerPeriod: periodCap(4) };
     // Two tablets at the first free clock of each civil bucket attain this
@@ -4053,4 +4053,153 @@ describe("round45 finite history and ranged occurrence bounds", () => {
       }
     });
   });
+});
+
+
+describe("round46 supported execution boundaries", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const annotated = {
+    id: "round46-administration",
+    extension: [{ url: "urn:test:round46:source", valueString: "retained" }],
+  };
+  const amount = (value = 1) => ({ doseAndRate: [{ doseQuantity: { value, unit: "tab" } }] });
+  const r5Forms = (rows: FhirDosage | FhirDosage[]) => {
+    const r6 = toDosageDetails(Array.isArray(rows) ? rows : [rows]);
+    return [rows, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]];
+  };
+  const r6Forms = (raw: FhirR6DosageInstruction) => {
+    const rows = toFhirR5Dosages(raw);
+    return [raw, rows, JSON.parse(JSON.stringify(rows)) as FhirDosage[]];
+  };
+
+  it.each(["immediate", "ordinary clock", "later authored start"] as const)(
+    "keeps the established successor boundary for %s", variant => {
+      const loading: FhirDosage = { ...amount(), sequence: 1, timing: { repeat: {
+        count: 1, frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"]
+      } } };
+      const successor: FhirDosage = { ...annotated, ...amount(2), sequence: 2, timing: { repeat:
+        variant === "ordinary clock"
+          ? { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"] }
+          : { when: [EventTiming.Immediate], ...(variant === "later authored start"
+            ? { boundsPeriod: { start: "2026-01-02T12:00:00Z" } } : {}) }
+      } };
+      const expected = variant === "immediate"
+        ? ["2026-01-01T08:00:00+00:00", "2026-01-01T08:00:00+00:00"]
+        : variant === "later authored start"
+        ? ["2026-01-01T08:00:00+00:00", "2026-01-02T12:00:00+00:00"]
+        : ["2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+          "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"];
+      for (const dosage of r5Forms([loading, successor])) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 4 })).toEqual(expected);
+        expect(calculateTotalUnits({ dosage, ...options,
+          durationValue: variant === "later authored start" ? 3 : 1, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: variant === "ordinary clock" ? 1 : 3, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each(["explicit one", "explicit zero", "nominal history", "actual history", "before eligibility", "alternate days"] as const)(
+    "spends finite allowance once with %s", variant => {
+      const alternate = variant === "alternate days";
+      const raw: FhirR6DosageInstruction = { step: [{
+        start: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
+          code: "treatment-start" }] }, offsetDuration: { value: 3, unit: "d", system: ucum, code: "d" } },
+        component: [{ ...annotated, ...amount(), timing: { repeat: {
+          countMax: 3, frequency: 1, period: alternate ? 2 : 1, periodUnit: Unit.Day,
+          timeOfDay: ["09:00:00"], boundsPeriod: { start: origin }
+        } } }]
+      }] };
+      const query = { ...options, limit: 8,
+        from: alternate ? "2026-01-06T00:00:00Z"
+          : variant === "before eligibility" ? "2026-01-02T00:00:00Z" : "2026-01-05T00:00:00Z",
+        priorCount: variant === "explicit one" || alternate ? 1
+          : variant === "explicit zero" || variant === "before eligibility" ? 0 : undefined,
+        priorDoseTimes: variant === "actual history" ? ["2026-01-04T09:00:00Z"] : undefined,
+      };
+      const days = alternate ? [7, 9] : variant === "before eligibility" ? [4, 5, 6]
+        : variant === "explicit zero" ? [5, 6, 7] : [5, 6];
+      for (const dosage of r6Forms(raw)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query))
+          .toEqual(days.map(day => "2026-01-0" + day + "T09:00:00+00:00"));
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 7, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: days.length, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each(["Q4H range", "Q4H exact", "BID range"] as const)(
+    "retains the admitted coded cadence for %s", variant => {
+      const daily = variant === "BID range";
+      const ranged = variant !== "Q4H exact";
+      const row: FhirDosage = { ...annotated, ...amount(), timing: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation",
+          code: daily ? "BID" : "Q4H" }] },
+        repeat: { frequency: daily ? 1 : ranged ? 4 : 6,
+          ...(ranged ? { frequencyMax: daily ? 3 : 8 } : {}),
+          period: 1, periodUnit: Unit.Day,
+          boundsDuration: { value: 1, unit: "d", code: "d", system: ucum } }
+      } };
+      const query = { ...options, from: "2026-01-01T01:00:00Z",
+        orderedAt: "2026-01-01T01:00:00Z", limit: 12 };
+      const clocks = daily ? ["08:00:00", "20:00:00"]
+        : ["01:00:00", "05:00:00", "09:00:00", "13:00:00", "17:00:00", "21:00:00"];
+      for (const dosage of r5Forms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(clocks.map(clock => "2026-01-01T" + clock + "+00:00"));
+        // The explicit range still owns the existing maximum-supply endpoint.
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+          .toBe(daily ? 3 : ranged ? 8 : 6);
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each(["missing", "known", "local", "independent end", "qualified known"] as const)(
+    "retains authored duration presence before dependent completion (%s)", variant => {
+      const duration = variant === "known" || variant === "qualified known"
+        ? { value: 2, unit: "hours", system: ucum, code: "h", id: "authored-duration",
+          ...(variant === "qualified known" ? { comparator: ">=" as const } : {}) }
+        : { value: 3, unit: "half-hour blocks", system: "urn:clinic:duration-units",
+          code: "half-hour-block", id: "authored-duration" };
+      const marker = { url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration",
+        valueQuantity: duration };
+      const raw: FhirR6DosageInstruction = { step: [{
+        ...(variant === "independent end" ? { end: {
+          contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
+            code: "treatment-start" }] },
+          offsetDuration: { value: 2, unit: "d", code: "d", system: ucum }
+        } } : {}),
+        component: [{ ...annotated, timing: { repeat: { count: 1, timeOfDay: ["23:30:00"],
+          ...(variant === "missing" ? {} : { extension: [marker] }) } },
+          doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }] }]
+      }, {
+        start: { contextCode: { coding: [{ system: "urn:ezmedicationinput:CodeSystem:course-phase-event",
+          code: "previous-phase-next-day" }] } },
+        component: [{ timing: { repeat: { frequency: 1, period: 1,
+          periodUnit: Unit.Day, timeOfDay: ["08:00:00"] } },
+          doseAndRate: [{ doseQuantity: { value: 20, unit: "mL" } }] }]
+      }] };
+      const query = { from: "2026-12-01T00:00:00Z", orderedAt: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", limit: 4 };
+      const unresolved = variant === "local" || variant === "qualified known";
+      const days = unresolved ? [] : variant === "missing" ? [2, 3, 4] : [3, 4, 5];
+      for (const dosage of r6Forms(raw)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(["2026-12-01T23:30:00+00:00",
+          ...days.map(day => "2026-12-0" + day + "T08:00:00+00:00")]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 4, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: unresolved ? 100 : variant === "missing" ? 160 : 140, unit: "mL" });
+        const projected = projectCanonicalCourse(importCanonicalCourse(dosage));
+        if (variant === "local" || variant === "independent end") {
+          for (const repeat of [projected.fhir[0].timing!.repeat!,
+            projected.fhirNext.step![0].component[0].timing!.repeat!]) {
+            expect(repeat.extension).toContainEqual(marker);
+            expect(repeat.duration).toBeUndefined();
+            expect(repeat.durationUnit).toBeUndefined();
+          }
+        }
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
 });

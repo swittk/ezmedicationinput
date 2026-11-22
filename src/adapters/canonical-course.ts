@@ -283,6 +283,11 @@ function timingAnnotations(
             if (duration.range) out.occurrenceDurationRange = duration.range;
             out.occurrenceDurationUnit = duration.unit;
             out.occurrenceDurationComparator = duration.comparator;
+          } else if (r?.duration === undefined && e.valueQuantity?.value !== undefined) {
+            // Preserve numeric duration presence without interpreting a local
+            // unit. Its original quantity remains in the timing provenance.
+            out.occurrenceDuration = e.valueQuantity.value;
+            out.occurrenceDurationComparator = getQuantityComparator(e.valueQuantity);
           }
         }
         break;
@@ -345,7 +350,8 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       occurrenceDurationMax: annotations?.occurrenceDurationRange ? undefined : r.durationMax,
       occurrenceDurationRange: annotations?.occurrenceDurationRange,
       occurrenceDurationUnit: annotations?.occurrenceDurationRange ? undefined :
-        r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
+        r.duration === undefined && annotations?.occurrenceDuration !== undefined
+          ? annotations.occurrenceDurationUnit : r.durationUnit,
       occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
       courseLengthRange: rangeFromFhir(r.boundsRange),
@@ -1012,9 +1018,16 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     // A qualified duration stays in its typed timing marker or carrier rate
     // denominator; Timing.duration must not assert false exactness.
     const markerDuration = r.occurrenceDurationComparator || r.occurrenceDurationRange;
-    const occurrenceDuration = markerDuration ? undefined : r.occurrenceDuration;
-    const occurrenceDurationMax = markerDuration ? undefined : r.occurrenceDurationMax;
-    const occurrenceDurationUnit = markerDuration ? undefined : r.occurrenceDurationUnit;
+    // Numeric presence from an unresolved marker must not create a unitless
+    // core duration. Keep its authored marker and any independent core fields.
+    const unresolvedMarkerDuration = r.occurrenceDuration !== undefined &&
+      r.occurrenceDurationUnit === undefined && prior?.duration === undefined;
+    const occurrenceDuration = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.duration : r.occurrenceDuration;
+    const occurrenceDurationMax = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.durationMax : r.occurrenceDurationMax;
+    const occurrenceDurationUnit = markerDuration ? undefined :
+      unresolvedMarkerDuration ? prior?.durationUnit : r.occurrenceDurationUnit;
     const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
       ? r.offset : undefined;
     if (

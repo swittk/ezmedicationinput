@@ -468,7 +468,7 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
       repeat.anchors?.length ||
       codedDaily !== undefined && codedDaily >= 1
   );
-  const licensedCode = licensedDailyRangeRecurrence(timing, repeat, codedDaily);
+  const licensedCode = licensedDailyRangeRecurrence(timing, repeat, codedCadence);
   const frequency = positiveInteger(repeat.frequency);
   const frequencyMax = positiveInteger(repeat.frequencyMax);
   const period = positiveNumber(repeat.period);
@@ -1060,7 +1060,7 @@ function matchesDailyCodeCadence(daily: number, repeat: CanonicalRecurrence): bo
   const seconds = repeat.periodUnit ? INFUSION_TIME_SECONDS[repeat.periodUnit] : undefined;
   return !!seconds && daily * repeat.period! * seconds === repeat.frequency! * 86400;
 }
-/** The known daily code supplies one concrete cadence inside an authored
+/** The known code supplies one concrete cadence inside an authored
  * repeat range. Only the execution copy is resolved; neither endpoint nor
  * its code is changed on the prescription. Explicit positions keep ownership. */
 function licensedDailyRangeRecurrence(
@@ -2364,7 +2364,8 @@ function resolveAdministrationWindow(
     ? absoluteStart ?? start : implicitStart;
   let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
   if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
-  if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
+  if (successorFloor && successorFloor > eligibleFrom &&
+      !arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate)) eligibleFrom = successorFloor;
   const delay = getAdministrationOffsetMinutes(administration);
   const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
   // A scalar parallel phaseOrigin survives unrelated global step cuts.
@@ -4139,9 +4140,10 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       countEligibilityStart: undefined,
       countedActualTimes,
       priorCount: undefined,
-      // Eligible actual history owns the spent count, including a dose
-      // taken off its nominal clock. Only the remaining slots are replayed.
-      from: one.asNeeded || countedActualTimes?.size || (options.priorCount !== undefined && !eligibleAt)
+      // Actual history or an explicit consumed count already owns the spent
+      // allowance. Enumerate the rest after the query and phase eligibility,
+      // without changing the ordered cadence origin.
+      from: (one.asNeeded || countedActualTimes?.size || options.priorCount !== undefined) && requestedFrom > origin
         ? requestedFrom : origin,
       limit: capped,
     } as PhaseCountOptions);
@@ -7523,7 +7525,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
   const one = input as CanonicalAdministration;
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
-    return calculateCourseTotalUnits(courseFromCanonicalRows([one]), options);
+    return calculateTotalUnits({ ...options, dosage: courseFromCanonicalRows([one]) });
   const choice = executionChoice(one);
   if (choice) {
     const selected = options.alternativeChoices?.[choice.groupId];
@@ -7786,6 +7788,9 @@ function completionAfterAcceptedAdministration(
   if (repeat?.occurrenceDurationComparator ||
       repeat?.occurrenceDurationMax !== undefined &&
         repeat.occurrenceDurationMax !== repeat.occurrenceDuration) return undefined;
+  // An authored duration with no recognized unit is still a duration.
+  // Only a genuinely absent duration can complete at the dose instant.
+  if (repeat?.occurrenceDuration !== undefined && !repeat.occurrenceDurationUnit) return undefined;
   if (repeat?.occurrenceDuration && repeat.occurrenceDurationUnit) {
     const advance = createIntervalStepper(
       { period: repeat.occurrenceDuration, periodUnit: repeat.occurrenceDurationUnit },

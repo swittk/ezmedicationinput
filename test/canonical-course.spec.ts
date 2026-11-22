@@ -2461,9 +2461,10 @@ describe("round39 metric totals and live event identity", () => {
       expect(text).toContain("Dose: 1 mL");
       expect(text).not.toMatch(/1 mL \(per administration target\)/u);
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(thai).toContain("ขนาดยาที่สั่ง:");
-      expect(thai).toContain("แต่ละจุด");
-      expect(thai).not.toContain("แต่ละจุด 1 mL");
+      expect(thai.split(/;\s*/u).filter(fragment => fragment.startsWith("ขนาดยา"))).toEqual([
+        "ขนาดยาที่สั่ง: แต่ละจุด 1 ถึง 2 หยด",
+        "ขนาดยาต่อครั้ง: ครั้งละ 1 มิลลิลิตร"
+      ]);
     }
   });
 
@@ -3023,7 +3024,12 @@ describe("round 43 supported supply bounds", () => {
       durationValue: 7, durationUnit: FhirPeriodUnit.Day,
       context: { containerValue: 2, containerUnit: "tab" } };
     const before = structuredClone(raw);
-    for (const dosage of [...surfaces(raw), ...surfaces(scalar)]) {
+    const phaseRow = toFhirR5Dosages(scalar)[0];
+    phaseRow.modifierExtension = [...(phaseRow.modifierExtension ?? []), {
+      url: "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin",
+      valueQuantity: { value: 0, unit: "d", code: "d", system: "http://unitsofmeasure.org" }
+    }];
+    for (const dosage of [...surfaces(raw), ...surfaces(scalar), phaseRow, [phaseRow]]) {
       const source = JSON.stringify(dosage);
       expect(calculateTotalUnits({ dosage, ...query }).totalUnits).toBe(maximum === undefined ? 7 : expected);
       expect(calculateTotalUnits({ dosage, ...query, roundToMultiple: 5 })).toMatchObject({

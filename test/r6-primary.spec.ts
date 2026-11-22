@@ -3236,6 +3236,26 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       safety: { doseLimit: [{ scope: "administration",
         valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] }
     };
+    const previews: [FhirR6DosageInstruction, string][] = [
+      [source, "Call clinic for dose; Across this course: max per administration: ~5 mg"],
+      [{ renderedInstruction: source.renderedInstruction }, "Call clinic for dose"],
+      [{ safety: source.safety }, "Across this course: max per administration: ~5 mg"]
+    ];
+    for (const [header, expected] of previews) for (const emptySteps of [false, true]) {
+      const input: FhirR6DosageInstruction = emptySteps ? { ...header, step: [] } : header;
+      const before = JSON.stringify(input);
+      const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(input))) as FhirDosage[];
+      for (const locale of ["en", "th"]) {
+        const localized = locale === "th" ? expected.replace("Across this course:", "ตลอดแผนการใช้ยานี้:") : expected;
+        const imported = fromFhir(input, { locale, realizationMode: "normalized" });
+        expect(imported.longText).toBe(localized);
+        expect(imported.items.map(item => item.longText)).toEqual([localized]);
+        expect(formatParseBatch(imported, "long")).toBe(localized);
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toBe(localized);
+        expect(formatSig(cold, "long", { locale, realizationMode: "normalized" })).toBe(localized);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
     const rows = toFhirR5Dosages(source);
     expect(rows).toHaveLength(1);
     expect(rows[0].text).toBe(source.renderedInstruction);
@@ -4831,7 +4851,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
           expect(() => nextDueDoses(input, opts)).toThrow(expect.objectContaining({ code: "unresolved-cap-period" }));
           expect(total.explanation).toContain("could not be applied");
         } else {
-          expect(nextDueDoses(input, opts)[1]).toBe("2026-11-04T08:00:00+00:00");
+          expect(nextDueDoses(input, opts)).toEqual([
+            "2026-11-02T08:00:00+00:00", "2026-11-04T08:00:00+00:00",
+            "2026-11-06T08:00:00+00:00", "2026-11-08T08:00:00+00:00"
+          ]);
         }
       }
       expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
