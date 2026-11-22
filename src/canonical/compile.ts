@@ -595,6 +595,7 @@ export function courseFromAdministrations(
     let start: CanonicalBoundary | undefined;
     const minutes = first.delayMinutes;
     if (
+      key === 1 &&
       minutes !== undefined &&
       minutes > 0 &&
       Number.isFinite(minutes) &&
@@ -604,6 +605,7 @@ export function courseFromAdministrations(
           // An independently stated origin owns the member delay. Promoting
           // it here would consume it before the contextual boundary replaces it.
           a.onsetDays === undefined && !a.onsetReference &&
+          !a.schedule?.recurrence?.calendarWindow?.start &&
           !a.schedule?.recurrence?.clocks?.length &&
           !a.schedule?.recurrence?.anchors?.length
       )

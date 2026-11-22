@@ -418,18 +418,24 @@ function mergeDose(
   let value = mergeOptionalScalar(left.value, right.value);
   let unit = mergeOptionalScalar(left.unit, right.unit);
   const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
-  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.status !== "unsupported" &&
+  if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
+      clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
-    const doseUnit = [clinicalQuantity.numerator.unit,
-      ...clinicalQuantity.denominators.filter(term => term.dimension !== "time").map(term => term.unit)
-    ].join("/");
-    value = clinicalQuantity.numerator.value / divisionCount;
+    // A carrier numerator belongs to the rate; the separately typed active
+    // amount owns the divided dose and its comparator.
+    const activeDose = clinicalQuantity.projectedDose ?? clinicalQuantity.numerator;
+    let doseUnit = activeDose.unit;
+    if (!clinicalQuantity.projectedDose) {
+      for (const term of clinicalQuantity.denominators)
+        if (term.dimension !== "time") doseUnit += "/" + term.unit;
+    }
+    value = activeDose.value / divisionCount;
     unit = doseUnit;
     clinicalQuantity = {
       ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
       dividedDoseCount: divisionCount, projectedDose: {
-        value, unit, ...(clinicalQuantity.numerator.comparator
-          ? { comparator: clinicalQuantity.numerator.comparator } : {})
+        value, unit, ...(activeDose.comparator
+          ? { comparator: activeDose.comparator } : {})
       }
     };
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {

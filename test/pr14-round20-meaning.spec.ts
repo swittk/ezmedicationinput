@@ -430,7 +430,10 @@ describe("round32 live schedule modifier proof family", () => {
     expect(warm).not.toBe(text);
     expect(warm).toBe(formatSig(JSON.parse(JSON.stringify(row)), "long", options));
     if (kind === "delay") expect(warm).toContain("60 minutes later");
-    // Meaning's sibling test checks day15 replaces stale source wording.
+    else {
+      expect(warm).toMatch(/days 1(?: and |, )15/u);
+      expect(warm).not.toMatch(/days 1(?: and |, )8\b/u);
+    }
     expect(row.modifierExtension![0]).toBe(modifier);
   });
 });
@@ -483,6 +486,12 @@ describe("round33 onset scope and complete Thai fractions", () => {
     expect(schedule.frequency ?? 1).toBe(1);
     expect(schedule.when).toBeUndefined();
     expect(parsed.input).toContain(ending);
+    // Relative morning-end execution is not modeled; the clinician-facing
+    // suggestion retains that authored qualifier beside the known cadence.
+    for (const text of [parsed.shortText, parsed.longText]) {
+      expect(text).toContain(ending);
+      expect(text).toMatch(/every 6 hours|Q6H/u);
+    }
     for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
       expect(nextDueDoses(input, { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
         timeZone: "UTC", limit: 4 })).toEqual([
@@ -515,10 +524,10 @@ describe("round33 mixed clock and event recurrence", () => {
       anchors: ["MORN"], clocks: ["09:00:00"] };
     return value;
   }
-  it("retains one count and cap owner across mixed occurrence positions and the next phase", () => {
+  it.each([1, 2])("retains one count and cap owner across mixed occurrence positions and the next phase (%s tablets/day)", cap => {
     const loading = mixed();
     loading.schedule!.recurrence!.count = 2;
-    loading.limits = [{ scope: "period", amount: { value: 1, unit: "tab" },
+    loading.limits = [{ scope: "period", amount: { value: cap, unit: "tab" },
       period: { value: 1, unit: "d" } }];
     const next = tablet();
     next.amounts![0].quantity!.value = 2;
@@ -533,9 +542,12 @@ describe("round33 mixed clock and event recurrence", () => {
       for (const row of rows)
       expect(Boolean(row.timing?.repeat?.when?.length && row.timing.repeat.timeOfDay?.length)).toBe(false);
     for (const input of [native, JSON.parse(JSON.stringify(projection.fhir)), projection.fhirNext]) {
-      expect(nextDueDoses(input, context)).toEqual([
+      expect(nextDueDoses(input, context)).toEqual(cap === 1 ? [
         "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
         "2026-01-02T20:00:00+00:00", "2026-01-03T20:00:00+00:00"
+      ] : [
+        "2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00",
+        "2026-01-01T20:00:00+00:00", "2026-01-02T20:00:00+00:00"
       ]);
       expect(calculateTotalUnits({ dosage: input, ...context,
         durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(6);

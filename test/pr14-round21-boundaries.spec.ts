@@ -782,8 +782,8 @@ describe("round34 compact range and maximum ownership", () => {
       const amount = importCanonicalCourse(input).stages[0].administrations[0].amounts![0];
       expect(amount.range).toEqual(range);
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      expect(text).toContain("500");
-      expect(text).toContain("1 mg");
+      expect(text).toMatch(kind === "authored" ? /(?:^|\D)500 mcg\b/u : /(?:^|\D)500 ug\b/u);
+      expect(text).toMatch(/(?:^|\D)1 mg\b/u);
       expect(text).not.toContain("500 to 1");
     }
     expect(JSON.stringify([row, raw])).toBe(before);

@@ -3708,7 +3708,8 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
 };
 const RESULT_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
-  let text = joinLocalizedTokens(c.locale, [c.label, c.manner]);
+  const head = c.amount ? c.label + profile.quantitySeparator + c.amount : c.label;
+  let text = joinLocalizedTokens(c.locale, [head, c.manner]);
   if (c.site) {
     const sourceSiteAlreadyHasLocative = stripBodySiteSourceLead(c.site) !== c.site;
     if (sourceSiteAlreadyHasLocative) {
@@ -3871,7 +3872,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
   const temporalPhrase = temporalRelation && temporalAdjunct && !temporallyEntailedByCompound
     ? joinLocalizedTokens(locale, [
         localizeAdviceRelation(temporalRelation, locale) ?? temporalRelation,
-        translatedArgumentConcept(temporalAdjunct, locale)
+        translatedArgument(temporalAdjunct, locale)
       ])
     : undefined;
   const complete = temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized;
@@ -3895,7 +3896,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   frame = frameWithCanonicalPrimaryContext(frame, clause);
   if (primaryActionAmountConflicts(frame, clause.dose,
       !clause.dose && clause.sourceProjectionVerified === false))
-    frame = frameWithoutSupersededAmount(frame, clause.dose);
+    frame = frameWithReconciledAmount(frame, clause.dose);
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
@@ -3903,10 +3904,9 @@ export function realizeRichPrimaryWithCanonicalDose(
       ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
       : getMedicationInstructionAction(frame.predicate.lemma);
     const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
-    // Preserve the source frame's accompaniment valence. A result-only
-    // realization cannot own the live administration Amount after a head edit;
-    // the default action composes that dose with its surviving site and manner.
-    const realizer = sourceRealizer === "result" ? "default" : sourceRealizer;
+    // The edited head keeps the source frame's typed argument realization,
+    // including both the live amount and any independent physical result.
+    const realizer = sourceRealizer;
     const methodBoundManners = sourceDefinition?.methodBoundMannerConcepts;
     // Independent material, manner and event daughters stay with the edited
     // action. Only the source method's declared bound qualifiers are superseded.
@@ -3930,7 +3930,10 @@ export function realizeRichPrimaryWithCanonicalDose(
   // A preceding preparation already supplies the unchanged amount. Add the
   // live dose only when no independently rendered owner still supplies it.
   const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
-  if (owner && owner !== sourceFrame && !primaryActionAmountConflicts(owner, dose))
+  if (owner && owner !== sourceFrame && (
+      !primaryActionAmountConflicts(owner, dose) ||
+      clause.instructionGraph?.primaryAdministrationSpan &&
+        owner.span.end <= clause.instructionGraph.primaryAdministrationSpan.start))
     return realizeAction(frame, locale);
   const { value, range, unit, comparator } = dose;
   return realizeAction({
@@ -4404,9 +4407,14 @@ function primaryActionAmountConflicts(
  * amoxicillin'); remove only the source-owned amount, keep the drug name and
  * the action's independent material/target. No raw-source fallback is valid
  * after a numeric edit. */
-function frameWithoutSupersededAmount(
-  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined
+function frameWithReconciledAmount(
+  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false
 ): AdviceFrame {
+  const replacement = replaceAtOwner && currentDose &&
+    (currentDose.value !== undefined || currentDose.range) ? {
+      value: currentDose.value, range: currentDose.range,
+      unit: currentDose.unit, comparator: currentDose.comparator
+    } : undefined;
   const superseded = frame.args.filter(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity &&
     !quantityCoveredByDose(arg, currentDose));
@@ -4416,7 +4424,10 @@ function frameWithoutSupersededAmount(
     // independent 100 mL mixing Substance or 5-minute Duration must never
     // disappear because the tablet amount changed.
     if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-        !quantityCoveredByDose(arg, currentDose)) continue;
+        !quantityCoveredByDose(arg, currentDose)) {
+      if (replacement) args.push({ ...arg, quantity: replacement, i18n: undefined });
+      continue;
+    }
     if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
       const text = arg.text ?? "";
       let sourceAmount: AdviceArgument | undefined;
@@ -4443,7 +4454,7 @@ function frameWithoutSupersededAmount(
           ? (text.slice(0, labelOffset) + " " +
               text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
           : text;
-        if (!remaining) continue;
+        if (!remaining && !replacement) continue;
         const quantity = sourceAmount.quantity;
         const sharesSupersededQuantity = quantity && arg.quantity &&
           quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
@@ -4451,8 +4462,10 @@ function frameWithoutSupersededAmount(
           quantity.range?.low === arg.quantity.range?.low &&
           quantity.range?.high === arg.quantity.range?.high;
         args.push({ ...arg,
-          ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
-          text: remaining, normalized: remaining, i18n: undefined });
+          ...(replacement ? { quantity: replacement } :
+            sharesSupersededQuantity ? { quantity: undefined } : {}),
+          text: replacement ? arg.text : remaining,
+          normalized: remaining || replacement?.unit, i18n: undefined });
         continue;
       }
     }
@@ -4501,6 +4514,19 @@ function primaryDoseAmountOwner(
   // saved graphs. Multiple independent dose definers keep the original first
   // amount owner; a live method/unit edit never changes this source decision.
   return earlierCount === 1 ? earlier : earliest;
+}
+
+/** A sole typed preparation owns the amount before a later administration.
+ * Ordinary primary-only graphs return before the ownership walk. */
+export function instructionGraphPreparationOwnsDose(
+  clause: CanonicalSigClause, options?: Pick<ParseOptions, "instructionActionMap">
+): boolean {
+  const graph = clause.instructionGraph;
+  const primary = graph?.primaryAdministrationSpan;
+  if (!clause.dose || !graph || !primary || !graph.actions.length ||
+      graph.actions[0].span.start >= primary.start) return false;
+  const owner = primaryDoseAmountOwner(graph, clause, options);
+  return Boolean(owner && owner.span.end <= primary.start);
 }
 
 /** Whole-source replay and action realization have the same amount owner.
@@ -4853,10 +4879,12 @@ export function realizeInstructionGraph(
     const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
       primaryActionAmountConflicts(sourceFrame, currentDose,
         !currentDose && options?.omitCanonicalAdministration?.sourceProjectionVerified === false));
-    // The canonical body owns the edited dose. Preserve the original graph
-    // verbatim; a source-free display copy cannot revive its obsolete amount.
+    // The source dose owner keeps its role after an external amount edit.
+    // A sole preparation before the primary action supplies the live amount
+    // there; the later rich administration does not repeat or inherit it.
     const frame = editedPrimary
-      ? frameWithoutSupersededAmount(sourceFrame, currentDose)
+      ? frameWithReconciledAmount(sourceFrame, currentDose,
+          Boolean(primary && amountOwner && amountOwner.span.end <= primary.start))
       : sourceFrame;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(

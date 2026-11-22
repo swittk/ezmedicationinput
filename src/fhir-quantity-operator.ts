@@ -189,8 +189,34 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
   FhirR6Quantity | undefined {
   if (!quantity) return undefined;
   if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
-  const comparator = getEmaQuantityComparator(quantity);
-  if (!comparator) return quantity;
+  if (!quantity.extension?.length) return quantity;
+  let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false;
+  let metadataOnly: FhirExtension | undefined, ambiguousMetadata = false;
+  // Classify the current operator and metadata-only source in one walk. Ordinary
+  // exact annotated quantities do not pay a second scan for a rare source marker.
+  for (const item of quantity.extension) {
+    if (item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL && item.valueCoding) {
+      hasOperator = true;
+      const coding = item.valueCoding;
+      if (coding.system !== EMA_QUANTITY_OPERATOR_SYSTEM || !coding.code) continue;
+      const current = comparatorByEmaCode[coding.code];
+      if (current) {
+        if (comparator && comparator !== current) conflict = true;
+        comparator = current;
+      }
+    } else if (item.url === QUANTITY_OPERATOR_SOURCE_URL && item.valueCode === undefined &&
+        item._valueCode && Object.keys(item).length === 2) {
+      if (metadataOnly) ambiguousMetadata = true;
+      metadataOnly = item;
+    }
+  }
+  if (conflict) comparator = undefined;
+  if (!comparator) {
+    if (hasOperator || quantity._comparator !== undefined || !metadataOnly || ambiguousMetadata) return quantity;
+    const remaining = quantity.extension.filter(item => item !== metadataOnly);
+    return { ...quantity, _comparator: metadataOnly._valueCode,
+      extension: remaining.length ? remaining : undefined };
+  }
   const remaining: FhirExtension[] = [];
   let primitive = quantity._comparator;
   for (const ext of quantity.extension ?? []) {

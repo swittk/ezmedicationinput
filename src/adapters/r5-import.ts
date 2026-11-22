@@ -438,7 +438,9 @@ function restoreComponentDelta(
         }
       }
       if (old.rateRatio?.numerator?.comparator === "~") {
-        if (unchangedRate && !entry.rateExpression) entry.rateRatio = old.rateRatio;
+        if (unchangedRate && !entry.rateExpression) entry.rateRatio = {
+          ...entry.rateRatio, numerator: old.rateRatio.numerator,
+        };
         else {
           const oldR5 = { ...old.rateRatio, numerator: quantityForR5(old.rateRatio.numerator) };
           if (
@@ -906,7 +908,9 @@ function reconcileNativeCompactCourse(
     // meaning. An explicit current course-field edit resolves that field.
     for (const key of ["repeatCycle", "safety", "modifierExtension"] as const)
       if (historicalHeader[key] !== undefined && header.course[key] !== undefined &&
-          courseEdits[key] === undefined && !equalStructuredValues(historicalHeader[key], header.course[key])) {
+          courseEdits[key] === undefined && !(key === "repeatCycle"
+            ? equalRepeatCycle(historicalHeader[key]!, header.course[key]!)
+            : equalStructuredValues(historicalHeader[key], header.course[key]))) {
         missing.add("conflicting-shared-course");
         addWarning(warnings,
           "Historical and current shared course metadata conflict; both sources remain available for resolution.");
@@ -1594,6 +1598,18 @@ function reconcileNativeRetainedCourse(
       editedInstruction !== undefined && editedInstruction !== unchangedInstruction) && retainedSource)
     sourceFragments.unshift(sourceWithoutNestedHistory(retainedSource));
   return withReconciliationSources(withReconciliationWarnings(result, warnings), sourceFragments);
+}
+
+/** Matching coded duration units may use different display labels. All other
+ * submitted fields, including qualifiers and annotations, still own conflicts. */
+function equalRepeatCycle(left: object, right: object): boolean {
+  const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+  if (a.system !== undefined && a.code !== undefined && a.system === b.system && a.code === b.code) {
+    const { unit: _leftLabel, ...leftFields } = a;
+    const { unit: _rightLabel, ...rightFields } = b;
+    return equalStructuredValues(leftFields, rightFields);
+  }
+  return equalStructuredValues(left, right);
 }
 
 export function courseFromR5(

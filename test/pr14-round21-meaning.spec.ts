@@ -386,6 +386,7 @@ describe("review 21 locale facets and grammar number", () => {
   it("inherits missing clause facets from a regional registration's base language", () => {
     registerSigLocalization({ locale: "th-TH", course: THAI_COURSE });
     const regional = resolveSigLocalization("th-TH")!;
+    expect(regional.locale).toBe("th-TH");
     const base = resolveSigLocalization("th")!;
     const dose = { step: [{ component: [tablet] }] };
     for (const style of ["short", "long"] as const)
@@ -807,7 +808,7 @@ describe("round34 typed recurrence and locale previews", () => {
   it.each([
     [{ period: 8, periodUnit: FhirPeriodUnit.Hour }, false, "8 hours"],
     [{ period: 6, periodUnit: FhirPeriodUnit.Hour }, true, "6 hours"],
-    [{ period: 6, periodMax: 8, periodUnit: FhirPeriodUnit.Hour }, false, "6"],
+    [{ period: 6, periodMax: 8, periodUnit: FhirPeriodUnit.Hour }, false, "6–8 hours"],
     [{ period: 6, periodUnit: FhirPeriodUnit.Day }, false, "6 days"],
     [{ frequency: 1, period: 6, periodUnit: FhirPeriodUnit.Hour }, false, "6 hours"]
   ] as const)("checks a timing code against its original offset period (%j)", (repeat, keepCode, period) => {

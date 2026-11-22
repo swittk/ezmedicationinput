@@ -32,6 +32,7 @@ import {
   BODY_SITE_PARTITIVE_HEADS,
   CLOCK_LEAD_TOKENS,
   EVENT_PREPOSITIONS,
+  nextDayOnsetAt,
   COMPOUND_DOSE_UNITS,
   CONNECTORS,
   COORDINATED_NOUN_METHOD_VERBS,
@@ -1108,7 +1109,9 @@ function comparativeDoseAt(
     const weekdayLead = EVENT_PREPOSITIONS.has(normalizeTokenLower(next)) &&
       numericIndex + 2 < context.limit && weekday && !context.state.consumed.has(weekday.index) &&
       getDayOfWeekMeaning(weekday);
-    if (!weekdayLead && !isScheduleLead(context, numericIndex + 1) &&
+    const nextDay = !weekdayLead && nextDayOnsetAt(context.tokens, numericIndex + 1, context.limit);
+    const nextDayLead = nextDay && tokensAvailable(context, numericIndex + 1, nextDay.tokenEnd - numericIndex - 1);
+    if (!weekdayLead && !nextDayLead && !isScheduleLead(context, numericIndex + 1) &&
         !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;

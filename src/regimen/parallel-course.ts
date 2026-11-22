@@ -192,15 +192,18 @@ function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
  * agree before one origin can represent their complete phase. Null marks
  * conflicting authored onsets; undefined means no onset was supplied. */
 function authoredPhaseStart(members: readonly CanonicalParallelComponent[]): RegimenPosition | null | undefined {
-  let value: number | undefined;
+  let value: number | undefined, missing = false;
   for (const member of members) {
     const schedule = member.clause.schedule;
     const onset = schedule?.treatmentStartOffsetDays;
-    if (onset === undefined || schedule?.phaseStartReference === "previous-phase-next-day") continue;
+    if (onset === undefined || schedule?.phaseStartReference === "previous-phase-next-day") {
+      missing = true;
+      continue;
+    }
     if (value !== undefined && value !== onset) return null;
     value = onset;
   }
-  return value === undefined ? undefined : { unit: 'd', value };
+  return value === undefined ? undefined : missing ? null : { unit: 'd', value };
 }
 
 /** Keep independent phase ownership when global cuts cannot be ordered.
@@ -243,12 +246,15 @@ function partialParallelRegimen(
       // supply an absolute end for this phase or its unanchored successor.
       const authoredStart = hasDependentStart ? undefined : authoredPhaseStart(members);
       const hasAuthoredStart = hasAuthoredDayStart || hasAuthoredElapsedStart || hasDependentStart;
+      // Mixed member onsets do not become a shared phase origin. The known
+      // track origin still supplies the default for an unanchored member;
+      // independently authored onsets remain on their own administrations.
       const start: RegimenPosition | undefined = calendar ? undefined
-        : authoredStart ?? (hasAuthoredStart ? undefined : at);
+        : authoredStart ?? (hasAuthoredStart && authoredStart !== null ? undefined : at);
       const startReference = authoredStart
         ? hasAuthoredDayStart && !hasAuthoredElapsedStart ? "treatment-day-start" : undefined
-        : hasAuthoredStart ? undefined : atReference;
-      const end: RegimenPosition | undefined = start && exact &&
+        : hasAuthoredStart && authoredStart !== null ? undefined : atReference;
+      const end: RegimenPosition | undefined = start && exact && authoredStart !== null &&
         !(hasAuthoredDayStart && hasAuthoredElapsedStart) ? advance(start, first) : undefined;
       const planned: CanonicalParallelPhase = { kind: calendar ? "calendar" : "relative", members,
         ...(start ? { start } : {}), ...(end ? { end } : {}) };
@@ -256,7 +262,8 @@ function partialParallelRegimen(
       // A known successor replaces the old cadence even when its predecessor
       // has no duration. Keep the authored end separately: it can leave a gap.
       // Mixed or dependent origins cannot supply a concrete treatment cutoff.
-      if (index > 0 && start && !hasDependentStart && !(hasAuthoredDayStart && hasAuthoredElapsedStart))
+      if (index > 0 && start && authoredStart !== null && !hasDependentStart &&
+          !(hasAuthoredDayStart && hasAuthoredElapsedStart))
         phases[index - 1].phaseEnd = {
           anchor: startReference ?? "treatment-start",
           displacement: { value: start.value, unit: start.unit, code: start.unit, system: "http://unitsofmeasure.org" }

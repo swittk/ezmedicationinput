@@ -23,6 +23,7 @@ import {
   instructionGraphRichPrimaryAction,
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
+  instructionGraphPreparationOwnsDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
@@ -1227,7 +1228,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   ) {
     parts.push(`${stripTrailingZero(schedule.frequency)}x/d`);
   } else if (schedule.period && schedule.periodUnit &&
-      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
+      !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined && schedule.frequencyMax === undefined &&
         (schedule.dayOfMonth?.length ?? 0) > 1)) {
     const base = stripTrailingZero(schedule.period);
     const qualifier =
@@ -1324,18 +1325,20 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
   return `${prefix} ${verb.charAt(0).toLowerCase()}${verb.slice(1)}`;
 }
 
-function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage): string {
+function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
+  resolvedMethod?: SigLongContext["resolvedMethod"]): string {
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
   const baseVerb = resolveMethodVerb(clause, grammar);
   const verb = applyEnglishAdministrationModality(baseVerb, clause);
-  const explicitDosePart = formatDoseLong(clause.dose);
+  const preparationSuppliesDose = instructionGraphPreparationOwnsDose(clause, options);
+  const explicitDosePart = preparationSuppliesDose ? undefined : formatDoseLong(clause.dose);
   const integratedThinLayer = options?.realizationMode !== "roundtrip" &&
     !explicitDosePart &&
     (clause.additionalInstructions ?? []).find((instruction) =>
       instruction.coding?.code === SPREAD_THINLY_INSTRUCTION_CODE
     );
-  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
+  const methodDefinition = resolvedMethod ?? resolveMedicationInstructionAction(clause.method?.text ?? baseVerb);
   const directSiteObject = Boolean(
     !explicitDosePart && medicationInstructionActionLocaleRealizerConfig(
       methodDefinition?.realizerConfig,
@@ -1465,7 +1468,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     segments.push(sitePart);
   }
   const body = segments.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  const graphRepresentsDose = !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
+  const graphRepresentsDose = preparationSuppliesDose || !clause.dose || Boolean(clause.instructionGraph?.actions.some((action) =>
     action.args.some((arg) =>
       arg.role === AdviceArgumentRole.Amount &&
       arg.quantity?.value === clause.dose?.value &&
@@ -1927,10 +1930,11 @@ export function formatCanonicalClause(
   // Per-call vocabulary can declare method identities beyond the built-in
   // compiler dictionary. Resolve that head for every locale's display view
   // without replacing source method text or adding work to ordinary clauses.
+  let resolvedMethod: SigLongContext["resolvedMethod"];
   if (options?.instructionActionMap && clause.method) {
-    const definition = resolveMedicationInstructionActionForMethod(clause.method, options);
-    if (definition && definition.display !== clause.method.text)
-      clause = { ...clause, method: { ...clause.method, text: definition.display } };
+    resolvedMethod = resolveMedicationInstructionActionForMethod(clause.method, options);
+    if (resolvedMethod && resolvedMethod.display !== clause.method.text)
+      clause = { ...clause, method: { ...clause.method, text: resolvedMethod.display } };
   }
   const cycle = clause.schedule?.cycleDayConstraint;
   if (cycle) {
@@ -2036,7 +2040,7 @@ export function formatCanonicalClause(
         return shortDefault;
       case "long":
         if (longDefault === undefined) {
-          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE);
+          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod);
         }
         return longDefault;
     }
@@ -2058,7 +2062,8 @@ export function formatCanonicalClause(
       sitePlacement: options?.sitePlacement ??
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
-      instructionActionMap: options?.instructionActionMap
+      instructionActionMap: options?.instructionActionMap,
+      resolvedMethod
     };
     return localization.formatShort(context);
   }
@@ -2075,7 +2080,8 @@ export function formatCanonicalClause(
       sitePlacement: options?.sitePlacement ??
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
-      instructionActionMap: options?.instructionActionMap
+      instructionActionMap: options?.instructionActionMap,
+      resolvedMethod
     };
     return localization.formatLong(context);
   }

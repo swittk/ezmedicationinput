@@ -2714,23 +2714,19 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const unitSurface = normalizeTokenLower(unitToken);
     // `tablets/day` remains one lossless lexical token; split only this
     // explicitly bounded dimensional suffix inside the maximum construction.
-    const compactUnitPeriod = unitSurface.match(
-      /^(.+?)\/(day|d|week|wk|24h|24hr|24hrs|24hour|24hours)$/u
+    const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
+    const compactPeriodUnit = compactUnitPeriod && (
+      mapIntervalUnit(compactUnitPeriod[2]) ??
+      (/^24(?:h|hr|hrs|hour|hours)$/u.test(compactUnitPeriod[2]) ? FhirPeriodUnit.Day : undefined)
     );
     if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return [];
-    const unit = normalizeUnit(compactUnitPeriod?.[1] ?? unitSurface, context.options);
+    const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
     if (!unit) return [];
     matched.push(valueToken, unitToken);
     cursor += 2;
 
-    const compactPeriod = compactUnitPeriod
-      ? {
-          tokens: [] as Token[],
-          period: 1,
-          periodUnit: /^(?:week|wk)$/u.test(compactUnitPeriod[2])
-            ? FhirPeriodUnit.Week
-            : FhirPeriodUnit.Day
-        }
+    const compactPeriod = compactPeriodUnit
+      ? { tokens: [] as Token[], period: 1, periodUnit: compactPeriodUnit }
       : undefined;
     const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
     if (!period) return [];

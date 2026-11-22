@@ -340,8 +340,9 @@ export function numericAdministrationLimits(
     const target = limit.scope === "administration"
       ? (administrationUnit ??= doseUnit || source)
       : (lifetimeUnit ??= doseUnit || source);
-    const value = sourceUnit === normalizeQuantityCapUnit(target)
-      ? bound.value : convertValue(bound.value, source, target, strength);
+    const targetUnit = normalizeQuantityCapUnit(target);
+    const value = sourceUnit === targetUnit
+      ? bound.value : convertValue(bound.value, sourceUnit, targetUnit, strength);
     if (value === null || !Number.isFinite(value)) {
       multiple = true;
       continue;

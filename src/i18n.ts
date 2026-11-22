@@ -3,7 +3,7 @@ import type { CourseLanguage } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
 export type { CourseLanguage } from "./locales/course/types";
-import { quantityComparatorText } from "./localization";
+import { localizedValue, quantityComparatorText } from "./localization";
 import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
@@ -49,6 +49,7 @@ import {
   instructionGraphRichPrimaryAction,
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
+  instructionGraphPreparationOwnsDose,
   instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
@@ -74,6 +75,7 @@ import {
   CanonicalPrnReasonExpr,
   CanonicalScheduleExpr,
   CanonicalSigClause,
+  type MedicationInstructionActionDefinition,
   EventTiming,
   FhirPeriodUnit,
   RouteCode
@@ -95,6 +97,7 @@ export interface SigFormatContext {
   readonly realizationMode: "normalized" | "roundtrip";
   readonly sitePlacement: "natural" | "trailing";
   readonly instructionActionMap?: TimingSummaryOptions["instructionActionMap"];
+  readonly resolvedMethod?: MedicationInstructionActionDefinition;
   formatDefault(style: "short" | "long"): string;
 }
 
@@ -282,7 +285,8 @@ function createThaiLocalization(): SigLocalization {
       includeTimesPerDaySummary,
       realizationMode,
       sitePlacement,
-      instructionActionMap
+      instructionActionMap,
+      resolvedMethod
     }) =>
       formatLongThai(clause, {
         groupMealTimingsByRelation,
@@ -290,7 +294,7 @@ function createThaiLocalization(): SigLocalization {
         realizationMode,
         sitePlacement,
         instructionActionMap
-      }, course)
+      }, course, resolvedMethod)
   };
 }
 
@@ -778,8 +782,10 @@ const THAI_EARLY_SITE_ROUTES = new Set<RouteCode>([
 
 function resolveThaiMethodVerb(
   clause: CanonicalSigClause,
-  grammar: ThaiRouteGrammar
+  grammar: ThaiRouteGrammar,
+  resolvedMethod?: MedicationInstructionActionDefinition
 ): string {
+  if (resolvedMethod) return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
   const translatedText = getPrimitiveTranslation(clause.method?._text, "th");
   if (translatedText) {
     return translatedText;
@@ -2180,7 +2186,8 @@ function thaiIntegratedAdministrationQualifier(
 function formatLongThai(
   clause: CanonicalSigClause,
   options?: TimingSummaryOptions,
-  words: CourseLanguage = THAI_COURSE
+  words: CourseLanguage = THAI_COURSE,
+  resolvedMethod?: MedicationInstructionActionDefinition
 ): string {
   if (
     options?.realizationMode === "roundtrip" &&
@@ -2191,12 +2198,12 @@ function formatLongThai(
   }
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
-  const methodDefinition = resolveMedicationInstructionAction(clause.method?.text ?? "");
+  const methodDefinition = resolvedMethod ?? resolveMedicationInstructionAction(clause.method?.text ?? "");
   const methodLocaleConfig = medicationInstructionActionLocaleRealizerConfig(
     methodDefinition?.realizerConfig,
     "th"
   );
-  const baseVerb = resolveThaiMethodVerb(clause, grammar);
+  const baseVerb = resolveThaiMethodVerb(clause, grammar, resolvedMethod);
   const integratedQualifiers = new Map<
     NonNullable<CanonicalSigClause["additionalInstructions"]>[number],
     string
@@ -2211,7 +2218,8 @@ function formatLongThai(
   const qualifierSuffix = Array.from(integratedQualifiers.values()).join("");
   const verb = `${modalVerb}${qualifierSuffix}`;
   const distributedPerTarget = options?.realizationMode !== "roundtrip" && Boolean(perTargetSiteThai(clause));
-  const explicitDosePart = distributedPerTarget || methodLocaleConfig?.directDose
+  const preparationSuppliesDose = instructionGraphPreparationOwnsDose(clause, options);
+  const explicitDosePart = preparationSuppliesDose ? undefined : distributedPerTarget || methodLocaleConfig?.directDose
     ? formatDoseThaiPerTarget(clause.dose)
     : formatDoseThaiLong(clause.dose);
   const sitePart = formatSiteThai(clause, grammar);

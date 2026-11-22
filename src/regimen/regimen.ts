@@ -284,7 +284,26 @@ export function scopeSequentialPhaseSemantics(
   source: string
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
-  for (const state of states) materializeAnchoredScheduleWindow(state.primaryClause.schedule);
+  for (const state of states) {
+    const clause = state.primaryClause, schedule = clause.schedule;
+    materializeAnchoredScheduleWindow(schedule);
+    // A typed relative delay without a recurrence denotes one future point.
+    // Establish it before both native and R5 projection; neither execution
+    // nor an interchange adapter should infer it from an empty repeat.
+    if (schedule?.administrationOffsetMinutes !== undefined &&
+        schedule.count === undefined && schedule.countMax === undefined &&
+        !hasRecurringSchedule(schedule) && schedule.frequencyMax === undefined &&
+        schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+        !schedule.dayOfMonth?.length && schedule.weekdayOrdinal === undefined &&
+        !schedule.activityTiming?.length && !schedule.clockWindow && !schedule.eventWindow &&
+        !schedule.calendarEvents?.length && !schedule.cycleDayConstraint && !schedule.occurrenceCap &&
+        schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined) {
+      schedule.count = 1;
+      clause.evidence.push({ rule: "hpsg.regimen.delayed-administration-point", spans: [],
+        scheduleFields: ["count"],
+        note: "The relative interval locates one administration unless a recurrence is independently stated." });
+    }
+  }
   for (const dependency of graph.administrationDependencies ?? []) {
     const donor = states[dependency.from]?.primaryClause;
     const recipient = states[dependency.to]?.primaryClause;
@@ -409,6 +428,13 @@ export function scopeSequentialPhaseSemantics(
         datedNextDay = phasePauseDays ? advanceDate(start, phasePauseDays) : start;
         schedule.boundsStart ??= datedNextDay;
         delete schedule.treatmentStartOffsetDays;
+      } else if (firstSchedule?.boundsStart && priorStart !== null) {
+        // An open dated phase supplies a civil origin, not a completion.
+        // NEXT follows that shared date; keep the predecessor's authored end
+        // absent, rather than replacing its calendar origin with treatment day 2.
+        datedNextDay = advanceDate(firstSchedule.boundsStart, 1 + phasePauseDays);
+        schedule.boundsStart ??= datedNextDay;
+        delete schedule.treatmentStartOffsetDays;
       } else {
         if (relativeNextDay === undefined) {
           // Finite and dependent predecessors were handled above. An
@@ -426,7 +452,7 @@ export function scopeSequentialPhaseSemantics(
         scheduleFields: schedule.phaseStartReference && schedule.treatmentStartOffsetDays !== undefined
           ? ["phaseStartReference", "treatmentStartOffsetDays"]
           : schedule.phaseStartReference ? ['phaseStartReference'] :
-            start ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
+            datedNextDay ? ['boundsStart'] : relativeNextDay === null ? [] : ['treatmentStartOffsetDays'],
         note: 'The next-day daughter follows the complete preceding phase, retaining its authored endpoint or origin.' });
     }
     if (contextualNextDay || localNextDay || datedNextDay) {

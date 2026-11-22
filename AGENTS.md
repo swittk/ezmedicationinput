@@ -1,3 +1,7 @@
+# OWNER UNIT-PRESERVATION CLARIFICATION — 2026-11-22
+
+The prescriber owns authored quantity values and unit choices. Preserve independently authored range endpoints in the internal model and R5/R6 projections. Do not convert, normalize, drop, or rewrite those values/units merely to satisfy FHIR Range constraints; retaining originals only in provenance does not authorize changing the active prescription. Calculations may compare compatible units internally without changing stored/exported prescription quantities. A validator's rejection is an interoperability limitation, not permission to rewrite the prescription.
+
 # PR #14 OWNER SCOPE CORRECTION — 2026-11-18
 
 **STOP public/native editing API work.** The owner did not request an EZMED editCanonicalCourse editor. Remove its public export, the callback-based draft/clone/deep-comparison machinery (src/canonical/edit-course.ts), its README use example, and editor-only tests/hardening. Do not replace it with a renamed editor, mutation wrapper, defensive validation, freezing, or another internal API. The canonical model is an implementation detail with NO caller-misuse support obligation. Internal helpers can change freely; no backward-compatibility or footgun protection required.

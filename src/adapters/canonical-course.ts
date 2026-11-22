@@ -640,12 +640,14 @@ function baseAdministration(
   }
   if (duration?.valueRange && raw.timing?.repeat?.boundsRange && schedule?.recurrence)
     schedule.recurrence.courseLengthRange = rangeFromFhir(duration.valueRange);
+  const asNeeded = raw.asNeeded ?? (format === "r5"
+    ? (raw as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean : undefined);
   const output: CanonicalAdministration = {
     kind: "administration",
     schedule,
     amounts,
     stageOrdinal: format === "r5" ? input.sequence : undefined,
-    asNeeded: raw.asNeeded ?? (raw.asNeededFor?.length ? true : undefined),
+    asNeeded: asNeeded ?? (raw.asNeededFor?.length ? true : undefined),
     target,
     targetCount: getBodySiteAdministrationTargetCount(target),
     siteReference: format === "r6" ? (raw as FhirR6Dosage).site?.reference : input.siteReference,
@@ -723,7 +725,7 @@ function baseAdministration(
       route: raw.route,
       site: target,
       method: raw.method,
-      asNeeded: raw.asNeeded,
+      asNeeded,
       asNeededFor: raw.asNeededFor,
       additionalInstruction: raw.additionalInstruction,
       patientInstruction: raw.patientInstruction,
@@ -1084,6 +1086,10 @@ function updateNativeTimingAnnotations(
     administrationChanges.add(ADMINISTRATION_OFFSET_EXTENSION_URL);
   const oldLength = getAnchoredCourseDuration(raw);
   if (
+    // Active bounds own duration projection reconciliation below. In particular,
+    // do not discard an old projected-range wrapper before retaining its ID and
+    // annotations alongside the recovered authored endpoints.
+    !target?.repeat?.boundsRange && !target?.repeat?.boundsDuration &&
     !same(
       oldLength
         ? { quantity: measureFromWire(oldLength.valueQuantity), range: rangeFromFhir(oldLength.valueRange) }

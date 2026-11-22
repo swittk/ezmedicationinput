@@ -3427,13 +3427,14 @@ describe("round33 joined-script method vocabulary bounds", () => {
 
 describe("round34 live method realization", () => {
   it.each(["Apply", "Rub"] as const)("keeps the live dose and compatible adjuncts for %s", method => {
-    const source = "Rub 1 g into the skin gently";
+    const source = "Rub 1 g into the skin gently to form foam";
     const row = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to the skin gently").fhir[0]));
     const primary = parseInstructionActions(source)[0];
     primary.args = [
       { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
       { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
-      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } },
+      { role: AdviceArgumentRole.Result, text: "foam", normalized: "foam", i18n: { en: "foam", th: "ฟอง" } }
     ];
     const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
       primaryAdministrationSpan: { start: 0, end: 3 }, actions: [primary] })!;
@@ -3447,9 +3448,10 @@ describe("round34 live method realization", () => {
     for (const input of [saved, toDosageDetails([saved])]) {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       expect(text).toMatch(method === "Apply" ? /^Apply\b/u : /^Rub\b/u);
-      if (method === "Apply") expect(text).toContain("1 g");
+      expect(text.match(/(?:^|\D)1 g\b/gu)).toHaveLength(1);
       expect(text).toContain("skin");
       expect(text).toContain("gently");
+      expect(text).toContain("foam");
     }
     expect(JSON.stringify(saved)).toBe(before);
   });
@@ -3485,4 +3487,63 @@ it("round34: keeps display-selected custom method identity among equal coded def
     coding: { ...coding, display: "local-rub" } }, options)?.code).toBe("local-rub");
   expect(resolveMedicationInstructionActionForMethod({ text: "Swallow",
     coding }, options)?.code).toBe("local-apply");
+});
+
+
+describe("round35 action realization ownership", () => {
+  it("carries the resolved institution method into each locale without changing the source", () => {
+    const options = { instructionActionMap: {
+      "chew-slowly": { code: "chew-slowly", display: "Masticate", i18n: { th: "เคี้ยวช้าๆ" },
+        primaryAdministrationHead: true,
+        administrationMethod: { system: "urn:clinic:method", code: "chew-slowly" } }
+    } };
+    const row = { route: { text: "oral" }, method: { coding: [{ system: "urn:clinic:method", code: "chew-slowly" }] },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    const saved = JSON.stringify(row);
+    for (const input of [row, toDosageDetails([row])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const english = formatSig(input, "long", { ...options, locale: "en", realizationMode });
+      expect(english).toContain("Masticate");
+      expect(english.match(/1 tablet/gu)).toHaveLength(1);
+      const thai = formatSig(input, "long", { ...options, locale: "th", realizationMode });
+      expect(thai).toContain("เคี้ยวช้าๆ");
+      expect(thai.match(/1 เม็ด/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(saved);
+    expect(formatSig({ ...row, method: { coding: [{ system: "urn:other", code: "chew-slowly" }] } },
+      "long", { ...options, locale: "th" })).toContain("รับประทาน");
+  });
+
+  it("keeps amount, result, manner and site together for a result-producing action", () => {
+    const frame = parseInstructionActions("Rub 1 g onto the skin gently to form foam")[0];
+    frame.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", i18n: { th: "ผิวหนัง" } },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { th: "เบาๆ" } },
+      { role: AdviceArgumentRole.Result, text: "foam", normalized: "foam", i18n: { th: "ฟอง" } }
+    ];
+    const saved = JSON.stringify(frame);
+    for (const locale of ["en", "th"]) {
+      const text = realizeInstructionAction(frame, locale);
+      expect(text.match(/1 g\b/gu)).toHaveLength(1);
+      for (const word of locale === "en" ? ["Rub", "skin", "gently", "foam"] : ["ถู", "ผิวหนัง", "เบาๆ", "ฟอง"])
+        expect(text).toContain(word);
+    }
+    expect(JSON.stringify(frame)).toBe(saved);
+  });
+
+  it("uses event names for independent temporal arguments beside a material complement", () => {
+    const frame = parseInstructionActions("Dilute 1 mL with 10 mL saline before each dose")[0];
+    frame.args = frame.args.filter(arg => arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Time);
+    frame.args.push({ role: AdviceArgumentRole.Time, text: "breakfast", normalized: "CM", relation: AdviceRelation.Before });
+    const saved = JSON.stringify(frame);
+    for (const locale of ["en", "th"]) {
+      const text = realizeInstructionAction(frame, locale);
+      expect(text).toContain("saline");
+      expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
+      expect(text).not.toContain("CM");
+      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+    }
+    expect(JSON.stringify(frame)).toBe(saved);
+  });
 });

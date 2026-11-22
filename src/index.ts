@@ -69,7 +69,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
     site: captureSourceReplayConcept(dosage.site),
     route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
-    asNeeded: dosage.asNeeded,
+    asNeeded: dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean,
     reasons: captureSourceReplayConceptList(dosage.asNeededFor, true),
     instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
     quantity: captureDosePart(first?.doseQuantity),
@@ -91,7 +91,8 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
   const current = dosage.doseAndRate;
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
-  return dosage.patientInstruction === original.patientInstruction && dosage.asNeeded === original.asNeeded &&
+  return dosage.patientInstruction === original.patientInstruction &&
+    (dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean) === original.asNeeded &&
     matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons, true) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
     matchesSourceReplayConcept(dosage.site, original.site) &&

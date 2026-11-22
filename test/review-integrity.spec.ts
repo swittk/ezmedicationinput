@@ -2569,6 +2569,27 @@ describe("rebased HPSG instruction scopes", () => {
 describe("round 32 known cadence and repeat range intersection", () => {
   const options = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC" };
   it.each([
+    { code: "BID", frequency: 1, frequencyMax: 3, clocks: ["08:00:00", "20:00:00"] },
+    { code: "TID", frequency: 2, frequencyMax: 4, clocks: ["08:00:00", "14:00:00", "20:00:00"] },
+    { code: "QID", frequency: 3, frequencyMax: 4, clocks: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] },
+    { code: "QID", frequency: 3, frequencyMax: 5, clocks: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] },
+    { code: "QID", frequency: 4, frequencyMax: 4, clocks: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] },
+  ])("uses the recognized $code cadence inside its authored range", ({ code, frequency, frequencyMax, clocks }) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code }] },
+        repeat: { frequency, frequencyMax, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: row.doseAndRate, timing: row.timing }] }] };
+    for (const dosage of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, limit: clocks.length })).toEqual(
+        clocks.map(clock => "2026-01-01T" + clock + "+00:00"));
+      expect(nextDueDoses(dosage, { ...options, limit: clocks.length + 1 })[clocks.length]).toBe("2026-01-02T08:00:00+00:00");
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+        .toBe(frequencyMax);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+  it.each([
     { code: "QID", repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day } },
     { code: "QID", repeat: { frequency: 5, frequencyMax: 6, period: 1, periodUnit: FhirPeriodUnit.Day } },
     { code: "QID", repeat: { frequency: 1, period: 8, periodMax: 12, periodUnit: FhirPeriodUnit.Hour } },

@@ -266,7 +266,8 @@ function activeDoseInCarrierOverTime(
   context: HpsgClauseContext,
   start: number,
   value: number,
-  attachedUnit?: string
+  attachedUnit?: string,
+  phraseStart = start
 ) {
   const unitShift = attachedUnit ? -1 : 0;
   const activeUnitToken = context.tokens[start + 1];
@@ -295,7 +296,7 @@ function activeDoseInCarrierOverTime(
   const activeDose = massTerm(value, activeUnit);
   const carrier = volumeOrMassTerm(carrierNumber, carrierUnit);
   if (!activeDose || !carrier || carrier.dimension !== "volume" ||
-      !hasAdministrationCue(context, start)) return undefined;
+      !hasAdministrationCue(context, phraseStart)) return undefined;
   if (qualifiedCarrier) carrier.comparator = qualifiedCarrier.comparator;
 
   // The carrier-volume constituent may have a nominal daughter between its
@@ -365,10 +366,14 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   if (!token || !available(context, start)) return undefined;
   const qualified = token.kind === LexKind.Number ? undefined :
     doseComparatorNumberAt(context.tokens, start, context.limit, normalizeTokenLower(token));
-  const exact = qualified ? undefined : clinicalDurationNumber(token);
+  const articleFraction = !qualified && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(token)) &&
+    available(context, start + 1)
+    ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
+  const exact = articleFraction ?? (qualified ? undefined : clinicalDurationNumber(token));
   const mixed = exact === undefined ? undefined :
     additiveDoseNumberAt(context.tokens, start, context.limit, exact);
-  let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ?? start) + 1;
+  let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ??
+    (articleFraction === undefined ? start : start + 1)) + 1;
   const value = qualified?.value ?? mixed?.value ?? exact;
   // Exact and qualified fractional daughters share the same article rule;
   // ordinary whole duration numbers still require their immediate unit.
@@ -387,7 +392,8 @@ function fixedVolumeOverTime(
   context: HpsgClauseContext,
   start: number,
   value: number,
-  attachedUnit?: string
+  attachedUnit?: string,
+  phraseStart = start
 ) {
   const unitToken = context.tokens[start + 1];
   const unit = attachedUnit ?? (unitToken && normalizeTokenLower(unitToken));
@@ -409,7 +415,7 @@ function fixedVolumeOverTime(
       // constituent. It can therefore be the complement of an inherited
       // administration head in a later regimen phase. In contrast, `for`
       // remains ambiguous with course duration and requires a local head.
-      durationLead !== "over" && !hasAdministrationCue(context, start)) return undefined;
+      durationLead !== "over" && !hasAdministrationCue(context, phraseStart)) return undefined;
   const durationQualifier = duration.comparator ? { comparator: duration.comparator } : {};
   const clinicalQuantity: HpsgClinicalQuantityFeature = {
     representation: "dose-with-rate-ratio",
@@ -722,9 +728,9 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
   const comparator = qualified?.comparator;
   const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
-    activeDoseInCarrierOverTime(context, numericStart, value, unit), comparator);
+    activeDoseInCarrierOverTime(context, numericStart, value, unit, phraseStart), comparator);
   const volume = activeInCarrier ?? qualifyClinicalSign(context, phraseStart, numericStart,
-    fixedVolumeOverTime(context, numericStart, value, unit), comparator);
+    fixedVolumeOverTime(context, numericStart, value, unit, phraseStart), comparator);
   if (volume) {
     // The volume-over-time construction owns its leading rate marker too.
     const sign = phraseStart > start ? lexicalSign({

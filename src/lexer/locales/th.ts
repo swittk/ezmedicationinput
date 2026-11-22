@@ -459,9 +459,13 @@ function appendThaiQuantityToken(result: LexToken[], token: LexToken, input: str
   const end = result.length;
   let start: number, fraction = false;
   if (result[end - 2]?.original === ".") start = end - 3;
-  else if (result[end - 3]?.original === "/" &&
+  else if ((result[end - 3]?.original === "/" ||
+      result[end - 2]?.original.startsWith("/") || result[end - 3]?.original.endsWith("/")) &&
       isClinicalNumericUnit(token.canonical ?? canonicalLocaleLexeme(token.lower) ?? token.lower)) {
-    start = end - 4;
+    if (result[end - 3]?.original === "/") start = end - 4;
+    else if (result[end - 2]?.original.startsWith("/") ||
+        result[end - 3]?.original.endsWith("/")) start = end - 3;
+    else return;
     fraction = true;
   } else return;
   const numeric = thaiNumericTokenAt(result, start, input);
@@ -708,8 +712,12 @@ function thaiNumericTokenAt(
   index: number,
   input: string
 ): LexToken | undefined {
-  const whole = tokens[index], separator = tokens[index + 1], fraction = tokens[index + 2];
-  if (!whole || !separator || !fraction) return undefined;
+  const whole = tokens[index], separator = tokens[index + 1];
+  if (!whole || !separator) return undefined;
+  const trailingSlash = whole.original.endsWith("/");
+  const leadingSlash = separator.original.startsWith("/") && separator.original.length > 1;
+  const fraction = trailingSlash || leadingSlash ? separator : tokens[index + 2];
+  if (!fraction) return undefined;
   const original = input.slice(whole.sourceStart, fraction.sourceEnd);
   if (!/[๐-๙]/u.test(original)) return undefined;
   let value: number | undefined;
@@ -718,13 +726,16 @@ function thaiNumericTokenAt(
     if (whole.sourceEnd !== separator.sourceStart || separator.sourceEnd !== fraction.sourceStart)
       return undefined;
     value = medicationNumberValue(original);
-  } else if (separator.original === "/") {
+  } else if (separator.original === "/" || trailingSlash || leadingSlash) {
+    const numeratorText = trailingSlash ? whole.original.slice(0, -1) : whole.original;
+    const denominatorText = leadingSlash ? fraction.original.slice(1) : fraction.original;
     if (!/^\s*$/u.test(input.slice(whole.sourceEnd, separator.sourceStart)) ||
-        !/^\s*$/u.test(input.slice(separator.sourceEnd, fraction.sourceStart)) ||
-        whole.original.includes("/") || fraction.original.includes("/")) return undefined;
-    comparator = whole.original.match(/^(?:[<>]=?|[~≈≥≤])/u)?.[0];
-    const numerator = medicationNumberValue(comparator ? whole.original.slice(comparator.length) : whole.original);
-    const denominator = medicationNumberValue(fraction.original);
+        (!trailingSlash && !leadingSlash &&
+          !/^\s*$/u.test(input.slice(separator.sourceEnd, fraction.sourceStart))) ||
+        numeratorText.includes("/") || denominatorText.includes("/")) return undefined;
+    comparator = numeratorText.match(/^(?:[<>]=?|[~≈≥≤])/u)?.[0];
+    const numerator = medicationNumberValue(comparator ? numeratorText.slice(comparator.length) : numeratorText);
+    const denominator = medicationNumberValue(denominatorText);
     if (numerator === undefined || denominator === undefined || denominator === 0) return undefined;
     value = numerator / denominator;
   }

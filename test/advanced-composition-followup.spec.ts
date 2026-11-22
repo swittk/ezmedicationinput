@@ -2023,18 +2023,22 @@ describe("independent release oracles for newly observed realistic clinical erro
     expect(rows[1].route?.coding?.[0]?.code).toBe("26643006");
     expect(rows[1].timing?.repeat?.boundsDuration).toBeUndefined();
     const course = parsed.fhirNext;
-    const hasDelay = course.step.some(step => step.start?.offsetDuration?.value === 12 &&
-      step.start.offsetDuration.code === "h");
-    expect(hasDelay).toBe(true);
-    // The historical test adapter exposes only the first dosage as .fhir;
-    // check the shipping API's complete flattened, course-marked R5 array.
-    const extendedR5 = toDosageDetails(parseProductionSig(source).fhir);
-    expect(extendedR5.step.some(step => step.start?.offsetDuration?.value === 12 &&
-      step.start.offsetDuration.code === "h")).toBe(true);
+    expect(course.step[1].component[0].timing?.repeat?.count).toBe(1);
+    // Assert the actual delayed administration after both supported
+    // projections, rather than requiring a treatment-global start encoding.
+    const production = parseProductionSig(source);
+    const extendedR5 = toDosageDetails(production.fhir);
     const strictR5 = toFhirR5Dosages(course);
-    expect(toDosageDetails(strictR5).step.some(step =>
-      step.start?.offsetDuration?.value === 12 &&
-      step.start.offsetDuration.code === "h")).toBe(true);
+    for (const input of [production.meta.canonical.course!, course, production.fhir,
+      JSON.parse(JSON.stringify(production.fhir)), extendedR5, strictR5,
+      JSON.parse(JSON.stringify(strictR5)), toDosageDetails(strictR5)]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+        timeZone: "UTC", limit: 4 })).toEqual([
+          "2026-11-21T08:00:00+00:00", "2026-11-21T20:00:00+00:00"
+        ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 
   it("retains a second OD BID phase when its duration is phrased as five more days", () => {

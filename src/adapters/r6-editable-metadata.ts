@@ -376,9 +376,13 @@ export function liftSingleStepSafety(output: FhirR6DosageInstruction): void {
   let ownerComponentIds: string[] | undefined;
   if (step!.id === undefined) for (const member of step!.component)
     if (member.id !== undefined) (ownerComponentIds ??= []).push(member.id);
+  // A lifted policy needs an identity that survives ordinary dose/timing edits.
+  // Author-provided phase/component IDs remain authoritative. Only an otherwise
+  // anonymous sole phase receives a wire Element.id; duplicate IDs stay ambiguous.
+  if (step!.id === undefined && !ownerComponentIds)
+    step!.id = "phase-" + stepOwnerFingerprint(step!);
   replaceSource(output, R6_SINGLE_STEP_SAFETY_SOURCE_URL, { course, step: policy, projected,
-    ownerId: step!.id, ownerComponentIds,
-    ownerFingerprint: step!.id === undefined && !ownerComponentIds ? stepOwnerFingerprint(step!) : undefined });
+    ownerId: step!.id, ownerComponentIds });
   output.safety = projected;
   delete step!.safety;
 }

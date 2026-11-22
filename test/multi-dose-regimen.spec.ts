@@ -10,7 +10,8 @@ import {
   getDosageCondition,
   nextDueDoses,
   toDosageDetails,
-  toFhirR5Dosages
+  toFhirR5Dosages,
+  parseSig as parseProductionSig
 } from "../src/index";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { AdviceArgumentRole, FhirDosage } from "../src/types";
@@ -374,10 +375,21 @@ describe("typed delayed loading and phase continuations", () => {
       item.rule === "hpsg.lex.schedule.administrationOffset.relativeInterval"
     )).toBe(true);
     expect(parsed.fhirNext.step).toHaveLength(2);
-    expect(parsed.fhirNext.step[1]?.start?.offsetDuration).toMatchObject({
-      value: hours,
-      code: "h"
-    });
+    const production = parseProductionSig(input, { context: TABLET_CONTEXT });
+    const clock = { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z", timeZone: "UTC", limit: 4 };
+    const expected = ["2026-11-21T08:00:00+00:00",
+      hours === 12 ? "2026-11-21T20:00:00+00:00" : "2026-11-21T09:00:00+00:00"];
+    for (const course of [production, production.meta.canonical.course!, production.fhirNext,
+      JSON.parse(JSON.stringify(production.fhirNext)), production.fhir,
+      JSON.parse(JSON.stringify(production.fhir))]) {
+      const before = JSON.stringify(course);
+      expect(nextDueDoses(course, clock)).toEqual(expected);
+      expect(nextDueDoses(course, { ...clock, from: "2026-11-22T00:00:00Z" })).toEqual([]);
+      expect(JSON.stringify(course)).toBe(before);
+    }
+    expect(parsed.fhirNext.step[1]?.component[0]?.timing?.repeat?.count).toBe(1);
+    expect(production.meta.canonical.clauses[1].schedule?.count).toBe(1);
+    expect(calculateTotalUnits({ dosage: production, ...clock, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
     expect(parsed.fhirNext.renderedInstruction).toBe(input);
   });
 
@@ -1772,4 +1784,19 @@ describe("dose-times-frequency whitespace preserves the same clinical regimen", 
       }
     }
   );
+});
+
+
+it("round35 keeps a recurring cadence beside a delayed onset", () => {
+  const parsed = parseProductionSig("Take 1 tablet every 6 hours in 2 hours");
+  expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+    period: 6, periodUnit: "h", administrationOffsetMinutes: 120
+  });
+  expect(parsed.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+  for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+    expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+      timeZone: "UTC", limit: 4 })).toEqual([
+        "2026-11-21T10:00:00+00:00", "2026-11-21T16:00:00+00:00",
+        "2026-11-21T22:00:00+00:00", "2026-11-22T04:00:00+00:00"
+      ]);
 });

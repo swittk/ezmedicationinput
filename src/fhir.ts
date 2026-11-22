@@ -252,40 +252,11 @@ function reconcileDurationEndpoint(
   return result;
 }
 
-/** FHIR Range endpoints share one unit. Preserve authored endpoint units in
- * the existing must-understand duration modifier, rather than flatten calendar
- * months/years or let a normalized display change elapsed/calendar execution. */
+/** The prescriber owns each endpoint's amount and unit. Wire constraints do
+ * not authorize changing elapsed hours to days or dropping calendar endpoints.
+ * Existing projection metadata is read on import and retired by its writer. */
 export function projectCourseDurationRange(range: FhirRange): { range: FhirRange; source?: FhirExtension } {
-  const { low, high, ...metadata } = range;
-  if (!low || !high || low.unit === high.unit && low.code === high.code && low.system === high.system)
-    return { range };
-  const lowUnit = parseFhirDurationUnit(low), highUnit = parseFhirDurationUnit(high);
-  const elapsed: Partial<Record<FhirPeriodUnit, number>> = {
-    [FhirPeriodUnit.Second]: 1, [FhirPeriodUnit.Minute]: 60, [FhirPeriodUnit.Hour]: 3600,
-    [FhirPeriodUnit.Day]: 86400, [FhirPeriodUnit.Week]: 604800,
-  };
-  const factor = lowUnit && highUnit && (lowUnit === highUnit ? 1 :
-    elapsed[lowUnit] && elapsed[highUnit] ? elapsed[lowUnit]! / elapsed[highUnit]! : undefined);
-  const projected: FhirRange = { ...metadata, high };
-  if (factor !== undefined && low.value !== undefined) {
-    projected.low = {
-      ...low, value: low.value * factor, unit: high.unit, system: high.system, code: high.code,
-    };
-    // Primitive annotations describe their authored unit/code, retained below.
-    // They cannot label a replacement unit as though it were the original.
-    if (low.unit !== high.unit) delete projected.low._unit;
-    if (low.code !== high.code || low.system !== high.system) delete projected.low._code;
-    if (low.system !== high.system) delete projected.low._system;
-  }
-  const children: FhirExtension[] = [
-    { url: "low", valueQuantity: cloneStructuredValue(low) },
-    { url: "high", valueQuantity: cloneStructuredValue(high) },
-  ];
-  if (Object.keys(metadata).length) children.push(retainField("rangeMetadata", metadata));
-  // The serialized baseline must not alias live editable Range nodes. The
-  // existing source codec also detaches nested operator/Element metadata.
-  children.push(retainField("projectedRange", projected));
-  return { range: projected, source: { url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: children } };
+  return { range };
 }
 
 export const TIMING_OFFSET_MIN_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-timing-offset-min";
@@ -2070,12 +2041,16 @@ export function deserializeCanonicalContext(
 
   const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding);
   if (dosage.method?.text || dosage.method?._text || methodCoding?.code) {
-    const methodText = resolveMedicationInstructionActionForMethod({
+    const action = resolveMedicationInstructionActionForMethod({
       text: dosage.method?.text, coding: methodCoding
-    })?.display ?? dosage.method?.text ?? methodCoding?.display;
+    });
+    const authoredText = dosage.method?.text;
+    const compatibleText = authoredText && (!action || action.display === authoredText ||
+      resolveMedicationInstructionActionForMethod({ text: authoredText }) === action);
+    const methodText = compatibleText ? authoredText : action?.display ?? authoredText ?? methodCoding?.display;
     clause.method = {
       text: methodText,
-      _text: methodText === dosage.method?.text ? clonePrimitiveElement(dosage.method?._text) : undefined,
+      _text: methodText === dosage.method?.text ? cloneStructuredValue(dosage.method?._text) : undefined,
       coding: methodCoding?.code
         ? {
           code: methodCoding.code,

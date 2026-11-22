@@ -240,7 +240,7 @@ describe("round 23: duration endpoints retain their own units", () => {
       expect(formatCanonicalCourse(course, "short", { locale })).toContain(`x${low}min-${high}h`);
     const wire = JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction;
     const emitted = wire.step![0].component[0].timing?.repeat?.boundsRange;
-    expect(emitted?.low).toMatchObject({ value: low / 60, code: "h", unit: "hours" });
+    expect(emitted?.low).toMatchObject({ value: low, code: "min", unit: "minutes" });
     expect(emitted?.high).toMatchObject({ value: high, code: "h", unit: "hours" });
     const reopened = courseFromR6(wire).stages[0].administrations[0];
     expect(reopened.schedule?.recurrence?.courseLengthRange)
@@ -268,12 +268,10 @@ describe("round 23: duration endpoints retain their own units", () => {
       .toContain(">=30 นาที ถึง <=2 ชั่วโมง");
     const wire = JSON.parse(JSON.stringify(canonicalToFhir(clause))) as FhirDosage;
     const roundtrip = wire.timing?.repeat?.boundsRange;
-    // Strict Range endpoints share a unit; retained typed metadata keeps the
-    // author's independent endpoint units for the next canonical import.
-    expect(roundtrip?.low).toMatchObject({ value: 0.5, code: "h" });
-    expect(roundtrip?.high).toMatchObject({ value: 2, code: "h" });
-    expect(roundtrip?.low?.unit).toBe(roundtrip?.high?.unit);
-    expect(roundtrip?.low?.system).toBe(roundtrip?.high?.system);
+    // The prescriber owns both active endpoint units. An interoperability
+    // constraint does not authorize a 30-minute to 0.5-hour conversion.
+    expect(roundtrip?.low).toMatchObject({ value: 30, code: "min", unit: "minutes" });
+    expect(roundtrip?.high).toMatchObject({ value: 2, code: "h", unit: "hours" });
     expect(getQuantityComparator(roundtrip?.low)).toBe(">=");
     expect(getQuantityComparator(roundtrip?.high)).toBe("<=");
     for (const reopened of [canonicalFromFhir(wire), parserStateFromFhir(wire).primaryClause]) {
@@ -721,13 +719,14 @@ describe("round 25: typed source owners survive independent clinical edits", () 
     expect(clause.instructionGraph?.actions).toHaveLength(2);
     const saved = JSON.stringify(parsed.fhir[0]);
     for (const locale of ["en", "th"]) {
-      const dose = locale === "en" ? "2 tablets" : "2 เม็ด";
+      const dose = locale === "en" ? /(?:^|[^\d.])2 tablets\b/gu : /(?:^|[^\d.])2 เม็ด/gu;
       for (const text of [
         formatCanonicalClause(clause, "long", resolveSigLocalization(locale),
           { ...options, realizationMode: "normalized" }),
         formatSig(parsed.fhir[0], "long", { ...options, locale, realizationMode: "normalized" })
       ]) {
-        expect(text.split(dose)).toHaveLength(2);
+        expect(text.match(dose)).toHaveLength(1);
+        expect(text).toMatch(locale === "en" ? /Disperse 2 tablets\b/u : /กระจาย[^.;]*\s2 เม็ด/u);
         expect(text).toContain(locale === "en" ? "Disperse" : "กระจาย");
         expect(text).toContain("slowly");
       }
@@ -744,7 +743,8 @@ describe("round 25: typed source owners survive independent clinical edits", () 
     const saved = JSON.stringify(dosage);
     for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const text = formatSig(dosage, "long", { ...options, locale, realizationMode });
-      expect(text).toContain(locale === "en" ? "3 tablets" : "3 เม็ด");
+      expect(text.match(locale === "en" ? /(?:^|[^\d.])3 tablets\b/gu : /(?:^|[^\d.])3 เม็ด/gu)).toHaveLength(1);
+      expect(text).toMatch(locale === "en" ? /Disperse 3 tablets\b/u : /กระจาย[^.;]*\s3 เม็ด/u);
       expect(text).not.toMatch(/2 tablets|2 เม็ด/);
       expect(text).toContain(locale === "en" ? "water" : "น้ำ");
       expect(text).toContain(locale === "en" ? "slowly" : thaiManner);
@@ -950,7 +950,9 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     const saved = JSON.stringify(wire);
     for (const locale of ["en", "th"]) {
       const text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
-      expect(text).toContain(locale === "en" ? "each nostril" : "ข้างละ");
+      expect(text).toMatch(locale === "en"
+        ? /(?:approximately|at least) 1 spray[^.;]*each nostril/u
+        : /ข้างละ (?:ประมาณ|อย่างน้อย) 1 ครั้ง/u);
       expect(text).toContain(locale === "en" ? comparator === "~" ? "approximately 1 spray" : "at least 1 spray"
         : comparator === "~" ? "ประมาณ 1" : "อย่างน้อย 1");
       expect(text).toContain(locale === "en" ? "less than 2 mg" : "น้อยกว่า 2 มิลลิกรัม");
@@ -1002,7 +1004,8 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
   it("cleans a surviving primary frame after an external bedtime-to-morning edit", () => {
     const source = "Take 1 tablet at bedtime";
     const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
-    row.extension = [...(row.extension ?? []), buildInstructionGraphExtension({
+    row.extension = [...(row.extension ?? []).filter(extension =>
+      extension.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL), buildInstructionGraphExtension({
       sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source)
     })!];
     const originalGraph = JSON.stringify(row.extension);
@@ -1028,7 +1031,8 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     const prefix = source + "; ";
     const later = parseInstructionActions(laterText, prefix.length)[0];
     later.sequenceIndex = 1;
-    row.extension = [...(row.extension ?? []), buildInstructionGraphExtension({
+    row.extension = [...(row.extension ?? []).filter(extension =>
+      extension.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL), buildInstructionGraphExtension({
       sourceText: prefix + laterText, sourceLocale: "en",
       primaryAdministrationSpan: { start: 0, end: 4 }, actions: [first, later]
     })!];
@@ -1826,7 +1830,14 @@ describe("round 30: completed phase origins and exact boundary display", () => {
     expect(native.stages[0].administrations[0].schedule?.recurrence?.courseLength?.value).toBe(Number(duration.split(" ")[0]));
     for (const input of [parsed, native, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       const before = JSON.stringify(input);
-      expect(nextDueDoses(input, { orderedAt, from, timeZone: "UTC", limit: 1 })).toEqual([expected]);
+      // Include every predecessor event and the earliest successor, so a
+      // spurious 06:00 on its completion date cannot fall before the query.
+      const completion = Date.parse(from);
+      const predecessor: string[] = [];
+      for (let instant = Date.parse(orderedAt); instant < completion; instant += 6 * 60 * 60 * 1000)
+        predecessor.push(new Date(instant).toISOString().replace(".000Z", "+00:00"));
+      expect(nextDueDoses(input, { orderedAt, from: orderedAt, timeZone: "UTC",
+        limit: predecessor.length + 1 })).toEqual([...predecessor, expected]);
       expect(JSON.stringify(input)).toBe(before);
     }
     expect(native.stages[1].start?.anchor).toBe("previous-phase-next-day");
@@ -2209,8 +2220,11 @@ describe("round34 successor and member origins", () => {
   it("keeps an independently dated sibling outside the shared dated pause", () => {
     const parsed = parseSig("Take 1 tablet on 2026-11-25 at 22:00, then stop for 2 days, then take 2 tablets at 06:00 the next morning and take 3 tablets on 2026-11-30 at 07:00");
     expect(parsed.meta.canonical.clauses.slice(1).map(clause => clause.schedule?.boundsStart)).toEqual(["2026-11-28", undefined]);
-    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-30T00:00:00Z",
-      timeZone: "UTC", limit: 2 })).toEqual(["2026-11-30T06:00:00+00:00", "2026-11-30T07:00:00+00:00"]);
+    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T12:00:00Z", from: "2026-11-28T00:00:00Z",
+      timeZone: "UTC", limit: 4 })).toEqual([
+        "2026-11-28T06:00:00+00:00", "2026-11-29T06:00:00+00:00",
+        "2026-11-30T06:00:00+00:00", "2026-11-30T07:00:00+00:00"
+      ]);
   });
 
   it.each(["mixed", "elapsed", "day-start"] as const)("keeps the first civil-day clock for %s member origins", kind => {

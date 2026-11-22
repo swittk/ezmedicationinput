@@ -666,7 +666,19 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
   // selected dose evidence itself spans that seam.
   for (const site of sites) {
     if (!possibleAdditiveDoseSeam(tokens, site)) continue;
-    const windowStart = tokens[site.tokenIndex - 1].sourceStart;
+    let windowStart = tokens[site.tokenIndex - 1].sourceStart;
+    // Preserve a governing administration head in this same bounded probe.
+    // Removing it can make a later carrier quantity displace the active dose
+    // before its typed evidence is checked for ownership of the connector.
+    for (let cursor = site.tokenIndex - 2, first = Math.max(0, cursor - 7); cursor >= first; cursor--) {
+      const token = tokens[cursor], lower = lexeme(token);
+      if (isHard(token) || connectorKind(token) || token.kind === LexKind.Number ||
+          DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) break;
+      const action = resolveMedicationInstructionAction(lower, options);
+      if (!action) continue;
+      if (action.definesDose) windowStart = token.sourceStart;
+      break;
+    }
     const followingBoundary = sites.find(candidate =>
       candidate.start > site.end && candidate.kind !== 'adjacent-dose' &&
       candidate.kind !== 'coordination'

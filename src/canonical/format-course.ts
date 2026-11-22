@@ -546,6 +546,12 @@ function formatCanonicalBase(
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
+  // Timing alone cannot replace the only authored dose/manner directions.
+  // Keep those words beside the current cadence without parsing them or
+  // allowing old text to override a structured amount or method.
+  if (a.text?.trim() && source.schedule && !source.amounts?.length && !source.method &&
+      !clause.instructionGraph?.actions.length)
+    rendered = joinGeneratedClauses([a.text, rendered]);
   if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
@@ -1031,6 +1037,16 @@ export function formatCanonicalCourse(
           ? formatCalendarStepWindow(inheritedStart, undefined, words, previous?.end?.anchor)
           : words.afterPreviousPhase;
       }
+    }
+    // A successor can finish this stage before any open-ended continuation.
+    // Show the known origin as a point; do not invent an end that could
+    // contradict the member's earlier duration/count completion.
+    if (!step.end && index + 1 < oneOrCourse.stages.length) {
+      const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
+        : startDays === undefined ? undefined : { value: startDays, unit: "d" };
+      const point = courseBoundaryPoint(quantity, startAnchor, words) ??
+        (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words) : undefined);
+      if (point) timing = point;
     }
     const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");

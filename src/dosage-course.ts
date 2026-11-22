@@ -11,7 +11,7 @@ import {
   simpleQuantityForR5
 } from "./fhir-quantity-operator";
 import {
-  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, FhirTiming, FhirCoding, FhirCodeableConcept, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
+  FhirDayOfWeek, FhirDosage, FhirDoseAndRate, EzDoseAndRate, FhirTiming, FhirCoding, FhirCodeableConcept, FhirTimingRepeat, FhirExtension, FhirQuantity, FhirSimpleQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition,
   FhirR6DosageInstruction,
   FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety,
   FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat,
@@ -512,24 +512,34 @@ function setCalendarRestriction(
     const value = read(child);
     if (value !== undefined) current.add(value);
   }
-  if (current.size === values.length && values.every(value => current.has(value))) return;
+  const unchanged = current.size === values.length && values.every(value => current.has(value));
+  let duplicates: FhirExtension[] | undefined, keptTail: FhirExtension[] | undefined;
+  for (let at = index + 1; at < extensions!.length; at++) {
+    const item = extensions![at];
+    if (item.url === url) {
+      (duplicates ??= []).push(item);
+      keptTail ??= extensions!.slice(index + 1, at);
+    } else keptTail?.push(item);
+  }
+  if (unchanged && !duplicates) return;
   const wanted = new Set(values);
   const children: FhirExtension[] = [];
   let removed = false;
-  for (const child of previous?.extension ?? []) {
+  for (const child of previous.extension ?? []) {
     const value = read(child);
     if (value === undefined || wanted.has(value)) children.push(child);
     else removed = true;
   }
   for (const value of values)
     if (!current.has(value)) children.push({ url: kind, [valueKey]: value });
-  const next = extensions ? extensions.slice() : [];
-  const marker = values.length ? { ...previous, url, extension: children } : undefined;
-  if (index < 0) { if (marker) next.push(marker); }
-  else next.splice(index, 1, ...(marker ? [marker] : []));
+  const next = extensions!.slice(0, index);
+  const marker = values.length ? unchanged ? previous : { ...previous, url, extension: children } : undefined;
+  if (marker) next.push(marker);
+  next.push(...(keptTail ?? extensions!.slice(index + 1)));
   dosage[field] = next.length ? next : undefined;
-  if (previous && removed) dosage.extension = [...(dosage.extension ?? []),
-    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [previous] }];
+  const retired = removed || !values.length ? [previous, ...(duplicates ?? [])] : duplicates;
+  if (retired?.length) dosage.extension = [...(dosage.extension ?? []),
+    { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired }];
 }
 
 export function setDosageExcludedDates(dosage: FhirDosage, dates: string[]): void {
@@ -745,25 +755,55 @@ export function reconcileR5SafetyEdits(
       ? original.system === replacement.system && original.code === replacement.code
       : original.unit === replacement.unit && original.code === replacement.code &&
         original.system === replacement.system);
-  for (const [scope, oldIndices] of oldByScope) {
-    const liveIndices = liveByScope.get(scope);
-    if (oldIndices.length !== 1 || liveIndices?.length !== 1) continue;
-    const original = oldLimits[oldIndices[0]];
-    const candidate = live[liveIndices[0]];
-    // Unmatched cardinality alone is not identity: deleting 5 mg/day and
-    // adding 5 mL/30 days must NOT transfer the old ID or extension.
-    // A numeric edit retains the same units and period window.
+  const sameNumericOwner = (scope: string, original: FhirR6DoseLimit, candidate: FhirR6DoseLimit): boolean => {
+    // Unmatched cardinality alone is not identity: units and the period window
+    // belong to the clinical limit, while an explicit replacement ID wins.
     const firstId = original.id === undefined &&
       original.valueQuantity?.value === candidate.valueQuantity?.value &&
       (original.valueQuantity?.comparator ?? getEmaQuantityComparator(original.valueQuantity)) ===
         (candidate.valueQuantity?.comparator ?? getEmaQuantityComparator(candidate.valueQuantity));
-    if (scope === "period" && original.id !== candidate.id && !firstId ||
-        !sameUnit(original.valueQuantity, candidate.valueQuantity) ||
-        (original.period || candidate.period) &&
-        (!sameUnit(original.period, candidate.period) ||
-          original.period?.value !== candidate.period?.value)) continue;
-    matched.set(liveIndices[0], oldIndices[0]);
-    usedOld.add(oldIndices[0]);
+    return !(scope === "period" && original.id !== candidate.id && !firstId) &&
+      sameUnit(original.valueQuantity, candidate.valueQuantity) &&
+      (!(original.period || candidate.period) ||
+        sameUnit(original.period, candidate.period) && original.period?.value === candidate.period?.value &&
+        (original.period?.comparator ?? getEmaQuantityComparator(original.period)) ===
+          (candidate.period?.comparator ?? getEmaQuantityComparator(candidate.period)));
+  };
+  const windowKey = (limit: FhirR6DoseLimit): string => {
+    const quantity = limit.valueQuantity, period = limit.period;
+    return compactProjectionFingerprint({
+      quantity: quantity && { system: quantity.system, code: quantity.code,
+        unit: quantity.system && quantity.code ? undefined : quantity.unit },
+      period: period && { value: period.value, system: period.system, code: period.code,
+        unit: period.system && period.code ? undefined : period.unit,
+        comparator: period.comparator ?? getEmaQuantityComparator(period) },
+    });
+  };
+  for (const [scope, oldIndices] of oldByScope) {
+    const liveIndices = liveByScope.get(scope);
+    if (!liveIndices?.length) continue;
+    if (oldIndices.length === 1 && liveIndices.length === 1) {
+      if (!sameNumericOwner(scope, oldLimits[oldIndices[0]], live[liveIndices[0]])) continue;
+      matched.set(liveIndices[0], oldIndices[0]); usedOld.add(oldIndices[0]);
+      continue;
+    }
+    // Several amount edits in one scope are still identifiable by distinct
+    // unit/window pairs. Duplicate windows remain inactive, never guessed.
+    const oldWindows = new Map<string, number>(), liveWindows = new Map<string, number>();
+    for (const index of oldIndices) {
+      const key = windowKey(oldLimits[index]);
+      oldWindows.set(key, oldWindows.has(key) ? -1 : index);
+    }
+    for (const index of liveIndices) {
+      const key = windowKey(live[index]);
+      liveWindows.set(key, liveWindows.has(key) ? -1 : index);
+    }
+    for (const [key, oldIndex] of oldWindows) {
+      const liveIndex = liveWindows.get(key);
+      if (oldIndex < 0 || liveIndex === undefined || liveIndex < 0 ||
+          !sameNumericOwner(scope, oldLimits[oldIndex], live[liveIndex])) continue;
+      matched.set(liveIndex, oldIndex); usedOld.add(oldIndex);
+    }
   }
   const liveLimits: FhirR6DoseLimit[] = live.map((replacement, index) => {
     const oldIndex = matched.get(index);
@@ -805,6 +845,8 @@ export function reconcileR5SafetyEdits(
   for (const hidden of hiddenByScope.values()) doseLimit.push(...hidden);
   doseLimit.push(...remainingHidden);
   const { doseLimit: _retainedLimits, ...retainedSafety } = retained;
+  // Superseded limits remain in the boundary's existing inactive source
+  // snapshot. They must not create a source-only active safety object.
   if (doseLimit.length) return { ...retainedSafety, doseLimit };
   return Object.keys(retainedSafety).length ? retainedSafety : undefined;
 }
@@ -1270,8 +1312,23 @@ interface SourceMeasureObservation {
   system?: string;
   comparator?: FhirR6Quantity["comparator"];
 }
+interface SourceExpressionObservation {
+  original: NonNullable<EzDoseAndRate["doseExpression"]>;
+  language?: string; description?: string; name?: string; expression?: string; reference?: string;
+}
+function capturedReplayExpression(value: EzDoseAndRate["doseExpression"]): SourceExpressionObservation | undefined {
+  return value ? { original: value, language: value.language, description: value.description,
+    name: value.name, expression: value.expression, reference: value.reference } : undefined;
+}
+function unchangedReplayExpression(value: EzDoseAndRate["doseExpression"], prior: SourceExpressionObservation | undefined): boolean {
+  return value === prior?.original && value?.language === prior?.language &&
+    value?.description === prior?.description && value?.name === prior?.name &&
+    value?.expression === prior?.expression && value?.reference === prior?.reference;
+}
 interface SourceDoseObservation {
   original: FhirDoseAndRate;
+  doseExpression?: SourceExpressionObservation;
+  rateExpression?: SourceExpressionObservation;
   dose?: SourceMeasureObservation;
   rate?: SourceMeasureObservation;
   rangeLow?: SourceMeasureObservation;
@@ -1848,7 +1905,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
   const top: SourceReplayProof["top"] = [];
   for (const key of Object.keys(dosage)) top.push([key, raw[key]]);
   const amounts: SourceDoseObservation[] = [];
-  for (const original of dosage.doseAndRate ?? []) {
+  for (const original of (dosage as EzDosage).doseAndRate ?? []) {
     amounts.push({
       original,
       dose: capturedReplayMeasure(original.doseQuantity),
@@ -1859,6 +1916,8 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
       rateHigh: capturedReplayMeasure(original.rateRange?.high),
       ratioNumerator: capturedReplayMeasure(original.rateRatio?.numerator),
       ratioDenominator: capturedReplayMeasure(original.rateRatio?.denominator),
+      doseExpression: capturedReplayExpression(original.doseExpression),
+      rateExpression: capturedReplayExpression(original.rateExpression),
     });
   }
   return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
@@ -1874,7 +1933,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   for (const key in raw) if (Object.prototype.hasOwnProperty.call(raw, key)) ownCount++;
   if (ownCount !== proof.top.length) return false;
   for (const [key, value] of proof.top) if (raw[key] !== value) return false;
-  const rows = dosage.doseAndRate;
+  const rows = (dosage as EzDosage).doseAndRate;
   if ((rows?.length ?? 0) !== proof.amounts.length) return false;
   for (let index = 0; index < proof.amounts.length; index++) {
     const prior = proof.amounts[index], row = rows![index];
@@ -1887,7 +1946,9 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
       !unchangedReplayMeasure(row.rateRange?.low, prior.rateLow) ||
       !unchangedReplayMeasure(row.rateRange?.high, prior.rateHigh) ||
       !unchangedReplayMeasure(row.rateRatio?.numerator, prior.ratioNumerator) ||
-      !unchangedReplayMeasure(row.rateRatio?.denominator, prior.ratioDenominator)
+      !unchangedReplayMeasure(row.rateRatio?.denominator, prior.ratioDenominator) ||
+      (row.doseExpression || prior.doseExpression) && !unchangedReplayExpression(row.doseExpression, prior.doseExpression) ||
+      (row.rateExpression || prior.rateExpression) && !unchangedReplayExpression(row.rateExpression, prior.rateExpression)
     ) return false;
   }
   return matchesSourceReplayConcept(dosage.site, proof.site) &&

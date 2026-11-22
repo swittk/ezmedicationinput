@@ -955,3 +955,84 @@ it("round34: public parsing closes the known eye track and retains the unresolve
     durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
   expect(JSON.stringify(parsed)).toBe(before);
 });
+
+describe("round35 independent phase-origin ownership", () => {
+  const options = { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+    timeZone: "UTC", limit: 10 };
+  it.each([
+    ["Take 1 tablet starting 2026-12-01 once in 2 hours", ["2026-12-01T02:00:00+00:00"]],
+    ["Take 1 tablet once in 2 hours", ["2026-11-21T10:00:00+00:00"]],
+    ["Take 1 tablet daily for 7 days, then take 2 tablets once in 2 hours", [
+      "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+      "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T09:00:00+00:00",
+      "2026-11-27T09:00:00+00:00", "2026-11-28T10:00:00+00:00"
+    ]]
+  ])("applies an elapsed delay to its own calendar or phase origin: %s", (source, expected) => {
+    const parsed = parseSig(source as string);
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(nextDueDoses(input, options)).toEqual(expected);
+    expect(JSON.stringify(parsed)).toBe(before);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses[parsed.meta.canonical.clauses.length - 1].schedule?.administrationOffsetMinutes).toBe(120);
+  });
+
+  it.each(["", "From day 1 "])("retains an unanchored parallel member at its own track start (%s)", prefix => {
+    const source = prefix + "1 drop OD at 08:00 daily for 5 days and from day 4 2 drops OD at 20:00 daily for 3 days" +
+      " then 3 drops OD at 06:00 the next morning; 1 drop OS at 12:00 daily for 7 days then 2 drops OS at 12:00 daily";
+    const parsed = parseSig(source);
+    const first = parsed.meta.canonical.course!.stages[0].administrations[0];
+    expect(first.phaseStart?.displacement?.value ?? first.phaseOrigin?.value).toBe(0);
+    const expected = [
+      "2026-11-21T08:00:00+00:00", "2026-11-21T12:00:00+00:00",
+      "2026-11-22T08:00:00+00:00", "2026-11-22T12:00:00+00:00",
+      "2026-11-23T08:00:00+00:00", "2026-11-23T12:00:00+00:00",
+      "2026-11-24T08:00:00+00:00", "2026-11-24T12:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T12:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T12:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T06:00:00+00:00", "2026-11-27T12:00:00+00:00"
+    ];
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(nextDueDoses(input, { ...options, limit: expected.length })).toEqual(expected);
+    expect(JSON.stringify(parsed)).toBe(before);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBe(5);
+    expect(parsed.meta.canonical.clauses[1].schedule?.duration).toBe(3);
+  });
+
+  it("uses the dated start for the following morning without inventing completion", () => {
+    const source = "Take 1 tablet starting 2026-12-01 at 22:00, then take 2 tablets at 06:00 the next morning";
+    const parsed = parseSig(source);
+    const prior = parsed.meta.canonical.clauses[0].schedule!;
+    expect(prior.boundsStart).toBe("2026-12-01");
+    expect(prior.boundsEnd).toBeUndefined();
+    expect(prior.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule?.boundsStart).toBe("2026-12-02");
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    const before = JSON.stringify(parsed);
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual([
+        "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00"
+      ]);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
+
+it("round35 retains a shared authored onset for all coordinated parallel members", () => {
+  const parsed = parseSig("From day 4 1 drop OD at 08:00 daily for 5 days and from day 4 2 drops OD at 20:00 daily for 3 days" +
+    " then 3 drops OD at 06:00 the next morning; 1 drop OS at 12:00 daily for 7 days then 2 drops OS at 12:00 daily");
+  const members = parsed.meta.canonical.course!.stages[0].administrations;
+  expect(members.slice(0, 2).map(member => member.phaseStart?.displacement?.value)).toEqual([3, 3]);
+  const rows = parsed.fhir.filter(row => row.site?.text === "right eye");
+  expect(nextDueDoses(rows, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+    timeZone: "UTC", limit: 9 })).toEqual([
+      "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
+      "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",
+      "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+      "2026-11-27T08:00:00+00:00", "2026-11-28T08:00:00+00:00",
+      "2026-11-29T06:00:00+00:00"
+    ]);
+});

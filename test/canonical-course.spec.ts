@@ -26,7 +26,7 @@ import {
   TIMING_OCCURRENCE_CAP_EXTENSION_URL,
   TIMING_OFFSET_EXACT_EXTENSION_URL,
   ADMINISTRATION_OFFSET_EXTENSION_URL,
-  projectCourseDurationRange, getAnchoredCourseDuration,
+  getAnchoredCourseDuration,
 } from "../src/fhir";
 import { cloneStructuredValue } from "../src/stable-structure";
 import { dosageMatchesSavedProjection, withDosageEditProvenance } from "../src/dosage-course";
@@ -1405,9 +1405,18 @@ describe("round30 current cadence and duration metadata", () => {
       high: { value: 3, unit: "days", code: "d", system: "http://unitsofmeasure.org" }
     };
     const sourceBefore = JSON.stringify(source);
-    const projected = projectCourseDurationRange(source);
-    delete projected.range.low!._value;
-    const input = { modifierExtension: [projected.source!], timing: { repeat: { boundsRange: projected.range } } };
+    // An existing source record can retain a formerly projected range. New
+    // writes keep authored endpoints active; import must still honor live edits
+    // to this saved record without reintroducing automatic unit conversion.
+    const projected = {
+      low: { value: 2, unit: "days", code: "d", system: "http://unitsofmeasure.org", _value: { id: "number" } },
+      high: source.high,
+    };
+    const input = { modifierExtension: [{ url: ANCHORED_COURSE_DURATION_EXTENSION_URL, extension: [
+      { url: "low", valueQuantity: source.low }, { url: "high", valueQuantity: source.high },
+      { url: "projectedRange", valueRange: projected },
+    ] }], timing: { repeat: { boundsRange: cloneStructuredValue(projected) } } };
+    delete (input.timing.repeat.boundsRange.low as { _value?: { id: string } })._value;
     const before = JSON.stringify(input);
     const restored = getAnchoredCourseDuration(input)!.valueRange!.low!;
     expect(restored).toMatchObject({ value: 48, unit: "hours", code: "h",
@@ -1492,9 +1501,68 @@ describe("round31 live source replay observations", () => {
     const before = JSON.stringify(row);
     for (const output of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
       expect(output).toMatch(/swallow whole/iu);
-      if (source.includes("BP")) expect(output).toMatch(/BP.*(?:160|greater than)/u);
+      if (source.includes("BP")) expect(output).toMatch(/BP\s*(?:>|greater than)\s*160\b/u);
     }
     expect(JSON.stringify(row)).toBe(before);
     expect(row.text).toBe(originalText);
+  });
+});
+
+describe("round35 partial authored directions and sequential previews", () => {
+  const options = { locale: "en", realizationMode: "normalized" as const };
+  it("retains text-only dose directions beside independently edited live timing", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      text: "Swallow 1 tablet whole",
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    formatSig(raw, "long", options);
+    raw.step[0].component[0].timing!.repeat!.frequency = 2;
+    const before = JSON.stringify(raw);
+    for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
+      expect(text).toContain("Swallow 1 tablet whole");
+      expect(text).toContain("twice daily");
+      expect(text).not.toContain("once daily");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(courseToR6(courseFromR6(raw)).step[0].component[0].text).toBe("Swallow 1 tablet whole");
+  });
+
+  it("lets a live structured dose replace old component wording", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      text: "Take 1 tablet once daily",
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
+      expect(text).toContain("2 tablets twice daily");
+      expect(text).not.toContain("1 tablet");
+      expect(text).not.toContain("once daily");
+    }
+  });
+
+  it.each([false, true])("does not call an earlier sequential dose open-ended (earlier duration %s)", duration => {
+    const start = (value: number) => ({
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: { value, unit: "d" }
+    });
+    const raw: FhirR6DosageInstruction = { step: [2, 1].map((dose, index) => ({
+      start: start(index * 7),
+      component: [{ doseAndRate: [{ doseQuantity: { value: dose, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          ...(duration && index === 0 ? { boundsDuration: { value: 3, unit: "d" } } : {}) } }
+      }]
+    })) };
+    const before = JSON.stringify(raw);
+    for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
+      expect(text.match(/onward/gu)).toHaveLength(1);
+      expect(text).toContain("2 tablets once daily");
+      expect(text).toContain("1 tablet once daily");
+      expect(text).not.toContain("until 7 days");
+      if (duration) expect(text).toContain("for 3 days");
+    }
+    expect(nextDueDoses(raw, { orderedAt: "2026-11-21T08:00:00Z",
+      from: "2026-11-28T00:00:00Z", timeZone: "UTC", limit: 2 }))
+      .toEqual(["2026-11-28T09:00:00+00:00", "2026-11-29T09:00:00+00:00"]);
+    expect(JSON.stringify(raw)).toBe(before);
   });
 });

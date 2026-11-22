@@ -12608,3 +12608,85 @@ Negative values indicate less runtime. Changes are median paired ratios, not rat
 ### Review communication and delivery
 
 No top-level GitHub comment, private project name or new full-review request was posted. GitHub operations use the CLI. The current review has no new inline thread requiring a reply. Final delivery preflight confirmed the existing PR is open and mergeable, remote head remains `d659c06`, exact master remains `7d62823`, all 148 inline threads remain resolved, and the PR remains at 100 changed paths. Delivery uses the existing PR branch; remote-head and clean-tree verification follows the push.
+
+## PR #14 review round 35 — 2026-11-22
+
+### Scope and owner decisions
+
+The next review is anchored to c941b91, exact master 7d62823, reviews 6009164753/6009168474 and overflow 7071537852. Clean preflight found 100 PR paths and no prior managed workers. The inventory contains 52 findings: 20 major, 29 minor, 3 trivial (one explicitly unverified), with 20 new inline threads among 168 total. Three workers investigated execution, interchange and meaning; the coordinator implemented the remaining parser/rendering fixes, reviewed their source changes and ran all final gates.
+
+The owner expressly rejected converting authored prescription range endpoints merely for FHIR conformance. AGENTS.md now states that rule prominently. Active R5/R6 output keeps each endpoint's exact value and unit; preserving the original only in provenance is insufficient. Temporary compatible-unit comparison remains allowed for calculations. R5 stays the shipping .fhir/storage contract; .fhirNext and R6 import remain current pinned R6 only. No native editor, old R6 compatibility or internal caller-misuse defenses were added.
+
+**Disposition: 33 findings fixed in production, 14 accepted as stronger test oracles, 5 declined.** The complete 52-entry evidence ledger is recorded as ezmed14-round35-findings-ledger.json alongside the frozen before/current/prior/master probes.
+
+| Declined finding | Decision |
+|---|---|
+| 7: flattened history wrapper | Existing public text-only persistence tests retain envelope/child IDs and old instruction across saves. Remaining complaint is schema shape, with no demonstrated active meaning or source loss. |
+| 24: obsolete FhirR6DosageDetails alias | The current R6 type is FhirR6DosageInstruction. No backward compatibility alias is wanted. |
+| 36: explicit empty clock array | Empty clocks already deactivate the old clock bridge while breakfast and source annotations survive. Omission solely for strict JSON shape earns no runtime cleanup. |
+| 50: manually overlapping parallel offsets | The reviewer acknowledges parser-produced origins cannot reach the constructed internal state. The builder is private orchestration, and the native model has no caller-misuse contract. |
+| 52: readonly internal TimeParts | Hypothetical internal cache mutation, with no demonstrated supported public failure. No defensive type/runtime layer added. |
+
+### Accepted clinical and interchange corrections
+
+- **Quantity ownership (#11/#12/#13/#18/#28/#49):** Full compound numeric phrases own administration-cue lookup. The same existing boundary probe retains a registered governing action for a mixed amount, so 2 million units or 1.5 mg stay active drug amounts beside a 50 mL carrier. A next-day daughter licenses a qualified omitted tablet unit without interpreting “about one week” as dose. Thai fractions preserve 0.5 tablet and <= across slash spacing and mixed Thai/Arabic digits. Divided doses use the active projected drug amount, keeping the carrier's quantity and qualifier separate; repeated feature merges do not divide twice. Compact period caps use the shared interval vocabulary, and article-led half/quarter-hour durations use existing fraction entries. No new parse pass or phrase-repair layer.
+- **Dose and action realization (#10/#20/#30/#37/#51):** Resolved institution method identity is passed into locale rendering rather than looked up again. Result actions keep the live amount, site, manner and physical result after method edits. A sole dose-defining preparation keeps the edited dose at that action; the later drink/swallow does not acquire or repeat it. The existing reconciliation walk updates linked Amount/Theme together while preserving independent mixing volume and wait duration. Typed Time adjuncts use the shared locale event-name realization, so CM appears as breakfast with one before relation. Monthly day lists no longer hide a separately authored frequency maximum.
+- **Course origins and preview (#3/#4/#5/#14/#15/#19/#43):** Calendar-bound members retain their own delay; later-phase delays stay relative to that phase. Only an ordinary first-phase delay can promote to treatment-relative stage onset. Every member must author the same onset before it becomes a shared phase origin; an unanchored member keeps the track origin. A dated predecessor supplies the next-morning civil date without inventing an authored end/count; execution can use a dated successor as the effective cutoff. Omitted treatment-day displacement is zero in the existing civil repeat-span owner, including DST. Nonterminal open stages do not promise onward; the final open stage can. Timing-only external components retain otherwise unrepresented directions without overriding structured amounts, methods or typed action graphs.
+- **Execution and supply (#8/#9/#17/#26/#27):** The existing ranged-supply proof counts actual slots per cap partition, including the partial final window: 51 days of 1–2 tablets under 3 tablets/48 h has a proven maximum of 77. Recorded timestamp keys shift together with delayed history. Loading completion and due clocks reuse the existing chronological ranged-cap admission; scheduling does not run supply quantity maximization. Internal unit comparisons normalize the comparison labels before converting, while source/exported values remain unchanged. A known daily code may choose its licensed cadence inside a repeat range for due clocks; the historical upper-bound supply contract remains intact.
+- **Persistence and independent metadata (#1/#2/#6/#16/#21/#23/#35/#38/#47/#48):** Approximate numerator restoration keeps the decoded denominator qualifier. A lifted sole-phase policy receives a stable wire owner ID only when no authored phase/component ID exists, preserving it through dose edits without attaching it to replacement/duplicate owners. Calendar setters reconcile every active duplicate and retain retired wrapper metadata. Multiple period-limit edits match unique typed unit/window identity, preserving each limit's text; ambiguous/deleted prior limits stay in the existing inactive source snapshot. Automatic duration endpoint conversion/removal is gone, and saved projection metadata restores originals while retaining wrapper IDs/annotations as source. Comparator primitive metadata can survive without inventing an operator. Compatible method aliases retain complete primitive metadata. R5 fresh proof and native import agree on the supported effective PRN alias. Equal coded repeat units can differ in display label without a false conflict. Warm replay observes in-place dose/rate expression changes.
+
+No new whole-course traversal, recursive defensive equality or full-schema validator was added. Rare custom/dimensional paths remain gated. Operator classification and calendar duplicate classification reuse their existing walks. The coordinator removed a redundant daily-code lookup left after an exploratory supply change was correctly rejected by historical behavior tests.
+
+### Stronger oracles and integration findings
+
+Test-only accepted findings are 22, 25, 29, 31, 32, 33, 34, 39, 40, 41, 42, 44, 45, 46. They assert the actual BP operator/value, each mixed-unit endpoint, edited cycle days, primary per-target phrase, dates before a wrongly early successor, exact locale-provider identity, both interval endpoints, intended source graph, all structured rate alternatives, scalar comparator metadata, retained end wording and real cap/incomplete-timing behavior. Whole numeric-token tests for #30 exposed a real preparation-ownership defect and therefore belong to production fixes, not test-only changes. Until-next-morning wording remains retained suggestion evidence; no relative-end execution subsystem was invented.
+
+The first combined gate failed 12 tests. Three exposed an integration mistake in the new period-limit history retention: placing inactive history on active safety left a source-only safety wrapper/native empty object after clearing the final maximum. The redundant append was removed; the existing inactive course/source snapshot already retains the old text. The historical deletion assertions remain unchanged, and new tests require no active FHIR safety/native safety/limits while preserving source.
+
+Nine failures initially concerned old treatment-global step-offset assertions. Before migrating them, exact timestamp checks exposed a missing delayed one-shot dose. Frozen c941b91, d659c06 and exact master all already return only 08:00 for an immediate dose followed by a dose after 1 h or 12 h. The old field-shape oracle had masked that clinical bug. The fix places the one-administration fact in the existing typed regimen pass, before native and R5 projections; a temporary compile-local inference was removed because it did not update the authoritative clause. Authored countMax and recurring/calendar/capacity/course-duration facts remain authoritative. Execution compares finite-count eligibility with the actual delayed origin, retaining the separate nominal recurrence origin. No adapter repair or global later-phase promotion was used.
+
+Seven loading-language variants now give 08:00→09:00 or 08:00→20:00 through parsed/native/R6/JSON R6/shipping R5/JSON R5, no later doses, and supply of 3 tablets. An explicit three-phase control gives 08:00→20:00→21:00 and supply of 6. A delayed six-hour recurrence remains 10:00/16:00/22:00/04:00, without an invented count. The seven-day predecessor followed by a two-hour delay still passes.
+
+Frozen evidence does not attribute every failure to this PR. Several quantity, qualifier, calendar and delayed-dose symptoms reproduce in older builds. The omitted day-start/DST repeat leak in #43 is attributable to the preceding round: c941 fails while the two earlier frozen artifacts pass. Where master lacks the current native/R6 concept, no unsupported equivalence claim is made. Two initially added locale assertions assumed translations absent from existing terminology; those test assumptions were corrected to the retained g/saline labels and excluded from defect attribution.
+
+### Validation on the frozen candidate
+
+- **5,897 source tests in 55 files passed**, including the configured strict ES6 gate.
+- **4 distribution tests passed**, after ESM/CommonJS/declaration builds.
+- **13 real downstream R5 storage roundtrips passed** with complete JSON equality through conversion and save/reopen: simple, glued qualified Thai half, active drug/carrier, divided active drug, delayed loading, mixed event/clock, Thai half, spaced qualified Thai half, mixed-number infusion, hourly oral cap, Thai parallel, taper and independent eyes. The original Thai parallel and English taper remain 2 and 4 R5 rows. No downstream application code was changed.
+- Source remained frozen across source tests, build and distribution tests. The manifest wrapper initially assumed an index.mjs output filename; both gates had already passed. Enumeration was corrected to the actual index.js/index.cjs/declarations without changing or rebuilding source.
+- The first gate's logs remain as attempt1 evidence. An execution policy correction arrived during that first run; it was not accepted as a stable-source gate. All final results refer to the later immutable source snapshot.
+
+Source SHA-256: ac6b4c284fb3c29ada174255535fce12da5c437e259d844eea5cfbcfb11cfea7. Built ESM SHA-256: 02d42a90261e7a0e062946920c66e354c38c9d114e12176d5a8c1cf1eebfc664. Exact master 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb build SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Harness blob 4ed621edc7d5c05195e0ba2abc3dbe4af58b4732 is unchanged from round 34; its prior independent integrity controls remain applicable.
+
+### Performance and delivery
+
+The exact built master comparison measured all **117/117 public functions**, with **181 paired scenarios: 174 equivalent and the same seven established non-equivalent cases**. All 174 equivalent scenarios passed the per-scenario 4% ceiling after prescribed confirmation. Six candidate-only APIs have seven separate measurements. There were no new equivalence exclusions, missing APIs or measurement errors.
+
+The full run used 22 balanced paired rounds (11 starting each way), targeting 35 ms per batch. All eight first-pass flags were rerun on the identical candidate and baseline with 72 rounds at 140 ms, reversed first order and 36 pairs starting each way. Every flag passed confirmation; no source optimization or result exclusion was made between runs. All original and confirmation samples remain in the reports. The highest accepted slowdown was **+3.791%** for `parseMedicationDateListAt`. Domains and scenarios are never averaged to conceal a regression.
+
+| Flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| `parseSig/eye` | +5.889% | -6.296% |
+| `formatSig/R5/en` | +7.704% | -4.980% |
+| `fromFhirDosage/en` | +4.499% | -7.072% |
+| `parseStrengthIntoRatio` | +4.227% | -0.827% |
+| `parseSnomedBodySiteLateralityPostcoordinationCode` | +6.261% | -0.662% |
+| `parseSnomedBodySiteTopographicalModifierPostcoordinationCode` | +6.029% | +0.185% |
+| `registerInstructionActionLocaleAdapter` | +5.933% | -1.033% |
+| `registerSuggestLocaleAdapter` | +4.549% | +0.118% |
+
+Representative accepted measurements (microseconds per call; percentages are medians of paired ratios, not ratios of separately aggregated times):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| `parseSig/ordinary` | 1804.969 | 1699.312 | -6.004% |
+| `parseSig/thai` | 6657.774 | 6184.451 | -6.742% |
+| `parseSig/eye` | 6470.227 | 6028.126 | -6.296% |
+| `parseSig/staged` | 9724.060 | 9735.055 | +0.256% |
+| `formatSig/R5/en` | 15.884 | 14.976 | -4.980% |
+| `calculateTotalUnits/scalar` | 340.640 | 43.739 | -87.379% |
+
+The seven pre-existing non-equivalent cases remain R6-complex formatting/import in EN and TH, edited/added-dose Thai R5 roundtrips, and R6 author-source formatting. The unchanged harness and its round 34 integrity controls are retained. Performance acceptance and complete samples are recorded in ezmed14-round35-performance-accepted.json, master-full.json and master-confirm.json. No source or distribution artifact changed across either run.
+
+The PR remains at 100 changed paths, with no new repository files. GitHub operations use the CLI only. No top-level comment, private project name or new full-review request is posted. Replies belong only to the 20 original inline threads after commit; the declined wrapper finding receives its preservation-based explanation there.
