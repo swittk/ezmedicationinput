@@ -591,12 +591,12 @@ describe("R6 course marker in-memory persistence fidelity", () => {
 describe("source-less R6 treatment-relative step display", () => {
   const phaseDose = {
     en: [
-      /From treatment start until 7 days after treatment start: [^.]*(?:^|[^0-9.])1 tablet at 8:00 am\./u,
-      /^[^:]*: [^.]*(?:^|[^0-9.])2 tablets at 8:00 am\./u
+      /From treatment start until 7 days after treatment start: (?:Take|Use) 1 tablet at 8:00 am\./u,
+      /^[^:]*: (?:Take|Use) 2 tablets at 8:00 am\./u
     ],
     th: [
-      /ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])1 เม็ด เวลา 08:00\./u,
-      /^[^:]*: [^.]*(?:^|[^0-9.])2 เม็ด เวลา 08:00\./u
+      /ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ 1 เม็ด เวลา 08:00\./u,
+      /^[^:]*: ใช้ครั้งละ 2 เม็ด เวลา 08:00\./u
     ]
   };
   const relative = (days: number) => ({
@@ -666,6 +666,8 @@ describe("source-less R6 treatment-relative step display", () => {
           : "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ "
         : locale === "en" ? "From 7 days after treatment start: Take " : "ตั้งแต่7 วันหลังเริ่มการรักษา: ใช้ครั้งละ ";
       const suffix = locale === "en" ? (phase === 0 ? " tablet" : " tablets") + " at 8:00 am." : " เม็ด เวลา 08:00.";
+      const conflicting = locale === "en" ? "3 tablets and " : "3 เม็ด และ ";
+      expect(phaseDose[locale][phase].test(prefix + conflicting + String(phase + 1) + suffix)).toBe(false);
       for (const quantity of ["1.2", "2.1", "12", "1", "2"]) {
         const matches = phaseDose[locale][phase].test(prefix + quantity + suffix);
         expect(matches, locale + " phase " + phase + " quantity " + quantity).toBe(quantity === String(phase + 1));
@@ -735,11 +737,11 @@ describe("round38 implicit successor with calendar end", () => {
       const englishSuccessor = english.slice(english.indexOf(englishStart));
       const thaiSuccessor = thai.slice(thai.indexOf(thaiStart));
       expect(englishSuccessor).toMatch(exactPredecessor
-        ? /^From 7 days after treatment start until 1 month after treatment start: [^.]*(?:^|[^0-9.])2 tablets once daily\./u
-        : /^After the previous phase; Until 1 month after treatment start: [^.]*(?:^|[^0-9.])2 tablets once daily\./u);
+        ? /^From 7 days after treatment start until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\./u
+        : /^After the previous phase; Until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\./u);
       expect(thaiSuccessor).toMatch(exactPredecessor
-        ? /^ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])2 เม็ด วันละครั้ง\./u
-        : /^หลังขั้นตอนก่อนหน้า; จนถึง1 เดือนหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])2 เม็ด วันละครั้ง\./u);
+        ? /^ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\./u
+        : /^หลังขั้นตอนก่อนหน้า; จนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\./u);
       if (exactPredecessor) expect(english).not.toContain("After the previous phase");
     }
   });

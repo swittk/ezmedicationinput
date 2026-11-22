@@ -136,8 +136,6 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
 
 /** Typed ownership is shared; each locale only orders the resolved words. */
 function mixArgumentContent(c: InstructionActionRealizationInput) {
-  const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
-    relationHasSemanticClass(c.frame.relation, "accompaniment");
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
     unmarkedSubstance: AdviceArgument | undefined, amountArg: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
@@ -147,7 +145,8 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     // An unmarked Substance can be the theme before an explicit WITH vehicle.
     const companion = arg.relation &&
       (relationHasGrammarFeature(arg.relation, "accompanimentComplement") ||
-        relationHasSemanticClass(arg.relation, "accompaniment") || arg.relation === AdviceRelation.In);
+        relationHasSemanticClass(arg.relation, "accompaniment") ||
+        relationHasSemanticClass(arg.relation, "locative"));
     if (!themeArg && !arg.relation && (arg.role === AdviceArgumentRole.Theme || nominal)) themeArg = arg;
     if (!substanceArg && companion && (material || nominal || arg.role === AdviceArgumentRole.Theme))
       substanceArg = arg;
@@ -199,7 +198,7 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const primaryAmount = themeArg && !amountAlreadyInTheme ? c.amount : undefined;
   const substanceAmount = substanceArg?.quantity ? substanceQuantity
     : themeArg || amountAlreadyInTheme ? undefined : c.amount;
-  return { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
+  return { theme, themeAmount, substance, substanceArg, amountArg,
     coextensiveAmount, primaryAmount, substanceAmount };
 }
 
@@ -222,16 +221,18 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
     case "mix-substance": {
-      const { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
+      const { theme, themeAmount, substance, substanceArg, amountArg,
         coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme
         ? ` ${primaryAmount ? `${primaryAmount} of ` : ""}${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
         : primaryAmount || coextensiveAmount || themeAmount
           ? " " + (primaryAmount ?? coextensiveAmount ?? themeAmount) : "";
       const amountText = substanceAmount ? `${substanceAmount}${amountArg?.conceptId && !substanceArg?.quantity ? " of " : " "}` : "";
-      const materialRelation = c.frame.relation &&
-        (withComplement || c.frame.relation === AdviceRelation.In)
-        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+      const vehicleRelation = substanceArg?.relation ?? c.frame.relation;
+      const materialRelation = vehicleRelation &&
+        (relationHasSemanticClass(vehicleRelation, "accompaniment") ||
+          relationHasSemanticClass(vehicleRelation, "locative"))
+        ? localizeAdviceRelation(vehicleRelation, c.locale) ?? vehicleRelation
         : "with";
       const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
       const timeRelation = timeSemanticRelation &&
@@ -293,8 +294,11 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-time": {
       const object = c.theme ?? c.site;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${object ? ` ${object}` : ""}${c.time ? ` in ${c.time}` : ""}`;
+      const timeRelation = c.timeRelation ?? c.frame.relation;
+      const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
+        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
+      if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
+      return c.label + (object ? " " + object : "") + (c.time ? " " + (relation ? relation + " " : "") + c.time : "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;
@@ -378,10 +382,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const themeText = theme ? (coextensiveAmount ??
         `${theme}${themeAmount ? ` ${themeAmount}` : ""}${primaryAmount ? ` ${primaryAmount}` : ""}`) : primaryAmount ?? coextensiveAmount ?? themeAmount ?? "";
       const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";
-      const materialRelation = c.frame.relation === AdviceRelation.Without
+      const vehicleRelation = substanceArg?.relation ?? c.frame.relation;
+      const materialRelation = vehicleRelation === AdviceRelation.Without
         ? "โดยไม่ใช้"
-        : c.frame.relation === AdviceRelation.In
-          ? "ใน"
+        : vehicleRelation && relationHasSemanticClass(vehicleRelation, "locative")
+          ? localizeAdviceRelation(vehicleRelation, c.locale) ?? vehicleRelation
           : themeText ? "กับ" : "";
       const substanceText = substance
         ? `${materialRelation}${substance}${substanceAmount ? `${amountSeparator}${substanceAmount}` : ""}` : "";
@@ -442,8 +447,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-time": {
       const object = c.theme ?? c.site;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${object ?? ""}${c.time ?? ""}`;
+      const timeRelation = c.timeRelation ?? c.frame.relation;
+      const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
+        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
+      if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
+      return c.label + (object ?? "") + (c.time ? (relation ?? "") + c.time : "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;

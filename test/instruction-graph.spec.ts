@@ -2902,13 +2902,10 @@ describe("round30 method and current timing ownership", () => {
   });
 
   function primaryWithTime(value: string, when?: EventTiming) {
-    const input = copy(parsePublicSig("Swallow 1 tablet with 200 mL water").fhir[0]);
-    const graph = parseInstructionGraphExtension(input.extension)!;
-    graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: value, normalized: value });
-    const marker = buildInstructionGraphExtension(graph)!;
-    input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
-    input.timing = { repeat: when ? { when: [when] } : { timeOfDay: [value] } };
-    return input;
+    // Parse the complete source so its structured-clock ownership is real;
+    // adding a graph clock to a clockless source would instead be independent.
+    return copy(parsePublicSig("Swallow 1 tablet with 200 mL water " +
+      (when ? "at bedtime" : "at " + value)).fhir[0]);
   }
 
   it("applies a current event when both method and timing change on the selected primary", () => {
@@ -3012,36 +3009,31 @@ describe("round31 edited action ownership", () => {
   });
 
   it("preserves a preparation clock when the separate primary clock changes", () => {
-    const parsed = parsePublicSig("Dissolve 2 tablets in water then drink at 09:00");
-    const clause = parsed.meta.canonical.clauses[0];
-    const graph = clause.instructionGraph!;
-    // The compact canonical graph omits the covered Drink; construct the
-    // complete source graph once and select its real source-owned primary.
-    graph.actions = parseInstructionActions(graph.sourceText!);
-    const preparation = graph.actions[0];
-    preparation.args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00" });
-    preparation.sourceText = "Dissolve 2 tablets in water at 08:00";
-    const primary = graph.primaryAdministrationSpan!;
-    const drink = graph.actions.find(action => action.predicate.lemma === "drink" &&
-      action.span.start <= primary.start && action.span.end >= primary.end)!;
-    expect(graph.actions.filter(action => action.predicate.lemma === "drink")).toHaveLength(1);
-    drink.args = [{ role: AdviceArgumentRole.Time, text: "09:00", normalized: "09:00" }];
-    clause.schedule!.timeOfDay = ["10:00:00"];
-    clause.sourceProjectionVerified = false;
-    const before = JSON.stringify(graph);
-    const output = realizeInstructionGraph(graph, "en", {
-      omitCanonicalAdministration: clause, position: "pre", preferSourceText: true
-    });
-    expect(output).toContain("Dissolve 2 tablets in water at 08:00");
-    const long = formatCanonicalClause(clause, "long", { locale: "en" }, { realizationMode: "normalized" });
-    expect(long).toContain("08:00");
-    expect(long).toContain("10:00");
-    expect(long).not.toContain("9:00");
-    const thai = formatCanonicalClause(clause, "long", resolveSigLocalization("th"), { realizationMode: "normalized" });
-    expect(thai).toContain("08:00");
-    expect(thai).toContain("10:00");
-    expect(thai).not.toContain("09:00");
-    expect(JSON.stringify(graph)).toBe(before);
+    const source = "Dissolve 2 tablets in water at 08:00 then drink at 09:00";
+    const actions = parseInstructionActions(source);
+    const drink = actions.find(action => action.predicate.lemma === "drink")!;
+    const graph = { sourceText: source, sourceLocale: "en", actions, primaryAdministrationSpan: drink.span };
+    const initial: FhirDosage = {
+      text: source, method: { text: "Drink" }, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      timing: { repeat: { timeOfDay: ["09:00:00"] } },
+      extension: [buildInstructionGraphExtension(graph)!]
+    };
+    const row = JSON.parse(JSON.stringify(withDosageEditProvenance([initial], source)[0]));
+    expect(getDosageSourceOwnership(row)?.clocks).toBe(true);
+    row.timing.repeat.timeOfDay = ["10:00:00"];
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("Dissolve 2 tablets");
+      expect(en).toContain("08:00");
+      expect(en).toContain("10:00");
+      expect(en).not.toMatch(/0?9:00/u);
+      expect(th).toContain("08:00");
+      expect(th).toContain("10:00");
+      expect(th).not.toContain("09:00");
+    }
+    expect(JSON.stringify(row)).toBe(before);
   });
 });
 
@@ -3161,6 +3153,8 @@ describe("round32 action meaning combinations", () => {
 describe("round32 source clock ownership", () => {
   it.each([
     [false, "dose", true, false],
+    [false, "add", true, true],
+    [false, "mirror", true, false],
     [true, "dose", true, false],
     [true, "replace", false, true],
     [true, "delete", false, false]
@@ -3184,6 +3178,8 @@ describe("round32 source clock ownership", () => {
     const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
     expect(getDosageSourceOwnership(saved)?.clocks).toBe(structured);
     saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "add" || edit === "mirror")
+      saved.timing = { repeat: { timeOfDay: [edit === "mirror" ? "08:00:00" : "10:00:00"] } };
     if (edit === "replace") saved.timing.repeat.timeOfDay = ["10:00:00"];
     if (edit === "delete") delete saved.timing.repeat.timeOfDay;
     const before = JSON.stringify(saved);
@@ -3195,6 +3191,7 @@ describe("round32 source clock ownership", () => {
         expect(/(?:^|[^0-9:])0?8:00(?::00)?(?:\s*a\.?m\.?(?![\p{L}\p{N}])|(?![0-9:]|\s*[ap]\.?m\.?))/iu.test(text), locale + " " + realizationMode + " " +
           (input === saved ? "R5" : input === r6 ? "R6" : "R5-from-R6") + ": " + text).toBe(eight);
         expect(/(?:^|[^0-9:])10:00(?::00)?(?:\s*a\.?m\.?(?![\p{L}\p{N}])|(?![0-9:]|\s*[ap]\.?m\.?))/iu.test(text)).toBe(ten);
+        if (edit === "mirror") expect(text.match(/(?:^|[^0-9:])0?8:00(?::00)?(?![0-9:])/gu)).toHaveLength(1);
       }
     }
     expect(JSON.stringify(saved)).toBe(before);
@@ -4445,6 +4442,9 @@ describe("round41 supported graph and clinical preview facts", () => {
         .toContain("between after waking and bedtime");
       expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
         .toContain("ระหว่างหลังตื่นนอนถึงก่อนนอน");
+      for (const locale of ["en", "th"])
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" }))
+          .not.toMatch(/\d|\b(?:tablets?|capsules?|mL|mg|sprays?)\b|เม็ด|แคปซูล|มิลลิลิตร|มิลลิกรัม/u);
     }
     expect(courseFromR6(raw).stages[0].administrations[0].amounts).toBeUndefined();
     expect(formatSig({}, "long", { locale: "en" })).toBe("Use.");
@@ -4602,4 +4602,128 @@ describe("round41 live quantity, cadence and indication previews", () => {
     expect(cold[0].asNeededFor[0]._text).toEqual(row.asNeededFor![0]._text);
     expect(JSON.stringify(row)).toBe(original);
   });
+});
+
+
+describe("round42 graph participant and preparation ownership", () => {
+  it("keeps the authored INTO vehicle and its volume across public formats", () => {
+    const parsed = parsePublicSig("Mix the tablet into 100 mL juice");
+    const before = JSON.stringify(parsed.fhirNext);
+    for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Mix tablet into 100 mL juice.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ผสมยาเม็ดเข้าไปในjuice 100 มิลลิลิตร.");
+    }
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+  });
+
+  it("gives the explicit WITH vehicle priority over an unmarked substance object", () => {
+    const options: ParseOptions = { instructionConceptMap: { syrup: {
+      code: "clinic-syrup", role: AdviceArgumentRole.Substance, display: "syrup", i18n: { th: "น้ำเชื่อม" }
+    } } };
+    const frame = parseInstructionActions("Swallow syrup with water", 0, options)[0];
+    frame.sourceText = "";
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({
+      sourceText: "", sourceLocale: "en", actions: [frame]
+    })!] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Swallow syrup with water.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("กลืนน้ำเชื่อมร่วมกับน้ำ.");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(realizeInstructionAction(parseInstructionActions("Swallow with water")[0], "en"))
+      .toBe("Swallow with water");
+  });
+
+  it.each([false, true])("renders the selected object independently of argument order (%s)", reversed => {
+    const frame = parseInstructionActions("Swallow the tablet with applesauce")[0];
+    frame.sourceText = "";
+    if (reversed) frame.args.reverse();
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({
+      sourceText: "", sourceLocale: "en", actions: [frame]
+    })!] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Swallow tablet with applesauce.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("กลืนยาเม็ดร่วมกับapplesauce.");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("retains independent priming counts when the imported graph has no primary span", () => {
+    const frame = parseInstructionActions("Prime with 2 sprays")[0];
+    frame.sourceText = "";
+    const row: FhirDosage = {
+      method: { text: "Spray" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "spray" } }],
+      extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!]
+    };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Spray 1 spray. Prime with 2 sprays.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("พ่นครั้งละ 1 พ่น. เตรียมอุปกรณ์พ่น 2 พ่น.");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+
+it("round42: keeps BEFORE in a public imported rich patch preview", () => {
+  const source = "Apply a new patch before breakfast";
+  const frame = parseInstructionActions("Apply patch before breakfast")[0];
+  frame.predicate.display = "Apply";
+  frame.sourceText = source;
+  frame.span = { start: 0, end: source.length };
+  frame.args = [
+    { role: AdviceArgumentRole.Object, text: "a new patch", normalized: "a new patch", i18n: { th: "แผ่นแปะใหม่" } },
+    { role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming.Breakfast,
+      relation: AdviceRelation.Before, i18n: { th: "อาหารเช้า" } }
+  ];
+  const raw: FhirR6DosageInstruction = { step: [{ component: [{
+    method: { coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] },
+    route: { coding: [{ system: "http://snomed.info/sct", code: "45890007", display: "Transdermal route" }] },
+    timing: { repeat: { when: ["ACM" as EventTiming] } },
+    extension: [buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", primaryAdministrationSpan: { start: 0, end: 5 }, actions: [frame]
+    })!]
+  }] }] };
+  const before = JSON.stringify(raw);
+  for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))])
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en.match(/before breakfast/gu)).toHaveLength(1);
+      expect(en).not.toContain("in breakfast");
+      expect(th.match(/ก่อนอาหารเช้า/gu)).toHaveLength(1);
+      expect(en).toContain("a new patch");
+      expect(th).toContain("แผ่นแปะใหม่");
+    }
+  expect(JSON.stringify(raw)).toBe(before);
+});
+
+
+it.each([
+  ["Mix 5 mL with 100 mL water at 08:00", "Mix 5 mL with 100 mL water at 08:00:00"],
+  ["Dissolve 2 tablets in water at 08:00", "Dissolve 2 tablets in water at 08:00:00"]
+])("round42: preserves a recognized clock after the material complement: %s", (source, expected) => {
+  const frame = parseInstructionActions(source)[0];
+  expect(frame.args).toContainEqual(expect.objectContaining({
+    role: AdviceArgumentRole.Time, normalized: "08:00:00"
+  }));
+  const before = JSON.stringify(frame);
+  expect(realizeInstructionAction(frame, "en")).toBe(expected);
+  const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
+  const row: FhirDosage = { extension: [extension] }, r6 = toDosageDetails([row]);
+  for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("08:00");
+    expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("08:00");
+  }
+  expect(JSON.stringify(frame)).toBe(before);
 });

@@ -44,6 +44,7 @@ export const THAI_COURSE: CourseLanguage = {
   unspecified: "ไม่ระบุค่า",
   withAuthoredDirections: (current, source) => "ปัจจุบัน: " + current + "; ข้อความเดิม: " + source,
   treatmentStart: "เริ่มการรักษา",
+  cycleStart: "จุดเริ่มต้นของแต่ละรอบ",
   incompleteInterpretation: "ข้อมูลบางส่วนเท่านั้น — ต้องตรวจสอบข้อจำกัดการใช้ยา",
   retainedStructure: "Structured FHIR data is retained",
   // Preserve the established output surface. These technical fallback labels
@@ -81,7 +82,9 @@ export const THAI_COURSE: CourseLanguage = {
       ? `จนถึง${end}`
       : "",
   calendarEvents: (events) => "วันที่กำหนด: " + events.join(" และ "),
-  reviewTiming: (source) => (source ? `ต้องตรวจสอบช่วงเวลา: ${source}` : "ต้องตรวจสอบช่วงเวลาการใช้ยา"),
+  reviewTiming: (source, boundary) => boundary === "end"
+    ? "ต้องตรวจสอบเวลาสิ้นสุด" + (source ? ": " + source : "")
+    : (source ? "ต้องตรวจสอบช่วงเวลา: " + source : "ต้องตรวจสอบช่วงเวลาการใช้ยา"),
   dayRange: (first, last) => `วันที่ ${first}–${last}`,
   fromDay: (first) => `ตั้งแต่วันที่ ${first} เป็นต้นไป`,
   throughDay: (last) => `ถึงวันที่ ${last}`,

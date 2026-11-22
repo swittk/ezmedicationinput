@@ -45,6 +45,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   unspecified: "unspecified",
   withAuthoredDirections: (current, source) => "Current: " + current + "; original directions: " + source,
   treatmentStart: "treatment start",
+  cycleStart: "each cycle start",
   incompleteInterpretation: "INCOMPLETE medication interpretation — safety restrictions require review",
   retainedStructure: "Structured FHIR data is retained",
   maxAdministrationLabel: "max per administration: ",
@@ -74,7 +75,9 @@ export const ENGLISH_COURSE: CourseLanguage = {
   calendarWindow: (start, end) =>
     start && end ? `From ${start} until ${end}` : start ? `From ${start} onward` : end ? `Until ${end}` : "",
   calendarEvents: (events) => "Scheduled events: " + events.join(", "),
-  reviewTiming: (source) => (source ? `Timing requires review: ${source}` : "Stage timing requires review"),
+  reviewTiming: (source, boundary) => boundary === "end"
+    ? "End timing requires review" + (source ? ": " + source : "")
+    : (source ? "Timing requires review: " + source : "Stage timing requires review"),
   dayRange: (first, last) => `Days ${first}–${last}`,
   fromDay: (first) => `From day ${first} onward`,
   throughDay: (last) => `Through day ${last}`,

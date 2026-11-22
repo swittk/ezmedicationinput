@@ -388,7 +388,7 @@ function trimActionRange(input: string, range: TextRange, offset: number): TextR
   return { start, end };
 }
 
-function timeArgumentFromParts(
+function clockArgumentFromParts(
   parts: Lexeme[],
   start: number,
   endExclusive: number,
@@ -404,6 +404,14 @@ function timeArgumentFromParts(
       normalized: clock.value
     };
   }
+  return undefined;
+}
+
+function timeArgumentFromParts(
+  parts: Lexeme[], start: number, endExclusive: number, input: string
+): AdviceArgument | undefined {
+  const clock = clockArgumentFromParts(parts, start, endExclusive, input);
+  if (clock) return clock;
   const canonicalParts = parts.slice(start, endExclusive).map((part) => key(part));
   let event: EventTiming | undefined;
   for (let index = 0; index < canonicalParts.length; index += 1) {
@@ -1332,10 +1340,13 @@ const OBJECT_TIME_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
 
 const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const { definition, parts, argumentStart, segmentEnd, input, offset, options, relIndex } = c;
+  const tailRelation = c.relationTargetEnd < segmentEnd
+    ? actionArgumentRelation(key(parts[c.relationTargetEnd])) : undefined;
   const materialEnd = c.relationTargetEnd < segmentEnd &&
-    relationHasSemanticClass(
-      actionArgumentRelation(key(parts[c.relationTargetEnd])), "temporal"
-    ) ? c.relationTargetEnd : segmentEnd;
+    (relationHasSemanticClass(tailRelation, "temporal") ||
+      relationHasGrammarFeature(tailRelation, "timeComplement") &&
+        clockArgumentFromParts(parts, c.relationTargetEnd + 1, segmentEnd, input))
+    ? c.relationTargetEnd : segmentEnd;
   const absolutePrimary = configuredConceptIndex(
     parts, argumentStart, materialEnd, definition.argumentParserConfig?.primaryConcepts);
   if (absolutePrimary < 0) {
@@ -1718,7 +1729,16 @@ function buildActionFrame(
     relationHasSemanticClass(temporalRelation, "temporal") &&
     relationHasGrammarFeature(temporalRelation, "activityFallback")
       ? temporalRelation : undefined;
-  if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
+  // The shared clock grammar also licenses a complete time daughter after
+  // a material complement, e.g. dissolve in water at 08:00.
+  const nextTime = temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
+    ? clockArgumentFromParts(parts, temporalIndex + 1, segmentEnd, input) : undefined;
+  if (nextTime) {
+    const first = parts[temporalIndex + 1], last = parts[segmentEnd - 1];
+    pushArgument(args, { ...nextTime, relation: temporalRelation,
+      ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {})
+    });
+  } else if (temporalIndex >= 0 && temporalRelation === AdviceRelation.Until) {
     const result = argumentFromParts(parts, temporalIndex + 1, segmentEnd, input, AdviceArgumentRole.Result, options);
     if (result) {
       result.relation = temporalRelation;
@@ -3620,24 +3640,35 @@ function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false):
 type ActionRealizationContext = InstructionActionRealizationInput;
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
-const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
+function defaultActionArguments(frame: AdviceFrame) {
+  const explicitAccompaniment = frame.args.some(arg =>
+    (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+      arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) &&
+    relationHasSemanticClass(arg.relation, "accompaniment"));
   let objectArg: AdviceArgument | undefined;
   let relationTargetArg: AdviceArgument | undefined;
   let amountArg: AdviceArgument | undefined;
-  for (const arg of c.frame.args) {
+  for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
     else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
         arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) {
       // A WITH daughter remains an accompaniment when the medication object
       // is implicit. A bare substance without that relation can be the object.
       if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
-          arg.role === AdviceArgumentRole.Substance &&
-            relationHasSemanticClass(c.frame.relation, "accompaniment"))
+          !explicitAccompaniment && arg.role === AdviceArgumentRole.Substance &&
+            relationHasSemanticClass(frame.relation, "accompaniment"))
         relationTargetArg ??= arg;
       else if (!objectArg) objectArg = arg;
       else relationTargetArg ??= arg;
     }
   }
+  return { objectArg, relationTargetArg, amountArg };
+}
+
+const DEFAULT_ACTION_REALIZER = (
+  c: ActionRealizationContext, selected = defaultActionArguments(c.frame)
+): string => {
+  const { objectArg, relationTargetArg, amountArg } = selected;
   const object = !objectArg ? undefined : objectArg.role === AdviceArgumentRole.Site ? c.site
     : objectArg.role === AdviceArgumentRole.Substance ? c.substance : c.theme;
   const objectSource = normalizedInstructionSurface(objectArg?.text ?? "");
@@ -3839,11 +3870,16 @@ function realizeAction(
   };
   const label = actionLabel(frame, locale, roundtripSafe);
   const amount = first(AdviceArgumentRole.Amount);
-  const theme = first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma);
+  const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
+  const defaultArguments = realizerKey === "default" ? defaultActionArguments(frame) : undefined;
+  const objectArg = defaultArguments?.objectArg;
+  const theme = objectArg && (objectArg.role === AdviceArgumentRole.Theme || objectArg.role === AdviceArgumentRole.Object)
+    ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Theme) ?? first(AdviceArgumentRole.Object);
   const container = first(AdviceArgumentRole.Container);
   const destination = first(AdviceArgumentRole.Destination);
-  const site = first(AdviceArgumentRole.Site);
-  const substance = first(AdviceArgumentRole.Substance);
+  const site = objectArg?.role === AdviceArgumentRole.Site ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Site);
+  const substance = objectArg?.role === AdviceArgumentRole.Substance ? translatedArgument(objectArg, locale) : first(AdviceArgumentRole.Substance);
   const result = first(AdviceArgumentRole.Result);
   const activity = first(AdviceArgumentRole.Activity);
   const timeArg = firstArguments[AdviceArgumentRole.Time];
@@ -3851,7 +3887,6 @@ function realizeAction(
   const duration = first(AdviceArgumentRole.Duration);
   const material = first(AdviceArgumentRole.Material);
   const manner = first(AdviceArgumentRole.Manner);
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
   let input: InstructionActionRealizationInput = {
     frame, locale, label, amount, theme, container, destination, site,
     substance, result, activity, time, timeRelation: timeArg?.relation, duration, material, manner,
@@ -3864,14 +3899,16 @@ function realizeAction(
   const adapter = getInstructionActionLocaleAdapter(locale);
   input = adapter.selectLexicalRealization?.(input) ?? input;
   const negated = frame.polarity === AdvicePolarity.Negate;
-  const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const genericRealizer = ACTION_REALIZERS[realizerKey];
-  const realized = negated ? adapter.renderNegated(input,
-    realizerKey === "amount-material-destination" ||
-      realizerKey === "default" && firstArguments[AdviceArgumentRole.Amount]?.quantity
-      ? genericRealizer?.(input) : undefined) : genericRealizer
-    ? genericRealizer(input)
-    : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
+  const genericText = genericRealizer && (!negated ||
+      realizerKey === "amount-material-destination" ||
+      realizerKey === "default" && firstArguments[AdviceArgumentRole.Amount]?.quantity)
+    ? genericRealizer === DEFAULT_ACTION_REALIZER
+      ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)
+      : genericRealizer(input)
+    : undefined;
+  const realized = negated ? adapter.renderNegated(input, genericText)
+    : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
   let complete = realized;
@@ -4322,20 +4359,25 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
   const hasOffset = schedule?.offset !== undefined || schedule?.offsetMin !== undefined ||
     schedule?.offsetMax !== undefined;
   const hasClocks = Boolean(schedule?.timeOfDay?.length);
-  const ownsClocks = hasClocks || clause.sourceHasStructuredClocks === true;
+  const ownsClocks = clause.sourceHasStructuredClocks === true;
   const ownsEvents = hasOffset || Boolean(schedule?.when?.length) || clause.sourceHasStructuredEvents === true;
   const site = clause.site;
   const ownsSite = Boolean(site) || clause.sourceHasStructuredSite === true;
   // Both callers have already selected the source primary. A simultaneous
   // method edit cannot revoke its current schedule/site ownership.
-  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !ownsSite) return frame;
+  if (clause.sourceProjectionVerified !== false && !ownsEvents && !ownsClocks && !hasClocks && !ownsSite) return frame;
   const args: AdviceArgument[] = [];
   let changed = false;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
       const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
       const event = ownsEvents ? argumentEventTiming(arg) : undefined;
-      if (clock && ownsClocks || event &&
+      // A newly added structured clock does not take ownership of an
+      // independent graph time. Identical clocks need only one display.
+      const mirrorsClock = clock && hasClocks && schedule!.timeOfDay!.some(time =>
+        (time.length === 5 ? time + ":00" : time.replace(/\.0+$/u, "")) ===
+        (arg.normalized!.length === 5 ? arg.normalized + ":00" : arg.normalized!.replace(/\.0+$/u, "")));
+      if (clock && (ownsClocks || mirrorsClock) || event &&
           (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
         changed = true;
         continue;
@@ -4537,11 +4579,15 @@ function primaryDoseAmountOwner(
     for(const arg of action.args)
       if(arg.role===AdviceArgumentRole.Amount&&arg.quantity){hasAmount=true;break;}
     if(!hasAmount)continue;
-    if(!earliest||action.span.start<earliest.span.start)earliest=action;
+    const definition = getMedicationInstructionAction(action.predicate.lemma, options);
+    // A registered device preparation carries its own count. It cannot
+    // acquire the administration's dose merely by appearing first.
+    if ((!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+        (!earliest || action.span.start < earliest.span.start)) earliest = action;
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
     if(!primary || action.span.end<=primary.start) {
-      if(getMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) {
+      if(definition?.definesDose) {
         earlierCount++;earlier=action;
       }
     }

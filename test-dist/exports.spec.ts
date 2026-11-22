@@ -35,6 +35,7 @@ function runNode(args: string[], code: string): {
   roundTripText?: string;
   roundTripSiteCode?: string;
   roundTripFrequency?: number;
+  roundTripAnchors?: string[];
   originalInstruction?: string;
   longText: string;
 } {

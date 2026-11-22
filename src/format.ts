@@ -1130,13 +1130,15 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
   return `for ${lowerBound}${lower} ${label(schedule.duration)}`;
 }
 
-function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined, short = false): string | undefined {
+function describeAdministrationDuration(
+  schedule: CanonicalScheduleExpr | undefined, short = false, words: CourseLanguage = ENGLISH_COURSE
+): string | undefined {
   const range = schedule?.administrationDurationRange;
   if (range) {
     const endpoint = (quantity: NonNullable<typeof range.low>): string => {
       const unit = quantity.code ?? quantity.unit ?? "";
       const label = short ? quantity.unit ?? unit :
-        quantity.unit && quantity.unit !== unit ? quantity.unit : ENGLISH_COURSE.timeUnit(unit, quantity.value) ?? unit;
+        words.timeUnit(unit, quantity.value) ?? quantity.unit ?? unit;
       return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "en")) +
         (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
     };
@@ -1150,7 +1152,7 @@ function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefi
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
   if ((value === undefined && max === undefined) || !unit) return undefined;
-  const label = ENGLISH_COURSE.timeUnit(unit, value ?? max) ?? unit;
+  const label = words.timeUnit(unit, value ?? max) ?? unit;
   if (value === undefined) return `over up to ${stripTrailingZero(max!)} ${label}`;
   const lower = quantityComparatorText(schedule?.administrationDurationComparator, "en") + stripTrailingZero(value);
   return max !== undefined && max !== value
@@ -1334,7 +1336,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   if (schedule.administrationDurationRange) {
-    const duration = describeAdministrationDuration(schedule, true);
+    const duration = describeAdministrationDuration(schedule, true, words);
     if (duration) parts.push(duration);
   } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
       schedule.administrationDurationUnit) {
@@ -1456,7 +1458,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         ? "once only"
         : `for ${stripTrailingZero(schedule.count)} doses`
       : undefined;
-  const administrationDurationPart = describeAdministrationDuration(schedule);
+  const administrationDurationPart = describeAdministrationDuration(schedule, false, words);
   const durationPart = describeDuration(schedule);
   const occurrenceCapPart = describeOccurrenceCapEnglish(schedule);
   const reason = getLocalizedCanonicalPrnReasonText(clause.prn?.reason, clause.prn?.reasons, "en");

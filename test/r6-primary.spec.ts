@@ -1,3 +1,4 @@
+import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { decodeR5RetainedFields } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
@@ -1588,10 +1589,12 @@ describe("source-less repeating and overlapping treatment windows", () => {
       const th = formatSig(input, "long", { locale: "th" });
       expect(en).toContain("every 14 days");
       expect(en).toContain("from each cycle start");
-      expect(en).toContain("No doses from 7 days after treatment start until 14 days after treatment start");
+      expect(en).toContain("No doses from 7 days after each cycle start until 14 days after each cycle start");
+      expect(en).not.toContain("after treatment start");
       expect(th).toContain("ทุก 14 วัน");
       expect(th).toContain("จากจุดเริ่มต้นของแต่ละรอบ");
-      expect(th).toContain("งดยาตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา");
+      expect(th).toContain("งดยาตั้งแต่7 วันหลังจุดเริ่มต้นของแต่ละรอบจนถึง14 วันหลังจุดเริ่มต้นของแต่ละรอบ");
+      expect(th).not.toContain("หลังเริ่มการรักษา");
       const options = {
         timeZone: "Asia/Bangkok", orderedAt: "2026-11-02T00:00:00+07:00", limit: 4
       };
@@ -1683,7 +1686,7 @@ describe("source-less repeating and overlapping treatment windows", () => {
       expect(en).not.toContain("No doses");
       // This presentation control does not define execution for an overlong
       // cycle. Preserve its declared range and period without inventing a pause.
-      expect(en).toContain("From 7 days after treatment start until 21 days after treatment start");
+      expect(en).toContain("From 7 days after each cycle start until 21 days after each cycle start");
     }
   });
 
@@ -1864,7 +1867,7 @@ describe("cached parse-batch formatting retains course-wide semantics", () => {
     };
     const batch = fromFhir(course, { locale: "en" });
     const text = formatParseBatch(batch, "long");
-    expect(text).toContain("From treatment start until 7 days after treatment start");
+    expect(text).toContain("From each cycle start until 7 days after each cycle start");
     // Two seven-day stage iterations fill the entire fourteen-day cycle.
     expect(text).not.toContain("No doses");
     expect(text).toMatch(/14 days/);
@@ -4678,15 +4681,15 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     for (const input of [source, toDosageDetails(toFhirR5Dosages(source))]) {
       const text = formatSig(input, "long", { locale: "en" });
       expect(text).toContain(">=7 days");
-      expect(text).not.toContain("No doses from 3 days after treatment start until 7 days after treatment start");
+      expect(text).not.toContain("No doses from 3 days after each cycle start until 7 days after each cycle start");
       expect(text).not.toContain("every 7 days");
     }
     source.step[0].start = { ...relative(2), offsetDuration: {
       ...relative(2).offsetDuration, extension: coding("100000000055")
     } };
     const text = formatSig(source, "long", { locale: "en" });
-    expect(text).toContain("~2 days after treatment start");
-    expect(text).not.toContain("From 2 days after treatment start until 3 days after treatment start");
+    expect(text).toContain("~2 days after each cycle start");
+    expect(text).not.toContain("From 2 days after each cycle start until 3 days after each cycle start");
     expect(text).not.toContain("No doses");
     expect(formatSig(source, "long", { locale: "th" })).toContain("~2 วัน");
     expect(fromFhir(source).fhirNext).toEqual(source);
@@ -6801,5 +6804,62 @@ describe("round29 typed course display scope", () => {
     expect(en).toMatch(/After the previous phase: .*2 tablets/u);
     expect(en).not.toContain("3 days after treatment start onward");
     expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+
+describe("round42 supported course preview boundaries", () => {
+  it("uses an inherited English formatter's selected endpoint units and preserves unknown labels", () => {
+    const range = {
+      low: { value: 90, code: "min", unit: "minutes" },
+      high: { value: 2, code: "h", unit: "hours" }
+    };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { extension: [{
+        url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration", valueRange: range
+      }] } },
+      doseAndRate: [{ rateQuantity: { value: 20, unit: "mL/hour", code: "mL/h", system: "http://unitsofmeasure.org" } }]
+    }] }] };
+    const before = JSON.stringify(raw);
+    const i18n = { locale: "xx-round42-time", inherit: "en", course: {
+      ...ENGLISH_COURSE,
+      timeUnit: (unit: string) => unit === "min" || unit === "h" ? "pack-time-" + unit : undefined
+    } };
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const text = formatSig(input, "long", { i18n, realizationMode: "normalized" });
+      expect(text).toContain("90 pack-time-min to 2 pack-time-h");
+      expect(text).not.toContain("90 minutes");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    range.high.code = "clinic-window"; range.high.unit = "authored windows";
+    expect(formatSig(raw, "long", { i18n, realizationMode: "normalized" }))
+      .toContain("90 pack-time-min to 2 authored windows");
+  });
+
+  it.each([false, true])("claims onward only when no stage end was authored (%s)", hasEnd => {
+    const end = { contextCode: { coding: [{ system: "https://clinic.example/events", code: "follow-up" }] } };
+    const raw: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] }, offsetDuration: { value: 1, unit: "d", code: "d" } },
+      ...(hasEnd ? { end } : {}),
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { timeOfDay: ["08:00:00"] } } }]
+    }] };
+    const before = JSON.stringify(raw), saved = JSON.parse(JSON.stringify(toFhirR5Dosages(raw)));
+    for (const input of [raw, saved]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("1 day after treatment start");
+      expect(th).toContain("1 วันหลังเริ่มการรักษา");
+      expect(en.includes("onward")).toBe(!hasEnd);
+      expect(th.includes("เป็นต้นไป")).toBe(!hasEnd);
+      if (hasEnd) {
+        expect(en).toContain("End timing requires review");
+        expect(th).toContain("ต้องตรวจสอบเวลาสิ้นสุด");
+      }
+    }
+    if (hasEnd) expect(toDosageDetails(saved).step[0].end).toEqual(end);
+    expect(JSON.stringify(raw)).toBe(before);
   });
 });

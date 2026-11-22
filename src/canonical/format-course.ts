@@ -669,8 +669,14 @@ export function formatCanonicalCourse(
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length &&
       !oneOrCourse.safety?.ifExceeded && !oneOrCourse.cycleInterval &&
       oneOrCourse.cycleCount === undefined) return "";
-  const environment = courseEnvironment(options),
-    words = environment.words;
+  const environment = courseEnvironment(options);
+  // Treatment-start offsets restart with the repeating course. Use that
+  // same origin for active windows and their medication-free intervals.
+  const words: CourseLanguage = oneOrCourse.cycleInterval ? {
+    ...environment.words,
+    treatmentStart: environment.words.cycleStart,
+    afterTreatmentStart: offset => environment.words.relativeEvent(offset, environment.words.cycleStart, false)
+  } : environment.words;
   if (oneOrCourse.stages.length === 0) {
     const repetition = oneOrCourse.cycleInterval
       ? formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount)
@@ -1014,8 +1020,10 @@ export function formatCanonicalCourse(
               courseBoundaryPoint(endQuantity, endAnchor, words) ?? step.end?.description;
             const contextualStart = index > 0 && step.start?.anchor === "previous-phase-next-day";
             const contextualEnd = index > 0 && step.end?.anchor === "previous-phase-next-day";
-            const window = words.calendarWindow(start, end);
-            timing = (contextualStart || contextualEnd) &&
+            const unresolvedEnd = Boolean(step.end && !end);
+            const window = unresolvedEnd ? [start, words.reviewTiming(undefined, "end")].filter(Boolean).join("; ")
+              : words.calendarWindow(start, end);
+            timing = unresolvedEnd ? window : (contextualStart || contextualEnd) &&
               (!step.start || startQuantity || startRange || contextualStart) &&
               (!step.end || endQuantity || endRange || contextualEnd)
               ? window : words.reviewTiming(window || undefined);

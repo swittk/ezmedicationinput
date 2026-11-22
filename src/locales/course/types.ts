@@ -22,6 +22,7 @@ export interface CourseLanguage {
   readonly unspecified: string;
   withAuthoredDirections(current: string, source: string): string;
   readonly treatmentStart: string;
+  readonly cycleStart: string;
   readonly treatmentDayStart: string;
   readonly afterPreviousPhase: string;
   readonly nextDayAfterPreviousPhase: string;
@@ -51,7 +52,7 @@ export interface CourseLanguage {
   relativeEvent(offset: string, event: string | undefined, before: boolean): string;
   calendarWindow(start?: string, end?: string): string;
   calendarEvents(events: readonly string[]): string;
-  reviewTiming(source?: string): string;
+  reviewTiming(source?: string, boundary?: "end"): string;
   dayRange(first: number, last: number): string;
   fromDay(first: number): string;
   throughDay(last: number): string;
