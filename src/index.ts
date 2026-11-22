@@ -1253,7 +1253,16 @@ export function formatSigBatch(
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
-  const steps=batch.meta.canonical.course?.stages??batch.fhirNext.step;
+  const wireSteps=batch.fhirNext.step;
+  if(wireSteps!==undefined&&wireSteps.length>1)return style==="short"?batch.shortText:batch.longText;
+  return formatParseBatchContents(batch,style,separator,wireSteps);
+}
+
+function formatParseBatchContents(
+  batch:ParseBatchResult,style:"short"|"long",separator:string,
+  wireSteps:ParseBatchResult["fhirNext"]["step"]
+):string {
+  const steps=batch.meta.canonical.course?.stages??wireSteps;
   if(steps&&steps.length>1)return style==="short"?batch.shortText:batch.longText;
   if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
     return style==="short"?batch.shortText:batch.longText;

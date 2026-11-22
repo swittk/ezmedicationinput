@@ -82,17 +82,39 @@ export function normalizeConceptSurface(value: string): string {
 }
 
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  return coding
-    ? {
-      ...coding,
-      system: coding.system,
-      code: coding.code,
-      display: coding.display,
-      extension: coding.extension?.map((extension) => ({ ...extension })),
-      _display: coding._display ? { ...coding._display } : undefined,
-      i18n: coding.i18n ? { ...coding.i18n } : undefined
-    }
-    : undefined;
+  if (!coding) return undefined;
+  // Preserve authored Coding metadata without descriptor-based spread overrides.
+  const copy = Object.assign({}, coding);
+  copy.system = coding.system;
+  copy.code = coding.code;
+  copy.display = coding.display;
+  copy.extension = coding.extension?.map(extension => ({ ...extension }));
+  copy._display = coding._display ? { ...coding._display } : undefined;
+  copy.i18n = coding.i18n ? { ...coding.i18n } : undefined;
+  return copy;
+}
+
+// The bundled catalog has a closed Coding schema. Copy its known fields
+// directly; caller-supplied codings retain all metadata through cloneCoding.
+function cloneCatalogCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
+  return coding ? {
+    system: coding.system,
+    version: coding.version,
+    code: coding.code,
+    display: coding.display,
+    extension: coding.extension?.map(extension => ({ ...extension })),
+    _display: coding._display ? { ...coding._display } : undefined,
+    i18n: coding.i18n ? { ...coding.i18n } : undefined
+  } : undefined;
+}
+
+function cloneCatalogComponents(
+  components: MedicationInstructionConceptDefinition["components"]
+): MedicationInstructionConceptDefinition["components"] {
+  return components?.map(component => ({
+    role: component.role, text: component.text,
+    ...(component.coding ? { coding: cloneCatalogCoding(component.coding) } : {})
+  }));
 }
 
 export function cloneMedicationInstructionConceptComponents(
@@ -115,9 +137,9 @@ function cloneDefinition(
     i18n: definition.i18n ? { ...definition.i18n } : undefined,
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
-    coding: cloneCoding(definition.coding),
-    components: cloneMedicationInstructionConceptComponents(definition.components),
-    externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    coding: cloneCatalogCoding(definition.coding),
+    components: cloneCatalogComponents(definition.components),
+    externalCodings: definition.externalCodings?.map((coding) => cloneCatalogCoding(coding)!)
   };
 }
 
@@ -130,9 +152,9 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     i18n: sourceDefinition.i18n ? { ...sourceDefinition.i18n } : undefined,
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
-    coding: cloneCoding(sourceDefinition.coding),
-    components: cloneMedicationInstructionConceptComponents(sourceDefinition.components),
-    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
+    coding: cloneCatalogCoding(sourceDefinition.coding),
+    components: cloneCatalogComponents(sourceDefinition.components),
+    externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCatalogCoding(coding)!)
   };
 }
 
@@ -216,7 +238,9 @@ export function listMedicationInstructionConceptCopies(): MedicationInstructionC
 export function resolveMedicationInstructionConceptCopy(
   surface: string, options?: ParseOptions
 ): MedicationInstructionConceptDefinition | undefined {
-  const definition = resolveMedicationInstructionConcept(surface, options);
+  const custom = customDefinitionForSurface(surface, options);
+  if (custom) return custom;
+  const definition = DEFAULT_BY_ALIAS.get(normalizeConceptSurface(surface));
   return definition ? cloneDefinition(definition) : undefined;
 }
 

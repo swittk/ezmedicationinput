@@ -169,9 +169,10 @@ to evolve for maximum clinical expressiveness, performance, and
 maintainability; no old internal representation must be retained.
 
 Native courses are parser implementation data. EZMED does not expose a native
-editing workflow. Parser and projection outputs, including borrowed catalog
-and provider listings, are immutable by caller contract; ordinary imports and
-listing calls do not deep-clone or freeze them defensively.
+editing workflow. Parser and projection outputs, including borrowed provider
+listings, are immutable by caller contract; ordinary imports do not deep-clone
+or freeze them defensively. Public instruction action and concept vocabulary
+lookups and listings retain their established detached definition copies.
 Applications that modify external R5 or current R6 data pass those values back
 through the corresponding import boundary. Native scheduling, formatting, and
 supply consume clinical facts directly; the R5 reconciliation bridge is confined
