@@ -44,11 +44,13 @@ if (baselineEntry === candidateEntry)
 const maxRegression = 0.04;
 const outputPath = value("--json", undefined);
 const report = {
+  mode: smoke ? "smoke" : "timed",
   complete: false,
   startedAt: new Date().toISOString(),
   phase: "initializing",
   cases: [],
   newApiMeasurements: [],
+  newApiSmokeChecks: [],
   unavailable: [],
   errors: [],
 };
@@ -59,11 +61,18 @@ function checkpoint(complete = false) {
   report.complete = complete;
   if (complete) report.phase = "complete";
   report.updatedAt = new Date().toISOString();
-  report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
-  report.failing = report.cases.filter((c) => c.pass === false).length;
+  const timed = report.cases.filter(c => !c.smoke);
+  const checked = report.cases.filter(c => c.smoke);
+  report.timedComparisons = timed.length;
+  report.smokeComparisons = checked.length;
+  report.passing = timed.filter(c => c.pass === true).length;
+  report.failing = timed.filter(c => c.pass === false).length;
   report.nonEquivalent = report.cases.filter((c) => c.equivalentWork === false).length;
   report.measuredPublicFunctions = new Set([
-    ...report.cases.map(c => c.api), ...report.newApiMeasurements.map(c => c.api),
+    ...timed.map(c => c.api), ...report.newApiMeasurements.map(c => c.api),
+  ]).size;
+  report.smokePublicFunctions = new Set([
+    ...checked.map(c => c.api), ...report.newApiSmokeChecks.map(c => c.api),
   ]).size;
   if (outputPath) {
     const temporary = outputPath + ".tmp";
@@ -238,6 +247,16 @@ add("formatSig", "formatSig/R5-roundtrip-added-dose-thai", (m) =>
 add("formatSig", "formatSig/R6-author-source", (m) => m.formatSig(wire, "long"));
 add("formatParseBatch", "formatParseBatch/ordinary", (m) => m.formatParseBatch(parsed.ordinary, "long"));
 add("formatParseBatch", "formatParseBatch/staged", (m) => m.formatParseBatch(parsed.staged, "long"));
+// Keep the shared legacy batches above, and also measure each build's usual
+// parse-then-format path. Parsing these fixtures is outside all timed work.
+for (const key of ["ordinary", "staged"]) {
+  const ownBatch = new Map([
+    [baseline, parsed[key]],
+    [candidate, candidate.parseSig(S[key])],
+  ]);
+  add("formatParseBatch", "formatParseBatch/" + key + "-own-batch", (m) =>
+    m.formatParseBatch(ownBatch.get(m), "long"));
+}
 for (const [name, input] of [
   ["scalar", rows[0]],
   ["parallel-array", parsed.eye.fhir],
@@ -248,8 +267,7 @@ for (const [name, input] of [
     m.calculateTotalUnits({ ...schedule, dosage: input })
   );
 }
-// Varied dates defeat a benchmark which only wins by remembering one query.
-let variedIndex = 0;
+// Retain the established warm workload across 97 distinct calendar dates.
 const variedDates = Array.from({ length: 97 }, (_, i) =>
   new Date(Date.UTC(2026, 0, 1 + i * 7, 1)).toISOString()
 );
@@ -257,6 +275,38 @@ add("nextDueDoses", "nextDueDoses/varied-calendars", (m, i) => {
   const d = variedDates[i % variedDates.length];
   return m.nextDueDoses(rows[0], { ...schedule, from: d, orderedAt: d });
 });
+// A separate fresh workload advances the same ordinal in each build through
+// probes, warmup, calibration and measured rounds. Millisecond offsets retain
+// the existing 2026-27 calendar range instead of extending weeks indefinitely.
+const freshCalendarBases = variedDates.map(date => new Date(date).getTime());
+const freshCalendarState = new Map([baseline, candidate].map(m =>
+  [m, { nextOrdinal: 0, blocks: [] }]));
+function freshCalendarDate(ordinal) {
+  return new Date(freshCalendarBases[ordinal % freshCalendarBases.length] +
+    Math.floor(ordinal / freshCalendarBases.length)).toISOString();
+}
+function prepareFreshCalendars(module, iterations) {
+  const state = freshCalendarState.get(module);
+  const startOrdinal = state.nextOrdinal;
+  const queries = Array.from({ length: iterations }, (_, i) => {
+    const date = freshCalendarDate(startOrdinal + i);
+    return { ...schedule, from: date, orderedAt: date };
+  });
+  state.nextOrdinal += iterations;
+  state.blocks.push({
+    startOrdinal, iterations, first: queries[0].from, last: queries[iterations - 1].from,
+  });
+  return i => module.nextDueDoses(rows[0], queries[i]);
+}
+add("nextDueDoses", "nextDueDoses/fresh-calendars", m => prepareFreshCalendars(m, 1)(0));
+cases[cases.length - 1].prepare = prepareFreshCalendars;
+// Check the first wrap explicitly, outside timing and without advancing either
+// build's execution sequence or touching the production calendar cache.
+if (freshCalendarDate(0) !== "2026-01-01T01:00:00.000Z" ||
+    freshCalendarDate(97) !== "2026-01-01T01:00:00.001Z" ||
+    freshCalendarDate(194) !== "2026-01-01T01:00:00.002Z" ||
+    new Set(Array.from({ length: 195 }, (_, i) => freshCalendarDate(i))).size !== 195)
+  throw new Error("Fresh-calendar fixture must retain distinct valid query instants");
 for (const [name, input] of [
   ["simple", rows],
   ["complex", parsed.eye.fhir],
@@ -498,7 +548,7 @@ if (counted) for (const module of [baseline, candidate]) {
     throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
 }
 Object.assign(report, {
-  phase: "measuring",
+  phase: smoke ? "smoke" : "measuring",
   runtime: {
     node: process.version,
     platform: process.platform,
@@ -535,7 +585,10 @@ const median = (values) => {
 };
 let sink;
 async function measure(test, module, iterations, async) {
-  const invoke = test.direct?.get(module) ?? ((i) => test.run(module, i));
+  // Only the fresh-calendar fixture prepares changing inputs here, before the
+  // clock starts. Existing scenarios retain their established timed work.
+  const invoke = test.prepare?.(module, iterations) ??
+    test.direct?.get(module) ?? ((i) => test.run(module, i));
   const start = performance.now();
   if (async) for (let i = 0; i < iterations; i++) sink = await invoke(i);
   else for (let i = 0; i < iterations; i++) sink = invoke(i);
@@ -584,12 +637,16 @@ function completeThaiRightEyeDose(output) {
   const preparation = "ล้างมือก่อนหยอดตา";
   const wash = output.indexOf(preparation);
   const dose = output.indexOf("หยอด", wash + preparation.length);
-  const closure = output.indexOf("หลับตา", dose);
-  return wash >= 0 && dose > wash && closure > dose;
+  const afterDose = output.slice(output.indexOf("หยด", dose) + "หยด".length);
+  return wash >= 0 && dose > wash &&
+    /^(?:\s*(?:ที่)?ตาขวา)?\s*[.;,]?\s*(?:(?:จากนั้น|แล้ว)\s*)?หลับตา[.;,]?\s*$/u.test(afterDose);
+}
+function completeThaiPreparedDrink(output) {
+  return completeThaiDose(output, "ดื่ม", "เม็ด", 2) && output.trimStart().startsWith("ผสมน้ำ");
 }
 const equivalenceOracles = new Map([
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
-  ["formatSig/R5-roundtrip-added-dose-thai", output => completeThaiDose(output, "ดื่ม", "เม็ด", 2)],
+  ["formatSig/R5-roundtrip-added-dose-thai", completeThaiPreparedDrink],
 ]);
 // Source-bearing R6 fixtures used to return the saved input verbatim. The
 // current public contract generates requested previews from editable facts.
@@ -684,11 +741,14 @@ for (const text of ["ล้างมือก่อนหยอดตา หย�
     throw new Error("Complete-dose oracle rejected the authored site placement");
 for (const text of ["หยอดตาขวา 2 หยด.", "หยอดตาขวา 2 หยด แล้วหลับตา.",
   "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หลับตา ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หยอด 2 หยด.", "หยอด 2 หยด แล้วหลับตาขวา.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
-  "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา."])
+  "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา.",
+  "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วไม่ต้องหลับตา.",
+  "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วห้ามหลับตา."])
   if (completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");
-if (!completeThaiDose("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด.", "ดื่ม", "เม็ด", 2) ||
-    completeThaiDose("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด.", "ดื่ม", "เม็ด", 2))
+if (!completeThaiPreparedDrink("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด.") ||
+    completeThaiPreparedDrink("ดื่มครั้งละ 2 เม็ด.") ||
+    completeThaiPreparedDrink("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด."))
   throw new Error("Complete-dose oracle lost the preparation or negation boundary");
 const candidateOnlyCases = [];
 for (const test of cases) {
@@ -793,7 +853,7 @@ for (const test of candidateOnlyCases) {
     const oracle = equivalenceOracles.get(name);
     if (oracle && !oracle(output)) throw new Error("Candidate failed the independent clinical preview oracle");
     if (smoke) {
-      report.newApiMeasurements.push({ api, name, smoke: true });
+      report.newApiSmokeChecks.push({ api, name, smoke: true });
       continue;
     }
     for (let i = 0; i < 12; i++) {
@@ -822,18 +882,34 @@ for (const test of candidateOnlyCases) {
     checkpoint();
   }
 }
-if (!report.cases.length && !report.newApiMeasurements.length)
+const freshBaseline = freshCalendarState.get(baseline);
+const freshCandidate = freshCalendarState.get(candidate);
+if (freshBaseline.nextOrdinal || freshCandidate.nextOrdinal) {
+  const aligned = JSON.stringify(freshBaseline) === JSON.stringify(freshCandidate);
+  report.freshCalendarPreparation = {
+    policy: "97 weekly base instants plus one millisecond per 97-query cycle; prepared outside timing",
+    baseline: freshBaseline, candidate: freshCandidate, aligned,
+  };
+  if (!aligned) report.errors.push({
+    name: "nextDueDoses/fresh-calendars", error: "Builds used different fresh-calendar query sequences",
+  });
+}
+if (!report.cases.length && !report.newApiMeasurements.length && !report.newApiSmokeChecks.length)
   report.errors.push({ name: "selection", error: "--only selected no runnable benchmark scenarios" });
-report.passing = report.cases.filter((c) => c.pass || c.smoke).length;
-report.failing = report.cases.filter((c) => c.pass === false).length;
 checkpoint(true);
 console.log(
   JSON.stringify({
+    mode: report.mode,
     covered: report.coveredPublicFunctions,
     total: report.publicFunctions,
     newApis: report.newApis,
     newApiMeasurements: report.newApiMeasurements.length,
+    newApiSmokeChecks: report.newApiSmokeChecks.length,
     cases: report.cases.length,
+    timedComparisons: report.timedComparisons,
+    smokeComparisons: report.smokeComparisons,
+    measuredPublicFunctions: report.measuredPublicFunctions,
+    smokePublicFunctions: report.smokePublicFunctions,
     passing: report.passing,
     failing: report.failing,
     unavailable: report.unavailable,
