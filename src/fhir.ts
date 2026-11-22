@@ -384,9 +384,9 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
   if (!mixed && !markers) return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
   if (markers && unchangedBridge &&
-      (mixed || target === "r5" && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
-    // Keep an unchanged R5 bridge with metadata-only positions in its authored
-    // active form. R6 can expand those positions into core primitive arrays.
+      (mixed || (target === "r5" || repeat.when?.length) && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
+    // Keep metadata-only positions in the authored bridge for R5 or when
+    // event anchors exclude core clocks. Other R6 bridges can use core arrays.
     // The native writer supplied timeOfDay temporarily for projection.
     const output = { ...repeat };
     delete output.timeOfDay;

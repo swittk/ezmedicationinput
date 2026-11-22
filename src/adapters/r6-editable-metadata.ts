@@ -95,15 +95,18 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
   for (let index = 0; index < saved.length; index++) {
     const prior = saved[index], current = active[index];
     const identity = identityOf(prior, index);
+    const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
     if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) continue;
     if (identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||
         !equalStructuredValues(prior.end, current.end) ||
-        prior.component.length !== current.component.length) return false;
+        needsMembers && prior.component.length !== current.component.length) return false;
     // A phase can finish through its member timing (count, duration or bounds)
     // without an explicit step.end. Dose edits leave that declared completion.
-    for (let member = 0; member < prior.component.length; member++)
+    // A uniquely identified successor owns its boundary independently of
+    // newly added concurrent doses. Earlier/anonymous owners still need members.
+    for (let member = 0; needsMembers && member < prior.component.length; member++)
       if (prior.component[member].id !== current.component[member].id ||
           !prior.end && index <= lastDraftPredecessor && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
             draftCompletionTiming(current.component[member].timing)))

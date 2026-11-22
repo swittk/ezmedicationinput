@@ -1,4 +1,4 @@
-import { quantityFromWire, simpleQuantityForR5, EMA_QUANTITY_COMPARATOR_EXTENSION_URL, QUANTITY_OPERATOR_SOURCE_URL } from "./fhir-quantity-operator";
+import { quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -334,7 +334,9 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     for(const field of quantity.extension??[])switch(field.url){
       case "value":if(!value)value=field;break;case "low":if(!low)low=field;break;
       case "high":if(!high)high=field;break;case "unit":if(!unit)unit=field;break;
-      case EMA_QUANTITY_COMPARATOR_EXTENSION_URL:case QUANTITY_OPERATOR_SOURCE_URL:
+      default:
+        // The quantity decoder owns operators; unfamiliar annotations remain
+        // retained data beside them and must survive a graph rebuild.
         (comparatorExtensions??=[]).push(field);break;
     }
     const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;

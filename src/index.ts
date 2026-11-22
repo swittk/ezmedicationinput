@@ -242,7 +242,7 @@ export {
   buildMedicationInstructionActionCodeSystem,
   getMedicationInstructionAction,
   listMedicationInstructionActions,
-  resolveMedicationInstructionAction,
+  resolveMedicationInstructionActionWithCodeFallback as resolveMedicationInstructionAction,
   resolveMedicationInstructionSequenceAction
 } from "./instruction-action-terminology";
 export type { MedicationInstructionActionCodeSystem } from "./instruction-action-terminology";
@@ -1420,8 +1420,6 @@ function fromFhirDosageInternal(
     ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
     : undefined;
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
-  if (unverified && options?.realizationMode !== "normalized")
-    options = { ...options, realizationMode: "normalized" };
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
   const maximumDoseSource = !unverified && hasMaximumDose &&
       typeof dosage.text === "string" && dosage.text.trim().length > 0

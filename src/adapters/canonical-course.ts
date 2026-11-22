@@ -1,4 +1,4 @@
-import { projectR6ModifierWrapper, projectR5ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
+import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
@@ -50,6 +50,7 @@ import type {
 } from "../canonical/course";
 import {
   DOSAGE_DETAILS_R5_URL,
+  DOSAGE_RETAINED_R5_SEQUENCE_URL,
   R5_RATE_MODIFIERS_R6_URL,
   DOSAGE_CONDITION_R5_URL,
   exactConditionBridgePredicate,
@@ -1277,6 +1278,20 @@ function administrationToWire(
     a.provenance?.format === "r6"
       ? (a.provenance.data as FhirR6Dosage)
       : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
+  // Keep the authored R5 sequence when grouping uses a one-based ordinal.
+  // A live row edit supersedes its prior sequence carrier.
+  if (a.provenance?.format === "r5") {
+    const sequence = (a.provenance.data as FhirDosage).sequence;
+    const normalized = sequence !== undefined && (!Number.isInteger(sequence) || sequence < 1);
+    const extensions = output.extension as FhirExtension[] | undefined;
+    const retained = extensions?.find(item => item.url === DOSAGE_RETAINED_R5_SEQUENCE_URL);
+    if (normalized ? retained?.valueDecimal !== sequence : retained !== undefined) {
+      const next = extensions?.filter(item => item !== retained) ?? [];
+      if (retained) next.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [retained] });
+      if (normalized) next.push({ ...retained, url: DOSAGE_RETAINED_R5_SEQUENCE_URL, valueDecimal: sequence });
+      assign(output, "extension", next.length ? next : undefined);
+    }
+  }
   delete output.sequence;
   let wireTiming = timingToWire(a.schedule, target);
   if (clause && wireTiming) {
@@ -1417,12 +1432,13 @@ function administrationToWire(
             !value.rateRatio?.denominator?.comparator &&
             value.rateRatio?.numerator?.comparator !== "~" &&
             !(value.rateRatio?.numerator?.comparator && original.rateRatio?.numerator?.extension?.length) &&
-            !original.extension?.some((e) => e.url === R5_RATE_MODIFIERS_R6_URL))
+            !Object.prototype.hasOwnProperty.call(original, "modifierExtension"))
       )
         return original;
       const rate = Object.assign({}, value.provenance);
-      if (target === "r6") projectR6ModifierWrapper(rate, R5_RATE_MODIFIERS_R6_URL);
-      else projectR5ModifierWrapper(rate, R5_RATE_MODIFIERS_R6_URL);
+      // Both strict doseAndRate slots are Element. Keep editable modifier
+      // children in their existing extension wrapper in either wire version.
+      projectR6ModifierWrapper(rate, R5_RATE_MODIFIERS_R6_URL);
       const code = (q: CanonicalMeasure | undefined) =>
         q && clause
           ? {
