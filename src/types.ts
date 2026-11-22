@@ -594,7 +594,7 @@ export interface FhirReference extends FhirElement {
     system?: string;
     value?: string;
     period?: FhirPeriod;
-    assigner?: { reference?: string; type?: string; display?: string };
+    assigner?: FhirReference;
   };
   display?: string;
   _display?: FhirPrimitiveElement;
@@ -1777,6 +1777,9 @@ export interface CanonicalScheduleExpr {
   durationUnit?: FhirPeriodUnit;
   /** Unit of the upper duration endpoint when distinct from durationUnit. */
   durationMaxUnit?: FhirPeriodUnit;
+  /** Authored unit labels are independent of the normalized temporal codes. */
+  durationUnitLabel?: string;
+  durationMaxUnitLabel?: string;
   /** Typed qualifiers for the beginning/end of the prescribed duration.
    * They are independent for FHIR boundsRange, and R5 approximation uses
    * EMA Quantity Operator instead of an unsupported native "~". */

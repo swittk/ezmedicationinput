@@ -1,6 +1,6 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import {courseFromR5} from "./adapters/r5-import";
-import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, parsePrnTriggerPhase, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL } from "./fhir";
+import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, parsePrnTriggerPhase, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -162,15 +162,19 @@ export function getDosageAlternativeChoice(
  * @param choice Proven membership; undefined explicitly clears this modifier.
  */
 export function setDosageAlternativeChoice(
-  dosage: Pick<FhirDosage, "modifierExtension">,
+  dosage: Pick<FhirDosage, "modifierExtension" | "extension">,
   choice: DosageAlternativeChoice | undefined
 ): void {
   const original = dosage.modifierExtension;
-  let found = false, updated: FhirExtension[] | undefined;
+  let found = false, updated: FhirExtension[] | undefined, retired: FhirExtension[] | undefined;
   for (let index = 0; index < (original?.length ?? 0); index++) {
     const marker = original![index];
     if (marker.url !== DOSAGE_ALTERNATIVE_CHOICE_URL) { updated?.push(marker); continue; }
-    if (!choice || found) { updated ??= original!.slice(0, index); continue; }
+    if (!choice || found) {
+      updated ??= original!.slice(0, index);
+      (retired ??= []).push(marker);
+      continue;
+    }
     found = true;
     let fields: FhirExtension[] | undefined, seen = 0;
     const children = marker.extension ?? [];
@@ -208,6 +212,9 @@ export function setDosageAlternativeChoice(
     ] });
   }
   if (updated) dosage.modifierExtension = updated.length ? updated : undefined;
+  if (retired) dosage.extension = [...(dosage.extension ?? []), {
+    url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: retired
+  }];
 }
 
 /** Machine-readable declaration of the local alternative-choice modifier.
@@ -707,14 +714,27 @@ export function reconcileR5SafetyEdits(
   const live = projected?.doseLimit ?? [];
   // A scope is NOT an identity: several per-period limits can coexist.
   // An explicit Element.id owns its limit even after amount or order edits.
-  // ID-less limits use a unique amount + period, then an unambiguous numeric
-  // edit in the same scope. Ambiguous rows never inherit arbitrary metadata.
+  // ID-less limits use independently retained annotations and unit/window
+  // identity. Ambiguous rows never inherit arbitrary metadata.
   const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits);
   const representable = oldLimits.map((_, index) => projectedIndices.has(index));
-  const signature = (limit: FhirR6DoseLimit) => limit.scope === "period" && limit.id !== undefined
-    ? "id:" + limit.id : "value:" + compactProjectionFingerprint({
-      scope: limit.scope, valueQuantity: limit.valueQuantity, period: limit.period
+  // Amount is editable, not identity. A unique retained Ratio annotation or
+  // clinical unit/window can own an anonymous limit; duplicate anonymous
+  // windows must leave old text inactive instead of exchanging it.
+  const windowKey = (limit: FhirR6DoseLimit): string => {
+    const quantity = limit.valueQuantity, period = limit.period;
+    return compactProjectionFingerprint({
+      quantity: quantity && { system: quantity.system, code: quantity.code,
+        unit: quantity.system && quantity.code ? undefined : quantity.unit },
+      period: period && { value: period.value, system: period.system, code: period.code,
+        unit: period.system && period.code ? undefined : period.unit,
+        comparator: period.comparator ?? getEmaQuantityComparator(period) },
     });
+  };
+  const signature = (limit: FhirR6DoseLimit) => limit.scope === "period" && limit.id !== undefined
+    ? "id:" + limit.id : limit.extension?.length
+      ? limit.scope + ":metadata:" + compactProjectionFingerprint(limit.extension)
+      : limit.scope + ":" + windowKey(limit);
   const oldKeys = new Map<string, number>();
   const liveKeys = new Map<string, number>();
   const indexKeys = (items: readonly FhirR6DoseLimit[], keys: Map<string, number>,
@@ -768,16 +788,6 @@ export function reconcileR5SafetyEdits(
         sameUnit(original.period, candidate.period) && original.period?.value === candidate.period?.value &&
         (original.period?.comparator ?? getEmaQuantityComparator(original.period)) ===
           (candidate.period?.comparator ?? getEmaQuantityComparator(candidate.period)));
-  };
-  const windowKey = (limit: FhirR6DoseLimit): string => {
-    const quantity = limit.valueQuantity, period = limit.period;
-    return compactProjectionFingerprint({
-      quantity: quantity && { system: quantity.system, code: quantity.code,
-        unit: quantity.system && quantity.code ? undefined : quantity.unit },
-      period: period && { value: period.value, system: period.system, code: period.code,
-        unit: period.system && period.code ? undefined : period.unit,
-        comparator: period.comparator ?? getEmaQuantityComparator(period) },
-    });
   };
   for (const [scope, oldIndices] of oldByScope) {
     const liveIndices = liveByScope.get(scope);
@@ -908,11 +918,15 @@ export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] 
     if(predicate)row.condition=[conditionToR6(predicate)];
     if(safety){
       // These two external editing owners and their saved baseline must not
-      // share mutable Quantity objects. Copy only lifted quantities, including
-      // their annotations; ordinary rows and internal native paths do no work.
+      // share mutable quantities or Ratio annotations. Copy only lifted external
+      // safety fields; ordinary rows and internal native paths do no work.
       const retainedLimits: FhirR6DoseLimit[] = [];
       for (const limit of safety.doseLimit ?? []) {
         const retained = { ...limit };
+        if (limit.extension) {
+          retained.extension = cloneStructuredValue(limit.extension);
+          limit.extension = cloneStructuredValue(limit.extension);
+        }
         if (limit.valueQuantity) {
           const quantity = quantityForR6(limit.valueQuantity)!;
           retained.valueQuantity = cloneStructuredValue(quantity);
@@ -1316,11 +1330,11 @@ interface SourceExpressionObservation {
   original: NonNullable<EzDoseAndRate["doseExpression"]>;
   language?: string; description?: string; name?: string; expression?: string; reference?: string;
 }
-function capturedReplayExpression(value: EzDoseAndRate["doseExpression"]): SourceExpressionObservation | undefined {
+export function capturedReplayExpression(value: EzDoseAndRate["doseExpression"]): SourceExpressionObservation | undefined {
   return value ? { original: value, language: value.language, description: value.description,
     name: value.name, expression: value.expression, reference: value.reference } : undefined;
 }
-function unchangedReplayExpression(value: EzDoseAndRate["doseExpression"], prior: SourceExpressionObservation | undefined): boolean {
+export function unchangedReplayExpression(value: EzDoseAndRate["doseExpression"], prior: SourceExpressionObservation | undefined): boolean {
   return value === prior?.original && value?.language === prior?.language &&
     value?.description === prior?.description && value?.name === prior?.name &&
     value?.expression === prior?.expression && value?.reference === prior?.reference;
@@ -1355,18 +1369,24 @@ interface SourceConceptObservation {
   original: FhirCodeableConcept;
   text?: string;
   triggerPhase?: "onset";
+  restrictions?: SourcePredicateObservation[][] | null;
   codings: Array<{ original: FhirCoding; system?: string; version?: string;
     code?: string; display?: string; userSelected?: boolean }>;
 }
 /** Observe only the editable clinical concept, never opaque source metadata. */
-export function captureSourceReplayConcept(value: FhirCodeableConcept | undefined): SourceConceptObservation | undefined {
+export function captureSourceReplayConcept(value: FhirCodeableConcept | undefined, observeRestrictions = false): SourceConceptObservation | undefined {
   if (!value) return undefined;
   const codings: SourceConceptObservation["codings"] = [];
   for (const original of value.coding ?? []) codings.push({
     original, system: original.system, version: original.version, code: original.code,
     display: original.display, userSelected: original.userSelected,
   });
-  return { original: value, text: value.text, codings };
+  // Only a site owns body restrictions. Other concept annotations stay opaque.
+  let restrictions: SourcePredicateObservation[][] | null | undefined = observeRestrictions ? null : undefined;
+  if (observeRestrictions) for (const marker of value.extension ?? [])
+    if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL)
+      (restrictions ??= []).push(captureReplayPredicate(marker)!);
+  return { original: value, text: value.text, codings, restrictions };
 }
 export function matchesSourceReplayConcept(
   value: FhirCodeableConcept | undefined, proof: SourceConceptObservation | undefined
@@ -1380,7 +1400,13 @@ export function matchesSourceReplayConcept(
         current.code !== previous.code || current.display !== previous.display || current.userSelected !== previous.userSelected)
       return false;
   }
-  return true;
+  if (proof.restrictions === undefined) return true;
+  let restrictionIndex = 0;
+  for (const marker of value.extension ?? []) if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
+    const prior = proof.restrictions?.[restrictionIndex++];
+    if (marker !== prior?.[0].original || !matchesReplayPredicate(prior)) return false;
+  }
+  return restrictionIndex === (proof.restrictions?.length ?? 0);
 }
 /** Observe an ordered clinical concept list only when one is supplied. */
 export function captureSourceReplayConceptList(
@@ -1469,7 +1495,11 @@ interface SourceModifierObservation {
 }
 function predicateScalar(field: FhirExtension): string | number | boolean | undefined {
   switch (field.url) {
-    case "kind": case "operation": return field.valueCode;
+    case "kind": case "operation": case "relation": case "predicateForm": return field.valueCode;
+    case "sourceText": case "predicateText": case "predicateLemma": case "predicateFocusText":
+      return field.valueString;
+    case "sourceStart": case "sourceEnd": case "markerStart": case "markerEnd":
+    case "predicateStart": case "predicateEnd": return field.valueInteger;
     case "name": case "unit": case "text": return field.valueString;
     case "value": return field.valueDecimal;
     case "expected": return field.valueBoolean;
@@ -1597,7 +1627,7 @@ interface SourceTimingObservation {
   clockWindow?: { start?: string; end?: string; endInclusive?: boolean };
   eventWindow?: { start?: string; end?: string };
   occurrenceCap?: { max?: number; period?: SourceMeasureObservation };
-  administrationDuration?: { quantity?: SourceMeasureObservation };
+  administrationDuration?: { quantity?: SourceMeasureObservation; low?: SourceMeasureObservation; high?: SourceMeasureObservation };
   activities?: Array<{ relation?: string; activity?: SourceConceptObservation;
     offset?: SourceMeasureObservation; offsetMin?: SourceMeasureObservation; offsetMax?: SourceMeasureObservation }>;
   events?: string[];
@@ -1674,7 +1704,8 @@ export function captureSourceReplayTiming(timing: FhirTiming | undefined): Sourc
       (monthDays ??= []).push(extension.valuePositiveInt);
     else if (extension.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL) weekdayOrdinal ??= extension.valueInteger;
     else if (extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL && !administrationDuration) {
-      administrationDuration = { quantity: capturedReplayMeasure(extension.valueQuantity) };
+      administrationDuration = { quantity: capturedReplayMeasure(extension.valueQuantity),
+        low: capturedReplayMeasure(extension.valueRange?.low), high: capturedReplayMeasure(extension.valueRange?.high) };
     }
     else if (extension.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL && !occurrenceCap) {
       occurrenceCap = {};
@@ -1773,7 +1804,9 @@ export function matchesSourceReplayTiming(
     else if (extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL && !administrationDurationSeen) {
       administrationDurationSeen = true;
       if (!proof.administrationDuration ||
-          !unchangedReplayMeasure(extension.valueQuantity, proof.administrationDuration.quantity)) return false;
+          !unchangedReplayMeasure(extension.valueQuantity, proof.administrationDuration.quantity) ||
+          !unchangedReplayMeasure(extension.valueRange?.low, proof.administrationDuration.low) ||
+          !unchangedReplayMeasure(extension.valueRange?.high, proof.administrationDuration.high)) return false;
     }
     else if (extension.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL && !occurrenceCapSeen) {
       occurrenceCapSeen = true;
@@ -1922,7 +1955,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
   }
   return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
     timing: captureSourceReplayTiming(dosage.timing), modifiers: captureSourceReplayModifiers(dosage),
-    site: captureSourceReplayConcept(dosage.site), route: captureSourceReplayConcept(dosage.route),
+    site: captureSourceReplayConcept(dosage.site, true), route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
     asNeededFor: captureSourceReplayConceptList(dosage.asNeededFor, true),
     additionalInstructions: captureSourceReplayConceptList(dosage.additionalInstruction) };

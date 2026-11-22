@@ -42,6 +42,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   rateLabel: "Rate: ",
   rateRangeLabel: "Rate range: ",
   unspecified: "unspecified",
+  withAuthoredDirections: (current, source) => "Current: " + current + "; original directions: " + source,
   treatmentStart: "treatment start",
   incompleteInterpretation: "INCOMPLETE medication interpretation — safety restrictions require review",
   retainedStructure: "Structured FHIR data is retained",

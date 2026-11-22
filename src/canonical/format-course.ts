@@ -547,11 +547,11 @@ function formatCanonicalBase(
   const clause = compiled ?? clauseForAdministration(a);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
   // Timing alone cannot replace the only authored dose/manner directions.
-  // Keep those words beside the current cadence without parsing them or
-  // allowing old text to override a structured amount or method.
+  // Label retained source separately from the current cadence: those words
+  // may contain an older timing, and are not a second active instruction.
   if (a.text?.trim() && source.schedule && !source.amounts?.length && !source.method &&
       !clause.instructionGraph?.actions.length)
-    rendered = joinGeneratedClauses([a.text, rendered]);
+    rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
   if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);

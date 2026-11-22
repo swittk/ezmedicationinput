@@ -142,7 +142,8 @@ function getAdministrationTargetMultiplier(
   context: MedicationContext | undefined
 ): number {
   if (dosage.targetCount === undefined || dosage.targetCount === 1) return 1;
-  const doseUnit = getDoseQuantityUnit(dosage.amounts?.[0]?.quantity);
+  const amount = dosage.amounts?.[0];
+  const doseUnit = getDoseQuantityUnit(amount?.quantity ?? amount?.range?.high ?? amount?.range?.low);
   if (!doseUnitSupportsPerTargetMultiplication(doseUnit, context)) {
     return 1;
   }
@@ -2755,6 +2756,8 @@ interface CycleEventQuota {
   historyEnd?: number;
   recordedTimes?: number[];
   recordedIndex?: number;
+  /** Chronological replay must not spend a recorded instant again as a planned clock. */
+  lastRecordedAt?: number;
   /** Lazily advance a finite capped phase after its candidate is decided. */
   advance?: (at: number, accepted: boolean) => void;
 }
@@ -2934,7 +2937,9 @@ function scheduleTreatmentRelativeCourse(
           remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
         };
-        if (collect && (original.asNeeded || deferred) && quota.remaining !== undefined) {
+        // Actual use spends a finite quota even when an authored end keeps
+        // phase completion independent of that quota.
+        if (collect && quota.remaining !== undefined) {
           quota.historyStart = member.eligibleFrom.getTime();
           quota.historyEnd = effectiveEnd?.getTime();
         }
@@ -2942,6 +2947,11 @@ function scheduleTreatmentRelativeCourse(
         const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat)
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
           : originalRepeat;
+        // The resolved end fences actual administrations. The recurrence
+        // below is enumerated in nominal time, before its displacement.
+        const nominalEnd = effectiveEnd && originalRepeat && (collect || rollingUsage)
+          ? new Date(effectiveEnd.getTime() - (getAdministrationOffsetMinutes(original) ?? 0) * 60000 - 1).toISOString()
+          : undefined;
         const execution: CanonicalAdministration = {
           ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
@@ -2950,14 +2960,14 @@ function scheduleTreatmentRelativeCourse(
               ...counted, occurrenceCap: undefined,
               ...(effectiveEnd ? { calendarWindow: {
                 ...originalRepeat.calendarWindow,
-                end: new Date(effectiveEnd.getTime() - 1).toISOString(),
+                end: nominalEnd,
               } } : {}),
             } },
           } : rollingUsage && effectiveEnd && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
               ...originalRepeat, calendarWindow: {
                 ...originalRepeat.calendarWindow,
-                end: new Date(effectiveEnd.getTime() - 1).toISOString(),
+                end: nominalEnd,
               },
             } },
           } : {}),
@@ -3464,6 +3474,13 @@ function chronologicalRepeatedEvents(
     while (next && next.at < before) {
       const event = queue.pop()!;
       let actual = event.recorded === true;
+      // Actual records are queued before coincident planned clocks. Stable
+      // chronological order needs only the last recorded point, not a second
+      // history set or another scan of the recorded administrations.
+      if (!actual && event.quota.lastRecordedAt === event.at) {
+        next = queue.first();
+        continue;
+      }
       if (!actual && actualReplay && event.at < from.getTime() &&
           (event.quota.remaining === undefined || event.quota.remaining > 0)) {
         actual = claimActualHistory(memberActualHistory(actualReplay, event.key, prior), event.at);
@@ -3472,6 +3489,7 @@ function chronologicalRepeatedEvents(
       // matching replay spends its finite phase count, never another amount.
       // Earlier PRN opportunities are not evidence of administration.
       const accepted = actual || ((event.at >= from.getTime() || !event.member.asNeeded) && accept(event));
+      if (actual) event.quota.lastRecordedAt = event.at;
       if (actual && event.quota.remaining !== undefined && event.quota.remaining > 0) event.quota.remaining--;
       event.quota.advance?.(event.at, accepted);
       if (accepted && event.at >= from.getTime()) {
@@ -3937,15 +3955,16 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     ? repeatOccurrenceCap(repeatForCount)
     : undefined;
   // A recurrence's total count is another allowance on ADMINISTERED doses.
-  // A periodic/quantity cap must not spend it on rejected raw opportunities.
+  // Caps and conditional eligibility must not spend it on rejected opportunities.
   // countMax participates here as a ceiling, without becoming a phase-end
   // promise. A one-time count-only instruction keeps its unique identity.
-  const capCount = repeatForCount &&
+  const constrainedCount = repeatForCount &&
       (repeatForCount.count !== undefined || repeatForCount.countMax !== undefined) &&
       !isSingleAdministrationRepeat(repeatForCount) &&
-      (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount))
+      (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount) ||
+       (one.asNeeded && (one.predicate || one.excludedDates?.length || one.excludedWeekdays?.length)))
     ? repeatOccurrenceCap(repeatForCount) : undefined;
-  const acceptedCount = eligibleAt && !one.asNeeded ? finiteCount : capCount;
+  const acceptedCount = eligibleAt && !one.asNeeded ? finiteCount : constrainedCount;
   if (acceptedCount !== undefined) {
     const requestedLimit = options.limit ?? 10;
     if (!Number.isFinite(requestedLimit) || requestedLimit <= 0) return [];
@@ -4020,33 +4039,6 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       },
       options
     );
-  }
-  const administrationOffset = getAdministrationOffsetMinutes(one);
-  if (administrationOffset !== undefined) {
-    const zone = options.timeZone ?? options.config?.timeZone;
-    if (!zone) throw new Error("A timeZone is required for administration offsets");
-    const delta = administrationOffset * 60000;
-    const shifted = (value: Date | string, amount: number) =>
-      formatZonedIso(new Date(coerceDate(value, "administration time").getTime() + amount), zone);
-    const base: CanonicalAdministration = {
-      ...one,
-      delayMinutes: undefined,
-    };
-    const recorded = (options as PhaseCountOptions).countedActualTimes;
-    let countedActualTimes: Set<number> | undefined;
-    if (recorded) {
-      countedActualTimes = new Set<number>();
-      for (const at of recorded) countedActualTimes.add(at - delta);
-    }
-    return nextDueDoses(base, {
-      ...options,
-      from: shifted(options.from, -delta),
-      priorDoseTimes: options.priorDoseTimes?.map((value) => shifted(value, -delta)),
-      countedActualTimes,
-      evaluateCondition: options.evaluateCondition
-        ? (condition, at) => options.evaluateCondition!(condition, shifted(at, delta))
-        : undefined,
-    } as PhaseCountOptions).map((value) => shifted(value, delta));
   }
   if (unscheduledOccurrenceCapacity(one)) return [];
   const guard = getDosageCondition(one);
@@ -4123,7 +4115,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const recorded = (options as PhaseCountOptions).countedActualTimes;
     while (true) {
       const candidates = nextDueDoses(unconstrained, {
-        ...options, from: eligibleFrom, priorCount: undefined, limit: candidateLimit,
+        ...options, from: eligibleFrom, priorCount: exactCount === undefined ? options.priorCount : undefined, limit: candidateLimit,
       });
       const accepted: string[] = [];
       for (const at of candidates) {
@@ -4375,6 +4367,33 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         return capped;
       candidateLimit = Math.min(10000, candidateLimit * 2);
     }
+  }
+  // Generate the displaced clock before the outer condition/cap wrappers
+  // admit administrations, so civil buckets use actual administration dates.
+  const administrationOffset = getAdministrationOffsetMinutes(dosage);
+  if (administrationOffset !== undefined) {
+    const delta = administrationOffset * 60000;
+    const shifted = (value: Date | string, amount: number) =>
+      formatZonedIso(new Date(coerceDate(value, "administration time").getTime() + amount), timeZone);
+    const base: CanonicalAdministration = {
+      ...dosage,
+      delayMinutes: undefined,
+    };
+    const recorded = (options as PhaseCountOptions).countedActualTimes;
+    let countedActualTimes: Set<number> | undefined;
+    if (recorded) {
+      countedActualTimes = new Set<number>();
+      for (const at of recorded) countedActualTimes.add(at - delta);
+    }
+    return nextDueDoses(base, {
+      ...options,
+      from: shifted(options.from, -delta),
+      priorDoseTimes: options.priorDoseTimes?.map((value) => shifted(value, -delta)),
+      countedActualTimes,
+      evaluateCondition: options.evaluateCondition
+        ? (condition, at) => options.evaluateCondition!(condition, shifted(at, delta))
+        : undefined,
+    } as PhaseCountOptions).map((value) => shifted(value, delta));
   }
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),
@@ -5865,7 +5884,7 @@ function measureRangedSchedule(
       ...repeat,
       ...(!isSingleAdministrationRepeat(repeat ?? {}) ? { count: undefined, countMax: undefined } : {}),
       occurrenceCap: undefined,
-      calendarWindow: { ...repeat?.calendarWindow, end: new Date(end.getTime() - 1).toISOString() },
+      calendarWindow: { ...repeat?.calendarWindow, end: new Date(end.getTime() - (getAdministrationOffsetMinutes(dosage) ?? 0) * 60000 - 1).toISOString() },
     } },
   };
   const candidates = nextDueDoses(execution, {
@@ -6271,7 +6290,14 @@ function calculateTotalUnitsSingle(
   if (!timeZone) throw new Error("timeZone is required for calculateTotalUnits");
   const from = coerceDate(options.from, "from");
   const administrationOffset = getAdministrationOffsetMinutes(sourceDosage);
-  if (administrationOffset !== undefined) {
+  // Civil occurrence allowances must see actual dates. Keep the scalar
+  // arithmetic shift for unconstrained clocks, but let the existing filtered
+  // enumerator own displaced candidates when a civil allowance applies.
+  const shiftedOccurrence = administrationOffset !== undefined &&
+    !!getTimingOccurrenceCap(sourceDosage.schedule?.recurrence) &&
+    !unscheduledOccurrenceCapacity(sourceDosage);
+  const admissionDisplacement = shiftedOccurrence ? administrationOffset * 60000 : 0;
+  if (administrationOffset !== undefined && !shiftedOccurrence) {
     const delta = administrationOffset * 60000;
     const shift = (value: Date | string, amount: number) =>
       new Date(coerceDate(value, "administration time").getTime() + amount);
@@ -6425,14 +6451,20 @@ function calculateTotalUnitsSingle(
       "The dosage has no executable frequency or dosing time for supply calculation.");
   const capacityCap = unscheduledOccurrenceCapacity(dosage);
   const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
-  const boundsStart = boundsPeriod.start;
+  const nominalBoundsStart = boundsPeriod.start;
+  const boundsStart = admissionDisplacement && nominalBoundsStart
+    ? new Date(nominalBoundsStart.getTime() + admissionDisplacement) : nominalBoundsStart;
   const countFrom = boundsStart && boundsStart > from ? boundsStart : from;
   const effectiveOrderedAt =
-    orderedAtDate && boundsStart && boundsStart > orderedAtDate ? boundsStart : orderedAtDate;
-  const baseCandidate = effectiveOrderedAt ?? boundsStart ?? countFrom;
-  const baseTime = boundsStart && boundsStart > baseCandidate ? boundsStart : baseCandidate;
-  endDay = minDate(endDay, resolveRepeatDurationCapEnd(dosage, baseTime, timeZone));
-  endDay = minDate(endDay, boundsPeriod.end);
+    orderedAtDate && nominalBoundsStart && nominalBoundsStart > orderedAtDate ? nominalBoundsStart : orderedAtDate;
+  const baseCandidate = effectiveOrderedAt ?? nominalBoundsStart ??
+    (admissionDisplacement ? new Date(countFrom.getTime() - admissionDisplacement) : countFrom);
+  const baseTime = nominalBoundsStart && nominalBoundsStart > baseCandidate ? nominalBoundsStart : baseCandidate;
+  const durationEnd = resolveRepeatDurationCapEnd(dosage, baseTime, timeZone);
+  endDay = minDate(endDay, durationEnd && admissionDisplacement
+    ? new Date(durationEnd.getTime() + admissionDisplacement) : durationEnd);
+  endDay = minDate(endDay, boundsPeriod.end && admissionDisplacement
+    ? new Date(boundsPeriod.end.getTime() + admissionDisplacement) : boundsPeriod.end);
   const needsFilteredEnumeration =
     conditional ||
     excludedDates.length ||
@@ -6487,7 +6519,7 @@ function calculateTotalUnitsSingle(
     // A constrained course may exclude individual administration instants
     // (dates, conditions or quantity limits); counting the raw cadence would
     // silently inflate supply. Enumerate only within the requested window.
-    const endInclusive = new Date(endDay.getTime() - 1).toISOString();
+    const endInclusive = new Date(endDay.getTime() - admissionDisplacement - 1).toISOString();
     const boundedRepeat: CanonicalRecurrence = {
       ...(repeat ?? {}),
       calendarWindow: {

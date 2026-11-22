@@ -719,7 +719,7 @@ function thaiNumericTokenAt(
   const fraction = trailingSlash || leadingSlash ? separator : tokens[index + 2];
   if (!fraction) return undefined;
   const original = input.slice(whole.sourceStart, fraction.sourceEnd);
-  if (!/[๐-๙]/u.test(original)) return undefined;
+  // The caller's clinical-unit gate licenses fractions in either digit script.
   let value: number | undefined;
   let comparator: string | undefined;
   if (separator.original === ".") {

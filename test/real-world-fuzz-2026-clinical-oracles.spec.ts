@@ -4,7 +4,7 @@ import expectedJson from "./real-world-fuzz-2026-oracles.json";
 import {
   calculateTotalUnits, fromFhirDosage, getDosageCondition,
   getDosageAlternativeChoice, nextDueDoses, parseSig, toFhirR5Dosages,
-  formatSig, formatSigBatch
+  formatSig, formatSigBatch, fromFhir, toDosageDetails
 } from "../src";
 import type { FhirR6DosageInstruction } from "../src";
 import { cloneStructuredValue } from "../src/stable-structure";
@@ -614,7 +614,7 @@ describe("source-less R6 treatment-relative step display", () => {
     const thai = formatSig(course, "long", { locale: "th" });
     expect(thai).toContain("ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา");
     expect(thai).toContain(`ตั้งแต่${secondStart} วันหลังเริ่มการรักษาจนถึง${secondStart + 7} วันหลังเริ่มการรักษา`);
-    if (secondStart === 14) expect(thai).toContain("งดยา");
+    if (secondStart === 14) expect(thai).toContain("งดยาตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา");
     else expect(thai).not.toContain("งดยา");
     const strict = toFhirR5Dosages(course);
     const strictEnglish = formatSigBatch(strict, "long");
@@ -625,13 +625,18 @@ describe("source-less R6 treatment-relative step display", () => {
     expect(strictThai).toContain(`ตั้งแต่${secondStart} วันหลังเริ่มการรักษาจนถึง${secondStart + 7} วันหลังเริ่มการรักษา`);
     if (secondStart === 14) {
       expect(strictEnglish).toContain("No doses from 7 days after treatment start until 14 days after treatment start");
-      expect(strictThai).toContain("งดยา");
+      expect(strictThai).toContain("งดยาตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา");
     } else {
       expect(strictEnglish).not.toContain("No doses");
       expect(strictThai).not.toContain("งดยา");
     }
     const source = "keep the clinician-authored dosing text exactly";
-    expect(formatSig({ ...course, renderedInstruction: source }, "long")).toBe(english);
+    const authored = { ...course, renderedInstruction: source };
+    expect(formatSig(authored, "long")).toBe(english);
+    const imported = fromFhir(authored);
+    expect(imported.fhirNext.renderedInstruction).toBe(source);
+    const saved = JSON.parse(JSON.stringify(imported.fhir));
+    expect(toDosageDetails(saved).renderedInstruction).toBe(source);
   });
 });
 

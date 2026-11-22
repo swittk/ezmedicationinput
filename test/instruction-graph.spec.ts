@@ -3547,3 +3547,260 @@ describe("round35 action realization ownership", () => {
     expect(JSON.stringify(frame)).toBe(saved);
   });
 });
+
+describe("round36 configured identity and active cadence", () => {
+  it.each([1, 2])("keeps the current %s-day period authoritative in both locales", period => {
+    const r6 = { step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QOD" }] },
+        repeat: { period, periodUnit: "d" as const } } }] }] };
+    const before = JSON.stringify(r6);
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      const text = formatSig(r6, style, { locale, realizationMode: "normalized" });
+      if (period === 1) {
+        expect(text).not.toMatch(/other day|QOD|วันเว้นวัน/u);
+        expect(text).toContain(locale === "th" ? "ทุกวัน" : style === "short" ? "Q1D" : "daily");
+        expect(text).not.toMatch(/once daily|วันละครั้ง/u);
+      } else expect(text).toContain(locale === "th" ? "วันเว้นวัน" : style === "short" ? "QOD" : "every other day");
+    }
+    expect(JSON.stringify(r6)).toBe(before);
+  });
+
+  it("selects a custom method's configured display without making that display a parser alias", () => {
+    const coding = { system: "urn:clinic:method", code: "shared-preparation" };
+    const options = { instructionActionMap: {
+      first: { code: "first", display: "First preparation", i18n: { th: "เตรียมแรก" }, primaryAdministrationHead: true, administrationMethod: coding },
+      bedside: { code: "bedside", display: "Bedside preparation", i18n: { th: "เตรียมข้างเตียง" }, primaryAdministrationHead: true, administrationMethod: coding },
+    } };
+    const method = { coding: { ...coding, display: "Bedside preparation" } };
+    expect(resolveMedicationInstructionActionForMethod(method, options)?.code).toBe("bedside");
+    expect(resolveMedicationInstructionActionForMethod({ coding }, options)?.code).toBe("first");
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], method: { coding: [method.coding] } };
+    for (const input of [row, toDosageDetails([row])])
+      expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" })).toContain("เตรียมข้างเตียง");
+  });
+
+  it("preserves authored Coding metadata supplied by the concept vocabulary", () => {
+    const coding = { system: "urn:clinic:activity", code: "physio", userSelected: false,
+      _code: { id: "code-note" }, _userSelected: { id: "selected-note" },
+      extension: [{ url: "urn:activity:note", valueString: "preserve" }] };
+    const options = { instructionConceptMap: { physiotherapy: {
+      role: AdviceArgumentRole.Activity, display: "physiotherapy", coding
+    } } };
+    const before = JSON.stringify(options);
+    const parsed = parsePublicSig("Take 1 tablet before physiotherapy", options);
+    expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming?.[0].activity.coding).toMatchObject(coding);
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(rows)));
+      const json = JSON.stringify(reopened);
+      expect(json).toContain("code-note");
+      expect(json).toContain("selected-note");
+      expect(json).toContain('"userSelected":false');
+    }
+    expect(JSON.stringify(options)).toBe(before);
+  });
+
+  it("uses the authored in relation for the mix action's time complement", () => {
+    const frame = parseInstructionActions("Mix in the morning")[0];
+    const before = JSON.stringify(frame);
+    expect(realizeInstructionAction(frame, "en")).toBe("Mix in the morning");
+    const thai = realizeInstructionAction(frame, "th");
+    expect(thai).toContain("ผสม");
+    expect(thai).toContain("ตอนเช้า");
+    expect(thai).not.toContain("เวลา");
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+});
+
+
+describe("round36 rich primary rendered argument ownership", () => {
+  it.each(["result", "default"] as const)("keeps the edited dose and exactly one morning instruction with the %s realizer", realizer => {
+    const source = "Rub 1 g into the skin gently to form foam in the morning";
+    const row = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to the skin in the morning").fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.predicate.realizer = realizer;
+    primary.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } },
+      { role: AdviceArgumentRole.Result, text: "foam", normalized: "foam", i18n: { en: "foam", th: "ฟอง" } },
+      { role: AdviceArgumentRole.Time, text: "the morning", normalized: EventTiming.Morning, i18n: { en: "the morning", th: "ตอนเช้า" } }
+    ];
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 3 }, actions: [primary] })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== marker.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(marker);
+    row.method = { text: "Rub", coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] };
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    saved.doseAndRate[0].doseQuantity.value = 2;
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text.match(locale === "en" ? /morning/gu : /เช้า/gu)).toHaveLength(1);
+      expect(text).toContain(locale === "en" ? "foam" : "ฟอง");
+      expect(text).toContain(locale === "en" ? "gently" : "เบาๆ");
+      expect(text.match(/(?:^|\D)2 g\b/gu)).toHaveLength(1);
+      expect(text).not.toMatch(/(?:^|\D)1 (?:g|กรัม)\b/u);
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+  });
+
+  it("shows the current restricted primary site once while retaining an independent action site and saved wording", () => {
+    const source = "Apply 1 g to the skin gently";
+    const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
+    const primary = parseInstructionActions(source)[0];
+    primary.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 g", normalized: "g", quantity: { value: 1, unit: "g" } },
+      { role: AdviceArgumentRole.Site, text: "skin", normalized: "skin", coding: row.site.coding[0] },
+      { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { en: "gently", th: "เบาๆ" } }
+    ];
+    const warning = parseInstructionActions("Do not touch right eye")[0];
+    warning.span = { start: source.length + 2, end: source.length + 24 };
+    warning.sequenceIndex = 1;
+    const marker = buildInstructionGraphExtension({ sourceText: source + "; Do not touch right eye", sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 5 }, actions: [primary, warning] })!;
+    row.extension = row.extension.filter((x: { url: string }) => x.url !== marker.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
+    row.extension.push(marker);
+    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
+    saved.site = JSON.parse(JSON.stringify(parsePublicSig("Apply 1 g to skin where skin is red").fhir[0].site));
+    saved.site.extension[0].extension.find((x: { url: string }) => x.url === "predicateText").valueString = "skin is itchy";
+    const before = JSON.stringify(saved);
+    for (const input of [saved, toDosageDetails([saved])]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode });
+      const th = formatSig(input, "long", { locale: "th", realizationMode });
+      expect(en.match(/to the skin where skin is itchy/gu)).toHaveLength(1);
+      expect(en.match(/skin is itchy/gu)).toHaveLength(1);
+      expect(en).toContain("gently");
+      expect(en).toMatch(/Do not touch (?:the )?right eye/u);
+      expect(en.match(/right eye/gu)).toHaveLength(1);
+      expect(th.match(/ผิวหนัง/gu)).toHaveLength(1);
+      expect(th.match(/skin is itchy/gu)).toHaveLength(1);
+      expect(th).toContain("เบาๆ");
+      expect(th).toContain("ห้ามสัมผัสตาขวา");
+      expect(en + th).not.toContain("skin is red");
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+    expect(before).toContain("where skin is red");
+    expect(parseInstructionGraphExtension(saved.extension)?.sourceText).toBe(source + "; Do not touch right eye");
+  });
+
+  it("omits only the covered amountless primary when preparation owns the amount", () => {
+    const source = "Dissolve 2 tablets in water, then drink";
+    const clause = parsePublicSig(source).meta.canonical.clauses[0];
+    const graph = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      ...clause.instructionGraph!, actions: parseInstructionActions(source)
+    })!])!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["dissolve", "drink"]);
+    const before = JSON.stringify(graph);
+    for (const locale of ["en", "th"]) {
+      const text = realizeInstructionGraph(graph, locale, { omitCanonicalAdministration: clause })!;
+      if (locale === "en") expect(text).toBe("Dissolve 2 tablets in water");
+      else expect(text).toMatch(/^ละลาย\s?2 เม็ดในน้ำ$/u);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("retains an amountless primary's independent manner when canonical administration does not cover it", () => {
+    const source = "Dissolve 2 tablets in water, then drink slowly";
+    const clause = parsePublicSig("Dissolve 2 tablets in water, then drink").meta.canonical.clauses[0];
+    const actions = parseInstructionActions(source);
+    const graph = { sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...actions[1].span } };
+    const text = realizeInstructionGraph(graph, "en", { omitCanonicalAdministration: clause })!;
+    expect(text).toContain("Dissolve 2 tablets in water");
+    expect(text).toMatch(/drink slowly/iu);
+  });
+});
+
+
+describe("round36 selected Time output evidence", () => {
+  it.each([
+    ["Remove patch before breakfast", "before breakfast", /before breakfast/gu, /ก่อนอาหารเช้า/gu],
+    ["Hold the eyelid in the morning", "in the morning", /morning/gu, /เช้า/gu]
+  ] as const)("reports the selected locale realizer's emitted event: %s", (source, scheduleText, english, thai) => {
+    const frame = parseInstructionActions(source)[0];
+    const clause = parsePublicSig(scheduleText).meta.canonical.clauses[0];
+    const before = JSON.stringify(frame);
+    for (const locale of ["en", "th"]) {
+      const coverage = { singleScheduledEvent: false };
+      const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale, undefined, coverage);
+      expect(text.match(locale === "en" ? english : thai)).toHaveLength(1);
+      expect(coverage.singleScheduledEvent).toBe(true);
+    }
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+
+  it("does not report an unrendered Time when a relation realizer selects Duration", () => {
+    const frame = parseInstructionActions("Remove patch after 8 hours")[0];
+    frame.args.push({ role: AdviceArgumentRole.Time, text: "the morning", normalized: EventTiming.Morning,
+      i18n: { en: "the morning", th: "ตอนเช้า" } });
+    const clause = parsePublicSig("in the morning").meta.canonical.clauses[0];
+    const before = JSON.stringify(frame);
+    for (const locale of ["en", "th"]) {
+      const coverage = { singleScheduledEvent: false };
+      const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale, undefined, coverage);
+      expect(text).toContain(locale === "en" ? "8 hours" : "8 ชั่วโมง");
+      expect(text).not.toMatch(/morning|เช้า/u);
+      expect(coverage.singleScheduledEvent).toBe(false);
+    }
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+
+  it("reports an independent event adjunct appended after a material realizer", () => {
+    const frame = parseInstructionActions("Dilute 1 mL with 10 mL saline before each dose")[0];
+    frame.args = frame.args.filter(arg => arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Time);
+    frame.args.push({ role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming.Breakfast, relation: AdviceRelation.Before });
+    const clause = parsePublicSig("before breakfast").meta.canonical.clauses[0];
+    const before = JSON.stringify(frame);
+    for (const locale of ["en", "th"]) {
+      const coverage = { singleScheduledEvent: false };
+      const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale, undefined, coverage);
+      expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
+      expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+      expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      expect(coverage.singleScheduledEvent).toBe(true);
+    }
+    expect(JSON.stringify(frame)).toBe(before);
+  });
+});
+
+
+describe("round36 live predicate and explicit amountless primary controls", () => {
+  it("uses only the live predicate after a warmed supported wire restriction edit in both locales", () => {
+    const source = "Apply 1 g to skin where skin is red daily max 2 g/day";
+    const row = parseSig(source).items[0].fhir;
+    for (const locale of ["en", "th"])
+      formatSig(row, "long", { locale, realizationMode: "roundtrip" });
+    const restriction = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
+    restriction.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
+    const before = JSON.stringify(row);
+    for (const input of [row, toDosageDetails(JSON.parse(JSON.stringify([row])))])
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text.match(/skin is itchy/gu)).toHaveLength(1);
+        expect(text).not.toContain("skin is red");
+        expect(text).toMatch(locale === "en" ? /to the skin where skin is itchy/u : /ผิวหนัง.*skin is itchy/u);
+        expect(text).toMatch(locale === "en" ? /1 g/u : /1 (?:g|กรัม)/u);
+      }
+    expect(row.text).toBe(source);
+    expect(restriction.extension!.find(item => item.url === "sourceText")!.valueString).toBe("where skin is red");
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each([
+    ["Drink, then dissolve 2 tablets in water, then drink", "Dissolve 2 tablets in water, then drink", /2 tablets in water/u],
+    ["Drink, then wait 1 hour, then drink", "Drink", /1 hour/u]
+  ] as const)("retains the independent earlier amountless action: %s", (source, primaryText, retainedStep) => {
+    const actions = parseInstructionActions(source);
+    const graph = parseInstructionGraphExtension([buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions,
+      primaryAdministrationSpan: { ...actions[actions.length - 1].span }
+    })!])!;
+    const clause = parsePublicSig(primaryText).meta.canonical.clauses[0];
+    const before = JSON.stringify(graph);
+    const text = realizeInstructionGraph(graph, "en", { omitCanonicalAdministration: clause })!;
+    expect(text.match(/drink/giu)).toHaveLength(1);
+    expect(text).toMatch(/^Drink[;,]/u);
+    expect(text).toMatch(retainedStep);
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+});

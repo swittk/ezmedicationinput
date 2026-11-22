@@ -32,6 +32,7 @@ import {
   DOSAGE_DETAILS_R5_URL,
   DOSAGE_RECONCILIATION_SOURCE_URL,
   DOSAGE_RECONCILIATION_WARNING_URL,
+  DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   compactCourseMarker,
   decodeR5RetainedFields,
   encodeR5RetainedFields,
@@ -57,7 +58,7 @@ import {
   getDosageCondition,
   conditionToR6,
   decodeCourseDetails,
-  sourceWithoutNestedHistory,
+  sourceWithoutNestedHistory, retainField,
   liveDosageProjection,
   getDosageAlternativeChoice,
   getDosageExcludedDates,
@@ -1752,7 +1753,10 @@ export function courseFromR5(
       effectiveDosages.length === 1 &&
       carrier &&
       Object.keys(carrier).every((key) => {
-        if (key === "text" || key === "modifierExtension") return true;
+        if (key === "text" || key === "modifierExtension" || key === "id") return true;
+        // Weekday exclusions are the live dosage-level ordinary extension;
+        // other clinical guards are modifier extensions checked below.
+        if (key === "extension") return !carrier.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
         if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
         const value = (carrier as Record<string, unknown>)[key];
         // R5 mappers may materialize all optional keys as undefined and
@@ -1764,6 +1768,11 @@ export function courseFromR5(
       carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL
     ) {
       const instruction = currentInstruction ?? carrier.text;
+      if (carrier.id !== undefined || carrier.extension?.length)
+        reconciliationSources.push(retainField("r5SourceCarrier", {
+          ...(carrier.id !== undefined ? { id: carrier.id } : {}),
+          ...(carrier.extension?.length ? { extension: carrier.extension } : {}),
+        }));
       // Even an incomplete clinician-authored stage is live editable data.
       // This carrier has no administration: merge its explicit stage edits
       // without treating the carrier's Dosage.text as an active component.

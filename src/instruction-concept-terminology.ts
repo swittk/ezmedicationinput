@@ -84,10 +84,7 @@ export function normalizeConceptSurface(value: string): string {
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding
     ? {
-      system: coding.system,
-      version: coding.version,
-      code: coding.code,
-      display: coding.display,
+      ...coding,
       extension: coding.extension?.map((extension) => ({ ...extension })),
       _display: coding._display ? { ...coding._display } : undefined,
       i18n: coding.i18n ? { ...coding.i18n } : undefined

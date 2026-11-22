@@ -337,7 +337,12 @@ describe("review 21 dimensional quantity grammar", () => {
       for (const step of parsed.fhirNext.step) for (const component of step.component)
         for (const amount of component.doseAndRate ?? []) {
           expect(amount.doseQuantity).toBeUndefined();
+          expect(amount.doseRange).toBeUndefined();
+          expect(amount.doseExpression).toBeUndefined();
           expect(amount.rateQuantity).toBeUndefined();
+          expect(amount.rateRatio).toBeUndefined();
+          expect(amount.rateRange).toBeUndefined();
+          expect(amount.rateExpression).toBeUndefined();
         }
       expect(parsed.input).toBe(source);
       const displayedSource = [parsed.fhirNext.renderedInstruction,

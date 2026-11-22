@@ -41,6 +41,7 @@ export const THAI_COURSE: CourseLanguage = {
   rateLabel: "อัตราการให้ยา: ",
   rateRangeLabel: "ช่วงอัตราการให้ยา: ",
   unspecified: "ไม่ระบุค่า",
+  withAuthoredDirections: (current, source) => "ปัจจุบัน: " + current + "; ข้อความเดิม: " + source,
   treatmentStart: "เริ่มการรักษา",
   incompleteInterpretation: "ข้อมูลบางส่วนเท่านั้น — ต้องตรวจสอบข้อจำกัดการใช้ยา",
   retainedStructure: "Structured FHIR data is retained",

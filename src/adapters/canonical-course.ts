@@ -229,6 +229,7 @@ function timingAnnotations(
   | "eventWindow"
   | "frequency"
   | "occurrenceDuration"
+  | "occurrenceDurationMax"
   | "occurrenceDurationUnit"
   | "occurrenceDurationComparator"
 > {
@@ -246,6 +247,7 @@ function timingAnnotations(
     | "eventWindow"
     | "frequency"
     | "occurrenceDuration"
+    | "occurrenceDurationMax"
     | "occurrenceDurationUnit"
     | "occurrenceDurationComparator"
   > = { offset: r?.offset };
@@ -268,6 +270,7 @@ function timingAnnotations(
           const duration = parseTimingAdministrationDuration(e);
           if (duration) {
             out.occurrenceDuration = duration.value;
+            out.occurrenceDurationMax = duration.max;
             out.occurrenceDurationUnit = duration.unit;
             out.occurrenceDurationComparator = duration.comparator;
           }
@@ -329,7 +332,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       periodMax: r.periodMax,
       periodUnit: r.periodUnit,
       occurrenceDuration: r.duration ?? annotations?.occurrenceDuration,
-      occurrenceDurationMax: r.durationMax,
+      occurrenceDurationMax: r.durationMax ?? (r.duration === undefined ? annotations?.occurrenceDurationMax : undefined),
       occurrenceDurationUnit: r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
       occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
@@ -1050,7 +1053,8 @@ function updateNativeTimingAnnotations(
   const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
   const duration = parseTimingAdministrationDuration(durationMarker);
   if (duration && (duration.value !== live?.occurrenceDuration ||
-      duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator)) {
+      duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
+      duration.max !== live?.occurrenceDurationMax)) {
     changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
     output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
@@ -1666,6 +1670,9 @@ function administrationToWire(
     if (contextSources)
       output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
         { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: contextSources }];
+    // The supported R5 alias has already supplied current asNeeded above.
+    // It is not an active current-R6 field.
+    delete output.asNeededBoolean;
     delete output.siteReference;
     delete output.excludedDates;
     delete output.maxDosePerPeriod;

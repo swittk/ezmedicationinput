@@ -3695,6 +3695,7 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   const timeRelation = c.time && relationHasGrammarFeature(c.frame.relation, "timeComplement")
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
+  if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
   text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
   if (withTarget && targetRelation) {
     const materialRelation = localizeAdviceRelation(
@@ -3799,7 +3800,10 @@ const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, Acti
   "amount-material-destination": AMOUNT_MATERIAL_DESTINATION_REALIZER
 };
 
-function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
+function realizeAction(
+  frame: AdviceFrame, locale: string, roundtripSafe = false,
+  coverage?: { singleScheduledEvent: boolean }, clause?: CanonicalSigClause
+): string {
   // Never discard inherited prohibition or modality: its governing words may
   // occur outside this frame's exact source span.
   if (frame.sourceText && !frame.modality &&
@@ -3842,6 +3846,7 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
     substance, result, activity, time, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
+    timeWasRendered: coverage ? false : undefined,
     translateArgumentConcept: (arg) => translatedArgumentConcept(arg, locale),
     translateQuantity: (quantity) => translatedQuantity(quantity, locale)
   };
@@ -3876,6 +3881,10 @@ function realizeAction(frame: AdviceFrame, locale: string, roundtripSafe = false
       ])
     : undefined;
   const complete = temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized;
+  if (coverage && clause) coverage.singleScheduledEvent = Boolean(
+    input.timeWasRendered && timeArg && timeArgumentCoversSingleScheduledEvent(frame, timeArg, clause) ||
+    temporalPhrase && temporalAdjunct && timeArgumentCoversSingleScheduledEvent(frame, temporalAdjunct, clause)
+  );
   return negated ? complete : adapter.applyPositiveModality(complete, frame);
 }
 
@@ -3890,7 +3899,8 @@ export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): str
  * This is a display-only frame copy, not an edit of source graph/provenance. */
 export function realizeRichPrimaryWithCanonicalDose(
   frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
-  options?: Pick<ParseOptions, "instructionActionMap">
+  options?: Pick<ParseOptions, "instructionActionMap">,
+  coverage?: { singleScheduledEvent: boolean }
 ): string {
   const sourceFrame = frame;
   frame = frameWithCanonicalPrimaryContext(frame, clause);
@@ -3926,7 +3936,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   const dose = clause.dose;
   if (!dose || frame.args.some(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
-    (dose.value === undefined && !dose.range)) return realizeAction(frame, locale);
+    (dose.value === undefined && !dose.range)) return realizeAction(frame, locale, false, coverage, clause);
   // A preceding preparation already supplies the unchanged amount. Add the
   // live dose only when no independently rendered owner still supplies it.
   const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
@@ -3934,7 +3944,7 @@ export function realizeRichPrimaryWithCanonicalDose(
       !primaryActionAmountConflicts(owner, dose) ||
       clause.instructionGraph?.primaryAdministrationSpan &&
         owner.span.end <= clause.instructionGraph.primaryAdministrationSpan.start))
-    return realizeAction(frame, locale);
+    return realizeAction(frame, locale, false, coverage, clause);
   const { value, range, unit, comparator } = dose;
   return realizeAction({
     ...frame, sourceText: "",
@@ -3942,7 +3952,7 @@ export function realizeRichPrimaryWithCanonicalDose(
       role: AdviceArgumentRole.Amount,
       text: "", quantity: { value, range, unit, comparator }
     }, ...frame.args.filter(arg => arg.role !== AdviceArgumentRole.Amount)]
-  }, locale);
+  }, locale, false, coverage, clause);
 }
 
 function normalizedInstructionSurface(value: string): string {
@@ -4311,7 +4321,11 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
         continue;
       }
     }
-    if (arg.role === AdviceArgumentRole.Site && !site && clause.sourceHasStructuredSite === true) {
+    // The graph's plain Site argument cannot express live restrictions.
+    // Let the canonical site phrase own this primary display; other actions
+    // and the saved graph keep their authored sites.
+    if (arg.role === AdviceArgumentRole.Site &&
+        (site?.restrictions?.length || !site && clause.sourceHasStructuredSite === true)) {
       changed = true;
       continue;
     }
@@ -4339,23 +4353,22 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
  * Both localizers share this compositional check instead of reparsing the
  * displayed text independently.
  */
-export function instructionGraphActionCoversSingleScheduledEvent(
+function timeArgumentCoversSingleScheduledEvent(
   frame: AdviceFrame,
+  arg: AdviceArgument,
   clause: CanonicalSigClause
 ): boolean {
-  if (clause.schedule?.when?.length !== 1 || clause.schedule.offset !== undefined ||
-      clause.schedule.offsetMin !== undefined || clause.schedule.offsetMax !== undefined) return false;
-  return frame.args.some((arg) => {
-    if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
-    if (arg.role !== AdviceArgumentRole.Time ||
-        arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
-    const words = normalizeActionSurface(arg.normalized ?? arg.text)
-      .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
-    for (let index = 0; index < words.length; index += 1) {
-      if (resolveEventTimingExpression(words, index)?.timing === clause.schedule?.when?.[0]) return true;
-    }
-    return false;
-  });
+  if (arg.role !== AdviceArgumentRole.Time || clause.schedule?.when?.length !== 1 ||
+      clause.schedule.offset !== undefined || clause.schedule.offsetMin !== undefined ||
+      clause.schedule.offsetMax !== undefined) return false;
+  if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
+  if (arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
+  const words = normalizeActionSurface(arg.normalized ?? arg.text)
+    .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
+  for (let index = 0; index < words.length; index += 1) {
+    if (resolveEventTimingExpression(words, index)?.timing === clause.schedule.when[0]) return true;
+  }
+  return false;
 }
 
 function primaryActionCoveredByCanonicalClause(
@@ -4833,15 +4846,18 @@ export function realizeInstructionGraph(
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
     if (frameSource && omittedSources.indexOf(frameSource) >= 0) continue;
+    const hasAmount = options?.omitCanonicalAdministration &&
+      frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity);
     if (options?.omitCanonicalAdministration &&
       // A later, independent action may now happen to match the clinician's
       // EDITED method and dose. Only the source-backed amount owner may be
       // removed as the canonical administration; other quantified actions
       // keep their separate meaning and original temporal relationship.
-      (!frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
-        amountOwner === sourceFrame) &&
+      // An amountless action instead follows the explicit primary span,
+      // including when an independent preparation supplied the dose.
+      (!hasAmount || amountOwner === sourceFrame) &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
-        primary ? amountOwner : undefined, sourceFrame)) {
+        primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined, sourceFrame)) {
       continue;
     }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);

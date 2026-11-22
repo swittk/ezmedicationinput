@@ -270,8 +270,9 @@ describe("round 23: duration endpoints retain their own units", () => {
     const roundtrip = wire.timing?.repeat?.boundsRange;
     // The prescriber owns both active endpoint units. An interoperability
     // constraint does not authorize a 30-minute to 0.5-hour conversion.
-    expect(roundtrip?.low).toMatchObject({ value: 30, code: "min", unit: "minutes" });
-    expect(roundtrip?.high).toMatchObject({ value: 2, code: "h", unit: "hours" });
+    // Wire labels also retain authored min/h; the preview may spell them out.
+    expect(roundtrip?.low).toMatchObject({ value: 30, code: "min", unit: "min" });
+    expect(roundtrip?.high).toMatchObject({ value: 2, code: "h", unit: "h" });
     expect(getQuantityComparator(roundtrip?.low)).toBe(">=");
     expect(getQuantityComparator(roundtrip?.high)).toBe("<=");
     for (const reopened of [canonicalFromFhir(wire), parserStateFromFhir(wire).primaryClause]) {
@@ -610,8 +611,9 @@ describe("round 24: typed quantity ownership", () => {
     expect(clause.clinicalQuantity?.administrationDuration).toMatchObject({ value: 1, unit: "h" });
     expect(clause.site).toBeUndefined();
     expect(clause.leftovers.some(span => /^at$/iu.test(span.text.trim()))).toBe(false);
-    expect(parsed.fhirNext.step[0].component[0].doseAndRate?.[0].rateRatio?.numerator)
-      .toMatchObject({ value: 100, unit: "mL" });
+    const numerator = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].rateRatio?.numerator;
+    expect(numerator).toMatchObject({ value: 100, unit: "mL" });
+    expect(getQuantityComparator(numerator)).toBe(qualifier ? "~" : undefined);
   });
 
   it("keeps later rate tokens out of a separator-led instruction before their chart position runs", () => {
@@ -913,9 +915,11 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     const saved = JSON.stringify(wire);
     for (const locale of ["en", "th"]) {
       const text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
-      expect(text).toContain("follow-up visit");
-      expect(text).toContain(String(Math.abs(value)));
-      expect(text).toContain(locale === "en" ? (value < 0 ? "before" : "after") : (value < 0 ? "ก่อน" : "หลัง"));
+      const displacement = locale === "en"
+        ? Math.abs(value) + " days " + (value < 0 ? "before " : "after ") + "follow-up visit"
+        : Math.abs(value) + " วัน" + (value < 0 ? "ก่อน" : "หลัง") + "follow-up visit";
+      expect(text).toContain(displacement);
+      expect(text).not.toMatch(/\b\d{1,2}:\d{2}\b/u);
       expect(text).toContain(locale === "en" ? "requires review" : "ต้องตรวจสอบ");
       expect(text).not.toMatch(/2026|Days 1|วันที่ 1/);
     }

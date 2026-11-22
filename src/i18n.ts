@@ -4,7 +4,7 @@ import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
-import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish } from "./format";
+import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -50,7 +50,6 @@ import {
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
   instructionGraphPreparationOwnsDose,
-  instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
   instructionGraphCoversTypedWarnings,
@@ -1264,7 +1263,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     }
     return `${countPrefix}ทุก ${stripTrailingZero(period)} ปี`;
   }
-  if (timingCode) {
+  if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
     const map: Record<string, string> = {
       BID: "วันละ 2 ครั้ง",
       TID: "วันละ 3 ครั้ง",
@@ -1281,6 +1280,8 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
       return value;
     }
   }
+  if (frequency === undefined && frequencyMax === undefined && period === 1 &&
+      periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "ทุกวัน";
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
       return "ครั้งเดียว";
@@ -1538,8 +1539,11 @@ function appendSiteRestrictionsThai(
   if (!restrictions?.length) return sitePhrase;
   let result = sitePhrase;
   for (const restriction of restrictions) {
-    const phrase = realizeBodySiteRestriction(restriction, "th") ??
-      (restriction.sourceText.trim() ? ` (${restriction.sourceText.trim()})` : undefined);
+    const local = realizeBodySiteRestriction(restriction, "th");
+    const retained = local ? undefined : restriction.predicate.text.trim()
+      ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en")
+      : restriction.sourceText.trim();
+    const phrase = local ?? (retained ? ` (${retained})` : undefined);
     if (phrase && !result.includes(phrase)) result += phrase;
   }
   return result;
@@ -2065,7 +2069,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   const timing = describeFrequencyThai(schedule);
   if (timing) {
     parts.push(timing);
-  } else if (schedule.timingCode) {
+  } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (schedule.period && schedule.periodUnit &&
       !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
@@ -2370,16 +2374,15 @@ function formatLongThai(
   const richPrimaryGraphAction = options?.realizationMode === "roundtrip"
     ? instructionGraphRoundTripPrimaryAction(clause) ?? instructionGraphRichPrimaryAction(clause)
     : instructionGraphRichPrimaryAction(clause);
+  const richPrimaryCoverage = richPrimaryGraphAction && clause.schedule?.when?.length === 1
+    ? { singleScheduledEvent: false } : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options)
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options, richPrimaryCoverage)
     : undefined;
   const richPrimaryHasSite = Boolean(
-    richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
+    !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
-  const richPrimaryCoversSingleEvent = Boolean(
-    richPrimaryGraphAction &&
-    instructionGraphActionCoversSingleScheduledEvent(richPrimaryGraphAction, clause)
-  );
+  const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const richPrimaryDefinition = richPrimaryGraphAction
     ? resolveMedicationInstructionAction(richPrimaryGraphAction.predicate.lemma)
     : undefined;

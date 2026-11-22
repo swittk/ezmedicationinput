@@ -552,7 +552,8 @@ export function resolveMedicationInstructionActionByMethod(
     for (const surface of Object.keys(customMap)) {
       const input = customMap[surface];
       if (!sameMethodCoding(input.administrationMethod, coding)) continue;
-      if (!display || customDefinitionMatchesSurface(surface, input, display))
+      if (!display || input.display && normalizeActionSurface(input.display) === display ||
+          customDefinitionMatchesSurface(surface, input, display))
         return normalizeCustomDefinition(surface, input);
       fallback ??= surface;
     }
@@ -595,6 +596,9 @@ export function resolveMedicationInstructionActionForMethod(
     // Resolve only a declared lexical head, bounded by the existing vocabulary.
     // Compatible qualified text remains whole; unfamiliar text stays source.
     const surface = normalizeActionSurface(method.text);
+    // An exact configured display is a coded label, not a qualified phrase or
+    // a new parser alias. Keep its selected identity for locale realization.
+    if (surface === normalizeActionSurface(coded.display)) return coded;
     let end = surface.indexOf(" ");
     // Joined scripts use the registered locale boundary policy and the same
     // declared aliases. No language literals or second action vocabulary.

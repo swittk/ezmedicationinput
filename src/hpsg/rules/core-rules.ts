@@ -896,7 +896,15 @@ function explicitScalarDoseLexicalEnd(
   const fraction = DOSE_FRACTION_WORDS.has(lower);
   const numeratorValue = doseNumeratorValue(token, lower);
   const numerator = numeratorValue !== undefined;
-  if (!fraction && !numerator && token.kind !== LexKind.NumberRange) return undefined;
+  if (!fraction && !numerator && token.kind !== LexKind.NumberRange) {
+    const qualified = doseComparatorNumberAt(tokens, start, limit, lower);
+    if (!qualified) return undefined;
+    if (qualified.rawUnit) return normalizeUnit(qualified.rawUnit, options) ? qualified.numericIndex + 1 : undefined;
+    let unitIndex = qualified.numericIndex + 1;
+    while (unitIndex < limit && DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(tokens[unitIndex]))) unitIndex++;
+    return unitIndex < limit && normalizeUnit(normalizeTokenLower(tokens[unitIndex]), options)
+      ? unitIndex + 1 : undefined;
+  }
 
   for (let wholeIndex = Math.max(0, start - 4); wholeIndex + 1 < start; wholeIndex += 1) {
     const whole = tokens[wholeIndex];

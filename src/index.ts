@@ -33,6 +33,8 @@ interface FreshDoseProof {
   reasons?: ReturnType<typeof captureSourceReplayConceptList>;
   instructions?: ReturnType<typeof captureSourceReplayConceptList>;
   quantity?: FreshDosePart;
+  doseExpression?: ReturnType<typeof capturedReplayExpression>;
+  rateExpression?: ReturnType<typeof capturedReplayExpression>;
   low?: FreshDosePart;
   high?: FreshDosePart;
   timing?: ReturnType<typeof captureSourceReplayTiming>;
@@ -60,19 +62,21 @@ function sameDosePart(
     part.comparator === getQuantityComparator(live);
 }
 function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
-  const first = dosage.doseAndRate?.[0];
+  const first = (dosage as EzDosage).doseAndRate?.[0];
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     length: dosage.doseAndRate?.length ?? 0,
     text: dosage.text,
     patientInstruction: dosage.patientInstruction,
     defaulted,
-    site: captureSourceReplayConcept(dosage.site),
+    site: captureSourceReplayConcept(dosage.site, true),
     route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
     asNeeded: dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean,
     reasons: captureSourceReplayConceptList(dosage.asNeededFor, true),
     instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
     quantity: captureDosePart(first?.doseQuantity),
+    doseExpression: capturedReplayExpression(first?.doseExpression),
+    rateExpression: capturedReplayExpression(first?.rateExpression),
     low: captureDosePart(first?.doseRange?.low),
     high: captureDosePart(first?.doseRange?.high),
     timing: captureSourceReplayTiming(dosage.timing),
@@ -88,7 +92,7 @@ function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
   });
 }
 function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
-  const current = dosage.doseAndRate;
+  const current = (dosage as EzDosage).doseAndRate;
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
   return dosage.patientInstruction === original.patientInstruction &&
@@ -99,6 +103,8 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
     matchesSourceReplayConcept(dosage.route, original.route) &&
     matchesSourceReplayConcept(dosage.method, original.method) &&
     sameDosePart(original.quantity, first?.doseQuantity) &&
+    unchangedReplayExpression(first?.doseExpression, original.doseExpression) &&
+    unchangedReplayExpression(first?.rateExpression, original.rateExpression) &&
     sameDosePart(original.low, first?.doseRange?.low) &&
     sameDosePart(original.high, first?.doseRange?.high) &&
     sameDosePart(original.rate?.quantity, first?.rateQuantity) &&
@@ -114,7 +120,7 @@ function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
 /** Source edits are separate from clinical edits: replacement clinician text
  * owns roundtrip display, while a clear or stale projection uses live facts. */
 function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
-  const first = dosage.doseAndRate?.[0];
+  const first = (dosage as EzDosage).doseAndRate?.[0];
   const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
   const originalText = fresh ? undefined : getDosageSourceTextFingerprint(dosage);
   const textChanged = fresh ? fresh.text !== dosage.text
@@ -124,6 +130,7 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   if (fresh && !fresh.modifiers && !dosage.modifierExtension?.length &&
       !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
       !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
+      !fresh.doseExpression && !fresh.rateExpression && !first?.doseExpression && !first?.rateExpression &&
       !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
     return false;
   const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
@@ -195,7 +202,7 @@ import {
   dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
   captureSourceReplayMaxima, matchesSourceReplayMaxima,
   captureSourceReplayModifiers, matchesSourceReplayModifiers,
-  captureSourceReplayConcept, matchesSourceReplayConcept,
+  captureSourceReplayConcept, matchesSourceReplayConcept, capturedReplayExpression, unchangedReplayExpression,
   captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
   getDosageSourceOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,

@@ -690,7 +690,11 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(right.site?.reference?.reference).toBe("BodyStructure/right-eye");
     expect(right.doseAndRate?.[0].doseExpression?.expression).toBe("one right-eye drop");
     expect(right.doseAndRate?.[0].doseQuantity).toBeUndefined();
-    expect(() => fromFhir(restored)).not.toThrow();
+    const imported = fromFhir(restored);
+    const currentRight = imported.meta.canonical.course!.stages[0].administrations.find(
+      administration => administration.siteReference?.reference === "BodyStructure/right-eye")!;
+    expect(currentRight.amounts![0].expression?.expression).toBe("one right-eye drop");
+    expect(currentRight.amounts![0].quantity).toBeUndefined();
     expect(restored.renderedInstruction).not.toBe(original.renderedInstruction);
   });
 

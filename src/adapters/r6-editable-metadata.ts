@@ -65,21 +65,22 @@ export function retainDraftSteps(
  * Changed anonymous stages need a unique boundary identity; position alone
  * cannot prove which stage survived a deletion, replacement or reordering. */
 function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[], firstIsTreatmentOrigin: boolean): boolean {
-  if (!Array.isArray(saved) || active.length !== saved.length) return false;
+  if (!Array.isArray(saved) || active.length < saved.length) return false;
   // Unchanged projections need no identity index or boundary hashes. Remember
   // the compared prefix so reconciliation never deep-walks those stages twice.
   let firstChanged = 0;
   while (firstChanged < saved.length && equalStructuredValues(saved[firstChanged], active[firstChanged]))
     firstChanged++;
-  if (firstChanged === saved.length) return true;
+  if (firstChanged === saved.length && active.length === saved.length) return true;
   const identities = new Map<string, number>();
   const changed: string[] = [];
+  const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
+    step.start || step.end ? "boundary:" + compactProjectionFingerprint({
+      start: step.start, end: step.end, count: step.count,
+    }) : index === 0 && firstIsTreatmentOrigin ? "treatment-origin" : undefined;
   for (let index = 0; index < saved.length; index++) {
     const prior = saved[index], current = active[index];
-    const identity = prior.id !== undefined ? "id:" + prior.id :
-      prior.start || prior.end ? "boundary:" + compactProjectionFingerprint({
-        start: prior.start, end: prior.end, count: prior.count,
-      }) : index === 0 && firstIsTreatmentOrigin ? "treatment-origin" : undefined;
+    const identity = identityOf(prior, index);
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
     if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) continue;
     if (identity === undefined || prior.id !== current.id || prior.count !== current.count ||
@@ -95,6 +96,12 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     changed.push(identity);
   }
   for (const identity of changed) if (identities.get(identity) !== 1) return false;
+  // Appending a later phase leaves earlier draft indices intact. A duplicate
+  // owner in the appended tail makes that retained ownership ambiguous.
+  for (let index = saved.length; index < active.length; index++) {
+    const identity = identityOf(active[index], index);
+    if (identity !== undefined && identities.has(identity)) return false;
+  }
   return true;
 }
 
@@ -166,13 +173,33 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
   try {
     const saved = decodeR6SourceMetadata(marker, "safety") as unknown as LiftedSafety | undefined;
     const current = input.safety;
-    if (!saved?.step || !current || current.ifExceeded !== saved.projected.ifExceeded ||
-        !equalStructuredValues(current.doseLimit, saved.projected.doseLimit) ||
-        !equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension)) return undefined;
+    if (!saved?.step || !current) return undefined;
+    const sameAction = current.ifExceeded === saved.projected.ifExceeded;
+    const sameModifiers = equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension);
+    if (!sameAction || !sameModifiers) return undefined;
+    const unchanged = equalStructuredValues(current.doseLimit, saved.projected.doseLimit);
     // Header Element metadata follows the policy that supplied the projection.
-    // Changing its ID or ordinary annotations does not widen a phase's limits.
+    // Changes to a different limit do not widen the surviving phase limits.
     let course = saved.course, step = saved.step;
-    if (course) {
+    if (!unchanged) {
+      const reconciled = reconcileSafetyScopes(current, saved, true);
+      // An edited header limit remains the current header's authority. Only
+      // unchanged surviving phase limits can reuse the previous phase scope.
+      if (!reconciled.stepLimits.size) return undefined;
+      step = reconciled.step!;
+      const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
+      if (!saved.course) step = { ...step, ...metadata };
+      const limits = current.doseLimit?.filter(limit => !reconciled.stepLimits.has(limit));
+      const action = sameAction ? reconciled.course?.ifExceeded : current.ifExceeded;
+      const modifiers = sameModifiers ? reconciled.course?.modifierExtension : current.modifierExtension;
+      course = {
+        ...(saved.course ? metadata : {}),
+        ...(limits?.length ? { doseLimit: limits } : {}),
+        ...(action !== undefined ? { ifExceeded: action } : {}),
+        ...(modifiers?.length ? { modifierExtension: modifiers } : {}),
+      };
+      if (!Object.keys(course).length) course = undefined;
+    } else if (course) {
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       course = { ...metadata,
         ...(course.doseLimit !== undefined ? { doseLimit: course.doseLimit } : {}),
@@ -200,11 +227,132 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
   } catch { return undefined; }
 }
 
+/** Shared per-limit ownership for a lifted policy and its scoped modifiers. */
+function reconcileSafetyScopes(
+  safety: FhirR6DosageSafety,
+  saved: { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety },
+  unchangedStepOnly = false
+): { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety; stepLimits: Set<FhirR6DoseLimit> } {
+  const current = safety.doseLimit ?? [];
+  const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
+  const combinedAction = stepAction && stepAction !== courseAction
+    ? courseAction ? courseAction + "\n" + stepAction : stepAction : courseAction;
+  const sameShape = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean => {
+    const a = left.valueQuantity, b = right.valueQuantity, ap = left.period, bp = right.period;
+    return left.scope === right.scope && (a !== undefined) === (b !== undefined) &&
+      (left.valueInteger !== undefined) === (right.valueInteger !== undefined) &&
+      (left.valueExpression !== undefined) === (right.valueExpression !== undefined) &&
+      a?.system === b?.system && a?.code === b?.code &&
+      (a?.system && a.code ? true : a?.unit === b?.unit) &&
+      ap?.value === bp?.value && ap?.system === bp?.system && ap?.code === bp?.code &&
+      (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
+      getQuantityComparator(ap) === getQuantityComparator(bp);
+  };
+  const claimed = new Set<FhirR6DoseLimit>();
+  const stepLimits = new Set<FhirR6DoseLimit>();
+  const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
+  const shapeMatch = (limit: FhirR6DoseLimit): FhirR6DoseLimit | undefined => {
+    // Only unmatched anonymous edits need this short clinical comparison.
+    // No object serialization or opaque metadata participates in identity.
+    let replacement: FhirR6DoseLimit | undefined;
+    for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
+        (!item.id || !sourceIds.has(item.id) &&
+          item.valueQuantity?.value === limit.valueQuantity?.value &&
+          getQuantityComparator(item.valueQuantity) === getQuantityComparator(limit.valueQuantity) &&
+          item.valueInteger === limit.valueInteger &&
+          equalStructuredValues(item.valueExpression, limit.valueExpression))) {
+      if (replacement) return undefined;
+      replacement = item;
+    }
+    if (!replacement) return undefined;
+    let sourceCount = 0;
+    for (const item of sourceGroups.keys())
+      if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
+    return sourceCount === 1 ? replacement : undefined;
+  };
+  // Exact-equal anonymous limits still have distinct scope ownership.
+  // Count each equality bucket once on both sides before assigning it;
+  // one surviving copy cannot inherit two independent policy qualifiers.
+  type ExactLimits = { sample: FhirR6DoseLimit; sourceCount: number;
+    live: FhirR6DoseLimit[]; cursor: number };
+  const exactBuckets = new Map<number, ExactLimits[]>();
+  const sourceGroups = new Map<FhirR6DoseLimit, ExactLimits>();
+  const exactGroup = (limit: FhirR6DoseLimit): ExactLimits => {
+    const key = hashStructuredValue(limit);
+    let bucket = exactBuckets.get(key);
+    if (!bucket) exactBuckets.set(key, bucket = []);
+    for (const group of bucket) if (equalStructuredValues(group.sample, limit)) return group;
+    const group = { sample: limit, sourceCount: 0, live: [], cursor: 0 };
+    bucket.push(group);
+    return group;
+  };
+  const liveIds = new Map<string, FhirR6DoseLimit | undefined>();
+  const sourceIds = new Map<string, number>();
+  for (const limit of current) {
+    exactGroup(limit).live.push(limit);
+    if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : limit);
+  }
+  for (const policy of [saved.course, saved.step])
+    for (const limit of policy?.doseLimit ?? []) {
+      const group = exactGroup(limit);
+      group.sourceCount++;
+      sourceGroups.set(limit, group);
+      if (limit.id) sourceIds.set(limit.id, (sourceIds.get(limit.id) ?? 0) + 1);
+    }
+  // Reserve exact survivors and unique declared identities across BOTH
+  // policies before any anonymous edit can claim a live clinical shape.
+  for (const [limit, group] of sourceGroups) {
+    const exact = group.sourceCount === group.live.length ? group.live[group.cursor++] : undefined;
+    const replacement = exact ?? (group.live.length === 0 && limit.id && sourceIds.get(limit.id) === 1
+      ? liveIds.get(limit.id) : undefined);
+    if (replacement && !claimed.has(replacement)) {
+      matches.set(limit, replacement);
+      claimed.add(replacement);
+    }
+  }
+  const reconcile = (policy: FhirR6DosageSafety | undefined, phase = false) => {
+    if (!policy) return policy;
+    let changed = false;
+    const limits: FhirR6DoseLimit[] = [];
+    for (const limit of policy.doseLimit ?? []) {
+      const group = sourceGroups.get(limit)!;
+      const assigned = matches.get(limit);
+      if (assigned && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length)) {
+        limits.push(assigned);
+        if (phase) stepLimits.add(assigned);
+        if (group.sourceCount !== group.live.length) changed = true;
+        continue;
+      }
+      changed = true;
+      // A changed multiplicity is not an amount edit. Neither an ID
+      // fallback nor shape matching can prove which identical copy won.
+      if (phase && unchangedStepOnly || group.live.length || limit.id) continue;
+      const replacement = shapeMatch(limit);
+      if (replacement) {
+        limits.push(replacement);
+        if (phase) stepLimits.add(replacement);
+        matches.set(limit, replacement);
+        claimed.add(replacement);
+      }
+    }
+    const action = policy.ifExceeded;
+    const keepAction = action === undefined || safety.ifExceeded === action ||
+      safety.ifExceeded === combinedAction;
+    if (!changed && keepAction) return policy;
+    const next = { ...policy };
+    if (limits.length) next.doseLimit = limits;
+    else delete next.doseLimit;
+    if (!keepAction) delete next.ifExceeded;
+    return next;
+  };
+  const course = reconcile(saved.course), step = reconcile(saved.step, true);
+  return { course, step, stepLimits };
+}
+
 /** A live edit to lifted safety also owns the active scoped modifier. Keep
  * qualifiers attached to surviving limits, never to a superseded snapshot. */
 function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
   if (!safety?.modifierExtension?.length) return;
-  const current = safety.doseLimit ?? [];
   let modifiers: FhirExtension[] | undefined;
   let retired: FhirExtension[] | undefined;
   for (let index = 0; index < safety.modifierExtension.length; index++) {
@@ -215,115 +363,7 @@ function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
         course?: FhirR6DosageSafety; step?: FhirR6DosageSafety;
       } | undefined;
       if (saved) {
-        const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
-        const combinedAction = stepAction && stepAction !== courseAction
-          ? courseAction ? courseAction + "\n" + stepAction : stepAction : courseAction;
-        const sameShape = (left: FhirR6DoseLimit, right: FhirR6DoseLimit): boolean => {
-          const a = left.valueQuantity, b = right.valueQuantity, ap = left.period, bp = right.period;
-          return left.scope === right.scope && (a !== undefined) === (b !== undefined) &&
-            (left.valueInteger !== undefined) === (right.valueInteger !== undefined) &&
-            (left.valueExpression !== undefined) === (right.valueExpression !== undefined) &&
-            a?.system === b?.system && a?.code === b?.code &&
-            (a?.system && a.code ? true : a?.unit === b?.unit) &&
-            ap?.value === bp?.value && ap?.system === bp?.system && ap?.code === bp?.code &&
-            (ap?.system && ap.code ? true : ap?.unit === bp?.unit) &&
-            getQuantityComparator(ap) === getQuantityComparator(bp);
-        };
-        const claimed = new Set<FhirR6DoseLimit>();
-        const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
-        const shapeMatch = (limit: FhirR6DoseLimit): FhirR6DoseLimit | undefined => {
-          // Only unmatched anonymous edits need this short clinical comparison.
-          // No object serialization or opaque metadata participates in identity.
-          let replacement: FhirR6DoseLimit | undefined;
-          for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
-              (!item.id || !sourceIds.has(item.id) &&
-                item.valueQuantity?.value === limit.valueQuantity?.value &&
-                getQuantityComparator(item.valueQuantity) === getQuantityComparator(limit.valueQuantity) &&
-                item.valueInteger === limit.valueInteger &&
-                equalStructuredValues(item.valueExpression, limit.valueExpression))) {
-            if (replacement) return undefined;
-            replacement = item;
-          }
-          if (!replacement) return undefined;
-          let sourceCount = 0;
-          for (const item of sourceGroups.keys())
-            if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
-          return sourceCount === 1 ? replacement : undefined;
-        };
-        // Exact-equal anonymous limits still have distinct scope ownership.
-        // Count each equality bucket once on both sides before assigning it;
-        // one surviving copy cannot inherit two independent policy qualifiers.
-        type ExactLimits = { sample: FhirR6DoseLimit; sourceCount: number;
-          live: FhirR6DoseLimit[]; cursor: number };
-        const exactBuckets = new Map<number, ExactLimits[]>();
-        const sourceGroups = new Map<FhirR6DoseLimit, ExactLimits>();
-        const exactGroup = (limit: FhirR6DoseLimit): ExactLimits => {
-          const key = hashStructuredValue(limit);
-          let bucket = exactBuckets.get(key);
-          if (!bucket) exactBuckets.set(key, bucket = []);
-          for (const group of bucket) if (equalStructuredValues(group.sample, limit)) return group;
-          const group = { sample: limit, sourceCount: 0, live: [], cursor: 0 };
-          bucket.push(group);
-          return group;
-        };
-        const liveIds = new Map<string, FhirR6DoseLimit | undefined>();
-        const sourceIds = new Map<string, number>();
-        for (const limit of current) {
-          exactGroup(limit).live.push(limit);
-          if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : limit);
-        }
-        for (const policy of [saved.course, saved.step])
-          for (const limit of policy?.doseLimit ?? []) {
-            const group = exactGroup(limit);
-            group.sourceCount++;
-            sourceGroups.set(limit, group);
-            if (limit.id) sourceIds.set(limit.id, (sourceIds.get(limit.id) ?? 0) + 1);
-          }
-        // Reserve exact survivors and unique declared identities across BOTH
-        // policies before any anonymous edit can claim a live clinical shape.
-        for (const [limit, group] of sourceGroups) {
-          const exact = group.sourceCount === group.live.length ? group.live[group.cursor++] : undefined;
-          const replacement = exact ?? (group.live.length === 0 && limit.id && sourceIds.get(limit.id) === 1
-            ? liveIds.get(limit.id) : undefined);
-          if (replacement && !claimed.has(replacement)) {
-            matches.set(limit, replacement);
-            claimed.add(replacement);
-          }
-        }
-        const reconcile = (policy: FhirR6DosageSafety | undefined) => {
-          if (!policy) return policy;
-          let changed = false;
-          const limits: FhirR6DoseLimit[] = [];
-          for (const limit of policy.doseLimit ?? []) {
-            const group = sourceGroups.get(limit)!;
-            const assigned = matches.get(limit);
-            if (assigned) {
-              limits.push(assigned);
-              if (group.sourceCount !== group.live.length) changed = true;
-              continue;
-            }
-            changed = true;
-            // A changed multiplicity is not an amount edit. Neither an ID
-            // fallback nor shape matching can prove which identical copy won.
-            if (group.live.length || limit.id) continue;
-            const replacement = shapeMatch(limit);
-            if (replacement) {
-              limits.push(replacement);
-              matches.set(limit, replacement);
-              claimed.add(replacement);
-            }
-          }
-          const action = policy.ifExceeded;
-          const keepAction = action === undefined || safety.ifExceeded === action ||
-            safety.ifExceeded === combinedAction;
-          if (!changed && keepAction) return policy;
-          const next = { ...policy };
-          if (limits.length) next.doseLimit = limits;
-          else delete next.doseLimit;
-          if (!keepAction) delete next.ifExceeded;
-          return next;
-        };
-        const course = reconcile(saved.course), step = reconcile(saved.step);
+        const { course, step } = reconcileSafetyScopes(safety, saved);
         if (course !== saved.course || step !== saved.step) {
           const generated = encodeR6SourceMetadata(R6_SCOPED_SAFETY_MODIFIER_URL,
             { ...saved, course, step }, "safety");

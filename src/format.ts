@@ -24,7 +24,6 @@ import {
   realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose,
   instructionGraphPreparationOwnsDose,
-  instructionGraphActionCoversSingleScheduledEvent,
   instructionGraphRoundTripPrimaryAction,
   instructionGraphEntailsAdviceCoding,
   instructionGraphCoversTypedWarnings,
@@ -540,7 +539,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     }
     return `${countPrefix}every ${stripTrailingZero(period)} years`;
   }
-  if (timingCode) {
+  if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
     if (timingCode === "WK") {
       return "once weekly";
     }
@@ -560,6 +559,8 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
       return map[timingCode];
     }
   }
+  if (frequency === undefined && frequencyMax === undefined && period === 1 &&
+      periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "daily";
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
       return "once";
@@ -903,7 +904,9 @@ function appendSiteRestrictionsEnglish(
   if (!restrictions?.length) return sitePhrase;
   const parts = [sitePhrase];
   for (const restriction of restrictions) {
-    const relative = realizeBodySiteRestriction(restriction, "en");
+    // Source wording remains provenance; the live predicate owns this preview.
+    const relative = realizeBodySiteRestriction(restriction.predicate.text.trim()
+      ? { ...restriction, sourceText: "" } : restriction, "en");
     if (relative && !parts.some((part) => part.toLowerCase().includes(relative.toLowerCase()))) {
       parts.push(relative);
     }
@@ -1488,16 +1491,15 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
     ? instructionGraphRichPrimaryAction(clause)
     : needsCurrentPrimary ? primaryGraphAction : undefined;
+  const richPrimaryCoverage = richPrimaryGraphAction && clause.schedule?.when?.length === 1
+    ? { singleScheduledEvent: false } : undefined;
   const richPrimaryGraphText = richPrimaryGraphAction
-    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options)
+    ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options, richPrimaryCoverage)
     : undefined;
   const richPrimaryHasSite = Boolean(
-    richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
+    !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
-  const richPrimaryCoversSingleEvent = Boolean(
-    richPrimaryGraphAction &&
-    instructionGraphActionCoversSingleScheduledEvent(richPrimaryGraphAction, clause)
-  );
+  const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const graphRegimenTail: string[] = [];
   if (richPrimaryGraphText) {
     if (routePart) graphRegimenTail.push(routePart);

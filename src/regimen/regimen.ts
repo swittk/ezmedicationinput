@@ -1,4 +1,4 @@
-import { DOSE_TARGET_EVENT_MEMBERS, NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
+import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
 import { terminalAdministrationDelay } from "./grammar";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
@@ -384,8 +384,15 @@ export function scopeSequentialPhaseSemantics(
             preceding.frequencyMax === undefined && preceding.periodMax === undefined &&
             !preceding.dayOfWeek?.length && !preceding.dayOfMonth?.length &&
             preceding.weekdayOrdinal === undefined && !preceding.repeatCycle &&
-            !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length)
-          singleClockPredecessor = prior[0];
+            !preceding.boundsStart && !preceding.boundsEnd && !preceding.calendarEvents?.length) {
+          // A named daypart can qualify this same clock. A separate event
+          // position, including a meal, cannot be closed by a one-dose cap.
+          const hour = preceding.when?.length ? Number(preceding.timeOfDay[0].slice(0, 2)) : 0;
+          if (!preceding.when?.length || preceding.when.every(event => {
+            const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+            return range && hour >= range.startHour && hour < range.endHour;
+          })) singleClockPredecessor = prior[0];
+        }
         // Every finite duration can end within a local day. The execution
         // owner knows its actual endpoint, order clock and timezone; grammar
         // must preserve NEXT instead of reducing it to an elapsed offset.

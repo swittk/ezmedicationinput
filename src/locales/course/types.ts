@@ -19,6 +19,7 @@ export interface CourseLanguage {
   readonly rateLabel: string;
   readonly rateRangeLabel: string;
   readonly unspecified: string;
+  withAuthoredDirections(current: string, source: string): string;
   readonly treatmentStart: string;
   readonly treatmentDayStart: string;
   readonly afterPreviousPhase: string;

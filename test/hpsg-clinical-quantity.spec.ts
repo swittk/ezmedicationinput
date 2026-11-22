@@ -2,7 +2,7 @@ import { unifySynsem } from "../src/hpsg/unification";
 import { describe, expect, it } from "vitest";
 import { parseClauseSign, parseClauseState } from "../src/parser";
 import { projectHpsgSignToState } from "../src/hpsg/projection";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir } from "../src/fhir";
+import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import {
   calculateTotalUnits, importCanonicalCourse,
   getEmaQuantityComparator,
@@ -2325,7 +2325,8 @@ describe("round35 quantity ownership and lexical neighbors", () => {
     expect(control.meta.canonical.clauses[0].dose?.comparator).toBeUndefined();
   });
 
-  it.each(["≤๑ /๒", "≤๑ / ๒", "≤๑/๒", "≤๑/ ๒", "≤1 /๒", "≤๑ /2"])(
+  it.each(["≤๑ /๒", "≤๑ / ๒", "≤๑/๒", "≤๑/ ๒", "≤1 /๒", "≤๑ /2",
+    "≤1 / 2", "≤1 /2", "≤1/ 2", "≤1/2"])(
     "retains a Thai qualified fraction across spacing: %s", number => {
       const input = "กิน " + number + " เม็ด";
       const parsed = parsePublicSig(input);
@@ -2357,14 +2358,20 @@ describe("round35 quantity ownership and lexical neighbors", () => {
     }
   });
 
-  it.each(["a half hour", "half an hour", "about a half hour", "a quarter hour", "2 hours"])(
-    "reads the complete elapsed duration %s", duration => {
-      const parsed = parsePublicSig("Infuse 100 mL over " + duration);
-      const value = duration.includes("quarter") ? 0.25 : duration === "2 hours" ? 2 : 0.5;
-      expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration)
-        .toMatchObject({ value, unit: "h" });
-      expect(parsed.fhir[0].doseAndRate?.[0].rateRatio?.denominator).toMatchObject({ value, code: "h" });
-    });
+  it.each([
+    ["a half hour", 0.5, undefined], ["half an hour", 0.5, undefined],
+    ["about a half hour", 0.5, "~"], ["a quarter hour", 0.25, undefined], ["2 hours", 2, undefined]
+  ] as const)("reads the complete elapsed duration %s", (duration, value, comparator) => {
+    const parsed = parsePublicSig("Infuse 100 mL over " + duration);
+    const elapsed = parsed.meta.canonical.clauses[0].clinicalQuantity?.administrationDuration;
+    expect(elapsed).toMatchObject({ value, unit: "h" });
+    expect(elapsed?.comparator).toBe(comparator);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      const denominator = row.doseAndRate?.[0].rateRatio?.denominator;
+      expect(denominator).toMatchObject({ value, code: "h" });
+      expect(getQuantityComparator(denominator)).toBe(comparator);
+    }
+  });
 
   it.each([["h", "h"], ["hr", "h"], ["min", "min"], ["day", "d"], ["wk", "wk"], ["24h", "d"]])(
     "retains a compact maximum denominator /%s", (suffix, unit) => {
@@ -2383,8 +2390,116 @@ describe("round35 quantity ownership and lexical neighbors", () => {
       const text = formatSig(input, "short", { locale: "en", realizationMode: "normalized" });
       expect(text).toContain("<=1x/1mo");
       expect(text).toContain("PRN");
-      expect(text).toContain("1");
-      expect(text).toContain("15");
+      expect(text).toContain("on days 1 and 15 of each month");
     }
+  });
+});
+
+describe("round36 complete quantity constituents", () => {
+  it.each(["about 1 tablet", "at most 1 tablet", "≤1 tablet", "about half a tablet"])(
+    "keeps the clock target for %s", amount => {
+      const parsed = parsePublicSig("Take 2 tablets at 08:00 and 20:00 for 3 days, then reduce the 20:00 dose to " + amount);
+      const last = parsed.fhirNext.step[1].component;
+      expect(last).toHaveLength(2);
+      const morning = last.find(row => row.timing?.repeat?.timeOfDay?.includes("08:00:00"))!;
+      const evening = last.find(row => row.timing?.repeat?.timeOfDay?.includes("20:00:00"))!;
+      expect(morning.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(evening.doseAndRate?.[0].doseQuantity).toMatchObject({ value: amount.includes("half") ? 0.5 : 1, unit: "tab" });
+      expect(getQuantityComparator(evening.doseAndRate?.[0].doseQuantity)).toBe(amount.startsWith("about") ? "~" : "<=");
+    });
+
+  it.each(["via a peripheral IV", "via an intravenous line", "IV"])(
+    "keeps a route determiner separate from the amount: %s", route => {
+      const parsed = parsePublicSig("Give " + route + " 500 mL for 2 hours");
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toMatchObject({ value: 500, unit: "mL" });
+      expect(clause.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h" });
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+        expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+          numerator: { value: 500, code: "mL" }, denominator: { value: 2, code: "h" }
+        });
+      }
+    });
+
+  it.each([
+    ["three quarters of an hour", 0.75, undefined],
+    ["about three quarters of an hour", 0.75, "~"],
+    ["five quarters of an hour", 1.25, undefined],
+    ["0.75 hours", 0.75, undefined], ["2 hours", 2, undefined],
+  ] as const)("keeps the drug volume separate from %s", (duration, value, comparator) => {
+    const parsed = parsePublicSig("Infuse 100 mL over " + duration);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 100, unit: "mL" });
+    expect(clause.clinicalQuantity?.administrationDuration).toEqual({
+      value, unit: "h", ...(comparator ? { comparator } : {})
+    });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateRatio?.denominator).toMatchObject({ value, code: "h" });
+      expect(getQuantityComparator(row.doseAndRate?.[0].rateRatio?.denominator)).toBe(comparator);
+    }
+  });
+
+  it("keeps an earlier actual dose from licensing an unrelated maximum as an infusion", () => {
+    const parsed = parsePublicSig("Give 5 mL every 2 hours, maximum 10 mL for 1 hour");
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 5, unit: "mL" });
+    for (const row of parsed.fhir) for (const dose of row.doseAndRate ?? []) expect(dose.rateRatio).toBeUndefined();
+    const temporal = parsePublicSig("Take 1 tablet daily for about one week");
+    expect(temporal.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(temporal.meta.canonical.clauses[0].dose?.comparator).toBeUndefined();
+  });
+});
+
+
+describe("round36 authored duration endpoints", () => {
+  it.each([false, true])("keeps a qualified occurrence upper bound with carrier=%s", carrier => {
+    const parsed = parsePublicSig(carrier ? "Infuse 100 mL over at least 1 hour" : "Apply 1 g");
+    let clause = { ...parsed.meta.canonical.clauses[0], schedule: {
+      ...parsed.meta.canonical.clauses[0].schedule,
+      administrationDuration: 1, administrationDurationMax: 2,
+      administrationDurationUnit: FhirPeriodUnit.Hour, administrationDurationComparator: ">=" as const,
+    } };
+    for (let save = 0; save < 3; save++) {
+      const before = JSON.stringify(clause);
+      const wire = canonicalToFhir(clause);
+      const repeat = wire.timing!.repeat!;
+      const marker = repeat.extension!.find(extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)!;
+      expect(marker.valueRange?.low).toMatchObject({ value: 1, code: "h" });
+      expect(getQuantityComparator(marker.valueRange?.low)).toBe(">=");
+      expect(marker.valueRange?.high).toMatchObject({ value: 2, code: "h" });
+      expect(repeat.duration).toBeUndefined();
+      expect(repeat.durationMax).toBeUndefined();
+      expect(JSON.stringify(clause)).toBe(before);
+      const imported = canonicalFromFhir(wire);
+      expect(imported.schedule).toMatchObject({ administrationDuration: 1, administrationDurationMax: 2,
+        administrationDurationUnit: "h", administrationDurationComparator: ">=" });
+      clause = imported as typeof clause;
+    }
+  });
+
+  it.each([["day", "days"], ["days", "day"]])(
+    "preserves separately authored low=%s and high=%s labels", (lowUnit, highUnit) => {
+      let row: FhirDosage = { timing: { repeat: { boundsRange: {
+        low: { value: 1, unit: lowUnit, system: "http://unitsofmeasure.org", code: "d" },
+        high: { value: 3, unit: highUnit, system: "http://unitsofmeasure.org", code: "d" },
+      } } } };
+      for (let save = 0; save < 3; save++) {
+        const before = JSON.stringify(row);
+        const next = canonicalToFhir(canonicalFromFhir(row));
+        expect(next.timing?.repeat?.boundsRange).toEqual({
+          low: { value: 1, unit: lowUnit, system: "http://unitsofmeasure.org", code: "d" },
+          high: { value: 3, unit: highUnit, system: "http://unitsofmeasure.org", code: "d" },
+        });
+        expect(JSON.stringify(row)).toBe(before);
+        row = next;
+      }
+    });
+
+  it("preserves an authored scalar duration label independently of its UCUM code", () => {
+    const row: FhirDosage = { timing: { repeat: { boundsDuration: {
+      value: 1, unit: "one authored day", system: "http://unitsofmeasure.org", code: "d",
+    } } } };
+    expect(canonicalToFhir(canonicalFromFhir(row)).timing?.repeat?.boundsDuration)
+      .toEqual(row.timing!.repeat!.boundsDuration);
   });
 });

@@ -1008,13 +1008,14 @@ function refinedDailyCadenceSynsem(
  * @param context Existing source ranges, used only for adjacency/coordination.
  */
 function fixedClockMealAdjunctSynsem(
-  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext
+  clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext,
+  mealSynsem: HpsgSynsem = mealSign.synsem
 ): HpsgSynsem | undefined {
   const clock = clockSign.synsem.head.schedule;
-  const meal = mealSign.synsem.head.schedule;
+  const meal = mealSynsem.head.schedule;
   if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
       meal.timeOfDay?.length || !context.sourceText ||
-      (clockSign.synsem.head.dose && mealSign.synsem.head.dose)) return undefined;
+      (clockSign.synsem.head.dose && mealSynsem.head.dose)) return undefined;
   const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
     for (const values of MEAL_TIMING_BY_RELATION.values()) {
       for (const value of values.values()) if (value === event) return true;
@@ -1025,7 +1026,10 @@ function fixedClockMealAdjunctSynsem(
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
     for (const item of sign.evidence) {
-      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields) continue;
+      // A refined NEXT daypart still owns its onset tokens, not the
+      // remaining meal modifier or a coordinator between them.
+      if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields ||
+          field === "when" && mealSynsem !== mealSign.synsem && item.rule === NEXT_DAY_SCHEDULE_RULE) continue;
       for (const index of item.tokenIndices) indices.add(index);
     }
     return sign.tokens.filter(token => indices.has(token.index));
@@ -1062,6 +1066,7 @@ function fixedClockMealAdjunctSynsem(
     for (const sign of [clockSign, mealSign]) {
       for (const evidence of sign.evidence) {
         if (!evidence.scheduleFields?.length ||
+            !(mealSynsem !== mealSign.synsem && evidence.rule === NEXT_DAY_SCHEDULE_RULE) &&
             !evidence.scheduleFields.every(field => fields.indexOf(field) >= 0)) continue;
         for (const index of evidence.tokenIndices) allowed.add(index);
       }
@@ -1100,12 +1105,12 @@ function fixedClockMealAdjunctSynsem(
       spans: [{ start: mealStart, end: mealEnd, text }] }]
   };
   return {
-    ...mealSign.synsem,
-    head: { ...mealSign.synsem.head, schedule: {
+    ...mealSynsem,
+    head: { ...mealSynsem.head, schedule: {
       ...meal, when: undefined, offset: undefined, offsetMin: undefined, offsetMax: undefined
     } },
-    valence: { ...mealSign.synsem.valence,
-      instructions: mergeInstructions(mealSign.synsem.valence.instructions, [instruction]) }
+    valence: { ...mealSynsem.valence,
+      instructions: mergeInstructions(mealSynsem.valence.instructions, [instruction]) }
   };
 }
 
@@ -1163,9 +1168,12 @@ function scheduleRefinementSynsems(
   context: HpsgUnificationContext
 ): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
   const nextDayRight = nextDayClockAdjunctSynsem(left, right, context);
-  if (nextDayRight) return { left: left.synsem, right: nextDayRight, refined: true };
+  if (nextDayRight) return { left: left.synsem,
+    right: fixedClockMealAdjunctSynsem(left, right, context, nextDayRight) ?? nextDayRight, refined: true };
   const nextDayLeft = nextDayClockAdjunctSynsem(right, left, context);
-  if (nextDayLeft) return { left: nextDayLeft, right: right.synsem, refined: true };
+  if (nextDayLeft) return {
+    left: fixedClockMealAdjunctSynsem(right, left, context, nextDayLeft) ?? nextDayLeft,
+    right: right.synsem, refined: true };
   const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
   if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
   const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);

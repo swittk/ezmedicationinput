@@ -1243,7 +1243,7 @@ it.each([
 it("retains an independent member onset beside a completion-relative member over three external saves", () => {
   const source = "Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day and from day 10 take 3 tablets at 15:00";
   let wire = parseSig(source).fhirNext;
-  for (let save = 0; save < 3; save++) {
+  for (let save = 0; save <= 3; save++) {
     const native = courseFromR6(wire);
     expect(native.stages).toHaveLength(2);
     const members = native.stages[1].administrations;
@@ -1252,7 +1252,7 @@ it("retains an independent member onset beside a completion-relative member over
       amounts: [{ quantity: { value: 2, unit: "tab" } }] });
     expect(members[1]).toMatchObject({ phaseStart: { anchor: "treatment-day-start", displacement: { value: 9, unit: "d" } },
       amounts: [{ quantity: { value: 3, unit: "tab" } }] });
-    wire = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(wire))));
+    if (save < 3) wire = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(wire))));
   }
 });
 
@@ -1362,7 +1362,10 @@ describe("round 28 live source concept lists", () => {
       for (const text of [
         formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }),
         fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText
-      ]) expect(text).toContain("Avoid grapefruit");
+      ]) {
+        expect(text).toContain("Avoid grapefruit");
+        expect(text).toMatch(/max(?:imum)?[^\d]*2\s*(?:tab|tablet).*?(?:day|1\s*d)/i);
+      }
       expect(JSON.stringify(row)).toBe(edited);
       expect(row.text).toBe(source);
     });

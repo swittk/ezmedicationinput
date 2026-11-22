@@ -12690,3 +12690,133 @@ Representative accepted measurements (microseconds per call; percentages are med
 The seven pre-existing non-equivalent cases remain R6-complex formatting/import in EN and TH, edited/added-dose Thai R5 roundtrips, and R6 author-source formatting. The unchanged harness and its round 34 integrity controls are retained. Performance acceptance and complete samples are recorded in ezmed14-round35-performance-accepted.json, master-full.json and master-confirm.json. No source or distribution artifact changed across either run.
 
 The PR remains at 100 changed paths, with no new repository files. GitHub operations use the CLI only. No top-level comment, private project name or new full-review request is posted. Replies belong only to the 20 original inline threads after commit; the declined wrapper finding receives its preservation-based explanation there.
+
+## 2026-11-22 — PR #14 round 36: quantity constituents, ownership, and actual-time admission
+
+Reviewed head: 070f91d7020f4f5f54eab779fd11208060822af8. Exact master: 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. The 04:07 UTC review and overflow contain 49 findings: 22 major and 27 minor. There are no new inline threads in this batch; all 168 earlier threads were resolved at preflight. Dispositions are recorded here. No top-level comment or additional full-review request is posted.
+
+Root delegated separate execution, interchange and meaning scopes, integrated the work, then independently audited the cross-owner boundaries. All 49 findings are accounted for: **34 code/tooling fixes, 14 strengthened test oracles, and one declined production request**. This includes the Reference type correction and benchmark-statistic correction. Test-only #18 declines an unnecessary runtime patch after its alleged failure did not reproduce.
+
+### Contract boundaries
+
+The shipping .fhir surface remains R5. .fhirNext and R6 import use the current pinned R6 contract, with no older-R6 compatibility or downstream application migration. Supported external wire edits remain supported; the internal native/clinical model remains an implementation model without an editor lifecycle or backward-compatibility layer.
+
+Prescribers own values, units and endpoints. No fix converts an authored range for conformance, drops an endpoint, or uses preservation in provenance as permission to rewrite the active prescription. Separately authored low/high duration labels are preserved too.
+
+### Production and tooling dispositions
+
+| Findings | Cause and implemented ownership |
+|---|---|
+| 1 | A qualified targeted replacement could discard the unchanged morning branch. The existing scalar lexical boundary accepts the shared comparator constituent in its nonplain-number fallback. Ordinary numeric doses gain no comparator pass. |
+| 2 | A whitelist discarded Coding primitive annotations and false userSelected. The existing vocabulary clone now retains excess fields with its established shallow extension/translation handling. |
+| 3 | Editing a course limit invalidated all lifted phase ownership. The existing scoped matcher is shared: exact surviving phase limits retain phase scope; edited header limits remain course-owned. Existing equality buckets avoid a second deep comparison. |
+| 4, 13, 14 | Replay did not observe recognized site restrictions, and graph presence was mistaken for actual displayed site/time coverage. The existing proof observes the restriction; the selected realizer records emitted Time; the canonical site phrase owns live restrictions. Display copies leave source graphs and independent action sites unchanged. |
+| 5 | Amount was used as anonymous limit identity, allowing metadata to migrate on value collisions. Independent Ratio annotations or unambiguous clinical windows now own the match. A denominator-collision control additionally proves annotation identity is independent of both numerator and period. |
+| 6 | Lifted external safety owners shared Ratio annotations with their baseline. Only already lifted external safety fields are detached; ordinary/native paths gain no cloning. |
+| 7 | The article in “via a peripheral IV” masqueraded as an earlier medication amount. The existing cue walk counts an article as an amount only when it selects a medication unit. |
+| 8 | “Three quarters of an hour” could overwrite the 100 mL dose with 0.75 mL. The shared duration constituent composes cardinal/fraction words and their existing unit connectors. |
+| 10 | A clock plus a separate evening event was promoted to a one-administration predecessor. Existing daypart/clock ownership distinguishes a qualifier of that clock from an independent event or meal. |
+| 11 | Fresh replay ignored dose/rate expressions. Its existing expression snapshot/check is reused; the short path excludes live expressions. |
+| 12 | Qualified Thai fractions excluded ASCII digits. The existing folder now accepts both digit families under the same clinical-unit gate. |
+| 15 | Original directions looked like a second active cadence beside current timing. The existing course-language facet labels current timing and original directions separately, without reparsing source. |
+| 16, 17 | Stale QOD overrode an edited one-day period in English long and Thai short/long output. Both use the existing consistency predicate; unknown frequency plus one-day period says daily without inventing “once.” Matching QOD stays intact. |
+| 19 | Rejected opportunities spent finite PRN counts, and conditional recursion lost explicit priorCount. The existing admitted-count wrapper owns these restrictions and retains a count-only one-shot’s identity. |
+| 20 | Civil caps were applied before administration displacement. The existing offset enumerator supplies actual-time candidates to admission; scalar/ranged supply translates derived fences to the nominal recurrence frame. Unconstrained arithmetic paths remain. |
+| 21 | Bilateral multiplication resolved only a scalar unit. The existing resolver now selects the scalar or ranged endpoint unit without changing endpoints; metric total-quantity policy stays intact. |
+| 22 | An actual stage end was applied to nominal clocks before displacement. Both bounded execution copies share one inverse-displaced end while the authored actual boundary remains authoritative. |
+| 23 | Fixed-ended finite phases omitted actual history from their quota. Existing chronological replay now spends that quota without moving the successor. One last-recorded scalar prevents a coincident actual/planned event from spending twice. |
+| 24 | Appending a phase discarded intervening retained drafts. Prior-prefix ownership survives when its unique identities survive; a duplicate appended owner remains ambiguous. |
+| 25 | Metadata on an empty R5 carrier manufactured a dose. Carrier ID/ordinary annotations now remain source without a synthetic administration. The known weekday-exclusion extension stays live; existing modifier guards already protect dates, offsets and conditions. |
+| 26 | A known R5 PRN alias leaked into generated current R6, causing self-import rejection. The adapter translates that known field into current asNeeded; unknown source is not generically sanitized. |
+| 27 | Replacing an EMA operator could lose the superseded code. The existing inactive operator-source channel preserves the displaced Coding. |
+| 28 | Identifier.assigner restricted a complete Reference to a small object. It now uses the existing FhirReference type; annotated references compile. |
+| 29 | Retiring alternative-choice markers dropped their annotations. The existing reconciliation-source channel retains them during the same update pass. |
+| 30 | A stronger low-unit oracle exposed normalization of authored “day” to the upper endpoint’s “days.” The compact schedule/codec retain separate labels, with reversed-label and scalar-label controls. |
+| 36 | NEXT-day refinement returned before applying a compatible meal adjunct, creating an extra event. Existing refinements now compose on the same typed daughter; explicit coordination still creates independent events. |
+| 42 | Equal method codes selected the first custom entry despite a distinct configured display. The existing vocabulary walk and exact declared method text retain identity without registering parser aliases. |
+| 43 | Qualified occurrence duration lost its upper endpoint, also through carrier elision. The existing marker uses a Range when bounded; shared decoding, native reconciliation and replay retain max in the classified traversal. Scalar markers remain quantities. This is typed/external serialization, not new compound-range grammar. |
+| 44 | Mix “in the morning” became “at the morning.” Existing locale realizers accept the authored In relation for that complement. |
+| 48 | A preparation-owned amount blocked omission of the already covered, amountless primary. The explicit primary span owns omission; independent same-verb actions and their manner stay visible. |
+| 49 | Arithmetic median of reciprocal paired ratios could create false +25% from balanced 2x first-batch overhead. The harness uses exp(median(log(candidate/baseline))) with unchanged workloads, samples, alternating order, coverage, exclusions and 4% ceiling. |
+
+### Test-only and declined dispositions
+
+Test-strengthened: **18, 31, 32, 33, 34, 35, 37, 38, 39, 40, 41, 45, 46, 47**.
+
+- #18: reviewed, prior and equivalent master R5 all retain one unit of untimed PRN capacity at the reported midday query, with no invented due timestamps. Known actual use reduces supply to zero. Scalar/ranged stage and course repetitions are covered; no runtime patch is warranted.
+- #31–33: assert the cap beside edited advice, inspect the third save, and reopen the independent right-eye expression.
+- #34–35: assert actual partial-taper facts and edit the returned external row, without requiring fixture aliasing or an internal editor contract.
+- #37–40: assert R6 rate-numerator qualifiers, the displacement phrase, retained source, and both endpoints of the no-dose interval.
+- #41: before the real day-35 successor, an unbounded QID cadence remains four events/four drops during days 28–35; an explicitly four-week course still has its authored gap.
+- #45–47: require the full monthly-day phrase beside its cap, approximation on half-hour values, and absence of all seven structured dose/rate alternatives for an unlicensed rate.
+
+Declined #9 builds manually overlapping internal elapsed-offset phases and requires repair of that unsupported construction. The corresponding public authored treatment-day overlap already yields the correct reduced cadence on reviewed/prior builds. No second defensive boundary interpretation is added.
+
+### Independent family audit and attribution
+
+The oracles are authored clinical expectations. A qualified evening replacement leaves the morning dose at two tablets. “Give via a peripheral IV 500 mL for 2 hours” retains 500 mL over two hours. “Infuse 100 mL over about three quarters of an hour” retains 100 mL and approximate 0.75 h. Five quarters, decimal and whole durations are bounded controls; ASCII and Thai fractional spellings retain half-tablet values and qualifiers.
+
+For a one-per-day cap, nominal 00:30/22:30 plus two hours gives actual Jan 1 02:30, Jan 2 00:30, Jan 2 02:30, etc.; the first admissible events span two dates and two units in 26 hours. Two eyes each need at least one drop, so a three-drop/24-hour cap cannot admit two bilateral administrations. A nominal 09:00 dose shifted to 07:00 belongs before an exclusive 08:00 stage end.
+
+The execution family run caught actual/nominal double consumption introduced by the history correction; the existing regression and complete owned suite pass with the one-scalar chronological fix. Root’s review caught a separate integration regression: the first carrier patch demoted an ordinary weekday restriction. The final rare carrier guard recognizes its existing URL; three-save weekday/date/30-minute-offset controls preserve one unquantified administration plus carrier ID and foreign metadata. These integration failures and corrections are recorded, not hidden.
+
+The warmed predicateText-only red-to-itchy edit is verified in EN/TH, normalized/roundtrip, R5 and serialized R5-to-R6. Current restriction appears once while original source remains stored. Independent earlier Drink actions survive both preparation-owned and absent-quantity-owner cases.
+
+The scope oracle is induction 2, maintenance 5, from course limit 5 and unchanged induction limit 2. Generic course/phase safety.limits remain retained but are not currently numerically enforced by the supply engine; this is a scope proof, not a supply result.
+
+A separate duration audit passes 69 assertions across compact/parser-state readers, native R5/R6/R6-in-R5, three saves, reversed day/days labels and distinct authored h/min endpoints, without conversion or mutation. It also caught two missing occurrenceDurationMax type-union entries before the full gate.
+
+Frozen attribution separates inherited defects from regressions. Several quantity, qualifier and preview failures also occur on master. Route-article recognition and limit metadata identity are PR regressions already present in earlier snapshots. Current/original wording ambiguity arose with the previous round’s source retention. No master equivalence is claimed where its native/R6 concept differs. Corrected public probes replace an invalid uppercase Activity probe and an English-only method probe that hid the identity defect.
+
+Sixteen controlled executions of the actual benchmark CLI cover both first orders, shared round drift, odd requests rounded to balanced rounds, pure order bias, true 5% slowdown, 3.9%/4.1% boundaries and 20% speedup. Old arithmetic aggregation reports false +25% for pure order bias; the new aggregation reports 1.0 and still fails true 5% and 4.1% slowdowns. These are deterministic timing-cost controls, separate from the actual frozen-build measurements below.
+
+The first complete gate stopped at the configured strict ES6 typecheck before running runtime tests. Its exhaustive coordination assertions caught the new authored endpoint labels missing from the existing dependency-closed course-bound groups; both inventories now include them. New fixtures were corrected to their actual SimpleQuantity, R5 replay-proof and RelativeTime types without casts or relaxed assertions. The valid two-day RelativeTime draft still fails on the reviewed build and passes after the fix. Attempt-one logs remain retained; final gate results below refer to the corrected frozen source.
+
+The next full runtime pass had one failure among 5,989 tests: an older endpoint-unit test still expected exported labels “minutes” and “hours” from authored “min” and “h.” The active numeric values, codes, qualifiers and human-readable preview were already correct. Its wire oracle now explicitly requires authored min/h, aligning it with #30 and the prescriber-owned unit policy; preview expansion remains separately asserted. No production code changed for that oracle correction. Attempt-two results remain retained.
+
+
+### Validation on the frozen candidate
+
+- **5,989 source tests in 55 files passed**, including the configured strict ES6 typecheck.
+- **4 distribution tests passed** after ESM, CommonJS and declaration builds.
+- **18 actual downstream R5 storage roundtrips passed**, with complete JSON equality through conversion and save/reopen. Added ASCII qualified half, route-article infusion, qualified fractional duration, targeted replacement and NEXT-clock/meal cases join the earlier carrier, cap, taper, independent-eye and loading controls.
+- The original Thai parallel case remains 2 shipping R5 rows; the English taper remains 4. No downstream application code or database was changed.
+- No runtime source changed during the final gates or the performance comparison.
+
+Source SHA-256: 2c76c5cb50160a5e4b67bfd9a579b553ae3abbc271ef0d83dc7ec9a920449478. Built ESM SHA-256: e0b364124a6967331ee1ff8a415e19294d7e126ea82d04992e51c24b85a18f28. Exact master build SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Harness SHA-256: 68eff00076248fe44cbe7e211d00570e3e002c91d4fde0942bbbc1b654d49d95 (git blob 251c6db2a138fc615d3f55314eaff43ccfa5b912).
+
+
+### Performance and delivery
+
+The complete exact-master comparison covers **117/117 public functions**, with **181 paired scenarios: 174 equivalent and the same seven established non-equivalent cases**. All 174 equivalent scenarios meet the per-scenario 4% ceiling after the prescribed confirmations. Six candidate-only APIs have seven separate measurements. There are no new equivalence exclusions, missing API measurements or measurement errors.
+
+The full run used 22 balanced paired rounds at 35 ms target per batch. Every initial flag was rerun on the identical candidate, baseline and harness with 72 rounds at 140 ms, reversed first order and 36 pairs starting each way. No source optimization or case exclusion was made between runs. All raw samples remain available; the accepted percentage is the median log paired ratio, not the ratio of separately aggregated timings. Domains and scenarios are not averaged together.
+
+The highest accepted slowdown is **+3.605%**, for parseSig/eye.
+
+| Initially flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| formatSig/R5/en | +20.846% | -1.062% |
+| formatSig/R6/en | +4.361% | -13.229% |
+| fromFhirDosage/en | +4.732% | -9.020% |
+| fromFhirDosage/th | +6.662% | -20.682% |
+| parseSnomedBodySiteTopographicalModifierPostcoordinationCode | +4.251% | -0.697% |
+| listMedicationDateResolvers | +6.017% | +0.746% |
+
+Representative accepted measurements (microseconds per call):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| parseSig/ordinary | 1686.703 | 1657.794 | -1.709% |
+| parseSig/thai | 6654.072 | 6214.587 | -6.347% |
+| parseSig/eye | 7435.021 | 7547.938 | +3.605% |
+| parseSig/staged | 9735.878 | 9646.843 | -0.670% |
+| formatSig/R5/en | 15.161 | 14.957 | -1.062% |
+| formatSig/R6/en | 19.303 | 16.995 | -13.229% |
+| fromFhirDosage/en | 15.605 | 14.298 | -9.020% |
+| calculateTotalUnits/scalar | 345.453 | 44.058 | -87.317% |
+
+
+The seven existing non-equivalent cases remain R6-complex formatting/import in EN and TH, edited/added-dose Thai R5 roundtrips, and R6 author-source formatting. Complete reports are retained as ezmed14-round36-master-full.json, master-confirm.json and performance-accepted.json; the 49-item evidence ledger is ezmed14-round36-ledger.json.
+
+The PR stays at 100 changed paths, with no new repository files. GitHub access is CLI-only. This round has no new inline threads to reply to, and no top-level comment or new full-review request is posted. The commit and non-force push target the existing PR branch.

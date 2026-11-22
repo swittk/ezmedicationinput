@@ -931,6 +931,14 @@ describe("round34 partial same-track cadence cutoffs", () => {
     expect(calculateTotalUnits({ ...late, dosage: leftTrack, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(12);
     if (duration) expect(calculateTotalUnits({ ...options("2026-11-16T08:00:00+07:00"), dosage: rightTrack,
       durationValue: 7, durationUnit: "d" }).totalUnits).toBe(0);
+    else for (const input of [rightTrack, wire.fhirNext, JSON.parse(JSON.stringify(wire.fhir))]) {
+      const between = options("2026-11-18T00:00:00+07:00", 4);
+      expect(nextDueDoses(input, between)).toEqual([
+        "2026-11-18T08:00:00+07:00", "2026-11-18T12:00:00+07:00",
+        "2026-11-18T16:00:00+07:00", "2026-11-18T20:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ ...between, dosage: input, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+    }
   });
 });
 

@@ -518,7 +518,7 @@ Object.assign(report, {
   newApis: [...newApis],
   threshold: 1 + maxRegression,
   methodology:
-    "Balanced alternating paired warm batches; helper exports captured before timing; no cross-domain averaging",
+    "Balanced alternating paired warm batches; median log paired ratio; helper exports captured before timing; no cross-domain averaging",
   filter: filter.source,
   selectedComparisons: cases.filter(
     (test) => filter.test(test.name) && typeof baseline[test.api] === "function"
@@ -744,7 +744,9 @@ for (const test of cases) {
     }
     const old = median(a),
       current = median(b),
-      ratio = median(b.map((value, index) => value / a[index]));
+      // Log ratios make reciprocal order effects cancel symmetrically.
+      // An arithmetic median of the two middle ratios biases even samples upward.
+      ratio = Math.exp(median(b.map((value, index) => Math.log(value / a[index]))));
     const result = {
       name: test.name,
       api: test.api,
