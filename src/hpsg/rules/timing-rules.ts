@@ -2253,7 +2253,11 @@ export function eventTimingPhraseRule(): HpsgLexicalRule<HpsgClauseContext> {
             rule: "hpsg.lex.schedule.eventPhrase.preposition",
             tokens,
             synsem: {
-              head: { schedule: { when: [when] } },
+              // EVERY owns explicit recurrence, even beside a finite NEXT
+              // onset. An ordinary AT/IN event retains its existing scope.
+              head: { schedule: { when: [when],
+                ...(EVERY_INTERVAL_TOKENS.has(firstLower)
+                  ? { period: 1, periodUnit: FhirPeriodUnit.Day } : {}) } },
               valence: {},
               cont: { clauseKind: "administration" }
             },

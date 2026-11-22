@@ -2962,6 +2962,30 @@ describe("round42 infusion arguments and saved action lookup", () => {
     expect(parsed.fhir[0].maxDosePerPeriod).toBeUndefined();
   });
 
+  it.each([", ", " at "])("retains an authored infusion range beside its independent rate: %s", separator => {
+    const source = "Infuse 500 to 1000 mL" + separator + "100 mL/hr";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ range: { low: 500, high: 1000 }, unit: "mL" });
+    expect(clause.clinicalQuantity?.administrationDuration).toBeUndefined();
+    expect(clause.clinicalQuantity?.projectedDose).toBeUndefined();
+    expect(parsed.meta.canonical.course?.stages[0].administrations[0].amounts).toEqual([{
+      range: { low: { value: 500, unit: "mL" }, high: { value: 1000, unit: "mL" } },
+      rate: { value: 100, unit: "mL/h" }
+    }]);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].doseRange).toMatchObject({
+        low: { value: 500, unit: "mL" }, high: { value: 1000, unit: "mL" }
+      });
+      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+    expect(parsed.input).toBe(source);
+  });
+
   it.each(["intravenous", "IV", "intravenously", ", intravenous"])(
     "keeps the infusion duration beyond the already recognized IV route %s", route => {
     const parsed = parsePublicSig("5 mL/h " + route + " for 2 hours");

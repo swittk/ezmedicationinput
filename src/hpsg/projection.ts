@@ -1,5 +1,6 @@
 import { equalStructuredValues } from "../stable-structure";
-import { NEXT_DAY_SCHEDULE_RULE } from "./lexical-classes";
+import { FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, NEXT_DAY_SCHEDULE_RULE } from "./lexical-classes";
+import { EVENT_TIMING_TOKENS } from "../maps";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
@@ -564,6 +565,10 @@ export function projectHpsgSignToState(
         const comparator = clinical.projectedDose.comparator ?? dose.comparator;
         if (comparator !== undefined && state.primaryClause.dose)
           state.primaryClause.dose.comparator = comparator;
+      } else if (clinical.status === "resolved" && clinical.representation === "rate-quantity" && dose.range) {
+        // An independently authored range remains the dose beside its rate.
+        state.doseRange = dose.range;
+        if (dose.unit !== undefined) state.unit = dose.unit;
       } else {
         // A rate or unresolved expression is not a scalar medication dose.
         delete state.primaryClause.dose;
@@ -601,9 +606,26 @@ export function projectHpsgSignToState(
       !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
       schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
       !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
-    // Existing NEXT-clock and fixed-clock/meal constructions remove mere
-    // qualifiers. Remaining event and clock anchors own distinct positions.
-    state.count = Math.max(1, (schedule.when?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+    // Existing constructions distinguish qualifiers from coordinated events.
+    // Keep an authored daypart field without counting its clock twice.
+    const qualifiedDayparts = new Set<EventTiming>();
+    for (const evidence of sign.evidence) {
+      if (evidence.rule !== FIXED_CLOCK_DAYPART_QUALIFICATION_RULE) continue;
+      const indices = new Set(evidence.tokenIndices);
+      for (const token of sign.tokens) {
+        if (!indices.has(token.index)) continue;
+        const event = EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
+        if (event) qualifiedDayparts.add(event);
+      }
+    }
+    const positions = schedule.when?.filter(event => !qualifiedDayparts.has(event));
+    if (qualifiedDayparts.size && state.primaryClause.schedule) {
+      // Like the existing NEXT-clock refinement, only the authored exact
+      // clock executes. A configured daypart clock cannot add an earlier dose.
+      if (positions?.length) state.primaryClause.schedule.when = positions;
+      else delete state.primaryClause.schedule.when;
+    }
+    state.count = Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
   }
 
   const clinicalDuration = dose?.attachmentClass !== "procedure"

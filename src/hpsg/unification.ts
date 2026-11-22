@@ -3,7 +3,7 @@ import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, DOSE_TARGET_DAYPART_CLOCK_RANGES, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -1018,7 +1018,7 @@ function refinedDailyCadenceSynsem(
 function fixedClockEventAdjunctSynsem(
   clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext,
   mealSynsem: HpsgSynsem = mealSign.synsem
-): HpsgSynsem | undefined {
+): { synsem: HpsgSynsem; qualifiedDaypartTokens?: number[] } | undefined {
   const clock = clockSign.synsem.head.schedule;
   const meal = mealSynsem.head.schedule;
   if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
@@ -1096,10 +1096,10 @@ function fixedClockEventAdjunctSynsem(
   }
   const text = context.sourceText(mealStart, mealEnd).trim();
   if (!text) return undefined;
-  // A matching daypart only qualifies the authored clock. Unlike a meal
-  // relation it adds no independent instruction or administration position.
-  if (daypartQualification) return { ...mealSynsem, head: { ...mealSynsem.head,
-    schedule: { ...meal, when: undefined } } };
+  // Keep the authored daypart qualifier. Its construction evidence records
+  // that it adds no separate position when a finite NEXT count is projected.
+  if (daypartQualification) return { synsem: mealSynsem,
+    qualifiedDaypartTokens: meals.map(token => token.index) };
   const i18n: Record<string, string> = {};
   if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
     for (const locale of ["en", "th"]) {
@@ -1125,14 +1125,14 @@ function fixedClockEventAdjunctSynsem(
     evidence: [{ rule: "hpsg.cx.schedule.fixed-clock-meal-qualification",
       spans: [{ start: mealStart, end: mealEnd, text }] }]
   };
-  return {
+  return { synsem: {
     ...mealSynsem,
     head: { ...mealSynsem.head, schedule: {
       ...meal, when: undefined, offset: undefined, offsetMin: undefined, offsetMax: undefined
     } },
     valence: { ...mealSynsem.valence,
       instructions: mergeInstructions(mealSynsem.valence.instructions, [instruction]) }
-  };
+  } };
 }
 
 /** An exact clock refines the daypart of NEXT within one administration.
@@ -1187,18 +1187,25 @@ function scheduleRefinementSynsems(
   left: HpsgSign,
   right: HpsgSign,
   context: HpsgUnificationContext
-): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
+): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean; qualifiedDaypartTokens?: number[] } {
   const nextDayRight = nextDayClockAdjunctSynsem(left, right, context);
-  if (nextDayRight) return { left: left.synsem,
-    right: fixedClockEventAdjunctSynsem(left, right, context, nextDayRight) ?? nextDayRight, refined: true };
+  if (nextDayRight) {
+    const qualified = fixedClockEventAdjunctSynsem(left, right, context, nextDayRight);
+    return { left: left.synsem, right: qualified?.synsem ?? nextDayRight, refined: true,
+      qualifiedDaypartTokens: qualified?.qualifiedDaypartTokens };
+  }
   const nextDayLeft = nextDayClockAdjunctSynsem(right, left, context);
-  if (nextDayLeft) return {
-    left: fixedClockEventAdjunctSynsem(right, left, context, nextDayLeft) ?? nextDayLeft,
-    right: right.synsem, refined: true };
+  if (nextDayLeft) {
+    const qualified = fixedClockEventAdjunctSynsem(right, left, context, nextDayLeft);
+    return { left: qualified?.synsem ?? nextDayLeft, right: right.synsem, refined: true,
+      qualifiedDaypartTokens: qualified?.qualifiedDaypartTokens };
+  }
   const qualifiedRight = fixedClockEventAdjunctSynsem(left, right, context);
-  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
+  if (qualifiedRight) return { left: left.synsem, right: qualifiedRight.synsem, refined: true,
+    qualifiedDaypartTokens: qualifiedRight.qualifiedDaypartTokens };
   const qualifiedLeft = fixedClockEventAdjunctSynsem(right, left, context);
-  if (qualifiedLeft) return { left: qualifiedLeft, right: right.synsem, refined: true };
+  if (qualifiedLeft) return { left: qualifiedLeft.synsem, right: right.synsem, refined: true,
+    qualifiedDaypartTokens: qualifiedLeft.qualifiedDaypartTokens };
   const refinedLeft = refinedDailyCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
   const refinedRight = refinedDailyCadenceSynsem(right, left);
@@ -1262,6 +1269,8 @@ export function combineSigns(
     evidence: [
       ...left.evidence,
       ...right.evidence,
+      ...(refinement.qualifiedDaypartTokens ? [{ rule: FIXED_CLOCK_DAYPART_QUALIFICATION_RULE,
+        tokenIndices: refinement.qualifiedDaypartTokens }] : []),
       {
         rule,
         tokenIndices

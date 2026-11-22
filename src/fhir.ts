@@ -2640,7 +2640,8 @@ function projectHpsgClinicalQuantityToFhir(
   // A canonical dose may be independently qualified (e.g. EMA ~500 mL).
   // Clinical-quantity lowering adds rate/infusion structure; it must not
   // overwrite an unchanged, already-qualified active dose with an exact one.
-  const originalDose = dosage.doseAndRate?.[0]?.doseQuantity;
+  const originalAmount = dosage.doseAndRate?.[0];
+  const originalDose = originalAmount?.doseQuantity;
   const resolvedDose = (dose: NonNullable<HpsgClinicalQuantityFeature["projectedDose"]>) =>
     originalDose?.value === dose.value &&
     (originalDose.unit ?? originalDose.code) === dose.unit
@@ -2651,7 +2652,7 @@ function projectHpsgClinicalQuantityToFhir(
     dosage.doseAndRate = [{
       ...(quantity.projectedDose ? {
         doseQuantity: resolvedDose(quantity.projectedDose)
-      } : {}),
+      } : originalAmount?.doseRange ? { doseRange: originalAmount.doseRange } : {}),
       rateQuantity: buildFhirDoseQuantity(
         quantity.numerator.value / quantity.denominators.reduce((scale, term) => scale * term.value, 1),
         unit, quantity.numerator.comparator

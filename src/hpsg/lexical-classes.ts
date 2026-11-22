@@ -529,6 +529,7 @@ export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
 export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
 /** Typed derivation identity shared by lexical timing and phase composition. */
 export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+export const FIXED_CLOCK_DAYPART_QUALIFICATION_RULE = "hpsg.cx.schedule.fixed-clock-daypart-qualification";
 function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number): boolean {
   let before = start - 1;
   const previous = tokens[before];

@@ -73,7 +73,7 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
   if (q.representation === "rate-quantity")
     return [
       {
-        ...(resolved ? { quantity: resolved } : {}),
+        ...(resolved ? { quantity: resolved } : result?.range ? { range: result.range } : {}),
         rate: quantity(
           q.numerator.value / q.denominators.reduce((scale, part) => scale * part.value, 1),
           [q.numerator.unit, ...q.denominators.map((part) => part.unit)].join("/"),
