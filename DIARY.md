@@ -13873,3 +13873,100 @@ The candidate source hash, candidate ESM, pinned master ESM and harness hash wer
 ### Review delivery
 
 Delivery follows the authorized loop: normal push to the existing PR14 branch, individual replies in the 14 original inline threads, resolution after replies, and one exact @coderabbitai full review request. Body-only findings and the two explicit rejections are covered in this ledger and the relevant original threads. The next full review will be assessed against the same supported-behavior boundary; requesting it does not end the work.
+
+
+## 2026-11-23 — PR14 full-review round43
+
+Review 6013421346 examined 92b64d6. It contains 8 inline findings and 16 body-only findings. Twenty-one are addressed; three are rejected at the supported-behavior boundary. Root performed source implementation, integration and independent review, using our own execution, grammar and interchange workers. No HPSERVER AI workers or downstream application edits were used.
+
+### Finding disposition
+
+| Finding | Decision | Supported requirement, cause and result |
+|---|---|---|
+| I1 | fix | Clearing editable excludedDates now compares the outgoing active modifier, so an unrelated retained site delta cannot mask the clear. November 23 remains eligible through three saves; removed source annotation remains history. |
+| I2 | fix | Repeating-course formatting keeps the original CourseLanguage receiver and passes cycle-origin text through private boundary helpers. Prototype methods survive; no wrapper/cache/public facet was added. |
+| I3 | fix | Standard numeric duration/durationMax participates in the existing maximum-range planner:10 mL/h with1–2 h and30 mL/24 h supplies 30 mL per cycle, 60 mL over the repeated control. Authored numbers/units remain unchanged. |
+| I4 | fix | Finite ranged supply replays accepted doses from actual phase eligibility, not an earlier cadence origin; January 4/5 supply 4 units. A countMax allowance follows eligibility without establishing exact phase completion. |
+| I5 | fix | Repeated single-member supply rounds once before applying remaining lifetime allowance; cap 3 and round 5 yields 3, with one actual prior unit yields 2. Volume/ingredient/container estimates and explanations are not doubled. |
+| I6 | fix | Lifted EzDosage safety alone selects the existing normalized native renderer. Direct and imported previews show the current maximum 2 tablets per administration, preserving source and unknown safety annotation. |
+| I7 | fix | Existing onset-only recurrence inheritance includes activityTiming agreement/copy. 30 minutes before exercise and day 8 survive; an authored 45-minute local successor remains local. |
+| I8 | reject | OD q2h then QID has no authored transition boundary. Preserve all parser facts and the independently executable left-eye course; do not invent a combined known-prefix/partial-execution policy. The prior 452715e decision remains. |
+| B1 | fix | Editable excludedDates is lifted independently of course-bridge presence. Strict R5 remains wire-only; editable APIs agree. |
+| B2 | fix | Anonymous period annotations compare period-list positions, not full R6 limit-list positions. Same-order administration-max edits preserve both texts; reordering retains ambiguous originals in source history. |
+| B3 | reject | Repeated round40 request for a missing-endpoint-unit preview model. No active endpoint quantity/unit is rewritten; incomplete-unit display is not expanded. |
+| B4 | fix | Shared route recognition distinguishes intravenous before the existing duration lead from intravenous fluid material, for attached/spaced carrier quantities. 20 mg / 50 mL / 1 h and IV coding stay intact. |
+| B5 | oracle | Complete phase-body assertions reject conflicting doses before and after the expected sentence. A separate no-dose gap remains a distinct phase. |
+| B6 | reject | Repro requires unexported legacy canonicalFromFhir→canonicalToFhir. Public R5/R6 and native projections preserve 30 min / 2 foreign-block endpoints, system/code/unit/IDs/annotations exactly across three saves. No legacy-model expansion. |
+| B7 | fix | The destination continuation delegates a complete recognized clock to the existing temporal parser. Dilute 1 mL with saline, optionally to 10 mL, retains amounts and exactly one 08:00 clock. |
+| B8 | oracle/fix | Preparation-clock tests assert one clock after material and preserve the 2-tablet quantity through public views. This exposed actual graph-only R6 amount loss, corrected with existing source ownership. |
+| B9 | oracle | Anchored directive and complete quantity matching distinguish 2 cm from 12 cm and check 1 g / 1–2 cm explicitly. |
+| B10 | oracle | EN Do not and TH ห้าม are asserted for negated cases and absent for affirmative cases through direct/wire views. |
+| B11 | oracle | Nasal preview independently asserts displayed 1 mL or 1 spray in both locales, alongside unchanged stored quantity. |
+| B12 | oracle | Morning presence/absence is checked in EN/TH according to the actual event flag. |
+| B13 | oracle | Replace the graph marker actually selected by the reader before appending the fixture marker. |
+| B14 | oracle | Daily/weekly 08:00 civil times cross New York's March 2027 DST transition; UTC alone is no longer the DST proof. |
+| B15 | fix/oracle | The supported pure backward-clock THEN continuation completes its initial 22:00 administration once, allowing next eligible 06:00. Existing frequency/course boundaries and forward-clock controls remain unchanged; query requests both results. |
+| B16 | oracle | An actual record before calendar eligibility does not consume the later finite count; January 3/4 remain two administrations and two units. |
+
+### Integration findings and ownership boundary
+
+The new source owner span exposed a rich-rendering defect for a live amount edit: standalone Dissolve 2→3 lost its replacement Theme quantity. The existing reconciler now replaces the amount only at the selected original owner. Public R6 and cold R5 checks assert 3 tablets exactly once while retaining 100 mL of material or the 08:00 clock, in both locales and realization modes. Independent later actions and explicit clears keep their prior behavior.
+
+The countMax neighbor initially reset an ongoing independent track at another track's global step split. Integration then caught an overly broad correction that conflated a portable scalar phaseOrigin with an explicit phaseStart boundary. The final correction uses the existing continuation marker, while an explicit phaseStart retains its eligibility semantics. Global eligibility still clips returned events. The prior parallel schedule and 80-drop total are preserved; delayed phases retain their actual eligibility for exact, ranged and maximum-only count allowances.
+
+For source-owned preparation amounts, the parser records the existing primaryAdministrationSpan after HPSG/action dose promotion and attachment, only when a unique declared definesDose action matches the live dose. A graph-only import never gains an invented core dose.
+
+A frozen saved Swish row from exact reviewed 92b64d6 has no primary span but has an existing projection fingerprint. Restoring just the sole declared 10 mL dose reproduces that fingerprint exactly; an unrelated clock edit or untouched graph-only row does not. A private R5 adapter helper uses that exact match to add a display-only span. The original input and saved graph remain byte-exact through R6/R5 export. No new serialized field, native editing API, compile-layer wire logic or proof framework was added.
+
+Old spanless R6 data cannot always establish deletion: an ordinary never-core-dose graph-only save is byte-identical to the historical cleared Dissolve wire. The chosen behavior preserves authored graph quantities. False agreement, coverage and text markers are not deletion evidence; no guessing rule or legacy migration framework was added.
+
+Pinned-master evidence classifies I1, B1, B2 and graph-only R6 loss as demonstrated PR regressions; I2 is specifically a round42 public locale-extension regression. Numeric duration maximum, rounded lifetime supply, lifted-only safety preview and named-IV carrier loss also affect master and are fixed as supported defects. The exact I7 phased activity example did not have the same successful complete master parse and is not labelled a master regression. The backward-clock case was wrong on master too, which reversed the explicit THEN order. I8 preserves parser suggestions while declining an unresolved whole-course execution.
+
+### Validation and performance
+
+- Source 6,513/6,513 across all 48 existing files, including strict ES6 type checking. Round42 had 6,457 tests; no prior file or case count was reduced.
+- ESM, CommonJS and declaration builds pass; all four distribution tests pass.
+- Actual Shinebright converter plus storage save/reopen preserves full JSON exactly for 74 cases out of 75 attempts, including all 64 previously preserved cases and ten new round43 cases. The remaining raw core timeOfDay [null,08:00:00] reproduces the same existing downstream RangeError. Input is passed directly, with no trimming, normalization or downstream change.
+- Exactly 100 changed PR paths; all new regressions use existing files.
+- The initial integrated source runs exposed the two production-neighbor regressions above and then the phaseStart precedence mistake. All were corrected before the final passing gate. A bracket error in the temporary storage fixture script stopped that runner before execution; correcting the script did not alter source/build artifacts. The passing source/build results were retained only after exact head/source-hash verification.
+- All source/test/build worker processes finished before measurement.
+
+Source head: 225bd606c1ccf3cf62ef6e9a8fb665be6bff51af.
+Frozen source SHA-256 (sorted tracked src path, NUL, file bytes, NUL): 7bbe021ad86845dc20f8fc9aa7f9d784002d32e3400ee17af83900b3391db48e.
+Candidate ESM SHA-256: b7bf3f8419f74b79cac77e9e778ef150e5b25e2cf35989b4e07c25f7de7af32f.
+Pinned master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
+Unchanged harness SHA-256: 10aae1e96f04edeefdd53471f1508998897f30ce34e99d7ab042fa97d109f1fb; git blob 42a4c7b898a778a092be550cd454d6bf39041879.
+
+All 117/117 public functions are covered and measured. The unchanged full sweep has 181 paired scenarios, with 174 semantically equivalent cases and the same seven established non-equivalent cases as round42. Every equivalent case meets its individual 4% ceiling. Candidate-only APIs remain separately measured.
+
+The full pass uses 22 balanced paired rounds at 35 ms. All eight initial timing flags receive the preset 72 balanced paired rounds at 140 ms with candidate-first order, on the same frozen artifacts. Accepted changes use median-log paired ratios, not ratios of marginal medians or averages across APIs.
+
+| Initially flagged scenario | First pass | Longer confirmation |
+|---|---:|---:|
+| formatSig/R5/en | +13.320% | -1.594% |
+| fromFhirDosage/en | +7.453% | -11.572% |
+| toEzDosages/simple | +4.407% | -35.912% |
+| setDosageExcludedWeekdays | +5.450% | -30.771% |
+| buildBodySiteSpatialRelationExtensions | +4.360% | -6.834% |
+| hasSnomedBodySiteLateralityPostcoordination | +4.487% | +1.013% |
+| inferMedicationLocale | +7.567% | -1.380% |
+| registerSigLocalization | +10.552% | -6.274% |
+
+Highest accepted equivalent-scenario change: **+3.548%** for **listAdviceRelationDefinitions**.
+
+| Representative scenario | Paired change |
+|---|---:|
+| parseSig/ordinary | -1.012% |
+| parseSig/thai | -7.022% |
+| parseSig/staged | +1.731% |
+| formatSig/R5/en | -1.594% |
+| formatSig/R6/en | -5.794% |
+| fromFhirDosage/en | -11.572% |
+| calculateTotalUnits/scalar | -85.713% |
+
+Source, candidate build, pinned master build and benchmark source hashes were independently rechecked after measurement and all match the frozen manifest. Full data, raw paired samples, process exits, command manifests, lane/independent-review notes and storage evidence remain under /tmp/ezmed14-round43-*.
+
+
+### Review delivery
+
+Normal push to the existing PR14 branch, evidence or explicit rejection in each of the eight original inline threads, resolution after replies, then one exact @coderabbitai full review request. Body-only dispositions remain in this ledger and related original threads. The request does not end the loop; the actual completed full review is checked next.
