@@ -137,7 +137,8 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
 /** Typed ownership is shared; each locale only orders the resolved words. */
 function mixArgumentContent(c: InstructionActionRealizationInput) {
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
-    unmarkedSubstance: AdviceArgument | undefined, amountArg: AdviceArgument | undefined;
+    unmarkedSubstance: AdviceArgument | undefined, unmarkedNominal: AdviceArgument | undefined,
+    amountArg: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
     const nominal = arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container;
     const material = arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material;
@@ -148,6 +149,7 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
         relationHasSemanticClass(arg.relation, "accompaniment") ||
         relationHasSemanticClass(arg.relation, "locative"));
     if (!themeArg && !arg.relation && (arg.role === AdviceArgumentRole.Theme || nominal)) themeArg = arg;
+    if (!unmarkedNominal && nominal && !arg.relation && arg !== themeArg) unmarkedNominal = arg;
     if (!substanceArg && companion && (material || nominal || arg.role === AdviceArgumentRole.Theme))
       substanceArg = arg;
     else if (!unmarkedSubstance && material && !arg.relation) unmarkedSubstance = arg;
@@ -155,7 +157,16 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     if (themeArg && substanceArg && amountArg) break;
   }
   if (substanceArg) themeArg ??= unmarkedSubstance;
-  else substanceArg = unmarkedSubstance;
+  else {
+    substanceArg = unmarkedSubstance;
+    // Saved graphs can attach WITH to the frame while their distinct
+    // instrument/container keeps its original nominal lexical role.
+    if (!substanceArg && unmarkedNominal && c.frame.relation &&
+        (relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
+          relationHasSemanticClass(c.frame.relation, "accompaniment") ||
+          relationHasSemanticClass(c.frame.relation, "locative")))
+      substanceArg = unmarkedNominal;
+  }
   const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
   // A quantity-only daughter carries its unit as normalized identity; it has
   // no ingredient noun to repeat as "5 mL of mL".
@@ -216,7 +227,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relation = c.frame.relation
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "before";
-      return `${c.label}${container ? ` ${container}` : ""}${c.activity ? ` ${relation} ${c.activity}` : ""}`;
+      return `${c.label}${container ? ` ${container}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.activity ? ` ${relation} ${c.activity}` : ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
@@ -375,7 +386,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relation = c.frame.relation
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "ก่อน";
-      return `${c.label}${container ?? ""}${c.activity ? `${relation}${c.activity}` : ""}`;
+      return `${c.label}${container ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${c.activity ? `${relation}${c.activity}` : ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;

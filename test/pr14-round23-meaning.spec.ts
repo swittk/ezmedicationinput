@@ -4083,3 +4083,33 @@ describe("round 44: course-wide choice and timing ownership", () => {
     }
   });
 });
+
+
+describe("round45 authored directions with independent administration caps", () => {
+  it.each(["en", "th"])("retains the only directions beside the live cap in %s", locale => {
+    const directions = "Swallow 1 tablet whole every morning";
+    for (const cap of [2, 3]) {
+      const raw: FhirR6DosageInstruction = { step: [{ component: [{
+        text: directions, safety: { doseLimit: [{
+          scope: "administration", valueQuantity: { value: cap, unit: "tab" }
+        }] }
+      }] }] };
+      const before = JSON.stringify(raw), rows = toFhirR5Dosages(raw);
+      const persisted = JSON.parse(JSON.stringify(rows));
+      for (const input of [raw, rows, toDosageDetails(persisted)]) {
+        for (const realizationMode of [undefined, "normalized", "roundtrip"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text).toContain(directions);
+          expect(text).toContain("max per administration: " + cap + " tab");
+        }
+      }
+      expect(JSON.stringify(raw)).toBe(before);
+      expect(JSON.stringify(persisted)).toBe(JSON.stringify(rows));
+      const current = JSON.parse(before) as FhirR6DosageInstruction;
+      current.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+      const text = formatSig(current, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+      expect(text).not.toContain(directions);
+    }
+  });
+});

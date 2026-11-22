@@ -4987,8 +4987,11 @@ describe("round44 existing temporal ownership", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
-        if (directional) expect(text).toContain(locale === "en" ? "before 08:00:00" : "ก่อน08:00:00");
-        else expect(text.match(/0?8:00(?::00)?/gu)).toHaveLength(1);
+        if (directional) {
+          expect(text).toContain(locale === "en" ? "before 08:00:00" : "ก่อน08:00:00");
+          expect(text).toMatch(locale === "en" ? /\bat\s+0?8:00\s*am\b/u : /เวลา\s*0?8:00/u);
+          expect(text.match(/0?8:00(?::00)?/gu)).toHaveLength(2);
+        } else expect(text.match(/0?8:00(?::00)?/gu)).toHaveLength(1);
       }
     expect(JSON.stringify(row)).toBe(before);
   });
@@ -5000,4 +5003,87 @@ describe("round44 existing temporal ownership", () => {
       expect(JSON.stringify(row)).toBe(before);
     }
   );
+});
+
+
+describe("round45 saved instruction meaning", () => {
+  // Exact public R5 rows emitted by pinned master 7d628239. These retain the
+  // old frame-level WITH and its unmarked Object/Container argument.
+  const frozenMixCases: Array<[string, string, FhirDosage[]]> = [["Mix powder with household spoon","household spoon",[{"extension":[{"url":"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph","extension":[{"url":"sourceText","valueString":"Mix powder with household spoon"},{"url":"sourceLocale","valueCode":"en"},{"url":"action","extension":[{"url":"sequenceIndex","valueInteger":0},{"url":"force","valueCode":"sequence"},{"url":"relationCoding","valueCoding":{"system":"http://snomed.info/sct","code":"421463005","display":"With - dosing instruction fragment"}},{"url":"predicateLemma","valueString":"mix"},{"url":"predicateDisplay","valueString":"Mix"},{"url":"semanticClass","valueString":"prepare"},{"url":"predicateTranslation","extension":[{"url":"locale","valueCode":"th"},{"url":"text","valueString":"ผสม"}]},{"url":"predicateRealizer","valueCode":"mix-substance"},{"url":"predicateCoding","valueCoding":{"system":"http://snomed.info/sct","code":"421826007","display":"Mix"}},{"url":"spanStart","valueInteger":0},{"url":"spanEnd","valueInteger":31},{"url":"sourceText","valueString":"Mix powder with household spoon"},{"url":"argument","extension":[{"url":"role","valueCode":"theme"},{"url":"text","valueString":"powder"},{"url":"normalized","valueString":"powder"},{"url":"spanStart","valueInteger":4},{"url":"spanEnd","valueInteger":10}]},{"url":"argument","extension":[{"url":"role","valueCode":"object"},{"url":"text","valueString":"household spoon"},{"url":"normalized","valueString":"household spoon"},{"url":"conceptId","valueString":"household-spoon"},{"url":"coding","valueCoding":{"system":"http://snomed.info/sct","code":"303514007","display":"Spoon"}},{"url":"argumentCoding","valueCoding":{"system":"http://snomed.info/sct","code":"303514007","display":"Spoon"}},{"url":"spanStart","valueInteger":16},{"url":"spanEnd","valueInteger":31},{"url":"translation","extension":[{"url":"locale","valueCode":"en"},{"url":"text","valueString":"household spoon"}]},{"url":"translation","extension":[{"url":"locale","valueCode":"th"},{"url":"text","valueString":"ช้อนกินข้าว"}]}]}]},{"url":"coverage","extension":[{"url":"understoodCharacters","valueInteger":31},{"url":"opaqueCharacters","valueInteger":0},{"url":"ratio","valueDecimal":1},{"url":"complete","valueBoolean":true}]}]},{"url":"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction","extension":[{"url":"instruction","valueString":"Mix powder with household spoon"},{"url":"row","extension":[{"url":"projectionFingerprint","valueString":"477013de929e05d2"},{"url":"textFingerprint","valueString":"64f761b522a80a10"}]}]}],"text":"Mix powder with household spoon.","patientInstruction":"Mix powder with household spoon"}]],["Mix powder with bottle","bottle",[{"extension":[{"url":"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph","extension":[{"url":"sourceText","valueString":"Mix powder with bottle"},{"url":"sourceLocale","valueCode":"en"},{"url":"action","extension":[{"url":"sequenceIndex","valueInteger":0},{"url":"force","valueCode":"sequence"},{"url":"relationCoding","valueCoding":{"system":"http://snomed.info/sct","code":"421463005","display":"With - dosing instruction fragment"}},{"url":"predicateLemma","valueString":"mix"},{"url":"predicateDisplay","valueString":"Mix"},{"url":"semanticClass","valueString":"prepare"},{"url":"predicateTranslation","extension":[{"url":"locale","valueCode":"th"},{"url":"text","valueString":"ผสม"}]},{"url":"predicateRealizer","valueCode":"mix-substance"},{"url":"predicateCoding","valueCoding":{"system":"http://snomed.info/sct","code":"421826007","display":"Mix"}},{"url":"spanStart","valueInteger":0},{"url":"spanEnd","valueInteger":22},{"url":"sourceText","valueString":"Mix powder with bottle"},{"url":"argument","extension":[{"url":"role","valueCode":"theme"},{"url":"text","valueString":"powder"},{"url":"normalized","valueString":"powder"},{"url":"spanStart","valueInteger":4},{"url":"spanEnd","valueInteger":10}]},{"url":"argument","extension":[{"url":"role","valueCode":"container"},{"url":"text","valueString":"bottle"},{"url":"normalized","valueString":"bottle"},{"url":"conceptId","valueString":"bottle"},{"url":"coding","valueCoding":{"system":"http://snomed.info/sct","code":"68276009","display":"Bottle"}},{"url":"argumentCoding","valueCoding":{"system":"http://snomed.info/sct","code":"68276009","display":"Bottle"}},{"url":"argumentCoding","valueCoding":{"system":"http://standardterms.edqm.eu","code":"30008000","display":"Bottle"}},{"url":"spanStart","valueInteger":16},{"url":"spanEnd","valueInteger":22},{"url":"translation","extension":[{"url":"locale","valueCode":"en"},{"url":"text","valueString":"bottle"}]},{"url":"translation","extension":[{"url":"locale","valueCode":"th"},{"url":"text","valueString":"ขวด"}]}]}]},{"url":"coverage","extension":[{"url":"understoodCharacters","valueInteger":22},{"url":"opaqueCharacters","valueInteger":0},{"url":"ratio","valueDecimal":1},{"url":"complete","valueBoolean":true}]}]},{"url":"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction","extension":[{"url":"instruction","valueString":"Mix powder with bottle"},{"url":"row","extension":[{"url":"projectionFingerprint","valueString":"6be054d159f634a0"},{"url":"textFingerprint","valueString":"f8e0341b9f5fd3d4"}]}]}],"text":"Mix powder with bottle.","patientInstruction":"Mix powder with bottle"}]]];
+
+  it.each(frozenMixCases)("retains the old nominal companion in %s", (source, companion, frozen) => {
+    const rows = JSON.parse(JSON.stringify(frozen)) as FhirDosage[];
+    const before = JSON.stringify(rows), r6 = toDosageDetails(rows);
+    for (const input of [rows, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("powder");
+      expect(en).toContain("with " + companion);
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toMatch(companion === "bottle" ? /bottle|ขวด/u : /household spoon|ช้อนกินข้าว/u);
+    }
+    expect(JSON.stringify(rows)).toBe(before);
+    expect(parsePublicSig(source).longText).toContain(companion);
+  });
+
+  it("keeps the accepted duration and container with a configured procedural realizer", () => {
+    const source = "Agitate bottle ten seconds", requests: string[] = [];
+    const options: ParseOptions = {
+      unitMap: { s: "s" },
+      instructionActionMap: {
+        "clinic-agitation": { code: "clinic-agitation", semanticClass: "prepare",
+          display: "Agitate", i18n: { th: "เขย่า" }, procedural: true, realizer: "container-activity" }
+      },
+      instructionSemanticResolvers: request => {
+        requests.push(request.sourceText);
+        if (request.sourceText !== source) return undefined;
+        return { actions: [{ action: "clinic-agitation", range: { start: 0, end: source.length }, args: [
+          { role: AdviceArgumentRole.Container, range: { start: 8, end: 14 }, concept: "bottle" },
+          { role: AdviceArgumentRole.Duration, range: { start: 15, end: 26 }, quantity: { value: 10, unit: "s" } }
+        ] }] };
+      }
+    };
+    const parsed = parsePublicSig(source, options);
+    expect(requests).toContain(source);
+    const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(action.predicate.realizer).toBe("container-activity");
+    expect(action.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Container, conceptId: "bottle" }),
+      expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 10, unit: "s" } })
+    ]));
+    const r6 = toDosageDetails(parsed.fhir), before = JSON.stringify(parsed.fhir);
+    for (const input of [parsed.fhir, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toContain("Agitate bottle for 10 seconds");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toContain("เขย่าขวดเป็นเวลา 10 วินาที");
+    }
+    expect(JSON.stringify(parsed.fhir)).toBe(before);
+  });
+
+  it.each(["PHS", "HS"])("uses current %s rather than an unmapped after-sleep graph argument", event => {
+    const original = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole after sleep").fhir[0])) as FhirDosage;
+    original.timing!.repeat!.when = [EventTiming["After Sleep"]];
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([original]))[0])) as FhirDosage;
+    saved.timing!.repeat!.when = [event as EventTiming];
+    const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
+    for (const input of [saved, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("1 tablet");
+      expect(en).toContain("whole");
+      expect(th).toContain("1 เม็ด");
+      expect(th).toContain("ทั้งเม็ด");
+      if (event === "PHS") {
+        expect(en.match(/after sleep/gu)).toHaveLength(1);
+        expect(th).toContain("หลังจากนอน");
+      } else {
+        expect(en).toContain("at bedtime");
+        expect(en).not.toContain("after sleep");
+        expect(th).toContain("ก่อนนอน");
+        expect(th).not.toMatch(/หลัง(?:จาก)?นอน/u);
+      }
+    }
+    expect(JSON.stringify(saved)).toBe(before);
+    expect(parseInstructionGraphExtension(saved.extension)!.sourceText).toBe("Swallow 1 tablet whole after sleep");
+  });
 });

@@ -376,6 +376,44 @@ describe("source-less multi-administration treatment course realization", () => 
     const strictR5Text = formatSigBatch(rows, "long", { locale: "en" });
     expect(strictR5Text.toLowerCase()).toContain("from 7 days after treatment start until 14 days after treatment start");
     expect(strictR5Text.toLowerCase()).toContain("from 14 days after treatment start until 21 days after treatment start");
+
+    // Bind each independently specified dose/clock pattern to its own heading.
+    // Global token presence also passes when two complete phases are swapped.
+    for (const locale of ["en", "th"]) {
+      const headings = locale === "en" ? [
+        "From treatment start until 7 days after treatment start",
+        "From 7 days after treatment start until 14 days after treatment start",
+        "From 14 days after treatment start until 21 days after treatment start"
+      ] : [
+        "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา",
+        "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา",
+        "ตั้งแต่14 วันหลังเริ่มการรักษาจนถึง21 วันหลังเริ่มการรักษา"
+      ];
+      const administrations = locale === "en" ? [
+        ["Use 0.5 tablets at 7:00 am", "Use 1 tablet at 12:00 pm", "Use 0.5 tablets at 7:00 pm"],
+        ["Use 1 tablet at 7:00 am, 1:00 pm, 7:00 pm", "Use 0.5 tablets at 10:00 pm"],
+        ["Use 1 tablet at 7:00 am, 1:00 pm", "Use 0.5 tablets at 7:00 pm"]
+      ] : [
+        ["ใช้ครั้งละ 0.5 เม็ด เวลา 07:00", "ใช้ครั้งละ 1 เม็ด เวลา 12:00", "ใช้ครั้งละ 0.5 เม็ด เวลา 19:00"],
+        ["ใช้ครั้งละ 1 เม็ด เวลา 07:00, 13:00, 19:00", "ใช้ครั้งละ 0.5 เม็ด เวลา 22:00"],
+        ["ใช้ครั้งละ 1 เม็ด เวลา 07:00, 13:00", "ใช้ครั้งละ 0.5 เม็ด เวลา 19:00"]
+      ];
+      const previews = [
+        formatSig(course, "long", { locale }), formatSig(reopened, "long", { locale }),
+        formatSigBatch(rows, "long", { locale })
+      ];
+      for (const preview of previews) {
+        const starts = headings.map(heading => preview.indexOf(heading + ": "));
+        expect(starts[0]).toBe(0);
+        expect(starts[1]).toBeGreaterThan(starts[0]);
+        expect(starts[2]).toBeGreaterThan(starts[1]);
+        headings.forEach((heading, index) => {
+          const section = preview.slice(starts[index] + heading.length + 2,
+            starts[index + 1] ?? preview.length).trim();
+          expect(section).toBe(administrations[index].join("; ") + ".");
+        });
+      }
+    }
   });
 
   it("exposes a full seven-day no-medication interval between complex schedules", () => {

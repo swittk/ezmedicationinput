@@ -4378,10 +4378,13 @@ function timeArgumentCoveredBySchedule(
 ): boolean {
   if (!timing || !clause.schedule?.when?.length) return false;
   const relation = arg.relation ?? frame.relation;
-  const related = relation
-    ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
+  const relationMapping = relation
+    ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")
     : undefined;
-  return clause.schedule.when.indexOf(related ?? timing) >= 0;
+  // A qualifying relation without a lexical mapping cannot license the bare
+  // event: an after-sleep argument does not establish the bedtime event.
+  const related = relationMapping ? relationMapping.get(timing) : timing;
+  return related !== undefined && clause.schedule.when.indexOf(related) >= 0;
 }
 
 const KNOWN_EVENT_TIMINGS = new Set<string>(objectValues(EventTiming));
@@ -4465,11 +4468,7 @@ function timeArgumentCoversSingleScheduledEvent(
   for (let index = 0; index < words.length; index += 1) {
     const timing = resolveEventTimingExpression(words, index)?.timing;
     if (!timing) continue;
-    const relation = arg.relation ?? frame.relation;
-    const related = relation
-      ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
-      : undefined;
-    if ((related ?? timing) === clause.schedule.when[0]) return true;
+    if (timeArgumentCoveredBySchedule(frame, arg, clause, timing)) return true;
   }
   return false;
 }

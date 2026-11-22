@@ -566,7 +566,7 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
 
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
-function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true): boolean {
+function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
         amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
@@ -574,7 +574,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
-      a.limits?.length || safetyHasClinicalFacts(a.safety) || a.choice || a.phaseOrigin ||
+      (includeSafety && (a.limits?.length || safetyHasClinicalFacts(a.safety))) || a.choice || a.phaseOrigin ||
       (includeMemberBounds && (a.phaseStart || a.phaseEnd)) || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
   const timing = a.schedule;
@@ -624,10 +624,14 @@ function formatCanonicalBase(
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a
 ): string {
-  // Member bounds are rendered beside the clause; they do not replace its only directions.
-  if (a.text?.trim() && !administrationHasClinicalFacts(source, false)) return a.text;
+  // Member bounds and safety limits qualify the directions; they cannot
+  // replace the only authored dose, manner and cadence.
+  const authoredDirectionsOnly = a.text?.trim() && !administrationHasClinicalFacts(source, false, false);
+  if (authoredDirectionsOnly && !a.limits?.length && !a.safety?.ifExceeded) return a.text!;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
+  if (authoredDirectionsOnly)
+    return appendDoseLimits(a.text!, a.limits, words, undefined, a.safety?.ifExceeded);
   const primary = a.amounts?.[0];
   const maxima = Boolean(a.limits?.length);
   const rich =
