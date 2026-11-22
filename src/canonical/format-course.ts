@@ -566,11 +566,15 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
 
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
-function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true): boolean {
+function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
         amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
         amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
+  return false;
+}
+function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true): boolean {
+  if (administrationHasAmountFacts(a)) return true;
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
@@ -657,7 +661,7 @@ function formatCanonicalBase(
   // Timing alone cannot replace the only authored dose/manner directions.
   // Label retained source separately from the current cadence: those words
   // may contain an older timing, and are not a second active instruction.
-  if (a.text?.trim() && source.schedule && !source.amounts?.length && !source.method &&
+  if (a.text?.trim() && source.schedule && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
   if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);

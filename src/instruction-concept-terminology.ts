@@ -1,4 +1,5 @@
 import source from "./instruction-concept-terminology.json";
+import { cloneStructuredValue } from "./stable-structure";
 import {
   AdviceArgumentRole,
   FhirCoding,
@@ -88,8 +89,10 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   copy.system = coding.system;
   copy.code = coding.code;
   copy.display = coding.display;
-  copy.extension = coding.extension?.map(extension => ({ ...extension }));
-  copy._display = coding._display ? { ...coding._display } : undefined;
+  copy.extension = cloneStructuredValue(coding.extension);
+  copy._code = cloneStructuredValue(coding._code);
+  copy._userSelected = cloneStructuredValue(coding._userSelected);
+  copy._display = cloneStructuredValue(coding._display);
   copy.i18n = coding.i18n ? { ...coding.i18n } : undefined;
   return copy;
 }

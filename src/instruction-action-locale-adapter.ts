@@ -178,11 +178,13 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
       : c.translateArgumentConcept(themeArg)
     : undefined;
   const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
-  const substance = substanceArg
+  const quantityOnlySubstance = substanceArg?.quantity && !substanceArg.conceptId && !substanceArg.coding &&
+    !substanceArg.codings?.length && substanceArg.normalized === substanceArg.quantity.unit;
+  const substance = substanceArg && !quantityOnlySubstance
     ? substanceArg.quantity && !substanceQuantity
       ? substanceArg.text || substanceArg.normalized
       : c.translateArgumentConcept(substanceArg)
-    : c.substance;
+    : quantityOnlySubstance ? undefined : c.substance;
   // c.amount already preserves a partial quantity's authored wording. Reusing
   // it avoids fabricating a number or attaching a tablet amount to plain water.
   const coextensiveAmount = themeArg && amountArg?.quantity &&
@@ -238,7 +240,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         ? ` ${primaryAmount ? `${primaryAmount} of ` : ""}${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
         : primaryAmount || coextensiveAmount || themeAmount
           ? " " + (primaryAmount ?? coextensiveAmount ?? themeAmount) : "";
-      const amountText = substanceAmount ? `${substanceAmount}${amountArg?.conceptId && !substanceArg?.quantity ? " of " : " "}` : "";
+      const amountText = substanceAmount ? substanceAmount +
+        (substance ? amountArg?.conceptId && !substanceArg?.quantity ? " of " : " " : "") : "";
       const vehicleRelation = substanceArg?.relation ?? c.frame.relation;
       const materialRelation = vehicleRelation &&
         (relationHasSemanticClass(vehicleRelation, "accompaniment") ||
@@ -250,7 +253,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
         ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : "at";
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${themeText}${substance ? ` ${materialRelation} ${amountText}${substance}` : ""}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
+      return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
     }
     case "site-relation": {
       const object = c.site ?? c.theme ?? c.container;
@@ -402,8 +405,8 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         : vehicleRelation && relationHasSemanticClass(vehicleRelation, "locative")
           ? localizeAdviceRelation(vehicleRelation, c.locale) ?? vehicleRelation
           : themeText ? "กับ" : "";
-      const substanceText = substance
-        ? `${materialRelation}${substance}${substanceAmount ? `${amountSeparator}${substanceAmount}` : ""}` : "";
+      const substanceText = substance || substanceAmount
+        ? `${materialRelation}${substance ?? ""}${substanceAmount ? (substance ? amountSeparator : "") + substanceAmount : ""}` : "";
       const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
       const timeRelation = timeSemanticRelation &&
         (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)

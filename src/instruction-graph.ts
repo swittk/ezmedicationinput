@@ -397,7 +397,8 @@ function clockArgumentFromParts(
 ): AdviceArgument | undefined {
   // The same bounded clock grammar supplies HPSG schedules and a complete
   // temporal action daughter. Do not turn a clock into an opaque Object.
-  if (endExclusive - start <= 2) {
+  ({ start, endExclusive } = semanticArgumentBounds(parts, start, endExclusive));
+  if (start < endExclusive && endExclusive - start <= 2) {
     const clock = parseClockToken(parts[start], start + 1 < endExclusive ? parts[start + 1] : undefined);
     if (clock && clock.tokens.length === endExclusive - start) return {
       role: AdviceArgumentRole.Time,
@@ -1741,7 +1742,8 @@ function buildActionFrame(
   const nextTime = temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
     ? clockArgumentFromParts(parts, temporalIndex + 1, segmentEnd, input) : undefined;
   if (nextTime) {
-    const first = parts[temporalIndex + 1], last = parts[segmentEnd - 1];
+    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, segmentEnd);
+    const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
     pushArgument(args, { ...nextTime, relation: temporalRelation,
       ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {})
     });

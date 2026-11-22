@@ -2047,7 +2047,8 @@ describe("qualified quantities keep their meaning in action graph realization", 
       const action = graph.actions.find(value => value.predicate.lemma === "squeeze")!;
       const quantity = action.args.find(value => value.role === AdviceArgumentRole.Amount)?.quantity;
       expect(quantity).toMatchObject({ value: 1, unit: "cm ribbon", comparator });
-      expect(parsed.longText).toContain(`${expected}1`);
+      const qualifiedAmount = expected + (locale === "th" ? "1 ซม." : "1 cm ribbon");
+      expect(parsed.longText).toContain(qualifiedAmount);
       expect(parsed.longText).toContain(locale === "th" ? "ครีม" : "cream");
       expect(parsed.longText).toContain(locale === "th" ? "จุดที่มีอาการ" : "spot");
       expect(clause.rawText).toBe(source);
@@ -2057,8 +2058,8 @@ describe("qualified quantities keep their meaning in action graph realization", 
       expect(restored.actions.find(value => value.predicate.lemma === "squeeze")?.args
         .find(value => value.role === AdviceArgumentRole.Amount)?.quantity?.comparator).toBe(comparator);
       expect(realizeInstructionAction(restored.actions.find(value => value.predicate.lemma === "squeeze")!, locale))
-        .toContain(`${expected}1`);
-      expect(fromFhirDosage(parsed.fhir[0], { locale }).longText).toContain(`${expected}1`);
+        .toContain(qualifiedAmount);
+      expect(fromFhirDosage(parsed.fhir[0], { locale }).longText).toContain(qualifiedAmount);
     }
   });
 
@@ -4436,7 +4437,10 @@ describe("round41 supported graph and clinical preview facts", () => {
 
   it.each([
     ["Mix 5 mL with 100 mL water", "Mix 5 mL with 100 mL water.", "ผสม5 มิลลิลิตรกับน้ำ 100 มิลลิลิตร."],
-    ["Mix 5 mL syrup with 100 mL water", "Mix 5 mL of syrup with 100 mL water.", undefined]
+    ["Mix 5 mL syrup with 100 mL water", "Mix 5 mL of syrup with 100 mL water.", undefined],
+    ["Mix the powder with 100 mL", "Mix the powder with 100 mL.", undefined],
+    ["Mix tablet with 100 mL", "Mix tablet with 100 mL.", "ผสมยาเม็ดกับ100 มิลลิลิตร."],
+    ["Mix powder with 100 mL water", "Mix powder with 100 mL water.", undefined]
   ])("renders quantity-only themes without inventing an ingredient noun: %s", (source, english, thai) => {
     const parsed = parsePublicSig(source!);
     for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
@@ -4880,6 +4884,44 @@ it.each(["Dissolve 2 tablets in 100 mL solvent", "Dissolve 2 tablets in water at
   }
 );
 
+
+describe("round46 authored concept metadata and terminal action clocks", () => {
+  it("detaches custom Coding primitive annotations without dropping authored metadata", () => {
+    const options: ParseOptions = { instructionConceptMap: { juice: {
+      code: "clinic-juice", role: AdviceArgumentRole.Substance, display: "juice",
+      coding: { system: "https://example.org/clinic", code: "juice",
+        _code: { id: "clinic-note", extension: [{ url: "https://example.org/note", valueString: "keep" }] },
+        _userSelected: { id: "selection-note" },
+        extension: [{ url: "https://example.org/outer", extension: [{ url: "inner", valueBoolean: false }] }] }
+    } } };
+    const before = JSON.stringify(options), result = resolvePublicConcept("juice", options)!;
+    expect(result.coding).toEqual(options.instructionConceptMap!.juice.coding);
+    result.coding!._code!.id = "Local note";
+    result.coding!._code!.extension![0].valueString = "Local annotation";
+    result.coding!._userSelected!.id = "Local selection";
+    result.coding!.extension![0].extension![0].valueBoolean = true;
+    expect(JSON.stringify(options)).toBe(before);
+    expect(resolvePublicConcept("juice", options)!.coding).toEqual(options.instructionConceptMap!.juice.coding);
+  });
+
+  it.each(["", ".", "!"])("retains a complete clock before terminal punctuation %s", punctuation => {
+    const source = "Dilute 1 mL at 08:00" + punctuation;
+    const parsed = parsePublicSig(source);
+    const time = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args
+      .find(argument => argument.role === AdviceArgumentRole.Time)!;
+    expect(time).toMatchObject({ text: "08:00", normalized: "08:00:00",
+      span: { start: 15, end: 20 } });
+    expect(source.slice(time.span!.start, time.span!.end)).toBe("08:00");
+    const before = JSON.stringify(parsed.fhirNext);
+    for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Dilute 1 mL at 08:00:00.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("เจือจาง 1 มิลลิลิตร เวลา 08:00:00.");
+    }
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+  });
+});
 
 describe("round44 public vocabulary and parsed frame isolation", () => {
   it.each(["list", "get", "resolve", "sequence"] as const)("detaches the public action %s value", lookup => {

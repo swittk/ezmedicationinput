@@ -3540,9 +3540,23 @@ describe("round32 retained clinical labels and incomplete amounts", () => {
     expect(JSON.stringify(raw)).toBe(before);
     const live = JSON.parse(before) as FhirR6DosageInstruction;
     live.step![0].component![0].timing = { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } };
-    const text = formatSig(live, "long", normalized);
-    expect(text).toContain("twice daily");
-    expect(text).not.toContain("one tablet daily");
+    const liveBefore = JSON.stringify(live);
+    const rows = toFhirR5Dosages(live), rowsBefore = JSON.stringify(rows);
+    for (const input of [live, rows, toDosageDetails(JSON.parse(rowsBefore))])
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toBe(locale === "en"
+          ? "Current: Use the medication twice daily; original directions: Take one tablet daily"
+          : "ปัจจุบัน: ใช้ยา วันละ 2 ครั้ง; ข้อความเดิม: Take one tablet daily");
+      }
+    expect(JSON.stringify(live)).toBe(liveBefore);
+    expect(JSON.stringify(rows)).toBe(rowsBefore);
+    const valued = JSON.parse(liveBefore) as FhirR6DosageInstruction;
+    valued.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+    const current = formatSig(valued, "long", normalized);
+    expect(current).toContain("2 tablets");
+    expect(current).toContain("twice daily");
+    expect(current).not.toContain("original directions");
   });
 
   it("retains a live R6 site qualifier beyond its recognized body-site code", () => {
@@ -4095,7 +4109,7 @@ describe("round45 authored directions with independent administration caps", () 
         }] }
       }] }] };
       const before = JSON.stringify(raw), rows = toFhirR5Dosages(raw);
-      const persisted = JSON.parse(JSON.stringify(rows));
+      const rowsBefore = JSON.stringify(rows), persisted = JSON.parse(rowsBefore);
       for (const input of [raw, rows, toDosageDetails(persisted)]) {
         for (const realizationMode of [undefined, "normalized", "roundtrip"] as const) {
           const text = formatSig(input, "long", { locale, realizationMode });
@@ -4104,7 +4118,8 @@ describe("round45 authored directions with independent administration caps", () 
         }
       }
       expect(JSON.stringify(raw)).toBe(before);
-      expect(JSON.stringify(persisted)).toBe(JSON.stringify(rows));
+      expect(JSON.stringify(rows)).toBe(rowsBefore);
+      expect(JSON.stringify(persisted)).toBe(rowsBefore);
       const current = JSON.parse(before) as FhirR6DosageInstruction;
       current.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
       const text = formatSig(current, "long", { locale, realizationMode: "normalized" });

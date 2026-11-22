@@ -589,16 +589,18 @@ describe("R6 course marker in-memory persistence fidelity", () => {
 
 
 describe("source-less R6 treatment-relative step display", () => {
-  const phaseDose = {
+  const phaseDose = (secondStart: number) => ({
     en: [
       /^From treatment start until 7 days after treatment start: (?:Take|Use) 1 tablet at 8:00 am\.$/u,
-      /^[^:]*: (?:Take|Use) 2 tablets at 8:00 am\.$/u
+      new RegExp("^From " + secondStart + " days after treatment start until " +
+        (secondStart + 7) + " days after treatment start: (?:Take|Use) 2 tablets at 8:00 am\\.$", "u")
     ],
     th: [
       /^ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ 1 เม็ด เวลา 08:00\.$/u,
-      /^[^:]*: ใช้ครั้งละ 2 เม็ด เวลา 08:00\.$/u
+      new RegExp("^ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษาจนถึง" +
+        (secondStart + 7) + " วันหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด เวลา 08:00\\.$", "u")
     ]
-  };
+  });
   const relative = (days: number) => ({
     contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
       code: "treatment-start" }] },
@@ -616,6 +618,7 @@ describe("source-less R6 treatment-relative step display", () => {
       { start: relative(secondStart), end: relative(secondStart + 7),
         component: [component(2)] }
     ] };
+    const matchers = phaseDose(secondStart);
     const english = formatSig(course, "long");
     expect(english).toContain("From treatment start until 7 days after treatment start");
     expect(english).toContain(`From ${secondStart} days after treatment start until ${secondStart + 7} days after treatment start`);
@@ -642,18 +645,18 @@ describe("source-less R6 treatment-relative step display", () => {
     }
     for (const text of [english, strictEnglish]) {
       const split = text.indexOf("From " + secondStart + " days after treatment start");
-      expect(text.slice(0, split).trim()).toMatch(phaseDose.en[0]);
+      expect(text.slice(0, split).trim()).toMatch(matchers.en[0]);
       const [second, pause, ...extra] = text.slice(split).trim().split(" No doses ");
-      expect(second.trim()).toMatch(phaseDose.en[1]);
+      expect(second.trim()).toMatch(matchers.en[1]);
       expect(extra).toEqual([]);
       expect(pause).toBe(secondStart === 14
         ? "from 7 days after treatment start until 14 days after treatment start." : undefined);
     }
     for (const text of [thai, strictThai]) {
       const split = text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา");
-      expect(text.slice(0, split).trim()).toMatch(phaseDose.th[0]);
+      expect(text.slice(0, split).trim()).toMatch(matchers.th[0]);
       const [second, pause, ...extra] = text.slice(split).trim().split(" งดยา");
-      expect(second.trim()).toMatch(phaseDose.th[1]);
+      expect(second.trim()).toMatch(matchers.th[1]);
       expect(extra).toEqual([]);
       expect(pause).toBe(secondStart === 14
         ? "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา." : undefined);
@@ -668,18 +671,24 @@ describe("source-less R6 treatment-relative step display", () => {
   });
 
   it.each(["en", "th"] as const)("rejects decimal and multi-digit substitutes with the actual %s phase matchers", locale => {
-    for (const phase of [0, 1]) {
+    for (const secondStart of [7, 14]) for (const phase of [0, 1]) {
+      const matcher = phaseDose(secondStart)[locale][phase];
       const prefix = phase === 0
         ? locale === "en" ? "From treatment start until 7 days after treatment start: Take "
           : "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ "
-        : locale === "en" ? "From 7 days after treatment start: Take " : "ตั้งแต่7 วันหลังเริ่มการรักษา: ใช้ครั้งละ ";
+        : locale === "en" ? "From " + secondStart + " days after treatment start until " +
+          (secondStart + 7) + " days after treatment start: Take "
+          : "ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษาจนถึง" +
+            (secondStart + 7) + " วันหลังเริ่มการรักษา: ใช้ครั้งละ ";
       const suffix = locale === "en" ? (phase === 0 ? " tablet" : " tablets") + " at 8:00 am." : " เม็ด เวลา 08:00.";
+      const injectedHeading = prefix.replace(": ", locale === "en" ? "; Take 3 tablets: " : "; ใช้ครั้งละ 3 เม็ด: ");
+      expect(matcher.test(injectedHeading + String(phase + 1) + suffix)).toBe(false);
       const conflicting = locale === "en" ? "3 tablets and " : "3 เม็ด และ ";
-      expect(phaseDose[locale][phase].test(prefix + conflicting + String(phase + 1) + suffix)).toBe(false);
+      expect(matcher.test(prefix + conflicting + String(phase + 1) + suffix)).toBe(false);
       const appended = locale === "en" ? " Take 3 tablets at 8:00 am." : " ใช้ครั้งละ 3 เม็ด เวลา 08:00.";
-      expect(phaseDose[locale][phase].test(prefix + String(phase + 1) + suffix + appended)).toBe(false);
+      expect(matcher.test(prefix + String(phase + 1) + suffix + appended)).toBe(false);
       for (const quantity of ["1.2", "2.1", "12", "1", "2"]) {
-        const matches = phaseDose[locale][phase].test(prefix + quantity + suffix);
+        const matches = matcher.test(prefix + quantity + suffix);
         expect(matches, locale + " phase " + phase + " quantity " + quantity).toBe(quantity === String(phase + 1));
       }
     }
