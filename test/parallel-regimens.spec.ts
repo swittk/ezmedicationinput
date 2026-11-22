@@ -1034,12 +1034,13 @@ describe("round35 independent phase-origin ownership", () => {
     expect(prior.boundsEnd).toBeUndefined();
     expect(prior.count).toBeUndefined();
     expect(parsed.meta.canonical.clauses[1].schedule?.boundsStart).toBe("2026-12-02");
+    expect(parsed.meta.canonical.clauses[1].schedule?.count).toBe(1);
     expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
     const before = JSON.stringify(parsed);
     for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
       JSON.parse(JSON.stringify(parsed.fhir))])
       expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual([
-        "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00"
+        "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00"
       ]);
     expect(JSON.stringify(parsed)).toBe(before);
   });
@@ -1121,4 +1122,100 @@ it("preserves THEN between a clock and an event anchor without inventing its eve
     "2026-12-01T08:00:00+00:00", "2026-12-01T22:00:00+00:00",
     "2026-12-02T08:00:00+00:00", "2026-12-02T22:00:00+00:00"
   ]);
+});
+
+
+describe("round42 relative points and inherited cadence origins", () => {
+  it.each([false, true])("keeps the next morning finite unless a daily course is stated (%s)", recurring => {
+    const parsed = parseSig(recurring ? "Take 1 tablet daily for 3 days starting the next morning"
+      : "Take 1 tablet the next morning");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(recurring ? undefined : 1);
+    const query = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC",
+      eventClock: { MORN: "08:00" }, limit: 4 };
+    const expected = recurring ? ["2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"]
+      : ["2026-11-22T08:00:00+00:00"];
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(expected);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 5, durationUnit: "d" }).totalUnits)
+        .toBe(recurring ? 3 : 1);
+    }
+  });
+
+  it.each([
+    ["the next morning and at 09:00", ["08:00", "09:00"]],
+    ["at 18:00 and again the next morning", ["08:00", "18:00"]],
+    ["at 07:00 the next morning and before breakfast", ["06:00", "07:00"]],
+    ["the next morning at 07:00 before breakfast", ["07:00"]],
+    ["at 08:00 in the morning the next day", ["08:00"]],
+    ["in the morning and at 09:00 the next day", ["08:00", "09:00"]]
+  ] as const)("keeps exactly the composed NEXT-day positions: %s", (timing, clocks) => {
+    const parsed = parseSig("Take 1 tablet " + timing);
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(clocks.length);
+    const query = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC",
+      eventClock: { MORN: "08:00", ACM: "06:00" }, limit: 5 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(clocks.map(clock => "2026-11-22T" + clock + ":00+00:00"));
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 5, durationUnit: "d" }).totalUnits).toBe(clocks.length);
+    }
+  });
+
+  it("inherits the same-time clock window and retains an unresolved reference without an anchor", () => {
+    const parsed = parseSig("Take 1 tablet daily between 18:00 and 20:00 for 7 days, then take 2 tablets at the same time");
+    const window = { start: "18:00:00", end: "20:00:00", endInclusive: true };
+    const successor = parsed.meta.canonical.clauses[1];
+    expect(successor.dose).toMatchObject({ value: 2, unit: "tab" });
+    expect(successor.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", clockWindow: window });
+    expect(successor.schedule?.timingReference).toBeUndefined();
+    expect(successor.additionalInstructions).toEqual([]);
+    for (const wire of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(importCanonicalCourse(wire).stages[1].administrations[0].schedule?.recurrence?.clockWindow).toEqual(window);
+    const unresolved = parseSig("Take 1 tablet daily for 7 days, then take 2 tablets at the same time");
+    expect(unresolved.meta.canonical.clauses[1].schedule).toMatchObject({ timingReference: "previous", frequency: 1 });
+    expect(unresolved.meta.canonical.clauses[1].schedule?.timeOfDay).toBeUndefined();
+    expect(unresolved.meta.canonical.clauses[1].schedule?.clockWindow).toBeUndefined();
+    expect(unresolved.longText.toLowerCase()).toContain("at the same time");
+  });
+
+  it.each([false, true])("keeps an authored onset as the inherited cadence origin (legacy offset %s)", legacy => {
+    const source = "Take 1 tablet every 2 days at 08:00 through 2026-12-05, then from day 11 take 2 tablets";
+    const plan = createBoundaryPlan(source);
+    const states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments, states);
+    expect(graph.sequences[0].relation.rule).toBe("regimen.treatment-relative-phase-onset");
+    // Existing offset-only schedules (including master parser output) already
+    // count from treatment start. The new optional reference is not required.
+    if (legacy) {
+      const clause = states[1].primaryClause;
+      delete clause.schedule!.phaseStartReference;
+      for (const evidence of [...(clause.schedule!.evidence ?? []), ...clause.evidence])
+        evidence.scheduleFields = evidence.scheduleFields?.filter(field => field !== "phaseStartReference");
+    }
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, source);
+    expect(states[1].primaryClause.schedule).toMatchObject({ treatmentStartOffsetDays: 10,
+      period: 2, periodUnit: "d", timeOfDay: ["08:00:00"] });
+    expect(states[1].primaryClause.schedule?.boundsStart).toBeUndefined();
+    expect(states[1].primaryClause.schedule?.boundsEnd).toBeUndefined();
+    const course = courseFromAdministrations(states.map((state, index) =>
+      administrationFromClause(state.primaryClause, plan.segments[index].text, index + 1)), source);
+    const wire = projectCanonicalCourse(course);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-11T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of [course, wire.fhirNext, JSON.parse(JSON.stringify(wire.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-12-11T08:00:00+00:00", "2026-12-13T08:00:00+00:00", "2026-12-15T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 5, durationUnit: "d" }).totalUnits).toBe(6);
+    }
+  });
+
+  it.each(["from day 11 take 2 tablets", "2 tablets from day 11"])(
+    "keeps the existing onset continuation with either source order: %s", continuation => {
+    const parsed = parseSig("Take 1 tablet QD at 08:00 for 7 days then " + continuation);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({ treatmentStartOffsetDays: 10,
+      frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] });
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-11T00:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual(["2026-12-11T08:00:00+00:00", "2026-12-12T08:00:00+00:00"]);
+    }
+  });
 });

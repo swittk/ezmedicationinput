@@ -1101,9 +1101,9 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
 
       if (!procedural && canProbe && rightStart < end) {
         // A synthetic onset seam cannot hide the schedule belonging to a
-        // coordinated dose. Extend only when cached typed daughters show an
-        // unscheduled amount followed by a schedule with no independent head.
-        if (site.kind === 'coordination' && nextBoundary?.kind === 'sequence' &&
+        // coordinated or sequential dose. Extend only when cached typed daughters
+        // show an unscheduled amount followed by a schedule with no independent head.
+        if ((site.kind === 'coordination' || site.kind === 'sequence') && nextBoundary?.kind === 'sequence' &&
             !nextBoundary.surface &&
             TREATMENT_PERIOD_START_LEADS.has(lexeme(tokens[nextBoundary.rightIndex])) &&
             treatmentRelativePeriodStartAt(tokens, nextBoundary.rightIndex)) {
@@ -1183,8 +1183,21 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           const prefix = evidence.probe(start, site.start);
           if (prefix.complete && prefix.clause.route && !prefix.hasHead && !prefix.hasSchedule && !prefix.prn) {
             proposals.push(keep('structure.route-complement', 500, 'left.typed-route-only', true));
-          } else proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
-            evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
+          } else {
+            // An infusion's volume and rate can be comma-separated arguments
+            // of one administration. The existing complete HPSG probe owns
+            // that interpretation and is reused for the resulting segment.
+            const suffix = prefix.method && prefix.clause.dose?.value !== undefined
+              ? evidence.probe(right.sourceStart, end) : undefined;
+            const full = suffix && !suffix.clause.dose && !suffix.method && !suffix.prn
+              ? evidence.probe(start, end) : undefined;
+            if (full?.complete && full.clause.clinicalQuantity?.representation === "rate-quantity" &&
+                full.clause.dose?.value === prefix.clause.dose?.value &&
+                full.clause.dose?.unit === prefix.clause.dose?.unit) {
+              proposals.push(keep('regimen.comma-dose-rate', 500, 'whole.typed-dose-and-rate', true));
+            } else proposals.push({ action: 'split', rule: 'regimen.comma-numeric-head', priority: 300, relation: 'independent',
+              evidence: [{ feature: 'right.lexicalType', value: right.kind }] });
+          }
         } else if (LATERAL_MODIFIER_WORDS.has(lexeme(right)) && following?.kind !== LexKind.Number) {
           proposals.push(keep('structure.site-continuation', 500, 'right.type', 'lateral-modifier'));
         } else if (right && CLAUSE_LEAD_WORDS.has(lexeme(right))) {

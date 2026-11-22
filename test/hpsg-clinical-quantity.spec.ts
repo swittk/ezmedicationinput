@@ -12,6 +12,7 @@ import {
   formatSig,
   parseSig as parsePublicSig,
   toDosageDetails,
+  resolveMedicationInstructionAction,
   toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
@@ -2696,6 +2697,17 @@ describe("round38 complete authored duration and maximum constituents", () => {
   ] as const)("keeps a ranged dose ahead of its later maximum: %s", (source, low, high) => {
     const parsed = parsePublicSig(source);
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low, high }, unit: "mL" });
+    if (source.startsWith("Infuse")) {
+      expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+        .toEqual([{ amount: 50, unit: "mL", period: 1, periodUnit: "h" }]);
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]])
+        expect(row.maxDosePerPeriod).toMatchObject([{
+          numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
+        }]);
+      expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
+        scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value: 1, unit: "h" }
+      }]);
+    }
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       const dose = row.doseAndRate?.[0];
       expect(dose?.doseRange).toMatchObject({ low: { value: low, unit: "mL" }, high: { value: high, unit: "mL" } });
@@ -2933,4 +2945,50 @@ it("keeps the supported semantic resolver's configured realization with its type
     expect(importCanonicalCourse(input).stages[0].administrations[0].syntax?.instructionGraph?.actions[0].predicate)
       .toMatchObject({ realizer: "result", realizerConfig: { locales: { th: { fallbackObject: "ยา" } } } });
   }
+});
+
+
+describe("round42 infusion arguments and saved action lookup", () => {
+  it.each([", ", " at "])("keeps an infusion volume and its rate in one administration: %s", separator => {
+    const source = "Infuse 1 L" + separator + "100 mL/hr";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "L" });
+    expect(parsed.input).toBe(source);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "L" });
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+    }
+    expect(parsed.fhir[0].maxDosePerPeriod).toBeUndefined();
+  });
+
+  it.each(["intravenous", "IV", "intravenously", ", intravenous"])(
+    "keeps the infusion duration beyond the already recognized IV route %s", route => {
+    const parsed = parsePublicSig("5 mL/h " + route + " for 2 hours");
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h" });
+    expect(clause.route?.code).toBe("47625008");
+    expect(clause.schedule?.duration).toBeUndefined();
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 5, unit: "mL/h" });
+      expect(row.timing?.repeat).toMatchObject({ count: 1, duration: 2, durationUnit: "h" });
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+      expect(row.route?.coding).toContainEqual(expect.objectContaining({ code: "47625008" }));
+    }
+    for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(calculateTotalUnits({ dosage, orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: "d" }).totalUnits).toBe(10);
+  });
+
+  it("resolves an unambiguous saved custom action code through the existing package lookup", () => {
+    const options: ParseOptions = { instructionActionMap: {
+      masticate: { code: "clinic-chew", display: "Masticate" }
+    } };
+    expect(resolveMedicationInstructionAction("clinic-chew", options))
+      .toMatchObject({ code: "clinic-chew", display: "Masticate" });
+    expect(resolveMedicationInstructionAction("masticate", options))
+      .toMatchObject({ code: "clinic-chew", display: "Masticate" });
+    expect(parseInstructionActions("masticate", 0, options)[0]?.predicate.lemma).toBe("clinic-chew");
+    expect(parseInstructionActions("clinic-chew", 0, options)).toEqual([]);
+  });
 });

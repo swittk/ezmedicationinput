@@ -1,4 +1,5 @@
 import { equalStructuredValues } from "../stable-structure";
+import { NEXT_DAY_SCHEDULE_RULE } from "./lexical-classes";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
@@ -586,6 +587,23 @@ export function projectHpsgSignToState(
   const schedule = sign.synsem.head.schedule;
   if (schedule && schedule.attachmentClass !== "procedure") {
     applySchedule(state, schedule, deps);
+  }
+
+  // NEXT day/daypart locates the composed administration positions once.
+  // An independently stated cadence or course keeps its own recurrence; the onset supplies
+  // neither a daily repetition nor an invented event clock.
+  if (schedule?.phaseStartReference === "treatment-day-start" &&
+      schedule.count === undefined && schedule.countMax === undefined &&
+      schedule.frequency === undefined && schedule.frequencyMax === undefined &&
+      schedule.period === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+      !schedule.timingCode && !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
+      !schedule.calendarEvents?.length && schedule.weekdayOrdinal === undefined &&
+      !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
+      schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
+      !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
+    // Existing NEXT-clock and fixed-clock/meal constructions remove mere
+    // qualifiers. Remaining event and clock anchors own distinct positions.
+    state.count = Math.max(1, (schedule.when?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
   }
 
   const clinicalDuration = dose?.attachmentClass !== "procedure"

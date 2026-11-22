@@ -3,7 +3,7 @@ import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, DOSE_TARGET_DAYPART_CLOCK_RANGES, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -1009,13 +1009,13 @@ function refinedDailyCadenceSynsem(
   };
 }
 
-/** A meal relation beside fixed clocks qualifies those same administrations.
+/** A meal relation or matching daypart qualifies the same fixed-clock administrations.
  * Explicit coordination or separate quantified heads retain their event union.
  * @param clockSign Daughter supplying exact clock anchors.
- * @param mealSign Daughter supplying a recognized meal-relative modifier.
+ * @param mealSign Daughter supplying a recognized meal or daypart modifier.
  * @param context Existing source ranges, used only for adjacency/coordination.
  */
-function fixedClockMealAdjunctSynsem(
+function fixedClockEventAdjunctSynsem(
   clockSign: HpsgSign, mealSign: HpsgSign, context: HpsgUnificationContext,
   mealSynsem: HpsgSynsem = mealSign.synsem
 ): HpsgSynsem | undefined {
@@ -1030,7 +1030,16 @@ function fixedClockMealAdjunctSynsem(
     }
     return false;
   };
-  if (!meal.when.every(isMeal)) return undefined;
+  const mealQualification = meal.when.every(isMeal);
+  const daypartQualification = meal.offset === undefined && meal.offsetMin === undefined &&
+    meal.offsetMax === undefined && meal.when.every(event => {
+      const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
+      return range && clock.timeOfDay!.every(value => {
+        const hour = Number(value.slice(0, 2));
+        return hour >= range.startHour && hour < range.endHour;
+      });
+    });
+  if (!mealQualification && !daypartQualification) return undefined;
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
     for (const item of sign.evidence) {
@@ -1087,6 +1096,10 @@ function fixedClockMealAdjunctSynsem(
   }
   const text = context.sourceText(mealStart, mealEnd).trim();
   if (!text) return undefined;
+  // A matching daypart only qualifies the authored clock. Unlike a meal
+  // relation it adds no independent instruction or administration position.
+  if (daypartQualification) return { ...mealSynsem, head: { ...mealSynsem.head,
+    schedule: { ...meal, when: undefined } } };
   const i18n: Record<string, string> = {};
   if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
     for (const locale of ["en", "th"]) {
@@ -1177,14 +1190,14 @@ function scheduleRefinementSynsems(
 ): { left: HpsgSynsem; right: HpsgSynsem; refined: boolean } {
   const nextDayRight = nextDayClockAdjunctSynsem(left, right, context);
   if (nextDayRight) return { left: left.synsem,
-    right: fixedClockMealAdjunctSynsem(left, right, context, nextDayRight) ?? nextDayRight, refined: true };
+    right: fixedClockEventAdjunctSynsem(left, right, context, nextDayRight) ?? nextDayRight, refined: true };
   const nextDayLeft = nextDayClockAdjunctSynsem(right, left, context);
   if (nextDayLeft) return {
-    left: fixedClockMealAdjunctSynsem(right, left, context, nextDayLeft) ?? nextDayLeft,
+    left: fixedClockEventAdjunctSynsem(right, left, context, nextDayLeft) ?? nextDayLeft,
     right: right.synsem, refined: true };
-  const qualifiedRight = fixedClockMealAdjunctSynsem(left, right, context);
+  const qualifiedRight = fixedClockEventAdjunctSynsem(left, right, context);
   if (qualifiedRight) return { left: left.synsem, right: qualifiedRight, refined: true };
-  const qualifiedLeft = fixedClockMealAdjunctSynsem(right, left, context);
+  const qualifiedLeft = fixedClockEventAdjunctSynsem(right, left, context);
   if (qualifiedLeft) return { left: qualifiedLeft, right: right.synsem, refined: true };
   const refinedLeft = refinedDailyCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };

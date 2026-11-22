@@ -533,6 +533,16 @@ export function resolveMedicationInstructionAction(
   return builtin ?? (codeFallback !== undefined ? normalizeCustomDefinition(codeFallback, map![codeFallback]) : undefined);
 }
 
+/** The package lookup accepts saved codes as well as registered surfaces.
+ * Internal lexical callers retain the surface-only default above. */
+export function resolveMedicationInstructionActionWithCodeFallback(
+  surface: string,
+  options?: ParseOptions,
+  includeCode = true
+): MedicationInstructionActionDefinition | undefined {
+  return resolveMedicationInstructionAction(surface, options, includeCode);
+}
+
 /** Resolve a declared administration method by exact code identity. Known
  * codings own the verb even when an external edit leaves stale display text.
  * Unknown identities return undefined for the caller's existing text fallback. */

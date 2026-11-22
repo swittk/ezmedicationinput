@@ -186,7 +186,7 @@ function weightRatePeriodUnit(
     (/^(?:wk|wks|week|weeks)$/u.test(raw) ? FhirPeriodUnit.Week : undefined);
 }
 
-function hasAdministrationCue(context: HpsgClauseContext, before: number): boolean {
+function hasAdministrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false): boolean {
   const first = Math.max(0, before - 8);
   let precedingAmount = false;
   for (let index = before - 1; index >= first; index -= 1) {
@@ -194,7 +194,7 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
     const lower = normalizeTokenLower(token);
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
-    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount;
+    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount || allowPrecedingDose;
     if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
         DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // An article counts as ONE only when it selects a medication unit;
@@ -217,10 +217,10 @@ function durationAfter(
       const next = context.tokens[index + 1];
       // Only a route marker or an optional comma may intervene between a
       // rate and its duration. Never cross into another clinical action.
-      if (/^(?:iv|intravenously)$/u.test(token) ||
+      if (getRouteMeaning(context.tokens[index])?.code === RouteCode["Intravenous route"] ||
           (token === "," && next && available(context, index + 1) &&
             (INFUSION_DURATION_LEADS.has(normalizeTokenLower(next)) ||
-              /^(?:iv|intravenously)$/u.test(normalizeTokenLower(next))))) continue;
+              getRouteMeaning(next)?.code === RouteCode["Intravenous route"]))) continue;
       break;
     }
     const duration = infusionDurationAt(context, index + 1);
@@ -552,7 +552,8 @@ function fixedRate(
   start: number,
   value: number,
   expression: UnitExpression,
-  phraseStart = start
+  phraseStart = start,
+  comparator?: HpsgClinicalQuantityFeature["numerator"]["comparator"]
 ) {
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
@@ -571,8 +572,12 @@ function fixedRate(
   const after = next?.original === "," ? context.tokens[expression.end + 1] : next;
   const hasInfusionRoute = getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
     getRouteMeaning(after)?.code === RouteCode["Intravenous route"];
+  // A bare/approximate rate after a comma completes the preceding volume.
+  // A qualified limit still needs its own rate marker or local head.
+  const commaRate = context.tokens[phraseStart - 1]?.original === "," &&
+    (comparator === undefined || comparator === "~");
   if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart))) return undefined;
+      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart, commaRate))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
     ...(hasSeparateRateMarker ? [phraseStart - 1] : []),
@@ -787,7 +792,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     return [weight];
   }
   const rate = qualifyClinicalSign(context, phraseStart, quantityEnd,
-    fixedRate(context, quantityEnd, value, expression, phraseStart), comparator);
+    fixedRate(context, quantityEnd, value, expression, phraseStart, comparator), comparator);
   if (rate) {
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of rate.tokens) owned.add(token.index);

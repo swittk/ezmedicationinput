@@ -545,7 +545,9 @@ export function scopeSequentialPhaseSemantics(
     const shared = schedules[0];
     const sharedAnchors = schedules.every(schedule =>
       sameSet(schedule?.when, shared?.when) &&
-      sameSet(schedule?.timeOfDay, shared?.timeOfDay)
+      sameSet(schedule?.timeOfDay, shared?.timeOfDay) &&
+      equalStructuredValues(schedule?.clockWindow, shared?.clockWindow) &&
+      equalStructuredValues(schedule?.eventWindow, shared?.eventWindow)
     );
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
@@ -609,7 +611,7 @@ export function scopeSequentialPhaseSemantics(
           timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
           when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
-          timeOfDay: shared.timeOfDay, eventWindow: shared.eventWindow,
+          timeOfDay: shared.timeOfDay, clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
           offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
         };
         // ParserState setters may create own keys with an undefined value;
@@ -620,7 +622,8 @@ export function scopeSequentialPhaseSemantics(
             (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
           }
         }
-        if (schedule.timingReference === "previous") {
+        if (schedule.timingReference === "previous" &&
+            (schedule.when?.length || schedule.timeOfDay?.length || schedule.clockWindow || schedule.eventWindow)) {
           delete schedule.timingReference;
           // Only remove the exact typed reference advice after it is resolved.
           // Without a predecessor the source preference stays readable/editable.
@@ -647,7 +650,8 @@ export function scopeSequentialPhaseSemantics(
         }
         continue;
       }
-      if (!schedule.boundsStart && !schedule.phaseStartReference && start) {
+      if (!schedule.boundsStart && !schedule.phaseStartReference &&
+          schedule.treatmentStartOffsetDays === undefined && start) {
         schedule.boundsStart = start;
         fields.push('boundsStart');
         materializeAnchoredScheduleWindow(schedule);
