@@ -74,6 +74,7 @@ import {
 } from "./hpsg/lexical-classes";
 import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, FREQUENCY_SIMPLE_WORDS } from "./hpsg/timing-lexicon";
 import {
+  cloneMedicationInstructionConceptComponents,
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept,
   getMedicationInstructionConcept
@@ -353,7 +354,7 @@ function internalArgument(
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
-    ...(definition.components?.length ? { components: definition.components } : {}),
+    ...(definition.components?.length ? { components: cloneMedicationInstructionConceptComponents(definition.components) } : {}),
     coding: preferredCoding,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) }
@@ -1182,6 +1183,12 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let targetRelation = relation;
   let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
+    // The first complement can already be a complete clock daughter.
+    if (relationHasGrammarFeature(targetRelation, "timeComplement") &&
+        clockArgumentFromParts(parts, targetIndex + 1, segmentEnd, input)) {
+      tailRelationIndex = targetIndex;
+      break;
+    }
     const nominal = argumentFromParts(
       parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
     );
@@ -1197,9 +1204,7 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
     targetRelation = actionArgumentRelation(key(parts[targetIndex]));
     // Temporal and conditional daughters are composed by the shared frame parser.
     if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
-        relationHasGrammarFeature(targetRelation, "conditionalTail") ||
-        relationHasGrammarFeature(targetRelation, "timeComplement") &&
-          clockArgumentFromParts(parts, targetIndex + 1, segmentEnd, input)) {
+        relationHasGrammarFeature(targetRelation, "conditionalTail")) {
       tailRelationIndex = targetIndex;
       break;
     }
@@ -3818,10 +3823,11 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   let targetArgument: AdviceArgument | undefined;
   let materialArgument: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
+    if (arg.role === AdviceArgumentRole.Time) continue;
     if (arg.relation && arg.relation === c.frame.relation) {
       targetArgument ??= arg;
     } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
-        arg.role !== AdviceArgumentRole.Time && arg.role !== AdviceArgumentRole.Duration &&
+        arg.role !== AdviceArgumentRole.Duration &&
         arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
       materialArgument ??= arg;
     }
@@ -3837,7 +3843,7 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   if (relation && relationTarget) destinations.push(
     joinLocalizedTokens(c.locale, [relation, relationTarget]));
   for (const arg of c.frame.args) {
-    if (arg === targetArgument || !arg.relation ||
+    if (arg === targetArgument || arg.role === AdviceArgumentRole.Time || !arg.relation ||
         relationHasSemanticClass(arg.relation, "temporal") ||
         relationHasGrammarFeature(arg.relation, "conditionalTail")) continue;
     const text = translatedArgument(arg, c.locale);
@@ -3852,12 +3858,15 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const material = materialValue
     ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
-  return renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
+  const text = renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
     amount: c.amount,
     material,
     destination: destination ? `${profile.tokenSeparator}${destination}` : undefined
   });
+  // The selected Time has its locale phrase, independently of the destinations.
+  if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+  return c.time ? joinLocalizedTokens(c.locale, [text, c.time]) : text;
 };
 
 const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, ActionRealizer>> = {
@@ -4400,7 +4409,7 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
       const event = ownsEvents ? argumentEventTiming(arg) : undefined;
       // A newly added structured clock does not take ownership of an
       // independent graph time. Identical clocks need only one display.
-      const mirrorsClock = clock && hasClocks && schedule!.timeOfDay!.some(time =>
+      const mirrorsClock = clock && !(arg.relation ?? frame.relation) && hasClocks && schedule!.timeOfDay!.some(time =>
         (time.length === 5 ? time + ":00" : time.replace(/\.0+$/u, "")) ===
         (arg.normalized!.length === 5 ? arg.normalized + ":00" : arg.normalized!.replace(/\.0+$/u, "")));
       if (clock && (ownsClocks || mirrorsClock) || event &&

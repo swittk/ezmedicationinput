@@ -643,14 +643,20 @@ describe("source-less R6 treatment-relative step display", () => {
     for (const text of [english, strictEnglish]) {
       const split = text.indexOf("From " + secondStart + " days after treatment start");
       expect(text.slice(0, split).trim()).toMatch(phaseDose.en[0]);
-      const second = text.slice(split).split(" No doses ")[0].trim();
-      expect(second).toMatch(phaseDose.en[1]);
+      const [second, pause, ...extra] = text.slice(split).trim().split(" No doses ");
+      expect(second.trim()).toMatch(phaseDose.en[1]);
+      expect(extra).toEqual([]);
+      expect(pause).toBe(secondStart === 14
+        ? "from 7 days after treatment start until 14 days after treatment start." : undefined);
     }
     for (const text of [thai, strictThai]) {
       const split = text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา");
       expect(text.slice(0, split).trim()).toMatch(phaseDose.th[0]);
-      const second = text.slice(split).split(" งดยา")[0].trim();
-      expect(second).toMatch(phaseDose.th[1]);
+      const [second, pause, ...extra] = text.slice(split).trim().split(" งดยา");
+      expect(second.trim()).toMatch(phaseDose.th[1]);
+      expect(extra).toEqual([]);
+      expect(pause).toBe(secondStart === 14
+        ? "ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง14 วันหลังเริ่มการรักษา." : undefined);
     }
     const source = "keep the clinician-authored dosing text exactly";
     const authored = { ...course, renderedInstruction: source };
@@ -738,14 +744,14 @@ describe("round38 implicit successor with calendar end", () => {
       const thaiStart = exactPredecessor ? "ตั้งแต่7 วันหลังเริ่มการรักษา" : "หลังขั้นตอนก่อนหน้า";
       expect(english.indexOf(englishStart)).toBeGreaterThanOrEqual(0);
       expect(thai.indexOf(thaiStart)).toBeGreaterThanOrEqual(0);
-      const englishSuccessor = english.slice(english.indexOf(englishStart));
-      const thaiSuccessor = thai.slice(thai.indexOf(thaiStart));
+      const englishSuccessor = english.slice(english.indexOf(englishStart)).trim();
+      const thaiSuccessor = thai.slice(thai.indexOf(thaiStart)).trim();
       expect(englishSuccessor).toMatch(exactPredecessor
-        ? /^From 7 days after treatment start until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\./u
-        : /^After the previous phase; Until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\./u);
+        ? /^From 7 days after treatment start until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\.$/u
+        : /^After the previous phase; Until 1 month after treatment start: (?:Take|Use) 2 tablets once daily\.$/u);
       expect(thaiSuccessor).toMatch(exactPredecessor
-        ? /^ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\./u
-        : /^หลังขั้นตอนก่อนหน้า; จนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\./u);
+        ? /^ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\.$/u
+        : /^หลังขั้นตอนก่อนหน้า; จนถึง1 เดือนหลังเริ่มการรักษา: ใช้ครั้งละ 2 เม็ด วันละครั้ง\.$/u);
       if (exactPredecessor) expect(english).not.toContain("After the previous phase");
     }
   });

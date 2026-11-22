@@ -242,18 +242,18 @@ export type {
 export {
   MEDICATION_INSTRUCTION_ACTION_SYSTEM,
   buildMedicationInstructionActionCodeSystem,
-  getMedicationInstructionAction,
-  listMedicationInstructionActions,
+  getMedicationInstructionActionCopy as getMedicationInstructionAction,
+  listMedicationInstructionActionCopies as listMedicationInstructionActions,
   resolveMedicationInstructionActionWithCodeFallback as resolveMedicationInstructionAction,
-  resolveMedicationInstructionSequenceAction
+  resolveMedicationInstructionSequenceActionCopy as resolveMedicationInstructionSequenceAction
 } from "./instruction-action-terminology";
 export type { MedicationInstructionActionCodeSystem } from "./instruction-action-terminology";
 export {
   MEDICATION_INSTRUCTION_CONCEPT_SYSTEM,
   buildMedicationInstructionConceptCodeSystem,
-  getMedicationInstructionConcept,
-  listMedicationInstructionConcepts,
-  resolveMedicationInstructionConcept
+  getMedicationInstructionConceptCopy as getMedicationInstructionConcept,
+  listMedicationInstructionConceptCopies as listMedicationInstructionConcepts,
+  resolveMedicationInstructionConceptCopy as resolveMedicationInstructionConcept
 } from "./instruction-concept-terminology";
 export type { MedicationInstructionConceptCodeSystem } from "./instruction-concept-terminology";
 export {

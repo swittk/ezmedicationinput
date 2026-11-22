@@ -540,7 +540,8 @@ export function resolveMedicationInstructionActionWithCodeFallback(
   options?: ParseOptions,
   includeCode = true
 ): MedicationInstructionActionDefinition | undefined {
-  return resolveMedicationInstructionAction(surface, options, includeCode);
+  const definition = resolveMedicationInstructionAction(surface, options, includeCode);
+  return definition ? cloneDefinition(definition) : undefined;
 }
 
 /** Resolve a declared administration method by exact code identity. Known
@@ -659,6 +660,26 @@ export function getMedicationInstructionAction(
 
 export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {
   return DEFAULT_ACTIONS;
+}
+
+/** Package vocabulary values can be customized without changing parser indexes.
+ * Internal lexical lookups above keep their shared, allocation-free entries. */
+export function getMedicationInstructionActionCopy(
+  code: string, options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  const definition = getMedicationInstructionAction(code, options);
+  return definition ? cloneDefinition(definition) : undefined;
+}
+
+export function listMedicationInstructionActionCopies(): MedicationInstructionActionDefinition[] {
+  return DEFAULT_ACTIONS.map(cloneDefinition);
+}
+
+export function resolveMedicationInstructionSequenceActionCopy(
+  surface: string, options?: ParseOptions
+): MedicationInstructionActionDefinition | undefined {
+  const definition = resolveMedicationInstructionSequenceAction(surface, options);
+  return definition ? cloneDefinition(definition) : undefined;
 }
 
 /** A CodeSystem snapshot is a public value, not mutable global schema.

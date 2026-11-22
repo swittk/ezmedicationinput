@@ -1079,7 +1079,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         const end = probeEnd(site.rightIndex);
         const probe = evidence.probe(start, end);
         maximumOwnsSlash = probe.clause.evidence.some(item =>
-          (item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 &&
+          ((item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 ||
+            item.rule === 'hpsg.lex.instruction.maximumPerDaypart') &&
           item.spans.some(span => probe.start + span.start <= site.start && probe.start + span.end >= site.end));
       }
       if (maximumOwnsSlash) proposals.push(keep('structure.maximum-dose-period', 900,

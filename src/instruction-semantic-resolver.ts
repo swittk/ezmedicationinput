@@ -12,6 +12,7 @@ import {
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import {
+  cloneMedicationInstructionConceptComponents,
   medicationInstructionConceptCodings,
   resolveMedicationInstructionConcept
 } from "./instruction-concept-terminology";
@@ -147,7 +148,7 @@ function buildConceptArgument(
     text: sourceText,
     normalized: definition.display,
     conceptId: definition.code,
-    ...(definition.components?.length ? { components: definition.components } : {}),
+    ...(definition.components?.length ? { components: cloneMedicationInstructionConceptComponents(definition.components) } : {}),
     coding: preferred,
     codings,
     i18n: { en: definition.display, ...(definition.i18n ?? {}) },

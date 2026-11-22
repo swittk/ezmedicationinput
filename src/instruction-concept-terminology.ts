@@ -95,7 +95,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
     : undefined;
 }
 
-function cloneComponents(
+export function cloneMedicationInstructionConceptComponents(
   components: MedicationInstructionConceptDefinition["components"]
 ): MedicationInstructionConceptDefinition["components"] {
   return components?.map(component => ({
@@ -116,7 +116,7 @@ function cloneDefinition(
     aliases: definition.aliases ? [...definition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(definition.localeAliases),
     coding: cloneCoding(definition.coding),
-    components: cloneComponents(definition.components),
+    components: cloneMedicationInstructionConceptComponents(definition.components),
     externalCodings: definition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -131,7 +131,7 @@ function normalizeDefinition(sourceDefinition: ConceptSource): MedicationInstruc
     aliases: sourceDefinition.aliases ? [...sourceDefinition.aliases] : undefined,
     localeAliases: cloneLocaleAliases(sourceDefinition.localeAliases),
     coding: cloneCoding(sourceDefinition.coding),
-    components: cloneComponents(sourceDefinition.components),
+    components: cloneMedicationInstructionConceptComponents(sourceDefinition.components),
     externalCodings: sourceDefinition.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -150,7 +150,7 @@ function normalizeCustomDefinition(
     aliases: Array.from(new Set([surface, ...(input.aliases ?? [])])),
     localeAliases: cloneLocaleAliases(input.localeAliases),
     coding: cloneCoding(input.coding),
-    components: cloneComponents(input.components),
+    components: cloneMedicationInstructionConceptComponents(input.components),
     externalCodings: input.externalCodings?.map((coding) => cloneCoding(coding)!)
   };
 }
@@ -199,6 +199,25 @@ export function getMedicationInstructionConcept(
 
 export function listMedicationInstructionConcepts(): MedicationInstructionConceptDefinition[] {
   return DEFAULT_CONCEPTS;
+}
+
+/** Public vocabulary values are detached; lexical resolution stays shared. */
+export function getMedicationInstructionConceptCopy(
+  code: string, system?: string
+): MedicationInstructionConceptDefinition | undefined {
+  const definition = getMedicationInstructionConcept(code, system);
+  return definition ? cloneDefinition(definition) : undefined;
+}
+
+export function listMedicationInstructionConceptCopies(): MedicationInstructionConceptDefinition[] {
+  return DEFAULT_CONCEPTS.map(cloneDefinition);
+}
+
+export function resolveMedicationInstructionConceptCopy(
+  surface: string, options?: ParseOptions
+): MedicationInstructionConceptDefinition | undefined {
+  const definition = resolveMedicationInstructionConcept(surface, options);
+  return definition ? cloneDefinition(definition) : undefined;
 }
 
 /** The public CodeSystem is freshly returned, but its published concepts

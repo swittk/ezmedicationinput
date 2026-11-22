@@ -496,6 +496,14 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
 
 const EN_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "en",
+  selectLexicalRealization(input) {
+    if (!input.time || (input.frame.predicate.realizer ?? input.definition?.realizer) !== "amount-material-destination")
+      return input;
+    const relation = input.timeRelation ?? input.frame.relation;
+    const prefix = relation && (relationHasSemanticClass(relation, "temporal") || relation === AdviceRelation.In)
+      ? localizeAdviceRelation(relation, input.locale) ?? relation : "at";
+    return { ...input, time: `${prefix} ${input.time}` };
+  },
   render: renderEnglish,
   renderNegated(c, completeAction) {
     const object = c.site ?? c.theme ?? c.substance ?? c.material;
@@ -557,6 +565,12 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
 const TH_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "th",
   selectLexicalRealization(input) {
+    if (input.time && (input.frame.predicate.realizer ?? input.definition?.realizer) === "amount-material-destination") {
+      const relation = input.timeRelation ?? input.frame.relation;
+      const prefix = relation && (relationHasSemanticClass(relation, "temporal") || relation === AdviceRelation.In)
+        ? localizeAdviceRelation(relation, input.locale) ?? relation : " เวลา ";
+      input = { ...input, time: `${prefix}${input.time}` };
+    }
     // Whole-unit manner agrees with the already typed dosage form.
     // For solid tablets/capsules, use the registered Thai unit classifier;
     // no English token matching and no new quantity is inferred.
