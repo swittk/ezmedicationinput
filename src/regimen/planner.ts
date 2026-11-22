@@ -32,7 +32,7 @@ import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from 
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from '../hpsg/signature';
 import { parseInstructionActions } from '../instruction-graph';
-import { resolveMedicationInstructionAction } from '../instruction-action-terminology';
+import { getMedicationInstructionAction, resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
 import { grammaticalProposals, arbitrate, hasAdministrationAdjunct } from './grammar';
@@ -485,7 +485,7 @@ class EvidenceContext {
         if (!left || action.span.end > left.span.end) left = action;
       } else if (action.span.start >= range.end && (!right || action.span.start < right.span.start)) right = action;
     }
-    return Boolean(left && right && resolveMedicationInstructionAction(left.predicate.lemma, this.options)?.procedural &&
+    return Boolean(left && right && getMedicationInstructionAction(left.predicate.lemma, this.options)?.procedural &&
       Math.max(0, range.start - left.span.end) <= 2 && Math.max(0, right.span.start - range.end) <= 2);
   }
 
@@ -622,7 +622,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     for (const site of sites) {
       if (site.kind !== 'adjacent-dose') continue;
       const owner = frames.find(frame => {
-        const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+        const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
         return definition?.procedural === true && definition.definesDose !== true &&
           frame.span.start < site.start && site.start < frame.span.end &&
           // An action frame may have an opaque tail past an explicit
@@ -777,7 +777,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (site.kind !== 'comma' ||
           explicitDoseLexicalEnd(tokens, site.rightIndex, options) !== undefined) continue;
       const internal = actionFrames.some(frame => {
-        const action = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+        const action = getMedicationInstructionAction(frame.predicate.lemma, options);
         // An administration frame may retain an opaque text argument while
         // HPSG licenses several complete schedule daughters within it. That
         // text is not a nominal-list constituent and cannot veto their seams.
@@ -1070,7 +1070,20 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       proposals.push(keep('boundary.punctuation-is-not-a-regimen', 0, 'punctuation', site.surface));
     } else if (site.kind === 'hard' || site.kind === 'slash') {
       const right = tokens[site.rightIndex];
-      if (site.kind === 'hard' || right && (right.kind === LexKind.Number || CLAUSE_LEAD_WORDS.has(lexeme(right)))) {
+      let maximumOwnsSlash = false;
+      if (site.kind === 'slash' && right?.kind === LexKind.Number &&
+          normalizeUnit(lexeme(tokens[site.tokenIndex - 1]), options)) {
+        // A spaced denominator belongs to the selected typed maximum sign.
+        // Probe only the ambiguous unit/slash/number shape and reuse its
+        // cached clause evidence instead of parsing another limit grammar.
+        const end = probeEnd(site.rightIndex);
+        maximumOwnsSlash = evidence.probe(start, end).clause.evidence.some(item =>
+          (item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 &&
+          item.spans.some(span => start + span.start <= site.start && start + span.end >= site.end));
+      }
+      if (maximumOwnsSlash) proposals.push(keep('structure.maximum-dose-period', 900,
+        'maximum-constituent.owns-slash', true));
+      else if (site.kind === 'hard' || right && (right.kind === LexKind.Number || CLAUSE_LEAD_WORDS.has(lexeme(right)))) {
         proposals.push({ action: 'split', rule: 'boundary.explicit-delimiter', priority: 200, relation: 'independent',
           evidence: [{ feature: 'delimiter', value: site.surface }] });
       }
@@ -1097,7 +1110,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           if (prefix.hasDose && !prefix.hasSchedule) {
             const onsetEnd = probeEnd(nextBoundary.rightIndex);
             const onset = evidence.probe(nextBoundary.start, onsetEnd);
-            if (onset.hasSchedule && !onset.hasDose && !onset.method) end = onsetEnd;
+            if ((onset.hasSchedule || onset.clause.schedule?.treatmentStartOffsetDays !== undefined ||
+                onset.clause.schedule?.phaseStartReference) && !onset.hasDose && !onset.method) end = onsetEnd;
           }
         }
         const rightUnit = hasUnit(site.rightIndex, end);
@@ -1147,7 +1161,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             // action as procedural suppressed legitimate independently dosed
             // "inhale 2 puffs OR nebulize 2.5 mg" alternatives.
             return rightActions().some((frame) => {
-              const definition = resolveMedicationInstructionAction(frame.predicate.lemma, options);
+              const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
               return definition?.procedural === true && definition.definesDose !== true;
             });
           },

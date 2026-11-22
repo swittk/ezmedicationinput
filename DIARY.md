@@ -12941,3 +12941,122 @@ Representative accepted measurements (microseconds per call):
 Reports are retained under ezmed14-round37: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json and the complete 41-item ledger.json. The seven prior non-equivalent scenarios remain exactly unchanged.
 
 The PR remains at 100 changed paths with no new repository files. GitHub access is CLI-only. No comment or additional full-review request was posted. Commit and non-force push target the existing PR branch.
+
+## 2026-11-22 — PR #14 round 38: scoped interchange, execution and meaning
+
+Reviewed HEAD a6ed242bc273b3bebc00a694df8987c5b1b811a6 against review 6011014758 and overflow 7075809545. The complete inventory contains 42 findings: 26 major, 15 minor and one trivial. Three workers handled interchange, execution and meaning; root integrated the implementation and reviewed the production changes. A separate read-only audit checked the complete source-surface/stored-code caller separation and duration interchange boundary. GitHub operations use the CLI only. This batch adds no inline review threads, top-level comments or full-review requests.
+
+The disposition is **34 production fixes, six stronger clinical/architecture oracles, one documentation correction and one declined finding**. The requirement remains supported public prescriptions and external wire edits. Private native/model mutation, older R6 compatibility, generic schema trimming and a public editor lifecycle remain outside the contract.
+
+### Ownership and family corrections
+
+- Scoped safety and action reconciliation preserve independent step ownership after unrelated header edits. Existing historical component matching respects explicit differing IDs. Singular R5 maxima select an exact comparable ceiling before qualified alternatives, preserve every original quantity, and retain the identity of the cap projected by historical writers. Only the editable external-R5 safety baseline is detached; no native defensive-cloning lifecycle is added.
+- Displaced condition and rate modifiers remain source annotations. An explicit native-condition clear on the external editable row differs from an absent field. PRN spatial edits invalidate stale source replay within the existing concept-extension walk; phase and restriction facts are observed in that same walk. The existing fresh primitive dose proof moved to its shared replay owner so a live mg/kg edit cannot revive old source text after conversion and saving.
+- Administration duration is a genuine pair of independently authored quantities. The native recurrence and compiler retain both endpoints, qualifiers, display labels, IDs and annotations. R5 and current R6 lowering/raising use the existing typed marker. A live core upper edit updates or creates high without replacing low or losing wrapper identity. Execution interprets compatible units internally; storage and previews do not convert 90 minutes into 1.5 hours or 2 hours into 120 minutes.
+- Root's integration audit found that retaining raw duration labels exposed a calculation gap: uncoded minutes/hours were not interpreted, and an unknown endpoint could disappear from the execution range. The existing wire duration-unit interpreter moves intact to the shared unit lexicon and serves both import and execution. Supplied unexecutable endpoints remain retained and use the established unresolved-rate calculation error. Exact versus variable completion is kept distinct; no guessed successor clock is introduced.
+- HPSG owns a complete relative-ending constituent such as until next morning. The existing typed unresolved-adjunct path retains the whole phrase in both fresh suggestions and keeps its source editable/lintable. The active instruction survives R5/R6 saves and complete long previews; it does not become a site named next, a recurring morning event or an invented absolute end. This does not redefine the general compact-short policy for arbitrary additional instructions. Numeric maximum windows preserve the authored denominator, including 10 mg/12h, spaced slash forms and leading decimal periods; 24 h stays 24 h. The regimen planner uses existing cached clause evidence only for the rare unit/slash/number candidate, so independent slash-separated prescriptions still split. Leading-dot infusion durations retain 0.5 h. A preceding completed dose stops an earlier infusion head from licensing a later maximum as an administration rate.
+- Onset-only successors retain their phase without changing the general hasSchedule contract. Backward clock pairs after then remain sequential. Civil next-day successors fence all coordinated predecessors at the actual civil boundary. Fractional day/week repetitions use elapsed spacing; whole-day/week clocks remain civil. A known stage end fences bare daily-code expansion before scheduling/condition work. In the independently instrumented repeated-course fixture, the same 84 returned doses require 56 relevant condition evaluations instead of 280,000; this operation-count evidence is separate from the acceptance timing benchmark. Recorded administrations reserve their full civil occurrence bucket while rolling quantity caps still use actual timestamps.
+- A strict range upper endpoint is an unattainable supremum under the existing numeric supply contract. It is retained unchanged; an uncapped request raises the established error, and a smaller closed ceiling remains usable. Inactive zero contributions do not erase volume, ingredient or container estimates; nonzero incompatible contributors still invalidate them. README now documents the existing thrown-error contract.
+- Selected Time relations reach every relevant realizer family, including negative branches. Mix keeps the medication amount with its Theme and a distinct water amount with its Substance. A successor with only a calendar-unit end still shows its predecessor dependency. Empty/unrelated action maps preserve supplied Thai method translations. Coding getters retain identity and display, including Coding.id through graph storage. Maximum-only daily frequency is visible in the English short preview; explicitly supplied period 1 retains its existing /1d form. Full-suite integration also verifies that Dissolve's unquantified Object already containing its authored Amount does not receive a duplicate dose, including current-dose edits and cold saves.
+- Source-language action lookup now matches registered surfaces/aliases; stored typed predicate lookup matches exact code identity. The semantic proposal boundary explicitly opts into its documented surface/code input contract. The independent caller audit found no missed typed-frame caller and no additional repeated configured-map walks. Grammar and realization continue to use their existing lexical/locale owners, preserving the direction toward language packs without creating another language layer.
+
+### Evidence, scope and test consolidation
+
+The reviewed and prior builds were frozen before reproduction. Meaning's independent probes fail 16/16 on reviewed a6ed242 and pass on current source. Interchange records before/current evidence for all 11 production findings. Master does not have the same full structured quantity/cap contract in every probe; those cases are not presented as equivalent causal regressions. The earlier infusion-head example already selected the correct public maximum before this round: the fixed defect is the inappropriate competing lexical rate sign, not an invented failed public result.
+
+Finding #15 is declined. Its elapsed-overlap reproducer constructs unsupported private parser state. Supported day-6/day-8 short-successor prescriptions already preserve the later phase; independent public controls now make that boundary explicit. No private mutation repair layer is added.
+
+The stronger oracles bind actual quantity units and comparators, reject numeric substring matches such as 2 matching 12, require stale cadence text to disappear, detect dynamic adapter imports, and bind each expected dose to its civil timestamp. Prescriber-owned range endpoints and qualifiers remain active; there is no conversion for wire conformance.
+
+Six test files introduced by this PR were consolidated into existing suites, as authorized by the earlier diary direction, to free five paths for the correct existing source owners and one for an existing clinical oracle whose 24-hours-to-1-day expectation contradicted the user's preservation rule. That oracle now explicitly expects period 24 and unit h; all other rows keep their authored periods. The PR remains at exactly **100 changed paths** and introduces no new repository file this round. Independent audit verified all **187 static case-registration sites, 708 expect calls and 156 import bindings**; parameterized tables and generation loops are also preserved. The original non-import bodies are identical after reversing two recorded flatMap-to-ES6-loop substitutions required by the destination's strict ES6 type check. No case/assertion was removed or weakened and no suite is registered twice.
+
+Shipping .fhir remains R5. .fhirNext and R6 import retain the pinned current R6 contract. The internal clinical model remains free to change. Actual downstream R5 conversion and save/reopen helpers are part of the final gates; no downstream migration is part of this work.
+
+### Complete review disposition
+
+| Finding | Severity | Decision | Subject |
+|---|---|---|---|
+| 1 | Major | fixed | Keep lifted step limits scoped after an unrelated header modifier edit. |
+| 2 | Major | fixed | Keep an unchanged step action on its step when only the course limit changes. |
+| 3 | Major | fixed | Keep an approximate limit from replacing the exact R5 maximum. |
+| 4 | Major | fixed | Detach the saved safety snapshot from the editable Quantity. |
+| 5 | Major | fixed | Do not pair historical components with a different explicit ID. |
+| 6 | Major | fixed | Preserve every displaced condition modifier on edit. |
+| 7 | Major | fixed | Distinguish an explicit condition clear from an absent native condition. |
+| 8 | Major | fixed | Retain the old rate modifier when an R5 edit replaces it. |
+| 9 | Major | fixed | Invalidate warm source replay after a PRN location edit. |
+| 10 | Major | fixed | Check the live dose before replaying weight-based source text. |
+| 11 | Major | fixed | Preserve both endpoints of a mixed-unit administration duration. |
+| 12 | Major | fixed | Keep the authored end of `until next morning` in the course output. |
+| 13 | Major | fixed | Preserve the authored window in `max 10 mg/12h`. |
+| 14 | Major | fixed | Preserve exact durations written as `.5h`. |
+| 15 | Major | declined | Keep the successor when an authored onset overlaps the preceding phase. |
+| 16 | Major | fixed | Admit onset-only treatment-relative schedules to the seam extension. |
+| 17 | Major | fixed | Keep the authored order for clock-only `then` continuations. |
+| 18 | Major | fixed | Bound multi-member predecessor phases at the successor start. |
+| 19 | Major | fixed | Do not report coverage for a meal relation the default realizer did not print. |
+| 20 | Major | fixed | Keep the live Mix dose separate from the water volume. |
+| 21 | Major | fixed | Keep the predecessor dependency when only the successor’s end is known. |
+| 22 | Major | fixed | Keep the supplied Thai method translation when the action map does not override it. |
+| 23 | Major | fixed | Do not report an excluded range endpoint as attainable supply. |
+| 24 | Major | fixed | Keep elapsed spacing when a fractional-day repeat has an authored clock. |
+| 25 | Major | fixed | Apply the known stage end before expanding a bare daily timing code. |
+| 26 | Major | fixed | Reserve the recorded occurrence before replaying that civil day. |
+| 27 | Minor | documented | Document the ranged-supply exceptions. |
+| 28 | Minor | oracle-strengthened | Assert the weight-based unit in the divided-dose test. |
+| 29 | Minor | fixed | Correct a stale EMA display when the code changes to equality. |
+| 30 | Minor | fixed | Restoring a comparator can activate a superseded primitive ID. |
+| 31 | Minor | oracle-strengthened | Require an exact second-phase dose in both languages. |
+| 32 | Minor | oracle-strengthened | Check the comparator on the active R5 maximum. |
+| 33 | Minor | fixed | Compare custom method definitions by identity, not object reference. |
+| 34 | Minor | fixed | Stop an earlier infusion head from licensing a later comparator limit. |
+| 35 | Minor | oracle-strengthened | Make the architecture test detect dynamic adapter imports. |
+| 36 | Minor | oracle-strengthened | Assert that the old cadence disappears after the edit. |
+| 37 | Minor | fixed | Preserve coding identity fields supplied through getters. |
+| 38 | Minor | fixed | Keep configured action surfaces separate from stored action codes. |
+| 39 | Trivial | oracle-strengthened | Add a cutover case whose order clock differs from the query clock. |
+| 40 | Minor | fixed | Lexical fallback ignores the argument's relation for bare meal words. |
+| 41 | Minor | fixed | Keep the daily maximum in the English short preview. |
+| 42 | Minor | fixed | Keep container estimates when an inactive component contributes zero. |
+
+
+### Validation on the frozen candidate
+
+- **6,211 source tests in 49 files passed**, including the configured strict ES6 typecheck.
+- **4 distribution tests passed** after ESM, CommonJS and declaration builds.
+- **29 actual downstream R5 storage roundtrips passed**, with complete JSON equality through conversion and save/reopen. The six new cases cover independently labelled duration endpoints, compact 12 h and 24 h maxima, a spaced 12 h maximum, leading-decimal infusion duration, and a relative ending phrase. Independent clinical checks verify quantities, units, unresolved timing and a 40 mL duration-range maximum. The existing 23 include historical/current maximum edit ownership.
+- The original Thai parallel case remains 2 shipping R5 rows; the English taper remains 4. No downstream application code or database changed.
+- Source, built candidate, exact-master build and benchmark harness remained frozen throughout their gates.
+
+Source SHA-256: 0eeb7831a4c3191a508eede6b660b95b44ff48fe00caeda94279c02dec73db47. Built ESM SHA-256: 948d46b10ee89a95fe9392a61ac21c29ae8b1342f42d689f49b7f080d9b7c3f3. Exact master build SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Harness SHA-256: 68eff00076248fe44cbe7e211d00570e3e002c91d4fde0942bbbc1b654d49d95 (git blob 251c6db2a138fc615d3f55314eaff43ccfa5b912).
+
+### Performance and delivery
+
+The exact-master comparison covers **117/117 public functions**, with **181 paired scenarios: 174 equivalent and the same seven established non-equivalent cases**. All 174 equivalent scenarios meet the per-scenario 4% ceiling after prescribed confirmations. Six candidate-only APIs have seven separate measurements. No exclusions or measurement errors were added.
+
+The full run used 22 balanced paired rounds at 35 ms per batch. Every initial flag was confirmed on the identical frozen builds/harness with 72 rounds at 140 ms, reversed first order and 36 pairs starting each way. Accepted percentages are median-log paired ratios; neither APIs nor scenarios are averaged together. The unchanged harness retains the 16 deterministic order-bias/threshold controls from round 36.
+
+Highest accepted change: **+3.591%**, for registerAdviceLocaleAdapter.
+
+| Initially flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| formatSig/R5/en | +10.723% | -4.764% |
+| listSupportedBodySiteGrammar | +4.992% | +1.337% |
+
+Representative accepted measurements (microseconds per call):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| parseSig/ordinary | 1747.966 | 1674.104 | -2.944% |
+| parseSig/thai | 6492.462 | 6169.673 | -4.449% |
+| parseSig/eye | 6998.113 | 6910.187 | -0.985% |
+| parseSig/staged | 9312.633 | 9205.079 | -1.522% |
+| formatSig/R5/en | 14.656 | 13.972 | -4.764% |
+| formatSig/R6/en | 25.524 | 24.878 | +0.019% |
+| fromFhirDosage/en | 19.586 | 19.936 | +2.943% |
+| fromFhirDosage/th | 40.115 | 38.918 | -1.155% |
+| calculateTotalUnits/scalar | 328.475 | 41.908 | -87.308% |
+
+Reports are retained under ezmed14-round38: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json and the complete 42-item ledger.json. The seven prior non-equivalent scenarios remain exactly unchanged.
+
+The PR remains at 100 changed paths with no new repository files. GitHub access is CLI-only. No comment or additional full-review request was posted. Commit and non-force push target the existing PR branch.

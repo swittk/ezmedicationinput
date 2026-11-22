@@ -201,7 +201,7 @@ function validateActionProposal(
   options?: ParseOptions
 ): AdviceFrame | undefined {
   if (!validRelativeRange(proposal.range, opaque.text.length)) return undefined;
-  const definition = resolveMedicationInstructionAction(proposal.action, options);
+  const definition = resolveMedicationInstructionAction(proposal.action, options, true);
   if (!definition?.procedural) return undefined;
   if (
     proposal.confidence !== undefined &&

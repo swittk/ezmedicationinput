@@ -176,23 +176,62 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
     if (!saved?.step || !current) return undefined;
     const sameAction = current.ifExceeded === saved.projected.ifExceeded;
     const sameModifiers = equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension);
-    if (!sameModifiers) return undefined;
     const unchanged = equalStructuredValues(current.doseLimit, saved.projected.doseLimit);
     // Header Element metadata follows the policy that supplied the projection.
     // Changes to a different limit do not widen the surviving phase limits.
     let course = saved.course, step = saved.step;
-    if (!unchanged || !sameAction) {
+    if (!unchanged || !sameAction || !sameModifiers) {
       const reconciled = reconcileSafetyScopes(current, saved, true);
       // An edited header limit remains the current header's authority. Only
       // unchanged surviving phase limits can reuse the previous phase scope.
-      if (!reconciled.stepLimits.size) return undefined;
+      const independentStepAction = !saved.step.doseLimit?.length && reconciled.step?.ifExceeded !== undefined;
+      if (!reconciled.stepLimits.size && !independentStepAction) return undefined;
       step = reconciled.step!;
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       if (!saved.course) step = { ...step, ...metadata };
       const limits = current.doseLimit?.filter(limit => !reconciled.stepLimits.has(limit));
       const action = sameAction || current.ifExceeded === reconciled.step?.ifExceeded
         ? reconciled.course?.ifExceeded : current.ifExceeded;
-      const modifiers = sameModifiers ? reconciled.course?.modifierExtension : current.modifierExtension;
+      let modifiers = reconciled.course?.modifierExtension;
+      if (!sameModifiers) {
+        const original = saved.projected.modifierExtension;
+        if (!original?.length) modifiers = current.modifierExtension;
+        else {
+          // Only changed external modifier lists need matching. An unchanged
+          // phase qualifier keeps its phase owner; new header qualifiers stay
+          // on the header, and removed qualifiers are never revived.
+          const groups = new Map<number, Array<{ value: FhirExtension; count: number }>>();
+          for (const value of original) {
+            const hash = hashStructuredValue(value);
+            let bucket = groups.get(hash);
+            if (!bucket) groups.set(hash, bucket = []);
+            const group = bucket.find(item => equalStructuredValues(item.value, value));
+            if (group) group.count++;
+            else bucket.push({ value, count: 1 });
+          }
+          const retained: FhirExtension[] = [], added: FhirExtension[] = [];
+          for (const value of current.modifierExtension ?? []) {
+            const group = groups.get(hashStructuredValue(value))?.find(item =>
+              item.count > 0 && equalStructuredValues(item.value, value));
+            if (group) { group.count--; retained.push(value); }
+            else added.push(value);
+          }
+          if (saved.course) {
+            // A merged course/step modifier is one scoped projection. Its
+            // unchanged wrapper proves both original owners independently.
+            const keepsScope = retained.length === original.length;
+            modifiers = keepsScope ? [...(reconciled.course?.modifierExtension ?? []), ...added] : added;
+            if (!keepsScope && step.modifierExtension) {
+              step = { ...step }; delete step.modifierExtension;
+            }
+          } else {
+            step = { ...step };
+            if (retained.length) step.modifierExtension = retained;
+            else delete step.modifierExtension;
+            modifiers = added;
+          }
+        }
+      }
       course = {
         ...(saved.course ? metadata : {}),
         ...(limits?.length ? { doseLimit: limits } : {}),

@@ -32,10 +32,11 @@ import {
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import {
-  getQuantityComparator, simpleQuantityForR5, quantityForR5
+  getQuantityComparator, simpleQuantityForR5, quantityForR5, quantityFromR5
 } from "./fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
+import { getQuantityDurationUnit } from "./unit-lexicon";
 import { joinCanonicalPrnReasonTexts } from "./prn";
 import { parseSnomedFindingSitePostcoordinationCode } from "./snomed-postcoordination";
 import {
@@ -158,19 +159,33 @@ export const TIMING_FREQUENCY_MIN_EXTENSION_URL = "urn:ezmedicationinput:Structu
 export const TIMING_ADMINISTRATION_DURATION_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:timing-administration-duration";
 
-/** Decode one classified timing marker using the shared temporal quantity codec. */
+/** Decode one classified marker without flattening independent endpoints. */
 export function parseTimingAdministrationDuration(
-  extension: FhirExtension | undefined
-): (NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]> & { max?: number }) | undefined {
-  const quantity = extension?.valueQuantity ?? extension?.valueRange?.low;
-  const unit = parseFhirDurationUnit(quantity);
+  extension: FhirExtension | undefined,
+  current?: Pick<FhirTimingRepeat, "durationMax" | "durationUnit">
+): (Partial<NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]>> & {
+  range?: import("./canonical/course").CanonicalRange;
+}) | undefined {
+  const range = extension?.valueRange;
+  if (range) {
+    const low = quantityFromR5(range.low);
+    let high = quantityFromR5(range.high);
+    if (current?.durationMax !== undefined) {
+      // A live core upper endpoint owns its numeric value. Keep the other
+      // authored endpoint and independent annotations; the displaced marker
+      // remains source provenance when the adapter writes the updated range.
+      high = { ...high, value: current.durationMax,
+        ...(current.durationUnit ? { unit: current.durationUnit,
+          code: current.durationUnit, system: "http://unitsofmeasure.org" } : {}) };
+    }
+    return { range: low === range.low && high === range.high ? range :
+      { ...range, ...(low ? { low } : {}), ...(high ? { high } : {}) } };
+  }
+  const quantity = extension?.valueQuantity;
+  const unit = getQuantityDurationUnit(quantity);
   if (quantity?.value === undefined || !unit) return undefined;
   const comparator = getQuantityComparator(quantity);
-  const high = extension?.valueRange?.high;
-  const max = high?.value !== undefined &&
-    (parseFhirDurationUnit(high) === unit || !high.unit && !high.code) ? high.value : undefined;
-  return { value: quantity.value, unit, ...(comparator ? { comparator } : {}),
-    ...(max !== undefined ? { max } : {}) };
+  return { value: quantity.value, unit, ...(comparator ? { comparator } : {}) };
 }
 
 /** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
@@ -1252,49 +1267,6 @@ function buildFhirBoundsRange(
   };
 }
 
-function parseFhirDurationUnit(quantity: FhirQuantity | undefined): FhirPeriodUnit | undefined {
-  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
-  switch (candidate) {
-    case "s":
-    case "sec":
-    case "second":
-    case "seconds":
-      return FhirPeriodUnit.Second;
-    case "min":
-    case "mins":
-    case "minute":
-    case "minutes":
-      return FhirPeriodUnit.Minute;
-    case "h":
-    case "hr":
-    case "hrs":
-    case "hour":
-    case "hours":
-      return FhirPeriodUnit.Hour;
-    case "d":
-    case "day":
-    case "days":
-      return FhirPeriodUnit.Day;
-    case "wk":
-    case "wks":
-    case "week":
-    case "weeks":
-      return FhirPeriodUnit.Week;
-    case "mo":
-    case "month":
-    case "months":
-      return FhirPeriodUnit.Month;
-    case "a":
-    case "yr":
-    case "yrs":
-    case "year":
-    case "years":
-      return FhirPeriodUnit.Year;
-    default:
-      return undefined;
-  }
-}
-
 function extractCanonicalTimingBounds(
   dosage: FhirDosage
 ): { duration?: number; durationMax?: number; durationIsRange?: true; durationUnit?: FhirPeriodUnit; durationMaxUnit?: FhirPeriodUnit;
@@ -1306,7 +1278,7 @@ function extractCanonicalTimingBounds(
   const boundsDuration = repeat?.boundsDuration ?? retained?.valueQuantity;
   const boundsRange = retained?.valueRange ?? repeat?.boundsRange;
   if (boundsDuration?.value !== undefined) {
-    const durationUnit = parseFhirDurationUnit(boundsDuration);
+    const durationUnit = getQuantityDurationUnit(boundsDuration);
     if (!durationUnit) {
       return {};
     }
@@ -1325,8 +1297,8 @@ function extractCanonicalTimingBounds(
 
   const low = boundsRange.low;
   const high = boundsRange.high;
-  const lowUnit = parseFhirDurationUnit(low);
-  const highUnit = parseFhirDurationUnit(high);
+  const lowUnit = getQuantityDurationUnit(low);
+  const highUnit = getQuantityDurationUnit(high);
   const durationUnit = lowUnit ?? highUnit;
   if (!durationUnit) {
     return {};
@@ -1700,7 +1672,15 @@ export function serializeCanonicalSchedule(
     repeat.countMax = schedule.countMax;
     hasRepeat = true;
   }
-  if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit &&
+  if (schedule?.administrationDurationRange) {
+    const { low, high, ...metadata } = schedule.administrationDurationRange;
+    repeat.extension = [...(repeat.extension ?? []), {
+      url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
+      valueRange: { ...metadata, ...(low ? { low: simpleQuantityForR5(low) } : {}),
+        ...(high ? { high: simpleQuantityForR5(high) } : {}) }
+    }];
+    hasRepeat = true;
+  } else if (schedule?.administrationDuration !== undefined && schedule.administrationDurationUnit &&
       !schedule.administrationDurationComparator) {
     repeat.duration = schedule.administrationDuration;
     repeat.durationUnit = schedule.administrationDurationUnit;
@@ -2066,7 +2046,7 @@ export function deserializeCanonicalContext(
     }, options);
     const authoredText = dosage.method?.text;
     const compatibleText = authoredText && (!action || action.display === authoredText ||
-      resolveMedicationInstructionActionForMethod({ text: authoredText }, options) === action);
+      resolveMedicationInstructionActionForMethod({ text: authoredText }, options)?.code === action.code);
     const methodText = compatibleText ? authoredText : action?.display ?? authoredText ?? methodCoding?.display;
     clause.method = {
       text: methodText,
@@ -2167,7 +2147,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   const timingCode = timingCodeFromFhir(dosage);
   const administrationDuration = repeat?.duration === undefined
     ? parseTimingAdministrationDuration(repeat?.extension?.find(
-      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL))
+      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat)
     : undefined;
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
@@ -2244,7 +2224,8 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       boundsStart: repeat?.boundsPeriod?.start,
       boundsEnd: repeat?.boundsPeriod?.end,
       administrationDuration: repeat?.duration ?? administrationDuration?.value,
-      administrationDurationMax: repeat?.durationMax ?? administrationDuration?.max,
+      administrationDurationMax: administrationDuration?.range ? undefined : repeat?.durationMax,
+      administrationDurationRange: administrationDuration?.range,
       administrationDurationUnit: administrationDuration?.unit ?? repeat?.durationUnit,
       administrationDurationComparator: administrationDuration?.comparator,
       frequency: repeat?.frequency ?? frequencyMinExtension,
@@ -2351,13 +2332,14 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   const repeat = dosage.timing?.repeat;
   const administrationDuration = repeat?.duration === undefined
     ? parseTimingAdministrationDuration(repeat?.extension?.find(
-      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL))
+      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat)
     : undefined;
   if (repeat?.duration !== undefined && repeat.durationUnit || administrationDuration) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),
       administrationDuration: repeat?.duration ?? administrationDuration?.value,
-      administrationDurationMax: repeat?.durationMax ?? administrationDuration?.max,
+      administrationDurationMax: administrationDuration?.range ? undefined : repeat?.durationMax,
+      administrationDurationRange: administrationDuration?.range,
       administrationDurationUnit: administrationDuration?.unit ?? repeat?.durationUnit,
       administrationDurationComparator: administrationDuration?.comparator
     };

@@ -523,7 +523,7 @@ export const CYCLE_COUNT_HEADS = setOf(source.cycleCountHeads);
 
 /** Cheap source-lexical gate for typed treatment-relative phase onsets. */
 export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLeads);
-const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
+export const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
 export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
 export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
 /** Typed derivation identity shared by lexical timing and phase composition. */

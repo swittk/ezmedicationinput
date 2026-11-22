@@ -5,6 +5,7 @@ import {
   KNOWN_DOSAGE_FORMS_TO_DOSE
 } from "./maps";
 import unitTerminologySource from "./unit-terminology.json";
+import { FhirPeriodUnit } from "./types";
 import type {
   DoseUnitApproximation,
   DoseUnitKind,
@@ -255,4 +256,50 @@ export function isDiscreteUnit(unit: string): boolean {
   }
   const semantics = getDoseUnitSemantics(unit);
   return Boolean(semantics && DISCRETE_UNIT_KINDS.has(semantics.kind));
+}
+
+/** Interpret a quantity's time unit without changing its authored representation. */
+export function getQuantityDurationUnit(
+  quantity: { code?: string; unit?: string } | undefined
+): FhirPeriodUnit | undefined {
+  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
+  switch (candidate) {
+    case "s":
+    case "sec":
+    case "second":
+    case "seconds":
+      return FhirPeriodUnit.Second;
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      return FhirPeriodUnit.Minute;
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return FhirPeriodUnit.Hour;
+    case "d":
+    case "day":
+    case "days":
+      return FhirPeriodUnit.Day;
+    case "wk":
+    case "wks":
+    case "week":
+    case "weeks":
+      return FhirPeriodUnit.Week;
+    case "mo":
+    case "month":
+    case "months":
+      return FhirPeriodUnit.Month;
+    case "a":
+    case "yr":
+    case "yrs":
+    case "year":
+    case "years":
+      return FhirPeriodUnit.Year;
+    default:
+      return undefined;
+  }
 }

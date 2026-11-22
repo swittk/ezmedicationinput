@@ -50,6 +50,7 @@ import {
 import type {
   CanonicalAdministration,
   CanonicalAmount,
+  CanonicalRange,
   CanonicalMeasure,
   CanonicalTiming,
   CanonicalRecurrence,
@@ -75,7 +76,7 @@ import { arrayIncludes } from "../utils/array";
 import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units";
 import { parseStrengthIntoRatio } from "../utils/strength";
 import { getDoseQuantityUnit } from "../maps";
-import { getDoseUnitSemantics } from "../unit-lexicon";
+import { getDoseUnitSemantics, getQuantityDurationUnit } from "../unit-lexicon";
 import {
   TIMING_CODE_DAILY_FREQUENCIES,
   TIMING_CODE_HOURLY_PERIODS,
@@ -1739,10 +1740,11 @@ function measuredRateComparator(
 }
 function measuredRateQuantity(
   amount: CanonicalAmount,
-  recurrence: CanonicalRecurrence | undefined
+  recurrence: CanonicalRecurrence | undefined,
+  durationEndpoint?: CanonicalMeasure
 ): CanonicalMeasure | undefined {
-  const duration = recurrence?.occurrenceDuration;
-  const durationUnit = recurrence?.occurrenceDurationUnit;
+  const duration = durationEndpoint ? durationEndpoint.value : recurrence?.occurrenceDuration;
+  const durationUnit = durationEndpoint ? getQuantityDurationUnit(durationEndpoint) : recurrence?.occurrenceDurationUnit;
   const seconds = durationUnit ? INFUSION_TIME_SECONDS[durationUnit] : undefined;
   if (duration === undefined || !Number.isFinite(duration) || duration <= 0 || !seconds)
     return undefined;
@@ -1779,10 +1781,23 @@ function measuredRateQuantity(
   }
   if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit)
     return undefined;
-  if (recurrence?.occurrenceDurationComparator)
-    comparator = measuredRateComparator(comparator, recurrence.occurrenceDurationComparator, true);
+  const durationComparator = durationEndpoint ? getQuantityComparator(durationEndpoint) : recurrence?.occurrenceDurationComparator;
+  if (durationComparator)
+    comparator = measuredRateComparator(comparator, durationComparator, true);
   return { value, unit, ...(code ? { code } : {}), ...(system ? { system } : {}),
     ...(comparator ? { comparator } : {}) };
+}
+/** Multiply each authored infusion endpoint in its own time unit. This range
+ * exists only in execution; authored duration values and labels stay intact. */
+function measuredRateDurationRange(
+  amount: CanonicalAmount, recurrence: CanonicalRecurrence
+): CanonicalRange | undefined {
+  const range = recurrence.occurrenceDurationRange!;
+  const low = range.low && measuredRateQuantity(amount, recurrence, range.low);
+  const high = range.high && measuredRateQuantity(amount, recurrence, range.high);
+  // An uninterpretable authored bound is not an absent/open bound.
+  if ((range.low && !low) || (range.high && !high)) return undefined;
+  return { ...(low ? { low } : {}), ...(high ? { high } : {}) };
 }
 function executableQuantityCaps(
   dosage: CanonicalAdministration,
@@ -1878,7 +1893,15 @@ function executableDoseRange(
   dosage: CanonicalAdministration, context?: MedicationContext, requireExactPeriod = false
 ): ExecutableDoseRange | undefined {
   const amount = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
-  const range = amount?.range, high = amount?.quantity ?? range?.high;
+  let range = amount?.range;
+  const recurrence = dosage.schedule?.recurrence;
+  if (!range && amount && !amount.quantity && (amount.rate || amount.rateRatio) &&
+      recurrence?.occurrenceDurationRange) {
+    range = measuredRateDurationRange(amount, recurrence);
+    if (!range) return undefined;
+    dosage = { ...dosage, amounts: [{ ...amount, range }] };
+  }
+  const high = amount?.quantity ?? range?.high;
   // A selected finite administration maximum also bounds a lower-only
   // range; its executable high need not have been authored as range.high.
   if (!range || !high?.value) return undefined;
@@ -2805,7 +2828,7 @@ function definitelyNonOverlappingCycle(course: CanonicalCourse, cycle?: Canonica
         member.anchoredLength || member.delayMinutes ||
         repeat?.calendarWindow?.end || repeat?.calendarWindow?.start ||
         (repeat?.count !== undefined && !unscheduledOccurrenceCapacity(member)) ||
-        repeat?.occurrenceDuration !== undefined ||
+        repeat?.occurrenceDuration !== undefined || repeat?.occurrenceDurationRange !== undefined ||
         repeat?.startOffset || repeat?.endOffset ||
         member.schedule?.explicitEvents?.length) return false;
     if (repeat?.courseLength && !durationFitsEveryCycle(repeat.courseLength, cycle)) return false;
@@ -2933,7 +2956,10 @@ function scheduleTreatmentRelativeCourse(
         const effectiveFrom = requestedFrom > member.eligibleFrom ? requestedFrom : member.eligibleFrom;
         if (effectiveEnd && effectiveFrom >= effectiveEnd) return;
         if (collect && unscheduledOccurrenceCapacity(original)) return;
-        const originalRepeat = original.schedule?.recurrence;
+        // A bare daily code still needs the known stage fence before scalar
+        // expansion. Resolve only this execution copy, leaving source timing intact.
+        const originalRepeat = original.schedule?.recurrence ??
+          (effectiveEnd && (collect || rollingUsage) ? prepareBestEffortTiming(original).schedule?.recurrence : undefined);
         const quota: CycleEventQuota = {
           remaining: collect && originalRepeat ? repeatOccurrenceCap(originalRepeat) ??
             (deferred ? finiteCompletionCount(originalRepeat) : undefined) : undefined,
@@ -3162,7 +3188,7 @@ function maximumTimedRangePlan(
     const bucket = occurrence ? occurrenceCapBucketKey(new Date(event.at), occurrence, zone) : "";
     buckets.push(bucket);
     const actual = priorBuckets.get(bucket);
-    supplied.push(actual ? upperBoundTimestamp(actual, event.at) : 0);
+    supplied.push(actual?.length ?? 0);
   }
   if (!Number.isFinite(firstFuture)) return [];
   let upper = 0;
@@ -3329,10 +3355,11 @@ function chronologicalCapAcceptor(
         state.occurrenceKey = bucket;
         state.occurrenceUsed = 0;
       }
-      // Binary-search only this bucket's supplied dates. Later supplied
-      // timestamps inside the same bucket must not count before they occur.
+      // Recorded administrations reserve their whole civil occurrence bucket.
+      // Nominal replay must not spend that allowance before the recorded clock.
+      // Rolling quantity windows above continue to use actual timestamps.
       const supplied = state.priorByBucket?.get(bucket);
-      const past = supplied ? upperBoundTimestamp(supplied, at) : 0;
+      const past = supplied?.length ?? 0;
       if (state.occurrenceUsed + past >= occurrence.max) return false;
     }
     if (event.quota.remaining !== undefined) event.quota.remaining--;
@@ -4079,7 +4106,8 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     } = one;
     const capContext = (options as Partial<CanonicalSupplyOptions>).context;
     const requireExactPeriod = !(options as PhaseCountOptions).quantityEstimation;
-    const range = one.amounts?.[0]?.range ? executableDoseRange(one, capContext, requireExactPeriod) : undefined;
+    const range = one.amounts?.[0]?.range || one.schedule?.recurrence?.occurrenceDurationRange
+      ? executableDoseRange(one, capContext, requireExactPeriod) : undefined;
     const quantityCaps = range?.caps ?? executableQuantityCaps(one, capContext, false, requireExactPeriod);
     const occurrenceCap = getTimingOccurrenceCap(one.schedule?.recurrence);
     // The cap is an allowance for *administered* doses, not for candidate
@@ -4328,7 +4356,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   dosage = prepareBestEffortTiming(dosage);
   const capContext = (options as Partial<CanonicalSupplyOptions>).context;
   const requireExactPeriod = !(options as PhaseCountOptions).quantityEstimation;
-  const range = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, capContext, requireExactPeriod) : undefined;
+  const range = dosage.amounts?.[0]?.range || dosage.schedule?.recurrence?.occurrenceDurationRange
+      ? executableDoseRange(dosage, capContext, requireExactPeriod) : undefined;
   const quantityCaps = range?.caps ?? executableQuantityCaps(dosage, capContext, false, requireExactPeriod);
   if (quantityCaps.length) {
     const requestLimit = Math.floor(limit);
@@ -4981,7 +5010,9 @@ function clockAnchoredElapsedOrigin(
     repeat.anchors?.length ||
     (repeat.periodUnit !== DurationUnit.Second &&
       repeat.periodUnit !== DurationUnit.Minute &&
-      repeat.periodUnit !== DurationUnit.Hour) ||
+      repeat.periodUnit !== DurationUnit.Hour &&
+      !(repeat.periodUnit === DurationUnit.Day && !Number.isInteger(repeat.period)) &&
+      !(repeat.periodUnit === DurationUnit.Week && !Number.isInteger(repeat.period! * 7))) ||
     !usesIntervalCadence(repeat)
   )
     return undefined;
@@ -5816,7 +5847,11 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   }
   const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
   const isRateDose = !!first && !first.quantity && !!(first.rate || first.rateRatio);
-  if (isRateDose && repeat.occurrenceDurationMax !== undefined) {
+  if (isRateDose && repeat.occurrenceDurationRange) {
+    // Endpoint units remain authored. prepareMeasuredDose multiplies each
+    // duration independently, then uses the existing ranged quantity planner.
+    infusionDurationMaximum = true;
+  } else if (isRateDose && repeat.occurrenceDurationMax !== undefined) {
     const duration = positiveNumber(repeat.occurrenceDuration);
     const durationMax = positiveNumber(repeat.occurrenceDurationMax);
     if (
@@ -6032,23 +6067,31 @@ function prepareMeasuredDose(
     // The known numeric amount stays useful even when qualified by <=,
     // >= or ~. Its original comparator remains in the caller's FHIR data.
     return dosage;
+  let range = first.range;
   if (!quantity && (first.rate || first.rateRatio)) {
     const repeat = dosage.schedule?.recurrence;
-    if (repeat?.occurrenceDuration === undefined ||
-        !repeat.occurrenceDurationUnit ||
-        repeat.occurrenceDuration <= 0)
-      throw new MedicationQuantityCalculationError(
-        "infusion-duration-required",
-        "Infusion rate is specified, but duration per infusion is not. Supply the infusion duration before computing volume/amount."
-      );
-    quantity = measuredRateQuantity(first, repeat);
-    if (!quantity)
-      throw new MedicationQuantityCalculationError(
-        "rate-units-unresolved",
-        "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity."
-      );
+    const durationRange = repeat?.occurrenceDurationRange;
+    if (durationRange) {
+      range = measuredRateDurationRange(first, repeat!);
+      if (!range || (!range.low && !range.high))
+        throw new MedicationQuantityCalculationError("rate-units-unresolved",
+          "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity.");
+    } else {
+      if (repeat?.occurrenceDuration === undefined ||
+          !repeat.occurrenceDurationUnit ||
+          repeat.occurrenceDuration <= 0)
+        throw new MedicationQuantityCalculationError(
+          "infusion-duration-required",
+          "Infusion rate is specified, but duration per infusion is not. Supply the infusion duration before computing volume/amount."
+        );
+      quantity = measuredRateQuantity(first, repeat);
+      if (!quantity)
+        throw new MedicationQuantityCalculationError(
+          "rate-units-unresolved",
+          "The infusion rate's units cannot be converted to the provided duration. Supply a compatible rate/duration pair or a computed dose quantity."
+        );
+    }
   }
-  let range = first.range;
   const weight = options.patientWeightKg;
   if (range && weight !== undefined && Number.isFinite(weight) && weight > 0) {
     // Resolve the owned range before comparing its endpoints with numeric
@@ -6163,6 +6206,7 @@ function sumCourseUnits(
     totalUnits = roundCalculatedUnits(totalUnits + quantity);
     if (total.quantityKind === "maximum") maximum = true;
     if (total.explanation) details.push(total.explanation);
+    if (quantity === 0) continue;
     if (total.totalApproximateQuantity && !mixedApproximate) {
       const q = total.totalApproximateQuantity;
       if (!approximate) approximate = { ...q };
@@ -6177,7 +6221,7 @@ function sumCourseUnits(
         approximate = undefined;
         mixedApproximate = true;
       }
-    } else if (!total.totalApproximateQuantity && approximate) {
+    } else if (!total.totalApproximateQuantity) {
       approximate = undefined;
       mixedApproximate = true;
     }
@@ -6195,7 +6239,7 @@ function sumCourseUnits(
         ingredient = undefined;
         mixedIngredient = true;
       }
-    } else if (!total.totalApproximateIngredientQuantity && ingredient) {
+    } else if (!total.totalApproximateIngredientQuantity) {
       ingredient = undefined;
       mixedIngredient = true;
     }
@@ -6677,6 +6721,14 @@ function calculateTotalUnitsSingle(
   const targetMultiplier = getAdministrationTargetMultiplier(dosage, context);
   let totalUnits = roundCalculatedUnits(supplyAccounting?.acceptedQuantity ??
     measuredRangeQuantity ?? count * doseQuantity * targetMultiplier);
+  // An excluded endpoint is a supremum even without a rolling-cap plan.
+  // A tighter closed administration maximum was selected in prepareMeasuredDose;
+  // a smaller lifetime ceiling can likewise supply an attainable interior total.
+  if (!rangePlan && dosage.amounts?.[0]?.range && count > 0 &&
+      getQuantityComparator(doseForLimits) === "<" &&
+      (lifetimeMaximum === undefined || lifetimeMaximum >= totalUnits))
+    throw new MedicationQuantityCalculationError("ranged-capacity-open-maximum",
+      "These strict dose endpoints have a finite supply supremum but no attainable maximum. Provide a resolved per-administration quantity or a closed dose range before calculating supply; all source constraints remain retained.");
   if (roundToMultiple && roundToMultiple > 0) {
     totalUnits = roundCalculatedUnits(Math.ceil(totalUnits / roundToMultiple) * roundToMultiple);
   }
@@ -7576,6 +7628,21 @@ function completionAfterAcceptedAdministration(
   dosage: CanonicalAdministration, last: Date, zone: string
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
+  if (repeat?.occurrenceDurationRange) {
+    const { low, high } = repeat.occurrenceDurationRange;
+    const lowUnit = getQuantityDurationUnit(low), highUnit = getQuantityDurationUnit(high);
+    if (!low?.value || !high?.value || getQuantityComparator(low) || getQuantityComparator(high) ||
+        !lowUnit || !highUnit) return undefined;
+    const sameDuration = lowUnit === highUnit ? low.value === high.value :
+      (lowUnit === "s" || lowUnit === "min" || lowUnit === "h") &&
+      (highUnit === "s" || highUnit === "min" || highUnit === "h") &&
+      low.value * INFUSION_TIME_SECONDS[lowUnit] === high.value * INFUSION_TIME_SECONDS[highUnit];
+    // A variable duration cannot supply an exact completion point for an
+    // implicit successor. Equivalent exact endpoints can.
+    if (!sameDuration) return undefined;
+    const end = createIntervalStepper({ period: low.value, periodUnit: lowUnit }, zone)?.(last);
+    return end ? { end, point: false } : undefined;
+  }
   if (repeat?.occurrenceDurationComparator) return undefined;
   if (repeat?.occurrenceDuration && repeat.occurrenceDurationUnit) {
     const advance = createIntervalStepper(

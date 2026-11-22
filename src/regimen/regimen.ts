@@ -502,11 +502,13 @@ export function scopeSequentialPhaseSemantics(
       explicitStarts.every(value => value === explicitStarts[0]) ? explicitStarts[0] : undefined;
     if (explicitStart !== undefined && priorStart !== null && explicitStart > priorStart) {
       // An explicit source-relative ADD/REPLACE onset closes the preceding
-      // phase. Never derive this from unrelated lowered parallel members.
+      // phase. Civil NEXT already supplies the successor boundary to execution;
+      // an elapsed length here would incorrectly keep the predecessor past midnight.
+      // Never derive an elapsed length from unrelated lowered parallel members.
       for (const member of prior) {
         const clause = states[member]?.primaryClause;
         const schedule = clause?.schedule;
-        if (!clause || !schedule || schedule.duration !== undefined ||
+        if (!clause || !schedule || localNextDay || schedule.duration !== undefined ||
             schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length) continue;
         schedule.duration = explicitStart - priorStart;
         schedule.durationUnit = FhirPeriodUnit.Day;

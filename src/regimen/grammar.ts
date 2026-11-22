@@ -94,6 +94,10 @@ const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
     constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
     constraint('left.hasSameDayAnchor', f => hasSameDayAnchor(f.left.clause)),
     constraint('right.hasSameDayAnchor', f => hasSameDayAnchor(f.right.clause)),
+    // Probe clocks are already sorted. A backward clock pair cannot share
+    // one civil day without reversing the authored THEN relation.
+    constraint('clocks.preserve-sequence-order', f => !f.left.clocks.length || !f.right.clocks.length ||
+      f.left.clocks[f.left.clocks.length - 1] <= f.right.clocks[0]),
     constraint('left.omitsPhaseBoundary', f => !hasPhaseBoundary(f.left.clause)),
     constraint('right.omitsPhaseBoundary', f => !hasPhaseBoundary(f.right.clause)),
     constraint('right.not-procedural', f => !f.rightHasProcedure),
@@ -365,6 +369,17 @@ export function terminalAdministrationDelay(clause: CanonicalSigClause): number 
 
 /** Rules inspect features only. Surface/locale recognition belongs to lexical and span producers. */
 export const CONSTRUCTIONS: readonly Construction[] = [
+  { id: 'regimen.treatment-relative-phase-onset', priority: 805, relation: 'sequence',
+    semanticLicense: 'dose-continuation', constraints: [
+      coordinationOrSequence, conjunctionOrSequence,
+      constraint('right.explicit-phase-onset-only', f => !f.right.hasSchedule &&
+        (f.right.clause.schedule?.treatmentStartOffsetDays !== undefined ||
+         Boolean(f.right.clause.schedule?.phaseStartReference))),
+      constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),
+      constraint('right.complete-dose', f => f.right.complete && f.right.hasDose),
+      constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
+      constraint('right.not-procedural', f => !f.rightHasProcedure)
+    ] },
   { id: 'regimen.explicit-phase-adjustment', priority: 810, relation: 'sequence',
     semanticLicense: 'dose-continuation', constraints: [
       constraint('connector.sequence', f => f.site.kind === 'sequence'),

@@ -125,6 +125,7 @@ export function administrationFromClause(
       occurrenceDurationMax: s.administrationDurationMax,
       occurrenceDurationUnit: s.administrationDurationUnit,
       occurrenceDurationComparator: s.administrationDurationComparator,
+      occurrenceDurationRange: s.administrationDurationRange,
       ...(ranged
         ? {
             courseLengthRange: {
@@ -484,6 +485,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     schedule.administrationDuration=r?.occurrenceDuration;schedule.administrationDurationMax=r?.occurrenceDurationMax;
     schedule.administrationDurationUnit=r?.occurrenceDurationUnit;
     schedule.administrationDurationComparator=r?.occurrenceDurationComparator;
+    schedule.administrationDurationRange=r?.occurrenceDurationRange;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
     schedule.durationIsRange=range ? true : undefined;
     schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;

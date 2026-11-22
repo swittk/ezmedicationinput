@@ -480,7 +480,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
   const r = timing?.recurrence;
   return !!r && (r.count !== undefined || r.countMax !== undefined || r.frequency !== undefined ||
     r.frequencyMax !== undefined || r.period !== undefined || r.periodMax !== undefined || !!r.periodUnit ||
-    r.occurrenceDuration !== undefined || r.occurrenceDurationMax !== undefined || !!r.occurrenceDurationUnit ||
+    r.occurrenceDuration !== undefined || r.occurrenceDurationMax !== undefined || !!r.occurrenceDurationUnit || !!r.occurrenceDurationRange ||
     !!r.courseLength || !!r.courseLengthRange || !!r.calendarWindow || !!r.dayOfWeek?.length ||
     !!r.clocks?.length || !!r.anchors?.length || r.offset !== undefined || r.offsetMin !== undefined ||
     r.offsetMax !== undefined || !!r.monthDays?.length || r.weekdayOrdinal !== undefined ||
@@ -998,6 +998,8 @@ export function formatCanonicalCourse(
           !reversedWindow
         ) {
           timing = formatCalendarStepWindow(startQuantity, endQuantity, words, startAnchor, endAnchor);
+          if (index > 0 && !step.start && !startQuantity)
+            timing = words.afterPreviousPhase + "; " + timing;
         } else {
           const startRange = treatmentBoundaryRangeText(step.start, words);
           const endRange = treatmentBoundaryRangeText(step.end, words);

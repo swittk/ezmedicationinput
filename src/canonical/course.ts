@@ -116,6 +116,8 @@ export interface CanonicalRecurrence {
   occurrenceDurationMax?: number;
   occurrenceDurationUnit?: DurationUnit;
   occurrenceDurationComparator?: CanonicalMeasure["comparator"];
+  /** Explicit endpoint quantities retain their independent units/qualifiers. */
+  occurrenceDurationRange?: CanonicalRange;
   courseLength?: CanonicalMeasure;
   courseLengthRange?: CanonicalRange;
   calendarWindow?: { start?: string; end?: string };

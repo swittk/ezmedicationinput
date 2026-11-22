@@ -631,14 +631,14 @@ describe("source-less R6 treatment-relative step display", () => {
       expect(strictThai).not.toContain("งดยา");
     }
     for (const text of [english, strictEnglish]) {
-      expect(text).toMatch(/From treatment start until 7 days after treatment start: [^.]*1 tablet at 8:00 am\./u);
+      expect(text).toMatch(/From treatment start until 7 days after treatment start: [^.]*(?:^|[^0-9])1 tablet at 8:00 am\./u);
       const second = text.slice(text.indexOf("From " + secondStart + " days after treatment start"));
-      expect(second).toMatch(/^[^:]*: [^.]*2 tablets at 8:00 am\./u);
+      expect(second).toMatch(/^[^:]*: [^.]*(?:^|[^0-9])2 tablets at 8:00 am\./u);
     }
     for (const text of [thai, strictThai]) {
-      expect(text).toMatch(/ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*1 เม็ด เวลา 08:00\./u);
+      expect(text).toMatch(/ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*(?:^|[^0-9])1 เม็ด เวลา 08:00\./u);
       const second = text.slice(text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา"));
-      expect(second).toMatch(/^[^:]*: [^.]*2 เม็ด เวลา 08:00\./u);
+      expect(second).toMatch(/^[^:]*: [^.]*(?:^|[^0-9])2 เม็ด เวลา 08:00\./u);
     }
     const source = "keep the clinician-authored dosing text exactly";
     const authored = { ...course, renderedInstruction: source };
@@ -683,5 +683,46 @@ describe("source-relative onset survives edits to an earlier phase", () => {
       expect(on("2026-11-09")).toEqual(spec.weekTwoClocks);
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(spec.input);
+  });
+});
+
+describe("round38 implicit successor with calendar end", () => {
+  const relative = (value: number, code: string) => ({
+    contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+    offsetDuration: { value, unit: code, code, system: "http://unitsofmeasure.org" }
+  });
+  it.each([false, true])("shows the predecessor dependency unless an exact start is known (%s)", exactPredecessor => {
+    const first = { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: "d",
+        boundsDuration: { value: 7, unit: "d", code: "d" } } } }],
+      ...(exactPredecessor ? { end: relative(7, "d") } : {}) };
+    const second = { end: relative(1, "mo"), component: [{
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }
+    }] };
+    const course = { step: [first, second] };
+    for (const input of [course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))]) {
+      const english = formatSig(input, "long");
+      const thai = formatSig(input, "long", { locale: "th" });
+      expect(english).toContain("1 month after treatment start");
+      expect(english).toContain("2 tablets once daily");
+      if (exactPredecessor) {
+        expect(english).toContain("From 7 days after treatment start");
+        expect(english).not.toContain("After the previous phase");
+      } else {
+        expect(english).toContain("After the previous phase; Until 1 month after treatment start");
+        expect(thai).toContain("หลังขั้นตอนก่อนหน้า");
+      }
+      expect(thai).toContain("1 เดือนหลังเริ่มการรักษา");
+      expect(thai).toContain("2 เม็ด");
+    }
+  });
+
+  it.each(["12 tablets", "12 เม็ด"])("rejects a twelve-unit substitute in the second-phase oracle (%s)", dose => {
+    const expected = dose.includes("tablets") ? /^[^:]*: [^.]*(?:^|[^0-9])2 tablets at 8:00 am\./u
+      : /^[^:]*: [^.]*(?:^|[^0-9])2 เม็ด เวลา 08:00\./u;
+    const clock = dose.includes("tablets") ? " at 8:00 am." : " เวลา 08:00.";
+    expect("Phase: Take " + dose + clock).not.toMatch(expected);
+    expect("Phase: Take " + dose.slice(1) + clock).toMatch(expected);
   });
 });

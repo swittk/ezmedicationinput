@@ -89,7 +89,7 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   // separate clinical grammar or a whole-input repair pass.
   if (/[0-9๐-๙]/u.test(after) &&
       (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) ||
-        before === "(" || before === "@" || before === "~" || before === "≈" ||
+        before === "/" || before === "(" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
         before === "<" || before === ">" ||
         before === "=" && index >= 2 && /[<>]/u.test(input[index - 2]))) {

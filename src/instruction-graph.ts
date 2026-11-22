@@ -2435,8 +2435,7 @@ function frameActionDefinition(
   frame: AdviceFrame,
   options?: ParseOptions
 ): ActionDefinition | undefined {
-  return resolveMedicationInstructionAction(frame.predicate.lemma, options) ??
-    getMedicationInstructionAction(frame.predicate.lemma);
+  return getMedicationInstructionAction(frame.predicate.lemma, options);
 }
 
 /** A water-consumption counseling frame with a typed fluid substance is
@@ -3180,7 +3179,7 @@ function promoteDoseFromDefiningAction(
   let first: AdviceArgument["quantity"];
   for (const action of actions) {
     if (action.polarity === AdvicePolarity.Negate ||
-        !resolveMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) continue;
+        !getMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) continue;
     const quantity = action.args.find(arg =>
       arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity;
     if (!quantity) continue;
@@ -3692,8 +3691,9 @@ const DEFAULT_ACTION_REALIZER: ActionRealizer = (c) => {
   }
 
   text = appendDuration(text, c.duration);
-  const timeRelation = c.time && relationHasGrammarFeature(c.frame.relation, "timeComplement")
-    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+  const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
+  const timeRelation = c.time && relationHasGrammarFeature(timeSemanticRelation, "timeComplement")
+    ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation
     : undefined;
   if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
   text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
@@ -3910,9 +3910,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
-    const sourceDefinition = options?.instructionActionMap
-      ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
-      : getMedicationInstructionAction(frame.predicate.lemma);
+    const sourceDefinition = getMedicationInstructionAction(frame.predicate.lemma, options);
     const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
     // The edited head keeps the source frame's typed argument realization,
     // including both the live amount and any independent physical result.
@@ -4041,11 +4039,11 @@ export function instructionGraphCoversTypedWarnings(
   if (!frames?.length) return false;
   return frames.every((expected) => {
     if (expected.polarity !== AdvicePolarity.Negate) return false;
-    const expectedCode = resolveMedicationInstructionAction(expected.predicate.lemma)?.code ??
+    const expectedCode = getMedicationInstructionAction(expected.predicate.lemma)?.code ??
       expected.predicate.lemma;
     return graph.actions.some((actual) => {
       if (actual.polarity !== AdvicePolarity.Negate) return false;
-      const actualCode = resolveMedicationInstructionAction(actual.predicate.lemma)?.code ??
+      const actualCode = getMedicationInstructionAction(actual.predicate.lemma)?.code ??
         actual.predicate.lemma;
       if (actualCode !== expectedCode ||
           actual.span.end <= expected.span.start ||
@@ -4205,9 +4203,7 @@ function actionMatchesCanonicalMethod(
 ): boolean {
   const method = clause.method;
   if (!method) return false;
-  const definition = options?.instructionActionMap
-    ? resolveMedicationInstructionAction(frame.predicate.lemma, options)
-    : getMedicationInstructionAction(frame.predicate.lemma);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
   // Distinct authored actions may share an administration code (Apply/Reapply).
   // Compare declared identities; an unknown custom source cannot be treated as
   // a different default action merely because its local lemma is unfamiliar.
@@ -4366,7 +4362,13 @@ function timeArgumentCoversSingleScheduledEvent(
   const words = normalizeActionSurface(arg.normalized ?? arg.text)
     .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
   for (let index = 0; index < words.length; index += 1) {
-    if (resolveEventTimingExpression(words, index)?.timing === clause.schedule.when[0]) return true;
+    const timing = resolveEventTimingExpression(words, index)?.timing;
+    if (!timing) continue;
+    const relation = arg.relation ?? frame.relation;
+    const related = relation
+      ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
+      : undefined;
+    if ((related ?? timing) === clause.schedule.when[0]) return true;
   }
   return false;
 }
@@ -4515,9 +4517,7 @@ function primaryDoseAmountOwner(
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
     if(!primary || action.span.end<=primary.start) {
-      const custom=options?.instructionActionMap
-        ?resolveMedicationInstructionAction(action.predicate.lemma, options):undefined;
-      if((custom??getMedicationInstructionAction(action.predicate.lemma))?.definesDose) {
+      if(getMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) {
         earlierCount++;earlier=action;
       }
     }

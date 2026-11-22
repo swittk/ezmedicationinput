@@ -4,7 +4,7 @@ import { Token } from "../parser-state";
 import { findUnparsedTokenGroups, parseClauseState } from "../parser";
 import { parseAdditionalInstructions } from "../advice";
 import { parseInstructionActions } from "../instruction-graph";
-import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { getMedicationInstructionAction } from "../instruction-action-terminology";
 import { findMedicationDateListSpans } from "../date-interpretation";
 import { normalizeUnit } from "../unit-lexicon";
 import { EVENT_TIMING_TOKENS } from "../maps";
@@ -78,7 +78,7 @@ function commaJoinsProceduralSequence(
     }
   }
   if (!previous || !next) return false;
-  const previousDefinition = resolveMedicationInstructionAction(previous.predicate.lemma, options);
+  const previousDefinition = getMedicationInstructionAction(previous.predicate.lemma, options);
   if (!previousDefinition?.procedural) return false;
   const gapBefore = Math.max(0, token.sourceStart - previous.span.end);
   const gapAfter = Math.max(0, next.span.start - token.sourceEnd);

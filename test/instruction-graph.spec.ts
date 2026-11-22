@@ -1,5 +1,6 @@
+import { deserializeCanonicalContext } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type MedicationCondition } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
@@ -11,7 +12,7 @@ import { formatCanonicalClause } from "../src/format";
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
-import { medicationInstructionActionCodings, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
+import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
@@ -3949,5 +3950,245 @@ describe("round37 rendered primary action identity", () => {
       saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
     }
     expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+describe("round38 live dose and action participant ownership", () => {
+  it.each([10, 2.5])("uses an edited scalar weight dose of %s without replaying the old amount", value => {
+    const source = "Take 5 mg/kg once daily";
+    const parsed = parsePublicSig(source);
+    const fresh = parsed.items[0].fhir!;
+    expect(formatSig(fresh, "long")).toBe(source);
+    fresh.doseAndRate![0].doseQuantity!.value = value;
+    for (const input of [fresh, JSON.parse(JSON.stringify(toFhirR5Dosages([fresh])))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale });
+        expect(text).toContain(value + " mg/kg");
+        expect(text).not.toMatch(/(?:^|[^0-9.])5 mg\/kg/u);
+      }
+    }
+    expect(fresh.text).toBe(source);
+  });
+
+  it.each([false, true])("keeps the medication dose with powder and its separate water quantity (%s)", measuredWater => {
+    const frame = parseInstructionActions("Mix powder with " + (measuredWater ? "100 mL water" : "water"))[0];
+    frame.sourceText = "";
+    const graph = { sourceText: "", sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame] };
+    const row = { method: { text: "Mix" }, doseAndRate: [{ doseQuantity: { value: 2, unit: "g" } }],
+      extension: [buildInstructionGraphExtension(graph)!] };
+    const before = JSON.stringify(row);
+    const course = toDosageDetails([row]);
+    for (const input of [row, course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain("2 g of powder");
+      expect(english).toContain(measuredWater ? "with 100 mL water" : "with water");
+      expect(english.match(/2 g/gu)).toHaveLength(1);
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("powder 2 g");
+      expect(thai).toContain(measuredWater ? "กับน้ำ 100 มิลลิลิตร" : "กับน้ำ");
+      expect(thai.match(/2 g/gu)).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each([AdviceRelation.Before, AdviceRelation.After])("uses the selected Time relation in the default realizer (%s)", relation => {
+    const frame = parseInstructionActions("Swallow 1 tablet after breakfast")[0];
+    frame.sourceText = "";
+    frame.relation = relation === AdviceRelation.Before ? AdviceRelation.After : AdviceRelation.Before;
+    frame.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 tablet", quantity: { value: 1, unit: "tab" } },
+      { role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" },
+      { role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming["Breakfast"],
+        relation, i18n: { en: "breakfast", th: "อาหารเช้า" } }
+    ];
+    const graph = { sourceText: "", sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame] };
+    const event = relation === AdviceRelation.Before ? EventTiming["Before Breakfast"] : EventTiming["After Breakfast"];
+    const row = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [event] } }, extension: [buildInstructionGraphExtension(graph)!] };
+    const before = JSON.stringify(row);
+    for (const input of [row, toDosageDetails([row]), JSON.parse(JSON.stringify(toFhirR5Dosages([row])))]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain(relation + " breakfast");
+      expect(english).not.toContain(frame.relation + " breakfast");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain(relation === AdviceRelation.Before ? "ก่อนอาหารเช้า" : "หลังอาหารเช้า");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("does not hide a live with-lunch event behind a saved after-lunch relation", () => {
+    const frame = parseInstructionActions("Swallow 1 tablet after lunch")[0];
+    frame.sourceText = "";
+    frame.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 tablet", quantity: { value: 1, unit: "tab" } },
+      { role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" },
+      { role: AdviceArgumentRole.Time, text: "lunch", normalized: "lunch",
+        relation: AdviceRelation.After, i18n: { en: "lunch", th: "อาหารกลางวัน" } }
+    ];
+    const graph = { sourceText: "", sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame] };
+    const row = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [EventTiming["Lunch"]] } }, extension: [buildInstructionGraphExtension(graph)!] };
+    for (const input of [row, toDosageDetails([row]), JSON.parse(JSON.stringify(toFhirR5Dosages([row])))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("with lunch");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("พร้อมอาหารกลางวัน");
+    }
+    expect(parseInstructionGraphExtension(row.extension)!.actions[0].args[2].relation).toBe(AdviceRelation.After);
+  });
+});
+
+describe("round38 configured terminology retains authored identity", () => {
+  const translation = (text: string) => ({ extension: [{
+    url: "http://hl7.org/fhir/StructureDefinition/translation",
+    extension: [{ url: "lang", valueCode: "th" }, { url: "content", valueString: text }]
+  }] });
+
+  it("preserves a wire method translation with an empty or unrelated action map", () => {
+    const row = { method: { text: "Chew", _text: translation("เคี้ยวให้ละเอียด") },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    for (const instructionActionMap of [undefined, {}, { local: { code: "local", display: "Local" } }]) {
+      for (const input of [row, toDosageDetails([row]), toFhirR5Dosages([row])])
+        expect(formatSig(input, "long", { locale: "th", instructionActionMap })).toContain("เคี้ยวให้ละเอียด");
+    }
+    expect(formatSig(row, "long", { locale: "th", instructionActionMap: {
+      chew: { code: "local-chew", display: "Chew", i18n: { th: "เคี้ยวช้าๆ" } }
+    } })).toContain("เคี้ยวช้าๆ");
+  });
+
+  it("keeps an authored method alias and its annotations for the same custom identity", () => {
+    const coding = { system: "urn:clinic:method", code: "apply" };
+    const method = { text: "dab on", _text: { id: "authored-alias", ...translation("แต้มให้ทั่ว") }, coding: [coding] };
+    const options = { instructionActionMap: {
+      apply: { code: "local-apply", display: "Apply", aliases: ["dab on"], administrationMethod: coding }
+    } };
+    const clause = deserializeCanonicalContext({ method }, options);
+    expect(clause.method?.text).toBe("dab on");
+    expect(clause.method?._text).toEqual(method._text);
+    const imported = fromFhirDosage({ method }, options);
+    expect(imported.meta.normalized.method?.text).toBe("dab on");
+    expect(imported.fhir.method?._text).toEqual(method._text);
+    const changed = deserializeCanonicalContext({ method: { ...method,
+      coding: [{ system: "http://snomed.info/sct", code: "738992009", display: "Chew" }] } }, options);
+    expect(changed.method?.text).toBe("Chew");
+    expect(changed.method?._text).toBeUndefined();
+  });
+
+  it.each([false, true])("keeps custom coding identity and annotations from plain or getter-backed inputs (%s)", getters => {
+    class Coding {
+      id = "saline-annotation";
+      version = "v2";
+      get system() { return "urn:clinic:fluid"; }
+      get code() { return "saline"; }
+      get display() { return "Custom saline"; }
+    }
+    const coding = getters ? new Coding() : { id: "saline-annotation", version: "v2",
+      system: "urn:clinic:fluid", code: "saline", display: "Custom saline" };
+    const actions = parseInstructionActions("Mix powder with saline", 0, {
+      instructionConceptMap: { saline: { code: "clinic-saline", role: AdviceArgumentRole.Substance,
+        display: "saline", coding } }
+    });
+    const graph = { sourceText: "Mix powder with saline", sourceLocale: "en", actions };
+    const saved = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, saved]) {
+      expect(candidate.actions[0].args.find(arg => arg.conceptId === "clinic-saline")?.coding).toMatchObject({
+        system: "urn:clinic:fluid", code: "saline", display: "Custom saline", id: "saline-annotation", version: "v2"
+      });
+    }
+  });
+});
+
+describe("round38 upper daily frequency short preview", () => {
+  it.each([undefined, 1])("retains an upper-only daily frequency with period %s", period => {
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequencyMax: 2, periodUnit: "d", ...(period === undefined ? {} : { period }) } } };
+    for (const input of [row, toDosageDetails([row]), toFhirR5Dosages([row])]) {
+      expect(formatSig(input, "short")).toContain(period === undefined ? "<=2x/d" : "<=2x/1d");
+      expect(formatSig(input, "long")).toContain("up to 2 times daily");
+    }
+  });
+  it.each([{ frequency: 2, expected: "2x/d" }, { frequency: 1, frequencyMax: 2, expected: "1-2x/d" }])("keeps exact and ranged daily counts", repeat => {
+    const row = { timing: { repeat: { frequency: repeat.frequency, frequencyMax: repeat.frequencyMax, periodUnit: "d" } } };
+    expect(formatSig(row, "short")).toContain(repeat.expected);
+  });
+});
+
+describe("round38 selected-Time relation across action realizers", () => {
+  it.each([
+    "Chew 1 tablet after breakfast",
+    "Rinse skin after breakfast",
+    "Keep dressing after breakfast",
+    "Remove patch after breakfast"
+  ])("keeps the selected relation through saved graph realization: %s", source => {
+    const original = parseInstructionActions(source)[0];
+    for (const polarity of [AdvicePolarity.Affirm, AdvicePolarity.Negate]) {
+      const frame = { ...original, sourceText: "", relation: AdviceRelation.After, polarity,
+        args: [...original.args.filter(arg => arg.role !== AdviceArgumentRole.Time), {
+          role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming.Breakfast,
+          relation: AdviceRelation.Before, i18n: { en: "breakfast", th: "อาหารเช้า" }
+        }] };
+      const graph = { sourceText: "", sourceLocale: "en", actions: [frame] };
+      const marker = buildInstructionGraphExtension(graph)!;
+      const recovered = parseInstructionGraphExtension([marker])!;
+      for (const input of [graph, recovered]) for (const locale of ["en", "th"]) {
+        const text = realizeInstructionGraph(input, locale)!;
+        expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+        expect(text).not.toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+      }
+      for (const locale of ["en", "th"])
+        expect(formatSig({ extension: [marker] }, "long", { locale, realizationMode: "normalized" }))
+          .toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+    }
+  });
+});
+
+describe("round38 configured source surfaces and stored action codes", () => {
+  it.each([false, true])("keeps colliding lexical and code namespaces independent of map order (%s)", reversed => {
+    const chew = getMedicationInstructionAction("chew")!;
+    const ordinary = { ...chew, code: "masticate", aliases: [], display: "Chew",
+      i18n: { th: "เคี้ยว" } };
+    const slowly = { ...chew, code: "chew-slowly", aliases: [], display: "Chew slowly",
+      i18n: { th: "เคี้ยวช้าๆ" } };
+    const options = { instructionActionMap: reversed
+      ? { masticate: slowly, chew: ordinary } : { chew: ordinary, masticate: slowly } };
+    for (const [surface, code, english, thai] of [
+      ["Chew", "masticate", "Chew 1 tablet", "เคี้ยว"],
+      ["Masticate", "chew-slowly", "Chew slowly 1 tablet", "เคี้ยวช้าๆ"]
+    ]) {
+      const actions = parseInstructionActions(surface + " 1 tablet", 0, options);
+      expect(actions).toHaveLength(1);
+      expect(actions[0].predicate.lemma).toBe(code);
+      expect(getMedicationInstructionAction(code, options)?.code).toBe(code);
+      const graph = { sourceText: "", sourceLocale: "en", actions };
+      const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+      expect(recovered.actions[0].predicate.lemma).toBe(code);
+      expect(realizeInstructionGraph(recovered, "en")).toContain(english);
+      expect(realizeInstructionGraph(recovered, "th")).toContain(thai);
+      const parsed = parsePublicSig(surface + " 1 tablet daily", options);
+      expect(parsed.longText).toContain(english);
+      for (const input of [parsed.fhirNext, parsed.fhir,
+        JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhir)))]) {
+        const englishText = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+        expect(englishText).toContain(english);
+        expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" })).toContain(thai);
+      }
+    }
+    expect(resolveMedicationInstructionAction("chew-slowly", options)).toBeUndefined();
+    expect(resolveMedicationInstructionAction("chew-slowly", options, true)?.code).toBe("chew-slowly");
+  });
+});
+
+describe("round38 procedural Object owns its authored amount", () => {
+  it.each(["tab", "tablet"])("keeps one authored %s dose and retires it after a wire edit", unit => {
+    const parsed = parsePublicSig("dissolve 1 " + unit + " under tongue prn chest pain");
+    expect(parsed.longText).toBe("Dissolve 1 " + unit + " under tongue as needed for chest pain.");
+    expect(parsed.longText.match(/\b1 tab(?:let)?\b/gu)).toHaveLength(1);
+    const row = JSON.parse(JSON.stringify(parsed.fhir[0]));
+    row.doseAndRate[0].doseQuantity.value = 2;
+    for (const input of [row, JSON.parse(JSON.stringify(toFhirR5Dosages([row])))]) {
+      const text = formatSig(input, "long", { locale: "en" });
+      expect(text).toContain("2 tablets");
+      expect(text).toContain("under tongue");
+      expect(text).not.toMatch(/\b1 tab(?:let)?\b/u);
+      expect(text.match(/2 tablets/gu)).toHaveLength(1);
+    }
   });
 });

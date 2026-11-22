@@ -50,6 +50,10 @@ import {
   INSTRUCTION_DURATION_UNITS,
   COURSE_DURATION_UNITS,
   nextDayOnsetAt,
+  NEXT_DAY_MODIFIERS,
+  NEXT_DAY_HEADS,
+  RELATIVE_TIME_END_LEADS,
+  attachedNumberUnitAt,
   isEndBoundDaypartAt,
   NEXT_DAY_SCHEDULE_RULE,
   compactDurationParts,
@@ -95,7 +99,7 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgScheduleFeature, HpsgSign, lexicalSign } from "../signature";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
-import { listMedicationInstructionActions, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getMedicationInstructionAction, listMedicationInstructionActions, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { combineSignFeatureStructures } from "../feature-structure";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
@@ -2565,7 +2569,7 @@ function timingRangeIsProcedureLocalDuration(
   end: number
 ): boolean {
   for (const frame of getProceduralFrames(context)) {
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
     if (definition?.procedural) {
       for (const arg of frame.args) {
         if (arg.role !== AdviceArgumentRole.Duration || !arg.span) continue;
@@ -2672,15 +2676,17 @@ function maximumDosePeriodAt(
     return DAYPART_INTERVAL_TOKENS.has(unitLower)
       ? { tokens, daypart: true } : { tokens, period: 1, periodUnit };
   }
-  if (unitLower !== "24") return undefined;
-  const hourToken = context.tokens[start + 2];
-  if (!hourToken || context.state.consumed.has(hourToken.index) ||
-      !/^(?:h|hr|hrs|hour|hours)$/u.test(normalizeTokenLower(hourToken))) return undefined;
-  return {
-    tokens: [connector, unitToken, hourToken],
-    period: 1,
-    periodUnit: FhirPeriodUnit.Day
-  };
+  const attached = attachedNumberUnitAt(unitLower);
+  const amount = attached?.value ?? (unitToken.kind === LexKind.Number
+    ? unitToken.value : FREQUENCY_NUMBER_WORDS[unitLower]);
+  const elapsedUnit = attached ? undefined : context.tokens[start + 2];
+  if (elapsedUnit && context.state.consumed.has(elapsedUnit.index)) return undefined;
+  const elapsedSurface = attached?.rawUnit ?? (elapsedUnit && normalizeTokenLower(elapsedUnit));
+  const elapsedPeriodUnit = elapsedSurface && mapIntervalUnit(elapsedSurface);
+  if (amount === undefined || amount <= 0 || !elapsedPeriodUnit) return undefined;
+  const tokens = attached ? [connector, unitToken] : [connector, unitToken, elapsedUnit!];
+  return DAYPART_INTERVAL_TOKENS.has(elapsedSurface!)
+    ? { tokens, daypart: true } : { tokens, period: amount, periodUnit: elapsedPeriodUnit };
 }
 
 /**
@@ -2725,10 +2731,9 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     // `tablets/day` remains one lossless lexical token; split only this
     // explicitly bounded dimensional suffix inside the maximum construction.
     const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
-    const compactPeriodUnit = compactUnitPeriod && (
-      mapIntervalUnit(compactUnitPeriod[2]) ??
-      (/^24(?:h|hr|hrs|hour|hours)$/u.test(compactUnitPeriod[2]) ? FhirPeriodUnit.Day : undefined)
-    );
+    const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
+    const compactPeriodSurface = compactAmount?.rawUnit ?? compactUnitPeriod?.[2];
+    const compactPeriodUnit = compactPeriodSurface ? mapIntervalUnit(compactPeriodSurface) : undefined;
     if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return [];
     const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
     if (!unit) return [];
@@ -2736,9 +2741,9 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     cursor += 2;
 
     const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
-      ? DAYPART_INTERVAL_TOKENS.has(compactUnitPeriod![2])
+      ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
         ? { tokens: [], daypart: true }
-        : { tokens: [], period: 1, periodUnit: compactPeriodUnit }
+        : { tokens: [], period: compactAmount?.value ?? 1, periodUnit: compactPeriodUnit }
       : undefined;
     const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
     if (!period) return [];
@@ -3522,7 +3527,7 @@ function openEndedContextMarkers(context: HpsgClauseContext): OpenEndedMarkerMat
 
 function codedCourseEndCondition(context: HpsgClauseContext, start: number): HpsgSign | undefined {
   const lead = context.tokens[start];
-  if (!lead || normalizeTokenLower(lead) !== 'until') return undefined;
+  if (!lead || !RELATIVE_TIME_END_LEADS.has(normalizeTokenLower(lead))) return undefined;
   // A dated bound has executable calendar semantics and owns this span.
   if (context.dateSpans.some(span => span.start <= lead.sourceStart && span.end > lead.sourceStart)) {
     return undefined;
@@ -3530,6 +3535,30 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   const article = context.tokens[start + 1];
   let next = start + 1;
   if (article && normalizeTokenLower(article) === 'the') next += 1;
+  // A relative end owns the whole NEXT + day/daypart nominal. Its clock is
+  // unresolved, so retain the authored ending instruction without creating a
+  // recurring morning/evening dose or inventing an absolute end instant.
+  const modifier = context.tokens[next], head = context.tokens[next + 1];
+  if (modifier && head && NEXT_DAY_MODIFIERS.has(normalizeTokenLower(modifier)) &&
+      NEXT_DAY_HEADS.has(normalizeTokenLower(head))) {
+    const tokens = tokensAvailable(context, start, next + 2 - start);
+    if (tokens) {
+      const text = context.state.input.slice(lead.sourceStart, head.sourceEnd);
+      return lexicalSign({
+        type: "instruction-sign", rule: "hpsg.lex.instruction.relativeCourseEnd", tokens,
+        synsem: { head: {}, valence: { instructions: [{ text }] },
+          cont: { clauseKind: "administration", clinicalAdjunct: {
+            unresolved: true,
+            localRanges: [{ start: lead.sourceStart, end: head.sourceEnd }],
+            evidence: [{
+              rule: "hpsg.lex.instruction.relativeCourseEnd", kind: "unresolved",
+              ranges: [{ start: lead.sourceStart, end: head.sourceEnd }]
+            }]
+          } } },
+        score: 58 + tokens.length
+      });
+    }
+  }
   for (const definition of OPEN_ENDED_COURSE_END_CONDITIONS) {
     const first = context.tokens[next];
     const second = context.tokens[next + 1];
@@ -3687,7 +3716,7 @@ export function finiteTreatmentPauseAt(
   context: HpsgClauseContext, frame: AdviceFrame, start: number
 ): { actionEnd: number; duration: HpsgSign; pause: { durationDays: number; range: { start: number; end: number } } } | undefined {
   if (frame.polarity === AdvicePolarity.Negate) return undefined;
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   if (definition?.semanticClass !== "stop" &&
       definition?.argumentParserConfig?.medicationConditionEffect !== "withhold") return undefined;
   const actionEnd = courseActionEnd(context.state.input, context.tokens, start, "stop", context.options);

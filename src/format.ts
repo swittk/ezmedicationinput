@@ -1120,7 +1120,22 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
   return `for ${lowerBound}${lower} ${label(schedule.duration)}`;
 }
 
-function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined, short = false): string | undefined {
+  const range = schedule?.administrationDurationRange;
+  if (range) {
+    const endpoint = (quantity: NonNullable<typeof range.low>): string => {
+      const unit = quantity.code ?? quantity.unit ?? "";
+      const label = short ? quantity.unit ?? unit :
+        quantity.unit && quantity.unit !== unit ? quantity.unit : ENGLISH_COURSE.timeUnit(unit, quantity.value) ?? unit;
+      return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "en")) +
+        (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
+    };
+    const low = range.low && endpoint(range.low), high = range.high && endpoint(range.high);
+    if (low && high) return short ? "over" + low + "-" + high : "over " + low + " to " + high;
+    if (high) return short ? "over" + (range.high?.comparator ? "" : "<=") + high : "over " + (range.high?.comparator ? "" : "up to ") + high;
+    if (low) return short ? "over" + (range.low?.comparator ? "" : ">=") + low : "over " + (range.low?.comparator ? "" : "at least ") + low;
+    return undefined;
+  }
   const value = schedule?.administrationDuration;
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
@@ -1220,6 +1235,13 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (
+    schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
+    schedule.periodUnit === FhirPeriodUnit.Day &&
+    schedule.period === undefined &&
+    (schedule.periodMax === undefined || schedule.periodMax === 1)
+  ) {
+    parts.push(`<=${stripTrailingZero(schedule.frequencyMax)}x/d`);
+  } else if (
     schedule.frequency !== undefined &&
     schedule.frequencyMax !== undefined &&
     schedule.periodUnit === FhirPeriodUnit.Day &&
@@ -1291,7 +1313,10 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
+  if (schedule.administrationDurationRange) {
+    const duration = describeAdministrationDuration(schedule, true);
+    if (duration) parts.push(duration);
+  } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
       schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
     const lower = schedule.administrationDuration === undefined

@@ -952,13 +952,16 @@ Key rules:
 
 `calculateTotalUnits` computes the total amount of medication (and optionally the number of containers) required for a specific duration. It accounts for complex schedules, dose ranges, and unit conversions between doses and containers. A range uses its upper quantity where feasible; interacting quantity and administration-count limits are considered together. For example, 1.5–2 tablets, at most once per day, with a three-tablet limit over 48 hours permits three tablets across two days as 1.5 + 1.5.
 
-Untimed ranged supply with interacting limits uses a bounded exact calculation.
-If it reports `ranged-capacity-complexity`, use a shorter supply window or supply
-a resolved per-administration quantity. A strict range that has a finite
-supremum but no attainable maximum reports `ranged-capacity-open-maximum`;
-resolve the dose or provide a closed range before requesting a numeric maximum.
-These are supply-calculation results; the structured instruction and source
-remain available for parsing, display, persistence, and correction.
+Ranged supply with interacting limits uses a bounded exact calculation.
+Successful calls return a `TotalUnitsResult`. When the calculation cannot provide
+an exact attainable maximum, it throws `MedicationQuantityCalculationError`;
+catch the exception and inspect its `code`. For `ranged-capacity-complexity`,
+use a shorter supply window or supply a resolved per-administration quantity.
+For `ranged-capacity-open-maximum`, a strict range has a finite supremum but
+no attainable maximum; the prescriber can resolve the dose or provide a closed
+range before requesting a numeric maximum. These exceptions affect supply
+calculation only. The structured instruction and source remain available for
+parsing, display, persistence, and correction.
 
 ```ts
 import { calculateTotalUnits, parseSig, FhirPeriodUnit } from "ezmedicationinput";

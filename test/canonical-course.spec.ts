@@ -90,7 +90,7 @@ describe("canonical course architecture", () => {
       "../src/canonical/format-course.ts",
     ]) {
       const text = readFileSync(new URL(name, import.meta.url), "utf8");
-      expect(text).not.toMatch(/from\s+["'][^"']*(?:dosage-course|adapters\/|\/fhir(?:["']|\.))/u);
+      expect(text).not.toMatch(/(?:from\s+|import\s*\(\s*)["'][^"']*(?:dosage-course|adapters\/|\/fhir(?:["']|\.))/u);
       expect(text).not.toMatch(
         /\b(?:toFhirR5Dosages|fromR6Dosage|toDosageDetails|modifierExtension)\s*(?:\(|\?\.|\.)/u
       );
@@ -1387,11 +1387,15 @@ describe("round30 current cadence and duration metadata", () => {
           period: 1, periodUnit: unit as FhirPeriodUnit } }
     }] }] };
     const before = JSON.stringify(input);
-    expect(formatSig(input, "short", { locale: "en" }).toLowerCase()).toContain(expected as string);
+    const beforeText = formatSig(input, "short", { locale: "en" });
+    expect(beforeText.toLowerCase()).toContain(expected as string);
+    expect(beforeText).not.toMatch(/\b(?:WK|MO)\b/u);
     expect(JSON.stringify(input)).toBe(before);
     input.step[0].component[0].timing.repeat.frequency = 1;
     input.step[0].component[0].timing.repeat.frequencyMax = undefined;
-    expect(formatSig(input, "short", { locale: "en" })).toContain(unit === "wk" ? "WK" : "MO");
+    const afterText = formatSig(input, "short", { locale: "en" });
+    expect(afterText).toContain(unit === "wk" ? "WK" : "MO");
+    expect(afterText.toLowerCase()).not.toContain(expected as string);
   });
 
   it.each([
@@ -1679,3 +1683,767 @@ describe("round37 upper-only timing and stage origins", () => {
       .toEqual(["2026-11-23T09:00:00+00:00"]);
   });
 });
+
+
+// Retained regression suite from test/pr14-followup-clinical.spec.ts.
+/**
+ * November 18 review: preserve clinical meaning through repeated-course
+ * chronology and through a clinician's live R5 dose edits.
+ * These are independent oracles, not roundtrips of the same broken output.
+ */
+import { describe as round38_followup_describe, expect as round38_followup_expect, it as round38_followup_it } from "vitest";
+import { calculateTotalUnits as round38_followup_calculateTotalUnits, formatSig as round38_followup_formatSig, nextDueDoses as round38_followup_nextDueDoses, parseSig as round38_followup_parseSig, EMA_QUANTITY_COMPARATOR_EXTENSION_URL as round38_followup_EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM as round38_followup_EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/index";
+import { formatCanonicalClause as round38_followup_formatCanonicalClause } from "../src/format";
+import { resolveSigLocalization as round38_followup_resolveSigLocalization } from "../src/i18n";
+import { instructionGraphSourceConflictsWithDose as round38_followup_instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
+import { FhirPeriodUnit as round38_followup_FhirPeriodUnit } from "../src/types";
+{
+  const describe = round38_followup_describe;
+  const expect = round38_followup_expect;
+  const it = round38_followup_it;
+  const calculateTotalUnits = round38_followup_calculateTotalUnits;
+  const formatSig = round38_followup_formatSig;
+  const nextDueDoses = round38_followup_nextDueDoses;
+  const parseSig = round38_followup_parseSig;
+  const EMA_QUANTITY_COMPARATOR_EXTENSION_URL = round38_followup_EMA_QUANTITY_COMPARATOR_EXTENSION_URL;
+  const EMA_QUANTITY_OPERATOR_SYSTEM = round38_followup_EMA_QUANTITY_OPERATOR_SYSTEM;
+  const formatCanonicalClause = round38_followup_formatCanonicalClause;
+  const resolveSigLocalization = round38_followup_resolveSigLocalization;
+  const instructionGraphSourceConflictsWithDose = round38_followup_instructionGraphSourceConflictsWithDose;
+  const FhirPeriodUnit = round38_followup_FhirPeriodUnit;
+  type FhirPeriodUnit = round38_followup_FhirPeriodUnit;
+// BEGIN PRESERVED followup
+/**
+ * November 18 review: preserve clinical meaning through repeated-course
+ * chronology and through a clinician's live R5 dose edits.
+ * These are independent oracles, not roundtrips of the same broken output.
+ */
+
+
+
+
+
+
+
+const from = "2026-01-01T00:00:00Z";
+const options = { from, orderedAt: from, timeZone: "UTC" } as const;
+
+describe("repeated-course clinical chronology", () => {
+  it("completes an uncapped finite loading stage before an overlapping capped maintenance stage", () => {
+    const course = {
+      kind: "course" as const,
+      cycleInterval: { value: 7, unit: "d" },
+      stages: [
+        {
+          administrations: [{
+            kind: "administration" as const,
+            amounts: [{ quantity: { value: 2, unit: "tab" } }],
+            schedule: { recurrence: {
+              count: 1,
+              frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+              clocks: ["08:00:00"]
+            } }
+          }]
+        },
+        {
+          administrations: [{
+            kind: "administration" as const,
+            amounts: [{ quantity: { value: 1, unit: "tab" } }],
+            schedule: { recurrence: {
+              frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+              clocks: ["09:00:00"],
+              courseLength: { value: 10, unit: "d" },
+            } },
+            limits: [{scope: "period" as const,
+              amount: {value: 2, unit: "tab"}, period: {value: 1, unit: "d"}}],
+          }]
+        }
+      ]
+    };
+    const due = nextDueDoses(course, { ...options, limit: 20 });
+    expect(due.slice(0, 6)).toEqual([
+      "2026-01-01T08:00:00+00:00",
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+      "2026-01-04T09:00:00+00:00",
+      "2026-01-05T09:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 5, durationUnit: FhirPeriodUnit.Day
+    });
+    // A finite 08:00 loading dose completes before the 09:00 maintenance
+    // clock ON JANUARY 1. The 5-day window therefore has two loading
+    // tablets plus five maintenance tablets (Jan 1 through Jan 5).
+    expect(supply.totalUnits).toBe(7);
+    // A partially stated cap is preserved for review but cannot impose
+    // shared chronological acceptance; the uncapped loading stage must
+    // still finish before maintenance starts.
+    const incomplete = {
+      ...course,
+      stages: [
+        {
+          ...course.stages[0],
+          administrations: course.stages[0].administrations.map(a => ({
+            ...a,
+            limits: [{
+              scope: "period" as const,
+              amount: { value: 2, unit: "tab" },
+              period: { unit: "d" }
+            }]
+          })),
+        },
+        course.stages[1],
+      ]
+    };
+    const incompleteDue = nextDueDoses(incomplete, { ...options, limit: 20 });
+    expect(incompleteDue.slice(0, 2)).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-01T09:00:00+00:00",
+    ]);
+    expect(incompleteDue).toContain("2026-01-02T09:00:00+00:00");
+  });
+
+  it("counts two genuinely accepted administrations at one time across overlapping daily cycles", () => {
+    const course = {
+      kind: "course" as const,
+      cycleInterval: { value: 1, unit: "d" },
+      stages: [{
+        administrations: [{
+          kind: "administration" as const,
+          amounts: [{quantity: {value: 1, unit: "tab"}}],
+          schedule: {recurrence: {
+            frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+            clocks: ["00:00:00"], courseLength: {value: 2, unit: "d"}
+          }},
+          limits: [{
+            scope: "period" as const,
+            amount: {value: 2, unit: "tab"},
+            period: {value: 1, unit: "d"}
+          }]
+        }]
+      }]
+    };
+    const due = nextDueDoses(course, {...options, limit: 5});
+    expect(due).toEqual([
+      "2026-01-01T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-03T00:00:00+00:00",
+      "2026-01-03T00:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply.totalUnits).toBe(5);
+  });
+});
+
+describe("R5 source dose identity after live edits", () => {
+  it("does not reuse an HPSG dose's source text after an in-place edit of its original parser row", () => {
+    const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+    const row = parseSig(source, { locale: "th" }).items[0].fhir;
+    const display = () => formatSig(row, "long", { locale: "th", realizationMode: "roundtrip" });
+    expect(display()).toBe(source);
+    const dose = row.doseAndRate?.[0]?.doseQuantity;
+    expect(dose?.value).toBe(1);
+    dose!.value = 2;
+    expect(display()).not.toBe(source);
+    expect(display()).toMatch(/(?:^|[^\d])(?:2|สอง)\s*หยด/u);
+    dose!.value = 1;
+    expect(display()).toBe(source);
+    const originalUnit = dose!.unit, originalCode = dose!.code;
+    dose!.unit = "tab";
+    dose!.code = "15054";
+    expect(display()).not.toBe(source);
+    expect(display()).toContain("เม็ด");
+    dose!.unit = originalUnit;
+    dose!.code = originalCode;
+    expect(display()).toBe(source);
+    const originalExtensions = dose!.extension;
+    dose!.extension = [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" }
+    }];
+    expect(display()).not.toBe(source);
+    expect(display()).toContain("ประมาณ");
+    dose!.extension = originalExtensions;
+    expect(display()).toBe(source);
+  });
+
+  it("treats a changed defaulted amount as a live dose while keeping the original default source", () => {
+    const source = "Mix with water then swallow";
+    const parsed = parseSig(source, {
+      assumeSingleDiscreteDose: true,
+      context: { dosageForm: "tablet" }
+    });
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({value: 1, defaulted: true});
+    expect(clause.instructionGraph?.actions.length).toBeGreaterThan(0);
+    const original = formatCanonicalClause(
+      clause, "long", resolveSigLocalization("en"), {realizationMode: "roundtrip"}
+    );
+    expect(original).toBe(source);
+    const changed = { ...clause, dose: { ...clause.dose!, value: 2 } };
+    expect(instructionGraphSourceConflictsWithDose(changed)).toBe(true);
+    const text = formatCanonicalClause(
+      changed, "long", resolveSigLocalization("en"), {realizationMode: "roundtrip"}
+    );
+    expect(text).not.toBe(original);
+    expect(text).toMatch(/(?<![\w.+-])(?:2|two)\s+tablets?\b/iu);
+    const changedUnit = { ...clause, dose: { ...clause.dose!, unit: "drop" } };
+    expect(instructionGraphSourceConflictsWithDose(changedUnit)).toBe(true);
+    const changedUnitText = formatCanonicalClause(
+      changedUnit, "long", resolveSigLocalization("en"), { realizationMode: "roundtrip" }
+    );
+    expect(changedUnitText).not.toBe(source);
+    expect(changedUnitText).toMatch(/(?<![\w.+-])(?:1|one)\s+drop\b/iu);
+  });
+});
+
+describe("November 18 overlapping-course maximum supply and rate dose caps", () => {
+  const capPeriod = { value: 1, unit: "d" };
+  const anchor = "2026-01-01T00:00:00Z";
+  const o = { from: anchor, orderedAt: anchor, timeZone: "UTC" };
+  const stage = (amounts: Array<{
+    quantity?: { value: number; unit: string };
+    rate?: { value: number; unit: string };
+    rateRatio?: { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } };
+  }>, limit: number, maximum?: boolean) => ({
+    kind: "course" as const,
+    cycleInterval: { value: 1, unit: "d" },
+    stages: [{ administrations: [{
+      kind: "administration" as const,
+      amounts,
+      schedule: { recurrence: {
+        frequency: 1,
+        ...(maximum ? { frequencyMax: 2 } : {}),
+        period: 1,
+        periodUnit: FhirPeriodUnit.Day,
+        clocks: [maximum ? "09:00:00" : "00:00:00"],
+        courseLength: { value: 2, unit: "d" },
+        ...(amounts[0]?.rate || amounts[0]?.rateRatio
+          ? { occurrenceDuration: 1, occurrenceDurationUnit: FhirPeriodUnit.Hour }
+          : {}),
+      } },
+      limits: [{ scope: "period" as const,
+        amount: { value: limit, unit: amounts[0]?.quantity?.unit ?? "mL" },
+        period: capPeriod
+      }]
+    }] }]
+  });
+
+  it("keeps concrete scheduling at one clock, but computes two-per-cycle maximum supply through shared caps", () => {
+    const course = stage([{ quantity: { value: 1, unit: "tab" } }], 4, true);
+    expect(nextDueDoses(course, { ...o, limit: 5 })).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply).toMatchObject({ totalUnits: 10, unit: "tab", quantityKind: "maximum" });
+  });
+
+  it("applies a one-tablet rolling cap to the upper-frequency plan, not just the source clock plan", () => {
+    const course = stage([{ quantity: { value: 1, unit: "tab" } }], 1, true);
+    // Even two-per-cycle maximum opportunities must respect the one
+    // administration/day clinical ceiling across overlapping cycles.
+    expect(calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 3, unit: "tab", quantityKind: "maximum" });
+  });
+
+  it("retains a contradictory 5 mL/day cap without making the 10 mL infusion unschedulable", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 5);
+    const scheduled = nextDueDoses(course, { ...o, limit: 4 });
+    expect(scheduled).toEqual([
+      "2026-01-01T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-02T00:00:00+00:00",
+      "2026-01-03T00:00:00+00:00",
+    ]);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply).toMatchObject({ totalUnits: 50, unit: "mL", quantityKind: "maximum" });
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].rate).toEqual({
+      value: 10, unit: "mL/h"
+    });
+  });
+
+  it("evaluates a rate-only maximum-frequency course with the SAME shared volume ceiling", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10, true);
+    const before = structuredClone(course);
+    const due = nextDueDoses(course, { ...o, limit: 3 });
+    expect(due).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-03T09:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 30, unit: "mL", quantityKind: "maximum" });
+    expect(course).toEqual(before);
+  });
+
+  it("carries rate-only rolling-cap history across a late supply query", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10);
+    const from = "2026-01-02T12:00:00Z";
+    expect(nextDueDoses(course, { ...o, from, limit: 2 })).toEqual([
+      "2026-01-03T00:00:00+00:00", "2026-01-04T00:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({
+      ...o, from, dosage: course, durationValue: 1, durationUnit: FhirPeriodUnit.Day
+    }).totalUnits).toBe(10);
+  });
+
+  it("retains an incompatible period cap as unevaluated clinical meaning instead of claiming exact supply", () => {
+    const course = stage([{ rate: { value: 10, unit: "mL/h" } }], 10);
+    const member = course.stages[0].administrations[0];
+    member.limits[0].amount.unit = "mg";
+    const originalLimit = structuredClone(member.limits);
+    const supply = calculateTotalUnits({
+      ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+    });
+    expect(supply.totalUnits).toBe(50);
+    expect(supply.unit).toBe("mL");
+    expect(supply.quantityKind).toBe("maximum");
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(member.limits).toEqual(originalLimit);
+  });
+
+  for (const [name, amounts] of [
+    ["rate quantity", [{ rate: { value: 10, unit: "mL/h" } }]],
+    ["rate ratio", [{ rateRatio: { numerator: { value: 10, unit: "mL" },
+      denominator: { value: 1, unit: "h" } } }]],
+  ] as const) {
+    it("applies a 10 mL/24h limit to each measured 10 mL infusion from " + name, () => {
+      const course = stage([...amounts], 10);
+      expect(nextDueDoses(course, { ...o, limit: 4 })).toEqual([
+        "2026-01-01T00:00:00+00:00",
+        "2026-01-02T00:00:00+00:00",
+        "2026-01-03T00:00:00+00:00",
+        "2026-01-04T00:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({
+        ...o, dosage: course, durationValue: 3, durationUnit: FhirPeriodUnit.Day
+      })).toMatchObject({ totalUnits: 30, unit: "mL" });
+    });
+  }
+});
+
+describe("November 18 review: dose ranges own upper-bound rolling-cap quantity", () => {
+  const options = {
+    from: "2026-01-01T00:00:00Z",
+    orderedAt: "2026-01-01T00:00:00Z",
+    timeZone: "UTC",
+  };
+  function rangedCourse(maxPerDay: number) {
+    return {
+      kind: "course" as const,
+      cycleInterval: { value: 1, unit: "d" },
+      stages: [{
+        administrations: [{
+          kind: "administration" as const,
+          amounts: [{ range: {
+            low: { value: 1, unit: "tab" },
+            high: { value: 2, unit: "tab" },
+          } }],
+          schedule: { recurrence: {
+            frequency: 1, frequencyMax: 2,
+            period: 1, periodUnit: FhirPeriodUnit.Day,
+            clocks: ["09:00:00"],
+            courseLength: { value: 2, unit: "d" },
+          } },
+          limits: [{ scope: "period" as const,
+            amount: { value: maxPerDay, unit: "tab" },
+            period: { value: 1, unit: "d" },
+          }],
+        }],
+      }],
+    };
+  }
+
+  it("caps the upper-range maximum plan by tablets, not just administrations", () => {
+    const course = rangedCourse(4);
+    const original = structuredClone(course);
+    // Clinical scheduling uses the one authored concrete clock; the
+    // two-per-day range belongs to maximum supply estimation only.
+    expect(nextDueDoses(course, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+      "2026-01-02T09:00:00+00:00",
+    ]);
+    // Jan 1 and Jan 2 each allow only TWO 2-tab administrations:
+    // maximum quantity = 4 tabs/day x 2 days = 8, never 12.
+    expect(calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    })).toMatchObject({
+      totalUnits: 8, unit: "tab", quantityKind: "maximum",
+    });
+    expect(course).toEqual(original);
+  });
+
+  it("uses the upper dose of two tablets when one administration exhausts each day's cap", () => {
+    const course = rangedCourse(2);
+    expect(calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    })).toMatchObject({
+      totalUnits: 4, unit: "tab", quantityKind: "maximum",
+    });
+  });
+
+  it("uses a feasible one-tablet dose when the cap intersects the authored range", () => {
+    const course = rangedCourse(1);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply).toMatchObject({ totalUnits: 2, quantityKind: "maximum" });
+    expect(supply.explanation).not.toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].range.high.value).toBe(2);
+  });
+
+  it("keeps a cap below the range's lower endpoint recoverable and explicitly unevaluated", () => {
+    const course = rangedCourse(0.5);
+    const supply = calculateTotalUnits({
+      ...options, dosage: course, durationValue: 2,
+      durationUnit: FhirPeriodUnit.Day,
+    });
+    expect(supply).toMatchObject({ totalUnits: 12, unit: "tab", quantityKind: "maximum" });
+    expect(supply.explanation).toContain("unevaluable maximum-dose constraint");
+    expect(course.stages[0].administrations[0].amounts[0].range.low.value).toBe(1);
+  });
+});
+
+// END PRESERVED followup
+}
+
+
+// Retained regression suite from test/course-language.spec.ts.
+/** Course language is a facet of the existing localization registry, not
+ * another clinical engine. Independent oracles cover both built-in surfaces
+ * and a third-language extension without editing canonical semantics. */
+import { describe as round38_language_describe, it as round38_language_it, expect as round38_language_expect } from "vitest";
+import { readFileSync as round38_language_readFileSync } from "node:fs";
+import { registerSigLocalization as round38_language_registerSigLocalization, resolveSigLocalization as round38_language_resolveSigLocalization } from "../src/i18n";
+import { formatSigBatch as round38_language_formatSigBatch, setDosageAlternativeChoice as round38_language_setDosageAlternativeChoice } from "../src/index";
+import type { FhirDosage as round38_language_FhirDosage } from "../src/types";
+import { ENGLISH_COURSE as round38_language_ENGLISH_COURSE } from "../src/locales/course/en";
+import { DAY_NAMES as round38_language_DAY_NAMES, joinWithAnd as round38_language_joinWithAnd } from "../src/format";
+import { DAY_NAMES_THAI as round38_language_DAY_NAMES_THAI, joinWithAndThai as round38_language_joinWithAndThai } from "../src/i18n";
+import { ENGLISH_DAY_NAMES as round38_language_ENGLISH_DAY_NAMES, THAI_DAY_NAMES as round38_language_THAI_DAY_NAMES, joinLocalizedList as round38_language_joinLocalizedList } from "../src/locales/course/weekday-vocabulary";
+import { formatCanonicalCourse as round38_language_formatCanonicalCourse, formatCanonicalAdministration as round38_language_formatCanonicalAdministration, appendMedicationConditionText as round38_language_appendMedicationConditionText, appendMedicationExcludedWeekdaysText as round38_language_appendMedicationExcludedWeekdaysText } from "../src/canonical/format-course";
+import type { CanonicalCourse as round38_language_CanonicalCourse } from "../src/canonical/course";
+{
+  const describe = round38_language_describe;
+  const it = round38_language_it;
+  const expect = round38_language_expect;
+  const readFileSync = round38_language_readFileSync;
+  const registerSigLocalization = round38_language_registerSigLocalization;
+  const resolveSigLocalization = round38_language_resolveSigLocalization;
+  const formatSigBatch = round38_language_formatSigBatch;
+  const setDosageAlternativeChoice = round38_language_setDosageAlternativeChoice;
+  type FhirDosage = round38_language_FhirDosage;
+  const ENGLISH_COURSE = round38_language_ENGLISH_COURSE;
+  const DAY_NAMES = round38_language_DAY_NAMES;
+  const joinWithAnd = round38_language_joinWithAnd;
+  const DAY_NAMES_THAI = round38_language_DAY_NAMES_THAI;
+  const joinWithAndThai = round38_language_joinWithAndThai;
+  const ENGLISH_DAY_NAMES = round38_language_ENGLISH_DAY_NAMES;
+  const THAI_DAY_NAMES = round38_language_THAI_DAY_NAMES;
+  const joinLocalizedList = round38_language_joinLocalizedList;
+  const formatCanonicalCourse = round38_language_formatCanonicalCourse;
+  const formatCanonicalAdministration = round38_language_formatCanonicalAdministration;
+  const appendMedicationConditionText = round38_language_appendMedicationConditionText;
+  const appendMedicationExcludedWeekdaysText = round38_language_appendMedicationExcludedWeekdaysText;
+  type CanonicalCourse = round38_language_CanonicalCourse;
+// BEGIN PRESERVED language
+/** Course language is a facet of the existing localization registry, not
+ * another clinical engine. Independent oracles cover both built-in surfaces
+ * and a third-language extension without editing canonical semantics. */
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Day-number wording is valid only for an explicitly local-day origin.
+const boundaries: CanonicalCourse = {
+  kind: "course",
+  cycleInterval: { value: 7, unit: "d" },
+  stages: [
+    {
+      start: { anchor: "treatment-day-start", displacement: { value: 0, unit: "d" } },
+      end: { anchor: "treatment-day-start", displacement: { value: 3, unit: "d" } },
+      administrations: [
+        {
+          kind: "administration",
+          amounts: [{ quantity: { value: 2, unit: "tab" } }],
+          schedule: { recurrence: { frequency: 1, period: 1, periodUnit: "d" } },
+        },
+      ],
+    },
+  ],
+};
+
+describe("dependency-free course vocabulary", () => {
+  it("reuses the historical weekday tables without a circular locale-registry dependency", () => {
+    expect(DAY_NAMES).toBe(ENGLISH_DAY_NAMES);
+    expect(DAY_NAMES_THAI).toBe(THAI_DAY_NAMES);
+    for (const name of ["en", "th"]) {
+      const moduleText = readFileSync(new URL("../src/locales/course/" + name + ".ts", import.meta.url), "utf8");
+      expect(moduleText).not.toMatch(/from\s+["']\.\.\/\.\.\/(?:i18n|format)["']/u);
+      expect(moduleText).toContain('from "./weekday-vocabulary"');
+    }
+  });
+  it("retains original 0/1/2/3+ list join behavior without slicing arrays", () => {
+    const items = ["Monday", "Tuesday", "Wednesday", "Thursday"];
+    expect(joinWithAnd([])).toBe("");
+    expect(joinWithAnd(items.slice(0, 1))).toBe("Monday");
+    expect(joinWithAnd(items.slice(0, 2))).toBe("Monday and Tuesday");
+    expect(joinWithAnd(items.slice(0, 3))).toBe("Monday, Tuesday and Wednesday");
+    expect(joinWithAnd(items)).toBe("Monday, Tuesday, Wednesday and Thursday");
+    expect(joinWithAndThai(items.slice(0, 3))).toBe("Monday, Tuesday และ Wednesday");
+    expect(joinLocalizedList(items, "ou")).toBe("Monday, Tuesday, Wednesday ou Thursday");
+  });
+});
+
+describe("course locale boundary", () => {
+  it("keeps built-in clinical windows, gaps and repeat periods exact in EN and TH", () => {
+    const en = formatCanonicalCourse(boundaries, "long", { locale: "en" });
+    const th = formatCanonicalCourse(boundaries, "long", { locale: "th" });
+    expect(en).toContain("Days 1–3:");
+    expect(en).toContain("No doses on days 4–7.");
+    expect(en).toContain("Repeat this schedule every 7 days");
+    expect(th).toContain("วันที่ 1–3:");
+    expect(th).toContain("งดยาในวันที่ 4–7.");
+    expect(th).toContain("ทำซ้ำแผนการใช้ยานี้ทุก 7 วัน");
+  });
+  it("preserves Boolean grouping and the distinction between a negated state and an outer unless", () => {
+    const guard = {
+      kind: "all" as const,
+      conditions: [
+        { kind: "state" as const, name: "awake", expected: false },
+        {
+          kind: "any" as const,
+          conditions: [
+            { kind: "measurement" as const, name: "SBP", operation: "gt" as const, value: 100 },
+            { kind: "measurement" as const, name: "HR", operation: "lt" as const, value: 90 },
+          ],
+        },
+      ],
+    };
+    expect(appendMedicationConditionText("Take 1 tablet.", guard, { locale: "en" })).toBe(
+      "Take 1 tablet only if not awake and (SBP > 100 or HR < 90)."
+    );
+    expect(appendMedicationConditionText("รับประทาน 1 เม็ด.", guard, { locale: "th" })).toBe(
+      "รับประทาน 1 เม็ด เฉพาะเมื่อ ไม่ awake และ (SBP > 100 หรือ HR < 90)."
+    );
+    const outerUnless = { kind: "not" as const, condition: guard };
+    expect(appendMedicationConditionText("Take 1 tablet.", outerUnless, { locale: "en" })).toBe(
+      "Take 1 tablet unless not awake and (SBP > 100 or HR < 90)."
+    );
+    expect(appendMedicationConditionText("รับประทาน 1 เม็ด.", outerUnless, { locale: "th" })).toBe(
+      "รับประทาน 1 เม็ด เว้นแต่ ไม่ awake และ (SBP > 100 หรือ HR < 90)."
+    );
+  });
+  it("adds a third language through the same registration including clauses, stages, rates and conditions", () => {
+    registerSigLocalization({
+      locale: "course-test",
+      formatLong: () => "Dose locale.",
+      formatShort: () => "Dose locale.",
+      course: {
+        ...ENGLISH_COURSE,
+        dayRange: (a, b) => `Jours ${a}–${b}`,
+        noDoseDays: (a, b) => `Pause ${a}–${b}.`,
+        timeUnit: (unit) => (unit === "d" ? "jours" : unit),
+        repeatCycle: (interval) => `Répéter ${interval}.`,
+        rateLabel: "Débit: ",
+        unspecified: "non spécifié",
+        onlyIf: "si",
+        notPrefix: "non ",
+        allSeparator: " et ",
+        anySeparator: " ou ",
+      },
+    });
+    const text = formatCanonicalCourse(boundaries, "long", { locale: "course-test" });
+    expect(text).toContain("Jours 1–3: Dose locale.");
+    expect(text).toContain("Pause 4–7.");
+    expect(text).toContain("Répéter 7 jours.");
+    expect(text).not.toContain("Days");
+    expect(
+      formatCanonicalAdministration(
+        { kind: "administration", amounts: [{ rate: { unit: "mL/h" } }] },
+        "long",
+        { locale: "course-test" }
+      )
+    ).toContain("Débit: non spécifié mL/h");
+    expect(
+      appendMedicationConditionText(
+        "Dose.",
+        { kind: "state", name: "awake", expected: false },
+        { locale: "course-test" }
+      )
+    ).toBe("Dose si non awake.");
+    // The same inheritance configuration applies to course and clause facets.
+    expect(
+      formatCanonicalCourse(boundaries, "long", {
+        i18n: { inherit: "course-test", locale: "course-derived" },
+      })
+    ).toContain("Jours 1–3");
+  });
+  it("applies per-call inheritance to public R5 choices and standalone course wording", () => {
+    const inherited = {
+      ...ENGLISH_COURSE,
+      choicePrefix: "Sélection: ",
+      anySeparator: " ou ",
+      exceptWeekdays: "sauf ",
+      weekdayName: () => "lundi",
+      joinList: (items: readonly string[]) => items.join(" et "),
+    };
+    registerSigLocalization({
+      locale: "choice-inherit",
+      formatLong: ({ clause }) => "Dose " + clause.dose?.value + ".",
+      course: inherited,
+    });
+    const rows: FhirDosage[] = [1, 2].map(value => ({
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+    }));
+    for (let i = 0; i < rows.length; i++)
+      setDosageAlternativeChoice(rows[i], {
+        groupId: "one-choice",
+        branchId: String(i),
+        selectionBehavior: "exactly-one",
+      });
+    const options = { i18n: { locale: "unregistered-output-tag", inherit: "choice-inherit" } };
+    expect(formatSigBatch(rows, "long", options)).toBe("Sélection: Dose 1 ou Dose 2.");
+    expect(appendMedicationExcludedWeekdaysText("Dose.", ["mon"], options)).toBe("Dose sauf lundi.");
+  });
+  it("keeps a course-only override even when no clause callbacks are registered", () => {
+    registerSigLocalization({ locale: "course-only", course: ENGLISH_COURSE });
+    const course = { ...ENGLISH_COURSE, onlyIf: "provided that" };
+    expect(resolveSigLocalization("course-only", { course })?.course).toBe(course);
+    expect(
+      appendMedicationConditionText(
+        "Dose.",
+        { kind: "state", name: "awake", expected: true },
+        { locale: "course-only", i18n: { course } }
+      )
+    ).toBe("Dose provided that awake.");
+  });
+  it("does not resolve or interpret language in the clinical course algorithm", () => {
+    const source = readFileSync(new URL("../src/canonical/format-course.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/(?:startsWith|indexOf)\(["']th["']\)|\bthai\s*\?/u);
+    expect(source).not.toMatch(/[ก-๙]/u);
+    expect(resolveSigLocalization("th")?.course).toBeDefined();
+  });
+});
+
+
+describe("round 28 complete-value locale facets", () => {
+  it("passes a complete count and period to a suffix-language upper-bound template", () => {
+    registerSigLocalization({
+      locale: "course-suffix-bound",
+      formatLong: () => "Dose locale.",
+      course: { ...ENGLISH_COURSE, upTo: value => value + "以下" }
+    });
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }],
+      schedule: { recurrence: { frequencyMax: 2, periodMax: 3, periodUnit: "d",
+        startOffset: { value: 1, unit: "h" } } }
+    }] }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "course-suffix-bound" });
+    expect(text).toContain("2以下 administrations per 3 days以下");
+    expect(text).not.toMatch(/以下2|以下3/);
+  });
+
+  it("does not assert a global pause by comparing elapsed and civil origins", () => {
+    const mixed: CanonicalCourse = { kind: "course", stages: [
+      { start: { anchor: "treatment-start", displacement: { value: 0, unit: "d" } },
+        end: { anchor: "treatment-start", displacement: { value: 2, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { start: { anchor: "treatment-day-start", displacement: { value: 4, unit: "d" } },
+        end: { anchor: "treatment-day-start", displacement: { value: 6, unit: "d" } },
+        administrations: [{ kind: "administration", amounts: [{ quantity: { value: 2, unit: "tab" } }] }] }
+    ] };
+    const text = formatCanonicalCourse(mixed, "long", { locale: "en" });
+    expect(text).toContain("From treatment start until 2 days after treatment start");
+    expect(text).toContain("Days 5–6");
+    expect(text).not.toContain("No doses");
+  });
+});
+
+
+describe("round 28 origin-aware member and ranged windows", () => {
+  it("renders an executable local-day member without a review warning", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [
+      { kind: "administration", phaseStart: { anchor: "treatment-day-start",
+          displacement: { value: 4, code: "d" } },
+        amounts: [{ quantity: { value: 1, unit: "tab" } }] }
+    ] }] };
+    const en = formatCanonicalCourse(course, "long", { locale: "en" });
+    const th = formatCanonicalCourse(course, "long", { locale: "th" });
+    expect(en).toContain("From day 5 onward");
+    expect(en).not.toContain("requires review");
+    expect(th).toContain("ตั้งแต่วันที่ 5 เป็นต้นไป");
+    expect(th).not.toContain("ต้องตรวจสอบ");
+  });
+
+  it("keeps an elapsed member floor visible inside an equal-number local-day stage", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-day-start", displacement: { value: 4, code: "d" } },
+      end: { anchor: "treatment-day-start", displacement: { value: 6, code: "d" } },
+      administrations: [{ kind: "administration", phaseOrigin: { value: 4, code: "d" },
+        amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("Days 5–6");
+    expect(text).toContain("From 4 days after treatment start onward");
+  });
+
+  it("uses the same local-day origin for scalar and ranged sides of a window", () => {
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: { anchor: "treatment-day-start", displacement: { value: 4, code: "d" } },
+      end: { anchor: "treatment-day-start",
+        displacementRange: { low: { value: 6, code: "d" }, high: { value: 8, code: "d" } } },
+      administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const text = formatCanonicalCourse(course, "long", { locale: "en" });
+    expect(text).toContain("From 4 days after the start of the first treatment day until 6 days – 8 days after the start of the first treatment day");
+    expect(text).not.toContain("4 days after treatment start");
+    // The known leading gap is still exact; the ranged end licenses no
+    // invented trailing pause.
+    expect(text).toContain("No doses on days 1–4.");
+    expect(text.match(/No doses/g)).toHaveLength(1);
+  });
+});
+
+
+it("uses locale-owned measurement labels with live values and retained old source text", () => {
+  const condition = { kind: "measurement" as const, name: "bp", operation: "gt" as const,
+    value: 150, text: "BP > 160" };
+  const source = JSON.stringify(condition);
+  expect(appendMedicationConditionText("Dose.", condition, { locale: "en" })).toBe("Dose only if BP > 150.");
+  expect(appendMedicationConditionText("ยา.", condition, { locale: "th" })).toBe("ยา เฉพาะเมื่อ BP > 150.");
+  expect(JSON.stringify(condition)).toBe(source);
+  expect(appendMedicationConditionText("Dose.", { ...condition, name: "custom pressure" }, { locale: "en" }))
+    .toBe("Dose only if custom pressure > 150.");
+});
+
+// END PRESERVED language
+}

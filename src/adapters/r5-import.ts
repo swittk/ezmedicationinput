@@ -1340,6 +1340,9 @@ function reconcileNativeRetainedCourse(
     if (editedStep && !equivalentProjection(retainedStepFields, editedR6Step)) {
       structuredChanged = true;
     }
+    const compatibleComponentIds = (liveIndex: number, sourceIndex: number): boolean =>
+      live[liveIndex].id === undefined || step.component[sourceIndex].id === undefined ||
+      live[liveIndex].id === step.component[sourceIndex].id;
     const componentCountChanged = live.length !== step.component.length;
     if (componentCountChanged) {
       structuredChanged = true;
@@ -1414,7 +1417,7 @@ function reconcileNativeRetainedCourse(
           liveChoiceCounts.get(key) === 1 &&
           match !== undefined &&
           match >= 0 &&
-          !usedOriginalIndices.has(match)
+          !usedOriginalIndices.has(match) && compatibleComponentIds(j, match)
         ) {
           assigned[j] = match;
           usedOriginalIndices.add(match);
@@ -1463,7 +1466,7 @@ function reconcileNativeRetainedCourse(
       }
       let match = -1;
       for (const index of group) {
-        if (!equivalentProjection(site, step.component[index].site?.concept)) continue;
+        if (!compatibleComponentIds(j, index) || !equivalentProjection(site, step.component[index].site?.concept)) continue;
         if (match >= 0) {
           ambiguousSources.add(match);
           ambiguousSources.add(index);
@@ -1491,7 +1494,7 @@ function reconcileNativeRetainedCourse(
       let unclaimedCursor = 0;
       for (const j of remainingLive) {
         const next = unclaimed[unclaimedCursor++];
-        if (next !== undefined) {
+        if (next !== undefined && compatibleComponentIds(j, next)) {
           assigned[j] = next;
           usedOriginalIndices.add(next);
           if (step.component[next].site?.reference) (positionOnly ??= new Set()).add(j);

@@ -926,6 +926,22 @@ describe("round34 partial same-track cadence cutoffs", () => {
     expect(right[0].phaseEnd).toMatchObject({
       anchor: dayStart ? "treatment-day-start" : "treatment-start", displacement: { value: 35, code: "d" }
     });
+    // An order at noon separates elapsed day 35 from the civil-midnight
+    // cutover. The 08:00 amount must still belong to the old phase only in
+    // the unbounded elapsed branch; timestamps alone cannot prove ownership.
+    const shifted = { ...options("2026-11-23T00:00:00+07:00", 10),
+      orderedAt: "2026-10-19T12:00:00+07:00" };
+    for (const input of [rightTrack, wire.fhirNext, JSON.parse(JSON.stringify(wire.fhir))]) {
+      const firstDay = nextDueDoses(input, shifted).filter(stamp =>
+        Date.parse(stamp) < Date.parse("2026-11-24T00:00:00+07:00"));
+      expect(firstDay).toEqual([
+        ...(dayStart || !duration ? ["2026-11-23T08:00:00+07:00"] : []),
+        "2026-11-23T20:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({ ...shifted, dosage: input,
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(dayStart ? 4 : duration ? 2 : 3);
+    }
+
     expect(left[0].phaseEnd).toBeUndefined();
     const leftTrack = { kind: "course" as const, stages: [{ administrations: [left[0]] }] };
     expect(calculateTotalUnits({ ...late, dosage: leftTrack, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(12);

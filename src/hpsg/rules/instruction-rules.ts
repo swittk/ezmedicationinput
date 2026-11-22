@@ -2,7 +2,7 @@ import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
-import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getMedicationInstructionAction, medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { listMedicationInstructionConcepts, medicationInstructionConceptCodings, normalizeConceptSurface, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
   getAdviceRelationRealizations,
@@ -138,7 +138,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
 }
 
 function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
     isConditionalAdviceFrame(context, frame) ||
     medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
@@ -167,7 +167,7 @@ function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): AdviceArgument["quantity"] {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
   if (!amount?.quantity) return undefined;
@@ -300,7 +300,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       frame.span.start <= first.sourceStart && first.sourceEnd <= frame.span.end
     );
     const firstDefinition = firstFrame
-      ? resolveMedicationInstructionAction(firstFrame.predicate.lemma, context.options)
+      ? getMedicationInstructionAction(firstFrame.predicate.lemma, context.options)
       : undefined;
     const structurallyHeadedProcedure = Boolean(
       firstFrame &&
@@ -421,7 +421,7 @@ function instructionStartIsLicensed(
       // Their partial generic heads must not compete with that full typed
       // constituent. Unquantified ordinary advice keeps its old pathway.
       (WORKFLOW_START_WORDS.has(frame.predicate.lemma) &&
-        resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true))
+        getMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true))
   ));
   // A procedural quantity constituent owns its action head and duration.
   // Generic fallback must not take only that head/lead while an ambiguous
@@ -431,7 +431,7 @@ function instructionStartIsLicensed(
   const enclosedByProcedure = Boolean(token && frames.some((frame) => {
     if (frame.span.start >= token.sourceStart || token.sourceEnd > frame.span.end) return false;
     if (frame.polarity === AdvicePolarity.Negate) return false;
-    return resolveMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;
+    return getMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;
   }));
   // A comma inside an already-composed procedural argument cannot make
   // that argument's homographic noun a second directive ("before food,
@@ -973,7 +973,11 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       // A separator may precede a rate whose own chart position is later.
       // Resolve that typed owner once before admitting its tokens as advice.
       if (cursor > start) clinicalQuantityAt(context, cursor);
-      if (context.clinicalCache.rateTokenIndices?.has(token.index)) break;
+      // A dimensional constituent keeps its numeral even when an earlier
+      // administration cannot license it as a rate. Its maximum-dose owner
+      // may still consume the complete phrase; free advice must not swallow it.
+      if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+          context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) break;
       if (!bodyTokens.length && isScheduleLead(context, cursor)) {
         return [];
       }

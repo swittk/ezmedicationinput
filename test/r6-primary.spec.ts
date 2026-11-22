@@ -4547,6 +4547,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(getQuantityComparator(parsed.fhir[0].doseAndRate?.[0][slot])).toBe(comparator);
     const restored = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
     expect(getQuantityComparator(restored.step[0].component[0].doseAndRate?.[0][slot])).toBe(comparator);
+    if (input === "approximately two mg/kg/day in two divided doses") {
+      for (const quantity of [native, parsed.fhir[0].doseAndRate?.[0][slot],
+        restored.step[0].component[0].doseAndRate?.[0][slot]]) {
+        expect(quantity).toMatchObject({ value: 1, unit: "mg/kg" });
+        expect(getQuantityComparator(quantity)).toBe("~");
+      }
+    }
     expect(parsed.input).toBe(input);
   });
 

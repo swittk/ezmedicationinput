@@ -19,6 +19,7 @@ import {
 import { canonicalClauseHasAdministrationSemantics } from "./ir";
 import {
   medicationInstructionActionLocaleRealizerConfig,
+  getMedicationInstructionAction,
   resolveMedicationInstructionAction
 } from "./instruction-action-terminology";
 import { getMedicationInstructionConcept, resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
@@ -784,12 +785,16 @@ function resolveThaiMethodVerb(
   grammar: ThaiRouteGrammar,
   resolvedMethod?: MedicationInstructionActionDefinition
 ): string {
-  if (resolvedMethod) return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
+  // An explicitly configured method may override wording. Resolving a
+  // built-in through an empty map does not erase an authored translation.
+  if (resolvedMethod && resolvedMethod !== getMedicationInstructionAction(resolvedMethod.code))
+    return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
   const translatedText = getPrimitiveTranslation(clause.method?._text, "th");
   if (translatedText) {
     return translatedText;
   }
 
+  if (resolvedMethod) return localizedValue(resolvedMethod.i18n, "th") ?? resolvedMethod.display;
   const methodText = clause.method?.text?.trim();
   if (methodText) {
     const overridden = THAI_METHOD_TEXT_VERBS[methodText];
@@ -1939,8 +1944,24 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
 
 function describeAdministrationDurationThai(
   schedule: CanonicalScheduleExpr | undefined,
-  prefix = "โดยให้ยานาน"
+  prefix = "โดยให้ยานาน",
+  short = false
 ): string | undefined {
+  const range = schedule?.administrationDurationRange;
+  if (range) {
+    const endpoint = (quantity: NonNullable<typeof range.low>): string => {
+      const unit = quantity.code ?? quantity.unit ?? "";
+      const label = short ? quantity.unit ?? unit :
+        quantity.unit && quantity.unit !== unit ? quantity.unit : THAI_COURSE.timeUnit(unit, quantity.value) ?? unit;
+      return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "th")) +
+        (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
+    };
+    const low = range.low && endpoint(range.low), high = range.high && endpoint(range.high);
+    if (low && high) return short ? "นาน" + low + "-" + high : prefix + " " + low + " ถึง " + high;
+    if (high) return short ? "นาน" + (range.high?.comparator ? "" : "<=") + high : prefix + " " + (range.high?.comparator ? "" : "ไม่เกิน ") + high;
+    if (low) return short ? "นาน" + (range.low?.comparator ? "" : ">=") + low : prefix + " " + (range.low?.comparator ? "" : "อย่างน้อย ") + low;
+    return undefined;
+  }
   const value = schedule?.administrationDuration;
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
@@ -2125,7 +2146,10 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
+  if (schedule.administrationDurationRange) {
+    const duration = describeAdministrationDurationThai(schedule, undefined, true);
+    if (duration) parts.push(duration);
+  } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
       schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
     const lower = schedule.administrationDuration === undefined
@@ -2392,7 +2416,7 @@ function formatLongThai(
   );
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const richPrimaryDefinition = richPrimaryGraphAction
-    ? resolveMedicationInstructionAction(richPrimaryGraphAction.predicate.lemma)
+    ? getMedicationInstructionAction(richPrimaryGraphAction.predicate.lemma, options)
     : undefined;
   const richPrimaryEncodesRoute = Boolean(
     clause.route?.code && richPrimaryDefinition && (

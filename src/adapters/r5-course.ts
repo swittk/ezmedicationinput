@@ -23,7 +23,7 @@ import {
   courseMetadataToWire,
   safetyToWire,
 } from "./canonical-course";
-import { equalStructuredValues } from "../stable-structure";
+import { cloneStructuredValue, equalStructuredValues } from "../stable-structure";
 import { getStandardDoseUnitCoding } from "../maps";
 import { simpleQuantityForR5 } from "../fhir-quantity-operator";
 import {
@@ -115,7 +115,9 @@ function retentionForAdministration(
   // deleting the live Ratio must retire its source, not erase its history.
   if ((editable && safety) || !equalStructuredValues(safety, regeneratedSafety) ||
       safety?.doseLimit?.some(limit => limit.id !== undefined || Boolean(limit.extension?.length))) {
-    component.safety = safety;
+    // The editable external safety and its saved edit baseline have separate
+    // owners. A live Quantity edit must not rewrite the retained comparison.
+    component.safety = editable ? cloneStructuredValue(safety) : safety;
     baseline.safety = compactProjectionFingerprint(r5SafetyBaseline(row));
     changed = true;
   }

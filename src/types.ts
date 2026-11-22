@@ -1,6 +1,7 @@
 import type { SigTranslationConfig } from "./i18n";
 
 export interface FhirCoding {
+  id?: string;
   system?: string;
   /** Terminology edition used to define this code. */
   version?: string;
@@ -1795,6 +1796,8 @@ export interface CanonicalScheduleExpr {
   administrationDurationUnit?: FhirPeriodUnit;
   /** Qualifier on each administration duration, distinct from course length. */
   administrationDurationComparator?: FhirR6Quantity["comparator"];
+  /** Independently authored occurrence endpoints, distinct from scalar duration. */
+  administrationDurationRange?: import("./canonical/course").CanonicalRange;
   frequency?: number;
   frequencyMax?: number;
   period?: number;

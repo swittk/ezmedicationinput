@@ -95,7 +95,8 @@ function suppressActivity(input: InstructionActionRealizationInput): boolean {
 }
 
 function relationForSite(input: InstructionActionRealizationInput): AdviceRelation {
-  return input.frame.relation ?? getUniqueAdviceRelationByGrammarFeature("defaultSiteRelation") ??
+  return (input.time ? input.timeRelation : undefined) ?? input.frame.relation ??
+    getUniqueAdviceRelationByGrammarFeature("defaultSiteRelation") ??
     (() => { throw new Error("Missing declarative default site relation"); })();
 }
 
@@ -124,9 +125,10 @@ const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
 function renderEnglishRelationDuration(c: InstructionActionRealizationInput): string {
   const object = c.amount ?? c.theme ?? c.site;
   const target = c.duration ?? c.time ?? c.activity;
-  if (target && relationHasGrammarFeature(c.frame.relation, "activityFallback")) {
+  const semanticRelation = !c.duration && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+  if (target && relationHasGrammarFeature(semanticRelation, "activityFallback")) {
     if (c.timeWasRendered !== undefined && !c.duration && c.time) c.timeWasRendered = true;
-    const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    const relation = localizeAdviceRelation(semanticRelation, c.locale) ?? semanticRelation;
     return `${c.label}${object ? ` ${object}` : ""} ${relation} ${target}`;
   }
   return `${c.label}${object ? ` ${object}` : ""}`;
@@ -163,15 +165,30 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   // it avoids fabricating a number or attaching a tablet amount to plain water.
   const coextensiveAmount = themeArg && amountArg?.quantity &&
     themeArg.text.trim() === amountArg.text.trim() ? c.amount : undefined;
-  const amountAlreadyInTheme = Boolean(coextensiveAmount ||
+  // The parser may retain an Amount inside an unquantified Object such as
+  // "1 tab under tongue". Its authored Amount label and source containment
+  // identify that same dose without comparing localized unit wording.
+  const sourceAmount = !themeArg?.quantity && amountArg?.quantity ? amountArg.text.trim() : undefined;
+  const sourceOffset = themeArg && sourceAmount ? themeArg.text.indexOf(sourceAmount) : -1;
+  const containsSourceAmount = Boolean(themeArg && sourceAmount && sourceOffset >= 0 &&
+    !themeArg.relation &&
+    (!themeArg.span || !amountArg?.span ||
+      themeArg.span.start <= amountArg.span.start && themeArg.span.end >= amountArg.span.end) &&
+    (sourceOffset === 0 || !/[a-z0-9]/i.test(themeArg.text[sourceOffset - 1])) &&
+    (sourceOffset + sourceAmount.length === themeArg.text.length ||
+      !/[a-z0-9]/i.test(themeArg.text[sourceOffset + sourceAmount.length])));
+  const amountAlreadyInTheme = Boolean(coextensiveAmount || containsSourceAmount ||
     themeArg?.quantity && amountArg?.quantity &&
       themeArg.quantity.value === amountArg.quantity.value &&
       themeArg.quantity.unit === amountArg.quantity.unit &&
       themeArg.text.includes(amountArg.text.trim()));
+  // A separate medication Amount belongs with the Theme, never with an
+  // unmeasured accompaniment. A measured Substance owns its own quantity.
+  const primaryAmount = theme && !amountAlreadyInTheme ? c.amount : undefined;
   const substanceAmount = substanceArg?.quantity ? substanceQuantity
-    : amountAlreadyInTheme ? undefined : c.amount;
+    : theme || amountAlreadyInTheme ? undefined : c.amount;
   return { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
-    coextensiveAmount, substanceAmount };
+    coextensiveAmount, primaryAmount, substanceAmount };
 }
 
 function renderEnglish(realizer: MedicationInstructionActionRealizer, c: InstructionActionRealizationInput): string | undefined {
@@ -194,9 +211,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
     case "mix-substance": {
       const { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
-        coextensiveAmount, substanceAmount } = mixArgumentContent(c);
+        coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme
-        ? ` ${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
+        ? ` ${primaryAmount ? `${primaryAmount} of ` : ""}${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
         : "";
       const amountText = substanceAmount ? `${substanceAmount}${amountArg?.conceptId && !substanceArg?.quantity ? " of " : " "}` : "";
       const materialRelation = c.frame.relation &&
@@ -217,7 +234,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
-        if (c.time && relationHasGrammarFeature(c.frame.relation, "directTimeRealization")) {
+        if (c.time && relationHasGrammarFeature(c.timeRelation ?? c.frame.relation, "directTimeRealization")) {
           const lower = c.time.toLowerCase();
           const timePhrase = lower === "night" ? "at night"
             : lower === "bed" || lower === "bedtime" || lower === "sleep" ? "at bedtime"
@@ -253,9 +270,10 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
-      const relation = c.time && c.frame.relation &&
-        relationHasGrammarFeature(c.frame.relation, "timeComplement")
-        ? localizeAdviceRelation(c.frame.relation, c.locale, "temporal") ?? c.frame.relation
+      const timeRelation = c.timeRelation ?? c.frame.relation;
+      const relation = c.time && timeRelation &&
+        relationHasGrammarFeature(timeRelation, "timeComplement")
+        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation
         : undefined;
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.time ? ` ${relation ? relation + " " : ""}${c.time}` : ""}`;
@@ -271,8 +289,9 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         !/[\u0E00-\u0E7F]/u.test(candidate.lead + candidate.particle));
       if (!alias) return renderEnglishRelationDuration(c);
       const target = c.duration ?? c.time ?? c.activity;
-      const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
-        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? "" : "";
+      const semanticRelation = !c.duration && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+      const relation = relationHasGrammarFeature(semanticRelation, "activityFallback")
+        ? localizeAdviceRelation(semanticRelation, c.locale) ?? "" : "";
       if (c.timeWasRendered !== undefined && !c.duration && c.time && target) c.timeWasRendered = true;
       return `${alias.lead}${object ? ` ${object}` : ""} ${alias.particle}${target ? ` ${relation} ${target}` : ""}`;
     }
@@ -318,9 +337,10 @@ function renderThaiRelationDuration(c: InstructionActionRealizationInput): strin
   const target = c.duration ?? c.time ?? c.activity;
   const objectText = thaiAsciiSeparated(object);
   const targetText = thaiAsciiSeparated(target);
-  if (target && relationHasGrammarFeature(c.frame.relation, "activityFallback")) {
+  const semanticRelation = !c.duration && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+  if (target && relationHasGrammarFeature(semanticRelation, "activityFallback")) {
     if (c.timeWasRendered !== undefined && !c.duration && c.time) c.timeWasRendered = true;
-    const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+    const relation = localizeAdviceRelation(semanticRelation, c.locale) ?? semanticRelation;
     return `${c.label}${objectText}${relation}${targetText}`;
   }
   return `${c.label}${objectText}`;
@@ -341,9 +361,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;
     case "mix-substance": {
       const { theme, themeAmount, substance, substanceArg, amountArg,
-        coextensiveAmount, substanceAmount } = mixArgumentContent(c);
+        coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme ? (coextensiveAmount ??
-        `${theme}${themeAmount ? ` ${themeAmount}` : ""}`) : "";
+        `${theme}${themeAmount ? ` ${themeAmount}` : ""}${primaryAmount ? ` ${primaryAmount}` : ""}`) : "";
       const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";
       const materialRelation = c.frame.relation === AdviceRelation.Without
         ? "โดยไม่ใช้"
@@ -366,7 +386,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       if (relationTarget) {
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
-        if (c.time && relationHasGrammarFeature(c.frame.relation, "directTimeRealization")) {
+        if (c.time && relationHasGrammarFeature(c.timeRelation ?? c.frame.relation, "directTimeRealization")) {
           const timePhrase = c.time === "กลางคืน" ? "ตอนกลางคืน"
             : c.time === "นอน" || c.time === "bedtime" ? "ก่อนนอน" : c.time;
           return `${c.label}${target}${manner}${timePhrase}`;
@@ -399,9 +419,10 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
-      const relation = c.time && c.frame.relation &&
-        relationHasGrammarFeature(c.frame.relation, "timeComplement")
-        ? localizeAdviceRelation(c.frame.relation, c.locale, "temporal") ?? c.frame.relation
+      const timeRelation = c.timeRelation ?? c.frame.relation;
+      const relation = c.time && timeRelation &&
+        relationHasGrammarFeature(timeRelation, "timeComplement")
+        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation
         : undefined;
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       return `${c.label}${object ?? ""}${c.duration ? ` ${c.duration}` : ""}${c.time ? `${relation ?? ""}${c.time}` : ""}`;
@@ -417,8 +438,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         /[\u0E00-\u0E7F]/u.test(candidate.lead + candidate.particle));
       if (!alias) return renderThaiRelationDuration(c);
       const target = c.duration ?? c.time ?? c.activity;
-      const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
-        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? "" : "";
+      const semanticRelation = !c.duration && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+      const relation = relationHasGrammarFeature(semanticRelation, "activityFallback")
+        ? localizeAdviceRelation(semanticRelation, c.locale) ?? "" : "";
       if (c.timeWasRendered !== undefined && !c.duration && c.time && target) c.timeWasRendered = true;
       return `${alias.lead}${object ?? ""}${alias.particle}${target ? `${relation}${target}` : ""}`;
     }
@@ -470,9 +492,10 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
       const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "without";
       return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""} ${relation} ${relationTarget}`;
     }
-    if (relationTarget && relationHasGrammarFeature(c.frame.relation, "negatedRelationTarget")) {
+    const temporalRelation = !c.activity && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+    if (relationTarget && relationHasGrammarFeature(temporalRelation, "negatedRelationTarget")) {
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+      const relation = localizeAdviceRelation(temporalRelation, c.locale) ?? temporalRelation;
       const localTime = c.time && c.activity ? ` ${c.time}` : "";
       return `${prefix}${c.label.toLowerCase()}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${localTime} ${relation} ${relationTarget}`;
     }
@@ -548,9 +571,10 @@ const TH_ADAPTER: InstructionActionLocaleAdapter = {
       const relation = localizeAdviceRelation(AdviceRelation.Without, c.locale) ?? "โดยไม่";
       return `${prefix}${c.label}${object ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${relation}${relationTarget}`;
     }
-    if (relationTarget && relationHasGrammarFeature(c.frame.relation, "negatedRelationTarget")) {
+    const temporalRelation = !c.activity && c.time ? c.timeRelation ?? c.frame.relation : c.frame.relation;
+    if (relationTarget && relationHasGrammarFeature(temporalRelation, "negatedRelationTarget")) {
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      const relation = localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation;
+      const relation = localizeAdviceRelation(temporalRelation, c.locale) ?? temporalRelation;
       const localTime = c.time && c.activity ? c.time : "";
       return `${prefix}${c.label}${object ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${localTime}${relation}${relationTarget}`;
     }

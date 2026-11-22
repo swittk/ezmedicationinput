@@ -1,14 +1,15 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL, normalizeAdministrationTargetCount } from "./body-site-target";
+import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "./body-site-spatial";
 import {courseFromR5} from "./adapters/r5-import";
-import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, parsePrnTriggerPhase, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
+import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, PRN_TRIGGER_PHASE_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import {
-  getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5,
+  getEmaQuantityComparator, getQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5,
   simpleQuantityForR5
 } from "./fhir-quantity-operator";
 import {
@@ -76,9 +77,12 @@ export function projectR6ModifierWrapper(output: ModifierWrapperOwner, url: stri
     }
   }
   const modifiers = modifierExtension ?? existing?.extension;
-  if (modifiers?.length)
+  if (modifiers?.length) {
+    if (existing && modifierExtension !== undefined &&
+        !equalStructuredValues(modifierExtension, existing.extension))
+      (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
     (extensions ??= extension?.slice() ?? []).push({ ...existing, url, extension: modifiers });
-  else if (existing && hasOtherOwnField(existing, "extension"))
+  } else if (existing && (existing.extension?.length || hasOtherOwnField(existing, "extension")))
     (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
   // Empty lists retain explicit clear ownership; unchanged foreign-only
   // lists keep their reference and require no allocation.
@@ -464,15 +468,22 @@ export function setDosageCondition(
     }];
     expanded.condition = condition ? [conditionToR6(condition)] : [];
   }
-  const previous = dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL);
+  let previous: FhirExtension | undefined, additional: FhirExtension[] | undefined;
+  for (const value of dosage.modifierExtension ?? []) if (value.url === DOSAGE_CONDITION_R5_URL) {
+    if (!previous) previous = value;
+    else (additional ??= []).push(value);
+  }
   const priorCalendar = calendarDayPredicateFromMarker(previous);
   const calendar = calendarDayCondition ?? priorCalendar;
   // Existing external wrappers own IDs and unfamiliar children. The same
   // typed facts do not require replacement merely to export another version.
-  if (condition && previous && equalStructuredValues(parseConditionModifier(previous), condition) &&
+  if (condition && previous && !additional && equalStructuredValues(parseConditionModifier(previous), condition) &&
       equalStructuredValues(priorCalendar, calendar)) return;
-  if (previous && !isExactConditionBridge(previous)) dosage.extension = [...(dosage.extension ?? []), {
-    url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [previous],
+  let displaced: FhirExtension[] | undefined;
+  if (previous && !isExactConditionBridge(previous)) displaced = [previous];
+  for (const value of additional ?? []) if (!isExactConditionBridge(value)) (displaced ??= []).push(value);
+  if (displaced) dosage.extension = [...(dosage.extension ?? []), {
+    url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: displaced,
   }];
   const children = condition ? [encodeConditionPredicate(condition)] : [];
   if (condition && calendar && equalStructuredValues(condition, calendar)) {
@@ -1277,7 +1288,12 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
   for(const key of keys){
     if(key==="text")continue;
     const part=record[key];
-    if(part===undefined||Array.isArray(part)&&!part.length)continue;
+    if(part===undefined)continue;
+    if(Array.isArray(part)&&!part.length){
+      const conditionMarker=key==="condition"?dosage.modifierExtension?.find(item=>
+        item.url===DOSAGE_CONDITION_R5_URL):undefined;
+      if(!conditionMarker||parseConditionModifier(conditionMarker)===undefined)continue;
+    }
     if(key==="extension"){
       let opened=false;
       for(const item of dosage.extension??[]){
@@ -1388,17 +1404,48 @@ interface SourceMaximaObservation {
   administration?: SourceMeasureObservation;
   lifetime?: SourceMeasureObservation;
 }
+interface SourceSpatialObservation {
+  original: FhirExtension;
+  fields: Array<{ original: FhirExtension; url: string; text?: string;
+    target?: SourceConceptObservation; coding?: FhirCoding; system?: string;
+    code?: string; display?: string; version?: string }>;
+}
+function captureSourceSpatial(value: FhirExtension): SourceSpatialObservation {
+  const fields: SourceSpatialObservation["fields"] = [];
+  for (const original of value.extension ?? []) {
+    const coding = original.url === "relation" ? original.valueCoding : undefined;
+    fields.push({ original, url: original.url, text: original.valueString,
+      target: original.url === "target" ? captureSourceReplayConcept(original.valueCodeableConcept) : undefined,
+      coding, system: coding?.system, code: coding?.code, display: coding?.display, version: coding?.version });
+  }
+  return { original: value, fields };
+}
+function matchesSourceSpatial(value: FhirExtension, proof: SourceSpatialObservation | null): boolean {
+  if (!proof || value !== proof.original || (value.extension?.length ?? 0) !== proof.fields.length) return false;
+  for (let index = 0; index < proof.fields.length; index++) {
+    const item = value.extension![index], prior = proof.fields[index];
+    if (item !== prior.original || item.url !== prior.url || item.valueString !== prior.text) return false;
+    if (item.url === "target" && !matchesSourceReplayConcept(item.valueCodeableConcept, prior.target)) return false;
+    if (item.url === "relation") {
+      const coding = item.valueCoding;
+      if (coding !== prior.coding || coding?.system !== prior.system || coding?.code !== prior.code ||
+          coding?.display !== prior.display || coding?.version !== prior.version) return false;
+    }
+  }
+  return true;
+}
 interface SourceConceptObservation {
   original: FhirCodeableConcept;
   text?: string;
   triggerPhase?: "onset";
+  spatial?: SourceSpatialObservation | null;
   restrictions?: SourcePredicateObservation[][] | null;
   targetCount?: number;
   codings: Array<{ original: FhirCoding; system?: string; version?: string;
     code?: string; display?: string; userSelected?: boolean }>;
 }
 /** Observe only the editable clinical concept, never opaque source metadata. */
-export function captureSourceReplayConcept(value: FhirCodeableConcept | undefined, observeRestrictions = false): SourceConceptObservation | undefined {
+export function captureSourceReplayConcept(value: FhirCodeableConcept | undefined, observeRestrictions = false, observePrn = false): SourceConceptObservation | undefined {
   if (!value) return undefined;
   const codings: SourceConceptObservation["codings"] = [];
   for (const original of value.coding ?? []) codings.push({
@@ -1408,16 +1455,23 @@ export function captureSourceReplayConcept(value: FhirCodeableConcept | undefine
   // Only a site owns body restrictions and administration target count.
   // Observe both in the same extension walk; other annotations stay opaque.
   let restrictions: SourcePredicateObservation[][] | null | undefined = observeRestrictions ? null : undefined;
-  let targetCount: number | undefined, countSeen = false;
-  if (observeRestrictions) for (const marker of value.extension ?? []) {
-    if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL)
+  let targetCount: number | undefined, countSeen = false, phaseSeen = false;
+  let spatial: SourceSpatialObservation | null | undefined = observePrn ? null : undefined;
+  let triggerPhase: "onset" | undefined;
+  if (observeRestrictions || observePrn) for (const marker of value.extension ?? []) {
+    if (observePrn && marker.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL && spatial === null)
+      spatial = captureSourceSpatial(marker);
+    else if (observePrn && !phaseSeen && marker.url === PRN_TRIGGER_PHASE_EXTENSION_URL) {
+      triggerPhase = marker.valueCode === "onset" ? "onset" : undefined;
+      phaseSeen = true;
+    } else if (observeRestrictions && marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL)
       (restrictions ??= []).push(captureReplayPredicate(marker)!);
-    else if (!countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
+    else if (observeRestrictions && !countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
       targetCount = normalizeAdministrationTargetCount(marker.valueInteger);
       countSeen = true;
     }
   }
-  return { original: value, text: value.text, codings, restrictions, targetCount };
+  return { original: value, text: value.text, codings, restrictions, targetCount, spatial, triggerPhase };
 }
 export function matchesSourceReplayConcept(
   value: FhirCodeableConcept | undefined, proof: SourceConceptObservation | undefined
@@ -1431,18 +1485,26 @@ export function matchesSourceReplayConcept(
         current.code !== previous.code || current.display !== previous.display || current.userSelected !== previous.userSelected)
       return false;
   }
-  if (proof.restrictions === undefined) return true;
-  let restrictionIndex = 0, targetCount: number | undefined, countSeen = false;
+  if (proof.restrictions === undefined && proof.spatial === undefined) return true;
+  let restrictionIndex = 0, targetCount: number | undefined, countSeen = false, phaseSeen = false, spatialSeen = false;
+  let triggerPhase: "onset" | undefined;
   for (const marker of value.extension ?? []) {
-    if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
+    if (proof.spatial !== undefined && !spatialSeen && marker.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL) {
+      if (!matchesSourceSpatial(marker, proof.spatial)) return false;
+      spatialSeen = true;
+    } else if (proof.spatial !== undefined && !phaseSeen && marker.url === PRN_TRIGGER_PHASE_EXTENSION_URL) {
+      triggerPhase = marker.valueCode === "onset" ? "onset" : undefined;
+      phaseSeen = true;
+    } else if (proof.restrictions !== undefined && marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
       const prior = proof.restrictions?.[restrictionIndex++];
       if (marker !== prior?.[0].original || !matchesReplayPredicate(prior)) return false;
-    } else if (!countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
+    } else if (proof.restrictions !== undefined && !countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
       targetCount = normalizeAdministrationTargetCount(marker.valueInteger);
       countSeen = true;
     }
   }
-  return restrictionIndex === (proof.restrictions?.length ?? 0) && targetCount === proof.targetCount;
+  return restrictionIndex === (proof.restrictions?.length ?? 0) && targetCount === proof.targetCount &&
+    triggerPhase === proof.triggerPhase && spatialSeen === Boolean(proof.spatial);
 }
 /** Observe an ordered clinical concept list only when one is supplied. */
 export function captureSourceReplayConceptList(
@@ -1451,20 +1513,18 @@ export function captureSourceReplayConceptList(
   if (!value) return undefined;
   const proof: SourceConceptObservation[] = new Array(value.length);
   for (let index = 0; index < value.length; index++) {
-    proof[index] = captureSourceReplayConcept(value[index])!;
-    if (observeTriggerPhase) proof[index].triggerPhase = parsePrnTriggerPhase(value[index]);
+    proof[index] = captureSourceReplayConcept(value[index], false, observeTriggerPhase)!;
   }
   return proof;
 }
 export function matchesSourceReplayConceptList(
   value: readonly FhirCodeableConcept[] | undefined,
-  proof: readonly SourceConceptObservation[] | undefined, observeTriggerPhase = false
+  proof: readonly SourceConceptObservation[] | undefined
 ): boolean {
   if (!value || !proof) return value === undefined && proof === undefined;
   if (value.length !== proof.length) return false;
   for (let index = 0; index < proof.length; index++)
-    if (!matchesSourceReplayConcept(value[index], proof[index]) ||
-        observeTriggerPhase && parsePrnTriggerPhase(value[index]) !== proof[index].triggerPhase) return false;
+    if (!matchesSourceReplayConcept(value[index], proof[index])) return false;
   return true;
 }
 interface SourcePredicateObservation {
@@ -2023,7 +2083,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   return matchesSourceReplayConcept(dosage.site, proof.site) &&
     matchesSourceReplayConcept(dosage.route, proof.route) &&
     matchesSourceReplayConcept(dosage.method, proof.method) &&
-    matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor, true) &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, proof.asNeededFor) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, proof.additionalInstructions) &&
     matchesSourceReplayModifiers(dosage, proof.modifiers) &&
     matchesSourceReplayMaxima(dosage, proof.maxima) &&
@@ -2058,6 +2118,118 @@ export function getDosageSourceTextAgreement(
   }
   return undefined;
 }
+/** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
+ * instruction-graph Amounts. Retain the ORIGINAL dose and timing values,
+ * never treat a mutable FHIR object as proof: a clinician can edit the very
+ * same row in place. Source realization and external import share this proof. */
+interface FreshDosePart {
+  value?: number;
+  unit?: string;
+  code?: string;
+  system?: string;
+  comparator?: string;
+}
+export interface FreshDoseProof {
+  length: number;
+  text?: string;
+  patientInstruction?: string;
+  defaulted?: boolean;
+  site?: ReturnType<typeof captureSourceReplayConcept>;
+  route?: ReturnType<typeof captureSourceReplayConcept>;
+  method?: ReturnType<typeof captureSourceReplayConcept>;
+  asNeeded?: FhirDosage["asNeeded"];
+  reasons?: ReturnType<typeof captureSourceReplayConceptList>;
+  instructions?: ReturnType<typeof captureSourceReplayConceptList>;
+  quantity?: FreshDosePart;
+  doseExpression?: ReturnType<typeof capturedReplayExpression>;
+  rateExpression?: ReturnType<typeof capturedReplayExpression>;
+  low?: FreshDosePart;
+  high?: FreshDosePart;
+  timing?: ReturnType<typeof captureSourceReplayTiming>;
+  maxima?: ReturnType<typeof captureSourceReplayMaxima>;
+  modifiers?: ReturnType<typeof captureSourceReplayModifiers>;
+  rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
+    numerator?: FreshDosePart; denominator?: FreshDosePart };
+}
+const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseProof>();
+function captureDosePart(
+  value: FhirQuantity | undefined
+): FreshDosePart | undefined {
+  return value ? {
+    value: value.value, unit: value.unit, code: value.code, system: value.system,
+    comparator: getQuantityComparator(value)
+  } : undefined;
+}
+function sameDosePart(
+  part: FreshDosePart | undefined,
+  live: FhirQuantity | undefined
+): boolean {
+  if (!part || !live) return part === undefined && live === undefined;
+  return part.value === live.value && part.unit === live.unit &&
+    part.code === live.code && part.system === live.system &&
+    part.comparator === getQuantityComparator(live);
+}
+export function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
+  const first = (dosage as EzDosage).doseAndRate?.[0];
+  FRESH_HPSG_DOSE_SOURCE.set(dosage, {
+    length: dosage.doseAndRate?.length ?? 0,
+    text: dosage.text,
+    patientInstruction: dosage.patientInstruction,
+    defaulted,
+    site: captureSourceReplayConcept(dosage.site, true),
+    route: captureSourceReplayConcept(dosage.route),
+    method: captureSourceReplayConcept(dosage.method),
+    asNeeded: dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean,
+    reasons: captureSourceReplayConceptList(dosage.asNeededFor, true),
+    instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
+    quantity: captureDosePart(first?.doseQuantity),
+    doseExpression: capturedReplayExpression(first?.doseExpression),
+    rateExpression: capturedReplayExpression(first?.rateExpression),
+    low: captureDosePart(first?.doseRange?.low),
+    high: captureDosePart(first?.doseRange?.high),
+    timing: captureSourceReplayTiming(dosage.timing),
+    maxima: captureSourceReplayMaxima(dosage),
+    modifiers: captureSourceReplayModifiers(dosage),
+    rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
+      quantity: captureDosePart(first.rateQuantity),
+      low: captureDosePart(first.rateRange?.low),
+      high: captureDosePart(first.rateRange?.high),
+      numerator: captureDosePart(first.rateRatio?.numerator),
+      denominator: captureDosePart(first.rateRatio?.denominator),
+    } : undefined,
+  });
+}
+export function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
+  const current = (dosage as EzDosage).doseAndRate;
+  if ((current?.length ?? 0) !== original.length) return false;
+  const first = current?.[0];
+  return dosage.patientInstruction === original.patientInstruction &&
+    (dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean) === original.asNeeded &&
+    matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons) &&
+    matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
+    matchesSourceReplayConcept(dosage.site, original.site) &&
+    matchesSourceReplayConcept(dosage.route, original.route) &&
+    matchesSourceReplayConcept(dosage.method, original.method) &&
+    sameDosePart(original.quantity, first?.doseQuantity) &&
+    unchangedReplayExpression(first?.doseExpression, original.doseExpression) &&
+    unchangedReplayExpression(first?.rateExpression, original.rateExpression) &&
+    sameDosePart(original.low, first?.doseRange?.low) &&
+    sameDosePart(original.high, first?.doseRange?.high) &&
+    sameDosePart(original.rate?.quantity, first?.rateQuantity) &&
+    sameDosePart(original.rate?.low, first?.rateRange?.low) &&
+    sameDosePart(original.rate?.high, first?.rateRange?.high) &&
+    sameDosePart(original.rate?.numerator, first?.rateRatio?.numerator) &&
+    sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
+    matchesSourceReplayTiming(dosage.timing, original.timing) &&
+    matchesSourceReplayMaxima(dosage, original.maxima) &&
+    matchesSourceReplayModifiers(dosage, original.modifiers);
+}
+
+export function getFreshDoseProof(dosage: FhirDosage): FreshDoseProof | undefined {
+  return FRESH_HPSG_DOSE_SOURCE.get(dosage);
+}
+
+
 export interface DosageSourceOwnership { clocks?: boolean; events?: boolean; site?: boolean; }
 export function sourceOwnership(marker: FhirExtension): DosageSourceOwnership | undefined {
   let result: DosageSourceOwnership | undefined;

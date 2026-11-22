@@ -1194,10 +1194,12 @@ describe("structured FHIR extensions without serialization", () => {
     const preserved = inspectExtensions(rows).find(ext => ext.url === "urn:test:unknown-dosage");
     expect(preserved).toEqual(source.step[0].component[0].extension[0]);
     expect(inspectExtensions(rows).some(ext => ext.url === "retainedField" && ext.extension?.length)).toBe(true);
-    expect(inspectExtensions(rows).some(ext =>
-      ext.url === "http://ema.europa.eu/fhir/extension/comparator" &&
-      ext.valueCoding?.system === "http://spor.ema.europa.eu/v1/lists/100000000008" &&
-      ext.valueCoding.code === "100000000055")).toBe(true);
+    expect(rows[0].maxDosePerAdministration).toMatchObject({ value: 2, unit: "mL" });
+    expect(rows[0].maxDosePerAdministration?.comparator).toBeUndefined();
+    expect(rows[0].maxDosePerAdministration?.extension).toContainEqual({
+      url: "http://ema.europa.eu/fhir/extension/comparator",
+      valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055" },
+    });
     expect(inspectExtensions(rows).some(ext =>
       ext.url === "comparator" && ext.valueCode === "~")).toBe(false);
     expect(source.step[0].component[0].safety.futureMetadata.zero).toBe(0);

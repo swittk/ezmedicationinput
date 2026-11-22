@@ -558,18 +558,18 @@ describe("clinical SIG correctness and boundary promotion", () => {
     ["1 drop OD q4h prn irritation, max 3 drops per week", undefined, 3, "drop", "wk"],
     ["1 cap BID do not exceed 2 capsules per day", undefined, 2, "cap", "d"],
     ["1 puff q4h no more than 6 puffs a day", undefined, 6, "puff", "d"],
-    ["1 mL daily max. 7 mL/24hrs", undefined, 7, "mL", "d"],
+    ["1 mL daily max. 7 mL/24hrs", undefined, 7, "mL", "h", 24],
     ["รับประทาน 1 เม็ด วันละ 2 ครั้ง ไม่เกิน วันละ 4 เม็ด", "th", 4, "tab", "d"]
   ] as const)("types a periodic dose maximum before the single FHIR projection: %s",
-    (source, locale, amount, unit, periodUnit) => {
+    (source, locale, amount, unit, periodUnit, period = 1) => {
       const parsed = parseSig(source, locale ? { locale } : undefined);
       expect(parsed.meta.canonical.clauses[0]?.schedule?.maxDosePerPeriod).toEqual([{
-        amount, unit, period: 1, periodUnit
+        amount, unit, period, periodUnit
       }]);
       expect(parsed.fhir.maxDosePerPeriod).toMatchObject([{
         numerator: { value: amount, unit },
         denominator: {
-          value: 1, unit: periodUnit,
+          value: period, unit: periodUnit,
           system: "http://unitsofmeasure.org", code: periodUnit
         }
       }]);

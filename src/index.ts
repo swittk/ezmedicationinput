@@ -10,124 +10,18 @@ import type { CanonicalCourse, CanonicalAdministration } from "./canonical/cours
 import { hasAmountRole } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
 import { getDoseQuantityUnit } from "./maps";
-/** Fresh parser rows may carry an HPSG dose not repeated in auxiliary
- * instruction-graph Amounts. Retain the ORIGINAL dose and timing values,
- * never treat a mutable FHIR object as proof: a clinician can edit the very
- * same row in place. Only roundtrip source realization consults this proof. */
-interface FreshDosePart {
-  value?: number;
-  unit?: string;
-  code?: string;
-  system?: string;
-  comparator?: string;
-}
-interface FreshDoseProof {
-  length: number;
-  text?: string;
-  patientInstruction?: string;
-  defaulted?: boolean;
-  site?: ReturnType<typeof captureSourceReplayConcept>;
-  route?: ReturnType<typeof captureSourceReplayConcept>;
-  method?: ReturnType<typeof captureSourceReplayConcept>;
-  asNeeded?: FhirDosage["asNeeded"];
-  reasons?: ReturnType<typeof captureSourceReplayConceptList>;
-  instructions?: ReturnType<typeof captureSourceReplayConceptList>;
-  quantity?: FreshDosePart;
-  doseExpression?: ReturnType<typeof capturedReplayExpression>;
-  rateExpression?: ReturnType<typeof capturedReplayExpression>;
-  low?: FreshDosePart;
-  high?: FreshDosePart;
-  timing?: ReturnType<typeof captureSourceReplayTiming>;
-  maxima?: ReturnType<typeof captureSourceReplayMaxima>;
-  modifiers?: ReturnType<typeof captureSourceReplayModifiers>;
-  rate?: { quantity?: FreshDosePart; low?: FreshDosePart; high?: FreshDosePart;
-    numerator?: FreshDosePart; denominator?: FreshDosePart };
-}
-const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseProof>();
-function captureDosePart(
-  value: FhirQuantity | undefined
-): FreshDosePart | undefined {
-  return value ? {
-    value: value.value, unit: value.unit, code: value.code, system: value.system,
-    comparator: getQuantityComparator(value)
-  } : undefined;
-}
-function sameDosePart(
-  part: FreshDosePart | undefined,
-  live: FhirQuantity | undefined
-): boolean {
-  if (!part || !live) return part === undefined && live === undefined;
-  return part.value === live.value && part.unit === live.unit &&
-    part.code === live.code && part.system === live.system &&
-    part.comparator === getQuantityComparator(live);
-}
-function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
-  const first = (dosage as EzDosage).doseAndRate?.[0];
-  FRESH_HPSG_DOSE_SOURCE.set(dosage, {
-    length: dosage.doseAndRate?.length ?? 0,
-    text: dosage.text,
-    patientInstruction: dosage.patientInstruction,
-    defaulted,
-    site: captureSourceReplayConcept(dosage.site, true),
-    route: captureSourceReplayConcept(dosage.route),
-    method: captureSourceReplayConcept(dosage.method),
-    asNeeded: dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean,
-    reasons: captureSourceReplayConceptList(dosage.asNeededFor, true),
-    instructions: captureSourceReplayConceptList(dosage.additionalInstruction),
-    quantity: captureDosePart(first?.doseQuantity),
-    doseExpression: capturedReplayExpression(first?.doseExpression),
-    rateExpression: capturedReplayExpression(first?.rateExpression),
-    low: captureDosePart(first?.doseRange?.low),
-    high: captureDosePart(first?.doseRange?.high),
-    timing: captureSourceReplayTiming(dosage.timing),
-    maxima: captureSourceReplayMaxima(dosage),
-    modifiers: captureSourceReplayModifiers(dosage),
-    rate: first?.rateQuantity || first?.rateRange || first?.rateRatio ? {
-      quantity: captureDosePart(first.rateQuantity),
-      low: captureDosePart(first.rateRange?.low),
-      high: captureDosePart(first.rateRange?.high),
-      numerator: captureDosePart(first.rateRatio?.numerator),
-      denominator: captureDosePart(first.rateRatio?.denominator),
-    } : undefined,
-  });
-}
-function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boolean {
-  const current = (dosage as EzDosage).doseAndRate;
-  if ((current?.length ?? 0) !== original.length) return false;
-  const first = current?.[0];
-  return dosage.patientInstruction === original.patientInstruction &&
-    (dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean) === original.asNeeded &&
-    matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons, true) &&
-    matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&
-    matchesSourceReplayConcept(dosage.site, original.site) &&
-    matchesSourceReplayConcept(dosage.route, original.route) &&
-    matchesSourceReplayConcept(dosage.method, original.method) &&
-    sameDosePart(original.quantity, first?.doseQuantity) &&
-    unchangedReplayExpression(first?.doseExpression, original.doseExpression) &&
-    unchangedReplayExpression(first?.rateExpression, original.rateExpression) &&
-    sameDosePart(original.low, first?.doseRange?.low) &&
-    sameDosePart(original.high, first?.doseRange?.high) &&
-    sameDosePart(original.rate?.quantity, first?.rateQuantity) &&
-    sameDosePart(original.rate?.low, first?.rateRange?.low) &&
-    sameDosePart(original.rate?.high, first?.rateRange?.high) &&
-    sameDosePart(original.rate?.numerator, first?.rateRatio?.numerator) &&
-    sameDosePart(original.rate?.denominator, first?.rateRatio?.denominator) &&
-    matchesSourceReplayTiming(dosage.timing, original.timing) &&
-    matchesSourceReplayMaxima(dosage, original.maxima) &&
-    matchesSourceReplayModifiers(dosage, original.modifiers);
-}
-
 /** Source edits are separate from clinical edits: replacement clinician text
  * owns roundtrip display, while a clear or stale projection uses live facts. */
 function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const first = (dosage as EzDosage).doseAndRate?.[0];
-  const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
+  const fresh = getFreshDoseProof(dosage);
   const originalText = fresh ? undefined : getDosageSourceTextFingerprint(dosage);
   const textChanged = fresh ? fresh.text !== dosage.text
     : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
   if (fresh && fresh.patientInstruction !== dosage.patientInstruction) return true;
-  if (fresh && !fresh.modifiers && !dosage.modifierExtension?.length &&
+  if (fresh && !fresh.quantity?.unit?.includes("/kg") && !first?.doseQuantity?.unit?.includes("/kg") &&
+      !fresh.modifiers && !dosage.modifierExtension?.length &&
       !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
       !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
       !fresh.doseExpression && !fresh.rateExpression && !first?.doseExpression && !first?.rateExpression &&
@@ -136,7 +30,8 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   // A persisted standalone item can have no source fingerprint. Its explicit
   // live guard still owns clinical display; unverified narrative is provenance.
-  return matches === false || (matches === undefined && Boolean((dosage as EzDosage).condition?.length ||
+  return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
+    (dosage as EzDosage).condition?.length ||
     (dosage as EzDosage).excludedDates?.length || dosage.modifierExtension?.some(item =>
       item.url === DOSAGE_CONDITION_R5_URL || item.url === DOSAGE_EXCLUDED_DATES_R5_URL) ||
     dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)));
@@ -153,7 +48,7 @@ function markOriginalGraphSource(
   sourceOwnershipRead = false
 ): void {
   if (!clause.instructionGraph) return;
-  const fresh = FRESH_HPSG_DOSE_SOURCE.get(dosage);
+  const fresh = getFreshDoseProof(dosage);
   if (fresh) {
     clause.sourceHasStructuredClocks = Boolean(fresh.timing?.clocks?.length);
     clause.sourceHasStructuredEvents = Boolean(fresh.timing?.anchors?.length);
@@ -199,11 +94,8 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
-  dosageMatchesSavedProjection, captureSourceReplayTiming, matchesSourceReplayTiming,
-  captureSourceReplayMaxima, matchesSourceReplayMaxima,
-  captureSourceReplayModifiers, matchesSourceReplayModifiers,
-  captureSourceReplayConcept, matchesSourceReplayConcept, capturedReplayExpression, unchangedReplayExpression,
-  captureSourceReplayConceptList, matchesSourceReplayConceptList, getDosageSourceTextAgreement,
+  dosageMatchesSavedProjection, captureFreshDose, sameFreshDose, getFreshDoseProof,
+  getDosageSourceTextAgreement,
   getDosageSourceOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
   DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,

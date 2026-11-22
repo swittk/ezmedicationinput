@@ -85,6 +85,9 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   return coding
     ? {
       ...coding,
+      system: coding.system,
+      code: coding.code,
+      display: coding.display,
       extension: coding.extension?.map((extension) => ({ ...extension })),
       _display: coding._display ? { ...coding._display } : undefined,
       i18n: coding.i18n ? { ...coding.i18n } : undefined

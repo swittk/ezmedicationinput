@@ -100,17 +100,19 @@ const QUANTITY_OPERATOR_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:quantity-operator-source";
 function editedOperator(
   extension: FhirExtension,
-  comparator: NonNullable<FhirR6Quantity["comparator"]>,
+  comparator: FhirR6Quantity["comparator"],
   sources: FhirExtension[]
 ): FhirExtension {
   const coding = extension.valueCoding!;
+  const code = comparator ? emaCodeByComparator[comparator] : EMA_EQUALITY_OPERATOR_CODE;
+  const display = comparator ? emaDisplayByComparator[comparator] : "equal to";
   const { _code, _display, i18n, ...current } = coding;
-  if (coding.code !== emaCodeByComparator[comparator] || coding.display !== undefined ||
+  if (coding.code !== code || coding.display !== undefined ||
       _code !== undefined || _display !== undefined || i18n !== undefined)
     sources.push({ url: QUANTITY_OPERATOR_SOURCE_URL, valueCoding: coding });
   return { ...extension, valueCoding: {
-    ...current, code: emaCodeByComparator[comparator],
-    ...(coding.display !== undefined ? { display: emaDisplayByComparator[comparator] } : {})
+    ...current, code,
+    ...(coding.display !== undefined ? { display } : {})
   } };
 }
 
@@ -192,15 +194,27 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
   if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
   if (!quantity.extension?.length) return quantity;
   let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false;
+  let corrected: FhirExtension[] | undefined, equalitySources: FhirExtension[] | undefined;
   let metadataOnly: FhirExtension | undefined, ambiguousMetadata = false;
+  let operatorPrimitives: Map<string, FhirExtension> | undefined;
   // Classify the current operator and metadata-only source in one walk. Ordinary
   // exact annotated quantities do not pay a second scan for a rare source marker.
-  for (const item of quantity.extension) {
+  for (let index = 0; index < quantity.extension.length; index++) {
+    const item = quantity.extension[index];
+    let currentItem = item;
     if (item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL && item.valueCoding) {
       hasOperator = true;
       const coding = item.valueCoding;
-      if (coding.system !== EMA_QUANTITY_OPERATOR_SYSTEM || !coding.code) continue;
+      if (coding.system !== EMA_QUANTITY_OPERATOR_SYSTEM || !coding.code) {
+        corrected?.push(item);
+        continue;
+      }
       const current = comparatorByEmaCode[coding.code];
+      if (coding.code === EMA_EQUALITY_OPERATOR_CODE && coding.display !== undefined &&
+          coding.display !== "equal to" && knownEmaDisplays.has(coding.display)) {
+        corrected ??= quantity.extension.slice(0, index);
+        currentItem = editedOperator(item, undefined, equalitySources ??= []);
+      }
       if (current) {
         if (comparator && comparator !== current) conflict = true;
         comparator = current;
@@ -209,25 +223,30 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
         item._valueCode && Object.keys(item).length === 2) {
       if (metadataOnly) ambiguousMetadata = true;
       metadataOnly = item;
+    } else if (item.url === QUANTITY_OPERATOR_SOURCE_URL && item.valueCode !== undefined &&
+        item._valueCode && Object.keys(item).length === 3) {
+      // A later external edit appends its current primitive after prior source.
+      // Only the latest marker for the active operator can regain authority.
+      (operatorPrimitives ??= new Map()).set(item.valueCode, item);
     }
+    corrected?.push(currentItem);
   }
+  if (corrected) quantity = { ...quantity, extension: [...corrected, ...equalitySources!] };
   if (conflict) comparator = undefined;
   if (!comparator) {
     if (hasOperator || quantity._comparator !== undefined || !metadataOnly || ambiguousMetadata) return quantity;
-    const remaining = quantity.extension.filter(item => item !== metadataOnly);
+    const remaining = quantity.extension!.filter(item => item !== metadataOnly);
     return { ...quantity, _comparator: metadataOnly._valueCode,
       extension: remaining.length ? remaining : undefined };
   }
   const remaining: FhirExtension[] = [];
-  let primitive = quantity._comparator;
+  const primitiveSource = quantity._comparator === undefined ? operatorPrimitives?.get(comparator) : undefined;
+  const primitive = quantity._comparator ?? primitiveSource?._valueCode;
   for (const ext of quantity.extension ?? []) {
     if (exactGeneratedComparatorExtension(ext, comparator)) continue;
     // The primitive annotation belongs to this exact operator. A live EMA
     // edit must not inherit the prior operator's ID or extensions.
-    if (primitive === undefined && ext.url === QUANTITY_OPERATOR_SOURCE_URL &&
-        ext.valueCode === comparator && ext._valueCode && Object.keys(ext).length === 3) {
-      primitive = ext._valueCode;
-    } else remaining.push(ext);
+    if (ext !== primitiveSource) remaining.push(ext);
   }
   return {
     ...quantity,

@@ -73,6 +73,7 @@ function wireCoding(value: FhirCoding): FhirCoding {
   // One typed wire value, not a chain of optional fragment objects and
   // transpiled spread-descriptor walks for every Coding in an action graph.
   const result:FhirCoding={};
+  if(value.id!==undefined)result.id=value.id;
   if(value.system!==undefined)result.system=value.system;
   if(value.version!==undefined)result.version=value.version;
   if(value.code!==undefined)result.code=value.code;

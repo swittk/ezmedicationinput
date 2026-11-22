@@ -59,6 +59,7 @@ import {
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
+  getFreshDoseProof, sameFreshDose,
   getDosageSourceTextFingerprint,
   dosageTextFingerprint,
   DOSAGE_RECONCILIATION_SOURCE_URL,
@@ -214,7 +215,7 @@ function offsetValue(repeat: { extension?: FhirExtension[] } | undefined, url: s
 /** Decode timing annotations in one classification walk. Each specialized
  * codec sees only its own marker(s), not the full extension list again. */
 function timingAnnotations(
-  r: { extension?: FhirExtension[]; offset?: number; timeOfDay?: Array<string | null> } | undefined
+  r: Pick<NonNullable<FhirR6Timing["repeat"]>, "extension" | "offset" | "timeOfDay" | "durationMax" | "durationUnit"> | undefined
 ): Pick<
   NonNullable<CanonicalTiming["recurrence"]>,
   | "clocks"
@@ -232,6 +233,7 @@ function timingAnnotations(
   | "occurrenceDurationMax"
   | "occurrenceDurationUnit"
   | "occurrenceDurationComparator"
+  | "occurrenceDurationRange"
 > {
   const out: Pick<
     NonNullable<CanonicalTiming["recurrence"]>,
@@ -250,6 +252,7 @@ function timingAnnotations(
     | "occurrenceDurationMax"
     | "occurrenceDurationUnit"
     | "occurrenceDurationComparator"
+    | "occurrenceDurationRange"
   > = { offset: r?.offset };
   let administrationDurationSeen = false;
   let exact: FhirExtension | undefined,
@@ -267,10 +270,10 @@ function timingAnnotations(
       case TIMING_ADMINISTRATION_DURATION_EXTENSION_URL:
         if (!administrationDurationSeen) {
           administrationDurationSeen = true;
-          const duration = parseTimingAdministrationDuration(e);
+          const duration = parseTimingAdministrationDuration(e, r);
           if (duration) {
             out.occurrenceDuration = duration.value;
-            out.occurrenceDurationMax = duration.max;
+            if (duration.range) out.occurrenceDurationRange = duration.range;
             out.occurrenceDurationUnit = duration.unit;
             out.occurrenceDurationComparator = duration.comparator;
           }
@@ -332,7 +335,8 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       periodMax: r.periodMax,
       periodUnit: r.periodUnit,
       occurrenceDuration: r.duration ?? annotations?.occurrenceDuration,
-      occurrenceDurationMax: r.durationMax ?? (r.duration === undefined ? annotations?.occurrenceDurationMax : undefined),
+      occurrenceDurationMax: r.duration === undefined && annotations?.occurrenceDurationRange ? undefined : r.durationMax,
+      occurrenceDurationRange: r.duration === undefined ? annotations?.occurrenceDurationRange : undefined,
       occurrenceDurationUnit: r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
       occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
@@ -758,6 +762,10 @@ export function administrationFromR5(
   sourceContext = false
 ): CanonicalAdministration {
   const result = baseAdministration(raw, "r5", sourceContext);
+  // Reuse the original parser-row proof at this external import boundary.
+  // A fresh conversion cannot certify stale wording after a live dose edit.
+  const fresh = getFreshDoseProof(raw);
+  if (fresh && !sameFreshDose(raw, fresh)) result.provenance!.sourceTextVerified = false;
   // Most rows have only R5 maxima and need no mirror reconciliation.
   // Lifted safety has a persisted baseline so either current view can own an edit.
   if ((raw as EzDosage).safety) {
@@ -938,9 +946,10 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     const frequency = r.frequency === 0 ? undefined : r.frequency;
     // A qualified duration stays in its typed timing marker or carrier rate
     // denominator; Timing.duration must not assert false exactness.
-    const occurrenceDuration = r.occurrenceDurationComparator ? undefined : r.occurrenceDuration;
-    const occurrenceDurationMax = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationMax;
-    const occurrenceDurationUnit = r.occurrenceDurationComparator ? undefined : r.occurrenceDurationUnit;
+    const markerDuration = r.occurrenceDurationComparator || r.occurrenceDurationRange;
+    const occurrenceDuration = markerDuration ? undefined : r.occurrenceDuration;
+    const occurrenceDurationMax = markerDuration ? undefined : r.occurrenceDurationMax;
+    const occurrenceDurationUnit = markerDuration ? undefined : r.occurrenceDurationUnit;
     const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
       ? r.offset : undefined;
     if (
@@ -1054,7 +1063,7 @@ function updateNativeTimingAnnotations(
   const duration = parseTimingAdministrationDuration(durationMarker);
   if (duration && (duration.value !== live?.occurrenceDuration ||
       duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
-      duration.max !== live?.occurrenceDurationMax)) {
+      !same(duration.range, live?.occurrenceDurationRange))) {
     changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
     output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
@@ -1104,6 +1113,16 @@ function updateNativeTimingAnnotations(
     administrationChanges.add(ANCHORED_COURSE_DURATION_EXTENSION_URL);
   if (!changes.size && !administrationChanges.size) return target;
   const generated = serializeCanonicalSchedule(clauseForAdministration(a).schedule);
+  if (durationMarker && changes.has(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
+    const marker = generated.timing?.repeat?.extension?.find(item =>
+      item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+    if (marker) {
+      // The current endpoint changes its value, not the identity or unrelated
+      // annotations of the timing marker that contains it.
+      const { valueQuantity: _quantity, valueRange: _range, ...metadata } = durationMarker;
+      Object.assign(marker, metadata);
+    }
+  }
   if (target?.repeat && changes.size) {
     target = Object.assign({}, target, { repeat: Object.assign({}, target.repeat) });
     const repeat = target.repeat!;
@@ -1151,13 +1170,19 @@ function maximumUnitKey(quantity: CanonicalMeasure, exact: boolean): string | un
 }
 /** One selection pass for writing R5 maxima and identifying their editable
  * source positions. Equal values retain the last annotated owner. Interleaved
- * units or qualified siblings allocate a map; same-unit exact limits keep
+ * exact units allocate a map; same-unit ceilings and qualified-only lists keep
  * scalar state. Operators are observed once, never compared or normalized. */
 export function selectR5Maximum(
   current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number
 ): R5MaximumSelection {
   const exact = quantity.value !== undefined && !getQuantityComparator(quantity);
-  if (!current) return { quantity, exact, index };
+  // A qualified sibling remains in the complete safety bridge. It cannot
+  // replace an available exact ceiling in R5's singular maximum field.
+  if (!current || exact && !current.exact) return { quantity, exact, index };
+  if (!exact) {
+    if (!current.exact) { current.quantity = quantity; current.index = index; }
+    return current;
+  }
   if (!current.groups && current.exact === exact && sameMaximumUnit(current.quantity, quantity)) {
     if (!exact || current.quantity.value! >= quantity.value!) {
       current.quantity = quantity;

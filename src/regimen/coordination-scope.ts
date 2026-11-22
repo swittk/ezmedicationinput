@@ -165,7 +165,7 @@ const SCHEDULE_FEATURE_GROUPS = {
   eventAnchor: ['when', 'offset', 'offsetMin', 'offsetMax', 'activityTiming'],
   courseBounds: ['duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationUnitLabel', 'durationMaxUnitLabel', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd'],
   administrationDuration: [
-    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator'
+    'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator', 'administrationDurationRange'
   ],
   calendarEvents: ['calendarEvents', 'cycleDayConstraint'],
   // A derived per-administration dependency is not a lexical trailing cadence.
@@ -188,7 +188,7 @@ void scheduleFeatureCoverage;
 const COORDINATED_ANCHOR_FIELDS = ['when', 'timeOfDay'] as const;
 const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
   'duration', 'durationMax', 'durationIsRange', 'durationUnit', 'durationMaxUnit', 'durationUnitLabel', 'durationMaxUnitLabel', 'durationComparator', 'durationMaxComparator', 'boundsStart', 'boundsEnd',
-  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator',
+  'administrationDuration', 'administrationDurationMax', 'administrationDurationUnit', 'administrationDurationComparator', 'administrationDurationRange',
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [

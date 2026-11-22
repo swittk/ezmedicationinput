@@ -16,7 +16,7 @@ import { resolveBodySiteLexeme } from "../../body-site-grammar";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, RouteCode, type ParseOptions } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { buildTranslationPrimitiveElement } from "../../fhir-translations";
-import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getMedicationInstructionAction, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt } from "../procedural-context";
 import {
@@ -1048,7 +1048,7 @@ function numericTokenIsProcedureLocalQuantity(
 ): boolean {
   for (const frame of getProceduralFrames(context)) {
     if (token.sourceStart < frame.span.start || token.sourceEnd > frame.span.end) continue;
-    const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+    const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
     for (const arg of frame.args) {
       if (!arg.span || token.sourceStart < arg.span.start || token.sourceEnd > arg.span.end) continue;
       // A source-spanned quantity on a complement is owned by that daughter,

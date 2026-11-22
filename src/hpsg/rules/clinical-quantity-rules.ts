@@ -192,10 +192,9 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
   for (let index = before - 1; index >= first; index -= 1) {
     const token = context.tokens[index];
     const lower = normalizeTokenLower(token);
-    if (/^(?:infuse|infusion|run)$/u.test(lower)) return true;
-    // A generic administration head owns its nearest numeric argument. A
-    // later cumulative limit cannot borrow GIVE across the already given dose.
-    if (/^(?:administer|give)$/u.test(lower)) return !precedingAmount;
+    // An administration head owns its nearest numeric argument. A later
+    // cumulative limit cannot borrow it across the already administered dose.
+    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount;
     if ((token.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // An article counts as ONE only when it selects a medication unit;
         // route determiners (via a peripheral IV) are not earlier doses.
@@ -372,7 +371,9 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   const articleFraction = !qualified && DOSE_FRACTION_ARTICLES.has(normalizeTokenLower(token)) &&
     available(context, start + 1)
     ? DOSE_FRACTION_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
-  const cardinal = articleFraction ?? (qualified ? undefined : clinicalDurationNumber(token));
+  const attached = !qualified && token.kind !== LexKind.Number
+    ? attachedNumberUnitAt(token.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+  const cardinal = articleFraction ?? attached?.value ?? (qualified ? undefined : clinicalDurationNumber(token));
   const denominator = articleFraction === undefined && cardinal !== undefined && available(context, start + 1)
     ? DOSE_FRACTION_DENOMINATOR_WORDS.get(normalizeTokenLower(context.tokens[start + 1])) : undefined;
   const exact = cardinal === undefined ? undefined : denominator === undefined ? cardinal : cardinal * denominator;
@@ -381,20 +382,21 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
   let unitIndex = (qualified?.numericIndex ?? mixed?.numericIndex ??
     (articleFraction === undefined && denominator === undefined ? start : start + 1)) + 1;
   const value = qualified?.value ?? mixed?.value ?? exact;
+  const rawUnit = qualified?.rawUnit ?? attached?.rawUnit;
   // The fraction selects its unit complement, including "of an hour".
   // Whole duration numbers retain their direct unit boundary.
-  if (!qualified?.rawUnit && value !== undefined && value > 0 &&
+  if (!rawUnit && value !== undefined && value > 0 &&
       (value < 1 || denominator !== undefined || qualified &&
         DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
     while (available(context, unitIndex) &&
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
   }
   const unitToken = context.tokens[unitIndex];
-  const unit = qualified?.rawUnit ? timeUnit(qualified.rawUnit) :
+  const unit = rawUnit ? timeUnit(rawUnit) :
     unitToken && available(context, unitIndex) ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
   if (value === undefined || !unit) return undefined;
   return { value, unit, comparator: qualified?.comparator,
-    end: unitIndex + (qualified?.rawUnit ? 0 : 1) };
+    end: unitIndex + (rawUnit ? 0 : 1) };
 }
 
 function fixedVolumeOverTime(

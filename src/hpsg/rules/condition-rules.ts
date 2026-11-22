@@ -6,7 +6,7 @@ import {
   MedicationDateListMatch,
   parseMedicationDateListAt
 } from "../../date-interpretation";
-import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction, getMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
 import {
@@ -292,7 +292,7 @@ function withholdsMedicationAdministration(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): boolean {
-  const action = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const action = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   const prohibitedAdministration = frame.polarity === AdvicePolarity.Negate &&
     (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod);
   const effect = prohibitedAdministration ? "withhold" : action?.argumentParserConfig?.medicationConditionEffect;
@@ -681,7 +681,7 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
 }
 
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
-  const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   return Boolean(
     frame.polarity === AdvicePolarity.Negate ||
     definition?.procedural || isConditionalAdviceFrame(context, frame) ||
@@ -752,7 +752,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const followsAdministration = getProceduralFrames(context).some(frame => {
         if (frame.polarity === AdvicePolarity.Negate || frame.span.end > lead.sourceStart ||
             context.state.input.slice(frame.span.end, lead.sourceStart).trim()) return false;
-        const definition = resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+        const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
         return (definition?.primaryAdministrationHead ||
           definition?.definesDose && definition.administrationMethod) &&
           frame.args.some(argument => argument.role === AdviceArgumentRole.Amount && argument.quantity);

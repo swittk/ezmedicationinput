@@ -439,10 +439,10 @@ function normalizeCustomDefinition(
 }
 
 function customDefinitionMatchesSurface(
-  surface: string, input: MedicationInstructionActionInput, normalized: string
+  surface: string, input: MedicationInstructionActionInput, normalized: string, includeCode = false
 ): boolean {
   if (normalizeActionSurface(surface) === normalized ||
-      input.code && normalizeActionSurface(input.code) === normalized) return true;
+      includeCode && input.code && normalizeActionSurface(input.code) === normalized) return true;
   for (const alias of input.aliases ?? [])
     if (normalizeActionSurface(alias) === normalized) return true;
   for (const locale of Object.keys(input.localeAliases ?? {}))
@@ -453,14 +453,15 @@ function customDefinitionMatchesSurface(
 
 function customDefinitionForSurface(
   surface: string,
-  options?: ParseOptions
+  options?: ParseOptions,
+  includeCode = false
 ): MedicationInstructionActionDefinition | undefined {
   const map = options?.instructionActionMap;
   if (!map) return undefined;
   const target = normalizeActionSurface(surface);
   for (const configuredSurface of Object.keys(map)) {
     const input = map[configuredSurface];
-    if (customDefinitionMatchesSurface(configuredSurface, input, target)) {
+    if (customDefinitionMatchesSurface(configuredSurface, input, target, includeCode)) {
       return normalizeCustomDefinition(configuredSurface, input);
     }
   }
@@ -522,14 +523,16 @@ export function medicationInstructionActionIsSafetyScopeTarget(
   return resolveMedicationInstructionAction(surface, options)?.safetyScopeTarget === true;
 }
 
-/** Dictionary definitions are immutable by caller contract. Repeated
- * lexical resolution must not recursively clone the same vocabulary tree.
- * Explicit frame construction still copies only the fields it later edits. */
+/* Dictionary definitions are immutable by caller contract. Lexical source
+ * surfaces do not implicitly include saved predicate codes. The semantic
+ * proposal boundary explicitly opts into its declared surface/code contract.
+ * Explicit frame construction copies only the fields it later edits. */
 export function resolveMedicationInstructionAction(
   surface: string,
-  options?: ParseOptions
+  options?: ParseOptions,
+  includeCode = false
 ): MedicationInstructionActionDefinition | undefined {
-  const custom = customDefinitionForSurface(surface, options);
+  const custom = customDefinitionForSurface(surface, options, includeCode);
   if (custom) return custom;
   const definition = DEFAULT_BY_ALIAS.get(normalizeActionSurface(surface));
   return definition;
@@ -637,10 +640,16 @@ export function resolveMedicationInstructionActionForMethod(
 }
 
 export function getMedicationInstructionAction(
-  code: string
+  code: string,
+  options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
-  const definition = DEFAULT_BY_CODE.get(code);
-  return definition;
+  const map = options?.instructionActionMap;
+  if (map) for (const surface of Object.keys(map)) {
+    const input = map[surface];
+    const identity = input.code?.trim() || normalizeActionSurface(surface).replace(/\s+/g, "-");
+    if (identity === code) return normalizeCustomDefinition(surface, input);
+  }
+  return DEFAULT_BY_CODE.get(code);
 }
 
 export function listMedicationInstructionActions(): MedicationInstructionActionDefinition[] {

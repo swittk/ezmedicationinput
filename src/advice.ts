@@ -16,7 +16,7 @@ import {
 } from "./types";
 import { normalizeLoosePhraseKey } from "./utils/text";
 import { resolveSymptomDefinition } from "./symptom-terminology";
-import { resolveMedicationInstructionAction } from "./instruction-action-terminology";
+import { getMedicationInstructionAction } from "./instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "./instruction-concept-terminology";
 import { composeLocalizedRecords, localizedValue } from "./localization";
 import { getAdviceLocaleAdapter } from "./advice-locale-adapter";
@@ -2042,7 +2042,7 @@ function realizeSingleAdviceFrame(frame: AdviceFrame, locale = "en"): string | u
   const modalityText = adapter.realizeModality(frame.modality);
   const relationText = localizeAdviceRelation(frame.relation, locale);
   const lexeme = findVerbLexeme(frame.predicate.lemma);
-  const sharedAction = resolveMedicationInstructionAction(frame.predicate.lemma);
+  const sharedAction = getMedicationInstructionAction(frame.predicate.lemma);
   const localizedPredicate = localizedValue(lexeme?.i18n, locale) ??
     localizedValue(sharedAction?.i18n, locale) ??
     frame.predicate.lemma;
