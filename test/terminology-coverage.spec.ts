@@ -5,7 +5,8 @@ import { findAdditionalInstructionDefinitionByCoding } from "../src/advice";
 import { RouteCode } from "../src/types";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { getDoseQuantityUnit, getStandardDoseUnitCoding } from "../src/maps";
-import { medicationInstructionConceptCodings } from "../src/instruction-concept-terminology";
+import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
+import { getMedicationInstructionAction as getInternalInstructionAction } from "../src/instruction-action-terminology";
 
 const SNOMED = "http://snomed.info/sct";
 
@@ -219,9 +220,13 @@ describe("non-equivalent standardized constituents of local instruction actions"
       expect.objectContaining({ role, coding: expect.objectContaining({ code, system: SNOMED }) })
     ]));
     const again = getMedicationInstructionAction(action)!;
-    // Lookup returns the immutable-by-contract dictionary definition, not a
-    // defensive copy of its full contextual vocabulary tree on every token.
-    expect(again).toBe(definition);
+    // Public vocabulary values are independent; parser lookups reuse their
+    // immutable-by-contract dictionary entry without copying it per token.
+    expect(again).not.toBe(definition);
+    expect(again).toEqual(definition);
+    const internal = getInternalInstructionAction(action);
+    expect(getInternalInstructionAction(action)).toBe(internal);
+    expect(internal).toEqual(definition);
     expect(Object.isFrozen(again)).toBe(false);
     expect(getMedicationInstructionAction(action)?.semanticComponents?.[0]?.coding.code).toBe(code);
   });
@@ -246,7 +251,10 @@ describe("non-equivalent standardized constituents of local instruction actions"
     const bare = getMedicationInstructionAction("rotate")!;
     expect(bare.semanticComponents).toBeUndefined();
     expect(bare.contextualSemanticComponents).toHaveLength(2);
-    expect(getMedicationInstructionAction("rotate")).toBe(bare);
+    expect(getMedicationInstructionAction("rotate")).not.toBe(bare);
+    expect(getMedicationInstructionAction("rotate")).toEqual(bare);
+    const internal = getInternalInstructionAction("rotate");
+    expect(getInternalInstructionAction("rotate")).toBe(internal);
     expect(getMedicationInstructionAction("rotate")!.contextualSemanticComponents![0].component.coding.code)
       .toBe("49572008");
   });
@@ -268,7 +276,10 @@ describe("non-equivalent standardized constituents of local instruction actions"
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
     const definition = getMedicationInstructionAction("reapply")!;
     expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
-    expect(getMedicationInstructionAction("reapply")).toBe(definition);
+    expect(getMedicationInstructionAction("reapply")).not.toBe(definition);
+    expect(getMedicationInstructionAction("reapply")).toEqual(definition);
+    const internal = getInternalInstructionAction("reapply");
+    expect(getInternalInstructionAction("reapply")).toBe(internal);
     expect(getMedicationInstructionAction("reapply")?.semanticComponents?.[0].coding.code).toBe("C47886");
     expect(getMedicationInstructionAction("tilt")?.semanticComponents?.[0].coding.code).toBe("257912008");
   });
@@ -311,7 +322,10 @@ describe("partial coded clinical concept constituents", () => {
       expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
     ]));
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
-    expect(getMedicationInstructionConcept(name)).toBe(concept);
+    expect(getMedicationInstructionConcept(name)).not.toBe(concept);
+    expect(getMedicationInstructionConcept(name)).toEqual(concept);
+    const internal = getInternalInstructionConcept(name);
+    expect(getInternalInstructionConcept(name)).toBe(internal);
     expect(getMedicationInstructionConcept(name)?.components?.[0]?.coding?.code).toBe(code);
   });
 });
