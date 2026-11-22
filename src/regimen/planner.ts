@@ -141,6 +141,12 @@ function connectorKind(token: Token | undefined): 'coordination' | 'sequence' | 
   const text = lexeme(token);
   return ACTION_SEQUENCE_MARKERS.has(text) ? 'sequence' : ACTION_COORDINATION_CONNECTORS.has(text) ? 'coordination' : undefined;
 }
+/** Consume an already registered two-word coordinator as one source seam. */
+function coordinationEnd(tokens: Token[], start: number): number {
+  const following = lexeme(tokens[start + 1]);
+  return following && coordinationConnectorKind(`${lexeme(tokens[start])} ${following}`) !== 'unknown'
+    ? start + 2 : start + 1;
+}
 function semanticConnectorKind(site: BoundarySite): CoordinationConnectorKind {
   return site.kind === 'alternative'
     ? 'disjunction'
@@ -245,10 +251,11 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     if (followingConnector && (token.original === ',' ||
         ((token.original === ';' || token.original === '.') &&
           followingConnector === 'sequence'))) {
-      const end = tokens[i + 1].sourceEnd;
-      sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: i + 1, rightIndex: i + 2,
+      const rightIndex = followingConnector === 'coordination' ? coordinationEnd(tokens, i + 1) : i + 2;
+      const end = tokens[rightIndex - 1].sourceEnd;
+      sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: rightIndex - 1, rightIndex,
         kind: followingConnector, surface: input.slice(token.sourceStart, end) });
-      i++; continue;
+      i = rightIndex - 1; continue;
     }
     const punctuation = token.original === '.' || token.original === ';' || token.original === '!' || token.original === '?';
     const slash = token.original === '/' && !(tokens[i - 1]?.kind === LexKind.Number && tokens[i + 1]?.kind === LexKind.Number);
@@ -256,9 +263,13 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
     const boundaryKind = kind ?? (token.original === ',' ? 'comma' : isHard(token) ? 'hard' : slash ? 'slash' :
       punctuation ? 'punctuation' : adjacent ? 'adjacent-dose' : undefined);
     if (!boundaryKind) continue;
-    const end = boundaryKind === 'adjacent-dose' ? token.sourceStart : token.sourceEnd;
-    sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex: i,
-      rightIndex: boundaryKind === 'adjacent-dose' ? i : i + 1, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
+    const rightIndex = boundaryKind === 'coordination' ? coordinationEnd(tokens, i)
+      : boundaryKind === 'adjacent-dose' ? i : i + 1;
+    const lastTokenIndex = boundaryKind === 'coordination' ? rightIndex - 1 : i;
+    const end = boundaryKind === 'adjacent-dose' ? token.sourceStart : tokens[lastTokenIndex].sourceEnd;
+    sites.push({ start: token.sourceStart, end, tokenIndex: i, lastTokenIndex,
+      rightIndex, kind: boundaryKind, surface: input.slice(token.sourceStart, end) });
+    i = lastTokenIndex;
   }
   return sites;
 }

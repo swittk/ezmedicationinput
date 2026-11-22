@@ -574,12 +574,12 @@ function fixedRate(
   const after = next?.original === "," ? context.tokens[expression.end + 1] : next;
   const hasInfusionRoute = getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
     getRouteMeaning(after)?.code === RouteCode["Intravenous route"];
-  // A bare/approximate rate after a comma completes the preceding volume.
-  // A qualified limit still needs its own rate marker or local head.
-  const commaRate = context.tokens[phraseStart - 1]?.original === "," &&
-    (comparator === undefined || comparator === "~");
+  // A bare/approximate per-time rate can complete the preceding volume,
+  // with or without a comma. A qualified limit still needs its own marker
+  // or local head; the earlier volume cannot lend the administration cue.
+  const completesVolume = comparator === undefined || comparator === "~";
   if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart, commaRate))) return undefined;
+      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart, completesVolume))) return undefined;
   const duration = durationAfter(context, expression.end);
   const indices = [
     ...(hasSeparateRateMarker ? [phraseStart - 1] : []),

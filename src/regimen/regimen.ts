@@ -1,5 +1,5 @@
 import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
-import { terminalAdministrationDelay } from "./grammar";
+import { singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from '../hpsg/signature';
@@ -256,25 +256,6 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
     schedule.when?.some(event => event !== SequenceEventTiming.Immediate) ||
     schedule.timeOfDay?.length
   ));
-}
-
-/** A single clock without independent recurrence or phase boundaries can
- * locate the initial administration in an explicitly ordered clock sequence. */
-function singleClockWithoutRecurrence(schedule: CanonicalSigClause['schedule']): string | undefined {
-  if (schedule?.timeOfDay?.length !== 1 || schedule.when?.length ||
-      schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
-      schedule.period !== undefined || schedule.periodMax !== undefined || schedule.periodUnit !== undefined ||
-      schedule.timingCode || schedule.count !== undefined || schedule.countMax !== undefined ||
-      schedule.duration !== undefined || schedule.durationMax !== undefined || schedule.durationUnit !== undefined ||
-      schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length ||
-      schedule.dayOfWeek?.length || schedule.dayOfMonth?.length || schedule.weekdayOrdinal !== undefined ||
-      schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
-      schedule.repeatCycle || schedule.cycleDayConstraint || schedule.occurrenceCap ||
-      schedule.treatmentStartOffsetDays !== undefined || schedule.phaseStartReference || schedule.timingReference ||
-      schedule.administrationOffsetMinutes !== undefined || schedule.administrationDuration !== undefined ||
-      schedule.administrationDurationRange || schedule.offset !== undefined ||
-      schedule.offsetMin !== undefined || schedule.offsetMax !== undefined) return undefined;
-  return schedule.timeOfDay[0];
 }
 
 /** Consume the HPSG pause only at the end of its administration program. */
@@ -645,7 +626,8 @@ export function scopeSequentialPhaseSemantics(
           timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
           when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
-          timeOfDay: shared.timeOfDay, clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
+          timeOfDay: schedule.clockWindow ? undefined : shared.timeOfDay,
+          clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
           activityTiming: shared.activityTiming,
           offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
         };
@@ -693,7 +675,7 @@ export function scopeSequentialPhaseSemantics(
       }
       // An explicit local meal/event or clock anchor owns the whole anchor
       // group, so inherited anchors can never create a mixed local/donor pair.
-      if (!schedule.when?.length && !schedule.timeOfDay?.length && sharedAnchors) {
+      if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow && sharedAnchors) {
         // A point event belongs to its administration. A successor may
         // inherit recurring meal/day anchors, never the predecessor's "now".
         const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);

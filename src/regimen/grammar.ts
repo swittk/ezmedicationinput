@@ -1,3 +1,4 @@
+import { NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
@@ -76,6 +77,46 @@ const hasPhaseBoundary = (clause: CanonicalSigClause) => Boolean(
     clause.schedule.administrationOffsetMinutes !== undefined
   )
 );
+
+/** A single clock without independent recurrence or phase boundaries can
+ * locate the initial administration in an explicitly ordered clock sequence. */
+export function singleClockWithoutRecurrence(schedule: CanonicalSigClause['schedule']): string | undefined {
+  if (schedule?.timeOfDay?.length !== 1 || schedule.when?.length ||
+      schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+      schedule.period !== undefined || schedule.periodMax !== undefined || schedule.periodUnit !== undefined ||
+      schedule.timingCode || schedule.count !== undefined || schedule.countMax !== undefined ||
+      schedule.duration !== undefined || schedule.durationMax !== undefined || schedule.durationUnit !== undefined ||
+      schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length ||
+      schedule.dayOfWeek?.length || schedule.dayOfMonth?.length || schedule.weekdayOrdinal !== undefined ||
+      schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
+      schedule.repeatCycle || schedule.cycleDayConstraint || schedule.occurrenceCap ||
+      schedule.treatmentStartOffsetDays !== undefined || schedule.phaseStartReference || schedule.timingReference ||
+      schedule.administrationOffsetMinutes !== undefined || schedule.administrationDuration !== undefined ||
+      schedule.administrationDurationRange || schedule.offset !== undefined ||
+      schedule.offsetMin !== undefined || schedule.offsetMax !== undefined) return undefined;
+  return schedule.timeOfDay[0];
+}
+
+/** A complete NEXT point after a single clock locates a later administration.
+ * The ordinary coordinator keeps same-day lists intact unless the right
+ * daughter carries this explicit next-day origin. Existing sequence completion
+ * supplies the predecessor's occupied day; no event clock is inferred here. */
+function conjunctiveNextPoint(f: BoundaryFacts): boolean {
+  if (f.site.kind !== "coordination" || f.connectorKind !== "conjunction" ||
+      !f.left.complete || !f.left.hasDose || f.left.prn || f.right.prn ||
+      singleClockWithoutRecurrence(f.left.clause.schedule) === undefined) return false;
+  const schedule = f.right.clause.schedule;
+  return Boolean(schedule?.phaseStartReference === "treatment-day-start" &&
+    schedule.treatmentStartOffsetDays === 1 && schedule.count === 1 && schedule.countMax === undefined &&
+    !f.right.hasRecurringCadence && !f.right.hasOffset && !f.right.hasDates &&
+    schedule.frequencyMax === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
+    schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
+    !schedule.boundsStart && !schedule.boundsEnd && !schedule.occurrenceCap &&
+    !schedule.clockWindow && !schedule.eventWindow && !schedule.activityTiming?.length &&
+    !schedule.repeatCycle && !schedule.cycleDayConstraint && !schedule.dayOfMonth?.length &&
+    schedule.weekdayOrdinal === undefined &&
+    schedule.evidence?.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE));
+}
 
 /** An explicit later number may omit the repeated dose unit after THEN.
  * The typed predecessor supplies the unit; the recipient keeps its own
@@ -484,7 +525,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     preserveRelationAtSequenceSurface: true, semanticLicense: 'dose-continuation', constraints: [...SAME_DAY_DOSE_CONSTRAINTS
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
-    constraint('connector.sequence', f => f.site.kind === 'sequence'), ...scheduleRight, usableLeft
+    constraint('connector.sequence-or-typed-next-point', f => f.site.kind === 'sequence' || conjunctiveNextPoint(f)), ...scheduleRight, usableLeft
   ] },
   { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence',
     semanticLicense: 'target-transition', constraints: [

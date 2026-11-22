@@ -108,6 +108,11 @@ export function administrationFromClause(
   stageOrdinal?: number
 ): CanonicalAdministration {
   const s = clause.schedule;
+  // This selected HPSG constituent owns a relative course ending but has no
+  // resolved clock. Keep it as the existing unresolved boundary, so numerical
+  // execution cannot turn the retained ending words into an unbounded course.
+  const relativeEnd = clause.clinicalAdjuncts?.evidence?.find(
+    item => item.rule === "hpsg.lex.instruction.relativeCourseEnd");
   let recurrence: CanonicalRecurrence | undefined;
   if (s) {
     const ranged = s.durationIsRange === true ||
@@ -188,6 +193,8 @@ export function administrationFromClause(
     stageOrdinal,
     onsetDays: s?.treatmentStartOffsetDays,
     onsetReference: s?.phaseStartReference,
+    phaseEnd: relativeEnd ? { anchor: "unresolved",
+      description: relativeEnd.spans.map(span => span.text).join(" ") } : undefined,
     syntax: clause,
     text,
     patientInstruction: clause.patientInstruction,
@@ -479,6 +486,10 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
   const value=a.amounts?.length===1 && !hasAmountRole(a.amounts[0].role) ? a.amounts[0] : undefined;
   if(value?.quantity){
     result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
+    if (base?.dose?.defaulted) {
+      result.dose.defaulted = true;
+      result.dose.defaultedUnit = base.dose.defaultedUnit;
+    }
     if(value.quantity.comparator)result.dose.comparator=value.quantity.comparator;
   }else if(value?.range && !doseRangeNeedsEndpointPreview(value.range))result.dose={range:{low:value.range.low?.value,high:value.range.high?.value},
     unit: getDoseQuantityUnit(value.range.low?.value !== undefined ? value.range.low : value.range.high) ||

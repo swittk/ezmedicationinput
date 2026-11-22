@@ -9,7 +9,7 @@ import {
   parseInstructionActions,
   getDosageCondition,
   nextDueDoses,
-  formatSig,
+  formatSig, formatCanonicalAdministration, formatCanonicalCourse,
   parseSig as parsePublicSig,
   toDosageDetails,
   resolveMedicationInstructionAction,
@@ -2739,11 +2739,11 @@ describe("round38 complete authored duration and maximum constituents", () => {
 
 describe("round38 independent occurrence duration endpoints", () => {
   it.each([
-    [{ value: 90, unit: "min", code: "min" }, { value: 2, unit: "h", code: "h" }, "90 minutes", "2 hours"],
-    [{ value: 1, unit: "hour", code: "h", comparator: ">=" }, { value: 120, unit: "minutes", code: "min", comparator: "<" }, "1 hour", "120 minutes"],
-    [undefined, { value: 2, unit: "h", code: "h" }, undefined, "2 hours"],
-    [{ value: 90, unit: "min", code: "min" }, undefined, "90 minutes", undefined],
-  ] as const)("retains every endpoint through R5/current R6 and canonical preview", (low, high, lowText, highText) => {
+    [{ value: 90, unit: "min", code: "min" }, { value: 2, unit: "h", code: "h" }, "90 minutes", "2 hours", "90 นาที", "2 ชั่วโมง"],
+    [{ value: 1, unit: "hour", code: "h", comparator: ">=" }, { value: 120, unit: "minutes", code: "min", comparator: "<" }, "1 hour", "120 minutes", "อย่างน้อย 1 ชั่วโมง", "น้อยกว่า 120 นาที"],
+    [undefined, { value: 2, unit: "h", code: "h" }, undefined, "2 hours", undefined, "ไม่เกิน 2 ชั่วโมง"],
+    [{ value: 90, unit: "min", code: "min" }, undefined, "90 minutes", undefined, "อย่างน้อย 90 นาที", undefined],
+  ] as const)("retains every endpoint through R5/current R6 and canonical preview", (low, high, lowText, highText, lowThai, highThai) => {
     let row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 100, unit: "mL/h" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, extension: [{
         url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, id: "duration-range",
@@ -2783,8 +2783,11 @@ describe("round38 independent occurrence duration endpoints", () => {
         const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
         if (lowText) expect(en).toContain(lowText);
         if (highText) expect(en).toContain(highText);
-        if (low) { expect(th).toContain(String(low.value)); expect(recurrence.occurrenceDurationRange?.low?.unit).toBe(low.unit); }
-        if (high) { expect(th).toContain(String(high.value)); expect(recurrence.occurrenceDurationRange?.high?.unit).toBe(high.unit); }
+        if (lowThai) expect(th).toContain(lowThai);
+        if (highThai) expect(th).toContain(highThai);
+        if (lowThai && highThai) expect(th.indexOf(lowThai)).toBeLessThan(th.indexOf(highThai));
+        if (low) expect(recurrence.occurrenceDurationRange?.low?.unit).toBe(low.unit);
+        if (high) expect(recurrence.occurrenceDurationRange?.high?.unit).toBe(high.unit);
       }
       const written = toFhirR5Dosages(detail)[0];
       expect(written.timing?.repeat?.duration).toBeUndefined();
@@ -3106,5 +3109,71 @@ describe("round45 authored volume and rate ownership", () => {
     expect(control.fhir[0].doseAndRate![0].doseQuantity).toBeUndefined();
     expect(control.fhir[0].doseAndRate![0].rateQuantity).toMatchObject({ value: 50, unit: "mL/h" });
     expect(getQuantityComparator(control.fhir[0].doseAndRate![0].rateQuantity)).toBe("<=");
+  });
+});
+
+
+describe("round46 supported quantity and boundary ownership", () => {
+  it.each(["Infuse 1 L 100 mL/hr", "Infuse 1 L at 100 mL/hr"])(
+    "retains the authored volume and following rate without rescaling: %s", source => {
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "L" });
+      for (const input of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "L" });
+        expect(member.amounts?.[0].rate).toMatchObject({ value: 100, unit: "mL/h" });
+        expect(member.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+      }
+      const wireAmounts = [parsed.fhir[0].doseAndRate?.[0], parsed.fhirNext.step[0].component[0].doseAndRate?.[0]];
+      for (const amount of wireAmounts) {
+        expect(amount?.doseQuantity).toMatchObject({ value: 1, unit: "L" });
+        expect(amount?.rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+      }
+    });
+
+  it("retains a recognized relative ending without executing an unbounded course", () => {
+    const source = "Take 1 tablet every 6 hours until the next morning";
+    const parsed = parsePublicSig(source);
+    const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+      timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 10 };
+    const course = parsed.meta.canonical.course!;
+    expect(course.stages[0].administrations[0].phaseEnd)
+      .toEqual({ anchor: "unresolved", description: "until the next morning" });
+    for (const input of [parsed, course, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(() => nextDueDoses(input, query)).toThrow(/treatment-start offset/);
+      expect(() => calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: "d" }))
+        .toThrow(/treatment-start offset/);
+    }
+    for (const input of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: "until the next morning" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
+      expect(member.schedule?.recurrence?.anchors).toBeUndefined();
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toContain("until the next morning");
+    }
+    const bounded = parsePublicSig("Take 1 tablet every 6 hours for 1 day");
+    for (const input of [bounded, bounded.fhirNext, JSON.parse(JSON.stringify(bounded.fhir))]) {
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-01T14:00:00+00:00",
+        "2026-12-01T20:00:00+00:00", "2026-12-02T02:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(4);
+    }
+  });
+
+  it("keeps an inferred single dose implicit in the unmodified public administration formatter", () => {
+    const source = "Swallow whole daily";
+    const parsed = parsePublicSig(source, { assumeSingleDiscreteDose: true, context: { dosageForm: "tablet" } });
+    const course = parsed.meta.canonical.course!;
+    const member = course.stages[0].administrations[0];
+    expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(member.syntax?.dose).toMatchObject({ value: 1, unit: "tab", defaulted: true, defaultedUnit: "tab" });
+    const text = formatCanonicalAdministration(member, "long", { locale: "en", realizationMode: "roundtrip" });
+    expect(text).toContain("Swallow whole");
+    expect(text).toContain("daily");
+    expect(text).not.toContain("1 tablet");
+    expect(formatCanonicalCourse(course, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
   });
 });

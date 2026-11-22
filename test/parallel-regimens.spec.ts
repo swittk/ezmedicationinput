@@ -1160,7 +1160,7 @@ describe("round42 relative points and inherited cadence origins", () => {
 
   it.each([
     ["the next morning and at 09:00", ["08:00", "09:00"]],
-    ["at 18:00 and again the next morning", ["08:00", "18:00"]],
+    ["the next morning and again at 18:00", ["08:00", "18:00"]],
     ["at 07:00 the next morning and before breakfast", ["06:00", "07:00"]],
     ["the next morning at 07:00 before breakfast", ["07:00"]],
     ["at 08:00 in the morning the next day", ["08:00"]],
@@ -1368,6 +1368,49 @@ describe("round45 explicit onset and parallel successor ownership", () => {
       expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
       expect(calculateTotalUnits({ ...query, from: "2026-12-06T00:00:00Z", dosage,
         durationValue: 1, durationUnit: "d" }).totalUnits).toBe(2);
+    }
+  });
+});
+
+
+describe("round46 source-owned continuation timing", () => {
+  it.each([
+    ["between 18:00 and 20:00", "18:00", true],
+    ["at 18:00", "18:00", false],
+    ["", "08:00", false]
+  ] as const)("keeps a successor's own clock window while inheriting cadence: %s", (timing, clock, window) => {
+    const parsed = parseSig("Take 1 tablet daily at 08:00 for 7 days, then from day 11 take 2 tablets " + timing);
+    const successor = parsed.meta.canonical.clauses[1];
+    expect(successor.schedule?.treatmentStartOffsetDays).toBe(10);
+    if (window || !timing) expect(successor.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    else expect(successor.schedule?.frequency).toBeUndefined();
+    if (window) {
+      expect(successor.schedule?.clockWindow).toEqual({ start: "18:00:00", end: "20:00:00", endInclusive: true });
+      expect(successor.schedule?.timeOfDay).toBeUndefined();
+    } else expect(successor.schedule?.timeOfDay).toEqual([clock + ":00"]);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-11T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, query)).toEqual([11, 12, 13].map(day => `2026-12-${day}T${clock}:00+00:00`));
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(6);
+    }
+  });
+
+  it.each(["and again", "and", "then"])("keeps the first clock before a distinct NEXT-day administration: %s", connector => {
+    const parsed = parseSig(`Take 1 tablet at 18:00 ${connector} the next morning`);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual([1, 1]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
+      { value: 1, unit: "tab" }, { value: 1, unit: "tab" }
+    ]);
+    expect(parsed.meta.canonical.clauses[0].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({ when: ["MORN"], phaseStartReference: "previous-phase-next-day" });
+    const query = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC",
+      eventClock: { MORN: "08:00" }, limit: 5 };
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, query)).toEqual(["2026-11-21T18:00:00+00:00", "2026-11-22T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 5, durationUnit: "d" }).totalUnits).toBe(2);
     }
   });
 });
