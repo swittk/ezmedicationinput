@@ -13970,3 +13970,100 @@ Source, candidate build, pinned master build and benchmark source hashes were in
 ### Review delivery
 
 Normal push to the existing PR14 branch, evidence or explicit rejection in each of the eight original inline threads, resolution after replies, then one exact @coderabbitai full review request. Body-only dispositions remain in this ledger and related original threads. The request does not end the loop; the actual completed full review is checked next.
+
+
+## 2026-11-23 — PR14 full-review round44
+
+Actual full review [6013794464](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6013794464) reviewed 6076c2eac468960b2bc9b21c40b4c40d14e74cbf and completed on 2026-11-23 at 01:41 Bangkok time (2026-11-22 18:41 UTC). All 12 inline findings and 20 body findings were inspected: **27 addressed, 5 rejected**. Review text was treated as a claim to verify against the product contract, public behavior and pinned master, not as permission to expand the product.
+
+### Scope decisions and dispositions
+
+Supported clinician input, valid existing interchange and advertised public API behavior are fixed even when the defect also exists on master. Internally contradictory quantities, invalid clinical codes/units and hypothetical benchmark failure frameworks remain excluded. The native course stays an internal implementation detail; no native editor, mutation/proof framework, persisted native schema, downstream application change, unit conversion, merge or release is included.
+
+| Item | Disposition | Concrete outcome |
+|---|---|---|
+| I1 | Fixed | Strict R5 excludes the lifted field; modifier and explicit clear retained. |
+| I2 | Rejected | Contradictory mg display/g code requires an unsupported precedence policy; valid mixed/code-only endpoints work. |
+| I3 | Fixed | Member phaseEnd keeps text-only directions and its end visible. |
+| I4 | Fixed | Stable branch labels bind taper alternatives across reordered stages; single-stage wording unchanged. |
+| I5 | Fixed | Branch-dependent starts cannot establish false global pauses; valid B-only pause remains. |
+| I6 | Fixed | Bounded live-carrier observation, current typed material preview, and existing unknown-source rule across cold/direct saves. |
+| I7 | Fixed | Equivalent exact range boundaries retain civil local-step repetition across DST. |
+| I8 | Fixed | Unknown ranged timing uses existing timing-required; known empty supply stays zero. |
+| I9 | Fixed | Detached public action/concept vocabulary; internal indexes remain shared. |
+| I10 | Fixed | Both parsed-argument constructors copy typed compound components. |
+| I11 | Fixed | First dilution clock is Time and uses existing locale realization; destination remains distinct. |
+| I12 | Fixed | An explicit unresolved duration marker blocks rate-denominator invention. |
+| B1 | Fixed | Opening draft ownership stops at boundary owners; later edits/tail removal preserve pause. |
+| B2 | Oracle strengthened | ACM07 and explicit08 yield both exact timestamps. |
+| B3 | Rejected | Invalid EMA prototype-name code collisions are outside scope. |
+| B4 | Fixed | Typed nightly maximum owns its slash and remains non-executable. |
+| B5 | Rejected | Electrical UCUM H is not a supported administration duration. |
+| B6 | Fixed | Advice alias surface resolution restores Thai eat localization. |
+| B7 | Fixed | Directional graph clock remains beside equal structured clock; point control deduplicates. |
+| B8 | Oracle strengthened | Edited tablet quantity must belong to Dissolve in both locales. |
+| B9 | Oracle strengthened | Saline must exist before its position is compared with the clock. |
+| B10 | Oracle strengthened | Dose and clocks are checked within the correct stages. |
+| B11 | Oracle strengthened | Both projected duration endpoints retain their authored values and units. |
+| B12 | Fixed | Valid year/month event precision remains unresolved for execution, while fully dated siblings retain slots. |
+| B13 | Oracle strengthened | Expected successor reaches the end of the complete preview. |
+| B14 | Oracle strengthened | Complete pause suffix rejects appended administrations. |
+| B15 | Oracle strengthened | Expected boundsRange is independent of adapter input. |
+| B16 | Oracle strengthened | January9 successor still has08/20 and four tablets per day. |
+| B17 | Rejected | Hypothetical missing-build report recovery is outside scope; nonzero exits fail and fresh report paths are used. |
+| B18 | Oracle strengthened | Thai benchmark fixture requires handwashing, right-eye dose and eye closure in order. |
+| B19 | Rejected | Hypothetical concurrent build replacement is outside scope; frozen artifacts are independently hashed before/after. |
+| B20 | Fixed | Existing language facet owns long duration-unit labels; short notation and authored fallback retained. |
+
+### Public evidence and integration
+
+Root implemented the course-preview fixes, locale-facet correction and benchmark clinical oracle, integrated all work, and independently reviewed worker changes. Its own execution, grammar and interop workers used isolated worktrees and AgentBoard claims. No HPSERVER AI worker was used. Independent worker audits of the root course changes and interop boundary changes found no concrete supported defect.
+
+The public course oracle preserves one choice across the 2-to-1 and 4-to-3 tablet tapers even when the second stage lists branches in a different order. Both R6 and saved R5 retain stage timing and branch identity in English and Thai. For A at days 0–2, B at days 4–6, and a successor ending at day 8, the preview retains a B-only 0–4 pause and describes the shared successor relative to the selected predecessor. Execution controls give A's successor doses on January 3/4 and B's doses on January 5/6. Pinned master also displayed per-stage choices and the false global pause; these are supported baseline defects, not newly invented semantics.
+
+Equivalent exact range starts and ends retain a civil repeat span after the existing resolver establishes their exact boundary. The New York spring-transition oracle distinguishes three civil days from three elapsed 23-hour windows and preserves every source endpoint. Local-step repetition itself is new PR behavior, so that finding is not labeled a master regression. Unknown ranged cadence and partial-date execution were already broken on master; known empty intervals, complete dated siblings and exhausted allowances remain explicit controls.
+
+Carrier integration verified warm, cold, normalized, roundtrip and direct-R5-save paths. The existing live material observation blocks stale saline replay after a change to dextrose. A cold standalone item has no source agreement to certify; the existing sourceTextVerified rule carries that state across saves. The material label is realized beside the current native ratio, while dose/rate values and units remain owned by native amounts. Explicit clinician text replacement controls remain. No new marker or replay framework was introduced.
+
+Broad integration and the full source preflight found eight old assertions expecting public action/concept getters to expose internal object identity. The oracles now check internal reuse separately from public equality and nonidentity, retaining their clinical coding and expression assertions. This restores the master public-copy contract rather than weakening the clinical checks.
+
+Independent review then combined the supported carrier edit with an explicit clinician text replacement and direct R5 saving. A public probe confirmed an integration regression from the new carrier-sensitive comparison: the fresh item lost replacement authority after saving, while the persisted control, reviewed head and master preserved it. The existing fresh mismatch rule now distinguishes a nonblank replacement from unchanged or cleared text; direct-save continuations are part of the same public oracle. The initial source preflight and launch-timeout evidence are retained, and no failed or interrupted gate is accepted.
+
+### Validation and frozen evidence
+
+Frozen source: 428709ab2f8fbc19bff70b18290fbafbb8029c72.
+
+- Source and strict ES6 types: 6567/6567 tests across 48 existing files, with no per-file test-count reduction.
+- Distribution: ESM/CommonJS/declaration build and 4/4 tests.
+- Actual converter/storage: 86 complete-input attempts, 85 exact full-JSON save/reopen preservations. The sole established downstream limitation is raw timeOfDay:[null,"08:00:00"]; the input is passed directly and the existing converter raises Invalid FHIR timeOfDay: null. No trimming, normalization, or downstream application change.
+- PR scope: 99 paths against pinned master 7d628239; git diff --check passes.
+
+All 174 equivalent scenarios meet the individual +4% ceiling; the largest accepted change is 3.327% for resolveMedicationInstructionConcept. The full 181-scenario sweep uses 22 rounds at a 35 ms target; exactly the 5 first-pass flags receive the prescribed 72-round, 140 ms candidate-first confirmation. The same seven prior semantic inequivalences remain recorded without reclassification or cross-case averaging.
+
+| Frozen evidence | SHA-256 |
+|---|---|
+| Source files | fd200904b2a1d1624b1f56cec1201d652d2d1d46d04fe9245cd37b43d2f27f34 |
+| Candidate ESM | 4d6ba419d2951bfb4032541c0d984981e579cab4a75272f9055e0ec24a7e50f6 |
+| Pinned master ESM | a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2 |
+| Benchmark harness | 93d2ffc5ef68d719c3d34d66d1194723c59ea7779414220891103d14e52d53f4 |
+
+An independent own-worker audit recomputed every paired-log ratio, median, spread and acceptance flag from all 181 full-run cases and exactly the five 72-pair confirmations. The accepted 169 full-run plus five confirmation cases match the gate summary. The source/build/harness hashes are unchanged through the final measurements. The benchmark-only diff strengthens the existing Thai clinical equivalence oracle; timing, sampling, fixture inventory, confirmation policy and threshold are unchanged. Raw full, confirmation, source, dist, storage and manifest reports are retained under /tmp/ezmed14-round44-*. The rejected pre-optimization gate is retained separately.
+
+| First-pass flag | Full sweep | Prescribed confirmation |
+|---|---:|---:|
+| suggestSig/empty | 5.497% | -0.045% |
+| formatSig/R5/en | 15.873% | 0.965% |
+| parseStrengthComponents | 4.648% | -0.531% |
+| getDosageExcludedWeekdays | 4.475% | 1.079% |
+| listSupportedBodySiteGrammar | 5.254% | 0.809% |
+
+### Review delivery
+
+The delivery retains one individual reply per original round 44 inline thread, with each related body finding included in its reply and the complete 32-item disposition ledger above. The five rejected requests remain explicitly rejected. The coordinator resolves those threads, audits pagination, updates the PR body, then requests a fresh full review and waits for its actual review body before triaging the next round. No merge, release, publication, deployment, or downstream change is authorized by this delivery.
+
+
+### Confirmed performance failures before optimization
+
+The complete gate at source 30a1617 rejected four equivalent scenarios after the prescribed confirmation: formatParseBatch/staged +16.017857%, getMedicationInstructionConcept +1482.762509%, resolveMedicationInstructionConcept +804.712106%, and listMedicationInstructionConcepts +1412.637569%. Those failed reports are retained under /tmp/ezmed14-round44-pre-optimization-*. No cases were reclassified and no threshold was relaxed. Independent source and frozen-dist inspection confirmed that pinned master already clones all three public concept API results. The copy implementation's spread-and-override descriptors were the bounded optimization target; authored custom Coding metadata and detached values remain required. The staged fixture returns cached text and never runs the new branch-preview code, so its direct multistage return was restored before native metadata inspection. Final acceptance is established by the fresh unchanged full gate at the optimized source recorded above.
+
+The bounded optimization is committed at 428709ab2f8fbc19bff70b18290fbafbb8029c72. Bundled catalog initialization/public copies now use the original direct typed Coding fields (including version); custom vocabulary and escaped parsed components retain the metadata-preserving copier. The already-fresh custom public resolution is returned directly, matching master. The staged formatter keeps a small cached-text return with an explicit optional-array check and moves unchanged remaining logic to a private helper. Independent execution/grammar reviews found no supported semantic or metadata loss. All four targeted scenarios pass the diagnostic at candidate ESM 4d6ba419d2951bfb4032541c0d984981e579cab4a75272f9055e0ec24a7e50f6; this diagnostic does not replace the fresh complete gate.
