@@ -1248,3 +1248,65 @@ describe("round42 relative points and inherited cadence origins", () => {
     }
   });
 });
+
+
+describe("round43 inherited activity timing", () => {
+  it.each([
+    ["2 tablets from day 8", 30],
+    ["from day 8 take 2 tablets", 30],
+    ["2 tablets 45 minutes before exercise from day 8", 45]
+  ] as const)("preserves recognized activity timing in the continuation: %s", (continuation, offset) => {
+    const source = "1 tablet daily 30 minutes before exercise, then " + continuation;
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
+      { value: 1, unit: "tab" }, { value: 2, unit: "tab" }
+    ]);
+    const expected = [{ relation: "before", offset, activity: {
+      text: "exercise", coding: { system: "http://snomed.info/sct", code: "256235009" }
+    } }];
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      treatmentStartOffsetDays: 7, frequency: 1, period: 1, periodUnit: "d", activityTiming: expected
+    });
+    expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming?.[0].offset).toBe(30);
+    for (const course of [parsed.meta.canonical.course!, importCanonicalCourse(parsed.fhirNext),
+      importCanonicalCourse(JSON.parse(JSON.stringify(parsed.fhir)))]) {
+      const successor = course.stages[1].administrations[0];
+      expect(successor.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(successor.schedule?.recurrence?.activityTiming).toMatchObject(expected);
+      expect(successor.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    }
+    expect(parsed.input).toBe(source);
+  });
+});
+
+
+describe("round43 ordered clock continuation", () => {
+  it.each(["2", "2 tablets"])("uses actual first-clock completion after a late order: %s", dose => {
+    const parsed = parseSig("Take 1 tablet at 22:00 then " + dose + " at 06:00");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+    expect(parsed.meta.canonical.clauses[1].schedule?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    const query = { orderedAt: "2024-01-01T23:00:00Z", from: "2024-01-01T23:00:00Z", timeZone: "UTC", limit: 2 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2024-01-02T22:00:00+00:00", "2024-01-03T06:00:00+00:00"]);
+    }
+  });
+
+  it("keeps an independently stated daily course as the predecessor's completion", () => {
+    const parsed = parseSig("Take 1 tablet daily at 22:00 for 2 days then 2 tablets at 06:00");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      frequency: 1, period: 1, periodUnit: "d", duration: 2, durationUnit: "d"
+    });
+    const query = { orderedAt: "2024-01-01T00:00:00Z", from: "2024-01-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2024-01-01T22:00:00+00:00", "2024-01-02T22:00:00+00:00", "2024-01-03T06:00:00+00:00"
+      ]);
+    }
+    const recurring = parseSig("Take 1 tablet daily at 22:00 then 2 tablets daily at 06:00");
+    expect(recurring.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual([undefined, undefined]);
+    expect(recurring.meta.canonical.clauses.map(clause => clause.schedule?.frequency)).toEqual([1, 1]);
+  });
+});

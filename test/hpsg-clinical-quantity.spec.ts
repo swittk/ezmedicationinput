@@ -3016,3 +3016,50 @@ describe("round42 infusion arguments and saved action lookup", () => {
     expect(parseInstructionActions("clinic-chew", 0, options)).toEqual([]);
   });
 });
+
+
+describe("round43 IV route after carrier volume", () => {
+  it.each([
+    ["50mL", "intravenous", "over"],
+    ["50 mL", "intravenous", "over"],
+    ["50mL", "intravenous", "for"],
+    ["50 mL", "IV", "over"],
+    ["50mL", "intravenously", "over"]
+  ] as const)("keeps the existing IV route between %s and %s %s duration", (volume, route, lead) => {
+    const source = `Give 20 mg in ${volume} ${route} ${lead} 1 hour`;
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(clause.dose).toEqual({ value: 20, unit: "mg" });
+    expect(clause.route?.code).toBe("47625008");
+    expect(clause.clinicalQuantity?.carrierMaterial).toBeUndefined();
+    expect(clause.clinicalQuantity?.administrationDuration).toEqual({ value: 1, unit: "h" });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.route?.coding).toContainEqual(expect.objectContaining({ code: "47625008" }));
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 20, unit: "mg" });
+      expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+        numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
+      });
+      expect(row.timing?.repeat).toMatchObject({ count: 1, duration: 1, durationUnit: "h" });
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+    expect(parsed.input).toBe(source);
+  });
+
+  it("keeps intravenous fluid as the carrier material when a noun follows the adjective", () => {
+    const source = "Give 20 mg in 500 mL intravenous fluid over 4 hours";
+    const parsed = parsePublicSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity?.carrierMaterial?.text).toBe("intravenous fluid");
+    expect(clause.route).toBeUndefined();
+    expect(clause.dose).toEqual({ value: 20, unit: "mg" });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.route).toBeUndefined();
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 20, unit: "mg" });
+      expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+        numerator: { value: 500, unit: "mL" }, denominator: { value: 4, unit: "h" }
+      });
+    }
+    expect(parsed.input).toBe(source);
+  });
+});

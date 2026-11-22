@@ -313,14 +313,16 @@ function activeDoseInCarrierOverTime(
     const token = context.tokens[cursor];
     const word = normalizeTokenLower(token);
     if (INFUSION_DURATION_LEADS.has(word) ||
-        word === "iv" || word === "intravenously" ||
+        (getRouteMeaning(token)?.code === RouteCode["Intravenous route"] &&
+          available(context, cursor + 1) &&
+          INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[cursor + 1]))) ||
         token.kind !== LexKind.Word) break;
     cursor++;
   }
   const materialEnd = cursor;
   const routeToken = context.tokens[cursor];
   const markedIV = Boolean(routeToken && available(context, cursor) &&
-    /^(?:iv|intravenously)$/u.test(normalizeTokenLower(routeToken)));
+    getRouteMeaning(routeToken)?.code === RouteCode["Intravenous route"]);
   if (markedIV) cursor++;
   const overToken = context.tokens[cursor];
   if (!overToken || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;

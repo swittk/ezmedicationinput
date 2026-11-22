@@ -258,6 +258,25 @@ function hasRecurringSchedule(schedule: CanonicalSigClause['schedule']): boolean
   ));
 }
 
+/** A single clock without independent recurrence or phase boundaries can
+ * locate the initial administration in an explicitly ordered clock sequence. */
+function singleClockWithoutRecurrence(schedule: CanonicalSigClause['schedule']): string | undefined {
+  if (schedule?.timeOfDay?.length !== 1 || schedule.when?.length ||
+      schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+      schedule.period !== undefined || schedule.periodMax !== undefined || schedule.periodUnit !== undefined ||
+      schedule.timingCode || schedule.count !== undefined || schedule.countMax !== undefined ||
+      schedule.duration !== undefined || schedule.durationMax !== undefined || schedule.durationUnit !== undefined ||
+      schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length ||
+      schedule.dayOfWeek?.length || schedule.dayOfMonth?.length || schedule.weekdayOrdinal !== undefined ||
+      schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length ||
+      schedule.repeatCycle || schedule.cycleDayConstraint || schedule.occurrenceCap ||
+      schedule.treatmentStartOffsetDays !== undefined || schedule.phaseStartReference || schedule.timingReference ||
+      schedule.administrationOffsetMinutes !== undefined || schedule.administrationDuration !== undefined ||
+      schedule.administrationDurationRange || schedule.offset !== undefined ||
+      schedule.offsetMin !== undefined || schedule.offsetMax !== undefined) return undefined;
+  return schedule.timeOfDay[0];
+}
+
 /** Consume the HPSG pause only at the end of its administration program. */
 function terminalTreatmentPauseDays(clause: CanonicalSigClause): number | undefined {
   const pause = clause.clinicalAdjuncts?.treatmentPause;
@@ -335,6 +354,20 @@ export function scopeSequentialPhaseSemantics(
     const prior = graph.phases[edge.from].members;
     const next = graph.phases[edge.to].members;
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
+    if (edge.relation.semanticLicense === 'dose-continuation' && prior.length === 1 && next.length === 1) {
+      const precedingClock = singleClockWithoutRecurrence(schedules[0]);
+      const followingClock = precedingClock && singleClockWithoutRecurrence(states[next[0]]?.primaryClause.schedule);
+      if (precedingClock && followingClock && precedingClock > followingClock) {
+        // The existing clock-order construction kept these daughters sequential.
+        // Complete its initial point; native phase completion owns the next
+        // eligible successor clock, including an order after today's first clock.
+        schedules[0]!.count = 1;
+        states[prior[0]].primaryClause.evidence.push({
+          rule: "hpsg.regimen.single-clock-before-clock-transition", spans: [], scheduleFields: ["count"],
+          note: "The explicit backward-clock continuation follows this initial administration."
+        });
+      }
+    }
     const endpoints = schedules.map(phaseEndExclusive);
     // All coordinated daughters must be finite. An unbounded sibling prevents
     // the sequence construction from inventing a phase boundary.
@@ -547,7 +580,8 @@ export function scopeSequentialPhaseSemantics(
       sameSet(schedule?.when, shared?.when) &&
       sameSet(schedule?.timeOfDay, shared?.timeOfDay) &&
       equalStructuredValues(schedule?.clockWindow, shared?.clockWindow) &&
-      equalStructuredValues(schedule?.eventWindow, shared?.eventWindow)
+      equalStructuredValues(schedule?.eventWindow, shared?.eventWindow) &&
+      equalStructuredValues(schedule?.activityTiming, shared?.activityTiming)
     );
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
@@ -612,6 +646,7 @@ export function scopeSequentialPhaseSemantics(
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
           when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
           timeOfDay: shared.timeOfDay, clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
+          activityTiming: shared.activityTiming,
           offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
         };
         // ParserState setters may create own keys with an undefined value;
