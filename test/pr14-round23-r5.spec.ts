@@ -10,7 +10,7 @@ import {
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   registerSigLocalization, getMedicationInstructionAction,
-  formatCanonicalCourse, formatSigBatch, formatParseBatch, suggestSig,
+  formatCanonicalCourse, formatCanonicalAdministration, formatSigBatch, formatParseBatch, suggestSig,
   buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole,
   type CanonicalInstructionGraph,
 } from "../src/index";
@@ -6853,7 +6853,8 @@ describe("round44 interop ownership", () => {
     for (const input of [raw, rows[0]]) {
       const native = importCanonicalCourse(input).stages[0].administrations[0];
       const recurrence = native.schedule?.recurrence;
-      expect(recurrence?.occurrenceDuration).toBe(kind === "unresolved" ? undefined : 2);
+      expect(recurrence?.occurrenceDuration).toBe(kind === "unresolved" ? 3 : 2);
+      expect(recurrence?.occurrenceDurationUnit).toBe(kind === "unresolved" ? undefined : "h");
       expect(recurrence?.occurrenceDurationComparator).toBe(kind === "missing" ? "~" : undefined);
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       if (kind === "unresolved") expect(text).not.toContain("over approximately 2 hours");
@@ -7275,5 +7276,64 @@ describe("round46 public display and pause ownership", () => {
       expect(formatSig(edited, "long", { locale: "en" })).toContain("below the ear (across 4 sites).");
     }
     expect(source).toEqual(before);
+  });
+});
+
+
+describe("round46 standalone administration source ownership", () => {
+  const parseOptions = { assumeSingleDiscreteDose: true, context: { dosageForm: "tablet" } };
+  const display = { locale: "en", realizationMode: "roundtrip" as const };
+
+  it.each([
+    "Swallow whole daily", "Swallow whole twice daily", "Swallow whole every morning",
+    "Swallow whole daily at 08:00", "Swallow whole before breakfast daily",
+    "Swallow whole daily, do not chew", "Swallow 2 tablets whole daily",
+  ])("retains the complete owned source without duplicated timing: %s", source => {
+    const parsed = parseSig(source, parseOptions), course = parsed.meta.canonical.course!;
+    const member = course.stages[0].administrations[0], before = persist(course);
+    expect(member.amounts?.[0].quantity).toMatchObject({ value: source.includes("2 tablets") ? 2 : 1, unit: "tab" });
+    expect(formatCanonicalAdministration(member, "long", display)).toBe(source);
+    expect(formatCanonicalCourse(course, "long", display)).toBe(source);
+    expect(persist(course)).toEqual(before);
+  });
+
+  it.each(["Swallow whole", "Swallow 1 tablet whole"])("keeps a staged %s source separate from the numeric successor", first => {
+    const source = first + " daily for 7 days then take 2 tablets twice daily";
+    const parsed = parseSig(source, parseOptions), course = parsed.meta.canonical.course!;
+    expect(course.stages).toHaveLength(2);
+    const firstText = formatCanonicalAdministration(course.stages[0].administrations[0], "long", display);
+    const secondText = formatCanonicalAdministration(course.stages[1].administrations[0], "long", display);
+    expect(firstText).toBe(first + " daily for 7 days");
+    expect(firstText).not.toContain("2 tablets");
+    expect(secondText).toBe("Take 2 tablets orally twice daily.");
+    expect(secondText).not.toContain("7 days");
+    expect(formatCanonicalCourse(course, "long", display)).toBe(source);
+  });
+
+  it("keeps each parallel administration's amount and event separate", () => {
+    const source = "Swallow 1 tablet whole in the morning and 2 tablets whole in the evening";
+    const course = parseSig(source, parseOptions).meta.canonical.course!;
+    expect(course.stages[0].administrations).toHaveLength(2);
+    const texts = course.stages[0].administrations.map(member => formatCanonicalAdministration(member, "long", display));
+    expect(texts[0]).toBe("Swallow 1 tablet whole in the morning");
+    expect(texts[1]).toContain("2 tablets");
+    expect(texts[1]).toContain("in the evening");
+    expect(texts[0]).not.toContain("evening");
+    expect(texts[1]).not.toContain("morning");
+    expect(formatCanonicalCourse(course, "long", display)).toBe(source);
+  });
+
+  it("keeps a current external numeric edit ahead of inferred-dose source", () => {
+    const parsed = parseSig("Swallow whole daily", parseOptions);
+    const wire = persist(parsed.fhirNext);
+    wire.step![0].component[0].doseAndRate![0].doseQuantity!.value = 3;
+    const before = persist(wire), saved = persist(toFhirR5Dosages(wire));
+    for (const input of [wire, saved]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 3, unit: "tab" });
+      expect(formatCanonicalAdministration(member, "long", display))
+        .toBe("Swallow 3 tablets whole orally once daily.");
+    }
+    expect(wire).toEqual(before);
   });
 });

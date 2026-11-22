@@ -1800,7 +1800,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
     baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
-    roundTrip && !hasExplicitMethod && graphSourceIsEnglish &&
+    roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
   ) {
     return clause.instructionGraph.sourceText.trim();
