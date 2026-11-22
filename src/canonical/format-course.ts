@@ -18,6 +18,7 @@ import type {
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { getDoseQuantityUnit } from "../maps";
+import { getDoseUnitKind } from "../unit-lexicon";
 import { formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
@@ -36,6 +37,11 @@ interface CourseFormatEnvironment {
 function courseEnvironment(options?: FormatOptions): CourseFormatEnvironment {
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   return { localization, words: resolveCourseLanguage(options?.locale, options?.i18n, localization) };
+}
+
+function usesTargetScope(quantity: CanonicalMeasure | undefined): boolean {
+  const kind = getDoseUnitKind(getDoseQuantityUnit(quantity));
+  return kind !== undefined && kind !== "metric" && kind !== "biologic_unit";
 }
 
 export function joinGeneratedClauses(clauses: readonly string[], separator = "; "): string {
@@ -471,7 +477,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration): boolean {
         amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
         amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
   if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
-      a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction ||
+      a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
       a.limits?.length || safetyHasClinicalFacts(a.safety) || a.choice || a.phaseOrigin || a.phaseStart || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
@@ -573,9 +579,9 @@ function formatCanonicalBase(
     rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
   const ranges: string[] = [];
   const labelled = (a.amounts?.length ?? 0) > 1 || hasAmountRole(primary?.role);
-  // Native target multiplicity applies to every labelled amount. It cannot
-  // depend on a compact scalar dose, which intentionally omits multiple roles.
-  const scope: SigDoseScope | undefined = a.targetCount !== undefined && a.targetCount > 1 &&
+  // Target count is independent of quantity scope. Labelled discrete amounts
+  // can be per-target; metric/biologic totals do not become per-target doses.
+  const targetScope: SigDoseScope | undefined = a.targetCount !== undefined && a.targetCount > 1 &&
     a.amounts?.length && (labelled || !clause.dose) ? {
       targetCount: a.targetCount,
       site: resolveBodySitePhrase(clause.site?.text ?? clause.site?.coding?.display ?? "")?.definition
@@ -583,26 +589,29 @@ function formatCanonicalBase(
   const formatDose = env.localization?.formatDose ?? formatDoseEnglish;
   for (let index = 0; index < (a.amounts?.length ?? 0); index++) {
     const amount = a.amounts![index];
+    const scope = targetScope && (amount.quantity ? usesTargetScope(amount.quantity) :
+      amount.range && (!amount.range.low || usesTargetScope(amount.range.low)) &&
+        (!amount.range.high || usesTargetScope(amount.range.high))) ? targetScope : undefined;
     // A compact clause represents one untyped dose. Multiple entries and
     // explicit roles remain complete, labelled amounts in the native preview.
     if (labelled && amount.quantity) {
       const unit = amount.quantity.unit ?? getDoseQuantityUnit(amount.quantity);
       const fallback = (amount.quantity.value === undefined ? words.unspecified
         : (getQuantityComparator(amount.quantity) ?? "") + amount.quantity.value) + (unit ? " " + unit : "");
-      const dose = scope && amount.quantity.value !== undefined
+      const dose = targetScope && amount.quantity.value !== undefined
         ? { value: amount.quantity.value, unit, comparator: getQuantityComparator(amount.quantity) } : fallback;
-      ranges.push(amountLabel(amount, "dose", words) + (scope ? formatDose.call(env.localization, dose, style, scope) ?? fallback : fallback));
+      ranges.push(amountLabel(amount, "dose", words) + (targetScope ? formatDose.call(env.localization, dose, style, scope) ?? fallback : fallback));
     }
     if (amount.range && (labelled || doseRangeNeedsEndpointPreview(amount.range))) {
       const text = rateRangePreview(amount.range);
       if (text) {
         let dose: CanonicalDoseExpr | string = text;
-        if (scope && !doseRangeNeedsEndpointPreview(amount.range)) {
+        if (targetScope && !doseRangeNeedsEndpointPreview(amount.range)) {
           const unit = amount.range.low?.unit || getDoseQuantityUnit(amount.range.low) ||
             amount.range.high?.unit || getDoseQuantityUnit(amount.range.high) || undefined;
           dose = { range: { low: amount.range.low?.value, high: amount.range.high?.value }, unit };
         }
-        ranges.push(amountLabel(amount, "dose", words) + (scope ? formatDose.call(env.localization, dose, style, scope) ?? text : text));
+        ranges.push(amountLabel(amount, "dose", words) + (targetScope ? formatDose.call(env.localization, dose, style, scope) ?? text : text));
       }
     }
     const text = amount.rateRange && rateRangePreview(amount.rateRange);

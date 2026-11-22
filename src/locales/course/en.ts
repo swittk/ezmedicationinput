@@ -34,6 +34,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   choicePrefix: "Choose one: ",
   stageSeparator: " then ",
   doseLabel: "Dose: ",
+  applicationSites: (count) => "across " + count + " sites",
   amountRoleLabel: (kind, role, sourceRole) => {
     const label = kind === "dose" ? "dose" : kind === "rate" ? "rate" : "rate range";
     return role ? (role === "ordered" ? "Ordered " : "Calculated ") + label + ": "

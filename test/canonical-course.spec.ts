@@ -2447,3 +2447,77 @@ it("uses locale-owned measurement labels with live values and retained old sourc
 
 // END PRESERVED language
 }
+
+
+describe("round39 metric totals and live event identity", () => {
+  it.each([false, true])("does not distribute metric bilateral endpoints per eye (labelled %s)", labelled => {
+    const range = {
+      low: { value: 500, unit: "uL", code: "uL", system: "http://unitsofmeasure.org" },
+      high: { value: 1, unit: "mL", code: "mL", system: "http://unitsofmeasure.org" }
+    };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] } },
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      doseAndRate: [{ ...(labelled ? { type: { coding: [{ code: "ordered" }] } } : {}), doseRange: range }]
+    }] }] };
+    const original = JSON.stringify(raw);
+    const course = courseFromR6(raw);
+    expect(course.stages[0].administrations[0].targetCount).toBe(2);
+    for (const input of [raw, course, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toContain("500 uL – 1 mL");
+      expect(english).not.toMatch(/per administration target|each eye/u);
+      expect(thai).toContain("500 uL – 1 mL");
+      expect(thai).not.toMatch(/แต่ละจุด|ข้างละ/u);
+    }
+    expect(courseToR6(course).step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
+    expect(JSON.stringify(raw)).toBe(original);
+  });
+
+  it("keeps a labelled discrete drop range per target beside a metric total", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] } },
+      doseAndRate: [
+        { doseRange: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } },
+        { doseQuantity: { value: 1, unit: "mL" } }
+      ]
+    }] }] };
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(/Dose: 1 to 2 drops \(per administration target\)/u);
+      expect(text).toContain("Dose: 1 mL");
+      expect(text).not.toMatch(/1 mL \(per administration target\)/u);
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("แต่ละจุด");
+      expect(thai).not.toContain("แต่ละจุด 1 mL");
+    }
+  });
+
+  it.each([
+    ["QHS", EventTiming["Before Sleep"], true],
+    ["QHS", EventTiming.Morning, false],
+    ["AM", EventTiming.Morning, true],
+    ["AM", EventTiming.Evening, false],
+    ["PM", EventTiming.Evening, true],
+    ["PM", EventTiming.Morning, false]
+  ] as const)("uses %s only when its live event %s agrees", (code, event, matches) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { code: { text: code }, repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, when: [event]
+      } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const original = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const short = formatSig(input, "short", { locale: "en", realizationMode: "normalized" });
+      expect(short.includes(code)).toBe(matches);
+      if (!matches) expect(short).toContain(event);
+      const long = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(long).toContain(event === EventTiming.Morning ? "morning" :
+        event === EventTiming.Evening ? "evening" : "bedtime");
+    }
+    expect(JSON.stringify(raw)).toBe(original);
+    expect(courseToR6(courseFromR6(raw)).step![0].component[0].timing!.code!.text).toBe(code);
+  });
+});

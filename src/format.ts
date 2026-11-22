@@ -921,7 +921,8 @@ function appendSiteRestrictionsEnglish(
 function formatSite(
   clause: CanonicalSigClause,
   grammar: RouteGrammar,
-  directObject = false
+  directObject = false,
+  words: CourseLanguage = ENGLISH_COURSE
 ): string | undefined {
   let text = clause.site?.text?.trim();
   if (!text) {
@@ -963,7 +964,10 @@ function formatSite(
     return appendSiteRestrictionsEnglish(clause, resolvedSite.englishObjectText);
   }
   const perTargetNoun = clause.dose ? resolvedSite?.definition?.perTargetText : undefined;
-  const noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
+  let noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
+  const count = clause.site?.administrationTargetCount;
+  if (count !== undefined && count > 1 && count !== resolvedSite?.definition?.administrationTargetCount)
+    noun += " (" + words.applicationSites(count) + ")";
   if (directObject) return appendSiteRestrictionsEnglish(clause, noun);
   const preferredPreposition = resolvedSite?.preferredPreposition;
   const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
@@ -1188,12 +1192,16 @@ function shouldSuppressRoutePhrase(
 
 /** A timing abbreviation is shorthand only while its typed recurrence agrees. */
 export function timingCodeMatchesRecurrence(
-  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit">,
+  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit" | "when">,
   code = schedule.timingCode
 ): boolean {
   if (!code) return true;
   const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
-  const interval = daily === undefined ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
+  const interval = daily === undefined || schedule.when?.length
+    ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
+  if (interval?.when?.length && schedule.when?.length &&
+      (interval.when.length !== schedule.when.length ||
+       schedule.when.some((event, index) => event !== interval.when![index]))) return false;
   if (daily === undefined && interval?.period === undefined) return true;
   const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
   const period = code === "QOD" ? 2 : interval?.period ?? 1;
@@ -1225,7 +1233,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(routeText);
   }
   if (clause.site) {
-    const site = formatSite(clause, resolveRouteGrammar(clause));
+    const site = formatSite(clause, resolveRouteGrammar(clause), false, words);
     if (site) parts.push(site);
   }
   if (schedule.period === undefined && schedule.periodMax !== undefined && schedule.periodUnit) {
@@ -1362,6 +1370,7 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
 
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
   resolvedMethod?: SigLongContext["resolvedMethod"]): string {
+  const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
   const baseVerb = resolveMethodVerb(clause, grammar);
@@ -1384,7 +1393,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     integratedThinLayer ? "a thin layer" :
     !directSiteObject && shouldUseGenericMedicationObject(clause) ? "the medication" : undefined
   );
-  const sitePart = formatSite(clause, grammar, directSiteObject);
+  const sitePart = formatSite(clause, grammar, directSiteObject, words);
   const roundTrip = options?.realizationMode === "roundtrip";
   let routePart = shouldSuppressRoutePhrase(clause, grammar, baseVerb)
     ? undefined
@@ -1619,7 +1628,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
         instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
-      (!canonicalClauseHasAdministrationSemantics(clause) &&
+      (!hasCanonicalAdministration &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
     );
   });
@@ -1710,6 +1719,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         preferSourceText: roundTrip,
         roundtripSafe: roundTrip,
         omitSourceTexts: additionalSemanticSourceTexts,
+        omitRenderedAction: primaryGraphAction ?? richPrimaryGraphAction,
         position: "pre"
       })
     : undefined;
@@ -1772,7 +1782,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     clause.patientInstruction && clause.instructionGraph && (
       richPrimaryGraphAction &&
       instructionGraphSingleActionRepresentsText(clause.instructionGraph, clause.patientInstruction) ||
-      !canonicalClauseHasAdministrationSemantics(clause) &&
+      !hasCanonicalAdministration &&
       instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
         text: clause.patientInstruction, frames: []
       })
@@ -1794,10 +1804,11 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
-  if (!canonicalClauseHasAdministrationSemantics(clause)) {
+  if (!hasCanonicalAdministration) {
     const wholeGraph = clause.instructionGraph
       ? realizeInstructionGraph(clause.instructionGraph, "en", {
           includeWarnings: true,
+          omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip
         })

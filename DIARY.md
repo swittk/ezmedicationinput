@@ -13060,3 +13060,301 @@ Representative accepted measurements (microseconds per call):
 Reports are retained under ezmed14-round38: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json and the complete 42-item ledger.json. The seven prior non-equivalent scenarios remain exactly unchanged.
 
 The PR remains at 100 changed paths with no new repository files. GitHub access is CLI-only. No comment or additional full-review request was posted. Commit and non-force push target the existing PR branch.
+
+## 2026-11-22 — PR #14 round 39: timing ownership, source integrity and clinical previews
+
+Reviewed HEAD 496cbc12cd78b1bc14d9e7cc03eaf30423190f58 against reviews 6011462255 and 6011465935. The complete inventory contains **38 findings: 19 major, 17 minor and 2 trivial**, including 18 new inline threads. Three bounded workers handled interchange, execution and meaning; the coordinator implemented the parser/unit/oracle work, reviewed the production changes and retained responsibility for integration and delivery. A separate read-only second look checked the shared scalar-course dispatch and the root parser/unit fixes.
+
+Disposition: **28 fixes, three strengthened oracles, two documentation clarifications and one import cleanup; four findings declined.** The four declines are #10, #22, #24 and #31. They do not create a private native editing/mutation contract: supported public cases are covered, and their current clinical behavior is retained.
+
+### Integration decisions
+
+- The shipping .fhir boundary and downstream storage remain R5. .fhirNext and dedicated R6 import retain the pinned current R6 contract. No older R6 compatibility layer, native editor, schema-trimming pass or downstream migration was added.
+- The prescription owns its values, units, qualifiers, labels and independent range endpoints. Duration annotations are interpreted without rewriting the quantity. Live endpoint changes keep the independent opposite endpoint; displaced source stays recoverable and inactive.
+- The scheduling and supply entry points share one scalar-course shape predicate. It excludes actual phase relationships, repetition and member offsets. Supply keeps the existing aggregation, container conversion, safety qualification and rounding owners. An abandoned global order clamp and a stage-recovery traversal were removed; independent absolute calendar tracks retain their established contract.
+- The maximum-dose slash uses the cached HPSG probe's actual source origin. Gauge vocabulary is in the existing lexical class data and is consulted only within the existing bounded administration-cue scan. The other planner span translations were checked: their starts already come from lexical source boundaries.
+- The graph condition lookup is populated during the existing action walk, replacing a later map and repeated searches. Custom action surface/code precedence uses one custom-map walk. The new R5 duration reconciliation returns before allocating sets when its duration marker is absent or unchanged.
+- New site-count and time-unit wording uses the existing course-language facet, including English, Thai and inherited custom-locale controls. Metric totals are not multiplied by target count. The edited site-count oracle therefore requires one gram across three sites and the existing two-gram daily cap, rather than inventing one gram per site.
+- Strengthening the requested assertions exposed real fixes beyond assertion changes: day-five recurrence inheritance, stale meal wording, live site-count visibility and graph-only/removed-primary ownership. Earlier conflicting phase/clock and metric-scope assertions were corrected individually with their clinical rationale recorded; their numeric, scheduling and source-preservation checks remain.
+- Import consolidation keeps the preserved r521 test body byte-identical (SHA-256 2fc9f262c4a39b903d8b3c23c7f9e02f92a73b2b7559115b7fca20a072cc9bcd). All regression cases were retained. To make room for the existing IR owner's missing duration-range check, the PR-added round21-boundaries suite was consolidated into round23-r5 with its 52,355-byte body unchanged (SHA-256 327c56808ff6355bc830ed078cf04f655e8676ad4db2695c44c6fb58931f789c). All 51 static test registrations, 239 assertions and three strict-type assertions are retained. The strict ES6 script checks the combined file with unchanged compiler flags. One existing source path replaces that PR-added test path; no new repository file is introduced and the PR stays at 100 paths.
+
+### Finding decisions and independent oracles
+
+**#1 — fixed (major): Retire a superseded R5 infusion-duration marker before export.**
+
+Requirement: Supported external R5 scalar infusion duration replacement, followed by an R6 core-duration clear. Harm: A retired approximately60-minute duration became active again after deleting current45-minute core duration. Owner: Existing typed duration-marker reconciliation in adapters/canonical-course.ts; applies to R5 provenance only for a changed actual duration marker. Cost: One marker read; non-duration and unchanged R5 markers return before reconciliation sets/serialization. No second parser or ordinary syntax work. Preservation: Displaced marker wrapper, original approximate quantity and unknown note remain under inert reconciliation source. Unedited marker-only control remains active. Oracle: Control~60min; replaced exact45min; subsequent clear has no active duration. Both R5 and R6 outputs retain source ID/note.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#1: old marker survived alongside45; deletion restored60/~.
+
+**#2 — fixed (major): Use a phase ID for lifted phase safety.**
+
+Requirement: A lifted sole-phase policy belongs to that phase even when one identified component moves to another phase. Harm: Component-ID fallback transferred the two-tablet induction cap to maintenance and removed induction's cap. Owner: liftSingleStepSafety assigns an ID to an anonymous wire phase; authored phase IDs remain untouched. Cost: Removes the component-ID collection walk from new lifting. Existing fingerprint runs only to supply missing phase ID. Preservation: Both component identities and authored policy data remain; phase ID persists through saves. Independent maintenance receives no cap. Oracle: Induction keeps2-tab administration cap; moved A remains A; maintenance has no phase cap.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#2: [null,[2]] for induction/maintenance.
+
+**#3 — fixed (major): Include the dose/rate slot role in the saved replay proof.**
+
+Requirement: Persisted editable R5 dose/rate roles can be changed in place after a preview. Harm: Warm replay proof returnedtrue after ordered→calculated while the cold persisted fingerprint returnedfalse. Owner: SourceDoseObservation captures the role with existing clinical concept observer inside the existing slot walk. Cost: No source graph hash on unchanged previews; each slot adds a clinical concept observation/comparison, absent roles are a constant-time branch. Preservation: Current role, dose and raw text remain in the wire. Coding version-only equivalence keeps existing persisted fingerprint policy. Oracle: Warm and cold proofs agree after role code/system/text/removal; quantity remains1tab and source text remains recoverable. Version-only change remains equivalent in both and is exported.
+
+Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#3: initialtrue,warmtrue,coldfalse.
+
+**#4 — fixed (major): Allow a verified DST gap to move a civil boundary past midnight.**
+
+Requirement: Civil supply windows must resolve valid time-zone gaps, including forward gaps crossing midnight, without moving prescribed exact dose clocks. Harm: One civil day from March27 2026 23:30 in America/Nuuk threw invalid-horizon, although the intended boundary resolves to March29 01:30Z. Owner: execution/calendar.ts calendarBoundaryDate verifies a valid requested calendar tuple and an actual forward offset discontinuity. It applies the established pre-gap offset even when the adjusted clock is on the next date; makeZonedDate remains exact. Cost: Additional tuple/offset checks occur only after exact resolution fails. Ordinary calendar/dose clocks retain the existing fast path; no medication or wire logic. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Nuuk boundary = 2026-03-29T01:30Z, daily09:00 supply = 1 tab, missing exact March28 23:30 is skipped. New York02:30 gap still advances to07:30Z; invalid Feb30/hour24 remain null.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: invalid-horizon; current: 1 tab; exact boundary/clock assertions in schedule-family-audit.spec.ts
+
+**#5 — fixed (major): Do not charge pre-window explicit events against the count.**
+
+Requirement: Count history begins at the later of the authored eligibility window and treatment order for an equivalent scalar administration; a one-member wire wrapper must preserve that semantics. Harm: Jan1 explicit event outside a Jan2 window spent count1, deleting the eligible Jan2 event. Window-only regular recurrence also reset count history; exhausted one-stage course supply could throw an invented invalid-stage-order. Owner: The existing shared exact-event/count paths now receive a bounds start even without orderedAt. Existing proven scalar-course dispatch is shared by scheduling and supply, so one-administration wrappers use the same calendar/order semantics without a phase planner. Existing course aggregation/qualification still owns total fields, rounding and safety explanations. Cost: Constant boundary selection, scalar shape proof and one scalar call. Removes phase planning for equivalent one-member wrappers; no extra grammar pass, array walk, generic validation, cloned input, or new boundary algorithm. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Count1 with Jan2 start and Jan1/2/3 explicit events yields Jan2 09:00 +1 tab, then no Jan3 dose/0 supply. Same oracle for daily recurrence. OrderJan2 noon yields Jan3 09:00 +1 tab over2 days. Plain R5,[R5],native,R6,coldR5 tested. Independent multi-track absolute calendars before the relative track anchor remain unchanged.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: Explicit Jan2 event lost: due[], supply0.; relatedArtifact: /tmp/ezmed14-round39-execution-family-before.json; related: Finished calendar R6 course threw invalid-stage-order; scalar regular recurrence incorrectly supplied another1tab.; current: All exact count/window/origin oracles in schedule-family-audit.spec.ts.
+
+**#6 — fixed (major): Exclude pre-order doses from unfiltered supply counts.**
+
+Requirement: The unfiltered supply counter must exclude administrations before the treatment order, consistently with due scheduling. Harm: Daily09:00, orderedJan2 midnight, queriedJan1: supply incorrectly reported1tab while due scheduling beganJan2. Owner: calculateTotalUnitsSingle clamps countFrom once to effective order/window start before every count path. Existing scalar-course shape proof extends the same semantics to equivalent wrappers. Cost: One Date comparison before enumeration, not a per-dose check or extra array traversal. Removed the now-redundant capacity branch re-clamp. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Jan1 supply0 and first dueJan2 09:00; Jan2 supply1. PlainR5,[R5],native,R6,coldR5 retain same values and source JSON unchanged.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: pre-order supply1, dueJan2; current supply0 and order-day1.
+
+**#7 — fixed (major): Check newly added `EzDosage.safety` before reusing parser text.**
+
+Requirement: Supported EzDosage.safety additions to a fresh parser row must affect preview. Harm: The fast source path reused uncapped parser wording after an added2-tab maximum. Owner: sourceDisplayEdit guard now sees live safety and reaches the existing maxima proof. Cost: One property check in existing guard; no new safety walk or clone. Preservation: Original parser text stays untouched; live typed limits and original dose remain. Oracle: One tablet daily plus2-tab administration/period/lifetime maximum in current preview.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#7: uncapped old wording.
+
+**#8 — fixed (major): Render each independent temporal adjunct.**
+
+Requirement: Supported structured Dilute import retains two independent temporal arguments. Harm: Dropping until-clear changes the preparation endpoint. Owner: src/instruction-graph.ts:realizeAction temporal adjunct realization Cost: Reuses the existing argument loop to collect typed temporal arguments. Only actions with temporal adjuncts allocate their small list and compound fingerprint Set. No parser pass, schema validation, or native editor lifecycle. Ordinary actions avoid the new list/Set. Preservation: Renders every typed independent relation without mutating the saved graph, argument quantity, original source, or R5/R6 extension. Source order retained. Oracle: Hand-authored two-adjunct Dilute graph must retain before each dose AND until clear exactly once in English and Thai across R5, current R6, and cold serialized R5. Single-adjunct and scheduled graph-only controls retain the independent 1 mL amount.
+
+Evidence: Reviewed and prior both omit until clear. Master differs in its unsupported material/destination ownership and also loses the endpoint; it is not an equivalent passing baseline.
+
+**#9 — fixed (major): Keep a postposed condition when the English formatter renders its primary action separately.**
+
+Requirement: Supported serialized graph condition on a rich primary action. Harm: Dropping if-able makes a conditional administration unconditional. Owner: src/instruction-graph.ts:realizeInstructionGraph conditionTargets; src/format.ts:formatLong primary omission; src/i18n.ts:formatLong graph-only reconciliation; src/canonical/format-course.ts:administrationHasClinicalFacts Cost: Builds conditionTargets in the existing action loop, removing map/Set plus per-relation find walks. Reuses a single existing canonical-administration fact check in each formatter. No reparse or sidecar cache. Preservation: A rich primary action rendered elsewhere remains a condition target without rendering the action twice. Preposed and postposed conditions retained, original graph/source unmodified. Oracle: Swallow 1 tablet whole with 200 mL water remains conditional on if able to swallow, once, for both condition positions in R5/R6/cold R5 and both locales. Unknown condition text remains authored text in Thai.
+
+Evidence: Reviewed and prior silently drop the graph-only condition. Master retains it only by repeating the entire Swallow action, so it does not satisfy the once-only oracle.
+
+**#10 — declined (major): Keep the authored onset of a sequential phase in the active stage.**
+
+Requirement: Supported public parallel eye regimens retain authored civil-day successors. Private native-builder mutation has no support contract. Harm: No reproduced public clinical error. The reported elapsed overlap requires assigning authored treatment offsets without the phaseStartReference produced by both HPSG onset producers. Owner: No parallel-course.ts production change. Source-authored day/week onsets carry treatment-day-start and take existing per-member partial-track handling before elapsed global phase selection. External FHIR imports bypass the parser-only builder. Cost: Zero production runtime cost. Expanded independent public controls only. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: OD QIDx7d then2dropsBIDx1d from day5,6,8 or10 retains successor and4drops/day. Day8 adjacent transition exact; day10 leaves day8/9 gap with0supply and next due day10. Reviewed/prior already pass.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: Day5,8,10 due08:00/20:00 and supply4 already correct.
+
+**#11 — fixed (major): Use the probe’s actual start to locate the maximum-dose slash.**
+
+Requirement: An independent prescription may be indented without changing its maximum-dose period. Harm: Reviewed build splits the 24-hour denominator into a third administration and drops the four-tablet limit. Owner: Existing regimen boundary planner, using cached typed HPSG probe evidence and its trimmed source origin. Cost: Uses the already computed probe once; replaces the offset base with probe.start, no additional parse or traversal. Preservation: One tablet daily and a maximum four tablets per authored24h; independent slash remains a real delimiter. Oracle: Four indentation forms yield exactly two rows, second dose1tab daily and cap4tab/24h in native R5/current R6/cold R5; independent1tab/2tabs remains split.
+
+Evidence: Reviewed496cbc1 passes unindented but fails indented3rows; prior a6ed and exactmaster fail both spaced forms. This completes the earlier family fix, not a new master regression.
+
+**#12 — fixed (major): Preserve an authored successor onset after a dated predecessor.**
+
+Requirement: An independently authored treatment-day onset remains the successor's owner even when NEXT also has a dated predecessor fallback. Harm: A compatible public 'from day2 ... next morning' successor after an end date lost its authored offset and instead retained a derived calendar date plus a zero-displacement civil anchor. Owner: scopeSequentialPhaseSemantics now honors authoredOffset before every predecessor-derived fallback, rather than only the contextual-predecessor branch. Cost: One reordered boolean condition in the existing evidence branch; no added evidence walk, grammar production, reparsing or metadata. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Three public word orders retain day2/civil offset1 and predecessor Nov25 end; native,R6,coldR5 preserve offset, dueNov26 08:00 +2tab when orderedNov25. Omitting independent onset still derives Nov26. The review's day10/next-morning dual-offset private combination is not itself used as a grammar acceptance fixture.
+
+Evidence: artifact: /tmp/ezmed14-round39-onset-before.json; reviewed: Native stage start had treatment-day-start but no displacement; successor schedule had boundsStartNov26 and missing authored offset.; currentArtifact: /tmp/ezmed14-round39-onset-current.json
+
+**#13 — fixed (major): Handle positional primitive metadata on `Timing.event` as well as `timeOfDay`.**
+
+Requirement: Valid R5/current-R6 primitive arrays may include null event positions owned by positional metadata. Harm: Scheduler called match onnull rather than returning authored timestamps; public type excluded valid positions. Owner: FhirTiming wire types permit null positions; getTimingEvents separates executable strings at import; timingToWire retains original wire positions; calendarEventFromFhir ignores metadata-only position. Cost: One linear event-value extraction with no allocation when no null; original wire array reused on export, no deep event matching/editor contract. Preservation: Both event positions and matching _event metadata remain byte-for-byte in R5/R6 projections. Oracle: Exactly Dec1 and Dec2 08:00UTC due; metadata-only slot schedules nothing; null positions at beginning/middle/end survive repeated saves.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#13 null.match error. Stable legacy API comparison additionally shows reviewed/prior/exact-master all throw.
+
+**#14 — fixed (major): Recognize annotated UCUM time codes without rewriting the quantity.**
+
+Requirement: Recognized UCUM time codes with terminal annotations carry the same duration and must retain original prescription quantity. Harm: 30min{infusion} is omitted from interpreted recurrence/preview/supply. Owner: Existing shared getQuantityDurationUnit interpretation helper. Cost: One index check on code and rare terminal-annotation regex; no quantity clone/mutation or second interpretation layer. Preservation: Original value30/code min{infusion}/label minutes/ID/system remain identical in R5/R6 roundtrip; unknown code is not guessed from label. Oracle: 30min and annotated forms both yield30min recurrence and50mL supply at100mL/h. Multiple terminal annotations retained. Unknown and rate-dimension codes remain unrecognized and recoverable.
+
+Evidence: Reviewed and prior support plain duration but omit annotated duration. Exactmaster lacks this imported occurrence-duration feature and canonical API; not an equivalent causal comparator.
+
+**#15 — fixed (major): Keep a metric dose total separate from the number of administration targets.**
+
+Requirement: Bilateral authored metric and discrete ranges. Harm: Total metric dose becomes dose-per-eye. Owner: src/canonical/format-course.ts:describeAmounts scope per quantity/range; src/format.ts:formatSite; src/i18n.ts:formatSiteThai; src/locales/course/types.ts:applicationSites; src/locales/course/en.ts:applicationSites; src/locales/course/th.ts:applicationSites Cost: Uses existing unit-kind vocabulary and computed target scope. Determines scope per amount (both endpoints for a range) without converting quantities. Existing site resolution supplies the known count; no second site walk or text parse. Preservation: All scalar/range values, units, endpoint labels, comparators and wire metadata unchanged. Metric and biologic amounts remain total; existing discrete-unit per-target policy remains. Localization is independent of whether target scope applies. Oracle: Bilateral 500 uL to 1 mL remains exactly those independently labelled endpoints with no per-eye multiplier. Discrete 1-2 drops remain per target beside total 1 mL. Mixed labelled mg/spray cases show per-target wording once for spray only.
+
+Evidence: Reviewed and prior mark the metric range per administration target. Master flattens the mixed range to 500 to 1 uL, so the independent-endpoint fixture is not contract-equivalent.
+
+**#16 — fixed (major): Keep a maximum-supply count from completing a loading stage.**
+
+Requirement: A maximum-supply projection may use an upper count quota, but only an exact authored count completes an implicit loading phase. Harm: Weekly loading count1–2 plus rolling cap silently became exact2 for supply, opening10tab maintenance and returning62tab for week1 instead of2. Owner: prepareMaximumSupplyTiming no longer rewrites count/countMax into an exact upper count. Existing repeatOccurrenceCap admits the maximum quota, while finiteCompletionCount retains authored completion semantics. Cost: Removes an allocation and semantic rewrite. Existing quota/completion owners perform their established work. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Weekly range1–2 yields loading08:00 on days1/2 and8/9, supply2 in7d and4 in14d, with and without a rolling cap. Exactcount2 opens maintenance day2 noon and requires62tab week1. Source JSON unchanged.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: due loading only but supply62; current supply2.
+
+**#17 — fixed (major): Do not show `QHS` beside an edited morning schedule.**
+
+Requirement: External R6 changes live event while keeping Timing.code. Harm: QHS morning contradiction. Owner: src/format.ts:timingCodeMatchesRecurrence Cost: Extends the existing timing-abbreviation compatibility check with a small ordered event-array comparison only when both abbreviation and live schedule have event facts. No new normalization pass. Preservation: Stale display abbreviation suppressed, but authored Timing.code and all imported/projected wire content remain intact. Long preview already followed the live event. Oracle: Edited QHS plus MORN short preview must exclude QHS and include MORN. Matching QHS/HS remains QHS. Matching and mismatching AM/PM controls use the live event without source mutation.
+
+Evidence: Reviewed, prior and exact master all output 1 tab QHS MORN. This is established contradictory display behavior, not a newly introduced regression.
+
+**#18 — fixed (major): Keep the mixed object separate from the vehicle.**
+
+Requirement: Ordinary Mix the tablet with100mL water, nearby preparation/vehicle cases. Harm: Loses vehicle and its quantity. Owner: src/instruction-graph.ts:MIX_SUBSTANCE_ARGUMENT_PARSER; src/instruction-action-locale-adapter.ts:mixArgumentContent Cost: Attaches the already-existing argument relation to the parsed companion daughter. Existing one-pass argument realization distinguishes unbound Object theme from relation-bearing Object/Container companion. No vocabulary list or second parser. Preservation: Medication head, vehicle, vehicle quantity, lexical roles, spans and unknown material text retained. Unknown milk remains literal text in Thai; no fabricated translation. Oracle: Mix the tablet with 100 mL water must include tablet, water and 100 mL in EN/TH, fresh/R5/currentR6/coldR5. Controls include unmeasured water, unknown milk, genuine Mix with the tablet companion, and unchanged Dissolve 1 tablet in water.
+
+Evidence: Reviewed, prior and exact master all reduce the ordinary input to Mix with tablet and lose the water. Existing companion-only and Dissolve controls already worked and remain unchanged.
+
+**#19 — fixed (major): Preserve the saved upper duration when an R6 edit adds a lower duration.**
+
+Requirement: A live lower duration added to an existing upper-only range is an endpoint edit, not replacement of the whole range. Harm: An exact90min scalar replaced saved high2h, erasing the active range upper endpoint. Owner: parseTimingAdministrationDuration reconciles live lower and upper independently; native and clause import prefer the resulting existing range. Cost: Extends existing marker read and endpoint construction; scalar path stays unchanged when no range exists. Preservation: 90min remains90min and2hours remains2hours with original high ID/code/annotations; marker ID remains. No storage conversion. Oracle: Canonical active range low90min/high2hours, no exact scalar; both endpoints remain in R5/currentR6 saves.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#19: exact90min and range dropped.
+
+**#20 — fixed (minor): Keep live route coding when reopening a historical R5 row.**
+
+Requirement: A supported historical R5 row's live route coding system/version additions must remain current while retaining unrelated R6-only fields. Harm: Relaxed identity equivalence reused the saved component and discarded the newly supplied coding system/version. Owner: Historical row reuse uses exact structured equality of existing live projections; earlier relaxed identity matching is unchanged. Cost: Uses the existing projection comparison location; no second row matching walk or new clone. Preservation: Live route system/version retained; unchanged historical2h startOffset survives; untouched control remains lossless. Oracle: Exact supplied urn:clinical-routes and version2026 plus original2h startOffset after every save.
+
+Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#20 route contained code only despite live system/version.
+
+**#21 — documented (minor): Document the benchmark baseline prerequisites.**
+
+Requirement: Document a reproducible benchmark baseline fixture contract. Harm: An arbitrary old build may fail before missing-API classification during fixture setup. Owner: Existing README performance instructions. Cost: Documentation only; unchanged benchmark/harness and no new compatibility path. Preservation: Names exact compatible master7d628239 and R5/current R6 canonical/graph/terminology/locale fixture prerequisites. Oracle: Existing accepted rounds and final round39 benchmark reach all117 APIs/181 scenarios on this exact baseline.
+
+Evidence: No runtime defect; documentation omitted prerequisites.
+
+**#22 — declined (minor): Retain the authored count marker when clearing the repeat count.**
+
+Requirement: Supported external course-count clear is required and already correct; the proposed helper change targets private native count/provenance divergence. Harm: No demonstrated external-input loss: public fromDosageDetails course.modifierExtension=[] already clears active count and retains authored marker as source. Owner: Existing R5 course-header edit reconciliation, not private CanonicalCourse mutation repair. Cost: No production change or extra retention mechanism added. Preservation: The public clear retains three-cycles ID and authored note across R5/R6 saves. Oracle: After external clear getCourseCycleCount undefined; source still includes original three-cycles ID/note through3 saves.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#22 already active[] and retainedtrue.
+
+**#23 — fixed (minor): Do not reactivate an earlier comparator annotation when its code returns.**
+
+Requirement: External R5 EMA operator edits may replace, remove and later re-add an operator without restoring its old primitive annotation. Harm: The old < primitive ID was reactivated after <→>→< saves even though the clinician did not restore it. Owner: quantityFromR5 classifies current projection primitive sources and wraps displaced ones as inactive source during its existing export preparation loop. Cost: Lazily allocated set only for rare primitive source records; same existing extension classification and output walks, no recursive source scan. Preservation: Old annotations remain nested source; immediate unchanged current primitive and explicitly newly supplied primitive still restore losslessly. Oracle: Current< and original2tab stay active; original-operator remains only in source after >, equality or removal and subsequent<.
+
+Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#23 and#23public show original ID reactivated.
+
+**#24 — declined (minor): Keep removed cycle-day children as inactive source.**
+
+Requirement: Current external cycle-day markers and supplied annotations must be preserved; native cycleDays editing against stale private provenance is not supported. Harm: Review gives only private constraint/previous-marker divergence, no public external-input failure. An external marker with a removed child correctly exposes only its remaining day. Owner: getCycleDayConstraint reads the live external marker; no native editor/removed-child history inference added. Cost: No production cost or private reconciliation architecture added. Preservation: Every remaining authored child, marker ID and unknown sibling is retained. Data already removed from an external input is not invented. Oracle: External current marker has day1 only, same first-day ID and independent annotation; day3 is not active.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#24 current external edit already preserves current marker.
+
+**#25 — fixed (minor): Keep metadata-only clock slots in the active timing arrays.**
+
+Requirement: When event anchors are removed, metadata-only additional-clock positions must remain active: preserve an unchanged source bridge in R5, expand positional primitive arrays in current R6. Authored core arrays remain core in either target. Harm: Reviewed code retired metadata-only bridge slots into inactive history while promoting only valued clocks. Initial round39 correction fixed active metadata but promoted null core slots into R5 and exposed an existing downstream inability; root integration now preserves the active R5 source vocabulary. Owner: Existing getTimingClocks/timingAnnotations classification and projectTimingClocks bridge loop separate executable values from wire positions. administrationToWire passes its existing R5/R6 target; no public option or downstream change. Cost: No additional extension walk or array allocation for the integration fix. Existing bridgeClocks.length and bridgeIndex identify metadata-only slots; current no-extension fast return remains. Preservation: R5 unchanged bridge retains exact active carrier wrappers, values, primitive metadata and independently authored _timeOfDay; R6 emits null placeholders plus correctly aligned primitive metadata. Authored core positions remain unchanged. No source metadata or placeholders dropped for storage. Oracle: First/last/only metadata positions: first R5 projection keeps exact active carriers, R6 has explicit positional null arrays; following core-array saves retain arrays in both targets. Three public JSON R5 saves assert exact carrier IDs, metadata, independent companion and executable clocks [08:00] or []. Existing exact due timestamps remain unchanged.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#25 only08:00/morning active, metadata-only slot lost from active arrays.
+
+**#26 — fixed (minor): Assert the edited application scope in the preview.**
+
+Requirement: Current target count must be visible in preview, but metric-dose total/per-site semantics must follow existing unit-scope contract. Harm: Old preview omitted current3-site count. Review's proposed1g each would additionally multiply a metric total without typed authority. Owner: Meaning lane's existing EN/TH site realization owners; this lane strengthens existing R5 external-count oracle. Cost: Uses already-resolved site definition and locale renderer; no new scans in this lane. Preservation: Current1g remains total,3sites visible,2g/day maximum remains and raw original text stays retained. Oracle: Preview has1g, across3sites, max2g/1d, excludes old2lesions and1g each; separate source-text equality remains.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#26: Use1g once daily to lesions; max2g/1d, missing3.
+
+**#27 — oracle-strengthened (minor): Assert the unit for each number-word dose and rate.**
+
+Requirement: Quantity tests must distinguish volume rates, mass per weight, tablets and ribbon length. Harm: Value/comparator-only assertions could accept a wrong unit on R5/R6/reopened output. Owner: Existing number-word fixture table in test/r6-primary.spec.ts. Cost: Test only. Preservation: Existing8cases retained; expectedunits tab,mL/h,mg/kg,cm ribbon match independent authored constructs and registered compound ribbon lexeme. Oracle: Each representation must match value+unit+comparator for every fixture.
+
+Evidence: Production output already correct; test-only strengthening.
+
+**#28 — fixed (minor): Model `DosageCondition.value[x]` as one optional choice.**
+
+Requirement: Pinned current R6 DosageCondition.value[x] is zero-or-one choice with primitive annotation belonging to its matching choice. Harm: Old interface admitted simultaneous quantity+period and unrelated primitive metadata at compile time. Owner: types.ts optional mapped exclusive choice across existing listed wire fields. Cost: Compile-time only; zero runtime checks, validations or rejection policy. Preservation: No choice remains valid; all existing choices still accepted individually; metadata-only primitive and value+matching metadata valid. Runtime input untouched. Oracle: Strict typegate rejects quantity+period and quantity+_valueBoolean; accepts no value, decimal+_decimal, metadata-only decimal, quantity, period.
+
+Evidence: HEAD types.ts inspection: independent optional properties allow both values; pinned local contract has value[x] max1.
+
+**#29 — documented (minor): Keep metadata-only R6 headers out of the generic R5 row path.**
+
+Requirement: Metadata-only R6 header is valid but structurally indistinguishable from metadata-only R5 Dosage. Harm: Generic version inference cannot choose safely; classifying all shared Element shapes as R6 would break supported R5. Owner: Existing documented fromFhir dedicated current-R6 entrypoint; clarify importCanonicalCourse JSDoc, no new public option. Cost: No dispatch change, extra runtime work or API surface. Preservation: Dedicated R6 retains header ID/extension and zero stages; R5 transport reopens header; generic metadata-only R5 stays a component. Oracle: Dedicated fromFhir returns exact input header and empty native stages; generic same-shape input remains R5.
+
+Evidence: /tmp/ezmed14-round39-interchange-before.json#29 dedicated path already correct; README104-106 already states ambiguity.
+
+**#30 — fixed (minor): Keep existing surface matches ahead of custom code matches.**
+
+Requirement: Documented semantic action proposals accept source surface or code with configured vocabulary. Harm: Code collision overrides unrelated built-in surface. Owner: src/instruction-action-terminology.ts:resolveMedicationInstructionAction Cost: One custom-map walk remembers code fallback while giving source surfaces/aliases precedence; direct built-in surface lookup is computed once. Removes the extra customDefinitionForSurface helper rather than adding another hot map pass. Preservation: Configured alias/surface precedence and unique custom-code fallback remain supported; direct code-identity lookup is still separate. No configuration rewrite or vocabulary loss. Oracle: Configured surface or alias wins over another entry code regardless of insertion order. Built-in Rinse surface wins over custom Flush whose code is rinse. Unambiguous clinic-flush code still resolves Flush.
+
+Evidence: Reviewer historical claim that the previous implementation resolved the built-in is false. Reviewed, prior and exact master all resolve Flush for the collision. Accept the supported product ambiguity, not the claimed regression story.
+
+**#31 — declined (minor): Do not publish a shared phase start when mixed onset bases agree numerically.**
+
+Requirement: Public mixed civil/elapsed origins must survive schedule, supply, interchange and long preview. Internal redundant metadata alone does not justify new defensive work. Harm: A real source can have mixed member onsets of equal value, but every affected member already owns its explicit origin and bypasses the nominal shared fallback. No incorrect public result was found. Owner: No parallel-course.ts change. courseFromPartialParallel reads each member onsetReference/onsetDays first. Existing mixed-basis guards already prevent shared end/cutoff inference. Cost: Zero production runtime cost. One public preservation oracle covers the meaningful interface boundary. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: After3d+1d pause, OD2drops08:00 fromday5 keeps civiloffset4; separate OD1drop22:00 keeps elapsedoffset4. Native,R6,coldR5,R5→R6 retain those exact different bases. Noon order still yields day5 08:00/09:00/22:00 and5drops before noon. EN/TH long previews distinguish day5 from4days after treatment start.
+
+Evidence: artifact: /tmp/ezmed14-round39-mixed-origin-before.json; reviewed: All four representations already retain exact origins and both distinct long-preview phrases.; publicExecutionArtifact: /tmp/ezmed14-round39-onset-before.json
+
+**#32 — oracle-strengthened (minor): Check the qualifier in the infusion preview.**
+
+Requirement: A qualified half-hour preview must show approximation beside its duration. Harm: Prior substring0.5hours accepted an exact preview. Owner: Existing infusion preview assertion in test/hpsg-clinical-quantity.spec.ts. Cost: Test only. Preservation: All6duration variants retained; approximate output says over approximately0.5hours, exact cases over0.5hours. Oracle: Explicit approximate/exact phrase checks on both currentR6 and reopenedR5.
+
+Evidence: Production already emits correct approximation; no runtime change.
+
+**#33 — fixed (minor): Reject stale after-lunch wording in both previews.**
+
+Requirement: Existing external timing edit test should exclude stale after lunch wording. Harm: Oracle permits contradictory live/stale event. Owner: src/instruction-graph.ts:argumentEventTiming and frameWithCanonicalPrimaryContext; test/instruction-graph.spec.ts: existing live with-lunch oracle Cost: Resolves typed event meaning once in the existing argument loop, consulting the existing event-timing vocabulary for a normalized bare lunch token. Reuses that resolved event in the existing coverage check. No new word list or parser. Preservation: Display reconciles saved After lunch against live Lunch timing, but the saved graph relation remains After. Source input stays byte-identical through format calls. Oracle: Both locales must INCLUDE with lunch / พร้อมอาหารกลางวัน and EXCLUDE after lunch / หลังอาหารกลางวัน across raw R5, current R6 and cold R5; original graph relation must still be After.
+
+Evidence: The stronger negative oracle exposed a real bug: reviewed emits after lunch with lunch; prior emits only after lunch; exact master duplicates after lunch. Current emits only with lunch. This is more than test-only hardening.
+
+**#34 — fixed (minor): Keep a catheter gauge number out of the earlier-dose check.**
+
+Requirement: An ordinary IV catheter size must not become a medication dose or hide an authored infusion rate. Harm: Reviewed build misreads22gauge as scalar dose22 and loses100mL/h. Owner: Existing HPSG administration-cue rule; gauge vocabulary in existing lexical class data. Cost: Single lexical membership check only for a candidate earlier number during existing bounded8token scan; no new parser/walk. Preservation: 100mL/h remains rate-only, device/source text preserved; prior20mL dose plus50mL/h maximum still separate. Oracle: 22/18gauge and nonnumeric catheter controls retain100mL/h in R5/currentR6/reopenedR5 with no scalar dose; existing completed-volume maximum family retained.
+
+Evidence: Prior a6ed and exactmaster correctly retain gauge rate; reviewed496cbc1 regressed via broader preceding-number check.
+
+**#35 — fixed (trivial): Exercise the day-five successor in each representation.**
+
+Requirement: The day5 successor oracle must verify its real dose, due time and supply, not only predecessor output. A licensed onset-only dose continuation inherits its one complete predecessor cadence. Harm: Stronger assertions exposed a production gap: latest reviewed output kept the day5 two-tablet phase but omitted its daily recurrence, yielding due[] and timing-required for supply in native/R6/coldR5. Owner: The existing regimen.treatment-relative-phase-onset license now reuses the established recurrence-inheritance owner, only for a single complete antecedent and no local recurrence. No duration/count/calendar bounds inherited. Original stronger oracle retained. Cost: Constant typed rule/single-antecedent gate; recurrence copy happens only for that licensed onset-only construction using the existing field-copy path. No source regex, parser pass, new file, generic cache or broad array scan. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Both postposed/fronted '2 tablets fromday5' retain1tab daily first4d, then Jan5 09:00 and2tab one-day supply in native,R6,coldR5. Twice-daily and08:00/20:00 controls inherit both clocks and need4tab/day. Second phase does not inherit prior4d duration.
+
+Evidence: artifact: /tmp/ezmed14-round39-execution-family-before.json; reviewed: Both forms: due[], supply timing-required in all3 representations.; currentArtifact: /tmp/ezmed14-round39-execution-family-current.json
+
+**#36 — fixed (minor): Localize recognized infusion-duration units in the Thai long preview.**
+
+Requirement: Thai long preview of independently labelled90minute2hour duration endpoints. Harm: Recognized temporal unit remains English in Thai output. Owner: src/i18n.ts:describeAdministrationDurationThai and range endpoint labels; src/ir.ts:canonicalClauseHasAdministrationSemantics administrationDurationRange Cost: Reuses root-owned getQuantityDurationUnit for interpretation of code/label/valid annotation and passes the already-resolved CourseLanguage to Thai duration formatting. One missing range-property check in the existing IR semantic guard. No additional locale resolver or source parse. Preservation: 90 minutes and 2 hours retain their values, independently authored unit labels, codes, metadata, annotations and wire endpoints; only visible Thai labels use locale words. Unknown unit clinic ticks stays literal. Short mode retains authored labels. Oracle: Thai long displays 90 นาที to 2 ชั่วโมง; annotated min{infusion} is understood without rewriting its code; unknown labels stay authored. A third locale inheriting Thai overrides temporal words, including a range-only infusion with no other recurrence facts.
+
+Evidence: Reviewed retains English minutes/hours in Thai. Prior only retained the scalar 90 minutes and master omitted duration, so neither is an equivalent supported independent-range fixture. The third-locale control additionally exposed the missing range-only administration fact guard; fixed at IR owner.
+
+**#37 — oracle-strengthened (minor): Make the second-phase dose assertion quantity-specific.**
+
+Requirement: A two-tablet successor must not pass as twelve tablets. Harm: Substring checks accepted extra leading digits in both locales. Owner: Existing actual formatter assertions in test/real-world-fuzz-2026-clinical-oracles.spec.ts. Cost: Test only. Preservation: Same course fixtures and explicit2tablet/2เม็ด dose. Oracle: Digit-boundary checks are applied to actual English and Thai formatted course output.
+
+Evidence: Production already correct; test-only strengthening.
+
+**#38 — maintenance (trivial): Reuse the suite’s existing imports for the preserved tests.**
+
+Requirement: Duplicated import aliases can be removed without disturbing consolidated test scope or assertions. Harm: Maintenance duplication only; no clinical defect. Owner: Existing test imports extended with missing names, preserved fixture block stays isolated. Cost: No production/runtime cost. Preservation: Preserved r521 body is byte-identical; all assertions/cases remain and strict gate includes suite. Oracle: SHA256 before/after 2fc9f262c4a39b903d8b3c23c7f9e02f92a73b2b7559115b7fca20a072cc9bcd.
+
+Evidence: /tmp/ezmed14-round39-interchange-import-cleanup.json
+
+Primary unit-reference check: UCUM specification §6 (https://ucum.org/ucum) defines annotations as not changing the underlying unit. This is used only for interpretation; authored quantities remain intact.
+
+
+### Validation on the frozen candidate
+
+- **6,305 source tests in 48 files passed**, including the configured strict ES6 typecheck and the consolidated boundary assertions.
+- **4 distribution tests passed** after ESM, CommonJS and declaration builds.
+- **36 actual downstream R5 storage roundtrips passed**, with complete JSON equality through conversion and save/reopen: all 29 previous controls plus seven new successful cases covering annotated infusion duration, an indented maximum, a gauge-bearing infusion, positional event metadata, and first/last/only metadata positions in active clock bridges. Independent clinical checks verify 50 mL supply for 100 mL/h over 30 minutes, 4 tablets per authored 24 h, rate-only 100 mL/h and exact due timestamps.
+- A 37th attempted storage case supplies a raw authored core timeOfDay null with its primitive companion. The existing downstream converter rejects that input before this library runs. Exact master, prior, reviewed HEAD and current all preserve that core null and encounter the same converter limit. It is recorded as an explicit pre-existing consumer limitation, not counted as a passing roundtrip or stripped to obtain a pass. Nullable Timing.event does pass exact storage equality.
+- The follow-up comparison separately exposed an introduced no-anchor clock-bridge projection failure. The coordinator fixed it in the existing serializer target: unchanged R5 bridges with metadata-only positions retain their exact active carriers and any authored primitive companion; only the temporary native core clock projection is removed. R6 still expands the same carriers into aligned null/value and primitive-metadata arrays. This uses counts from the existing marker walk, adds no public option or extra traversal, and leaves authored core arrays unchanged. Three cold-save position controls and the actual R5 projection-to-storage checks pass; an independent read-only review confirmed the ownership and cost.
+- The original Thai parallel case remains 2 shipping R5 rows; the English taper remains 4. No downstream application code or database changed.
+- Source, built candidate, exact-master build and benchmark harness remained frozen throughout their gates.
+
+Source SHA-256: 04dbd7cfc0d5a00f0fe7e235e645a3eb5f52f90dcfa410800cfc7312b591b4d8. Built ESM SHA-256: f63a1a6eea00eb81da2e2e914beda7b7fe6fe99eae3afe870906fff496fd969d. Exact master build SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Harness SHA-256: 68eff00076248fe44cbe7e211d00570e3e002c91d4fde0942bbbc1b654d49d95 (git blob 251c6db2a138fc615d3f55314eaff43ccfa5b912).
+
+### Performance and delivery
+
+The exact-master comparison covers **117/117 public functions**, with **181 paired scenarios: 174 equivalent and the same seven established non-equivalent cases**. All 174 equivalent scenarios meet the per-scenario 4% ceiling after prescribed confirmations. Six candidate-only APIs have seven separate measurements. No exclusions or measurement errors were added.
+
+The full run used 22 balanced paired rounds at 35 ms per batch. Every initial flag was confirmed on identical frozen builds and harness with 72 rounds at 140 ms, reversed first order and 36 pairs starting each way. Accepted percentages are median-log paired ratios; neither APIs nor scenarios are averaged together. The unchanged harness retains the 16 deterministic order-bias/threshold controls from round 36.
+
+Highest accepted change: **+3.600%**, for listSymptomDefinitions.
+
+| Initially flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| formatSig/R5/en | +11.813% | -3.535% |
+| fromFhirDosage/en | +6.606% | -5.612% |
+| evaluateMedicationCondition | +7.151% | -2.802% |
+| hasSnomedFindingSitePostcoordination | +5.055% | +0.624% |
+| parseSnomedBodySiteLateralityPostcoordinationCode | +5.732% | +0.260% |
+| buildDosageAlternativeChoiceStructureDefinition | +4.376% | +1.578% |
+| registerMedicationLexerLocalePack | +4.026% | -1.664% |
+
+Representative accepted measurements (microseconds per call):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| parseSig/ordinary | 1860.156 | 1813.704 | -2.643% |
+| parseSig/thai | 7054.424 | 6742.119 | -5.323% |
+| parseSig/eye | 7331.375 | 7533.987 | +2.736% |
+| parseSig/staged | 10431.381 | 10009.936 | -3.547% |
+| formatSig/R5/en | 14.885 | 14.108 | -3.535% |
+| formatSig/R6/en | 25.607 | 25.878 | -2.217% |
+| fromFhirDosage/en | 16.194 | 15.103 | -5.612% |
+| fromFhirDosage/th | 40.833 | 43.121 | +1.815% |
+| calculateTotalUnits/scalar | 505.709 | 74.558 | -84.865% |
+
+Reports are retained under ezmed14-round39: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json, null-storage-audit-final.json, consolidation-proof.json and the complete 38-item ledger.json.
+
+The PR remains at 100 changed paths. GitHub access is CLI-only. Delivery targets the existing PR branch with a normal push. Only the 18 original inline threads receive concise commit/test-linked replies and resolution; no top-level comment, private downstream project name or additional full-review request is posted.

@@ -68,6 +68,7 @@ import {
   FhirSimpleQuantity,
   FhirR6Quantity,
   FhirRange,
+  FhirTiming,
   FhirTimingRepeat,
   RouteCode,
   SNOMEDCTRouteCodes
@@ -162,14 +163,19 @@ export const TIMING_ADMINISTRATION_DURATION_EXTENSION_URL =
 /** Decode one classified marker without flattening independent endpoints. */
 export function parseTimingAdministrationDuration(
   extension: FhirExtension | undefined,
-  current?: Pick<FhirTimingRepeat, "durationMax" | "durationUnit">
+  current?: Pick<FhirTimingRepeat, "duration" | "durationMax" | "durationUnit">
 ): (Partial<NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]>> & {
   range?: import("./canonical/course").CanonicalRange;
 }) | undefined {
   const range = extension?.valueRange;
   if (range) {
-    const low = quantityFromR5(range.low);
+    let low = quantityFromR5(range.low);
     let high = quantityFromR5(range.high);
+    if (current?.duration !== undefined) {
+      low = { ...low, value: current.duration,
+        ...(current.durationUnit ? { unit: current.durationUnit,
+          code: current.durationUnit, system: "http://unitsofmeasure.org" } : {}) };
+    }
     if (current?.durationMax !== undefined) {
       // A live core upper endpoint owns its numeric value. Keep the other
       // authored endpoint and independent annotations; the displaced marker
@@ -181,6 +187,7 @@ export function parseTimingAdministrationDuration(
     return { range: low === range.low && high === range.high ? range :
       { ...range, ...(low ? { low } : {}), ...(high ? { high } : {}) } };
   }
+  if (current?.duration !== undefined) return undefined;
   const quantity = extension?.valueQuantity;
   const unit = getQuantityDurationUnit(quantity);
   if (quantity?.value === undefined || !unit) return undefined;
@@ -293,6 +300,20 @@ export const TIMING_EVENT_WINDOW_EXTENSION_URL =
 export const TIMING_ADDITIONAL_CLOCK_EXTENSION_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock";
 
+/** Wire primitive arrays contain metadata-only null positions. The clinical
+ * event list keeps values only, while the owning Timing retains wire positions. */
+export function getTimingEvents(timing: Pick<FhirTiming, "event"> | undefined): string[] | undefined {
+  const source = timing?.event;
+  if (!source) return undefined;
+  let events: string[] | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const event = source[index];
+    if (event === null) events ??= source.slice(0, index) as string[];
+    else if (events) events.push(event);
+  }
+  return events ?? source as string[];
+}
+
 /** Read the current wire clock field. A supplied core field, including an empty
  * array, owns its edit; the bridge is the clock field only when core is absent. */
 export function getTimingClocks(
@@ -312,8 +333,9 @@ export function getTimingClocks(
   if (!repeat.extension?.length) return undefined;
   let clocks: string[] | undefined;
   for (const item of repeat.extension) {
-    if (item.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL && typeof item.valueTime === "string")
-      (clocks ??= []).push(item.valueTime);
+    if (item.url !== TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) continue;
+    if (typeof item.valueTime === "string") (clocks ??= []).push(item.valueTime);
+    else if (item._valueTime) clocks ??= [];
   }
   return clocks;
 }
@@ -322,7 +344,7 @@ export function getTimingClocks(
  * The original wire repeat distinguishes a bridge read from a current core edit;
  * no administration/count/cap is split, and retired carriers cannot revive. */
 export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
-  repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">
+  repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">, target: "r5" | "r6" = "r5"
 ): T {
   let clocks = repeat.timeOfDay;
   const mixed = Boolean(repeat.when?.length && clocks?.length);
@@ -346,24 +368,29 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
   const kept: FhirExtension[] = [];
   let bridgeIndex = 0;
   let bridgeMetadata: FhirTimingRepeat["_timeOfDay"];
+  let bridgeClocks: FhirTimingRepeat["timeOfDay"];
   let bridgeMatches = wireSource !== undefined && wireSource.timeOfDay === undefined;
   for (const marker of repeat.extension ?? []) {
     if (marker.url !== TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) { kept.push(marker); continue; }
     (markers ??= []).push(marker);
-    if (marker.valueTime !== undefined) {
-      if (marker._valueTime && !bridgeMetadata) bridgeMetadata = Array(bridgeIndex).fill(null);
+    if (marker.valueTime !== undefined || marker._valueTime) {
+      const position = bridgeClocks?.length ?? 0;
+      (bridgeClocks ??= []).push(marker.valueTime ?? null);
+      if (marker._valueTime && !bridgeMetadata) bridgeMetadata = Array(position).fill(null);
       bridgeMetadata?.push(marker._valueTime ?? null);
-      if (marker.valueTime !== clocks?.[bridgeIndex++]) bridgeMatches = false;
+      if (marker.valueTime !== undefined && marker.valueTime !== clocks?.[bridgeIndex++]) bridgeMatches = false;
     }
   }
   if (!mixed && !markers) return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
-  if (mixed && markers && unchangedBridge) {
-    // These clocks were read from the current clock bridge. Keep its exact authored
-    // wrappers; the native writer temporarily supplied timeOfDay for projection.
+  if (markers && unchangedBridge &&
+      (mixed || target === "r5" && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
+    // Keep an unchanged R5 bridge with metadata-only positions in its authored
+    // active form. R6 can expand those positions into core primitive arrays.
+    // The native writer supplied timeOfDay temporarily for projection.
     const output = { ...repeat };
     delete output.timeOfDay;
-    delete output._timeOfDay;
+    if (mixed) delete output._timeOfDay;
     return output;
   }
   if (markers) kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
@@ -380,6 +407,7 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
   }
   const output = { ...repeat };
   if (!mixed && restorePositions) output.timeOfDay = clocks;
+  if (!mixed && unchangedBridge && bridgeClocks) output.timeOfDay = bridgeClocks;
   if (!mixed && unchangedBridge && bridgeMetadata && output._timeOfDay === undefined)
     output._timeOfDay = bridgeMetadata;
   if (kept.length) output.extension = kept;
@@ -1194,9 +1222,10 @@ function calendarEventPrimitive(event: CanonicalCalendarEventExpr): FhirPrimitiv
 }
 
 function calendarEventFromFhir(
-  value: string,
-  primitive?: FhirPrimitiveElement
+  value: string | null,
+  primitive?: FhirPrimitiveElement | null
 ): CanonicalCalendarEventExpr | undefined {
+  if (value === null) return undefined;
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/u);
   if (!match) return undefined;
   const isoYear = Number(match[1]);
@@ -2145,10 +2174,8 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const repeat = dosage.timing?.repeat;
   const timingCode = timingCodeFromFhir(dosage);
-  const administrationDuration = repeat?.duration === undefined
-    ? parseTimingAdministrationDuration(repeat?.extension?.find(
-      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat)
-    : undefined;
+  const administrationDuration = parseTimingAdministrationDuration(repeat?.extension?.find(
+    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat);
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
@@ -2223,7 +2250,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       durationMaxComparator: timingBounds.durationMaxComparator,
       boundsStart: repeat?.boundsPeriod?.start,
       boundsEnd: repeat?.boundsPeriod?.end,
-      administrationDuration: repeat?.duration ?? administrationDuration?.value,
+      administrationDuration: administrationDuration?.range ? undefined : repeat?.duration ?? administrationDuration?.value,
       administrationDurationMax: administrationDuration?.range ? undefined : repeat?.durationMax,
       administrationDurationRange: administrationDuration?.range,
       administrationDurationUnit: administrationDuration?.unit ?? repeat?.durationUnit,
@@ -2330,14 +2357,12 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
     };
   }
   const repeat = dosage.timing?.repeat;
-  const administrationDuration = repeat?.duration === undefined
-    ? parseTimingAdministrationDuration(repeat?.extension?.find(
-      extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat)
-    : undefined;
+  const administrationDuration = parseTimingAdministrationDuration(repeat?.extension?.find(
+    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat);
   if (repeat?.duration !== undefined && repeat.durationUnit || administrationDuration) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),
-      administrationDuration: repeat?.duration ?? administrationDuration?.value,
+      administrationDuration: administrationDuration?.range ? undefined : repeat?.duration ?? administrationDuration?.value,
       administrationDurationMax: administrationDuration?.range ? undefined : repeat?.durationMax,
       administrationDurationRange: administrationDuration?.range,
       administrationDurationUnit: administrationDuration?.unit ?? repeat?.durationUnit,

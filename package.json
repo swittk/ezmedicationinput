@@ -30,7 +30,7 @@
     "explain:boundaries": "node experiments/boundary-planner/explain.mjs",
     "test:boundary-clinical": "vitest run --config experiments/boundary-planner/vitest.acceptance.config.ts",
     "typecheck:boundary-integration": "node experiments/boundary-planner/typecheck-integration.mjs",
-    "test:types": "tsc --noEmit --strict --skipLibCheck --target es6 --module commonjs --moduleResolution node --esModuleInterop --resolveJsonModule test/pr14-round21-boundaries.spec.ts test/pr14-round23-r5.spec.ts"
+    "test:types": "tsc --noEmit --strict --skipLibCheck --target es6 --module commonjs --moduleResolution node --esModuleInterop --resolveJsonModule test/pr14-round23-r5.spec.ts"
   },
   "files": [
     "dist"

@@ -1359,8 +1359,10 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       }
       const nominal = argumentFromParts(parts, relIndex + 1, materialEnd, input, undefined, options);
       const role = nominal?.conceptId ? nominal.role : AdviceArgumentRole.Material;
-      pushArgument(args, quantifiedEntityArgument(
-        parts, relIndex + 1, materialEnd, input, offset, role, options));
+      const companion = quantifiedEntityArgument(
+        parts, relIndex + 1, materialEnd, input, offset, role, options);
+      if (companion) companion.relation = c.relation;
+      pushArgument(args, companion);
       return { args };
     }
     return { args: parsedArgs(argumentFromParts(
@@ -1382,6 +1384,7 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   const substanceStart = relIndex >= 0 && relIndex < absolutePrimary ? relIndex + 1 : absolutePrimary;
   const substance = quantifiedEntityArgument(
     parts, substanceStart, materialEnd, input, offset, AdviceArgumentRole.Substance, options);
+  if (substance && relIndex >= argumentStart) substance.relation = c.relation;
   if (substance?.conceptId === undefined) {
     const primary = argumentFromParts(
       parts, absolutePrimary, absolutePrimary + 1, input, AdviceArgumentRole.Substance, options);
@@ -1389,6 +1392,7 @@ const MIX_SUBSTANCE_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       primary.text = substance?.text ?? primary.text;
       primary.quantity = substance?.quantity;
       primary.span = substance?.span ?? primary.span;
+      primary.relation = substance?.relation;
       pushArgument(args, primary);
     } else pushArgument(args, substance);
   } else pushArgument(args, substance);
@@ -3812,14 +3816,14 @@ function realizeAction(
     return trimSemanticText(frame.sourceText);
   }
   const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
-  let temporalAdjunct: AdviceArgument | undefined;
+  let temporalAdjuncts: AdviceArgument[] | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
     if (independentTemporal && arg.relation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
         relationHasSemanticClass(arg.relation, "temporal")) {
-      temporalAdjunct ??= arg;
+      (temporalAdjuncts ??= []).push(arg);
     } else firstArguments[arg.role] ??= arg;
   }
   const first = (role: AdviceArgumentRole): string | undefined => {
@@ -3863,28 +3867,32 @@ function realizeAction(
     : adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
-  const temporalRelation = temporalAdjunct?.relation;
-  // Avoid duplicating an event already entailed by an explicitly registered
-  // compound noun ("before first use"). It remains a fully typed independent
-  // action argument in source and FHIR; only redundant display is omitted.
-  const temporallyEntailedByCompound = temporalAdjunct && frame.args.some((arg) => {
-    const implication = arg.conceptId
-      ? getMedicationInstructionConcept(arg.conceptId)?.impliedArgument : undefined;
-    return implication?.role === temporalAdjunct.role &&
-      implication.conceptId === temporalAdjunct.conceptId &&
-      implication.relation === temporalAdjunct.relation;
-  });
-  const temporalPhrase = temporalRelation && temporalAdjunct && !temporallyEntailedByCompound
-    ? joinLocalizedTokens(locale, [
-        localizeAdviceRelation(temporalRelation, locale) ?? temporalRelation,
-        translatedArgument(temporalAdjunct, locale)
-      ])
-    : undefined;
-  const complete = temporalPhrase ? joinLocalizedTokens(locale, [realized, temporalPhrase]) : realized;
+  let complete = realized;
   if (coverage && clause) coverage.singleScheduledEvent = Boolean(
-    input.timeWasRendered && timeArg && timeArgumentCoversSingleScheduledEvent(frame, timeArg, clause) ||
-    temporalPhrase && temporalAdjunct && timeArgumentCoversSingleScheduledEvent(frame, temporalAdjunct, clause)
+    input.timeWasRendered && timeArg && timeArgumentCoversSingleScheduledEvent(frame, timeArg, clause)
   );
+  if (temporalAdjuncts) {
+    // One compound lookup pass serves every independent adjunct. Ordinary
+    // actions without a temporal daughter pay no lookup or set allocation.
+    let entailed: Set<string> | undefined;
+    for (const arg of frame.args) {
+      const implication = arg.conceptId
+        ? getMedicationInstructionConcept(arg.conceptId)?.impliedArgument : undefined;
+      if (implication) (entailed ??= new Set()).add(
+        implication.role + "\0" + implication.conceptId + "\0" + implication.relation);
+    }
+    for (const adjunct of temporalAdjuncts) {
+      if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
+      const temporalPhrase = joinLocalizedTokens(locale, [
+        localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation,
+        translatedArgument(adjunct, locale)
+      ]);
+      if (!temporalPhrase) continue;
+      complete = joinLocalizedTokens(locale, [complete, temporalPhrase]);
+      if (coverage && clause && timeArgumentCoversSingleScheduledEvent(frame, adjunct, clause))
+        coverage.singleScheduledEvent = true;
+    }
+  }
   return negated ? complete : adapter.applyPositiveModality(complete, frame);
 }
 
@@ -4273,15 +4281,23 @@ function argumentCoveredByCanonicalText(
   );
 }
 
+function argumentEventTiming(arg: AdviceArgument): EventTiming | undefined {
+  if (arg.role !== AdviceArgumentRole.Time || !arg.normalized) return undefined;
+  return KNOWN_EVENT_TIMINGS.has(arg.normalized) ? arg.normalized as EventTiming :
+    EVENT_TIMING_TOKENS[normalizeActionSurface(arg.normalized)];
+}
+
 function timeArgumentCoveredBySchedule(
   frame: AdviceFrame,
   arg: AdviceArgument,
-  clause: CanonicalSigClause
+  clause: CanonicalSigClause,
+  // Lexical event identity can reconcile a changed live event, but does not
+  // prove the canonical phrase preserves a rich action's relation or locale
+  // realization. General action coverage retains canonical-code evidence.
+  timing = arg.role === AdviceArgumentRole.Time && arg.normalized &&
+    KNOWN_EVENT_TIMINGS.has(arg.normalized) ? arg.normalized as EventTiming : undefined
 ): boolean {
-  if (arg.role !== AdviceArgumentRole.Time || !arg.normalized || !clause.schedule?.when?.length) {
-    return false;
-  }
-  const timing = arg.normalized as EventTiming;
+  if (!timing || !clause.schedule?.when?.length) return false;
   const relation = arg.relation ?? frame.relation;
   const related = relation
     ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")?.get(timing)
@@ -4311,8 +4327,9 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Time && arg.normalized) {
       const clock = /^[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?$/.test(arg.normalized);
-      if (clock && ownsClocks || ownsEvents && KNOWN_EVENT_TIMINGS.has(arg.normalized) &&
-          (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause))) {
+      const event = ownsEvents ? argumentEventTiming(arg) : undefined;
+      if (clock && ownsClocks || event &&
+          (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
         changed = true;
         continue;
       }
@@ -4524,9 +4541,10 @@ function primaryDoseAmountOwner(
   }
   if(primary)return overlap??(earlierCount===1?earlier:undefined);
   // Source-declared dose ownership precedes device preparation in spanless
-  // saved graphs. Multiple independent dose definers keep the original first
-  // amount owner; a live method/unit edit never changes this source decision.
-  return earlierCount === 1 ? earlier : earliest;
+  // saved graphs. Without a live dose, only an explicit primary or declared
+  // dose-defining action establishes ownership; an unverified R6 import does
+  // not prove that an independent preparation's earliest Amount was deleted.
+  return earlierCount === 1 ? earlier : clause.dose ? earliest : undefined;
 }
 
 /** A sole typed preparation owns the amount before a later administration.
@@ -4837,9 +4855,13 @@ export function realizeInstructionGraph(
     return start >= primary.start;
   };
   const frames: AdviceFrame[] = [];
+  const conditionTargets = new Map<number | undefined, AdviceFrame>();
   let displayedAmountOwner = amountOwner;
   for (const sourceFrame of graph.actions) {
-    if (sourceFrame === options?.omitRenderedAction) continue;
+    if (sourceFrame === options?.omitRenderedAction) {
+      if (!options?.onlyWarnings) conditionTargets.set(sourceFrame.sequenceIndex, sourceFrame);
+      continue;
+    }
     const ownsPrimary = primaryAction >= 0
       ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
     const frame = ownsPrimary && options?.omitCanonicalAdministration
@@ -4880,6 +4902,7 @@ export function realizeInstructionGraph(
     const warning = frame.polarity === AdvicePolarity.Negate;
     if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
     frames.push(frame);
+    conditionTargets.set(frame.sequenceIndex, frame);
   }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
   const nodes: Array<{
@@ -4933,13 +4956,11 @@ export function realizeInstructionGraph(
       });
     }
   }
-  const selectedActionIndices = new Set(frames.map((frame) => frame.sequenceIndex));
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex === undefined) continue;
-    if (!selectedActionIndices.has(relation.toActionIndex)) continue;
-    if (!relation.text || !relation.span || !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
-    const target = frames.find((frame) => frame.sequenceIndex === relation.toActionIndex);
-    if (!target) continue;
+    const target = conditionTargets.get(relation.toActionIndex);
+    if (!target || !relation.text || !relation.span ||
+        !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
     const normalizedRelation = normalizedInstructionSurface(relation.text);
     const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
       const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
@@ -4990,7 +5011,7 @@ export function realizeInstructionGraph(
       )
       : undefined;
     if (conditional) {
-      const target = frames.find((frame) => frame.sequenceIndex === node.actionIndex);
+      const target = conditionTargets.get(node.actionIndex);
       const imperative = Boolean(target && !target.modality && target.polarity !== AdvicePolarity.Negate);
       output += localeAdapter.conditionalContinuation(node.text, imperative);
       continue;

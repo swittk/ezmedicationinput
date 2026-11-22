@@ -3950,6 +3950,19 @@ function unrecordedCountCandidates(candidates: string[], options: NextDueDoseOpt
   const recorded = (options as PhaseCountOptions).countedActualTimes;
   return recorded ? candidates.filter(iso => !recorded.has(Date.parse(iso))) : candidates;
 }
+/** A single administration with no course relationship has scalar semantics,
+ * including its authored window and order bound. Scheduling and supply use
+ * this same shape proof; no phase planner is needed for a wire wrapper. */
+function scalarCourseAdministration(course: CanonicalCourse): CanonicalAdministration | undefined {
+  if (course.cycleInterval || course.stages.length !== 1) return undefined;
+  const stage = course.stages[0];
+  if (stage.administrations.length !== 1 || (stage.count !== undefined && stage.count !== 1) ||
+      stage.start || stage.end) return undefined;
+  const single = stage.administrations[0];
+  return single.phaseOrigin || single.phaseStart || single.phaseEnd || single.phaseOriginIssue ||
+    single.phasePredecessors?.length || single.schedule?.recurrence?.startOffset || single.schedule?.recurrence?.endOffset
+    ? undefined : single;
+}
 export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDoseOptions): string[] {
   if (Array.isArray(dosage))
     return nextDueDoses(courseFromCanonicalRows(selectedAlternativeMembers(dosage, options)), options);
@@ -3960,12 +3973,8 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     requireExecutableCourseContext(course, "scheduling");
     const zone = options.timeZone ?? options.config?.timeZone;
     if (course.cycleInterval && zone) return scheduleRepeatedCourse(course, options, zone);
-    const stage = course.stages.length === 1 ? course.stages[0] : undefined;
-    const single = stage?.administrations.length === 1 ? stage.administrations[0] : undefined;
-    // A one-administration course has no inter-stage relationship to
-    // resolve. This is a proven scalar fast path, not another course model.
-    if (single && (stage?.count === undefined || stage.count === 1) && !stage?.start && !stage?.end && !single.phaseOrigin && !single.phaseStart && !single.phaseEnd && !single.phaseOriginIssue)
-      return nextDueDoses(single, options);
+    const single = scalarCourseAdministration(course);
+    if (single) return nextDueDoses(single, options);
     if (zone && hasRepeatedStep(course) && hasRollingCycleLimit(course)) {
       const events = chronologicalRepeatedEvents(course, options, zone, undefined, options.limit ?? 10);
       return events.map(event => event.iso);
@@ -4347,7 +4356,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   const prnCountCapped =
     !!dosage.asNeeded &&
     (dosage.schedule?.recurrence?.count !== undefined || dosage.schedule?.recurrence?.countMax !== undefined);
-  const needsDerivedPriorCount = priorCountInput === undefined && !!orderedAt && !dosage.asNeeded;
+  const needsDerivedPriorCount = priorCountInput === undefined && !dosage.asNeeded;
   const providedConfig = options.config;
   const timeZone = options.timeZone ?? providedConfig?.timeZone;
   if (!timeZone) {
@@ -4458,7 +4467,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   if (boundsStart && boundsStart > from) {
     from = boundsStart;
   }
-  const effectiveOrderedAt = orderedAt && boundsStart && boundsStart > orderedAt ? boundsStart : orderedAt;
+  const effectiveOrderedAt = boundsStart && (!orderedAt || boundsStart > orderedAt) ? boundsStart : orderedAt;
   const historyOrigin = effectiveOrderedAt ?? boundsStart;
   if (prnCountCapped && historyOrigin && from > historyOrigin && priorCountInput === undefined) {
     for (const stamp of options.priorDoseTimes ?? []) {
@@ -5814,9 +5823,8 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   const count = positiveInteger(repeat.count);
   const countMax = positiveInteger(repeat.countMax);
   if (countMax && (!count || countMax >= count) && countMax !== count) {
-    // A maximum without an authored count limits admissions but cannot
-    // promise stage completion. The acceptor already owns its quota.
-    if (count) nextRepeat = { ...nextRepeat, count: countMax, countMax: undefined };
+    // An upper count limits admissions but cannot promise stage completion,
+    // whether supplied alone or as a range. The acceptor already owns its quota.
     countMaximum = true;
   }
   const frequency = positiveInteger(repeat.frequency);
@@ -6507,9 +6515,12 @@ function calculateTotalUnitsSingle(
   const nominalBoundsStart = boundsPeriod.start;
   const boundsStart = admissionDisplacement && nominalBoundsStart
     ? new Date(nominalBoundsStart.getTime() + admissionDisplacement) : nominalBoundsStart;
-  const countFrom = boundsStart && boundsStart > from ? boundsStart : from;
+  let countFrom = boundsStart && boundsStart > from ? boundsStart : from;
   const effectiveOrderedAt =
-    orderedAtDate && nominalBoundsStart && nominalBoundsStart > orderedAtDate ? nominalBoundsStart : orderedAtDate;
+    nominalBoundsStart && (!orderedAtDate || nominalBoundsStart > orderedAtDate) ? nominalBoundsStart : orderedAtDate;
+  // All count paths share the order/window lower bound, including the cheap
+  // unfiltered clock counter. The requested horizon still ends at endDay.
+  if (effectiveOrderedAt && effectiveOrderedAt > countFrom) countFrom = effectiveOrderedAt;
   const baseCandidate = effectiveOrderedAt ?? nominalBoundsStart ??
     (admissionDisplacement ? new Date(countFrom.getTime() - admissionDisplacement) : countFrom);
   const baseTime = nominalBoundsStart && nominalBoundsStart > baseCandidate ? nominalBoundsStart : baseCandidate;
@@ -6541,11 +6552,10 @@ function calculateTotalUnitsSingle(
   } else if (endDay <= countFrom) {
     count = 0;
   } else if (capacityCap) {
-    const begin = effectiveOrderedAt && effectiveOrderedAt > countFrom ? effectiveOrderedAt : countFrom;
     count = maximumUnscheduledCapCount(
       dosage,
       capacityCap,
-      begin,
+      countFrom,
       endDay,
       options,
       timeZone,
@@ -7377,9 +7387,17 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
       "A medication dosage or complete treatment course is required for supply calculation."
     );
   const input = options.dosage;
-  if (!Array.isArray(input) && "stages" in input)
-    return calculateCourseTotalUnits(input as CanonicalCourse, options);
-  if (Array.isArray(input)) return calculateCourseTotalUnits(courseFromCanonicalRows(input), options);
+  const course = Array.isArray(input) ? courseFromCanonicalRows(input)
+    : "stages" in input ? input as CanonicalCourse : undefined;
+  if (course) {
+    const single = scalarCourseAdministration(course);
+    if (!single) return calculateCourseTotalUnits(course, options);
+    requireExecutableCourseContext(course, "calculating");
+    const total = calculateTotalUnits({ ...options, dosage: single, roundToMultiple: undefined });
+    // The course summary still owns output qualification, converted container
+    // totals and final rounding; only unnecessary phase planning is bypassed.
+    return qualifyCourseSupply(course, sumCourseUnits([{ total, unit: total.unit }], options));
+  }
   const one = input as CanonicalAdministration;
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
       one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)

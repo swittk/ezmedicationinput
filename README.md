@@ -383,6 +383,16 @@ node --expose-gc bench/public-api.mjs \
   --rounds 17 --target-ms 24 --json public-api-results.json
 ```
 
+Build the baseline separately from a compatible revision. The known-compatible
+master revision is `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`. Fixture setup
+requires its `parseSig` result to include R5 `fhir` rows, a current R6
+`fhirNext.step[].component[]` structure, and a canonical instruction graph.
+It also calls the instruction-graph, action/concept/symptom terminology,
+body-site relation, dosage condition/exclusion/choice, and lexer locale-pack
+helpers before scenario classification. An older baseline lacking those fixture
+APIs or the current R6 structure stops during setup; candidate-only classification
+does not supply those prerequisites.
+
 The harness checks that every exported function has a representative fixture or
 an explicit new-API classification. Each scenario is measured independently
 with paired alternating runs; faster scheduling cannot hide slower suggestions

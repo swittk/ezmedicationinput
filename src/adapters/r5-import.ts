@@ -1509,7 +1509,7 @@ function reconcileNativeRetainedCourse(
       const rawEqual =
         old !== undefined &&
         baseline !== undefined &&
-        equivalentProjection(liveDosageProjection(baseline), liveDosageProjection(dosage));
+        equalStructuredValues(liveDosageProjection(baseline), liveDosageProjection(dosage));
       const expanded = dosage as EzDosage;
       const datesEqual =
         old !== undefined &&

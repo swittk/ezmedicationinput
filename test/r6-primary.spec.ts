@@ -4531,28 +4531,21 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
   });
 
   it.each([
-    ["Take at most one tablet at bedtime", 1, "<=", "doseQuantity"],
-    ["Take at least two tablets daily", 2, ">=", "doseQuantity"],
-    ["Take approximately half a tablet daily", 0.5, "~", "doseQuantity"],
-    ["Take no more than a quarter tablet daily", 0.25, "<=", "doseQuantity"],
-    ["Infuse at least two mL/hr", 2, ">=", "rateQuantity"],
-    ["approximately two mg/kg/day in two divided doses", 1, "~", "doseQuantity"],
-    ["Dissolve at most two tablets in water", 2, "<=", "doseQuantity"],
-    ["squeeze at most one cm ribbon cream onto each spot", 1, "<=", "doseQuantity"]
-  ] as const)("retains number-word quantity scope for %s", (input, value, comparator, slot) => {
+    ["Take at most one tablet at bedtime", 1, "tab", "<=", "doseQuantity"],
+    ["Take at least two tablets daily", 2, "tab", ">=", "doseQuantity"],
+    ["Take approximately half a tablet daily", 0.5, "tab", "~", "doseQuantity"],
+    ["Take no more than a quarter tablet daily", 0.25, "tab", "<=", "doseQuantity"],
+    ["Infuse at least two mL/hr", 2, "mL/h", ">=", "rateQuantity"],
+    ["approximately two mg/kg/day in two divided doses", 1, "mg/kg", "~", "doseQuantity"],
+    ["Dissolve at most two tablets in water", 2, "tab", "<=", "doseQuantity"],
+    ["squeeze at most one cm ribbon cream onto each spot", 1, "cm ribbon", "<=", "doseQuantity"]
+  ] as const)("retains number-word quantity scope for %s", (input, value, unit, comparator, slot) => {
     const parsed = parseSig(input);
-    const native = parsed.fhirNext.step[0].component[0].doseAndRate![0][slot];
-    expect(native?.value).toBe(value);
-    expect(getQuantityComparator(native)).toBe(comparator);
-    expect(getQuantityComparator(parsed.fhir[0].doseAndRate?.[0][slot])).toBe(comparator);
     const restored = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
-    expect(getQuantityComparator(restored.step[0].component[0].doseAndRate?.[0][slot])).toBe(comparator);
-    if (input === "approximately two mg/kg/day in two divided doses") {
-      for (const quantity of [native, parsed.fhir[0].doseAndRate?.[0][slot],
-        restored.step[0].component[0].doseAndRate?.[0][slot]]) {
-        expect(quantity).toMatchObject({ value: 1, unit: "mg/kg" });
-        expect(getQuantityComparator(quantity)).toBe("~");
-      }
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+      restored.step[0].component[0]]) {
+      expect(row.doseAndRate?.[0][slot]).toMatchObject({ value, unit });
+      expect(getQuantityComparator(row.doseAndRate?.[0][slot])).toBe(comparator);
     }
     expect(parsed.input).toBe(input);
   });

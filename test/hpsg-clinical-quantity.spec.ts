@@ -2579,7 +2579,8 @@ describe("round38 complete authored duration and maximum constituents", () => {
         const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence;
         expect(recurrence).toMatchObject({ occurrenceDuration: 0.5, occurrenceDurationUnit: "h" });
         expect(recurrence?.occurrenceDurationComparator).toBe(duration.startsWith("~") ? "~" : undefined);
-        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("0.5 hours");
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toContain(duration.startsWith("~") ? "over approximately 0.5 hours" : "over 0.5 hours");
       }
     });
 
@@ -2714,4 +2715,91 @@ it("keeps an explicitly added upper duration endpoint with its authored unit and
     expect(saved[0].timing!.repeat!.durationMax).toBeUndefined();
     wire = toDosageDetails(JSON.parse(JSON.stringify(saved)));
   }
+});
+
+
+describe("round39 independent delimiters, device sizes and annotated durations", () => {
+  it.each(["", " ", "\n        ", "\t\t"])(
+    "keeps the spaced maximum period after an independent delimiter (%j)", indent => {
+      const parsed = parsePublicSig("Take 1 tablet in the morning;" + indent +
+        "Take 1 tablet daily, max 4 tablets / 24 h");
+      expect(parsed.meta.canonical.clauses).toHaveLength(2);
+      for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext),
+        toFhirR5Dosages(toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir))))]) {
+        expect(rows).toHaveLength(2);
+        expect(rows[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(rows[0].timing?.repeat?.when).toEqual(["MORN"]);
+        expect(rows[1].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(rows[1].timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(rows[1].maxDosePerPeriod).toHaveLength(1);
+        expect(rows[1].maxDosePerPeriod?.[0]).toMatchObject({
+          numerator: { value: 4, unit: "tab" }, denominator: { value: 24, unit: "h" }
+        });
+      }
+    });
+
+  it("keeps an independent slash between complete numeric administrations", () => {
+    const parsed = parsePublicSig("Take 1 tablet / 2 tablets in the evening");
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.fhir[1].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(parsed.fhir[1].timing?.repeat?.when).toEqual(["EVE"]);
+  });
+
+  it.each(["Infuse via a 22 gauge IV catheter", "Run via an 18 gauge IV catheter",
+    "Administer via an 18 gauge IV catheter", "Infuse via a 22 gauge peripheral IV catheter",
+    "Infuse via a 22 gauge peripheral IV catheter at", "Infuse via an IV catheter"])("keeps a device size out of the dose in %s", lead => {
+      const source = lead + " 100 mL/hr";
+      const parsed = parsePublicSig(source);
+      const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+        reopened.step[0].component[0]]) {
+        expect(row.doseAndRate).toHaveLength(1);
+        expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
+        expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+        expect(row.doseAndRate?.[0].doseRange).toBeUndefined();
+      }
+      expect(parsed.input).toBe(source);
+    });
+
+  it.each(["min", "min{infusion}", "min{infusion}{pump}"])(
+    "interprets %s without rewriting the authored duration", code => {
+      const duration = { id: "prescribed-duration", value: 30, code, unit: "minutes",
+        system: "http://unitsofmeasure.org" };
+      const row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 100, unit: "mL/h" } }],
+        timing: { repeat: { count: 1, extension: [{
+          url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: duration
+        }] } } };
+      const before = JSON.stringify(row);
+      const details = toDosageDetails([row]);
+      for (const input of [[row], details, JSON.parse(JSON.stringify(toFhirR5Dosages(details)))]) {
+        const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!;
+        expect(recurrence).toMatchObject({ occurrenceDuration: 30, occurrenceDurationUnit: "min" });
+        expect(calculateTotalUnits({ dosage: input, from: "2026-01-01T00:00:00Z",
+          durationValue: 1, durationUnit: "d", timeZone: "UTC" }))
+          .toMatchObject({ totalUnits: 50, unit: "mL" });
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toContain("over 30 minutes");
+        const projected = toFhirR5Dosages(Array.isArray(input) ? toDosageDetails(input) : input);
+        expect(projected[0].timing?.repeat?.extension?.find(item =>
+          item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueQuantity).toEqual(duration);
+      }
+      expect(JSON.stringify(row)).toBe(before);
+    });
+
+  it.each(["unknown{infusion}", "min{infusion}/h"])(
+    "retains an unrecognized duration code %s without inventing minutes from its label", code => {
+      const duration = { value: 30, code, unit: "minutes", system: "http://unitsofmeasure.org" };
+      const row: FhirDosage = { timing: { repeat: { extension: [{
+        url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: duration
+      }] } } };
+      const details = toDosageDetails([row]);
+      for (const input of [[row], details]) {
+        const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence;
+        expect(recurrence?.occurrenceDuration).toBeUndefined();
+        const projected = toFhirR5Dosages(Array.isArray(input) ? toDosageDetails(input) : input);
+        expect(projected[0].timing?.repeat?.extension?.find(item =>
+          item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueQuantity).toEqual(duration);
+      }
+    });
 });

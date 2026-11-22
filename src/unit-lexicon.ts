@@ -262,7 +262,12 @@ export function isDiscreteUnit(unit: string): boolean {
 export function getQuantityDurationUnit(
   quantity: { code?: string; unit?: string } | undefined
 ): FhirPeriodUnit | undefined {
-  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
+  let candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
+  // UCUM annotations describe the quantity but do not change its unit.
+  // Interpret only a terminal annotation sequence; never rewrite the source.
+  const annotation = quantity?.code ? candidate?.indexOf("{") ?? -1 : -1;
+  if (annotation > 0 && /^(?:\{[^{}]*\})+$/u.test(candidate!.slice(annotation)))
+    candidate = candidate!.slice(0, annotation);
   switch (candidate) {
     case "s":
     case "sec":

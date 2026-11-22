@@ -419,7 +419,7 @@ export function scopeSequentialPhaseSemantics(
         delete schedule.phaseStartReference;
       // An independent source onset remains its own owner. Remove only the
       // provisional relative-day offset when an authored calendar start owns it.
-      if (contextualPredecessor && (authoredOffset || schedule.boundsStart || schedule.calendarEvents?.length)) {
+      if (authoredOffset || contextualPredecessor && (schedule.boundsStart || schedule.calendarEvents?.length)) {
         if (!authoredOffset) delete schedule.treatmentStartOffsetDays;
         continue;
       }
@@ -596,9 +596,13 @@ export function scopeSequentialPhaseSemantics(
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         fields.push('method');
       }
-      if (schedule?.timingReference === "previous" && sharedAnchors && shared) {
-        // The anaphor contributes recurrence, not the preceding phase's
-        // duration or dates. Explicit local cadence/anchors remain local.
+      const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
+        prior.length === 1 && schedule && !hasRecurringSchedule(schedule);
+      if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && shared) {
+        // A timing anaphor or licensed onset-only dose continuation inherits
+        // recurrence, not the preceding phase's duration, count or dates.
+        // The onset-only construction has one complete cadence antecedent.
+        // Explicit local cadence/anchors remain local.
         const recurrence = {
           frequency: shared.frequency, frequencyMax: shared.frequencyMax,
           period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
@@ -615,15 +619,17 @@ export function scopeSequentialPhaseSemantics(
             (schedule as Record<string, unknown>)[key] = cloneStructuredValue(inherited);
           }
         }
-        delete schedule.timingReference;
-        // Only remove the exact typed reference advice after it is resolved.
-        // Without a predecessor the source preference stays readable/editable.
-        if (clause.additionalInstructions?.length) {
-          clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
-            !instruction.evidence?.some(item =>
-              (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
-        }
-        fields.push('timingReference');
+        if (schedule.timingReference === "previous") {
+          delete schedule.timingReference;
+          // Only remove the exact typed reference advice after it is resolved.
+          // Without a predecessor the source preference stays readable/editable.
+          if (clause.additionalInstructions?.length) {
+            clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
+              !instruction.evidence?.some(item =>
+                (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
+          }
+          fields.push('timingReference');
+        } else fields.push('recurrence');
       }
       if (!schedule || schedule.calendarEvents?.length || !hasRecurringSchedule(schedule)) {
         if (fields.length) {

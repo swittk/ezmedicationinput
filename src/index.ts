@@ -25,7 +25,8 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
       !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
       !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
       !fresh.doseExpression && !fresh.rateExpression && !first?.doseExpression && !first?.rateExpression &&
-      !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime)
+      !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime &&
+      !(dosage as EzDosage).safety)
     return false;
   const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   // A persisted standalone item can have no source fingerprint. Its explicit

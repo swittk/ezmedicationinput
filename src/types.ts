@@ -424,9 +424,9 @@ export interface FhirR6Timing extends Omit<FhirTiming, "repeat"> {
 }
 
 export interface FhirTiming extends FhirBackboneElement {
-  event?: string[];
-  /** Primitive metadata corresponding positionally to event. */
-  _event?: FhirPrimitiveElement[];
+  event?: Array<string | null>;
+  /** Primitive metadata corresponding positionally to event, including value-only slots. */
+  _event?: Array<FhirPrimitiveElement | null>;
   repeat?: FhirTimingRepeat;
   code?: FhirCodeableConcept;
 }
@@ -482,10 +482,7 @@ export type MedicationCondition =
 /** The pinned R6 DosageCondition value[x] choices are accepted at the wire
  * boundary. Uninterpreted complex values are retained as source data; accepting
  * a choice here does not make it executable as a medication predicate. */
-export interface FhirR6DosageCondition extends FhirBackboneElement {
-  code: FhirCodeableConcept;
-  details?: FhirCodeableConcept;
-  operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+interface FhirR6DosageConditionValues {
   valueBase64Binary?: string;
   _valueBase64Binary?: FhirPrimitiveElement;
   valueBoolean?: boolean;
@@ -561,8 +558,19 @@ export interface FhirR6DosageCondition extends FhirBackboneElement {
   valueVirtualServiceDetail?: Record<string, unknown>;
   valueDosage?: FhirR6Dosage;
   valueMeta?: Record<string, unknown>;
-  text?: string;
 }
+type DosageConditionValueField = Exclude<keyof FhirR6DosageConditionValues, `_${string}`>;
+type DosageConditionValue = {
+  [K in DosageConditionValueField]:
+    Pick<FhirR6DosageConditionValues, K | Extract<keyof FhirR6DosageConditionValues, `_${K}`>> &
+    Partial<Record<Exclude<keyof FhirR6DosageConditionValues, K | `_${K}`>, never>>
+}[DosageConditionValueField];
+export type FhirR6DosageCondition = FhirBackboneElement & {
+  code: FhirCodeableConcept;
+  details?: FhirCodeableConcept;
+  operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";
+  text?: string;
+} & DosageConditionValue;
 
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
 export type FhirR6DoseLimit = FhirElement & {

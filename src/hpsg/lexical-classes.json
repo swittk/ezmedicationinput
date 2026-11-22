@@ -1244,6 +1244,7 @@
       "เหลือ"
     ]
   ],
+  "deviceGaugeHeads": ["gauge"],
   "medicationObjectFillers": [
     "medication",
     "medicine",

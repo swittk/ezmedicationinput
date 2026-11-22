@@ -305,14 +305,20 @@ export function calendarBoundaryDate(
     hour === 0 && minute === 0 && second === 0);
   if (exact) return exact;
   const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const wall = new Date(wallUtc);
+  // Date.UTC normalizes invalid dates and clocks; only a real civil clock
+  // can be missing because of an offset transition.
+  if (wall.getUTCFullYear() !== year || wall.getUTCMonth() + 1 !== month ||
+      wall.getUTCDate() !== day || wall.getUTCHours() !== hour ||
+      wall.getUTCMinutes() !== minute || wall.getUTCSeconds() !== second) return null;
   const beforeOffset = getOffset(new Date(wallUtc - 86400000), timeZone);
   const shifted = new Date(wallUtc - beforeOffset * 60000);
-  const local = getTimeParts(shifted, timeZone);
-  const desiredClock = hour * 3600 + minute * 60 + second;
-  const actualClock = local.hour * 3600 + local.minute * 60 + local.second;
-  return local.year === year && local.month === month && local.day === day && actualClock > desiredClock
-    ? shifted
-    : null;
+  const afterOffset = getOffset(shifted, timeZone);
+  // The pre-gap and post-gap interpretations must straddle a forward jump.
+  // That jump may cross midnight; its civil date is not an invalid input.
+  return afterOffset > beforeOffset &&
+    getOffset(new Date(wallUtc - afterOffset * 60000), timeZone) === beforeOffset
+    ? shifted : null;
 }
 
 /** Convenience wrapper around makeZonedDate for day-level math. */

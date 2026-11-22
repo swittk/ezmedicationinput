@@ -2,6 +2,7 @@ import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-voca
 import type { CourseLanguage } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
+import { getQuantityDurationUnit } from "./unit-lexicon";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
 import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence } from "./format";
@@ -1558,7 +1559,7 @@ function appendSiteRestrictionsThai(
   return result;
 }
 
-function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): string | undefined {
+function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar, words: CourseLanguage): string | undefined {
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   const lower = text?.toLowerCase();
   const codingCode = clause.site?.coding?.code;
@@ -1605,7 +1606,10 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar): 
   if (!translated) {
     return undefined;
   }
-  const translatedSite = appendSiteRestrictionsThai(clause, translated);
+  const count = clause.site?.administrationTargetCount;
+  const scoped = count !== undefined && count > 1 && count !== resolvedSite?.definition?.administrationTargetCount
+    ? translated + " (" + words.applicationSites(count) + ")" : translated;
+  const translatedSite = appendSiteRestrictionsThai(clause, scoped);
   if (clause.route?.code === RouteCode["Nasal route"]) {
     return `เข้า${translatedSite}`;
   }
@@ -1945,14 +1949,16 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined): stri
 function describeAdministrationDurationThai(
   schedule: CanonicalScheduleExpr | undefined,
   prefix = "โดยให้ยานาน",
-  short = false
+  short = false,
+  words: CourseLanguage = THAI_COURSE
 ): string | undefined {
   const range = schedule?.administrationDurationRange;
   if (range) {
     const endpoint = (quantity: NonNullable<typeof range.low>): string => {
       const unit = quantity.code ?? quantity.unit ?? "";
+      const recognizedUnit = short ? undefined : getQuantityDurationUnit(quantity);
       const label = short ? quantity.unit ?? unit :
-        quantity.unit && quantity.unit !== unit ? quantity.unit : THAI_COURSE.timeUnit(unit, quantity.value) ?? unit;
+        (recognizedUnit && words.timeUnit(recognizedUnit, quantity.value)) || quantity.unit || unit;
       return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "th")) +
         (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
     };
@@ -2089,7 +2095,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     parts.push(clause.route.text);
   }
   if (clause.site) {
-    const site = formatSiteThai(clause, resolveRouteGrammarThai(clause));
+    const site = formatSiteThai(clause, resolveRouteGrammarThai(clause), words);
     if (site) parts.push(site);
   }
   const timing = describeFrequencyThai(schedule);
@@ -2147,7 +2153,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
   if (schedule.administrationDurationRange) {
-    const duration = describeAdministrationDurationThai(schedule, undefined, true);
+    const duration = describeAdministrationDurationThai(schedule, undefined, true, words);
     if (duration) parts.push(duration);
   } else if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
       schedule.administrationDurationUnit) {
@@ -2232,6 +2238,7 @@ function formatLongThai(
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
+  const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammarThai(clause);
   const methodDefinition = resolvedMethod ?? resolveMedicationInstructionAction(clause.method?.text ?? "");
@@ -2258,7 +2265,7 @@ function formatLongThai(
   const explicitDosePart = preparationSuppliesDose ? undefined : distributedPerTarget || methodLocaleConfig?.directDose
     ? formatDoseThaiPerTarget(clause.dose)
     : formatDoseThaiLong(clause.dose);
-  const sitePart = formatSiteThai(clause, grammar);
+  const sitePart = formatSiteThai(clause, grammar, words);
   const usesGenericMedicationObject = shouldUseGenericMedicationObjectThai(
     clause,
     baseVerb,
@@ -2320,7 +2327,9 @@ function formatLongThai(
       : undefined;
   const administrationDurationPart = describeAdministrationDurationThai(
     schedule,
-    methodLocaleConfig?.administrationDurationPrefix
+    methodLocaleConfig?.administrationDurationPrefix,
+    false,
+    words
   );
   const durationPart = describeDurationThai(schedule);
   const occurrenceCapPart = describeOccurrenceCapThai(schedule);
@@ -2484,7 +2493,7 @@ function formatLongThai(
       (positionedGraph &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text) &&
         instructionGraphTextParticipatesInRelation(clause.instructionGraph, instruction.text)) ||
-      (!canonicalClauseHasAdministrationSemantics(clause) &&
+      (!hasCanonicalAdministration &&
         instructionGraphSingleActionRepresentsText(clause.instructionGraph, instruction.text))
     );
   });
@@ -2604,7 +2613,7 @@ function formatLongThai(
     )
   ) || Boolean(
     clause.patientInstruction && clause.instructionGraph &&
-    !canonicalClauseHasAdministrationSemantics(clause) &&
+    !hasCanonicalAdministration &&
     instructionGraphFullyOwnsAdvice(clause.instructionGraph, {
       text: clause.patientInstruction, frames: []
     })
@@ -2618,10 +2627,11 @@ function formatLongThai(
     fallbackPatientInstruction
   ].filter(Boolean).join(" ").trim() || undefined;
 
-  if (!canonicalClauseHasAdministrationSemantics(clause)) {
+  if (!hasCanonicalAdministration) {
     const wholeGraph = clause.instructionGraph
       ? realizeInstructionGraph(clause.instructionGraph, "th", {
           includeWarnings: true,
+          omitCanonicalAdministration: clause,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip
         })

@@ -439,33 +439,15 @@ function normalizeCustomDefinition(
 }
 
 function customDefinitionMatchesSurface(
-  surface: string, input: MedicationInstructionActionInput, normalized: string, includeCode = false
+  surface: string, input: MedicationInstructionActionInput, normalized: string
 ): boolean {
-  if (normalizeActionSurface(surface) === normalized ||
-      includeCode && input.code && normalizeActionSurface(input.code) === normalized) return true;
+  if (normalizeActionSurface(surface) === normalized) return true;
   for (const alias of input.aliases ?? [])
     if (normalizeActionSurface(alias) === normalized) return true;
   for (const locale of Object.keys(input.localeAliases ?? {}))
     for (const alias of input.localeAliases![locale])
       if (normalizeActionSurface(alias) === normalized) return true;
   return false;
-}
-
-function customDefinitionForSurface(
-  surface: string,
-  options?: ParseOptions,
-  includeCode = false
-): MedicationInstructionActionDefinition | undefined {
-  const map = options?.instructionActionMap;
-  if (!map) return undefined;
-  const target = normalizeActionSurface(surface);
-  for (const configuredSurface of Object.keys(map)) {
-    const input = map[configuredSurface];
-    if (customDefinitionMatchesSurface(configuredSurface, input, target, includeCode)) {
-      return normalizeCustomDefinition(configuredSurface, input);
-    }
-  }
-  return undefined;
 }
 
 export function resolveMedicationInstructionSequenceAction(
@@ -532,10 +514,23 @@ export function resolveMedicationInstructionAction(
   options?: ParseOptions,
   includeCode = false
 ): MedicationInstructionActionDefinition | undefined {
-  const custom = customDefinitionForSurface(surface, options, includeCode);
-  if (custom) return custom;
-  const definition = DEFAULT_BY_ALIAS.get(normalizeActionSurface(surface));
-  return definition;
+  const target = normalizeActionSurface(surface);
+  const builtin = DEFAULT_BY_ALIAS.get(target);
+  const map = options?.instructionActionMap;
+  let codeFallback: string | undefined;
+  if (map) {
+    // A proposal may name either a surface or a saved code. Surfaces keep
+    // their lexical meaning across the complete vocabulary; a code match
+    // is only a fallback. Both custom candidates share this one map walk.
+    for (const configuredSurface of Object.keys(map)) {
+      const input = map[configuredSurface];
+      if (customDefinitionMatchesSurface(configuredSurface, input, target))
+        return normalizeCustomDefinition(configuredSurface, input);
+      if (includeCode && !builtin && codeFallback === undefined && input.code &&
+          normalizeActionSurface(input.code) === target) codeFallback = configuredSurface;
+    }
+  }
+  return builtin ?? (codeFallback !== undefined ? normalizeCustomDefinition(codeFallback, map![codeFallback]) : undefined);
 }
 
 /** Resolve a declared administration method by exact code identity. Known

@@ -1077,9 +1077,10 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
         // Probe only the ambiguous unit/slash/number shape and reuse its
         // cached clause evidence instead of parsing another limit grammar.
         const end = probeEnd(site.rightIndex);
-        maximumOwnsSlash = evidence.probe(start, end).clause.evidence.some(item =>
+        const probe = evidence.probe(start, end);
+        maximumOwnsSlash = probe.clause.evidence.some(item =>
           (item.scheduleFields?.indexOf('maxDosePerPeriod') ?? -1) >= 0 &&
-          item.spans.some(span => start + span.start <= site.start && start + span.end >= site.end));
+          item.spans.some(span => probe.start + span.start <= site.start && probe.start + span.end >= site.end));
       }
       if (maximumOwnsSlash) proposals.push(keep('structure.maximum-dose-period', 900,
         'maximum-constituent.owns-slash', true));

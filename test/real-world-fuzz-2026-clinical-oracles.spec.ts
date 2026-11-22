@@ -705,7 +705,7 @@ describe("round38 implicit successor with calendar end", () => {
       const english = formatSig(input, "long");
       const thai = formatSig(input, "long", { locale: "th" });
       expect(english).toContain("1 month after treatment start");
-      expect(english).toContain("2 tablets once daily");
+      expect(english).toMatch(/(?:^|[^0-9])2 tablets once daily\b/u);
       if (exactPredecessor) {
         expect(english).toContain("From 7 days after treatment start");
         expect(english).not.toContain("After the previous phase");
@@ -714,7 +714,7 @@ describe("round38 implicit successor with calendar end", () => {
         expect(thai).toContain("หลังขั้นตอนก่อนหน้า");
       }
       expect(thai).toContain("1 เดือนหลังเริ่มการรักษา");
-      expect(thai).toContain("2 เม็ด");
+      expect(thai).toMatch(/(?:^|[^0-9])2 เม็ด(?:\s|$)/u);
     }
   });
 

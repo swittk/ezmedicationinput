@@ -197,6 +197,7 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
   let corrected: FhirExtension[] | undefined, equalitySources: FhirExtension[] | undefined;
   let metadataOnly: FhirExtension | undefined, ambiguousMetadata = false;
   let operatorPrimitives: Map<string, FhirExtension> | undefined;
+  let primitiveSources: Set<FhirExtension> | undefined;
   // Classify the current operator and metadata-only source in one walk. Ordinary
   // exact annotated quantities do not pay a second scan for a rare source marker.
   for (let index = 0; index < quantity.extension.length; index++) {
@@ -223,34 +224,35 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
         item._valueCode && Object.keys(item).length === 2) {
       if (metadataOnly) ambiguousMetadata = true;
       metadataOnly = item;
+      (primitiveSources ??= new Set()).add(item);
     } else if (item.url === QUANTITY_OPERATOR_SOURCE_URL && item.valueCode !== undefined &&
         item._valueCode && Object.keys(item).length === 3) {
       // A later external edit appends its current primitive after prior source.
       // Only the latest marker for the active operator can regain authority.
       (operatorPrimitives ??= new Map()).set(item.valueCode, item);
+      (primitiveSources ??= new Set()).add(item);
     }
     corrected?.push(currentItem);
   }
   if (corrected) quantity = { ...quantity, extension: [...corrected, ...equalitySources!] };
   if (conflict) comparator = undefined;
-  if (!comparator) {
-    if (hasOperator || quantity._comparator !== undefined || !metadataOnly || ambiguousMetadata) return quantity;
-    const remaining = quantity.extension!.filter(item => item !== metadataOnly);
-    return { ...quantity, _comparator: metadataOnly._valueCode,
-      extension: remaining.length ? remaining : undefined };
-  }
+  if (!comparator && (!primitiveSources || !hasOperator && !operatorPrimitives && ambiguousMetadata))
+    return quantity;
   const remaining: FhirExtension[] = [];
-  const primitiveSource = quantity._comparator === undefined ? operatorPrimitives?.get(comparator) : undefined;
+  const primitiveSource = quantity._comparator === undefined
+    ? comparator ? operatorPrimitives?.get(comparator) : !hasOperator ? metadataOnly : undefined
+    : undefined;
   const primitive = quantity._comparator ?? primitiveSource?._valueCode;
   for (const ext of quantity.extension ?? []) {
-    if (exactGeneratedComparatorExtension(ext, comparator)) continue;
+    if (comparator && exactGeneratedComparatorExtension(ext, comparator)) continue;
     // The primitive annotation belongs to this exact operator. A live EMA
     // edit must not inherit the prior operator's ID or extensions.
-    if (ext !== primitiveSource) remaining.push(ext);
+    if (ext !== primitiveSource) remaining.push(primitiveSources?.has(ext)
+      ? { url: QUANTITY_OPERATOR_SOURCE_URL, extension: [ext] } : ext);
   }
   return {
     ...quantity,
-    comparator,
+    ...(comparator ? { comparator } : {}),
     ...(primitive ? { _comparator: primitive } : {}),
     ...(remaining.length ? { extension: remaining } : { extension: undefined })
   };

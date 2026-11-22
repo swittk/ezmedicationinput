@@ -1380,6 +1380,7 @@ export function unchangedReplayExpression(value: EzDoseAndRate["doseExpression"]
 }
 interface SourceDoseObservation {
   original: FhirDoseAndRate;
+  role?: SourceConceptObservation;
   doseExpression?: SourceExpressionObservation;
   rateExpression?: SourceExpressionObservation;
   dose?: SourceMeasureObservation;
@@ -1726,7 +1727,7 @@ interface SourceTimingObservation {
   administrationDuration?: { quantity?: SourceMeasureObservation; low?: SourceMeasureObservation; high?: SourceMeasureObservation };
   activities?: Array<{ relation?: string; activity?: SourceConceptObservation;
     offset?: SourceMeasureObservation; offsetMin?: SourceMeasureObservation; offsetMax?: SourceMeasureObservation }>;
-  events?: string[];
+  events?: FhirTiming["event"];
   clocks?: FhirTimingRepeat["timeOfDay"];
   weekdays?: FhirDayOfWeek[];
   anchors?: FhirTimingRepeat["when"];
@@ -2037,6 +2038,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
   for (const original of (dosage as EzDosage).doseAndRate ?? []) {
     amounts.push({
       original,
+      role: captureSourceReplayConcept(original.type),
       dose: capturedReplayMeasure(original.doseQuantity),
       rate: capturedReplayMeasure(original.rateQuantity),
       rangeLow: capturedReplayMeasure(original.doseRange?.low),
@@ -2068,6 +2070,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
     const prior = proof.amounts[index], row = rows![index];
     if (
       row !== prior.original ||
+      !matchesSourceReplayConcept(row.type, prior.role) ||
       !unchangedReplayMeasure(row.doseQuantity, prior.dose) ||
       !unchangedReplayMeasure(row.rateQuantity, prior.rate) ||
       !unchangedReplayMeasure(row.doseRange?.low, prior.rangeLow) ||

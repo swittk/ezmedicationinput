@@ -4029,8 +4029,12 @@ describe("round38 live dose and action participant ownership", () => {
     const row = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { when: [EventTiming["Lunch"]] } }, extension: [buildInstructionGraphExtension(graph)!] };
     for (const input of [row, toDosageDetails([row]), JSON.parse(JSON.stringify(toFhirR5Dosages([row])))]) {
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("with lunch");
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("พร้อมอาหารกลางวัน");
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toContain("with lunch");
+      expect(english).not.toContain("after lunch");
+      expect(thai).toContain("พร้อมอาหารกลางวัน");
+      expect(thai).not.toContain("หลังอาหารกลางวัน");
     }
     expect(parseInstructionGraphExtension(row.extension)!.actions[0].args[2].relation).toBe(AdviceRelation.After);
   });
@@ -4191,4 +4195,163 @@ describe("round38 procedural Object owns its authored amount", () => {
       expect(text.match(/2 tablets/gu)).toHaveLength(1);
     }
   });
+});
+
+
+describe("round39 independent graph arguments and current conditions", () => {
+  it.each([[false, false], [true, false], [true, true]])(
+    "renders every independent dilution adjunct once (endpoint %s, schedule %s)", (endpoint, scheduled) => {
+    const frame = parseInstructionActions("Dilute 1 mL with saline to 10 mL before each dose")[0];
+    frame.sourceText = "";
+    frame.args[frame.args.length - 1] = {
+      role: AdviceArgumentRole.Activity, text: "each dose", normalized: "each dose",
+      relation: AdviceRelation.Before, i18n: { en: "each dose", th: "แต่ละครั้ง" }
+    };
+    if (endpoint) frame.args.push({
+      role: AdviceArgumentRole.Result, text: "clear", normalized: "clear",
+      relation: AdviceRelation.Until, i18n: { en: "clear", th: "ใส" }
+    });
+    const row = {
+      ...(scheduled ? { timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" as const } } } : {}),
+      extension: [buildInstructionGraphExtension({
+        sourceText: "", sourceLocale: "en", actions: [frame]
+      })!]
+    };
+    const original = JSON.stringify(row);
+    const r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("Dilute 1 mL with saline to 10 mL");
+      expect(en.match(/before each dose/gu)).toHaveLength(1);
+      expect(en.match(/until clear/gu) ?? []).toHaveLength(endpoint ? 1 : 0);
+      expect(th.match(/ก่อนแต่ละครั้ง/gu)).toHaveLength(1);
+      expect(th.match(/จนกว่าใส/gu) ?? []).toHaveLength(endpoint ? 1 : 0);
+      if (endpoint) {
+        expect(en.indexOf("before each dose")).toBeLessThan(en.indexOf("until clear"));
+        expect(th.indexOf("ก่อนแต่ละครั้ง")).toBeLessThan(th.indexOf("จนกว่าใส"));
+      }
+    }
+    expect(JSON.stringify(row)).toBe(original);
+    expect(parseInstructionGraphExtension(row.extension)!.actions[0].args)
+      .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, relation: AdviceRelation.Before }));
+  });
+
+  it.each([false, true])("keeps a rich primary's graph-only condition once (postposed %s)", postposed => {
+    const source = "Swallow 1 tablet whole with 200 mL water";
+    const condition = "if able to swallow";
+    const frame = parseInstructionActions(source)[0];
+    const offset = postposed ? 0 : condition.length + 2;
+    frame.sourceText = "";
+    frame.span = { start: offset, end: offset + source.length };
+    const conditionStart = postposed ? source.length + 1 : 0;
+    const graph = {
+      sourceText: postposed ? source + " " + condition : condition + ", " + source,
+      sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame],
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: condition,
+        span: { start: conditionStart, end: conditionStart + condition.length } }]
+    };
+    const row = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      extension: [buildInstructionGraphExtension(graph)!] };
+    const original = JSON.stringify(row);
+    const r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(/if able to swallow/giu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /Swallow 1 tablet/gu : /กลืน 1 เม็ด/gu)).toHaveLength(1);
+        expect(text).toContain(locale === "en" ? "200 mL water" : "200 มิลลิลิตรน้ำ");
+      }
+    expect(JSON.stringify(row)).toBe(original);
+  });
+
+  it.each([
+    ["Mix the tablet with water", "Mix tablet with water", "ผสมยาเม็ดกับน้ำ"],
+    ["Mix the tablet with 100 mL water", "Mix tablet with 100 mL water", "ผสมยาเม็ดกับน้ำ 100 มิลลิลิตร"],
+    ["Mix the tablet with milk", "Mix tablet with milk", "ผสมยาเม็ดกับmilk"],
+    ["Mix with the tablet", "Mix with tablet", "ผสมยาเม็ด"],
+    ["Dissolve 1 tablet in water", "Dissolve 1 tablet in water", "ละลาย1 เม็ดในน้ำ"]
+  ])("keeps the head object and its companion distinct: %s", (source, english, thai) => {
+    const parsed = parsePublicSig(source);
+    const original = JSON.stringify(parsed.fhirNext);
+    for (const input of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(english + ".");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(thai + ".");
+    }
+    expect(JSON.stringify(parsed.fhirNext)).toBe(original);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    if (source.startsWith("Mix the tablet")) {
+      expect(graph.actions[0].args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Object, conceptId: "medication-tablet"
+      }));
+      expect(graph.actions[0].args.find(arg => arg.conceptId === "medication-tablet")!.relation).toBeUndefined();
+      const vehicle = graph.actions[0].args.find(arg => source.endsWith("milk")
+        ? arg.text === "milk" : arg.conceptId === "water");
+      expect(vehicle?.relation).toBe(AdviceRelation.With);
+      if (source.endsWith("milk")) expect(vehicle!.conceptId).toBeUndefined();
+    }
+  });
+});
+
+describe("round39 semantic resolver surface precedence", () => {
+  const flush = { code: "rinse", display: "Flush", procedural: true,
+    coding: { system: "urn:clinic:actions", code: "flush" } };
+  const localRinse = { code: "local-rinse", display: "Local rinse", procedural: true,
+    aliases: ["rinse"], coding: { system: "urn:clinic:actions", code: "local-rinse" } };
+  it.each([false, true])("prefers a custom alias over a colliding code independent of map order (%s)", reverse => {
+    const instructionActionMap = reverse ? { local: localRinse, flush } : { flush, local: localRinse };
+    const parsed = parsePublicSig("local procedure", {
+      instructionActionMap,
+      instructionSemanticResolvers: request => ({ actions: [{
+        action: "rinse", range: { start: 0, end: request.sourceText.length }
+      }] })
+    });
+    const actions = parsed.meta.canonical.clauses[0].instructionGraph!.actions;
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action.predicate.lemma).toBe("local-rinse");
+      expect(action.predicate.display).toBe("Local rinse");
+      expect(action.predicate.codings).toContainEqual({ system: "urn:clinic:actions", code: "local-rinse" });
+    }
+  });
+  it("keeps a built-in surface ahead of a custom code but accepts an unambiguous custom code", () => {
+    for (const [proposal, map, expectedDisplay, expectedCode] of [
+      ["rinse", { flush }, "Rinse", "782155003"],
+      ["clinic-flush", { flush: { ...flush, code: "clinic-flush" } }, "Flush", "flush"]
+    ] as const) {
+      const parsed = parsePublicSig("local procedure", {
+        instructionActionMap: map,
+        instructionSemanticResolvers: request => ({ actions: [{
+          action: proposal, range: { start: 0, end: request.sourceText.length }
+        }] })
+      });
+      const actions = parsed.meta.canonical.clauses[0].instructionGraph!.actions;
+      expect(actions.length).toBeGreaterThan(0);
+      for (const action of actions) {
+        expect(action.predicate.display).toBe(expectedDisplay);
+        expect(action.predicate.codings).toContainEqual(expect.objectContaining({ code: expectedCode }));
+      }
+    }
+  });
+});
+
+
+it("does not revive an externally cleared primary dose while retaining its saved graph", () => {
+  const raw = JSON.parse(JSON.stringify(parsePublicSig("Swallow 1 tablet whole").fhirNext));
+  const component = raw.step[0].component[0];
+  delete component.doseAndRate;
+  delete component.method;
+  delete component.route;
+  const savedGraph = JSON.stringify(parseInstructionGraphExtension(component.extension));
+  for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+    const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+    const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+    expect(english).toContain("Swallow whole");
+    expect(english).not.toContain("1 tablet");
+    expect(thai).toContain("กลืน");
+    expect(thai).not.toContain("1 เม็ด");
+  }
+  expect(JSON.stringify(parseInstructionGraphExtension(component.extension))).toBe(savedGraph);
+  expect(parseInstructionGraphExtension(component.extension)!.actions[0].args)
+    .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" } }));
 });

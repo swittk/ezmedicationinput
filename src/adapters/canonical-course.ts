@@ -83,7 +83,8 @@ import {
 import {
   serializeCanonicalContext,
   serializeCanonicalSchedule,
-  getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
+  getTimingClocks,
+  getTimingEvents, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL,
   projectTimingClocks,
   deserializeCanonicalContext,
   cycleDayConstraintExtension,
@@ -215,7 +216,7 @@ function offsetValue(repeat: { extension?: FhirExtension[] } | undefined, url: s
 /** Decode timing annotations in one classification walk. Each specialized
  * codec sees only its own marker(s), not the full extension list again. */
 function timingAnnotations(
-  r: Pick<NonNullable<FhirR6Timing["repeat"]>, "extension" | "offset" | "timeOfDay" | "durationMax" | "durationUnit"> | undefined
+  r: Pick<NonNullable<FhirR6Timing["repeat"]>, "extension" | "offset" | "timeOfDay" | "duration" | "durationMax" | "durationUnit"> | undefined
 ): Pick<
   NonNullable<CanonicalTiming["recurrence"]>,
   | "clocks"
@@ -265,7 +266,10 @@ function timingAnnotations(
   for (const e of r?.extension ?? [])
     switch (e.url) {
       case TIMING_ADDITIONAL_CLOCK_EXTENSION_URL:
-        if (r?.timeOfDay === undefined && e.valueTime !== undefined) (out.clocks ??= []).push(e.valueTime);
+        if (r?.timeOfDay === undefined) {
+          if (e.valueTime !== undefined) (out.clocks ??= []).push(e.valueTime);
+          else if (e._valueTime) out.clocks ??= [];
+        }
         break;
       case TIMING_ADMINISTRATION_DURATION_EXTENSION_URL:
         if (!administrationDurationSeen) {
@@ -321,7 +325,7 @@ function timingAnnotations(
 }
 function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): CanonicalTiming | undefined {
   if (!t) return undefined;
-  const out: CanonicalTiming = { code: t.code, explicitEvents: t.event, provenance: record(t) };
+  const out: CanonicalTiming = { code: t.code, explicitEvents: getTimingEvents(t), provenance: record(t) };
   const r = t.repeat;
   if (r) {
     const annotations = r.extension?.length ? timingAnnotations(r) : undefined;
@@ -334,10 +338,11 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       period: r.period,
       periodMax: r.periodMax,
       periodUnit: r.periodUnit,
-      occurrenceDuration: r.duration ?? annotations?.occurrenceDuration,
-      occurrenceDurationMax: r.duration === undefined && annotations?.occurrenceDurationRange ? undefined : r.durationMax,
-      occurrenceDurationRange: r.duration === undefined ? annotations?.occurrenceDurationRange : undefined,
-      occurrenceDurationUnit: r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
+      occurrenceDuration: annotations?.occurrenceDurationRange ? undefined : r.duration ?? annotations?.occurrenceDuration,
+      occurrenceDurationMax: annotations?.occurrenceDurationRange ? undefined : r.durationMax,
+      occurrenceDurationRange: annotations?.occurrenceDurationRange,
+      occurrenceDurationUnit: annotations?.occurrenceDurationRange ? undefined :
+        r.duration === undefined ? annotations?.occurrenceDurationUnit ?? r.durationUnit : r.durationUnit,
       occurrenceDurationComparator: r.duration === undefined ? annotations?.occurrenceDurationComparator : undefined,
       courseLength: r5 ? measureFromR5(r.boundsDuration as FhirQuantity) : measureFromWire(r.boundsDuration),
       courseLengthRange: rangeFromFhir(r.boundsRange),
@@ -999,15 +1004,18 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       repeat = value;
     }
   }
+  // Import has already separated executable values from metadata-only wire
+  // positions. The immutable native timing keeps its imported event projection.
+  const events = original?.event ?? t.explicitEvents;
   if (
     original &&
-    original.event === t.explicitEvents &&
+    original.event === events &&
     original.code === t.code &&
     original.repeat === repeat
   )
     return original;
   const output: Record<string, unknown> = Object.assign({}, t.provenance);
-  assign(output, "event", t.explicitEvents);
+  assign(output, "event", events);
   // Primitive annotations retain their external FHIR positions. Native facts
   // are internal immutable values, not an editing API that infers event identity.
   assign(output, "code", t.code);
@@ -1033,10 +1041,14 @@ function updateNativeTimingAnnotations(
   output: Record<string, unknown>,
   target: FhirR6Timing | undefined
 ): FhirR6Timing | undefined {
-  if (!a.provenance || a.provenance.format !== "r6") return target;
+  if (!a.provenance || a.provenance.format === "syntax") return target;
+  const fromR6 = a.provenance.format === "r6";
   const raw = a.provenance.data as FhirR6Dosage;
   const live = a.schedule?.recurrence;
   const original = raw.timing?.repeat;
+  // The R5 boundary already owns its other annotations. Only a surviving
+  // duration marker needs this shared reconciliation before either projection.
+  if (!fromR6 && !original?.extension?.length) return target;
   if (
     !original?.extension?.length &&
     !raw.modifierExtension?.length &&
@@ -1054,63 +1066,67 @@ function updateNativeTimingAnnotations(
     !a.anchoredLength
   )
     return target;
+  const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+  const duration = parseTimingAdministrationDuration(durationMarker);
+  const durationChanged = duration && (duration.value !== live?.occurrenceDuration ||
+    duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
+    !same(duration.range, live?.occurrenceDurationRange));
+  if (!fromR6 && !durationChanged) return target;
   const oldMarkers = original ? { extension: original.extension, offset: original.offset } : undefined;
   const changes = new Set<string>();
   const changed = (url: string, before: unknown, after: unknown) => {
     if (!same(before, after)) changes.add(url);
   };
-  const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
-  const duration = parseTimingAdministrationDuration(durationMarker);
-  if (duration && (duration.value !== live?.occurrenceDuration ||
-      duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
-      !same(duration.range, live?.occurrenceDurationRange))) {
+  if (durationChanged) {
     changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
     output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
   }
-  changed(TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingMonthDays(oldMarkers), live?.monthDays);
-  changed(TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, getTimingWeekdayOrdinal(oldMarkers), live?.weekdayOrdinal);
-  changed(TIMING_CLOCK_WINDOW_EXTENSION_URL, getTimingClockWindow(oldMarkers), live?.clockWindow);
-  changed(TIMING_EVENT_WINDOW_EXTENSION_URL, getTimingEventWindow(oldMarkers), live?.eventWindow);
-  changed(
-    TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
-    parseActivityTimingExtensions(oldMarkers),
-    live?.activityTiming
-  );
-  changed(TIMING_OCCURRENCE_CAP_EXTENSION_URL, getTimingOccurrenceCap(oldMarkers), live?.occurrenceCap);
-  changed(TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes(oldMarkers), live?.offset);
-  changed(
-    TIMING_OFFSET_MIN_EXTENSION_URL,
-    offsetValue(oldMarkers, TIMING_OFFSET_MIN_EXTENSION_URL),
-    live?.offsetMin
-  );
-  changed(
-    TIMING_OFFSET_MAX_EXTENSION_URL,
-    offsetValue(oldMarkers, TIMING_OFFSET_MAX_EXTENSION_URL),
-    live?.offsetMax
-  );
-  changed(
-    TIMING_FREQUENCY_MIN_EXTENSION_URL,
-    oldMarkers?.extension?.find((e) => e.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger === 0,
-    live?.frequency === 0
-  );
   const administrationChanges = new Set<string>();
-  if (!same(getAdministrationOffsetMinutes(raw as FhirDosage), a.delayMinutes))
-    administrationChanges.add(ADMINISTRATION_OFFSET_EXTENSION_URL);
-  const oldLength = getAnchoredCourseDuration(raw);
-  if (
-    // Active bounds own duration projection reconciliation below. In particular,
-    // do not discard an old projected-range wrapper before retaining its ID and
-    // annotations alongside the recovered authored endpoints.
-    !target?.repeat?.boundsRange && !target?.repeat?.boundsDuration &&
-    !same(
-      oldLength
-        ? { quantity: measureFromWire(oldLength.valueQuantity), range: rangeFromFhir(oldLength.valueRange) }
-        : undefined,
-      a.anchoredLength
+  if (fromR6) {
+    changed(TIMING_DAY_OF_MONTH_EXTENSION_URL, getTimingMonthDays(oldMarkers), live?.monthDays);
+    changed(TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, getTimingWeekdayOrdinal(oldMarkers), live?.weekdayOrdinal);
+    changed(TIMING_CLOCK_WINDOW_EXTENSION_URL, getTimingClockWindow(oldMarkers), live?.clockWindow);
+    changed(TIMING_EVENT_WINDOW_EXTENSION_URL, getTimingEventWindow(oldMarkers), live?.eventWindow);
+    changed(
+      TIMING_ACTIVITY_WINDOW_EXTENSION_URL,
+      parseActivityTimingExtensions(oldMarkers),
+      live?.activityTiming
+    );
+    changed(TIMING_OCCURRENCE_CAP_EXTENSION_URL, getTimingOccurrenceCap(oldMarkers), live?.occurrenceCap);
+    changed(TIMING_OFFSET_EXACT_EXTENSION_URL, getExactTimingOffsetMinutes(oldMarkers), live?.offset);
+    changed(
+      TIMING_OFFSET_MIN_EXTENSION_URL,
+      offsetValue(oldMarkers, TIMING_OFFSET_MIN_EXTENSION_URL),
+      live?.offsetMin
+    );
+    changed(
+      TIMING_OFFSET_MAX_EXTENSION_URL,
+      offsetValue(oldMarkers, TIMING_OFFSET_MAX_EXTENSION_URL),
+      live?.offsetMax
+    );
+    changed(
+      TIMING_FREQUENCY_MIN_EXTENSION_URL,
+      oldMarkers?.extension?.find((e) => e.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger === 0,
+      live?.frequency === 0
+    );
+    if (!same(getAdministrationOffsetMinutes(raw as FhirDosage), a.delayMinutes))
+      administrationChanges.add(ADMINISTRATION_OFFSET_EXTENSION_URL);
+    const oldLength = getAnchoredCourseDuration(raw);
+    if (
+      // Active bounds own duration projection reconciliation below. In particular,
+      // do not discard an old projected-range wrapper before retaining its ID and
+      // annotations alongside the recovered authored endpoints.
+      !target?.repeat?.boundsRange && !target?.repeat?.boundsDuration &&
+      !same(
+        oldLength
+          ? { quantity: measureFromWire(oldLength.valueQuantity), range: rangeFromFhir(oldLength.valueRange) }
+          : undefined,
+        a.anchoredLength
+      )
     )
-  )
-    administrationChanges.add(ANCHORED_COURSE_DURATION_EXTENSION_URL);
+      administrationChanges.add(ANCHORED_COURSE_DURATION_EXTENSION_URL);
+  }
   if (!changes.size && !administrationChanges.size) return target;
   const generated = serializeCanonicalSchedule(clauseForAdministration(a).schedule);
   if (durationMarker && changes.has(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
@@ -1294,7 +1310,7 @@ function administrationToWire(
   wireTiming = updateNativeTimingAnnotations(a, output, wireTiming);
   if (wireTiming?.repeat && a.schedule?.recurrence?.clocks !== undefined) {
     const sourceRepeat = (a.provenance?.data as FhirDosage | FhirR6Dosage | undefined)?.timing?.repeat;
-    const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat);
+    const repeat = projectTimingClocks(wireTiming.repeat, sourceRepeat, target);
     if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
   }
   const currentRange = wireTiming?.repeat?.boundsRange ??
@@ -1984,7 +2000,8 @@ export function unchangedR6SourceDisplay(
 
 /** Explicit editable import for applications that already hold R5 rows.
  * Import normalization and persistence reconciliation happen once here, not
- * inside any native edit, formatter, or execution operation. */
+ * inside any native edit, formatter, or execution operation. Metadata-only
+ * R6 headers share R5's Element shape; use fromFhir for that known-R6 input. */
 export function importCanonicalCourse(
   input: FhirDosage | readonly FhirDosage[] | FhirR6DosageInstructionInput | ParseBatchResult | CanonicalCourse
 ): CanonicalCourse {

@@ -3771,7 +3771,7 @@ describe("round33 complete native amount and cadence previews", () => {
     expect(fromFhirDosage(toFhirR5Dosages(raw)[0]).meta.canonical.clauses[0].dose).toBeUndefined();
     expect(JSON.stringify(raw)).toBe(before);
   });
-  it.each([false, true])("retains each-target scope on role-labelled amounts in either order (%s)", reverse => {
+  it.each([false, true])("keeps discrete each-target scope and metric totals in either role order (%s)", reverse => {
     const amounts = [
       { type: dose("ordered", 1).type, doseQuantity: simpleQuantityForR5({ value: 1, unit: "spray", comparator: "~" })! },
       { type: dose("calculated", 2).type, doseQuantity: { value: 2, unit: "mg" } }
@@ -3790,16 +3790,17 @@ describe("round33 complete native amount and cadence previews", () => {
         const text = formatSig(input, "long", { locale: tag, realizationMode: "normalized" });
         expect(text).toContain(locale === "en" ? "Ordered dose: approximately 1 spray (each nostril)"
           : "ขนาดยาที่สั่ง: รูจมูกข้างละ ประมาณ 1 ครั้ง");
-        expect(text).toContain(locale === "en" ? "Calculated dose: 2 mg (each nostril)"
-          : "ขนาดยาที่คำนวณ: รูจมูกข้างละ 2 มิลลิกรัม");
-        expect(text.match(locale === "en" ? /each nostril/gu : /ข้างละ/gu)).toHaveLength(2);
+        expect(text).toContain(locale === "en" ? "Calculated dose: 2 mg"
+          : "ขนาดยาที่คำนวณ: ครั้งละ 2 มิลลิกรัม");
+        expect(text).not.toContain(locale === "en" ? "2 mg (each nostril)" : "ข้างละ 2 มิลลิกรัม");
+        expect(text.match(locale === "en" ? /each nostril/gu : /ข้างละ/gu)).toHaveLength(1);
       }
     }
     expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
     expect(fromFhirDosage(rows[0]).meta.canonical.clauses[0].dose).toBeUndefined();
     expect(JSON.stringify(raw)).toBe(before);
   });
-  it.each([true, false])("retains code-only equal units on a scoped role-labelled range (known low unit %s)", knownLow => {
+  it.each([true, false])("retains code-only equal units on a total metric role-labelled range (known low unit %s)", knownLow => {
     const raw: FhirR6DosageInstruction = { step: [{ component: [{
       route: { text: "intranasal" }, site: { concept: { text: "both nostrils" } },
       doseAndRate: [{ type: dose("ordered", 1).type, doseRange: {
@@ -3811,10 +3812,12 @@ describe("round33 complete native amount and cadence previews", () => {
     // A single known endpoint supplies the compact range's unit without
     // filling in or changing the retained source endpoint.
     for (const input of [raw, toFhirR5Dosages(raw)]) {
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
-        .toContain("Ordered dose: 1 to 2 mg (each nostril)");
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toContain("ขนาดยาที่สั่ง: รูจมูกข้างละ 1 ถึง 2 มิลลิกรัม");
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(english).toContain("Ordered dose: 1 to 2 mg");
+      expect(english).not.toContain("each nostril");
+      expect(thai).toContain("ขนาดยาที่สั่ง: ครั้งละ 1 ถึง 2 มิลลิกรัม");
+      expect(thai).not.toContain("ข้างละ");
     }
     expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
     expect(JSON.stringify(raw)).toBe(before);
@@ -3974,3 +3977,68 @@ describe("round34 typed recurrence and locale previews", () => {
 
 // END PRESERVED meaning21
 }
+
+
+describe("round39 Thai infusion-duration labels", () => {
+  it.each(["min", "min{infusion}", "unknown-duration"])("localizes recognized code %s and preserves unknown labels", code => {
+    const range = { low: { value: 90, code, unit: code === "unknown-duration" ? "clinic ticks" : "minutes" },
+      high: { value: 2, code: "h", unit: "hours" } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { count: 1, extension: [{
+        url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration", valueRange: range
+      }] } },
+      doseAndRate: [{ rateQuantity: { value: 20, unit: "mL/hour", code: "mL/h", system: "http://unitsofmeasure.org" } }]
+    }] }] };
+    const original = JSON.stringify(raw);
+    const course = courseFromR6(raw);
+    for (const input of [raw, course, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain(code === "unknown-duration" ? "90 clinic ticks ถึง 2 ชั่วโมง" : "90 นาที ถึง 2 ชั่วโมง");
+      expect(thai).not.toContain("2 hours");
+    }
+    expect(course.stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange).toEqual(range);
+    expect(JSON.stringify(raw)).toBe(original);
+    const emitted = courseToR6(course).step![0].component[0].timing!.repeat!.extension!
+      .find(extension => extension.url === "urn:ezmedicationinput:StructureDefinition:timing-administration-duration")!;
+    expect(emitted.valueRange).toEqual(range);
+  });
+});
+
+
+describe("round39 locale-owned target count and duration words", () => {
+  const ENGLISH_COURSE = resolveSigLocalization("en")!.course!;
+  const THAI_COURSE = resolveSigLocalization("th")!.course!;
+  it.each(["en", "th", "third"] as const)("uses the selected %s course facet for live application count", locale => {
+    const base = locale === "en" ? ENGLISH_COURSE : THAI_COURSE;
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "lesions", extension: [{
+        url: "urn:ezmedicationinput:body-site-administration-target-count", valueInteger: 3
+      }] } };
+    const i18n = { locale: locale === "third" ? "xx-round39" : locale,
+      inherit: locale === "en" ? "en" : "th",
+      course: { ...base, applicationSites: (count: number) => "pack-site-count-" + count } };
+    for (const style of ["long", "short"] as const) {
+      const text = formatSig(row, style, { locale: i18n.locale, i18n, realizationMode: "normalized" });
+      expect(text).toContain("pack-site-count-3");
+      expect(text).not.toContain("across 3 sites");
+      expect(text).not.toContain("รวม 3 จุด");
+    }
+  });
+
+  it("uses an inherited Thai formatter's selected temporal-unit facet", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      timing: { repeat: { extension: [{
+        url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration",
+        valueRange: { low: { value: 90, code: "min", unit: "minutes" }, high: { value: 2, code: "h", unit: "hours" } }
+      }] } },
+      doseAndRate: [{ rateQuantity: { value: 20, unit: "mL/hour", code: "mL/h", system: "http://unitsofmeasure.org" } }]
+    }] }] };
+    const i18n = { locale: "xx-round39-time", inherit: "th", course: {
+      ...THAI_COURSE, timeUnit: (unit: string) => "pack-time-" + unit
+    } };
+    const text = formatSig(raw, "long", { i18n, realizationMode: "normalized" });
+    expect(text).toContain("90 pack-time-min ถึง 2 pack-time-h");
+    expect(text).not.toContain("minutes");
+    expect(text).not.toContain("ชั่วโมง");
+  });
+});

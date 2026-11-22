@@ -16,7 +16,8 @@ import {
   DOSE_FRACTION_WORDS,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
-  MEDICATION_OBJECT_FILLERS
+  MEDICATION_OBJECT_FILLERS,
+  DEVICE_GAUGE_HEADS
 } from "../lexical-classes";
 import {
   HpsgClinicalQuantityFeature,
@@ -198,7 +199,9 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
     if ((token.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // An article counts as ONE only when it selects a medication unit;
         // route determiners (via a peripheral IV) are not earlier doses.
-        (!DOSE_FRACTION_ARTICLES.has(lower) || directDoseUnitAfter(context, index + 1)))
+        (!DOSE_FRACTION_ARTICLES.has(lower) || directDoseUnitAfter(context, index + 1)) &&
+        // A device size is not a medication argument of the infusion head.
+        !DEVICE_GAUGE_HEADS.has(normalizeTokenLower(context.tokens[index + 1])))
       precedingAmount = true;
   }
   return false;

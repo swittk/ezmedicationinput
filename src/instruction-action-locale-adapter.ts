@@ -141,10 +141,14 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
     amountArg: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
-    if (!themeArg && (arg.role === AdviceArgumentRole.Theme ||
-        !withComplement && arg.role === AdviceArgumentRole.Object)) themeArg = arg;
+    const nominal = arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container;
+    // The construction marks the companion's attachment independently of
+    // lexical role. A tablet Object before WITH remains the mixed theme.
+    if (!themeArg && (arg.role === AdviceArgumentRole.Theme || nominal && !arg.relation)) themeArg = arg;
     if (!substanceArg && (arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material ||
-        withComplement && (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container)))
+        nominal && arg.relation &&
+        (relationHasGrammarFeature(arg.relation, "accompanimentComplement") ||
+          relationHasSemanticClass(arg.relation, "accompaniment") || arg.relation === AdviceRelation.In)))
       substanceArg = arg;
     if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
     if (themeArg && substanceArg && amountArg) break;
