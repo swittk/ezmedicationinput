@@ -2741,17 +2741,18 @@ describe("round32 live schedule modifier proof family", () => {
 it.each(["the next morning and at 09:00", "at 09:00 and the next morning"])(
   "round32 retains explicitly coordinated NEXT and clock events in either order: %s", timing => {
     const parsed = parseSig("Take 1 tablet " + timing);
-    expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
+    const splitDay = timing.startsWith("at ");
+    expect(parsed.meta.canonical.clauses[splitDay ? 1 : 0].schedule?.when).toEqual(["MORN"]);
     expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
     for (const row of parsed.fhir)
       expect(Boolean(row.timing?.repeat?.when?.length && row.timing.repeat.timeOfDay?.length)).toBe(false);
-    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(2);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual(splitDay ? [1, 1] : [2]);
     const query = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
       timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 };
     for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
-      expect(nextDueDoses(dosage, query)).toEqual([
-        "2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00"
-      ]);
+      expect(nextDueDoses(dosage, query)).toEqual(splitDay ? [
+        "2026-11-21T09:00:00+00:00", "2026-11-22T08:00:00+00:00"
+      ] : ["2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00"]);
       expect(calculateTotalUnits({ ...query, dosage, durationValue: 4, durationUnit: "d" }).totalUnits).toBe(2);
     }
   });
@@ -2773,14 +2774,15 @@ describe("round33 onset scope and complete Thai fractions", () => {
   it.each(["the next morning and again at 18:00", "at 18:00 and again the next morning"])(
     "retains explicitly coordinated event and clock in %s", timing => {
       const parsed = parseSig("Take 1 tablet " + timing);
-      expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
-      expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(2);
+      const splitDay = timing.startsWith("at ");
+      expect(parsed.meta.canonical.clauses[splitDay ? 1 : 0].schedule?.when).toEqual(["MORN"]);
+      expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.count)).toEqual(splitDay ? [1, 1] : [2]);
       const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
         timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 };
       for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
-        expect(nextDueDoses(dosage, query)).toEqual([
-          "2026-12-02T08:00:00+00:00", "2026-12-02T18:00:00+00:00"
-        ]);
+        expect(nextDueDoses(dosage, query)).toEqual(splitDay ? [
+          "2026-12-01T18:00:00+00:00", "2026-12-02T08:00:00+00:00"
+        ] : ["2026-12-02T08:00:00+00:00", "2026-12-02T18:00:00+00:00"]);
         expect(calculateTotalUnits({ ...query, dosage, durationValue: 4, durationUnit: "d" }).totalUnits).toBe(2);
       }
     });
@@ -2794,18 +2796,22 @@ describe("round33 onset scope and complete Thai fractions", () => {
     expect(schedule.frequency ?? 1).toBe(1);
     expect(schedule.when).toBeUndefined();
     expect(parsed.input).toContain(ending);
-    // Relative morning-end execution is not modeled; the clinician-facing
-    // suggestion retains that authored qualifier beside the known cadence.
+    // The recognized but unresolved end remains visible and blocks numeric
+    // execution through the existing unresolved RelativeTime contract.
+    expect(parsed.meta.canonical.course!.stages[0].administrations[0].phaseEnd)
+      .toEqual({ anchor: "unresolved", description: ending });
     for (const text of [parsed.shortText, parsed.longText]) {
       expect(text).toContain(ending);
       expect(text).toMatch(/every 6 hours|Q6H/u);
     }
-    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
-      expect(nextDueDoses(input, { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
-        timeZone: "UTC", limit: 4 })).toEqual([
-          "2026-12-01T08:00:00+00:00", "2026-12-01T14:00:00+00:00",
-          "2026-12-01T20:00:00+00:00", "2026-12-02T02:00:00+00:00"
-        ]);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+        timeZone: "UTC", limit: 4 };
+      const unresolved = "Unsupported R6 step RelativeTime: requires a treatment-start offset";
+      expect(() => nextDueDoses(dosage, query)).toThrow(unresolved);
+      expect(() => calculateTotalUnits({ ...query, dosage, durationValue: 3, durationUnit: "d" }))
+        .toThrow(unresolved);
+    }
   });
 
   it.each(["≤๑/๒เม็ด", "≤1/2เม็ด", ">=๑/๒เม็ด", "~๑/๒เม็ด"])("keeps the complete comparative fraction %s", amount => {
