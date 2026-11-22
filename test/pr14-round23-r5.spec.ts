@@ -6543,3 +6543,48 @@ describe("round42 interop current public contracts", () => {
     }
   });
 });
+
+
+describe("round42 public compatibility output and explicit source clears", () => {
+  it.each([
+    "and from day 10 take 3 tablets at 15:00",
+    "and 3 tablets from day 10 at 15:00",
+  ])("retains an independent day-10 member in parser R5 rows: %s", ending => {
+    const parsed = parseSig("Take 1 tablet daily for 5 doses then take 2 tablets at 06:00 the next day " + ending);
+    const expected = [
+      "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+      "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T06:00:00+00:00",
+      "2026-11-30T15:00:00+00:00", "2026-12-01T15:00:00+00:00",
+    ];
+    const saved = persist(parsed.fhir);
+    for (const input of [parsed, parsed.fhirNext, saved, toDosageDetails(saved),
+      persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
+        timeZone: "UTC", limit: 8 })).toEqual(expected);
+    }
+    expect(saved.map(row => row.doseAndRate?.[0].doseQuantity?.value)).toEqual([1, 2, 3]);
+    expect(saved.map(row => row.sequence)).toEqual([1, 2, 2]);
+    expect(parsed.input).toContain(ending);
+  });
+
+  it.each(["fresh", "persisted"] as const)("keeps roundtrip callbacks after a %s explicit text clear", kind => {
+    const parsed = parseSig("Swallow 1 tablet whole at bedtime per the agreed plan.");
+    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    const seen: string[] = [];
+    const options: FormatOptions = { locale: "en", realizationMode: "roundtrip", i18n: {
+      formatLong(context) { seen.push(context.realizationMode); return context.defaultText; },
+    } };
+    row.text = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
+    expect(fromFhirDosage(row, options).longText).toBe(row.text);
+    row.text = "";
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).not.toContain("per the agreed plan");
+      expect(text).not.toContain("discussion with the clinician");
+      expect(text).toContain("1 tablet");
+      expect(text).toMatch(/bedtime|on sleep/u);
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(new Set(seen)).toEqual(new Set(["roundtrip"]));
+    expect(row.text).toBe("");
+  });
+});

@@ -66,7 +66,9 @@ function markOriginalGraphSource(
   }
   if (options?.realizationMode !== "roundtrip" && clause.dose) return;
   const verified = fresh && !fresh.defaulted ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
-  clause.sourceProjectionVerified = verified;
+  // A matching dose cannot revive source text that the native import has
+  // already rejected, including an explicit text clear.
+  clause.sourceProjectionVerified = clause.sourceProjectionVerified !== false && verified;
   if (clause.dose) clause.dose.sourceDoseVerified = verified;
 }
 
@@ -643,7 +645,8 @@ function buildWholeCourseResult(
   });
   // The established editable R5 persistence contract is an OUTPUT adapter.
   // Neither canonical course construction nor native execution consumes it.
-  const typedSteps = !parallel && canonical.stages.some(stage => stage.start || stage.end || stage.count !== undefined);
+  const typedSteps = !parallel && canonical.stages.some(stage => stage.start || stage.end || stage.count !== undefined ||
+    stage.administrations.some(a => a.phaseStart || a.phaseEnd || a.phaseOrigin));
   const courseProjection = typedRepeatCycle || typedSteps || parallel
     ? projectNativeR5Course(canonical, {
       bodySitePostcoordination:options?.bodySitePostcoordination,
