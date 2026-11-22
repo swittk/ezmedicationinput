@@ -2916,3 +2916,122 @@ describe("round 42 clockless daily window", () => {
     expect(JSON.stringify(parsed)).toBe(before);
   });
 });
+
+describe("round 43 supported supply bounds", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const options = { orderedAt: origin, from: origin, timeZone: "UTC" };
+  const periodLimit = (value: number, unit: string): FhirR6DoseLimit => ({
+    scope: "period", valueQuantity: { value, unit }, period: { value: 24, unit: "h" }
+  });
+  const surfaces = (raw: FhirR6DosageInstruction) => [
+    raw, courseFromR6(raw), JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))
+  ];
+
+  it.each([false, true].flatMap(repeated =>
+    ["numeric", "typed", "exact"].map(kind => [repeated, kind] as const)))
+    ("retains both infusion bounds for rolling supply (%s, %s)", (repeated, kind) => {
+    const raw: FhirR6DosageInstruction = {
+      ...(repeated ? { repeatCycle: { value: 1, unit: "d" } } : {}),
+      step: [{ component: [{
+        doseAndRate: [{ rateQuantity: { value: 10, unit: "mL/h", code: "mL/h", system: "http://unitsofmeasure.org" } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["08:00:00", "20:00:00"], boundsDuration: { value: 1, unit: "d" },
+          ...(kind === "typed" ? { extension: [{
+            url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration",
+            valueRange: { low: { value: 1, unit: "h" }, high: { value: 2, unit: "h" } }
+          }] } : { duration: kind === "exact" ? 2 : 1, durationUnit: FhirPeriodUnit.Hour,
+            ...(kind === "numeric" ? { durationMax: 2 } : {}) })
+        } }, safety: { doseLimit: [periodLimit(30, "mL")] }
+      }] }]
+    };
+    const before = structuredClone(raw);
+    const expected = (kind === "exact" ? 20 : 30) * (repeated ? 2 : 1);
+    // 10 mL/h x (2 h + 1 h) attains 30 mL. Two exact 2 h doses cannot fit.
+    for (const dosage of surfaces(raw)) {
+      const source = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: repeated ? 2 : 1,
+        durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: expected, unit: "mL" });
+      expect(JSON.stringify(dosage)).toBe(source);
+    }
+    expect(raw).toEqual(before);
+    expect(courseToR6(courseFromR6(raw)).step![0].component[0].timing?.repeat)
+      .toMatchObject(raw.step![0].component[0].timing!.repeat!);
+  });
+
+  it.each(([
+    ["2026-01-04T00:00:00Z", [], 2, 4, ["2026-01-04", "2026-01-05"]],
+    ["2026-01-05T00:00:00Z", [], 1, 2, ["2026-01-05"]],
+    ["2026-01-04T00:00:00Z", ["2026-01-03T20:00:00Z"], 2, 2, ["2026-01-05", "2026-01-06"]],
+    ["2026-01-05T00:00:00Z", ["2026-01-04T09:00:00Z"], 1, 2, ["2026-01-05"]]
+  ] as const).flatMap(row => ["exact", "range", "maximum"].map(quota => [quota, ...row] as const)))
+    ("spends count allowances only after phase eligibility (%s, %s, %s)", (quota, from, prior, days, total, dates) => {
+    const raw: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+        offsetDuration: { value: 3, unit: "d" } },
+      component: [{
+        doseAndRate: [{ doseRange: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+        timing: { repeat: { ...(quota === "exact" ? { count: 2 } :
+          { countMax: 2, ...(quota === "range" ? { count: 1 } : {}) }),
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+          timeOfDay: ["09:00:00"], boundsPeriod: { start: "2026-01-01" } } },
+        safety: { doseLimit: [periodLimit(2, "tab")] }
+      }]
+    }] };
+    const before = structuredClone(raw);
+    const query = { ...options, from, priorDoseTimes: [...prior], limit: 4 };
+    const fixed = structuredClone(raw);
+    fixed.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+    for (const dosage of [...surfaces(raw), ...surfaces(fixed)]) {
+      const source = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(dates.map(date => date + "T09:00:00+00:00"));
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: days,
+        durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(total);
+      expect(JSON.stringify(dosage)).toBe(source);
+    }
+    expect(raw).toEqual(before);
+    if (quota !== "exact") {
+      const sequential = structuredClone(raw);
+      sequential.step!.push({ component: [{
+        doseAndRate: [{ doseQuantity: { value: 10, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["12:00:00"] } }
+      }] });
+      // An upper allowance admits the same eligible doses but does not
+      // establish completion, so the implicit noon successor stays closed.
+      for (const dosage of surfaces(sequential)) {
+        expect(nextDueDoses(dosage, query)).toEqual(dates.map(date => date + "T09:00:00+00:00"));
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: days,
+          durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(total);
+      }
+    }
+  });
+
+  it.each([[undefined, false, 10], [3, false, 3], [3, true, 2]] as const)
+    ("rounds repeated supply within its remaining lifetime ceiling (%s, prior %s)", (maximum, recorded, expected) => {
+    const member: FhirR6Dosage = {
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } },
+      ...(maximum === undefined ? {} : { safety: { doseLimit: [{
+        scope: "lifetime", valueQuantity: { value: maximum, unit: "tab" }
+      }] } })
+    };
+    const raw: FhirR6DosageInstruction = { repeatCycle: { value: 1, unit: "d" }, step: [{ component: [member] }] };
+    const scalar: FhirR6DosageInstruction = { step: [{ component: [{ ...member,
+      timing: { repeat: { ...member.timing!.repeat!, count: undefined } }
+    }] }] };
+    const query = { ...options, ...(recorded ? { from: "2026-01-02T00:00:00Z",
+      priorDoseTimes: ["2026-01-01T09:00:00Z"] } : {}),
+      durationValue: 7, durationUnit: FhirPeriodUnit.Day,
+      context: { containerValue: 2, containerUnit: "tab" } };
+    const before = structuredClone(raw);
+    for (const dosage of [...surfaces(raw), ...surfaces(scalar)]) {
+      const source = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...query }).totalUnits).toBe(maximum === undefined ? 7 : expected);
+      expect(calculateTotalUnits({ dosage, ...query, roundToMultiple: 5 })).toMatchObject({
+        totalUnits: expected, unit: "tab", totalContainers: Math.ceil(expected / 2),
+        totalContainerQuantity: { value: expected, unit: "tab" }
+      });
+      expect(JSON.stringify(dosage)).toBe(source);
+    }
+    expect(raw).toEqual(before);
+  });
+});

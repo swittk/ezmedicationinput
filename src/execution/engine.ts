@@ -622,7 +622,7 @@ function hasDefiniteAdministrationCount(
   return repeat?.count !== undefined && (repeat.countMax === undefined || repeat.countMax === repeat.count);
 }
 /** Exact phase completion includes the implicit single immediate dose.
- * Keep the ordinary explicit-count predicate separate for count eligibility. */
+ * Upper count allowances alone never establish this completion point. */
 function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number | undefined {
   const count = repeat?.count ?? (repeat?.anchors && arrayIncludes(repeat.anchors, TimingEvent.Immediate) ? 1 : undefined);
   return count !== undefined && Number.isInteger(count) && count > 0 &&
@@ -2358,12 +2358,12 @@ function resolveAdministrationWindow(
   if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
   const delay = getAdministrationOffsetMinutes(administration);
   const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
-  // Eligibility is an actual administration boundary. A delayed one-shot
-  // after its predecessor remains eligible even when its nominal origin
-  // equals that predecessor's point; keep its count-only identity intact.
+  // Exact counts and maximum allowances belong to administrations after
+  // phase eligibility, even when their cadence is anchored earlier. Only
+  // a definite count can separately establish phase completion below.
   const countEligibilityStart =
-    eligibleFrom > durationOrigin &&
-    hasDefiniteAdministrationCount(recurrence)
+    eligibleFrom > durationOrigin && recurrence &&
+    repeatOccurrenceCap(recurrence) !== undefined
       ? eligibleFrom
       : undefined;
   let endExclusive = earlierDate(
@@ -4022,12 +4022,10 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   // Late queries filter that same N rather than consuming the old origin.
   const eligibleAt = (options as PhaseCountOptions).countEligibilityStart;
   const repeatForCount = one.schedule?.recurrence;
-  // countMax is a maximum allowance, not a finite authored sequence of
-  // administrations. Only a definite count can define a successor's phase
-  // completion and eligibility-owned count.
-  const finiteCount = hasDefiniteAdministrationCount(repeatForCount)
-    ? repeatOccurrenceCap(repeatForCount)
-    : undefined;
+  // Both exact counts and upper allowances belong to eligible doses.
+  // Phase completion remains separately restricted to definite counts.
+  const eligibleCount = eligibleAt && !one.asNeeded && repeatForCount
+    ? repeatOccurrenceCap(repeatForCount) : undefined;
   // A recurrence's total count is another allowance on ADMINISTERED doses.
   // Caps and conditional eligibility must not spend it on rejected opportunities.
   // countMax participates here as a ceiling, without becoming a phase-end
@@ -4038,7 +4036,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount) ||
        one.predicate || one.excludedDates?.length || one.excludedWeekdays?.length)
     ? repeatOccurrenceCap(repeatForCount) : undefined;
-  const acceptedCount = eligibleAt && !one.asNeeded ? finiteCount : constrainedCount;
+  const acceptedCount = eligibleCount ?? constrainedCount;
   if (acceptedCount !== undefined) {
     const requestedLimit = options.limit ?? 10;
     if (!Number.isFinite(requestedLimit) || requestedLimit <= 0) return [];
@@ -5889,7 +5887,14 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
       repeat.occurrenceDurationUnit &&
       durationMax !== duration
     ) {
-      nextRepeat = { ...nextRepeat, occurrenceDuration: durationMax,
+      // Standard duration/durationMax has the same attainable amounts as
+      // the typed range. Preserve both endpoints for the existing cap planner;
+      // this shallow supply projection never changes the authored recurrence.
+      nextRepeat = duration ? { ...nextRepeat, occurrenceDurationRange: {
+        low: { value: duration, unit: repeat.occurrenceDurationUnit,
+          ...(repeat.occurrenceDurationComparator ? { comparator: repeat.occurrenceDurationComparator } : {}) },
+        high: { value: durationMax, unit: repeat.occurrenceDurationUnit }
+      } } : { ...nextRepeat, occurrenceDuration: durationMax,
         occurrenceDurationComparator: undefined, occurrenceDurationMax: undefined };
       infusionDurationMaximum = true;
     }
@@ -5934,13 +5939,15 @@ function measureRangedSchedule(
 ): { count: number; quantity: number; times: string[] } {
   const repeat = dosage.schedule?.recurrence;
   const totalCount = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  const eligibility = (options as PhaseCountOptions).countEligibilityStart;
+  const countStart = eligibility && eligibility > origin ? eligibility : origin;
   const prior: number[] = [];
   let used = options.priorCount ?? 0;
   let countedActual: Set<number> | undefined;
   for (const stamp of options.priorDoseTimes ?? []) {
     const at = coerceDate(stamp, "priorDoseTimes").getTime();
     prior.push(at);
-    if (at >= origin.getTime() && at < from.getTime()) {
+    if (at >= countStart.getTime() && at < from.getTime()) {
       if (options.priorCount === undefined) used++;
       (countedActual ??= new Set()).add(at);
     }
@@ -5950,7 +5957,7 @@ function measureRangedSchedule(
   if (prior.length > 1) prior.sort((a, b) => a - b);
   const accept = chronologicalCapAcceptor(prior, zone, options.context);
   const begin = totalCount !== undefined && !dosage.asNeeded && options.priorCount === undefined
-    ? origin : from;
+    ? countStart : from;
   const execution: CanonicalAdministration = {
     ...dosage, limits: dosage.limits?.filter(limit => limit.scope !== "period"),
     schedule: { ...dosage.schedule, recurrence: {
@@ -6208,7 +6215,8 @@ function sumCourseUnits(
     total: TotalUnitsResult;
     unit: string | undefined;
   }>,
-  options: CanonicalSupplyOptions
+  options: CanonicalSupplyOptions,
+  lifetimeCeiling?: number
 ): TotalUnitsResult {
   let commonUnit: string | undefined;
   let zeroUnit: string | undefined;
@@ -6294,6 +6302,8 @@ function sumCourseUnits(
     totalUnits = roundCalculatedUnits(
       Math.ceil(totalUnits / options.roundToMultiple) * options.roundToMultiple
     );
+  if (lifetimeCeiling !== undefined)
+    totalUnits = roundCalculatedUnits(Math.min(totalUnits, lifetimeCeiling));
   if (scheduledUnits > 0 && totalUnits !== scheduledUnits) {
     // Each per-stage approximation describes its unrounded supply. Estimate
     // the extra dispensed units at the same combined per-unit rate; otherwise
@@ -6361,6 +6371,28 @@ function sumCourseUnits(
     }
   }
   return result;
+}
+/** The same remaining lifetime allowance bounds scalar and rounded course
+ * supply. Actual records consume it; scheduled pre-query opportunities do not. */
+function remainingLifetimeSupply(
+  dosage: CanonicalAdministration,
+  options: CanonicalSupplyOptions,
+  lifetime: CanonicalMeasure,
+  strength: ReturnType<typeof measuredStrengthRatio>,
+  actualPriorCount = options.priorDoseTimes?.length ?? 0,
+  usedQuantity = 0
+): number | undefined {
+  const operator = getQuantityComparator(lifetime);
+  if (lifetime.value === undefined || !Number.isFinite(lifetime.value) || lifetime.value < 0 ||
+      (operator && operator !== "~" && operator !== "<=")) return undefined;
+  const dose = dosage.amounts?.[0]?.quantity;
+  const doseUnit = getDoseQuantityUnit(dose), lifetimeUnit = getDoseQuantityUnit(lifetime);
+  const converted = normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnit)
+    ? lifetime.value
+    : convertValue(lifetime.value, normalizeQuantityCapUnit(lifetimeUnit), normalizeQuantityCapUnit(doseUnit), strength);
+  if (converted === null || !Number.isFinite(converted)) return undefined;
+  const knownPrior = actualPriorCount * (dose?.value ?? 0) * getAdministrationTargetMultiplier(dosage, options.context);
+  return Math.max(0, converted - knownPrior - usedQuantity);
 }
 function calculateTotalUnitsSingle(
   options: Omit<CanonicalSupplyOptions, "dosage"> & {
@@ -6435,34 +6467,12 @@ function calculateTotalUnitsSingle(
   // Applicable maxima intersect; retained incomplete bounds still explain
   // why only part of the authored constraints could be evaluated.
   let unevaluatedMaximumDose = numericLimits.multiple;
-  let lifetimeMaximum: number | undefined;
   const doseForLimits = dosage.amounts?.[0]?.quantity;
   const doseUnitForLimits = getDoseQuantityUnit(doseForLimits);
   const lifetime = numericLimits.lifetime;
-  const lifetimeOperator = getQuantityComparator(lifetime);
-  if (
-    lifetime?.value !== undefined &&
-    Number.isFinite(lifetime.value) &&
-    lifetime.value >= 0 &&
-    (!lifetimeOperator || lifetimeOperator === "~" || lifetimeOperator === "<=")
-  ) {
-    const lifetimeUnit = getDoseQuantityUnit(lifetime);
-    const converted =
-      normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnitForLimits)
-        ? lifetime.value
-        : convertValue(lifetime.value, normalizeQuantityCapUnit(lifetimeUnit), normalizeQuantityCapUnit(doseUnitForLimits), strength);
-    if (converted !== null && Number.isFinite(converted)) {
-      const knownPrior =
-        (supplyAccounting?.actualPriorCount ?? options.priorDoseTimes?.length ?? 0) *
-        (doseForLimits?.value ?? 0) *
-        getAdministrationTargetMultiplier(dosage, context);
-      lifetimeMaximum = Math.max(0, converted - knownPrior - (supplyAccounting?.usedQuantity ?? 0));
-    } else {
-      unevaluatedMaximumDose = true;
-    }
-  } else if (lifetime) {
-    unevaluatedMaximumDose = true;
-  }
+  const lifetimeMaximum = lifetime ? remainingLifetimeSupply(dosage, options, lifetime, strength,
+    supplyAccounting?.actualPriorCount, supplyAccounting?.usedQuantity) : undefined;
+  if (lifetime && lifetimeMaximum === undefined) unevaluatedMaximumDose = true;
   const perAdministration = numericLimits.administration;
   if (perAdministration) {
     const dose = dosage.amounts?.[0]?.quantity;
@@ -6571,7 +6581,7 @@ function calculateTotalUnitsSingle(
     hasPeriodLimits(dosage) ||
     !!getTimingOccurrenceCap(repeat) ||
     isWakingHoursInterval(repeat) ||
-    Boolean((options as PhaseCountOptions).countEligibilityStart && hasDefiniteAdministrationCount(repeat));
+    Boolean((options as PhaseCountOptions).countEligibilityStart);
   let count: number;
   let measuredRangeQuantity: number | undefined;
   let selectedTimes: string[] | undefined;
@@ -7427,7 +7437,22 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     : "stages" in input ? input as CanonicalCourse : undefined;
   if (course) {
     const single = scalarCourseAdministration(course);
-    if (!single) return calculateCourseTotalUnits(course, options);
+    if (!single) {
+      const member = course.stages.length === 1 && course.stages[0].administrations.length === 1
+        ? course.stages[0].administrations[0] : undefined;
+      if (options.roundToMultiple && options.roundToMultiple > 0 && member && hasLifetimeLimit(member)) {
+        const total = calculateCourseTotalUnits(course, { ...options, roundToMultiple: undefined });
+        if (total.totalUnits === 0) return total;
+        const measured = prepareMeasuredDose(prepareMaximumSupplyTiming(member, true).dosage, options);
+        const strength = measuredStrengthRatio(options.context);
+        const lifetime = numericAdministrationLimits(measured, strength, getDoseQuantityUnit).lifetime;
+        const ceiling = lifetime ? remainingLifetimeSupply(measured, options, lifetime, strength) : undefined;
+        // Round the combined course once, then apply its remaining lifetime
+        // ceiling before deriving package and approximate-quantity estimates.
+        return sumCourseUnits([{ total, unit: total.unit }], options, ceiling);
+      }
+      return calculateCourseTotalUnits(course, options);
+    }
     requireExecutableCourseContext(course, "calculating");
     const total = calculateTotalUnits({ ...options, dosage: single });
     // Scalar rounding precedes its lifetime ceiling. The course summary owns

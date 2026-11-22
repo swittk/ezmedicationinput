@@ -3539,10 +3539,14 @@ describe("round38: authored boundaries, elapsed clocks, and recorded occurrence 
       timing: { repeat: { frequency: 1, period: 1, periodUnit, timeOfDay: ["08:00:00"] } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }] };
-    const nextDay = periodUnit === FhirPeriodUnit.Day ? "02" : "08";
-    for (const dosage of representations(course)) expect(nextDueDoses(dosage, { ...opts, limit: 2 })).toEqual([
-      "2024-01-01T08:00:00+00:00", "2024-01-" + nextDay + "T08:00:00+00:00"
+    const nextDay = periodUnit === FhirPeriodUnit.Day ? "14" : "20";
+    const before = JSON.stringify(course);
+    const spring = { orderedAt: "2027-03-13T00:00:00-05:00", from: "2027-03-13T00:00:00-05:00",
+      timeZone: "America/New_York", limit: 2 };
+    for (const dosage of representations(course)) expect(nextDueDoses(dosage, spring)).toEqual([
+      "2027-03-13T08:00:00-05:00", "2027-03-" + nextDay + "T08:00:00-04:00"
     ]);
+    expect(JSON.stringify(course)).toBe(before);
   });
 
   it.each([undefined, "<=" as const, "<" as const])("distinguishes an open uncapped range maximum: %s", comparator => {
@@ -3682,7 +3686,9 @@ describe("round38: authored boundaries, elapsed clocks, and recorded occurrence 
       stage.administrations.map(member => [member.amounts?.[0].quantity?.value, member.amounts?.[0].quantity?.unit])))
       .toEqual([[[1, "tab"]], [[2, "tab"]]]);
     for (const dosage of [backwards, backwards.fhirNext, JSON.parse(JSON.stringify(backwards.fhir))])
-      expect(nextDueDoses(dosage, { ...opts, limit: 1 })).toEqual(["2024-01-01T22:00:00+00:00"]);
+      expect(nextDueDoses(dosage, { ...opts, limit: 2 })).toEqual([
+        "2024-01-01T22:00:00+00:00", "2024-01-02T06:00:00+00:00"
+      ]);
     const forwards = parseSig("Take 1 tablet at 08:00 then " + dose + " at 18:00");
     expect(forwards.meta.canonical.course!.stages).toHaveLength(1);
     expect(forwards.meta.canonical.course!.stages[0].administrations).toHaveLength(2);
@@ -4119,11 +4125,12 @@ describe("round40: inherited selectors and finite-use history", () => {
   });
 
   it.each([
-    ["2026-01-02T12:00:00Z", 2],
-    ["2026-01-02T08:00:00Z", 1]
-  ] as const)("counts actual finite-use history only after both calendar and order origins: %s", (orderedAt, remaining) => {
+    ["2026-01-02T12:00:00Z", "2026-01-01", 2],
+    ["2026-01-02T08:00:00Z", "2026-01-01", 1],
+    ["2026-01-02T08:00:00Z", "2026-01-03", 2]
+  ] as const)("counts actual finite-use history only after both calendar and order origins: %s / %s", (orderedAt, calendarStart, remaining) => {
     const scalar = clocked();
-    Object.assign(scalar.timing!.repeat!, { count: 2, boundsPeriod: { start: "2026-01-01" } });
+    Object.assign(scalar.timing!.repeat!, { count: 2, boundsPeriod: { start: calendarStart } });
     scalar.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab" },
       denominator: { value: 24, unit: "h", code: "h", system: "http://unitsofmeasure.org" } }];
     const source = toDosageDetails([scalar]), before = JSON.stringify(source);
