@@ -4946,12 +4946,13 @@ export function realizeInstructionGraph(
     if (position === "pre") return end <= primary.start;
     return start >= primary.start;
   };
-  const frames: AdviceFrame[] = [];
+  const frames: number[] = [];
   const conditionTargets = new Map<number | undefined, AdviceFrame>();
   let displayedAmountOwner = amountOwner;
-  for (const sourceFrame of graph.actions) {
+  for (let actionIndex = 0; actionIndex < graph.actions.length; actionIndex += 1) {
+    const sourceFrame = graph.actions[actionIndex];
     if (sourceFrame === options?.omitRenderedAction) {
-      if (!options?.onlyWarnings) conditionTargets.set(sourceFrame.sequenceIndex, sourceFrame);
+      if (!options?.onlyWarnings) conditionTargets.set(actionIndex, sourceFrame);
       continue;
     }
     const ownsPrimary = primaryAction >= 0
@@ -4959,7 +4960,7 @@ export function realizeInstructionGraph(
     const frame = ownsPrimary && options?.omitCanonicalAdministration
       ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
     if (sourceFrame === amountOwner) displayedAmountOwner = frame;
-    const inPosition = inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex);
+    const inPosition = inRequestedPosition(frame.span.start, frame.span.end, actionIndex);
     // A preposed condition can precede its canonically rendered primary
     // action. Resolve that one target even when the action is outside PRE.
     if (!inPosition && !(position === "pre" && primaryAction >= 0 &&
@@ -4984,7 +4985,7 @@ export function realizeInstructionGraph(
       // conditional relation. Keep the target without emitting the action twice.
       if (!options?.onlyWarnings &&
           !(options?.includeWarnings === false && frame.polarity === AdvicePolarity.Negate))
-        conditionTargets.set(frame.sequenceIndex, frame);
+        conditionTargets.set(actionIndex, frame);
       continue;
     }
     if (!inPosition) continue;
@@ -5003,8 +5004,8 @@ export function realizeInstructionGraph(
     }
     const warning = frame.polarity === AdvicePolarity.Negate;
     if (options?.onlyWarnings ? !warning : options?.includeWarnings === false && warning) continue;
-    frames.push(frame);
-    conditionTargets.set(frame.sequenceIndex, frame);
+    frames.push(actionIndex);
+    conditionTargets.set(actionIndex, frame);
   }
   const localeAdapter = getInstructionActionLocaleAdapter(locale);
   const nodes: Array<{
@@ -5019,7 +5020,8 @@ export function realizeInstructionGraph(
   const targetLanguage = baseLanguageTag(locale) ?? locale.toLowerCase();
   const sourceLocale = graph.sourceLocale ?? "en";
   const sourceLanguage = baseLanguageTag(sourceLocale) ?? sourceLocale.toLowerCase();
-  for (const sourceFrame of frames) {
+  for (const actionIndex of frames) {
+    const sourceFrame = conditionTargets.get(actionIndex)!;
     const currentDose = options?.omitCanonicalAdministration?.dose;
     const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
       primaryActionAmountConflicts(sourceFrame, currentDose,
@@ -5052,7 +5054,7 @@ export function realizeInstructionGraph(
         end: frame.span.end,
         text,
         understood: true,
-        actionIndex: frame.sequenceIndex,
+        actionIndex,
         warning: frame.force === AdviceForce.Warning || frame.force === AdviceForce.Caution ||
           frame.polarity === AdvicePolarity.Negate
       });

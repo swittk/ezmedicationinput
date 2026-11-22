@@ -1197,12 +1197,12 @@ export function timingCodeMatchesRecurrence(
   if (interval?.when?.length && schedule.when?.length &&
       (interval.when.length !== schedule.when.length ||
        schedule.when.some((event, index) => event !== interval.when![index]))) return false;
-  if (daily === undefined && interval?.period === undefined) {
+  if (daily === undefined && !interval) {
     // Free text is not a recurrence abbreviation. Typed cadence owns the
     // preview while the authored label stays on the source timing.
-    return Boolean(interval) || (schedule.frequency === undefined &&
+    return schedule.frequency === undefined &&
       schedule.frequencyMax === undefined && schedule.period === undefined &&
-      schedule.periodMax === undefined && schedule.periodUnit === undefined);
+      schedule.periodMax === undefined && schedule.periodUnit === undefined;
   }
   const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
   const period = code === "QOD" ? 2 : interval?.period ?? 1;

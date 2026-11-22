@@ -97,8 +97,12 @@ export function registerMedicationDateResolver(resolver: MedicationDateResolver)
   normalized.id = id;
   const prototype = Object.getPrototypeOf(resolver);
   if (prototype !== Object.prototype && prototype !== null) {
-    normalized.resolveYear = resolver.resolveYear.bind(resolver);
-    normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
+    // Own methods already run against the copied configuration. Prototype
+    // methods need the original instance for private fields.
+    if (!Object.prototype.hasOwnProperty.call(resolver, "resolveYear"))
+      normalized.resolveYear = resolver.resolveYear.bind(resolver);
+    if (!Object.prototype.hasOwnProperty.call(resolver, "calendarYearFromIsoYear"))
+      normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
   }
   DATE_RESOLVERS.set(id, normalized);
 }

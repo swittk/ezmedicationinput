@@ -1135,7 +1135,8 @@ export function formatCanonicalCourse(
     if (!step.end && index + 1 < oneOrCourse.stages.length) {
       const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
         : startDays === undefined ? undefined : { value: startDays, unit: "d" };
-      const point = courseBoundaryPoint(quantity, startAnchor, words, cycleStart) ??
+      const point = treatmentBoundaryRangeText(step.start, words, cycleStart) ??
+        courseBoundaryPoint(quantity, startAnchor, words, cycleStart) ??
         (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words, cycleStart) : undefined);
       if (point) timing = point;
     }
