@@ -3069,9 +3069,12 @@ describe("round37 finite-phase history and eligibility ownership", () => {
     expect(JSON.stringify(input)).toBe(before);
   });
 
-  it.each(versions)("starts finite count at eligibility while retaining an earlier recurrence origin (%s)", version => {
+  it.each(versions.flatMap(version => ["exact", "range", "maximum"].map(quota => [version, quota] as const)))
+    ("starts finite count at eligibility while retaining an earlier recurrence origin (%s, %s)", (version, quota) => {
     for (const period of [1, 2]) for (const stageStart of [0, 3]) {
-      const member = counted(2); member.limits = undefined;
+      const member = counted(quota === "range" ? 1 : 2); member.limits = undefined;
+      if (quota !== "exact") member.schedule!.recurrence!.countMax = 2;
+      if (quota === "maximum") delete member.schedule!.recurrence!.count;
       member.phaseStart = relative(0);
       member.schedule!.recurrence!.period = period;
       member.schedule!.recurrence!.clocks = ["09:00:00"];

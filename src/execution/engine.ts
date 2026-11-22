@@ -2358,11 +2358,11 @@ function resolveAdministrationWindow(
   if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
   const delay = getAdministrationOffsetMinutes(administration);
   const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
-  // Explicit component origins survive unrelated global step cuts. Those
-  // cuts clip membership, not the component's total count allowance. Its own
-  // calendar start still constrains count history; an unmarked delayed phase
-  // instead owns the resolved stage eligibility.
-  const countFloor = cadence.hasPhaseOrigin && stage.start
+  // A scalar parallel phaseOrigin survives unrelated global step cuts.
+  // A relative phaseStart still honors later stage eligibility and takes
+  // precedence over that marker, just as it does for cadence resolution.
+  // A component calendar start remains a floor for its count history.
+  const countFloor = cadence.hasPhaseOrigin && !administration.phaseStart && stage.start
     ? absoluteStart && absoluteStart > durationOrigin ? absoluteStart : durationOrigin
     : eligibleFrom;
   const countEligibilityStart =
