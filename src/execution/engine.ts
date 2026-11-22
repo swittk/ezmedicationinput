@@ -4251,10 +4251,17 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
     ? { start: TimingEvent.Wake, end: TimingEvent["Before Sleep"] }
     : undefined;
 }
+/** A clockless daily dose shares the established explicit-window origin.
+ * Authored dose clocks and event anchors keep their existing precedence. */
+function usesClockWindowCadence(repeat: CanonicalRecurrence): boolean {
+  return usesIntervalCadence(repeat) ||
+    repeat.frequency === 1 && repeat.period === 1 && repeat.periodUnit === DurationUnit.Day &&
+      !repeat.clocks?.length && !repeat.anchors?.length;
+}
 function isWakingHoursInterval(repeat: CanonicalRecurrence | undefined): boolean {
   return (
     intervalEventWindow(repeat) !== undefined ||
-    Boolean(getTimingClockWindow(repeat) && repeat && usesIntervalCadence(repeat))
+    Boolean(getTimingClockWindow(repeat) && repeat && usesClockWindowCadence(repeat))
   );
 }
 /** Execute WAKE as the daily recurrence origin and HS as the exclusive end of
@@ -4272,7 +4279,8 @@ function generateWakingHoursIntervalSeries(
   calendarDays: CalendarDaySelection | undefined
 ): string[] | undefined {
   const window = intervalEventWindow(repeat);
-  const clockWindow = usesIntervalCadence(repeat) ? getTimingClockWindow(repeat) : undefined;
+  const suppliedClockWindow = getTimingClockWindow(repeat);
+  const clockWindow = suppliedClockWindow && usesClockWindowCadence(repeat) ? suppliedClockWindow : undefined;
   if (!window && !clockWindow) return undefined;
   const wakeValue = clockWindow?.start ?? (window && config.eventClock?.[window.start]);
   const sleepValue = clockWindow?.end ?? (window && config.eventClock?.[window.end]);

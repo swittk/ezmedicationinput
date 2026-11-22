@@ -2893,3 +2893,26 @@ describe("round 42 execution phase and history ownership", () => {
     expect(raw).toEqual(before);
   });
 });
+
+
+describe("round 42 clockless daily window", () => {
+  it.each([
+    ["Take 1 tablet daily between 18:00 and 20:00 for 7 days", ["18:00:00"], 7],
+    ["Take 1 tablet daily for 7 days", ["09:00:00"], 7],
+    ["Take 1 tablet every 3 hours between 07:00 and 19:00 for 7 days",
+      ["07:00:00", "10:00:00", "13:00:00", "16:00:00", "19:00:00"], 35]
+  ] as const)("uses the established clock origin for %s", (source, clocks, total) => {
+    const parsed = parseSig(source);
+    const before = JSON.stringify(parsed);
+    const expected = Array.from({ length: 7 }, (_, day) =>
+      clocks.map(clock => "2026-12-0" + (day + 1) + "T" + clock + "+00:00")).flat();
+    const context = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC" };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+        JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, { ...context, limit: 40 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...context,
+        durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(total);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});
