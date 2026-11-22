@@ -1572,11 +1572,7 @@ function administrationToWire(
   );
   const oldSite = a.provenance?.format === "r6" ? (output.site as object) : a.provenance?.retained?.site;
   let concept: FhirCodeableConcept | undefined = clause ? context?.site : a.target;
-  const oldTarget =
-    a.provenance?.format === "r6"
-      ? (a.provenance.data as FhirR6Dosage).site?.concept
-      : a.provenance?.retained?.site?.concept;
-  if (!clause && a.targetCount !== getBodySiteAdministrationTargetCount(oldTarget)) {
+  if (!clause && a.targetCount !== getBodySiteAdministrationTargetCount(concept)) {
     const marker = buildBodySiteAdministrationTargetCountExtension(a.targetCount);
     const extensions = (concept?.extension ?? []).filter(
       (e) => e.url !== BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL

@@ -1519,10 +1519,10 @@ function reconcileNativeRetainedCourse(
       const oldIndex = assigned[j];
       const old = oldIndex >= 0 ? step.component[oldIndex] : undefined;
       const baseline = old ? sourceMember(old, sequence).row : undefined;
-      const rawEqual =
-        old !== undefined &&
-        baseline !== undefined &&
-        equalStructuredValues(liveDosageProjection(baseline), liveDosageProjection(dosage));
+      const oldProjection = baseline && liveDosageProjection(baseline);
+      const currentProjection = baseline && liveDosageProjection(dosage);
+      const rawEqual = oldProjection !== undefined && equalStructuredValues(oldProjection, currentProjection);
+      const clinicallyEqual = rawEqual || oldProjection !== undefined && equivalentProjection(oldProjection, currentProjection);
       const expanded = dosage as EzDosage;
       const datesEqual =
         old !== undefined &&
@@ -1545,7 +1545,7 @@ function reconcileNativeRetainedCourse(
       // An explicitly supplied editable expression still owns its current
       // meaning; only an absent strict-R5 field can inherit the saved source.
       let expressionsEqual = true;
-      if (old && rawEqual)
+      if (old && clinicallyEqual)
         for (let index = 0; index < (expanded.doseAndRate?.length ?? 0); index++) {
           const liveEntry = expanded.doseAndRate![index];
           const oldEntry = old.doseAndRate?.[index];
@@ -1557,7 +1557,7 @@ function reconcileNativeRetainedCourse(
             break;
           }
         }
-      if (!rawEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
+      if (!clinicallyEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
         structuredChanged = true;
       if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual) {
         components.push(sourceMember(old, sequence).native);

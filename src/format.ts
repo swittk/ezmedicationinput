@@ -10,11 +10,11 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import type { SigLocalization, SigLongContext, SigShortContext, SigDoseScope } from "./i18n";
+import { isBuiltinSigFormatter, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
-import { medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
+import { cloneMedicationInstructionActionDefinition, medicationInstructionActionLocaleRealizerConfig, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "./instruction-action-terminology";
 import { baseLanguageTag, quantityComparatorText } from "./localization";
 import { getMedicationInstructionConcept } from "./instruction-concept-terminology";
 import {
@@ -875,7 +875,9 @@ function buildRoutePhrase(
 
 function renderSpatialSiteEnglish(
   relation: BodySiteSpatialRelation | undefined,
-  grammar: RouteGrammar
+  grammar: RouteGrammar,
+  targetCount: number | undefined,
+  words: CourseLanguage
 ): string | undefined {
   if (!relation?.relationText) {
     return undefined;
@@ -885,8 +887,10 @@ function renderSpatialSiteEnglish(
     return undefined;
   }
   const resolvedTarget = resolveBodySitePhrase(rawTarget);
-  const target = resolvedTarget?.englishObjectText ??
+  let target = resolvedTarget?.englishObjectText ??
     `the ${rawTarget.charAt(0).toLowerCase()}${rawTarget.slice(1)}`;
+  if (targetCount !== undefined && targetCount > 1 && targetCount !== resolvedTarget?.definition?.administrationTargetCount)
+    target += " (" + words.applicationSites(targetCount) + ")";
   const realization = getBodySiteRelationRealization(relation.relationText, "en");
   if (!realization) return undefined;
   if (realization.strategy === "prefix") {
@@ -935,7 +939,7 @@ function formatSite(
   const spatial = clause.site?.spatialRelation;
   const targetText = (spatial?.targetText ?? spatial?.targetCoding?.display)?.trim();
   if (!text || targetText && text.toLowerCase() === targetText.toLowerCase()) {
-    const spatialSite = renderSpatialSiteEnglish(spatial, grammar);
+    const spatialSite = renderSpatialSiteEnglish(spatial, grammar, clause.site?.administrationTargetCount, words);
     if (spatialSite) {
       return appendSiteRestrictionsEnglish(clause, spatialSite);
     }
@@ -2105,7 +2109,8 @@ export function formatCanonicalClause(
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
-      resolvedMethod
+      resolvedMethod: resolvedMethod && !isBuiltinSigFormatter(localization.formatShort)
+        ? cloneMedicationInstructionActionDefinition(resolvedMethod) : resolvedMethod
     };
     return localization.formatShort(context);
   }
@@ -2123,7 +2128,8 @@ export function formatCanonicalClause(
         (options?.realizationMode === "roundtrip" ? "trailing" : "natural"),
       formatDefault,
       instructionActionMap: options?.instructionActionMap,
-      resolvedMethod
+      resolvedMethod: resolvedMethod && !isBuiltinSigFormatter(localization.formatLong)
+        ? cloneMedicationInstructionActionDefinition(resolvedMethod) : resolvedMethod
     };
     return localization.formatLong(context);
   }

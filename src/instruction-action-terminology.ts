@@ -299,7 +299,7 @@ function cloneContinuationLicenses(
   }));
 }
 
-function cloneDefinition(
+export function cloneMedicationInstructionActionDefinition(
   definition: MedicationInstructionActionDefinition
 ): MedicationInstructionActionDefinition {
   return {
@@ -541,7 +541,7 @@ export function resolveMedicationInstructionActionWithCodeFallback(
   includeCode = true
 ): MedicationInstructionActionDefinition | undefined {
   const definition = resolveMedicationInstructionAction(surface, options, includeCode);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
 }
 
 /** Resolve a declared administration method by exact code identity. Known
@@ -668,18 +668,18 @@ export function getMedicationInstructionActionCopy(
   code: string, options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   const definition = getMedicationInstructionAction(code, options);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
 }
 
 export function listMedicationInstructionActionCopies(): MedicationInstructionActionDefinition[] {
-  return DEFAULT_ACTIONS.map(cloneDefinition);
+  return DEFAULT_ACTIONS.map(cloneMedicationInstructionActionDefinition);
 }
 
 export function resolveMedicationInstructionSequenceActionCopy(
   surface: string, options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   const definition = resolveMedicationInstructionSequenceAction(surface, options);
-  return definition ? cloneDefinition(definition) : undefined;
+  return definition ? cloneMedicationInstructionActionDefinition(definition) : undefined;
 }
 
 /** A CodeSystem snapshot is a public value, not mutable global schema.

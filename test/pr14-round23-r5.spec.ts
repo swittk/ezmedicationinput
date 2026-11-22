@@ -9,6 +9,7 @@ import {
   type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
+  registerSigLocalization, getMedicationInstructionAction,
   formatCanonicalCourse, formatSigBatch, formatParseBatch, suggestSig,
   buildInstructionGraphExtension, parseInstructionGraphExtension, AdviceForce, AdviceArgumentRole,
   type CanonicalInstructionGraph,
@@ -36,6 +37,7 @@ import {
 } from "../src/fhir";
 import { courseToR6, courseFromR6, courseToR5, administrationFromR5, boundaryToWire, R5_SOURCE_ONLY_MAXIMUM_URL } from "../src/adapters/canonical-course";
 import { courseFromR5 } from "../src/adapters/r5-import";
+import type { SigFormatContext } from "../src/i18n";
 import { R6_DRAFT_STEPS_SOURCE_URL, R6_SINGLE_STEP_SAFETY_SOURCE_URL, R6_SCOPED_SAFETY_MODIFIER_URL } from "../src/adapters/r6-editable-metadata";
 
 import { numericAdministrationLimits, type CanonicalCourse } from "../src/canonical/course";
@@ -7057,9 +7059,8 @@ describe("round45 public interop preservation", () => {
       for (const text of [formatSig(row, "long", options), formatSig(persist(row), "long", options),
         formatSig(r6, "long", options), formatSig(saved, "long", options)]) {
         expect(text).toContain(locale === "en" ? "above the ear" : "เหนือหู");
-        expect(text).not.toContain("below");
-        expect(text).toContain("1 g");
-        expect(text).toContain("2 g");
+        expect(text).not.toContain(locale === "en" ? "below" : "ใต้หู");
+        expect(text.match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*g\b/g)).toEqual(["1 g", "2 g"]);
       }
     }
     expect(row).toEqual(edited);
@@ -7117,5 +7118,162 @@ describe("round45 public interop preservation", () => {
       expect(wire.step![0].component[0].timing!.repeat!.boundsDuration)
         .toEqual({ value: edit === "duration" ? 10 : 7, unit: "d", ...(edit === "id" ? { id: "authored-duration" } : {}) });
     }
+  });
+});
+
+
+describe("round46 public display and pause ownership", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const boundary = (value: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value, unit: "d" } });
+  const member = (id: string, value: number, repeat: NonNullable<FhirR6Timing["repeat"]> = daily): FhirR6Dosage => ({
+    id, doseAndRate: [{ doseQuantity: q(value) }], timing: { repeat: persist(repeat) },
+  });
+
+  it.each([
+    { style: "short", registered: false }, { style: "long", registered: false },
+    { style: "short", registered: true }, { style: "long", registered: true },
+  ] as const)("isolates $style callback vocabulary (registered=$registered)", ({ style, registered }) => {
+    const before = getMedicationInstructionAction("take")!;
+    const thai = parseSig("Take 1 tablet daily", { locale: "th" }).longText;
+    const exposed: Array<NonNullable<SigFormatContext["resolvedMethod"]>> = [];
+    const callback = (context: SigFormatContext) => {
+      if (context.resolvedMethod) {
+        exposed.push(context.resolvedMethod);
+        context.resolvedMethod.i18n!.th = "Local display only";
+      }
+      return context.defaultText;
+    };
+    const localization = { locale: "round46-callback-" + style + "-" + registered,
+      ...(style === "short" ? { formatShort: callback } : { formatLong: callback }) };
+    try {
+      if (registered) registerSigLocalization(localization);
+      parseSig("Take 1 tablet daily", { instructionActionMap: {},
+        ...(registered ? { locale: localization.locale } : { i18n: localization }) });
+      expect(exposed.length).toBeGreaterThan(0);
+      expect(exposed[0].i18n!.th).toBe("Local display only");
+      expect(getMedicationInstructionAction("take")).toEqual(before);
+      expect(parseSig("Take 1 tablet daily", { locale: "th" }).longText).toBe(thai);
+      expect(parseSig("Take 1 tablet daily", {
+        instructionActionMap: {}, i18n: { inherit: "th" },
+      }).longText).toBe(thai);
+    } finally {
+      for (const definition of exposed) definition.i18n!.th = before.i18n!.th;
+    }
+  });
+
+  it.each(["unchanged", "last-start", "first-duration"] as const)("retains independently owned pauses after a %s edit", edit => {
+    const note = { url: "urn:test:pause-note", id: "authored-pause-note", valueString: "second planned pause" };
+    let wire = r6Save({ step: [
+      { id: "induction", component: [member("initial", 1, { ...daily, boundsDuration: { value: 7, unit: "d" } })] },
+      { id: "pause-a", end: boundary(14), component: [] },
+      { id: "resume-a", component: [member("middle", 2, { ...daily, boundsDuration: { value: 7, unit: "d" } })] },
+      { id: "pause-b", end: boundary(28), extension: [note], component: [] },
+      { id: "resume-b", component: [member("last", 3)] },
+    ] });
+    if (edit === "last-start") wire.step!.find(step => step.id === "resume-b")!.start = boundary(30);
+    if (edit === "first-duration") wire.step![0].component[0].timing!.repeat!.boundsDuration!.value = 10;
+    const expectedIds = edit === "last-start" ? ["induction", "pause-a", "resume-a", "resume-b"]
+      : edit === "first-duration" ? ["induction", "resume-a", "pause-b", "resume-b"]
+      : ["induction", "pause-a", "resume-a", "pause-b", "resume-b"];
+    for (let save = 0; save < 3; save++) {
+      const before = persist(wire), view = fromDosageDetails(wire);
+      expect(view.course.step?.map(step => step.id)).toEqual(expectedIds);
+      expect(view.course.step?.find(step => step.id === "resume-a")?.start)
+        .toEqual(edit === "first-duration" ? boundary(14) : undefined);
+      expect(view.course.step?.find(step => step.id === "resume-b")?.start)
+        .toEqual(edit === "last-start" ? boundary(30) : undefined);
+      expect(wire.step!.map(step => step.component[0].doseAndRate![0].doseQuantity!.value)).toEqual([1, 2, 3]);
+      expect(JSON.stringify(wire)).toContain("second planned pause");
+      expect(JSON.stringify(wire)).toContain("authored-pause-note");
+      expect(wire).toEqual(before);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+  });
+
+  it.each(["unchanged", "id", "end"] as const)("keeps a fixed-period pause across a Period %s edit", edit => {
+    const period = { start: "2026-11-21", end: "2026-11-27" };
+    let wire = r6Save({ step: [
+      { id: "induction", component: [member("initial", 1, { ...daily, boundsPeriod: period })] },
+      { id: "pause", end: boundary(14), component: [] },
+      { id: "resume", component: [member("later", 2)] },
+    ] });
+    const current = wire.step![0].component[0].timing!.repeat!.boundsPeriod!;
+    if (edit === "id") current.id = "authored-period";
+    if (edit === "end") current.end = "2026-11-30";
+    const expectedPeriod = persist(current);
+    for (let save = 0; save < 3; save++) {
+      const before = persist(wire), view = fromDosageDetails(wire);
+      expect(view.course.step?.map(step => step.id)).toEqual(edit === "end"
+        ? ["induction", "resume"] : ["induction", "pause", "resume"]);
+      expect(wire).toEqual(before);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      expect(wire.step![0].component[0].timing!.repeat!.boundsPeriod).toEqual(expectedPeriod);
+    }
+  });
+
+  it.each(["unchanged", "version", "dose"] as const)("preserves historical instruction agreement after a %s edit", edit => {
+    const text = "Take 1 tablet orally daily per the agreed plan.";
+    const route = { id: "authored-route", coding: [{ system: "http://snomed.info/sct", code: "26643006",
+      display: "Oral route", id: "route-coding", _code: { id: "route-code" },
+      extension: [{ url: "urn:test:route-note", valueString: "keep route annotation" }],
+    }] };
+    const timing = { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } };
+    const row: FhirDosage = { id: "historical", sequence: 1, text: "Take 1 tablet orally daily.", route: persist(route),
+      doseAndRate: [{ doseQuantity: q(1) }], timing, modifierExtension: [{
+        url: DOSAGE_DETAILS_R5_URL, extension: [{ url: "dosageDetails", extension: [
+          { url: "renderedInstruction", valueString: text }, { url: "step", extension: [{ url: "component", extension: [
+            { url: "id", valueString: "historical" }, { url: "text", valueString: "Take 1 tablet orally daily." },
+            { url: "route", valueCodeableConcept: persist(route) },
+            { url: "doseAndRate", extension: [{ url: "doseQuantity", valueQuantity: q(1) }] },
+            { url: "timing", valueTiming: timing },
+          ] }] },
+        ] }],
+      }] };
+    if (edit !== "unchanged") row.route!.coding![0].version = "2026-11";
+    if (edit === "dose") row.doseAndRate![0].doseQuantity!.value = 2;
+    const expectedRoute = persist(row.route);
+    let rows = persist([row]);
+    for (let save = 0; save < 3; save++) {
+      const before = persist(rows), wire = toDosageDetails(rows);
+      expect(wire.renderedInstruction).toBe(edit === "dose" ? undefined : text);
+      expect(wire.step![0].component[0].route).toEqual(expectedRoute);
+      expect(wire.step![0].component[0].doseAndRate).toEqual([{ doseQuantity: q(edit === "dose" ? 2 : 1) }]);
+      expect(JSON.stringify(wire)).toContain(text);
+      expect(rows).toEqual(before);
+      rows = persist(toFhirR5Dosages(wire));
+    }
+  });
+
+  it.each([undefined, 3])("retains an authored spatial application count (%s)", count => {
+    const ear = { text: "ear", coding: [{ system: "http://snomed.info/sct", code: "117590005", display: "Ear-related structure" }] };
+    const countMarker = { url: "urn:ezmedicationinput:body-site-administration-target-count", id: "authored-count",
+      valueInteger: count, _valueInteger: { id: "count-value" } };
+    const source: FhirDosage = { method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      timing: { repeat: daily }, site: { ...persist(ear), extension: [{
+        url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
+          { url: "relationText", valueString: "below" }, { url: "target", valueCodeableConcept: persist(ear) },
+        ],
+      }, ...(count === undefined ? [] : [countMarker])] },
+    };
+    const before = persist(source), wire = toDosageDetails([source]), rows = persist(toFhirR5Dosages(wire));
+    for (const input of [source, wire, rows]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain(count === undefined ? "below the ear." : "below the ear (across 3 sites).");
+      expect(text.match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)\s*g\b/g)).toEqual(["1 g"]);
+      if (count === undefined) expect(text).not.toContain("across");
+    }
+    expect(wire.step![0].component[0].site?.concept).toEqual(source.site);
+    expect(rows[0].site).toEqual(source.site);
+    if (count !== undefined) {
+      rows[0].site!.extension!.find(item => item.url === countMarker.url)!.valueInteger = 4;
+      const edited = toDosageDetails(rows), saved = persist(toFhirR5Dosages(edited));
+      expect(edited.step![0].component[0].site?.concept?.extension)
+        .toContainEqual({ ...countMarker, valueInteger: 4 });
+      expect(saved[0].site?.extension).toContainEqual({ ...countMarker, valueInteger: 4 });
+      expect(formatSig(edited, "long", { locale: "en" })).toContain("below the ear (across 4 sites).");
+    }
+    expect(source).toEqual(before);
   });
 });

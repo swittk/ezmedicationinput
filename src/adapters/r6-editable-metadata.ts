@@ -75,16 +75,17 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
     const { id: _durationId, ...duration } = repeat.boundsDuration;
     repeat.boundsDuration = duration;
   }
+  if (repeat.boundsPeriod?.id !== undefined) {
+    const { id: _periodId, ...period } = repeat.boundsPeriod;
+    repeat.boundsPeriod = period;
+  }
   return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
 }
-function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
-  drafts: readonly { index: number }[]): boolean {
+function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
+  drafts: readonly { index: number }[]): boolean | Set<number> {
   if (!Array.isArray(saved)) return false;
-  // Only earlier phases establish a draft completion, and its immediate
-  // successor receives that boundary. Later tail edits do not own the draft.
   const lastDraftPredecessor = drafts.length ? drafts[drafts.length - 1].index - drafts.length : -1;
   const lastDraftOwner = lastDraftPredecessor + 1;
-  if (active.length < Math.min(saved.length, lastDraftOwner + 1)) return false;
   // Unchanged projections need no identity index or boundary hashes. Remember
   // the compared prefix so reconciliation never deep-walks those stages twice.
   let firstChanged = 0;
@@ -92,7 +93,9 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     firstChanged++;
   if (firstChanged === saved.length && active.length === saved.length) return true;
   const identities = new Map<string, number>();
-  const changed: string[] = [];
+  const ownerIdentities: Array<string | undefined> = [];
+  const validOwners = new Set<number>();
+  const changed: number[] = [];
   const firstIsTreatmentOrigin = drafts[0]?.index !== 0;
   const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
     step.start || step.end ? "boundary:" + compactProjectionFingerprint({
@@ -101,33 +104,54 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
   for (let index = 0; index < saved.length; index++) {
     const prior = saved[index], current = active[index];
     const identity = identityOf(prior, index);
+    ownerIdentities[index] = identity;
     const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
-    if (index > lastDraftOwner || index < firstChanged ||
-        index > firstChanged && equalStructuredValues(prior, current)) continue;
-    if (identity === undefined || prior.id !== current.id || prior.count !== current.count ||
+    if (index > lastDraftOwner) continue;
+    if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) {
+      validOwners.add(index);
+      continue;
+    }
+    if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||
         !equalStructuredValues(prior.end, current.end) ||
-        needsMembers && prior.component.length !== current.component.length) return false;
+        needsMembers && prior.component.length !== current.component.length) continue;
     // A phase can finish through its member timing (count, duration or bounds)
     // without an explicit step.end. Dose edits leave that declared completion.
     // A uniquely identified successor owns its boundary independently of
     // newly added concurrent doses. Earlier/anonymous owners still need members.
+    let membersMatch = true;
     for (let member = 0; needsMembers && member < prior.component.length; member++)
       if (prior.component[member].id !== current.component[member].id ||
           !prior.end && index <= lastDraftPredecessor && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
-            draftCompletionTiming(current.component[member].timing)))
-        return false;
-    changed.push(identity);
+            draftCompletionTiming(current.component[member].timing))) {
+        membersMatch = false;
+        break;
+      }
+    if (!membersMatch) continue;
+    validOwners.add(index);
+    changed.push(index);
   }
-  for (const identity of changed) if (identities.get(identity) !== 1) return false;
-  // Appending a later phase leaves earlier draft indices intact. A duplicate
-  // owner in the appended tail makes that retained ownership ambiguous.
+  for (const index of changed) if (identities.get(ownerIdentities[index]!) !== 1) validOwners.delete(index);
+  // Appending a later phase leaves earlier draft indices intact. A duplicated
+  // owner in that tail invalidates only pauses belonging to that owner.
+  const duplicatedInTail = new Set<string>();
   for (let index = saved.length; index < active.length; index++) {
     const identity = identityOf(active[index], index);
-    if (identity !== undefined && identities.has(identity)) return false;
+    if (identity !== undefined && identities.has(identity)) duplicatedInTail.add(identity);
   }
-  return true;
+  if (duplicatedInTail.size)
+    for (const index of validOwners)
+      if (duplicatedInTail.has(ownerIdentities[index]!)) validOwners.delete(index);
+  // A changed later boundary cannot erase an earlier independently owned pause.
+  // Each saved draft uses its original active predecessor and receiver indices.
+  const retained = new Set<number>();
+  for (let index = 0; index < drafts.length; index++) {
+    const predecessor = drafts[index].index - index - 1, receiver = predecessor + 1;
+    if ((predecessor < 0 || validOwners.has(predecessor)) &&
+        (receiver >= saved.length || validOwners.has(receiver))) retained.add(index);
+  }
+  return retained.size === drafts.length ? true : retained;
 }
 
 /** Restore inactive editable stages while their active phase owners and
@@ -142,14 +166,19 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
       projected: FhirR6DosageStep[];
       synthesizedStarts?: number[];
     } | undefined;
-    if (!saved || !Array.isArray(saved.drafts) || !sameDraftStageOwnership(active, saved.projected, saved.drafts)) return active;
+    if (!saved || !Array.isArray(saved.drafts)) return active;
+    const ownership = matchingDraftOwnership(active, saved.projected, saved.drafts);
+    if (ownership === false || ownership !== true && !ownership.size) return active;
     const restored: FhirR6DosageStep[] = [];
     const inferred = new Set(saved.synthesizedStarts ?? []);
+    if (ownership !== true)
+      for (let index = 0; index < saved.drafts.length; index++)
+        if (!ownership.has(index)) inferred.delete(saved.drafts[index].index - index);
     let draft = 0, member = 0;
     for (let index = 0; index < active.length + saved.drafts.length; index++) {
       const next = saved.drafts[draft];
       if (next?.index === index) {
-        restored.push({ ...next.step, component: [] });
+        if (ownership === true || ownership.has(draft)) restored.push({ ...next.step, component: [] });
         draft++;
       } else if (member < active.length) {
         if (inferred.has(member)) {

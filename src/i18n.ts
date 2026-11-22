@@ -139,6 +139,26 @@ const THAI_ADMINISTRATION_WINDOW_TRANSLATIONS = new Map(
     .map((entry) => [entry.text.toLowerCase().trim(), entry.i18n!.th!] as const)
 );
 
+type SigFormatter = NonNullable<SigLocalization["formatShort"] | SigLocalization["formatLong"]>;
+const BUILTIN_SIG_FORMATTERS = new WeakSet<SigFormatter>();
+
+/** Custom callbacks receive detached vocabulary; bundled callbacks only read it. */
+export function isBuiltinSigFormatter(formatter: SigFormatter): boolean {
+  return BUILTIN_SIG_FORMATTERS.has(formatter);
+}
+
+function bindSigFormatter<T extends SigFormatter>(formatter: T, owner: object): T {
+  const bound = formatter.bind(owner) as T;
+  if (isBuiltinSigFormatter(formatter)) BUILTIN_SIG_FORMATTERS.add(bound);
+  return bound;
+}
+
+function registerBuiltinSigLocalization(localization: SigLocalization): void {
+  if (localization.formatShort) BUILTIN_SIG_FORMATTERS.add(localization.formatShort);
+  if (localization.formatLong) BUILTIN_SIG_FORMATTERS.add(localization.formatLong);
+  registerSigLocalization(localization);
+}
+
 const REGISTERED_LOCALIZATIONS = new Map<string, SigLocalization>();
 // An inherited regional view is valid while BOTH its exact registration and
 // base registration still have the same identity. No invalidation walk or
@@ -173,8 +193,10 @@ function registeredLocalization(key: string | undefined): SigLocalization | unde
   const resolved: SigLocalization = {
     locale: exact.locale,
     formatDose: exact.formatDose?.bind(exact) ?? base.formatDose?.bind(base),
-    formatShort: exact.formatShort?.bind(exact) ?? base.formatShort?.bind(base),
-    formatLong: exact.formatLong?.bind(exact) ?? base.formatLong?.bind(base),
+    formatShort: exact.formatShort ? bindSigFormatter(exact.formatShort, exact)
+      : base.formatShort ? bindSigFormatter(base.formatShort, base) : undefined,
+    formatLong: exact.formatLong ? bindSigFormatter(exact.formatLong, exact)
+      : base.formatLong ? bindSigFormatter(base.formatLong, base) : undefined,
     course: exact.course ?? base.course,
   };
   RESOLVED_REGIONAL_LOCALIZATIONS.set(key, {
@@ -224,8 +246,8 @@ export function resolveSigLocalization(
     : inherited?.formatShort ? inherited : base;
   const longOwner = config.formatLong !== undefined ? config
     : inherited?.formatLong ? inherited : base;
-  if (shortOwner?.formatShort) result.formatShort = shortOwner.formatShort.bind(shortOwner);
-  if (longOwner?.formatLong) result.formatLong = longOwner.formatLong.bind(longOwner);
+  if (shortOwner?.formatShort) result.formatShort = bindSigFormatter(shortOwner.formatShort, shortOwner);
+  if (longOwner?.formatLong) result.formatLong = bindSigFormatter(longOwner.formatLong, longOwner);
 
   if (!result.formatDose && !result.formatShort && !result.formatLong && !result.course) {
     return base ?? inherited ?? result;
@@ -234,7 +256,7 @@ export function resolveSigLocalization(
   return result;
 }
 
-registerSigLocalization({
+registerBuiltinSigLocalization({
   locale: "en",
   course: ENGLISH_COURSE,
   formatDose: formatDoseEnglish,
@@ -299,7 +321,7 @@ function createThaiLocalization(): SigLocalization {
   };
 }
 
-registerSigLocalization(createThaiLocalization());
+registerBuiltinSigLocalization(createThaiLocalization());
 
 // Thai formatting helpers
 const ROUTE_SHORT: Partial<Record<RouteCode, string>> = {
