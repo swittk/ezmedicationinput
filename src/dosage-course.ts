@@ -2,7 +2,7 @@ import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL, normalizeAdministrationTargetCount } from "./body-site-target";
 import { BODY_SITE_SPATIAL_RELATION_EXTENSION_URL } from "./body-site-spatial";
 import {courseFromR5} from "./adapters/r5-import";
-import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, PRN_TRIGGER_PHASE_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
+import { INFUSION_CARRIER_MATERIAL_EXTENSION_URL, getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, PRN_TRIGGER_PHASE_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
 import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
@@ -1735,6 +1735,7 @@ export function matchesSourceReplayModifiers(dosage: FhirDosage | EzDosage, proo
 }
 interface SourceReplayProof {
   matches: boolean;
+  carrierMaterial?: string;
   top: Array<[string, unknown]>;
   amounts: SourceDoseObservation[];
   maxima?: SourceMaximaObservation;
@@ -2066,6 +2067,13 @@ export function matchesSourceReplayMaxima(
   return unchangedReplayMeasure(dosage.maxDosePerAdministration, maxima?.administration) &&
     unchangedReplayMeasure(dosage.maxDosePerLifetime, maxima?.lifetime);
 }
+/** Named carrier text is live dosage meaning, unlike opaque source graphs.
+ * Ratio-free rows need no extension scan or observation allocation. */
+function replayCarrierMaterial(dosage: FhirDosage): string | undefined {
+  if (!dosage.doseAndRate?.[0]?.rateRatio) return undefined;
+  return dosage.extension?.find(e => e.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL)
+    ?.extension?.find(e => e.url === "material")?.valueString;
+}
 function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): SourceReplayProof {
   const raw = dosage as Record<string, unknown>;
   const top: SourceReplayProof["top"] = [];
@@ -2087,7 +2095,7 @@ function capturedReplayProof(dosage: FhirDosage | EzDosage, matches: boolean): S
       rateExpression: capturedReplayExpression(original.rateExpression),
     });
   }
-  return { matches, top, amounts, maxima: captureSourceReplayMaxima(dosage),
+  return { matches, top, amounts, carrierMaterial: replayCarrierMaterial(dosage), maxima: captureSourceReplayMaxima(dosage),
     timing: captureSourceReplayTiming(dosage.timing), modifiers: captureSourceReplayModifiers(dosage),
     site: captureSourceReplayConcept(dosage.site, true), route: captureSourceReplayConcept(dosage.route),
     method: captureSourceReplayConcept(dosage.method),
@@ -2100,6 +2108,7 @@ function unchangedReplayProof(dosage: FhirDosage | EzDosage, proof: SourceReplay
   for (const key in raw) if (Object.prototype.hasOwnProperty.call(raw, key)) ownCount++;
   if (ownCount !== proof.top.length) return false;
   for (const [key, value] of proof.top) if (raw[key] !== value) return false;
+  if (replayCarrierMaterial(dosage) !== proof.carrierMaterial) return false;
   const rows = (dosage as EzDosage).doseAndRate;
   if ((rows?.length ?? 0) !== proof.amounts.length) return false;
   for (let index = 0; index < proof.amounts.length; index++) {
@@ -2170,6 +2179,7 @@ interface FreshDosePart {
 }
 export interface FreshDoseProof {
   length: number;
+  carrierMaterial?: string;
   text?: string;
   patientInstruction?: string;
   defaulted?: boolean;
@@ -2212,6 +2222,7 @@ export function captureFreshDose(dosage: FhirDosage, defaulted: boolean): void {
   const first = (dosage as EzDosage).doseAndRate?.[0];
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     length: dosage.doseAndRate?.length ?? 0,
+    carrierMaterial: replayCarrierMaterial(dosage),
     text: dosage.text,
     patientInstruction: dosage.patientInstruction,
     defaulted,
@@ -2242,7 +2253,8 @@ export function sameFreshDose(dosage: FhirDosage, original: FreshDoseProof): boo
   const current = (dosage as EzDosage).doseAndRate;
   if ((current?.length ?? 0) !== original.length) return false;
   const first = current?.[0];
-  return dosage.patientInstruction === original.patientInstruction &&
+  return replayCarrierMaterial(dosage) === original.carrierMaterial &&
+    dosage.patientInstruction === original.patientInstruction &&
     (dosage.asNeeded ?? (dosage as FhirDosage & { asNeededBoolean?: boolean }).asNeededBoolean) === original.asNeeded &&
     matchesSourceReplayConceptList(dosage.asNeededFor, original.reasons) &&
     matchesSourceReplayConceptList(dosage.additionalInstruction, original.instructions) &&

@@ -671,7 +671,8 @@ function baseAdministration(
   let schedule = timing(raw.timing, format === "r5");
   const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
   if (denominator && schedule?.recurrence?.occurrenceDuration === undefined &&
-      raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator)) {
+      raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator) &&
+      !raw.timing?.repeat?.extension?.some(e => e.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
     // Only an explicitly recognized carrier/self-carrier infusion supplies an
     // administration duration. An arbitrary rate denominator is not a dose time.
     const administrationDuration = clinicalCarrierQuantityFromFhir(raw as FhirDosage)?.administrationDuration;
@@ -763,7 +764,7 @@ function baseAdministration(
       (limits ??= []).push({ scope: "lifetime", amount: measureFromR5(input.maxDosePerLifetime) });
     if (limits) output.limits = limits;
   }
-  if (sourceContext)
+  if (sourceContext) {
     output.syntax = deserializeCanonicalContext({
       text: raw.text,
       extension: raw.extension,
@@ -775,6 +776,13 @@ function baseAdministration(
       additionalInstruction: raw.additionalInstruction,
       patientInstruction: raw.patientInstruction,
     });
+    // The existing typed carrier feature supplies only its current material
+    // label to presentation; native amounts still own every dose/rate value.
+    if (raw.doseAndRate?.[0]?.rateRatio) {
+      const carrier = clinicalCarrierQuantityFromFhir(raw as FhirDosage);
+      if (carrier?.carrierMaterial) output.syntax.clinicalQuantity = carrier;
+    }
+  }
   const graph = output.syntax?.instructionGraph;
   if (format === "r5" && sourceTextVerified === false && !amounts?.length && graph && !graph.primaryAdministrationSpan) {
     const owner = savedR5DoseOwner(input, graph);
@@ -1865,6 +1873,7 @@ function administrationToWire(
     const limits = a.limits ?? (safetySource?.doseLimit !== undefined ? [] : undefined);
     assign(output, "safety", safetyToWire(a.safety, safetySource, limits, Boolean(clause)));
   } else {
+    delete output.excludedDates;
     delete output.safety;
     delete output.maxDosePerPeriod;
     delete output.maxDosePerAdministration;

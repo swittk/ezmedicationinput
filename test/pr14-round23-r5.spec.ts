@@ -3548,7 +3548,7 @@ describe("round35 interchange field ownership", () => {
     "keeps the prescriber's active range (%s, %s, %s, %s) in R5 and R6", (lowUnit, lowValue, highUnit, highValue) => {
       const range = { id: "authored-duration", low: { value: lowValue, unit: lowUnit, code: lowUnit, system: ucum, _unit: { id: "low-label" } },
         high: { value: highValue, unit: highUnit, code: highUnit, system: ucum } };
-      let wire = course({ timing: { repeat: { ...daily, boundsRange: range } } });
+      let wire = course({ timing: { repeat: { ...daily, boundsRange: persist(range) } } });
       for (let save = 0; save < 3; save++) {
         const projected = projectCanonicalCourse(importCanonicalCourse(wire));
         expect(projected.fhir[0].timing!.repeat!.boundsRange).toEqual(range);
@@ -6695,5 +6695,140 @@ describe("round43 live editable exclusions and safety metadata", () => {
       expect(wire.step![0].component[0].timing!.repeat!.boundsRange).toEqual(range);
     }
     expect(JSON.stringify(source)).toBe(before);
+  });
+});
+
+
+describe("round44 interop ownership", () => {
+  const ucum = "http://unitsofmeasure.org";
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+  const amount = (value: number, unit: string) => ({ value, unit, code: unit, system: ucum });
+  const afterDays = (value: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value, unit: "d", code: "d" } });
+  const carrierUrl = "urn:ezmedicationinput:StructureDefinition:medication-infusion-carrier-material";
+
+  it.each([false, true])("keeps exclusions wire-only in strict R5 after an editable clear=%s", clear => {
+    const note = { url: "urn:test:exclusion-note", valueString: "keep this annotation" };
+    const row: EzDosage = { timing: { repeat: daily }, doseAndRate: [{ doseQuantity: q(1) }], extension: [note] };
+    setDosageExcludedDates(row, ["2026-11-23"]);
+    row.excludedDates = clear ? [] : ["2026-11-23"];
+    const original = persist(row);
+    let strict = persist(toFhirR5Dosages([row]));
+    for (let save = 0; save < 3; save++) {
+      expect(strict[0]).not.toHaveProperty("excludedDates");
+      expect(getDosageExcludedDates(strict[0])).toEqual(clear ? [] : ["2026-11-23"]);
+      expect(strict[0].extension).toContainEqual(note);
+      const wire = toDosageDetails(strict);
+      const editable = fromDosageDetails(wire).dosages[0];
+      expect(editable.excludedDates ?? []).toEqual(clear ? [] : ["2026-11-23"]);
+      strict = persist(toFhirR5Dosages(wire));
+    }
+    expect(row).toEqual(original);
+  });
+
+  it.each(["dose", "cadence"] as const)("retains an opening pause across a later anonymous %s edit", edit => {
+    let wire = r6Save({ step: [
+      { id: "pause", end: afterDays(2), component: [] },
+      { component: [{ timing: { repeat: { ...daily, boundsDuration: { value: 3, unit: "d" } } }, doseAndRate: [{ doseQuantity: q(1) }] }] },
+      { component: [{ timing: { repeat: daily }, doseAndRate: [{ doseQuantity: q(2) }] }] },
+    ] });
+    if (edit === "dose") wire.step![1].component[0].doseAndRate![0].doseQuantity!.value = 3;
+    else wire.step![1].component[0].timing!.repeat!.frequency = 2;
+    const currentBoundary = persist(wire.step![0].start);
+    for (let save = 0; save < 3; save++) {
+      const native = importCanonicalCourse(persist(wire));
+      expect(native.stages).toHaveLength(3);
+      expect(native.stages[0].provenance?.id).toBe("pause");
+      expect(native.stages[0].administrations).toEqual([]);
+      expect(native.stages[0].end?.displacement).toMatchObject({ value: 2, unit: "d" });
+      expect(native.stages[1].administrations[0].amounts![0].quantity!.value).toBe(1);
+      expect(native.stages[2].administrations[0].amounts![0].quantity!.value).toBe(edit === "dose" ? 3 : 2);
+      expect(native.stages[2].administrations[0].schedule?.recurrence?.frequency).toBe(edit === "cadence" ? 2 : 1);
+      wire = projectCanonicalCourse(native).fhirNext;
+      expect(wire.step![0].start).toEqual(currentBoundary);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+    wire.step![0].start = afterDays(4);
+    expect(importCanonicalCourse(persist(wire)).stages).toHaveLength(2);
+  });
+
+  it("keeps the opening pause when an independent finite tail phase is removed", () => {
+    let wire = r6Save({ step: [
+      { id: "pause", end: afterDays(2), component: [] },
+      { component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
+        ...daily, boundsDuration: { value: 3, unit: "d" },
+      } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: {
+        ...daily, boundsDuration: { value: 2, unit: "d" },
+      } } }] },
+    ] });
+    wire.step!.pop();
+    for (let save = 0; save < 3; save++) {
+      const native = importCanonicalCourse(persist(wire));
+      expect(native.stages).toHaveLength(2);
+      expect(native.stages[0].provenance?.id).toBe("pause");
+      expect(native.stages[0].administrations).toEqual([]);
+      expect(native.stages[0].end?.displacement).toMatchObject({ value: 2, unit: "d" });
+      expect(native.stages[1].administrations[0].amounts![0].quantity!.value).toBe(1);
+      expect(native.stages[1].administrations[0].schedule!.recurrence!.courseLength).toMatchObject({ value: 3, unit: "d" });
+      wire = toDosageDetails(persist(projectCanonicalCourse(native).fhir));
+    }
+    wire.step![0].start = afterDays(4);
+    expect(importCanonicalCourse(persist(wire)).stages).toHaveLength(1);
+  });
+
+  it.each(["fresh", "persisted"] as const)("observes a changed live carrier after a warm %s preview", kind => {
+    const parsed = parseSig("Infuse 20 mg in 100 mL saline over 2 hours, max 100 mg per day");
+    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    expect(formatSig(row, "long")).toContain("saline");
+    const marker = row.extension!.find(e => e.url === carrierUrl)!;
+    marker.extension!.find(e => e.url === "material")!.valueString = "dextrose";
+    const current = persist(row);
+    expect(formatSig(row, "long")).not.toContain("saline");
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const options = { locale: "en", realizationMode };
+      for (const text of [formatSig(row, "long", options), formatSig(persist(row), "long", options),
+        fromFhirDosage(row, options).longText, formatSig(toDosageDetails([row]), "long", options)]) {
+        expect(text).not.toContain("saline");
+        expect(text).toContain("dextrose");
+        expect(text).toContain("20 mg");
+        expect(text).toContain("100 mL");
+      }
+    }
+    expect(row).toEqual(current);
+    const saved = persist(toFhirR5Dosages(toDosageDetails([row])))[0];
+    expect(saved.extension!.find(e => e.url === carrierUrl)).toEqual(marker);
+    expect(saved.doseAndRate).toEqual(current.doseAndRate);
+  });
+
+  it.each(["unresolved", "recognized", "missing"] as const)("keeps the explicit %s duration owner ahead of a ratio fallback", kind => {
+    const duration = kind === "unresolved"
+      ? { value: 3, unit: "half-hour blocks", system: "urn:clinic:duration-units", code: "h", id: "authored-duration" }
+      : { value: 2, unit: "hours", system: ucum, code: "h", id: "authored-duration" };
+    const marker = { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: duration };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      ...(kind !== "missing" ? { timing: { repeat: { extension: [persist(marker)] } } } : {}),
+      doseAndRate: [{ doseQuantity: amount(500, "mL"), rateRatio: {
+        numerator: amount(500, "mL"), denominator: simpleQuantityForR5({ ...amount(2, "h"), comparator: "~" })!,
+      } }],
+    }] }] };
+    const original = persist(raw);
+    const rows = persist(toFhirR5Dosages(raw));
+    for (const input of [raw, rows[0]]) {
+      const native = importCanonicalCourse(input).stages[0].administrations[0];
+      const recurrence = native.schedule?.recurrence;
+      expect(recurrence?.occurrenceDuration).toBe(kind === "unresolved" ? undefined : 2);
+      expect(recurrence?.occurrenceDurationComparator).toBe(kind === "missing" ? "~" : undefined);
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (kind === "unresolved") expect(text).not.toContain("over approximately 2 hours");
+      else expect(text).toContain(kind === "missing" ? "over approximately 2 hours" : "over 2 hours");
+      expect(text).toContain("500 mL");
+    }
+    expect(raw).toEqual(original);
+    const saved = toDosageDetails(rows).step![0].component[0];
+    if (kind !== "missing") expect(saved.timing!.repeat!.extension).toContainEqual(marker);
+    expect(saved.doseAndRate![0].rateRatio!.numerator).toEqual(amount(500, "mL"));
+    expect(saved.doseAndRate![0].rateRatio!.denominator).toMatchObject({ value: 2, unit: "h", code: "h", system: ucum });
   });
 });

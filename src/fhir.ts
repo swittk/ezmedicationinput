@@ -2175,8 +2175,9 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const repeat = dosage.timing?.repeat;
   const timingCode = timingCodeFromFhir(dosage);
-  const administrationDuration = parseTimingAdministrationDuration(repeat?.extension?.find(
-    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat);
+  const administrationDurationMarker = repeat?.extension?.find(
+    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+  const administrationDuration = parseTimingAdministrationDuration(administrationDurationMarker, repeat);
   const frequencyMinExtension = repeat?.extension?.find(
     (extension) => extension.url === TIMING_FREQUENCY_MIN_EXTENSION_URL
   )?.valueInteger;
@@ -2304,7 +2305,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   if (carrierQuantity) {
     clause.clinicalQuantity = carrierQuantity;
     const duration = carrierQuantity.administrationDuration;
-    if (duration?.comparator && clause.schedule?.administrationDuration === undefined) {
+    if (!administrationDurationMarker && duration?.comparator && clause.schedule?.administrationDuration === undefined) {
       const schedule = clause.schedule ??= {};
       schedule.administrationDuration = duration.value;
       schedule.administrationDurationUnit = duration.unit;
@@ -2358,8 +2359,9 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
     };
   }
   const repeat = dosage.timing?.repeat;
-  const administrationDuration = parseTimingAdministrationDuration(repeat?.extension?.find(
-    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL), repeat);
+  const administrationDurationMarker = repeat?.extension?.find(
+    extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
+  const administrationDuration = parseTimingAdministrationDuration(administrationDurationMarker, repeat);
   if (repeat?.duration !== undefined && repeat.durationUnit || administrationDuration) {
     state.primaryClause.schedule = {
       ...(state.primaryClause.schedule ?? {}),
@@ -2598,7 +2600,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   if (carrierQuantity) {
     state.primaryClause.clinicalQuantity = carrierQuantity;
     const duration = carrierQuantity.administrationDuration;
-    if (duration?.comparator && state.primaryClause.schedule?.administrationDuration === undefined) {
+    if (!administrationDurationMarker && duration?.comparator && state.primaryClause.schedule?.administrationDuration === undefined) {
       const schedule = state.primaryClause.schedule ??= {};
       schedule.administrationDuration = duration.value;
       schedule.administrationDurationUnit = duration.unit;

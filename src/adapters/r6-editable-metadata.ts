@@ -62,7 +62,7 @@ export function retainDraftSteps(
 }
 
 /** A pause belongs to the ordered phase boundaries, not its successor's dose.
- * Changed anonymous stages need a unique boundary identity; position alone
+ * Changed anonymous boundary owners need a unique identity; position alone
  * cannot prove which stage survived a deletion, replacement or reordering. */
 /** Compare the completion-bearing Timing fields only at the changed draft
  * owner boundary. Element IDs and positional primitive annotations do not
@@ -75,7 +75,12 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
 }
 function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
   drafts: readonly { index: number }[]): boolean {
-  if (!Array.isArray(saved) || active.length < saved.length) return false;
+  if (!Array.isArray(saved)) return false;
+  // Only earlier phases establish a draft completion, and its immediate
+  // successor receives that boundary. Later tail edits do not own the draft.
+  const lastDraftPredecessor = drafts.length ? drafts[drafts.length - 1].index - drafts.length : -1;
+  const lastDraftOwner = lastDraftPredecessor + 1;
+  if (active.length < Math.min(saved.length, lastDraftOwner + 1)) return false;
   // Unchanged projections need no identity index or boundary hashes. Remember
   // the compared prefix so reconciliation never deep-walks those stages twice.
   let firstChanged = 0;
@@ -85,9 +90,6 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
   const identities = new Map<string, number>();
   const changed: string[] = [];
   const firstIsTreatmentOrigin = drafts[0]?.index !== 0;
-  // Only earlier phases can supply a retained draft's completion.
-  // An opening draft supplies its successor's start, not its completion.
-  const lastDraftPredecessor = drafts.length ? drafts[drafts.length - 1].index - drafts.length : -1;
   const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
     step.start || step.end ? "boundary:" + compactProjectionFingerprint({
       start: step.start, end: step.end, count: step.count,
@@ -97,7 +99,8 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     const identity = identityOf(prior, index);
     const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
-    if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) continue;
+    if (index > lastDraftOwner || index < firstChanged ||
+        index > firstChanged && equalStructuredValues(prior, current)) continue;
     if (identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||
         !equalStructuredValues(prior.end, current.end) ||
