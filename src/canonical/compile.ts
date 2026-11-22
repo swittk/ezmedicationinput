@@ -302,6 +302,11 @@ export function courseFromPartialParallel(
         if (item.effectiveBoundsEnd) {
           const recurrence = (a.schedule ??= {}).recurrence ??= {};
           (recurrence.calendarWindow ??= {}).end = item.effectiveBoundsEnd;
+          if (recurrence.courseLength || recurrence.courseLengthRange) {
+            a.anchoredLength = { quantity: recurrence.courseLength, range: recurrence.courseLengthRange };
+            recurrence.courseLength = undefined;
+            recurrence.courseLengthRange = undefined;
+          }
         }
         if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
         else if (a.onsetReference === "previous-phase-next-day" && index > 0) {

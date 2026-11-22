@@ -1072,6 +1072,14 @@ describe("round40 dated parallel cutoff", () => {
     const before = JSON.stringify(parsed);
     const members = parsed.meta.canonical.course!.stages[0].administrations;
     expect(members[0].schedule?.recurrence?.calendarWindow).toEqual({ end: "2026-12-04" });
+    expect(members[0].schedule?.recurrence?.courseLength).toBeUndefined();
+    expect(members[0].anchoredLength?.quantity).toEqual(duration ? { value: 2, unit: "d" } : undefined);
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBe(duration ? 2 : undefined);
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.timing?.repeat?.boundsPeriod).toEqual({ end: "2026-12-04" });
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+      expect(row.timing?.repeat?.boundsRange).toBeUndefined();
+    }
     expect(parsed.meta.canonical.clauses[0].schedule?.boundsEnd).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0].schedule?.timingCode).toBe("QID");
     expect(members[2].schedule?.recurrence?.calendarWindow).toBeUndefined();
@@ -1088,4 +1096,29 @@ describe("round40 dated parallel cutoff", () => {
     }
     expect(JSON.stringify(parsed)).toBe(before);
   });
+});
+
+
+it("preserves THEN between a clock and an event anchor without inventing its event time", () => {
+  const parsed = parseSig("Take 1 tablet at 22:00, then 2 in the morning");
+  expect(parsed.meta.canonical.course!.stages).toHaveLength(2);
+  expect(parsed.fhir.map(row => row.sequence)).toEqual([1, 2]);
+  expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+  expect(parsed.fhir[1].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+  expect(parsed.fhir[1].timing?.repeat?.when).toEqual(["MORN"]);
+  expect(parsed.fhir[1].timing?.repeat?.timeOfDay).toBeUndefined();
+  const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC",
+    eventClock: { MORN: "08:00" }, limit: 4 };
+  for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+    expect(nextDueDoses(input, query)).toEqual([
+      "2026-12-01T22:00:00+00:00", "2026-12-02T22:00:00+00:00",
+      "2026-12-03T22:00:00+00:00", "2026-12-04T22:00:00+00:00"
+    ]);
+  }
+  const orderedClocks = parseSig("Take 1 tablet at 08:00, then 2 at 22:00");
+  expect(orderedClocks.meta.canonical.course!.stages).toHaveLength(1);
+  expect(nextDueDoses(orderedClocks, query)).toEqual([
+    "2026-12-01T08:00:00+00:00", "2026-12-01T22:00:00+00:00",
+    "2026-12-02T08:00:00+00:00", "2026-12-02T22:00:00+00:00"
+  ]);
 });

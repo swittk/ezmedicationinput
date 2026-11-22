@@ -5,6 +5,7 @@ import { inferMedicationLocale } from "./locale-detection";
 import { lexInput } from "./lexer/lex";
 import { ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS } from "./hpsg/lexical-classes";
 import {
+  cloneMedicationInstructionActionRealizerConfig,
   medicationInstructionActionCodings,
   medicationInstructionActionContextualCodings,
   medicationInstructionActionSemanticComponentsForArgs,
@@ -229,6 +230,8 @@ function validateActionProposal(
       semanticClass: definition.semanticClass,
       display: definition.display,
       i18n: definition.i18n ? { ...definition.i18n } : undefined,
+      realizer: definition.realizer,
+      realizerConfig: cloneMedicationInstructionActionRealizerConfig(definition.realizerConfig),
       codings: [
         ...medicationInstructionActionCodings(definition),
         ...medicationInstructionActionContextualCodings(definition, args)

@@ -195,7 +195,8 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number): boole
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
     if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount;
-    if ((token.kind === LexKind.Number || DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
+    if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
+        DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // An article counts as ONE only when it selects a medication unit;
         // route determiners (via a peripheral IV) are not earlier doses.
         (!DOSE_FRACTION_ARTICLES.has(lower) || directDoseUnitAfter(context, index + 1)))

@@ -3580,6 +3580,8 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
       });
     }
   }
+  // These terminology entries describe UNTIL, not every relative end relation.
+  if (normalizeTokenLower(lead) !== "until") return undefined;
   for (const definition of OPEN_ENDED_COURSE_END_CONDITIONS) {
     const first = context.tokens[next];
     const second = context.tokens[next + 1];

@@ -788,7 +788,9 @@ export function unifySynsem(
     } };
     schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
   }
-  if (dose?.clinicalQuantity?.dividedDoseCount !== undefined) {
+  // Only a daily total supplies a repeated period. A rate denominator belongs
+  // to the administration duration and cannot create an hourly recurrence.
+  if (dose?.clinicalQuantity?.dailyTotal && dose.clinicalQuantity.dividedDoseCount !== undefined) {
     const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
     if (period) {
       const dividedSchedule = {

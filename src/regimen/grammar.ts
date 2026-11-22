@@ -94,9 +94,12 @@ const SAME_DAY_DOSE_CONSTRAINTS: readonly Constraint[] = [
     constraint('right.explicit-or-inherited-unit', hasContinuationDoseUnit),
     constraint('left.hasSameDayAnchor', f => hasSameDayAnchor(f.left.clause)),
     constraint('right.hasSameDayAnchor', f => hasSameDayAnchor(f.right.clause)),
-    // Probe clocks are already sorted. A backward clock pair cannot share
-    // one civil day without reversing the authored THEN relation.
-    constraint('clocks.preserve-sequence-order', f => !f.left.clocks.length || !f.right.clocks.length ||
+    // Probe clocks are already sorted. A backward pair cannot share one civil
+    // day; a clock and an event anchor have no shared ordering without context.
+    // Both keep the existing sequential reading rather than invent event clocks.
+    constraint('clocks.preserve-sequence-order', f =>
+      !f.left.clocks.length && !f.right.clocks.length ||
+      Boolean(f.left.clocks.length && f.right.clocks.length) &&
       f.left.clocks[f.left.clocks.length - 1] <= f.right.clocks[0]),
     constraint('left.omitsPhaseBoundary', f => !hasPhaseBoundary(f.left.clause)),
     constraint('right.omitsPhaseBoundary', f => !hasPhaseBoundary(f.right.clause)),

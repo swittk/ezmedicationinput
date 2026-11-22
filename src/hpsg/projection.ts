@@ -597,7 +597,8 @@ export function projectHpsgSignToState(
     target.administrationDurationUnit = clinicalDuration.unit;
     target.administrationDurationComparator = clinicalDuration.comparator;
     // Duration qualifies each infusion. It is never regimen boundsDuration;
-    // a single-occurrence count is only appropriate without a recurrence.
+    // an occurrence count is only appropriate without a recurrence. Explicit
+    // divisions retain their finite cardinality; otherwise this is one infusion.
     // Keep a separately owned course duration (for example, daily for three
     // days). Only the overlapping timing artifact without typed schedule-field
     // ownership belongs to the clinical quantity's elapsed-time daughter.
@@ -613,7 +614,7 @@ export function projectHpsgSignToState(
     }
     if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
-        target.count === undefined) target.count = 1;
+        target.count === undefined) target.count = dose?.clinicalQuantity?.dividedDoseCount ?? 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct
