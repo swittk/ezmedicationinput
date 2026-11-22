@@ -8,7 +8,7 @@ import { buildRegimenGraph, scopeSequentialPhaseSemantics, anchoredScheduleDurat
 import { buildCanonicalParallelRegimen, projectParallelRegimen } from "../src/regimen/parallel-course";
 import { courseFromAdministrations, clauseForAdministration, courseFromPartialParallel } from "../src/canonical/compile";
 import { courseToR5, courseToR6, courseFromR6 } from "../src/adapters/canonical-course";
-import { calculateTotalUnits, nextDueDoses, toEzDosages, fromFhir, toFhirR5Dosages, parseSig, projectCanonicalCourse, importCanonicalCourse } from "../src/index";
+import { calculateTotalUnits, nextDueDoses, toEzDosages, fromFhir, toFhirR5Dosages, toDosageDetails, TIMING_OCCURRENCE_CAP_EXTENSION_URL, parseSig, projectCanonicalCourse, importCanonicalCourse } from "../src/index";
 import type { CanonicalAdministration, CanonicalCourse, CanonicalBoundary } from "../src/canonical/course";
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit as Unit, type FhirDosage, type FhirR6DosageInstruction } from "../src/types";
 
@@ -223,6 +223,9 @@ describe("overlapping cycles use one chronological admission stream", () => {
     const query = { from: "2026-03-09T00:00:00-04:00", orderedAt: "2026-03-06T00:00:00-05:00",
       timeZone: "America/New_York", limit: 2 };
     expect(nextDueDoses(course, query)).toEqual(["2026-03-09T00:00:00-04:00", "2026-03-09T00:00:00-04:00"]);
+    expect(nextDueDoses(course, { ...query, limit: 3 })).toEqual([
+      "2026-03-09T00:00:00-04:00", "2026-03-09T00:00:00-04:00", "2026-03-10T00:00:00-04:00"
+    ]);
     expect(calculateTotalUnits({ ...query, dosage: course, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(2);
   });
 });
@@ -3977,5 +3980,77 @@ describe("round44 supported temporal precision", () => {
       expect(JSON.stringify(dosage)).toBe(before);
     }
     expect(courseToR6(courseFromR6(raw)).step![0].component[0].timing?.event).toEqual(event);
+    const persisted = JSON.parse(JSON.stringify(toFhirR5Dosages(raw))) as FhirDosage[];
+    expect(toDosageDetails(persisted).step![0].component[0].timing?.event).toEqual(event);
+  });
+});
+
+
+describe("round45 finite history and ranged occurrence bounds", () => {
+  const oncePerDay = { url: TIMING_OCCURRENCE_CAP_EXTENSION_URL, extension: [
+    { url: "max", valueInteger: 1 },
+    { url: "period", valueQuantity: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } }
+  ] };
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]];
+  };
+  const rangedDose = { doseRange: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } };
+  const periodCap = (maximum: number) => [{ numerator: { value: maximum, unit: "tab" }, denominator: { value: 24, unit: "h" } }];
+
+  it.each([
+    ["daily allowance", true, origin, undefined, 56],
+    ["both clocks", false, origin, undefined, 112],
+    ["partial first and last days", true, "2026-01-01T12:00:00Z", undefined, 58],
+    ["recorded first-day allowance", true, "2026-01-01T12:00:00Z", "2026-01-01T08:00:00Z", 56]
+  ] as const)("proves an attainable ranged maximum from %s", (_name, occurrence, from, record, expected) => {
+    const row: FhirDosage = { asNeededBoolean: true, doseAndRate: [rangedDose],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00", "20:00:00"],
+        ...(occurrence ? { extension: [oncePerDay] } : {}) } }, maxDosePerPeriod: periodCap(4) };
+    // Two tablets at the first free clock of each civil bucket attain this
+    // bound. A noon-to-noon horizon touches 29 buckets; its actual first-day
+    // dose spends that day's allowance, leaving 28 buckets for new supply.
+    for (const dosage of forms(row)) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, from, durationValue: 28, durationUnit: Unit.Day,
+        ...(record ? { priorDoseTimes: [record] } : {}) })).toMatchObject({ totalUnits: expected, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([["2026-01-02T00:00:00Z", 4], ["2026-01-10T00:00:00Z", 0]] as const)(
+    "bounds future ranged supply by the finite allowance remaining at %s", (from, expected) => {
+    const row: FhirDosage = { doseAndRate: [rangedDose], timing: { repeat: { count: 3, frequency: 1,
+      period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"], extension: [oncePerDay] } }, maxDosePerPeriod: periodCap(4) };
+    for (const dosage of forms(row)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, { ...options, from, limit: 5 })).toEqual(expected ? [
+        "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00"
+      ] : []);
+      expect(calculateTotalUnits({ dosage, ...options, from, durationValue: 28, durationUnit: Unit.Day }).totalUnits).toBe(expected);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  describe.each([false, true])("actual finite-count ownership with ranged dose %s", ranged => {
+    it.each(["shifted", "on-time", "none", "pre-order", "late-tight"])("retains eligible remaining doses with %s history", history => {
+      const row: FhirDosage = { doseAndRate: [ranged ? rangedDose : { doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { count: 3, frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"] } },
+        maxDosePerPeriod: periodCap((ranged ? 2 : 1) * (history === "late-tight" ? 1 : 2)) };
+      const priorDoseTimes = history === "none" ? undefined : [history === "pre-order" ? "2025-12-31T09:00:00Z"
+        : history === "on-time" ? "2026-01-01T08:00:00Z" : history === "late-tight" ? "2026-01-01T23:00:00Z"
+          : "2026-01-01T09:00:00Z"];
+      const query = { ...options, from: "2026-01-02T00:00:00Z", priorDoseTimes, limit: 5 };
+      // One eligible recorded dose leaves two. Its actual 23:00 timestamp
+      // blocks the next 08:00 under a one-dose rolling ceiling, but consumes
+      // no extra lifetime slot. With no eligible record, replay January 1.
+      const days = history === "late-tight" ? [3, 4] : [2, 3];
+      for (const dosage of forms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(days.map(day => `2026-01-0${day}T08:00:00+00:00`));
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(ranged ? 4 : 2);
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
   });
 });

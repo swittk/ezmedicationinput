@@ -3199,6 +3199,7 @@ function maximumTimedRangePlan(
     values.push(at);
   }
   const futureCounts = new Map<CycleEventQuota, number>();
+  const futureBuckets = occurrence ? new Map<string, number>() : undefined;
   const capPartitions: Array<{ width: number; maximum: number; bucket: number; slots: number; total: number }> = [];
   for (const cap of range.caps) {
     const width = elapsedCapMilliseconds(cap);
@@ -3206,8 +3207,10 @@ function maximumTimedRangePlan(
   }
   let firstFuture = Infinity;
   for (const event of candidates) {
+    const bucket = occurrence ? occurrenceCapBucketKey(new Date(event.at), occurrence, zone) : "";
     if (event.at >= from) {
       futureCounts.set(event.quota, (futureCounts.get(event.quota) ?? 0) + 1);
+      if (futureBuckets) futureBuckets.set(bucket, (futureBuckets.get(bucket) ?? 0) + 1);
       firstFuture = Math.min(firstFuture, event.at);
       // Every partition spans less than a rolling window. Its supply is
       // bounded by both the cap and its actual available dose slots.
@@ -3221,17 +3224,44 @@ function maximumTimedRangePlan(
         partition.slots++;
       }
     }
-    const bucket = occurrence ? occurrenceCapBucketKey(new Date(event.at), occurrence, zone) : "";
     buckets.push(bucket);
     const actual = priorBuckets.get(bucket);
     supplied.push(actual?.length ?? 0);
   }
   if (!Number.isFinite(firstFuture)) return [];
+  const required = new Set<UncommittedCycleEvent>();
+  let pastQuotaCounts: Map<CycleEventQuota, number> | undefined;
+  let pastBucketCounts: Map<string, number> | undefined;
+  for (const event of ledger.selected) if (event.at < from) {
+    required.add(event);
+    pastQuotaCounts ??= new Map();
+    pastQuotaCounts.set(event.quota, (pastQuotaCounts.get(event.quota) ?? 0) + 1);
+    if (occurrence) {
+      const bucket = occurrenceCapBucketKey(new Date(event.at), occurrence, zone);
+      pastBucketCounts ??= new Map();
+      pastBucketCounts.set(bucket, (pastBucketCounts.get(bucket) ?? 0) + 1);
+    }
+  }
+  // Required past administrations already spend the lifetime and civil
+  // bucket allowances. The proof concerns only supply after the query.
   let upper = 0;
-  for (const [quota, count] of futureCounts) upper += Math.min(count, ledger.quotas.get(quota) ?? count) * range.high;
+  for (const [quota, count] of futureCounts) {
+    const allowance = ledger.quotas.get(quota);
+    const remaining = allowance === undefined ? count
+      : Math.max(0, allowance - (pastQuotaCounts?.get(quota) ?? 0));
+    upper += Math.min(count, remaining) * range.high;
+  }
+  if (occurrence && futureBuckets) {
+    let occurrenceUpper = 0;
+    for (const [bucket, count] of futureBuckets) {
+      const remaining = Math.max(0, occurrence.max - (priorBuckets.get(bucket)?.length ?? 0) -
+        (pastBucketCounts?.get(bucket) ?? 0));
+      occurrenceUpper += Math.min(count, remaining) * range.high;
+    }
+    upper = Math.min(upper, occurrenceUpper);
+  }
   for (const partition of capPartitions)
     upper = Math.min(upper, partition.total + Math.min(partition.slots * range.high, partition.maximum));
-  const required = new Set(ledger.selected.filter(event => event.at < from));
   const completed = new Map<CycleEventQuota, number>();
   for (const [quota, count] of ledger.quotas)
     if (quota.advance && quota.remaining === 0 && count !== undefined) completed.set(quota, count);
@@ -4109,7 +4139,9 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       countEligibilityStart: undefined,
       countedActualTimes,
       priorCount: undefined,
-      from: one.asNeeded || (options.priorCount !== undefined && !eligibleAt)
+      // Eligible actual history owns the spent count, including a dose
+      // taken off its nominal clock. Only the remaining slots are replayed.
+      from: one.asNeeded || countedActualTimes?.size || (options.priorCount !== undefined && !eligibleAt)
         ? requestedFrom : origin,
       limit: capped,
     } as PhaseCountOptions);
@@ -5983,7 +6015,7 @@ function measureRangedSchedule(
     Math.max(0, totalCount - used) };
   if (prior.length > 1) prior.sort((a, b) => a - b);
   const accept = chronologicalCapAcceptor(prior, zone, options.context);
-  const begin = totalCount !== undefined && !dosage.asNeeded && options.priorCount === undefined
+  const begin = totalCount !== undefined && !dosage.asNeeded && options.priorCount === undefined && !countedActual?.size
     ? countStart : from;
   const execution: CanonicalAdministration = {
     ...dosage, limits: dosage.limits?.filter(limit => limit.scope !== "period"),

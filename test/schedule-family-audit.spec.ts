@@ -3700,7 +3700,7 @@ describe("round38: authored boundaries, elapsed clocks, and recorded occurrence 
   it.each([["00:00:00", 6], ["09:00:00", 5], ["23:00:00", 3]] as const)(
     "closes coordinated predecessors at the civil successor boundary after a %s order", (clock, total) => {
     const parsed = parseSig("Take 1 tablet at 08:00 and 2 tablets at 22:00, then take 3 tablets at 06:00 the next morning");
-    const orderedAt = "2026-11-21T" + clock + "Z", end = Date.parse("2026-11-22T09:00:00Z");
+    const orderedAt = "2026-11-21T" + clock + "Z", end = Date.parse("2026-11-23T00:00:00Z");
     const clinical = { orderedAt, from: orderedAt, timeZone: "UTC", limit: 6 };
     for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
       const expected = [
