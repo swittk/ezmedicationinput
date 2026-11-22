@@ -612,9 +612,17 @@ export function projectHpsgSignToState(
       delete target.durationMax;
       delete target.durationUnit;
     }
+    const dividedCount = dose?.clinicalQuantity?.dividedDoseCount;
+    // The explicit daily schedule owns the total's divisions. The rate's
+    // elapsed duration never supplies a recurring period.
+    if (dividedCount !== undefined && target.frequency === 1 &&
+        target.period === 1 && target.periodUnit === "d") {
+      target.frequency = dividedCount;
+      target.timingCode = undefined;
+    }
     if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
-        target.count === undefined) target.count = dose?.clinicalQuantity?.dividedDoseCount ?? 1;
+        target.count === undefined) target.count = dividedCount ?? 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct
