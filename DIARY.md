@@ -13759,3 +13759,117 @@ All48 previously collected test files remain present. Test counts rise from6,332
 ### Review delivery
 
 The owner's resumed loop authorizes the normal review cycle for this work. Delivery uses a normal push to the existing PR14 branch, detailed replies in all13 original inline threads, resolution of addressed threads, and one full-review request after replies. Body-only findings and the18 reopened historical dispositions are documented above and linked from the relevant original threads; no replacement top-level findings summary is used. No merge, package publication or deployment is part of this delivery.
+
+
+## 2026-11-22 — PR14 round42 supported-correctness review loop
+
+Reviewed head: f80ddd67700c763b4d48179e099e3989acb5626b. CodeRabbit review: [6013055979](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6013055979). Frozen source candidate: 63359bb3414e4290b4c5cd83306c8109f007aeef. Comparison base remains actual pinned master 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb.
+
+The owner's renewed instruction is to continue the review/fix/full-review loop, fixing supported behavior including pre-existing defects and rejecting hypothetical malformed-input defenses or new feature demands. That newer instruction authorizes this review cycle over the older no-additional-review note. Work used the coordinator's own ChatGPT grammar, execution and interchange workers in isolated worktrees. The coordinator implemented the graph/formatting lane, independently reviewed ownership and public fixtures, integrated the commits, and ran all final gates. No HPSERVER Codex/Gemini workers were launched.
+
+The boundary remains native clinical courses with R5/R6 adapters: public .fhir is R5 and .fhirNext remains pinned to R6 Snapshot 1. Authored values, independent endpoint units, original source and opaque metadata stay intact. There is no active-prescription normalization, public/native edit framework, downstream application/database migration, merge, release or deployment.
+
+### Finding disposition
+
+All 14 inline and 20 body-only findings were individually assessed: 32 addressed and two rejected. The detailed lane notes include the supported requirement, independent oracle, baseline comparison and bounded implementation. Supported master defects are not mislabeled as PR regressions.
+
+| Finding | Decision | Existing boundary and independent result |
+|---|---|---|
+| I1 | fix | Strict R5/R6 rate slots retain modifiers in the existing legal Element extension wrapper; dose, IDs and unknown annotations survive repeated saves. |
+| I2 | fix | A final counted loading dose resumes maintenance at its known authored fence even when its completion duration is unresolved; first-two-day supply is 20 mL. |
+| I3 | fix | An upper duration measures maximum loading supply without establishing exact completion; ranged loading supplies 40 mL, exact-duration control 50 mL. |
+| I4 | fix | PRN finite history starts at phase/cycle eligibility rather than the later query; earlier same-phase use leaves zero remaining tablets. |
+| I5 | fix | Existing typed dose/rate ownership keeps comma-separated volume and rate together; qualified cumulative limits remain separate. |
+| I6 | fix | The duration scan uses the existing recognized IV route meaning; 5 mL/h for 2 h is one 10 mL administration, not a two-hour course. |
+| I7 | fix | Standalone NEXT is finite unless recurrence/course is independently stated; composed positions retain exact once-only cardinality and qualified clock authority. |
+| I8 | fix | The mixing adapter accepts the parser's locative relation contract and retains the INTO vehicle and its authored 100 mL quantity. |
+| I9 | fix | Explicit WITH owns accompaniment ahead of the frame-level Substance fallback; implicit-object swallowing remains valid. |
+| I10 | fix | Only source-established structured clock ownership permits replacement/removal; independent 08:00 plus added 10:00 survive, identical display clocks appear once. |
+| I11 | fix | Preparation-only priming cannot acquire the structured primary dose through the unqualified fallback; Prime 2 and Spray 1 remain independent. |
+| I12 | fix | Same-time continuation inherits clock windows; previous-time wording is removed only when a structured anchor actually carries it. |
+| I13 | fix | Authored treatment offsets remain the cadence origin instead of being overwritten by inferred predecessor dates; fronted/postposed onset stays attached. |
+| I14 | fix | Repeating active/rest boundaries use each-cycle-start wording in English and Thai; nonrepeating treatment-start wording and execution are unchanged. |
+| B1 | fix | A uniquely identified successor can gain a concurrent dose without losing its opening draft pause; existing predecessor/anonymous-owner checks remain. |
+| B2 | fix | Existing retained-sequence metadata preserves R5 sequence 0 and -1 through R6 grouping; later edits retire the old carrier without deleting source. |
+| B3 | reject | Removed-predecessor subset acceptance remains outside scope: pinned master and reviewed code both reject the public legacy/nested subsets; no supported acceptance contract established. |
+| B4 | oracle | Architecture checks now detect ordinary and optional direct modifierExtension reads, with positive controls. |
+| B5 | fix | Edited R5 import honors requested roundtrip mode; whole-source rejection cannot be overwritten by a successful dose-only match or revive cleared text. |
+| B6 | fix | Metadata-only clock bridges remain extensions beside event anchors; no null core clock is introduced, while actual valued clocks keep their core path. |
+| B7 | reject | Electrical UCUM codes placed in Duration do not establish a supported temporal defect; no new case validation or unit conversion. |
+| B8 | oracle | The ranged-dose limit test positively asserts 50 mL per hour through canonical, R5 and R6, besides retaining the dose range and absence of an administered rate. |
+| B9 | oracle | Pause queries actually start inside the pause, retain the November 28 and independent November 30 dates, and check exact 6/5-tablet totals. |
+| B10 | fix | A package-boundary wrapper restores unambiguous saved action-code lookup; internal lexical resolution remains surface-only. |
+| B11 | oracle | Phase-dose assertions start at the directive and reject conflicting earlier, decimal and multidigit doses; the calendar successor matcher is equally strict. |
+| B12 | fix | Rich object-time previews retain typed BEFORE/CM relations in both locales; the existing unmarked English daypart preposition remains. |
+| B13 | oracle | Event-window-only previews assert absence of an invented numeric dose/unit in both locales, alongside the absent native amount. |
+| B14 | fix | The existing graph quantity extension carrier retains unknown annotation children; the shared codec still owns comparator interpretation. |
+| B15 | fix | Default realization reuses the classifier-selected Object rather than taking the first Object; selection is computed once without a new cache. |
+| B16 | fix | Unselected scalar alternatives are skipped before timing validation; selecting the conflicting branch still retains its existing rejection. |
+| B17 | fix | Finite count history is bounded by the current cycle, while earlier actual use stays in the independent rolling-cap ledger. |
+| B18 | fix | Administration-duration endpoints use the selected CourseLanguage unit facet while retaining independent authored endpoint values and units. |
+| B19 | fix | A known start with an unresolved authored end displays end review wording rather than onward; truly absent ends retain onward and wire data is preserved. |
+| B20 | type | The existing distribution helper result declares its optional roundTripAnchors member. |
+
+### Supported neighboring defects and scope exclusions
+
+- Daily once-a-day dosing inside an authored 18:00–20:00 window now uses the existing interval-window start rule: all seven administrations occur at 18:00 and supply seven tablets. Ordinary unwindowed daily 09:00 and the q3h 07:00–19:00 control are unchanged. Master also scheduled the windowed case outside its window.
+- Existing range-plus-rate support retains 500–1000 mL beside 100 mL/h through typed projection, native, R5, R6 and strict R5. Master already preserves that wire combination; no duration, conversion or new amount algebra is inferred.
+- A complete recognized preparation clock following a material stays a typed Time daughter instead of being swallowed into material text. The correction factors the existing bounded complete-clock parser. Preparation 08:00 survives an external primary-clock edit from 09:00 to 10:00.
+- Intact public parseSig(...).fhir now selects the existing course-aware writer for member phase boundaries, preserving an independent day-10 start on November 30. The explicit R5 writer already worked. This fixes producer metadata loss and does not broaden removed-predecessor import acceptance.
+- Existing NEXT oracles no longer demand an extra unrequested day: predecessor timestamps and independent origins are retained, query limits exceed expected cardinality, later empty windows and exact 14-tablet/6-tablet totals are checked. Two old graph ownership fixtures now establish their ownership through complete public source/provenance rather than clock injection or private canonical/proof edits.
+
+The proposed active-drug/carrier-volume/independent-flow-rate triple remains excluded: the current active/carrier construction requires authored duration and has no third independent amount slot. No derived four-hour duration or new carrier representation was added. A separate onset-only daypart model for BID starting NEXT morning also remains excluded: the existing documented EventTiming/clinic-clock precedence is preserved. Historical Nuuk nominal-date machinery and earlier rejected internal edit/proof frameworks remain excluded.
+
+Pinned-master checks identify I1/I2/I4/I8/I9/I10/I11/I14 and B1/B2/B6/B10/B16 regressions where the earlier supported result was demonstrated. I3, the public comma split, same-window continuation, daily-window execution, normalized rich patch wording, selected-object roles and unknown quantity annotation loss also affect master and are repaired as supported defects. B17 is a gap in the newer repeated-course execution; master cannot execute its positive control, so it is not represented as a master scheduling regression.
+
+### Integrated validation
+
+- 6,457/6,457 source tests pass across all 48 existing test files, including strict ES6 type checking. The previous round had 6,394 tests; every prior file remains and none loses test cases.
+- Four distribution tests pass after ESM/CommonJS/declaration builds.
+- The actual Shinebright converter and storage save/reopen path preserves full JSON exactly for 64 cases out of 65 attempts, including all 48 previously preserved cases and 16 new cases. The remaining raw core timeOfDay [null,08:00:00] case reproduces the same existing downstream RangeError. Its input was passed directly, without trimming, normalization or downstream edits.
+- The PR remains at exactly 100 changed paths. All regression cases use existing files.
+- Source and candidate build are frozen throughout measurement; all worker source/test/build processes finished before benchmarking.
+
+Frozen source SHA-256 (sorted tracked src path, NUL, file bytes, NUL): 5de0b7279be57a5741a8177b210ed8a3f31886c49cd55dba7be6ca7c917a917e.
+Candidate ESM SHA-256: 9ea037f7468d09eef9936fae50f7ec3a5dadb9134f712886d4be371a3ffe3c84.
+Pinned master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
+Unchanged benchmark SHA-256: 10aae1e96f04edeefdd53471f1508998897f30ce34e99d7ab042fa97d109f1fb; git blob 42a4c7b898a778a092be550cd454d6bf39041879.
+
+Evidence remains in /tmp/ezmed14-round42-*: lane notes and before/after/master probes, public ownership and onset probes, exact converter/storage report, source/dist logs, gate manifest, and full paired benchmark data.
+
+
+### Final performance gate
+
+All 117/117 public functions are covered and measured by the unchanged harness. Across 181 paired scenarios, all 174 semantically equivalent scenarios meet the individual 4% ceiling. The same seven established non-equivalent scenarios remain visible separately; candidate-only APIs retain separate measurements. No scenario, threshold, equivalence exclusion or harness source changed.
+
+The full sweep used 22 balanced paired rounds at 35 ms. Every one of its eight initial equivalent-scenario flags received the preset 72 balanced paired rounds at 140 ms with reversed first order, using the same frozen artifacts. Changes are median-log paired ratios, not ratios of marginal medians or averages across scenarios.
+
+| Initially flagged scenario | First pass | Longer confirmation |
+|---|---:|---:|
+| formatSig/R5/en | +16.517% | -2.667% |
+| fromFhirDosage/en | +14.494% | -7.443% |
+| listSupportedBodySiteGrammar | +6.607% | +0.607% |
+| buildBodySiteSpatialRelationExtension | +4.710% | -6.716% |
+| buildBodySiteSpatialRelationExtensions | +22.546% | -7.828% |
+| buildSnomedBodySiteTopographicalModifierPostcoordinationCode | +26.758% | -4.403% |
+| inferMedicationLocale | +4.800% | +3.279% |
+| registerSuggestLocaleAdapter | +8.931% | -0.958% |
+
+Highest accepted equivalent-scenario change: **+3.279%**, for **inferMedicationLocale**.
+
+| Representative scenario | Paired change |
+|---|---:|
+| parseSig/ordinary | -5.557% |
+| parseSig/thai | -6.953% |
+| parseSig/staged | -2.342% |
+| formatSig/R5/en | -2.667% |
+| formatSig/R6/en | -12.803% |
+| fromFhirDosage/en | -7.443% |
+| calculateTotalUnits/scalar | -87.641% |
+
+
+The candidate source hash, candidate ESM, pinned master ESM and harness hash were independently rechecked after measurement and match the frozen manifest. The initial full process reports eight timing flags; the fixed longer confirmation resolves all eight. Complete reports, raw paired samples, command manifests and process exit records remain available.
+
+### Review delivery
+
+Delivery follows the authorized loop: normal push to the existing PR14 branch, individual replies in the 14 original inline threads, resolution after replies, and one exact @coderabbitai full review request. Body-only findings and the two explicit rejections are covered in this ledger and the relevant original threads. The next full review will be assessed against the same supported-behavior boundary; requesting it does not end the work.
