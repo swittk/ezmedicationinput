@@ -1,19 +1,35 @@
+import { THAI_COURSE } from "../src/locales/course/th";
+import { ENGLISH_COURSE } from "../src/locales/course/en";
+import { withDosageEditProvenance, encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, formatSig, toDosageDetails, toFhirR5Dosages,
-  registerMedicationDateResolver, nextDueDoses, calculateTotalUnits
+  parseSig, formatSig, toDosageDetails, toFhirR5Dosages, registerMedicationDateResolver, nextDueDoses,
+  calculateTotalUnits, fromFhir, projectCanonicalCourse, importCanonicalCourse,
+  type CanonicalAdministration, formatParseBatch, fromFhirDosage
 } from "../src/index";
 import { formatCanonicalClause } from "../src/format";
 import { formatCanonicalCourse } from "../src/canonical/format-course";
 import { administrationFromClause, clauseForAdministration, courseFromAdministrations, courseFromPartialParallel, courseFromParallel } from "../src/canonical/compile";
 import { courseFromR6, courseToR6 } from "../src/adapters/canonical-course";
 import type { CanonicalCourse, CanonicalBoundary } from "../src/canonical/course";
-import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
+import {
+  canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL,
+  TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL,
+  CYCLE_DAY_ELIGIBILITY_EXTENSION_URL
+} from "../src/fhir";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
-import { resolveSigLocalization, type SigFormatContext } from "../src/i18n";
-import { parseInstructionActions, realizeInstructionAction } from "../src/instruction-graph";
+import {
+  resolveSigLocalization, type SigFormatContext, registerSigLocalization
+} from "../src/i18n";
+import {
+  parseInstructionActions, realizeInstructionAction, realizeRichPrimaryWithCanonicalDose,
+  instructionGraphSourceConflictsWithDose
+} from "../src/instruction-graph";
 import { resolveMedicationInstructionActionByMethod } from "../src/instruction-action-terminology";
-import { buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../src/instruction-graph-fhir";
+import {
+  buildInstructionGraphExtension, MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL,
+  parseInstructionGraphExtension
+} from "../src/instruction-graph-fhir";
 import { tokenize, parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph, scopeSequentialPhaseSemantics } from "../src/regimen/regimen";
@@ -32,9 +48,8 @@ import {
 } from "../src/lexer/surface-segmenter";
 import {
   AdviceArgumentRole, AdviceRelation, AdvicePolarity, EventTiming, FhirPeriodUnit,
-  type CanonicalInstructionGraph,
-  type FhirDosage, type FhirR6DosageInstruction, type ParseOptions,
-  type MedicationDateResolver
+  type CanonicalInstructionGraph, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions,
+  type MedicationDateResolver, RouteCode, type FhirR6Dosage
 } from "../src/types";
 
 describe("round 23: language provider callable contracts", () => {
@@ -1679,6 +1694,8 @@ describe("round 29: typed onsets and complete numeric daughters", () => {
       expect(nextDueDoses(input, { ...context, limit: 20 })).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...context,
         durationValue: 15, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(21);
+      if (onsetDays === 7) expect(calculateTotalUnits({ dosage: input, ...context,
+        durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(7);
     }
   });
 
@@ -1733,7 +1750,8 @@ describe("round 29: typed onsets and complete numeric daughters", () => {
     });
     for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T12:00:00Z",
-        from: "2026-11-25T00:00:00Z", timeZone: "UTC", limit: 4 })).toEqual([
+        from: "2026-11-21T12:00:00Z", timeZone: "UTC", limit: 7 })).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00",
         "2026-11-25T06:00:00+00:00", "2026-11-25T08:00:00+00:00",
         "2026-11-26T06:00:00+00:00", "2026-11-26T08:00:00+00:00"
       ]);
@@ -2263,71 +2281,8 @@ describe("round34 successor and member origins", () => {
 
 
 // Retained regression suite from test/pr14-round20-meaning.spec.ts.
-import { describe as round38_meaning20_describe, expect as round38_meaning20_expect, it as round38_meaning20_it } from "vitest";
-import { parseSig as round38_meaning20_parseSig, formatSig as round38_meaning20_formatSig, formatCanonicalCourse as round38_meaning20_formatCanonicalCourse, fromFhir as round38_meaning20_fromFhir, nextDueDoses as round38_meaning20_nextDueDoses, calculateTotalUnits as round38_meaning20_calculateTotalUnits, projectCanonicalCourse as round38_meaning20_projectCanonicalCourse, toFhirR5Dosages as round38_meaning20_toFhirR5Dosages, toDosageDetails as round38_meaning20_toDosageDetails, importCanonicalCourse as round38_meaning20_importCanonicalCourse, FhirPeriodUnit as round38_meaning20_FhirPeriodUnit, type FhirDosage as round38_meaning20_FhirDosage, type CanonicalCourse as round38_meaning20_CanonicalCourse, type CanonicalAdministration as round38_meaning20_CanonicalAdministration } from "../src/index";
-import { formatCanonicalClause as round38_meaning20_formatCanonicalClause } from "../src/format";
-import { resolveSigLocalization as round38_meaning20_resolveSigLocalization } from "../src/i18n";
-import { parseClauseState as round38_meaning20_parseClauseState } from "../src/parser";
-import { createBoundaryPlan as round38_meaning20_createBoundaryPlan } from "../src/regimen/planner";
-import { buildRegimenGraph as round38_meaning20_buildRegimenGraph, scopeSequentialPhaseSemantics as round38_meaning20_scopeSequentialPhaseSemantics } from "../src/regimen/regimen";
-import { buildCanonicalParallelRegimen as round38_meaning20_buildCanonicalParallelRegimen } from "../src/regimen/parallel-course";
-import { parseInstructionActions as round38_meaning20_parseInstructionActions, realizeRichPrimaryWithCanonicalDose as round38_meaning20_realizeRichPrimaryWithCanonicalDose, instructionGraphSourceConflictsWithDose as round38_meaning20_instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
-import { AdviceArgumentRole as round38_meaning20_AdviceArgumentRole } from "../src/types";
-import { getQuantityComparator as round38_meaning20_getQuantityComparator, simpleQuantityForR5 as round38_meaning20_simpleQuantityForR5 } from "../src/fhir-quantity-operator";
-import { canonicalFromFhir as round38_meaning20_canonicalFromFhir, TIMING_FREQUENCY_MIN_EXTENSION_URL as round38_meaning20_TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL as round38_meaning20_ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL as round38_meaning20_CYCLE_DAY_ELIGIBILITY_EXTENSION_URL } from "../src/fhir";
-import { withDosageEditProvenance as round38_meaning20_withDosageEditProvenance } from "../src/dosage-course";
 {
-  const describe = round38_meaning20_describe;
-  const expect = round38_meaning20_expect;
-  const it = round38_meaning20_it;
-  const parseSig = round38_meaning20_parseSig;
-  const formatSig = round38_meaning20_formatSig;
-  const formatCanonicalCourse = round38_meaning20_formatCanonicalCourse;
-  const fromFhir = round38_meaning20_fromFhir;
-  const nextDueDoses = round38_meaning20_nextDueDoses;
-  const calculateTotalUnits = round38_meaning20_calculateTotalUnits;
-  const projectCanonicalCourse = round38_meaning20_projectCanonicalCourse;
-  const toFhirR5Dosages = round38_meaning20_toFhirR5Dosages;
-  const toDosageDetails = round38_meaning20_toDosageDetails;
-  const importCanonicalCourse = round38_meaning20_importCanonicalCourse;
-  const FhirPeriodUnit = round38_meaning20_FhirPeriodUnit;
-  type FhirPeriodUnit = round38_meaning20_FhirPeriodUnit;
-  type FhirDosage = round38_meaning20_FhirDosage;
-  type CanonicalCourse = round38_meaning20_CanonicalCourse;
-  type CanonicalAdministration = round38_meaning20_CanonicalAdministration;
-  const formatCanonicalClause = round38_meaning20_formatCanonicalClause;
-  const resolveSigLocalization = round38_meaning20_resolveSigLocalization;
-  const parseClauseState = round38_meaning20_parseClauseState;
-  const createBoundaryPlan = round38_meaning20_createBoundaryPlan;
-  const buildRegimenGraph = round38_meaning20_buildRegimenGraph;
-  const scopeSequentialPhaseSemantics = round38_meaning20_scopeSequentialPhaseSemantics;
-  const buildCanonicalParallelRegimen = round38_meaning20_buildCanonicalParallelRegimen;
-  const parseInstructionActions = round38_meaning20_parseInstructionActions;
-  const realizeRichPrimaryWithCanonicalDose = round38_meaning20_realizeRichPrimaryWithCanonicalDose;
-  const instructionGraphSourceConflictsWithDose = round38_meaning20_instructionGraphSourceConflictsWithDose;
-  const AdviceArgumentRole = round38_meaning20_AdviceArgumentRole;
-  type AdviceArgumentRole = round38_meaning20_AdviceArgumentRole;
-  const getQuantityComparator = round38_meaning20_getQuantityComparator;
-  const simpleQuantityForR5 = round38_meaning20_simpleQuantityForR5;
-  const canonicalFromFhir = round38_meaning20_canonicalFromFhir;
-  const TIMING_FREQUENCY_MIN_EXTENSION_URL = round38_meaning20_TIMING_FREQUENCY_MIN_EXTENSION_URL;
-  const ADMINISTRATION_OFFSET_EXTENSION_URL = round38_meaning20_ADMINISTRATION_OFFSET_EXTENSION_URL;
-  const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = round38_meaning20_CYCLE_DAY_ELIGIBILITY_EXTENSION_URL;
-  const withDosageEditProvenance = round38_meaning20_withDosageEditProvenance;
 // BEGIN PRESERVED meaning20
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 function tablet(): CanonicalAdministration {
   return { kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
@@ -3019,77 +2974,8 @@ it("round37 inherits Chew for a resolved divided daily dose, while a real rate k
 
 
 // Retained regression suite from test/pr14-round21-meaning.spec.ts.
-import { describe as round38_meaning21_describe, expect as round38_meaning21_expect, it as round38_meaning21_it } from "vitest";
-import { formatSig as round38_meaning21_formatSig, formatParseBatch as round38_meaning21_formatParseBatch, fromFhir as round38_meaning21_fromFhir, fromFhirDosage as round38_meaning21_fromFhirDosage, parseSig as round38_meaning21_parseSig, nextDueDoses as round38_meaning21_nextDueDoses, toFhirR5Dosages as round38_meaning21_toFhirR5Dosages, parseInstructionActions as round38_meaning21_parseInstructionActions, formatCanonicalCourse as round38_meaning21_formatCanonicalCourse, projectCanonicalCourse as round38_meaning21_projectCanonicalCourse, importCanonicalCourse as round38_meaning21_importCanonicalCourse } from "../src/index";
-import { encodeR6SourceMetadata as round38_meaning21_encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL as round38_meaning21_PARALLEL_COMPONENT_PHASE_ORIGIN_URL, withDosageEditProvenance as round38_meaning21_withDosageEditProvenance } from "../src/dosage-course";
-import { courseFromR6 as round38_meaning21_courseFromR6 } from "../src/adapters/canonical-course";
-import { formatCanonicalClause as round38_meaning21_formatCanonicalClause } from "../src/format";
-import { canonicalFromFhir as round38_meaning21_canonicalFromFhir, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL as round38_meaning21_CYCLE_DAY_ELIGIBILITY_EXTENSION_URL } from "../src/fhir";
-import { registerSigLocalization as round38_meaning21_registerSigLocalization, resolveSigLocalization as round38_meaning21_resolveSigLocalization } from "../src/i18n";
-import { ENGLISH_COURSE as round38_meaning21_ENGLISH_COURSE } from "../src/locales/course/en";
-import { THAI_COURSE as round38_meaning21_THAI_COURSE } from "../src/locales/course/th";
-import { simpleQuantityForR5 as round38_meaning21_simpleQuantityForR5, getQuantityComparator as round38_meaning21_getQuantityComparator } from "../src/fhir-quantity-operator";
-import { buildInstructionGraphExtension as round38_meaning21_buildInstructionGraphExtension, parseInstructionGraphExtension as round38_meaning21_parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
-import { realizeInstructionAction as round38_meaning21_realizeInstructionAction } from "../src/instruction-graph";
-import { AdviceArgumentRole as round38_meaning21_AdviceArgumentRole, EventTiming as round38_meaning21_EventTiming, FhirPeriodUnit as round38_meaning21_FhirPeriodUnit, RouteCode as round38_meaning21_RouteCode } from "../src/types";
-import type { FhirDosage as round38_meaning21_FhirDosage, FhirR6Dosage as round38_meaning21_FhirR6Dosage, FhirR6DosageInstruction as round38_meaning21_FhirR6DosageInstruction } from "../src/types";
 {
-  const describe = round38_meaning21_describe;
-  const expect = round38_meaning21_expect;
-  const it = round38_meaning21_it;
-  const formatSig = round38_meaning21_formatSig;
-  const formatParseBatch = round38_meaning21_formatParseBatch;
-  const fromFhir = round38_meaning21_fromFhir;
-  const fromFhirDosage = round38_meaning21_fromFhirDosage;
-  const parseSig = round38_meaning21_parseSig;
-  const nextDueDoses = round38_meaning21_nextDueDoses;
-  const toFhirR5Dosages = round38_meaning21_toFhirR5Dosages;
-  const parseInstructionActions = round38_meaning21_parseInstructionActions;
-  const formatCanonicalCourse = round38_meaning21_formatCanonicalCourse;
-  const projectCanonicalCourse = round38_meaning21_projectCanonicalCourse;
-  const importCanonicalCourse = round38_meaning21_importCanonicalCourse;
-  const encodeR6SourceMetadata = round38_meaning21_encodeR6SourceMetadata;
-  const PARALLEL_COMPONENT_PHASE_ORIGIN_URL = round38_meaning21_PARALLEL_COMPONENT_PHASE_ORIGIN_URL;
-  const withDosageEditProvenance = round38_meaning21_withDosageEditProvenance;
-  const courseFromR6 = round38_meaning21_courseFromR6;
-  const formatCanonicalClause = round38_meaning21_formatCanonicalClause;
-  const canonicalFromFhir = round38_meaning21_canonicalFromFhir;
-  const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = round38_meaning21_CYCLE_DAY_ELIGIBILITY_EXTENSION_URL;
-  const registerSigLocalization = round38_meaning21_registerSigLocalization;
-  const resolveSigLocalization = round38_meaning21_resolveSigLocalization;
-  const ENGLISH_COURSE = round38_meaning21_ENGLISH_COURSE;
-  const THAI_COURSE = round38_meaning21_THAI_COURSE;
-  const simpleQuantityForR5 = round38_meaning21_simpleQuantityForR5;
-  const getQuantityComparator = round38_meaning21_getQuantityComparator;
-  const buildInstructionGraphExtension = round38_meaning21_buildInstructionGraphExtension;
-  const parseInstructionGraphExtension = round38_meaning21_parseInstructionGraphExtension;
-  const realizeInstructionAction = round38_meaning21_realizeInstructionAction;
-  const AdviceArgumentRole = round38_meaning21_AdviceArgumentRole;
-  type AdviceArgumentRole = round38_meaning21_AdviceArgumentRole;
-  const EventTiming = round38_meaning21_EventTiming;
-  type EventTiming = round38_meaning21_EventTiming;
-  const FhirPeriodUnit = round38_meaning21_FhirPeriodUnit;
-  type FhirPeriodUnit = round38_meaning21_FhirPeriodUnit;
-  const RouteCode = round38_meaning21_RouteCode;
-  type RouteCode = round38_meaning21_RouteCode;
-  type FhirDosage = round38_meaning21_FhirDosage;
-  type FhirR6Dosage = round38_meaning21_FhirR6Dosage;
-  type FhirR6DosageInstruction = round38_meaning21_FhirR6DosageInstruction;
 // BEGIN PRESERVED meaning21
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 const tabletQuantity = { value: 1, unit: "tab" };
 const tablet: FhirR6Dosage = {

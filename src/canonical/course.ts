@@ -335,7 +335,12 @@ export function numericAdministrationLimits(
     if (!sourceUnit) { multiple = true; continue; }
     if (doseUnit === undefined) {
       const amount = a.amounts?.[0];
-      doseUnit = unitOf(amount?.quantity ?? amount?.range?.high ?? amount?.range?.low);
+      const high = amount?.range?.high;
+      // Metadata alone does not make the upper endpoint measurable. Match
+      // supply's numeric endpoint while retaining both authored quantities.
+      doseUnit = unitOf(amount?.quantity ??
+        (high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
+          ? high : amount?.range?.low));
     }
     // Keep every comparison in the same unit even when the winning original
     // bound uses a different unit. Returning that original preserves metadata.

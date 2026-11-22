@@ -2874,16 +2874,19 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
         found=true;
       }
       const occurrence=getTimingOccurrenceCap(member.schedule?.recurrence);
-      if(occurrence) {
-        const since=quantityCapHistoryFloor(upcoming,occurrence,zone);
-        if(since<oldest)oldest=since;
-        found=true;
-      }
+      const occurrenceBucket = occurrence ? occurrenceCapBucketIndex(upcoming, occurrence, zone) : undefined;
+      if(occurrence)found=true;
       if(!found){usage.delete(key);continue;}
       // A source's events can overlap adjacent cycles. Keep stable event
       // order without assuming they were sorted or copying the whole list.
       let write=0;
-      for(const item of times)if((typeof item === "string" ? Date.parse(item) : item.at)>oldest)times[write++]=item;
+      for(const item of times) {
+        const at = typeof item === "string" ? Date.parse(item) : item.at;
+        // Occurrence ceilings use civil buckets, including the bucket's first
+        // instant. Quantity ceilings retain their separate rolling cutoff.
+        if(at>oldest || occurrence && occurrenceCapBucketIndex(new Date(at), occurrence, zone)>=occurrenceBucket!)
+          times[write++]=item;
+      }
       times.length=write;
       if(!write)usage.delete(key);
     }
@@ -4007,7 +4010,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       (repeatForCount.count !== undefined || repeatForCount.countMax !== undefined) &&
       !isSingleAdministrationRepeat(repeatForCount) &&
       (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount) ||
-       (one.asNeeded && (one.predicate || one.excludedDates?.length || one.excludedWeekdays?.length)))
+       one.predicate || one.excludedDates?.length || one.excludedWeekdays?.length)
     ? repeatOccurrenceCap(repeatForCount) : undefined;
   const acceptedCount = eligibleAt && !one.asNeeded ? finiteCount : constrainedCount;
   if (acceptedCount !== undefined) {
@@ -6009,7 +6012,9 @@ function maximumChronologicalSupplyCourse(
       // amounts and their per-kg units remain on the source member.
       const amounts = generated.amounts;
       if (amounts?.length === 1 &&
-          ((!amounts[0].quantity && amounts[0].range) || options.patientWeightKg !== undefined) &&
+          ((!amounts[0].quantity && (amounts[0].range ||
+            ((amounts[0].rate || amounts[0].rateRatio) && generated.schedule?.recurrence?.occurrenceDurationRange))) ||
+            options.patientWeightKg !== undefined) &&
           hasPeriodLimits(generated))
         generated = prepareMeasuredDose(generated, options);
       if ((maximal.frequencyMaximum || maximal.periodMinimum) && !preserveClocks) {
@@ -7396,10 +7401,11 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     const single = scalarCourseAdministration(course);
     if (!single) return calculateCourseTotalUnits(course, options);
     requireExecutableCourseContext(course, "calculating");
-    const total = calculateTotalUnits({ ...options, dosage: single, roundToMultiple: undefined });
-    // The course summary still owns output qualification, converted container
-    // totals and final rounding; only unnecessary phase planning is bypassed.
-    return qualifyCourseSupply(course, sumCourseUnits([{ total, unit: total.unit }], options));
+    const total = calculateTotalUnits({ ...options, dosage: single });
+    // Scalar rounding precedes its lifetime ceiling. The course summary owns
+    // converted container totals and qualification without rounding again.
+    return qualifyCourseSupply(course,
+      sumCourseUnits([{ total, unit: total.unit }], { ...options, roundToMultiple: undefined }));
   }
   const one = input as CanonicalAdministration;
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
@@ -7664,7 +7670,9 @@ function completionAfterAcceptedAdministration(
     const end = createIntervalStepper({ period: low.value, periodUnit: lowUnit }, zone)?.(last);
     return end ? { end, point: false } : undefined;
   }
-  if (repeat?.occurrenceDurationComparator) return undefined;
+  if (repeat?.occurrenceDurationComparator ||
+      repeat?.occurrenceDurationMax !== undefined &&
+        repeat.occurrenceDurationMax !== repeat.occurrenceDuration) return undefined;
   if (repeat?.occurrenceDuration && repeat.occurrenceDurationUnit) {
     const advance = createIntervalStepper(
       { period: repeat.occurrenceDuration, periodUnit: repeat.occurrenceDurationUnit },

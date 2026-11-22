@@ -260,8 +260,11 @@ export function isDiscreteUnit(unit: string): boolean {
 
 /** Interpret a quantity's time unit without changing its authored representation. */
 export function getQuantityDurationUnit(
-  quantity: { code?: string; unit?: string } | undefined
+  quantity: { code?: string; unit?: string; system?: string } | undefined
 ): FhirPeriodUnit | undefined {
+  // A local code belongs to its stated terminology, even if it spells a
+  // familiar UCUM symbol. Keep unknown durations available without guessing.
+  if (quantity?.system && quantity.system !== "http://unitsofmeasure.org") return undefined;
   let candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
   // UCUM annotations describe the quantity but do not change its unit.
   // Interpret only a terminal annotation sequence; never rewrite the source.
