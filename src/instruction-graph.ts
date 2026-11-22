@@ -4381,9 +4381,11 @@ function timeArgumentCoveredBySchedule(
   const relationMapping = relation
     ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")
     : undefined;
-  // A qualifying relation without a lexical mapping cannot license the bare
-  // event: an after-sleep argument does not establish the bedtime event.
-  const related = relationMapping ? relationMapping.get(timing) : timing;
+  // HS already encodes before sleep, so retain that authored qualifier.
+  // Other unmapped relations cannot claim the bare event: after sleep does
+  // not establish the bedtime event.
+  const related = relation === "before" && timing === EventTiming["Before Sleep"]
+    ? timing : relationMapping ? relationMapping.get(timing) : timing;
   return related !== undefined && clause.schedule.when.indexOf(related) >= 0;
 }
 
