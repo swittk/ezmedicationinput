@@ -2358,13 +2358,17 @@ function resolveAdministrationWindow(
   if (successorFloor && successorFloor > eligibleFrom) eligibleFrom = successorFloor;
   const delay = getAdministrationOffsetMinutes(administration);
   const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
-  // Exact counts and maximum allowances belong to administrations after
-  // phase eligibility, even when their cadence is anchored earlier. Only
-  // a definite count can separately establish phase completion below.
+  // Explicit component origins survive unrelated global step cuts. Those
+  // cuts clip membership, not the component's total count allowance. Its own
+  // calendar start still constrains count history; an unmarked delayed phase
+  // instead owns the resolved stage eligibility.
+  const countFloor = cadence.hasPhaseOrigin && stage.start
+    ? absoluteStart && absoluteStart > durationOrigin ? absoluteStart : durationOrigin
+    : eligibleFrom;
   const countEligibilityStart =
-    eligibleFrom > durationOrigin && recurrence &&
+    countFloor > durationOrigin && recurrence &&
     repeatOccurrenceCap(recurrence) !== undefined
-      ? eligibleFrom
+      ? countFloor
       : undefined;
   let endExclusive = earlierDate(
     resolveRepeatDurationCapEnd(administration, durationOrigin, timeZone,
