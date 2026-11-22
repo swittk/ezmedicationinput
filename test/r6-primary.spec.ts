@@ -300,7 +300,11 @@ describe("FHIR R5 Timing invariant and clinical scheduling safety", () => {
     expect(repeat?.timeOfDay).toBeUndefined();
     expect(parsed.fhir[0].doseAndRate?.[0]?.doseQuantity?.value).toBe(1);
     expect(parsed.warnings).toEqual([]);
-    expect(nextDueDoses(parsed.fhir, timingFamilyOptions).length).toBeGreaterThan(0);
+    for (const dosage of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(nextDueDoses(dosage, { ...timingFamilyOptions, limit: 2,
+        eventClock: { [EventTiming["Before Breakfast"]]: "07:00" } })).toEqual([
+        "2026-10-21T07:00:00+07:00", "2026-10-21T08:00:00+07:00"
+      ]);
   });
 
   it("keeps a daily cadence plus two explicit clocks instead of erasing timing", () => {

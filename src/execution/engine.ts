@@ -852,7 +852,8 @@ function exactTimingEventOccurrences(
   timeZone: string,
   limit: number,
   priorCount: number,
-  derivePriorCount: boolean
+  derivePriorCount: boolean,
+  quantityEstimation = false
 ): string[] | undefined {
   if (!timing.explicitEvents?.length) return undefined;
   const whenCodes = repeat?.anchors ?? [];
@@ -868,7 +869,11 @@ function exactTimingEventOccurrences(
   const dayOfMonth = getTimingMonthDays(repeat);
   const calendarDays = dayOfMonth ? { dayOfMonth } : undefined;
   const candidates: Date[] = [];
+  let partialEvent = false;
   for (const value of timing.explicitEvents) {
+    // FHIR dateTime permits year/month precision. It names no exact dose
+    // instant and must not spend an occurrence slot or become midnight.
+    if (/^\d{4}(?:-\d{2})?$/u.test(value)) { partialEvent = true; continue; }
     const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
     if (dateOnly) {
       const day = calendarBoundaryDate(
@@ -895,6 +900,11 @@ function exactTimingEventOccurrences(
     const instant = new Date(value);
     if (!Number.isNaN(instant.getTime())) candidates.push(instant);
   }
+  const countCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  if (quantityEstimation && partialEvent && !candidates.length &&
+      (countCap === undefined || countCap > (derivePriorCount ? 0 : priorCount)))
+    throw new MedicationQuantityCalculationError("timing-required",
+      "The explicit events have only year or month precision; supply calculation requires a resolved administration date.");
   candidates.sort((left, right) => left.getTime() - right.getTime());
   const unique: Date[] = [];
   let historicalCount = 0;
@@ -917,7 +927,6 @@ function exactTimingEventOccurrences(
     if (courseEnd && candidate >= courseEnd) continue;
     unique.push(candidate);
   }
-  const countCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
   const effectivePriorCount = derivePriorCount ? historicalCount : priorCount;
   const remaining =
     countCap === undefined ? limit : Math.max(0, Math.min(limit, countCap - effectivePriorCount));
@@ -2605,13 +2614,26 @@ function treatmentStepWindow(
     ...(!stage.end && !repetitionWindow && completionPending ? { completionPending: true } : {}),
     ...(dependencies ? { dependencies } : {}) };
 }
+/** The window has already resolved both range endpoints to one instant.
+ * Retain civil repetition only when they also share a calendar amount;
+ * coincident elapsed/calendar offsets do not invent a common civil span. */
+function stepRepeatDisplacement(boundary: CanonicalBoundary | undefined): CanonicalMeasure | undefined {
+  if (boundary?.displacement) return boundary.displacement;
+  const low = boundary?.displacementRange?.low, high = boundary?.displacementRange?.high;
+  if (!low || !high) return undefined;
+  if (low.value === 0 && high.value === 0) return low;
+  const a = normalizedCalendarInterval(low.value, parseBoundsDurationUnit(low));
+  const b = normalizedCalendarInterval(high.value, parseBoundsDurationUnit(high));
+  return a && b && ((a.days !== undefined && a.days === b.days) ||
+    (a.months !== undefined && a.months === b.months)) ? low : undefined;
+}
 /** A repeated step keeps its authored civil duration when both boundaries
  * use a compatible calendar unit. Other resolved spans remain elapsed; an
  * implicit finite-count step instead restarts after its accepted completion. */
 function stepRepeatSpan(stage: CanonicalStage, window: TreatmentStepWindow, implicitTreatmentStart: boolean): CanonicalMeasure | undefined {
   if (!window.end || window.completionPoint) return undefined;
-  const start = stage.start?.displacement;
-  const end = stage.end?.displacement;
+  const start = stepRepeatDisplacement(stage.start);
+  const end = stepRepeatDisplacement(stage.end);
   const sameAnchor = stage.end?.anchor === "treatment-start"
     ? !stage.start || stage.start.anchor === "treatment-start"
     : stage.end?.anchor === "treatment-day-start" && stage.start?.anchor === "treatment-day-start";
@@ -4515,7 +4537,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       timeZone,
       Math.floor(limit),
       priorCount,
-      priorCountInput === undefined && !dosage.asNeeded
+      priorCountInput === undefined && !dosage.asNeeded,
+      (options as PhaseCountOptions).quantityEstimation === true
     );
     if (exactEvents !== undefined) {
       return exactEvents;
@@ -5973,9 +5996,9 @@ function measureRangedSchedule(
   };
   const candidates = nextDueDoses(execution, {
     ...options, from: begin, orderedAt: origin, priorCount: undefined,
-    priorDoseTimes: undefined, limit: 10000,
+    priorDoseTimes: undefined, limit: 10000, quantityEstimation: true,
     evaluateCondition: options.evaluateCondition ?? (() => true),
-  });
+  } as PhaseCountOptions);
   if (candidates.length === 10000 && Date.parse(candidates[9999]) < end.getTime())
     throw new MedicationQuantityCalculationError("schedule-horizon-too-dense",
       "More than 10,000 administrations could occur in the requested supply window. Use a shorter calculation window.");
@@ -6684,7 +6707,8 @@ function calculateTotalUnitsSingle(
           timeZone,
           100000,
           suppliedPriorCount,
-          options.priorCount === undefined && !dosage.asNeeded
+          options.priorCount === undefined && !dosage.asNeeded,
+          true
         )
       : undefined;
     // An unresolved one-time activity has no generated event history.

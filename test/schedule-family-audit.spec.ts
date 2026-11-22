@@ -4068,6 +4068,12 @@ it.each(["twice daily", "at 08:00 and 20:00"])(
       expect(nextDueDoses(dosage, query)).toEqual([
         "2024-01-05T08:00:00+00:00", "2024-01-05T20:00:00+00:00"
       ]);
+      const day9 = { ...query, from: "2024-01-09T00:00:00Z" };
+      expect(nextDueDoses(dosage, day9)).toEqual([
+        "2024-01-09T08:00:00+00:00", "2024-01-09T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...day9, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits).toBe(4);
       expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day })
         .totalUnits).toBe(4);
     }
