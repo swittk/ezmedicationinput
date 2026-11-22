@@ -1349,12 +1349,19 @@ it.each([
   expect(phase.administrations[1].phaseStart).toMatchObject({
     anchor: "treatment-day-start", displacement: { value: 9, unit: "d" }
   });
-  expect(nextDueDoses(parsed, {
-    orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-29T00:00:00Z", timeZone: "UTC", limit: 5
-  })).toEqual([
-    "2026-11-29T06:00:00+00:00", "2026-11-30T06:00:00+00:00", "2026-11-30T15:00:00+00:00",
-    "2026-12-01T06:00:00+00:00", "2026-12-01T15:00:00+00:00"
-  ]);
+  expect(parsed.meta.canonical.clauses[1].schedule?.count).toBe(1);
+  const query = { orderedAt: "2026-11-21T00:00:00Z", timeZone: "UTC" };
+  for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+    expect(nextDueDoses(dosage, { ...query, from: query.orderedAt, limit: 8 })).toEqual([
+      "2026-11-21T09:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+      "2026-11-24T09:00:00+00:00", "2026-11-25T09:00:00+00:00", "2026-11-26T06:00:00+00:00",
+      "2026-11-30T15:00:00+00:00", "2026-12-01T15:00:00+00:00"
+    ]);
+    expect(nextDueDoses(dosage, { ...query, from: "2026-11-29T00:00:00Z", limit: 5 })).toEqual([
+      "2026-11-30T15:00:00+00:00", "2026-12-01T15:00:00+00:00", "2026-12-02T15:00:00+00:00",
+      "2026-12-03T15:00:00+00:00", "2026-12-04T15:00:00+00:00"
+    ]);
+  }
 });
 
 
@@ -2621,11 +2628,12 @@ describe("round32 phase origin and numeric ownership audit", () => {
       const schedule = parsed.meta.canonical.clauses[1].schedule!;
       expect(schedule.when).toBeUndefined();
       expect(schedule.timeOfDay).toEqual(["09:00:00"]);
+      expect(schedule.count).toBe(1);
       for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
         expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
-          "2026-11-21T20:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T09:00:00+00:00",
+          "2026-11-21T20:00:00+00:00", "2026-11-22T09:00:00+00:00",
         ]);
-        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
+        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
       }
     });
 
@@ -2715,11 +2723,15 @@ it.each(["the next morning and at 09:00", "at 09:00 and the next morning"])(
     expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
     for (const row of parsed.fhir)
       expect(Boolean(row.timing?.repeat?.when?.length && row.timing.repeat.timeOfDay?.length)).toBe(false);
-    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
-      expect(nextDueDoses(input, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
-        timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
-        "2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00", "2026-11-23T08:00:00+00:00"
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(2);
+    const query = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z",
+      timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 };
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-22T09:00:00+00:00"
       ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 4, durationUnit: "d" }).totalUnits).toBe(2);
+    }
   });
 
 describe("round33 onset scope and complete Thai fractions", () => {
@@ -2740,11 +2752,15 @@ describe("round33 onset scope and complete Thai fractions", () => {
     "retains explicitly coordinated event and clock in %s", timing => {
       const parsed = parseSig("Take 1 tablet " + timing);
       expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["MORN"]);
-      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
-        expect(nextDueDoses(input, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
-          timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
-            "2026-12-02T08:00:00+00:00", "2026-12-02T18:00:00+00:00", "2026-12-03T08:00:00+00:00"
-          ]);
+      expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(2);
+      const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 };
+      for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-12-02T08:00:00+00:00", "2026-12-02T18:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ ...query, dosage, durationValue: 4, durationUnit: "d" }).totalUnits).toBe(2);
+      }
     });
 
   it.each(["until the next morning", "until next morning"])("does not turn %s into an onset", ending => {
@@ -2873,13 +2889,15 @@ describe("round36 clock positions and retained source directions", () => {
       const parsed = parseSig("Take 1 tablet " + timing + ", then 2 tablets the next morning");
       const second = timing.includes("evening") ? "18:00" : "20:00";
       expect(parsed.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+      expect(parsed.meta.canonical.clauses[1].schedule?.count).toBe(1);
       for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
         JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
         expect(nextDueDoses(dosage, clockOptions)).toEqual([
           "2026-11-21T08:00:00+00:00", "2026-11-21T" + second + ":00+00:00",
-          "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00"
+          "2026-11-22T08:00:00+00:00"
         ]);
         expect(calculateTotalUnits({ ...clockOptions, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(2);
+        expect(calculateTotalUnits({ ...clockOptions, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(4);
       }
     });
 
@@ -2887,10 +2905,13 @@ describe("round36 clock positions and retained source directions", () => {
     "keeps a single clock and its daypart qualification before NEXT after a late order: %s", timing => {
       const parsed = parseSig("Take 1 tablet " + timing + ", then 2 tablets the next morning");
       const late = { ...clockOptions, from: "2026-11-21T09:00:00Z", orderedAt: "2026-11-21T09:00:00Z", limit: 3 };
-      for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
+      expect(parsed.meta.canonical.clauses[1].schedule?.count).toBe(1);
+      for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
         expect(nextDueDoses(dosage, late)).toEqual([
-          "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"
+          "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00"
         ]);
+        expect(calculateTotalUnits({ ...late, dosage, durationValue: 4, durationUnit: "d" }).totalUnits).toBe(3);
+      }
     });
 
   it.each([
@@ -2901,22 +2922,26 @@ describe("round36 clock positions and retained source directions", () => {
     const parsed = parseSig("Take 1 tablet " + timing);
     expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
     expect(parsed.longText.toLowerCase()).toContain("before breakfast");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
     for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
       JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
       expect(nextDueDoses(dosage, { ...clockOptions, limit: 2 })).toEqual([
-        "2026-11-22T07:00:00+00:00", "2026-11-23T07:00:00+00:00"
+        "2026-11-22T07:00:00+00:00"
       ]);
-      expect(calculateTotalUnits({ ...clockOptions, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(2);
+      expect(calculateTotalUnits({ ...clockOptions, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(1);
     }
   });
 
   it("keeps an explicitly coordinated meal separate from the NEXT-day clock", () => {
     const parsed = parseSig("Take 1 tablet at 07:00 the next morning and before breakfast");
     expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(["ACM"]);
-    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext])
-      expect(nextDueDoses(dosage, { ...clockOptions, limit: 2 })).toEqual([
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(2);
+    for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) {
+      expect(nextDueDoses(dosage, { ...clockOptions, limit: 3 })).toEqual([
         "2026-11-22T06:00:00+00:00", "2026-11-22T07:00:00+00:00"
       ]);
+      expect(calculateTotalUnits({ ...clockOptions, dosage, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(2);
+    }
   });
 
   it.each(["en", "th"])("separates current timing from retained original instructions in %s", locale => {
