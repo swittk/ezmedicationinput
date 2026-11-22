@@ -1197,7 +1197,9 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
     targetRelation = actionArgumentRelation(key(parts[targetIndex]));
     // Temporal and conditional daughters are composed by the shared frame parser.
     if (!targetRelation || relationHasSemanticClass(targetRelation, "temporal") ||
-        relationHasGrammarFeature(targetRelation, "conditionalTail")) {
+        relationHasGrammarFeature(targetRelation, "conditionalTail") ||
+        relationHasGrammarFeature(targetRelation, "timeComplement") &&
+          clockArgumentFromParts(parts, targetIndex + 1, segmentEnd, input)) {
       tailRelationIndex = targetIndex;
       break;
     }
@@ -3260,6 +3262,27 @@ function canonicalPrimaryAdministrationSpan(
   return undefined;
 }
 
+/** Record the owner after HPSG/action promotion established the live dose. */
+function doseDefiningPrimarySpan(
+  clause: CanonicalSigClause,
+  frames: readonly AdviceFrame[],
+  options?: Pick<ParseOptions, "instructionActionMap">
+): TextRange | undefined {
+  // A standalone dose-defining preparation can supply the HPSG dose without
+  // a method head. Record that existing owner while the live dose proves
+  // the relationship; imported spanless graphs must not infer a deletion.
+  if (!clause.dose) return undefined;
+  let doseOwner: AdviceFrame | undefined;
+  for (const frame of frames) {
+    if (frame.polarity === AdvicePolarity.Negate ||
+        !getMedicationInstructionAction(frame.predicate.lemma, options)?.definesDose ||
+        !frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose))) continue;
+    if (doseOwner) return undefined;
+    doseOwner = frame;
+  }
+  return doseOwner ? { start: doseOwner.span.start, end: doseOwner.span.end } : undefined;
+}
+
 /**
  * HPSG-composed instruction meaning is the source of truth for structurally
  * scoped advice coding. Preliminary phrase-level coding can carry an
@@ -3356,7 +3379,7 @@ export function buildInstructionGraph(
   const opaqueSpans: CanonicalSourceSpan[] = [];
   const fullInputFrames = parseInstructionActions(input, 0, options);
   reconcileComposedAdviceCoding(clause, fullInputFrames);
-  const primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
+  let primaryAdministrationSpan = canonicalPrimaryAdministrationSpan(clause, fullInputFrames);
   // A source noun between the typed administration head and its matching
   // amount belongs to that primary action's object slot. It is still retained
   // verbatim by clause.rawText and graph.sourceText, but must not be promoted
@@ -3492,6 +3515,7 @@ export function buildInstructionGraph(
   if (!actions.length && !opaqueSpans.length) return undefined;
   promoteDoseFromDefiningAction(clause, actions, options);
   attachDoseToNearestAction(actions, clause, input, options);
+  primaryAdministrationSpan ??= doseDefiningPrimarySpan(clause, actions, options);
   // HPSG evidence can own the entire ", but <instruction>" span while the
   // action frame correctly begins at the verb. Retain the closed-class
   // discourse daughter separately so graph realization does not turn
@@ -4569,8 +4593,11 @@ function primaryDoseAmountOwner(
   clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
   options?: Pick<ParseOptions, "instructionActionMap">
 ): AdviceFrame | undefined {
-  if (!clause.dose && clause.sourceProjectionVerified !== false) return undefined;
   const primary=graph.primaryAdministrationSpan;
+  // An unverified imported graph is not evidence a structured dose was
+  // cleared. Without a live dose, an explicit primary span must establish
+  // that ownership before a graph amount can be removed.
+  if (!clause.dose && (clause.sourceProjectionVerified !== false || !primary)) return undefined;
   let earliest:AdviceFrame|undefined,overlap:AdviceFrame|undefined;
   let earlier:AdviceFrame|undefined,earlierCount=0;
   for(const action of graph.actions) {
@@ -4593,11 +4620,9 @@ function primaryDoseAmountOwner(
     }
   }
   if(primary)return overlap??(earlierCount===1?earlier:undefined);
-  // Source-declared dose ownership precedes device preparation in spanless
-  // saved graphs. Without a live dose, only an explicit primary or declared
-  // dose-defining action establishes ownership; an unverified R6 import does
-  // not prove that an independent preparation's earliest Amount was deleted.
-  return earlierCount === 1 ? earlier : clause.dose ? earliest : undefined;
+  // With a live dose, a sole declared dose-defining action takes precedence
+  // over device preparation in a saved graph without a primary span.
+  return earlierCount === 1 ? earlier : earliest;
 }
 
 /** A sole typed preparation owns the amount before a later administration.

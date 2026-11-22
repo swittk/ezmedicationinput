@@ -6863,3 +6863,37 @@ describe("round42 supported course preview boundaries", () => {
     expect(JSON.stringify(raw)).toBe(before);
   });
 });
+
+describe("round43 repeating course language receiver", () => {
+  it.each([false, true])("retains prototype methods and their original receiver (%s)", withStage => {
+    const { repeatCycle: _repeatCycle, ...otherWords } = ENGLISH_COURSE;
+    class ClassWords {
+      readonly prefix = "class-cycle";
+      repeatCycle(interval: string, count?: number): string {
+        expect(this).toBe(words);
+        return this.prefix + " " + interval + (count === undefined ? "" : " x" + count);
+      }
+    }
+    const words = Object.assign(new ClassWords(), otherWords);
+    const i18n = { locale: "xx-round43-class", inherit: "en", course: words };
+    const course: FhirR6DosageInstruction = {
+      repeatCycle: { value: 14, unit: "d", code: "d" },
+      step: withStage ? [{
+        end: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
+          code: "treatment-start" }] }, offsetDuration: { value: 7, unit: "d", code: "d" } },
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+      }] : []
+    };
+    const before = JSON.stringify(course);
+    for (const input of [course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))]) {
+      const text = formatSig(input, "long", { i18n, realizationMode: "normalized" });
+      expect(text).toContain("class-cycle 14 days");
+      if (withStage) {
+        expect(text).toContain("each cycle start");
+        expect(text).toContain("No doses from 7 days after each cycle start until 14 days after each cycle start");
+        expect(text).not.toContain("treatment start");
+      }
+    }
+    expect(JSON.stringify(course)).toBe(before);
+  });
+});

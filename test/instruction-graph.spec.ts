@@ -2096,9 +2096,9 @@ describe("qualified quantities keep their meaning in action graph realization", 
     const current = realizeRichPrimaryWithCanonicalDose(rich, clause, "en");
     expect(current).toContain("cream");
     expect(current).toContain("each spot");
-    if ("value" in edit) expect(current).toMatch(/2 cm/u);
-    if ("unit" in edit) expect(current).toMatch(/1 g(?:ram)?/u);
-    if ("range" in edit) expect(current).toMatch(/1(?:[–-]| to )2 cm/u);
+    if ("value" in edit) expect(current).toMatch(/^Squeeze 2 cm /u);
+    if ("unit" in edit) expect(current).toMatch(/^Squeeze 1 g /u);
+    if ("range" in edit) expect(current).toMatch(/^Squeeze 1-2 cm /u);
     expect(JSON.stringify(graph)).toBe(source);
     if ("comparator" in edit) {
       const roundtrip = formatCanonicalClause(clause, "long", { locale: "en" }, {
@@ -2946,6 +2946,8 @@ describe("round30 method and current timing ownership", () => {
       expect(th).not.toContain("08:00");
       expect(th.match(/09:00/gu)).toHaveLength(1);
       expect(th.match(/17:00/gu)).toHaveLength(1);
+      expect(/morning/iu.test(en)).toBe(withEvent);
+      expect(th.includes("เช้า")).toBe(withEvent);
     }
     expect(JSON.stringify(input)).toBe(before);
   });
@@ -3133,6 +3135,7 @@ describe("round32 action meaning combinations", () => {
       primaryAdministrationSpan: { start: 0, end: 7 }, actions: [primary, warning]
     })!;
     const row = JSON.parse(JSON.stringify(original));
+    row.extension = row.extension.filter((item: { url: string }) => item.url !== extension.url);
     row.extension.push(extension);
     row.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
     const before = JSON.stringify(row);
@@ -4138,10 +4141,15 @@ describe("round38 selected-Time relation across action realizers", () => {
         const text = realizeInstructionGraph(input, locale)!;
         expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
         expect(text).not.toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+        expect(locale === "en" ? /^Do not /iu.test(text) : text.startsWith("ห้าม"))
+          .toBe(polarity === AdvicePolarity.Negate);
       }
-      for (const locale of ["en", "th"])
-        expect(formatSig({ extension: [marker] }, "long", { locale, realizationMode: "normalized" }))
-          .toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+      for (const locale of ["en", "th"]) {
+        const text = formatSig({ extension: [marker] }, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+        expect(locale === "en" ? /^Do not /iu.test(text) : text.startsWith("ห้าม"))
+          .toBe(polarity === AdvicePolarity.Negate);
+      }
     }
   });
 });
@@ -4555,6 +4563,8 @@ describe("round41 live quantity, cadence and indication previews", () => {
       expect(en).toContain(unit === "mL" ? "both nostrils" : "each nostril");
       expect(en.includes("each nostril")).toBe(unit === "spray");
       expect(th.includes("ข้างละ")).toBe(unit === "spray");
+      expect(en).toMatch(unit === "mL" ? /^1 mL /u : /^1 spray /u);
+      expect(th).toMatch(unit === "mL" ? /^1 มล\. /u : /^1 พ่น /u);
       expect(r6.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
     }
     expect(JSON.stringify(row)).toBe(original);
@@ -4722,8 +4732,106 @@ it.each([
   const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
   const row: FhirDosage = { extension: [extension] }, r6 = toDosageDetails([row]);
   for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
-    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("08:00");
-    expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("08:00");
+    const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+    const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+    expect(en).toMatch(/water at 08:00:00\.$/u);
+    expect(th).toMatch(/น้ำ(?: 100 มิลลิลิตร)? เวลา 08:00:00\.$/u);
+    expect(en.match(/08:00/gu)).toHaveLength(1);
+    expect(th.match(/08:00/gu)).toHaveLength(1);
+    if (source.startsWith("Dissolve")) {
+      expect(en).toContain("2 tablets");
+      expect(th).toContain("2 เม็ด");
+      expect(r6.step[0].component[0].doseAndRate?.[0]?.doseQuantity).toBeUndefined();
+    }
   }
   expect(JSON.stringify(frame)).toBe(before);
+});
+
+describe("round43 dilution clock ownership", () => {
+  it.each([
+    ["Dilute 1 mL with saline at 08:00", false],
+    ["Dilute 1 mL with saline to 10 mL at 08:00", true]
+  ] as const)("keeps the complete clock out of destination arguments: %s", (source, withVolume) => {
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(1);
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Destination && /08:00/u.test(arg.text))).toEqual([]);
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+      .toMatchObject({ value: 1, unit: "mL" });
+    if (withVolume) expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Destination, relation: AdviceRelation.To,
+      quantity: expect.objectContaining({ value: 10, unit: "mL" })
+    }));
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
+    const row: FhirDosage = { extension: [marker] }, r6 = toDosageDetails([row]);
+    const before = JSON.stringify(row);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(/08:00/gu)).toHaveLength(1);
+        expect(text.indexOf("08:00")).toBeGreaterThan(text.indexOf("saline"));
+        expect(text).toContain(locale === "en" ? "1 mL" : "1 มิลลิลิตร");
+        if (withVolume) expect(text).toContain(locale === "en" ? "10 mL" : "10 มิลลิลิตร");
+      }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+it("round43: still clears a dose owned by the public source primary span", () => {
+  const source = "Dissolve 2 tablets in water at 08:00";
+  const edited = JSON.parse(JSON.stringify(parsePublicSig(source).fhirNext));
+  const sourceGraph = parseInstructionGraphExtension(edited.step[0].component[0].extension)!;
+  expect(sourceGraph.primaryAdministrationSpan).toEqual(sourceGraph.actions[0].span);
+  delete edited.step[0].component[0].doseAndRate;
+  const before = JSON.stringify(edited);
+  for (const input of [edited, JSON.parse(JSON.stringify(toFhirR5Dosages(edited)))]) {
+    const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+    const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+    expect(en).not.toContain("2 tablets");
+    expect(th).not.toContain("2 เม็ด");
+    expect(en).toContain("water");
+    expect(th).toContain("น้ำ");
+    expect(en).toMatch(/(?:08:00|8:00 am)/u);
+    expect(th).toContain("08:00");
+  }
+  expect(JSON.stringify(edited)).toBe(before);
+});
+
+
+it("round43: preserves graph-only amounts through ordinary source-text saves without inventing a dose", () => {
+  const source = "Dissolve 2 tablets in water at 08:00";
+  const frame = parseInstructionActions(source)[0];
+  const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
+  let rows: FhirDosage[] = [{ text: source, extension: [marker] }];
+  const graphBefore = JSON.stringify(parseInstructionGraphExtension(rows[0].extension));
+  for (let save = 0; save < 3; save++) {
+    const r6 = JSON.parse(JSON.stringify(toDosageDetails(rows)));
+    expect(r6.step[0].component[0].doseAndRate).toBeUndefined();
+    expect(formatSig(r6, "long", { locale: "en", realizationMode: "normalized" })).toContain("2 tablets");
+    expect(formatSig(r6, "long", { locale: "th", realizationMode: "normalized" })).toContain("2 เม็ด");
+    rows = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    expect(rows[0].doseAndRate).toBeUndefined();
+    expect(JSON.stringify(parseInstructionGraphExtension(rows[0].extension))).toBe(graphBefore);
+    expect(formatSig(rows, "long", { locale: "en", realizationMode: "normalized" })).toContain("2 tablets");
+    expect(formatSig(rows, "long", { locale: "th", realizationMode: "normalized" })).toContain("2 เม็ด");
+  }
+});
+
+
+it("round43: keeps an exactly verified cleared dose absent in an older saved R5 parser row", () => {
+  // Frozen wire from reviewed 92b64d6; do not regenerate with the new producer.
+  const row: FhirDosage = JSON.parse("{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Swish 10 mL for 30 seconds, then spit\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"86495002\",\"display\":\"For\"}},{\"url\":\"predicateLemma\",\"valueString\":\"swish\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Swish\"},{\"url\":\"semanticClass\",\"valueString\":\"cleanse\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"กลั้วปาก\"}]},{\"url\":\"predicateRealizer\",\"valueCode\":\"amount-duration\"},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421805007\",\"display\":\"Swish - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":26},{\"url\":\"sourceText\",\"valueString\":\"Swish 10 mL for 30 seconds\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"amount\"},{\"url\":\"text\",\"valueString\":\"10 mL\"},{\"url\":\"normalized\",\"valueString\":\"mL\"},{\"url\":\"spanStart\",\"valueInteger\":6},{\"url\":\"spanEnd\",\"valueInteger\":11},{\"url\":\"quantity\",\"extension\":[{\"url\":\"value\",\"valueDecimal\":10},{\"url\":\"unit\",\"valueString\":\"mL\"}]}]},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"duration\"},{\"url\":\"text\",\"valueString\":\"for 30 seconds\"},{\"url\":\"normalized\",\"valueString\":\"30 s\"},{\"url\":\"spanStart\",\"valueInteger\":12},{\"url\":\"spanEnd\",\"valueInteger\":26},{\"url\":\"quantity\",\"extension\":[{\"url\":\"value\",\"valueDecimal\":30},{\"url\":\"unit\",\"valueString\":\"s\"}]}]}]},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":1},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"predicateLemma\",\"valueString\":\"spit\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Spit out\"},{\"url\":\"semanticClass\",\"valueString\":\"expel\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"บ้วนทิ้ง\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"urn:ezmedicationinput:CodeSystem:medication-instruction-action\",\"code\":\"spit\",\"display\":\"Spit out\",\"_display\":{\"extension\":[{\"url\":\"http://hl7.org/fhir/StructureDefinition/translation\",\"extension\":[{\"url\":\"lang\",\"valueCode\":\"th\"},{\"url\":\"content\",\"valueString\":\"บ้วนทิ้ง\"}]}]}}},{\"url\":\"predicateComponent\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"activity\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"12405001\",\"display\":\"Spitting\"}}]},{\"url\":\"spanStart\",\"valueInteger\":33},{\"url\":\"spanEnd\",\"valueInteger\":37},{\"url\":\"sourceText\",\"valueString\":\"spit\"}]},{\"url\":\"graphRelation\",\"extension\":[{\"url\":\"kindCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421067001\",\"display\":\"Then - dosing instruction fragment\"}},{\"url\":\"fromActionIndex\",\"valueInteger\":0},{\"url\":\"toActionIndex\",\"valueInteger\":1},{\"url\":\"text\",\"valueString\":\", then\"},{\"url\":\"spanStart\",\"valueInteger\":26},{\"url\":\"spanEnd\",\"valueInteger\":33}]},{\"url\":\"coverage\",\"extension\":[{\"url\":\"understoodCharacters\",\"valueInteger\":37},{\"url\":\"opaqueCharacters\",\"valueInteger\":0},{\"url\":\"ratio\",\"valueDecimal\":1},{\"url\":\"complete\",\"valueBoolean\":true}]}]},{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Swish 10 mL for 30 seconds, then spit\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"04945e91102ea208\"},{\"url\":\"textFingerprint\",\"valueString\":\"5e3a3c0b00177305\"},{\"url\":\"sourceHasStructuredClocks\",\"valueBoolean\":false},{\"url\":\"sourceHasStructuredEvents\",\"valueBoolean\":false},{\"url\":\"sourceHasStructuredSite\",\"valueBoolean\":false}]}]}],\"route\":{\"text\":\"swish and spit, oromucosal\",\"coding\":[{\"system\":\"http://terminology.hl7.org/CodeSystem/v3-RouteOfAdministration\",\"code\":\"SWISHSPIT\",\"display\":\"Swish and spit out, oromucosal\"},{\"system\":\"http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl\",\"code\":\"C38302\",\"display\":\"Swish and Spit Route of Administration\"}]},\"patientInstruction\":\"Swish 10 mL for 30 seconds, then spit\",\"text\":\"Swish 10 mL for 30 seconds. Then spit out.\"}");
+  const before = JSON.stringify(row);
+  expect(parseInstructionGraphExtension(row.extension)?.primaryAdministrationSpan).toBeUndefined();
+  for (const realizationMode of ["normalized", "roundtrip"] as const) {
+    const text = formatSig(row, "long", { locale: "en", realizationMode });
+    expect(text).not.toMatch(/10\s*mL/iu);
+    expect(text).toContain("30 seconds");
+    expect(text).toContain("spit");
+  }
+  expect(fromFhirDosage(row, { locale: "en", realizationMode: "normalized" }).longText).not.toMatch(/10\s*mL/iu);
+  expect(JSON.stringify(row)).toBe(before);
+  expect(parseInstructionGraphExtension(row.extension)?.primaryAdministrationSpan).toBeUndefined();
+  const exported = toFhirR5Dosages([row]);
+  expect(JSON.stringify(parseInstructionGraphExtension(exported[0].extension)))
+    .toBe(JSON.stringify(parseInstructionGraphExtension(row.extension)));
 });

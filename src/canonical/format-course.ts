@@ -252,8 +252,12 @@ function treatmentStepOffsetDays(relative: CanonicalCourse["stages"][number]["st
  * @param thai Whether the requested realization is Thai.
  * @returns Source-qualified relative wording without a guessed treatment start date.
  */
+function afterCourseStart(offset: string, words: CourseLanguage, cycleStart?: string): string {
+  return cycleStart === undefined ? words.afterTreatmentStart(offset)
+    : words.relativeEvent(offset, cycleStart, false);
+}
 function treatmentBoundaryRangeText(
-  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
+  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage, cycleStart?: string
 ): string | undefined {
   if (!boundary || (boundary.anchor !== "treatment-start" && boundary.anchor !== "treatment-day-start") ||
       !boundary.displacementRange) return undefined;
@@ -265,12 +269,12 @@ function treatmentBoundaryRangeText(
     : lower ? (low?.comparator ? "" : ">=") + lower
     : high?.comparator ? upper! : words.upTo(upper!);
   return boundary.anchor === "treatment-day-start"
-    ? words.relativeEvent(range, words.treatmentDayStart, false) : words.afterTreatmentStart(range);
+    ? words.relativeEvent(range, words.treatmentDayStart, false) : afterCourseStart(range, words, cycleStart);
 }
 
 /** Show a known external event and displacement without inventing its date. */
 function boundaryEventText(
-  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage
+  boundary: CanonicalCourse["stages"][number]["start"], words: CourseLanguage, cycleStart?: string
 ): string | undefined {
   if (!boundary || boundary.anchor === "treatment-start" &&
       !(boundary.displacement?.value !== undefined && boundary.displacement.value < 0)) return undefined;
@@ -279,7 +283,7 @@ function boundaryEventText(
     const display = coding.display?.trim();
     if (display) { context = display; break; }
   }
-  const event = boundary.anchor === "treatment-start" ? words.treatmentStart
+  const event = boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart
     : boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
     : context ??
@@ -307,24 +311,26 @@ function boundaryEventText(
 function courseBoundaryPoint(
   quantity: CanonicalMeasure | undefined,
   anchor: CanonicalBoundary["anchor"] | undefined,
-  words: CourseLanguage
+  words: CourseLanguage,
+  cycleStart?: string
 ): string | undefined {
   if (!quantity) return undefined;
-  const origin = anchor === "treatment-day-start" ? words.treatmentDayStart : words.treatmentStart;
+  const origin = anchor === "treatment-day-start" ? words.treatmentDayStart : cycleStart ?? words.treatmentStart;
   if (quantity.value === 0 && !getQuantityComparator(quantity)) return origin;
   const offset = formatCourseTimeQuantity(quantity, words);
   return anchor === "treatment-day-start"
-    ? words.relativeEvent(offset, origin, false) : words.afterTreatmentStart(offset);
+    ? words.relativeEvent(offset, origin, false) : afterCourseStart(offset, words, cycleStart);
 }
 function formatCalendarStepWindow(
   start: CanonicalMeasure | undefined,
   end: CanonicalMeasure | undefined,
   words: CourseLanguage,
   startAnchor: CanonicalBoundary["anchor"] = "treatment-start",
-  endAnchor: CanonicalBoundary["anchor"] = "treatment-start"
+  endAnchor: CanonicalBoundary["anchor"] = "treatment-start",
+  cycleStart?: string
 ): string {
   return words.calendarWindow(
-    courseBoundaryPoint(start, startAnchor, words), courseBoundaryPoint(end, endAnchor, words)
+    courseBoundaryPoint(start, startAnchor, words, cycleStart), courseBoundaryPoint(end, endAnchor, words, cycleStart)
   );
 }
 
@@ -672,11 +678,8 @@ export function formatCanonicalCourse(
   const environment = courseEnvironment(options);
   // Treatment-start offsets restart with the repeating course. Use that
   // same origin for active windows and their medication-free intervals.
-  const words: CourseLanguage = oneOrCourse.cycleInterval ? {
-    ...environment.words,
-    treatmentStart: environment.words.cycleStart,
-    afterTreatmentStart: offset => environment.words.relativeEvent(offset, environment.words.cycleStart, false)
-  } : environment.words;
+  const words = environment.words;
+  const cycleStart = oneOrCourse.cycleInterval ? words.cycleStart : undefined;
   if (oneOrCourse.stages.length === 0) {
     const repetition = oneOrCourse.cycleInterval
       ? formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount)
@@ -933,13 +936,13 @@ export function formatCanonicalCourse(
           const boundary = component.phaseStart;
           const quantity = treatmentStepOffsetQuantity(boundary);
           const days = boundary.anchor === "treatment-day-start" ? exactCourseDays(quantity) : undefined;
-          const point = treatmentBoundaryRangeText(boundary, words) ??
-            courseBoundaryPoint(quantity, boundary.anchor, words) ?? boundaryEventText(boundary, words);
+          const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
+            courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
           const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
             (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
           memberTiming = knownOrigin
             ? days !== undefined ? words.fromDay(days + 1)
-              : words.calendarWindow(point ?? (boundary.anchor === "treatment-start" ? words.treatmentStart : words.treatmentDayStart))
+              : words.calendarWindow(point ?? (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart))
             : words.reviewTiming(point ?? boundary.description);
         }
         const origin = component.phaseOrigin;
@@ -955,13 +958,13 @@ export function formatCanonicalCourse(
               stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
           }
           if (!stageCoversOrigin) memberTiming = words.calendarWindow(
-            words.afterTreatmentStart(formatCourseTimeQuantity(origin, words)), undefined);
+            afterCourseStart(formatCourseTimeQuantity(origin, words), words, cycleStart), undefined);
         }
         if (component.phaseEnd) {
           const boundary = component.phaseEnd;
-          const point = treatmentBoundaryRangeText(boundary, words) ??
-            courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words) ??
-            boundaryEventText(boundary, words);
+          const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
+            courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words, cycleStart) ??
+            boundaryEventText(boundary, words, cycleStart);
           const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description);
           memberTiming = memberTiming ? memberTiming + "; " + endTiming : endTiming;
         }
@@ -1002,22 +1005,22 @@ export function formatCanonicalCourse(
           (!step.end || endQuantity) &&
           !reversedWindow
         ) {
-          timing = formatCalendarStepWindow(startQuantity, endQuantity, words, startAnchor, endAnchor);
+          timing = formatCalendarStepWindow(startQuantity, endQuantity, words, startAnchor, endAnchor, cycleStart);
           if (index > 0 && !step.start && !startQuantity)
             timing = words.afterPreviousPhase + "; " + timing;
         } else {
-          const startRange = treatmentBoundaryRangeText(step.start, words);
-          const endRange = treatmentBoundaryRangeText(step.end, words);
+          const startRange = treatmentBoundaryRangeText(step.start, words, cycleStart);
+          const endRange = treatmentBoundaryRangeText(step.end, words, cycleStart);
           if ((startRange || !step.start || startQuantity) &&
               (endRange || !step.end || endQuantity) && (startRange || endRange)) {
-            timing = words.calendarWindow(startRange ?? courseBoundaryPoint(startQuantity, startAnchor, words), endRange ?? courseBoundaryPoint(endQuantity, endAnchor, words));
+            timing = words.calendarWindow(startRange ?? courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart), endRange ?? courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart));
           } else {
             // Current structured bounds own the window. Descriptive source is
             // a fallback, and each side is a point rather than an open window.
-            const start = startRange ?? boundaryEventText(step.start, words) ??
-              courseBoundaryPoint(startQuantity, startAnchor, words) ?? step.start?.description;
-            const end = endRange ?? boundaryEventText(step.end, words) ??
-              courseBoundaryPoint(endQuantity, endAnchor, words) ?? step.end?.description;
+            const start = startRange ?? boundaryEventText(step.start, words, cycleStart) ??
+              courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart) ?? step.start?.description;
+            const end = endRange ?? boundaryEventText(step.end, words, cycleStart) ??
+              courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart) ?? step.end?.description;
             const contextualStart = index > 0 && step.start?.anchor === "previous-phase-next-day";
             const contextualEnd = index > 0 && step.end?.anchor === "previous-phase-next-day";
             const unresolvedEnd = Boolean(step.end && !end);
@@ -1039,7 +1042,7 @@ export function formatCanonicalCourse(
         timing = formatCalendarStepWindow(
           startDays === undefined ? undefined : { value: startDays, code: "d" },
           endDays === undefined ? undefined : { value: endDays, code: "d" },
-          words, startAnchor, endAnchor
+          words, startAnchor, endAnchor, cycleStart
         );
         if (index > 0 && !step.start && startDays === undefined)
           timing = words.afterPreviousPhase + "; " + timing;
@@ -1047,7 +1050,7 @@ export function formatCanonicalCourse(
         // The next phase is ordered even when its predecessor has no exact
         // end; displaying it without this context would make it immediate.
         timing = inheritedStart
-          ? formatCalendarStepWindow(inheritedStart, undefined, words, previous?.end?.anchor)
+          ? formatCalendarStepWindow(inheritedStart, undefined, words, previous?.end?.anchor, undefined, cycleStart)
           : words.afterPreviousPhase;
       }
     }
@@ -1057,8 +1060,8 @@ export function formatCanonicalCourse(
     if (!step.end && index + 1 < oneOrCourse.stages.length) {
       const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
         : startDays === undefined ? undefined : { value: startDays, unit: "d" };
-      const point = courseBoundaryPoint(quantity, startAnchor, words) ??
-        (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words) : undefined);
+      const point = courseBoundaryPoint(quantity, startAnchor, words, cycleStart) ??
+        (step.start?.anchor === "previous-phase-next-day" ? boundaryEventText(step.start, words, cycleStart) : undefined);
       if (point) timing = point;
     }
     const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
@@ -1071,9 +1074,9 @@ export function formatCanonicalCourse(
       stages.push(gapAnchor === "treatment-day-start"
         ? words.noDoseDays(pause.start + 1, pause.end)
         : words.noDoseWindow(
-            pause.start === 0 ? words.treatmentStart
-              : words.afterTreatmentStart(formatCourseTimeQuantity({ value: pause.start, code: "d" }, words)),
-            words.afterTreatmentStart(formatCourseTimeQuantity({ value: pause.end, code: "d" }, words))
+            pause.start === 0 ? cycleStart ?? words.treatmentStart
+              : afterCourseStart(formatCourseTimeQuantity({ value: pause.start, code: "d" }, words), words, cycleStart),
+            afterCourseStart(formatCourseTimeQuantity({ value: pause.end, code: "d" }, words), words, cycleStart)
           ));
     }
   }

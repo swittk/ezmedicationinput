@@ -591,12 +591,12 @@ describe("R6 course marker in-memory persistence fidelity", () => {
 describe("source-less R6 treatment-relative step display", () => {
   const phaseDose = {
     en: [
-      /From treatment start until 7 days after treatment start: (?:Take|Use) 1 tablet at 8:00 am\./u,
-      /^[^:]*: (?:Take|Use) 2 tablets at 8:00 am\./u
+      /^From treatment start until 7 days after treatment start: (?:Take|Use) 1 tablet at 8:00 am\.$/u,
+      /^[^:]*: (?:Take|Use) 2 tablets at 8:00 am\.$/u
     ],
     th: [
-      /ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ 1 เม็ด เวลา 08:00\./u,
-      /^[^:]*: ใช้ครั้งละ 2 เม็ด เวลา 08:00\./u
+      /^ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ 1 เม็ด เวลา 08:00\.$/u,
+      /^[^:]*: ใช้ครั้งละ 2 เม็ด เวลา 08:00\.$/u
     ]
   };
   const relative = (days: number) => ({
@@ -641,13 +641,15 @@ describe("source-less R6 treatment-relative step display", () => {
       expect(strictThai).not.toContain("งดยา");
     }
     for (const text of [english, strictEnglish]) {
-      expect(text).toMatch(phaseDose.en[0]);
-      const second = text.slice(text.indexOf("From " + secondStart + " days after treatment start"));
+      const split = text.indexOf("From " + secondStart + " days after treatment start");
+      expect(text.slice(0, split).trim()).toMatch(phaseDose.en[0]);
+      const second = text.slice(split).split(" No doses ")[0].trim();
       expect(second).toMatch(phaseDose.en[1]);
     }
     for (const text of [thai, strictThai]) {
-      expect(text).toMatch(phaseDose.th[0]);
-      const second = text.slice(text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา"));
+      const split = text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา");
+      expect(text.slice(0, split).trim()).toMatch(phaseDose.th[0]);
+      const second = text.slice(split).split(" งดยา")[0].trim();
       expect(second).toMatch(phaseDose.th[1]);
     }
     const source = "keep the clinician-authored dosing text exactly";
@@ -668,6 +670,8 @@ describe("source-less R6 treatment-relative step display", () => {
       const suffix = locale === "en" ? (phase === 0 ? " tablet" : " tablets") + " at 8:00 am." : " เม็ด เวลา 08:00.";
       const conflicting = locale === "en" ? "3 tablets and " : "3 เม็ด และ ";
       expect(phaseDose[locale][phase].test(prefix + conflicting + String(phase + 1) + suffix)).toBe(false);
+      const appended = locale === "en" ? " Take 3 tablets at 8:00 am." : " ใช้ครั้งละ 3 เม็ด เวลา 08:00.";
+      expect(phaseDose[locale][phase].test(prefix + String(phase + 1) + suffix + appended)).toBe(false);
       for (const quantity of ["1.2", "2.1", "12", "1", "2"]) {
         const matches = phaseDose[locale][phase].test(prefix + quantity + suffix);
         expect(matches, locale + " phase " + phase + " quantity " + quantity).toBe(quantity === String(phase + 1));

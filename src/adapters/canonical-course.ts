@@ -130,6 +130,8 @@ import {
 import { equalStructuredValues } from "../stable-structure";
 import { clauseForAdministration } from "../canonical/compile";
 import { getStandardDoseUnitCoding } from "../maps";
+import { getMedicationInstructionAction } from "../instruction-action-terminology";
+import { AdviceArgumentRole, AdvicePolarity, type AdviceFrame } from "../types";
 import type { FhirProjectionOptions } from "../fhir";
 import {
   getBodySiteAdministrationTargetCount,
@@ -529,6 +531,37 @@ export function amountFromWire(
     provenance: record(a),
   };
 }
+/** Older saved R5 parser rows predate explicit dose-owner spans. A single
+ * restored declared amount must reproduce their existing projection exactly
+ * before display can treat its absence as a clear. No source graph is edited. */
+function savedR5DoseOwner(
+  raw: FhirDosage, graph: NonNullable<CanonicalSigClause["instructionGraph"]>
+): AdviceFrame | undefined {
+  if (raw.doseAndRate?.length || graph.primaryAdministrationSpan ||
+      getDosageSourceTextAgreement(raw, false) === false) return undefined;
+  let owner: AdviceFrame | undefined;
+  for (const action of graph.actions) {
+    if (action.polarity === AdvicePolarity.Negate ||
+        !getMedicationInstructionAction(action.predicate.lemma)?.definesDose ||
+        !action.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity)) continue;
+    if (owner) return undefined;
+    owner = action;
+  }
+  if (!owner) return undefined;
+  const amount = owner.args.find(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity)!.quantity!;
+  const coded = (value: number) => simpleQuantityForR5({
+    value, unit: amount.unit, ...getStandardDoseUnitCoding(amount.unit), comparator: amount.comparator
+  })!;
+  const dose = amount.range ? { doseRange: {
+    ...(amount.range.low !== undefined ? { low: coded(amount.range.low) } : {}),
+    ...(amount.range.high !== undefined ? { high: coded(amount.range.high) } : {})
+  } } : amount.value !== undefined ? { doseQuantity: coded(amount.value) } : undefined;
+  if (!dose) return undefined;
+  const restored = { ...raw, doseAndRate: [dose] };
+  const fresh = getFreshDoseProof(raw);
+  const matches = fresh ? sameFreshDose(restored, fresh) : dosageMatchesSavedProjection(restored);
+  return matches === true ? owner : undefined;
+}
 function baseAdministration(
   raw: FhirDosage | FhirR6Dosage | EzDosage,
   format: "r5" | "r6",
@@ -742,6 +775,13 @@ function baseAdministration(
       additionalInstruction: raw.additionalInstruction,
       patientInstruction: raw.patientInstruction,
     });
+  const graph = output.syntax?.instructionGraph;
+  if (format === "r5" && sourceTextVerified === false && !amounts?.length && graph && !graph.primaryAdministrationSpan) {
+    const owner = savedR5DoseOwner(input, graph);
+    if (owner) output.syntax!.instructionGraph = {
+      ...graph, primaryAdministrationSpan: { start: owner.span.start, end: owner.span.end }
+    };
+  }
   return output;
 }
 
