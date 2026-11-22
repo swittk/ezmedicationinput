@@ -264,6 +264,9 @@ export function projectNativeR5Course(
     const stage = course.stages[i],
       fields = stageMetadataToWire(stage);
     steps.push(fields);
+    // An implicit successor still depends on its original predecessor.
+    // Sequence alone cannot retain that membership after a row is removed.
+    if (i > 0 && !stage.start) needsBridge = true;
     if (Object.keys(fields).length || !stage.administrations.length) {
       // The editable list owns explicitly retained empty stages, including
       // fieldless ones. Keep their identity so absence can mean deletion.

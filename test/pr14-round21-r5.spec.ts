@@ -273,8 +273,12 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(migrated.step![0].count).toBeUndefined();
     expect(migrated.extension).toContainEqual({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [saved[0].modifierExtension![0]] });
     const dates = nextDueDoses(migrated, { from: "2026-11-18T08:00:00Z", orderedAt: "2026-11-18T08:00:00Z", timeZone: "UTC", limit: 30 });
-    expect(dates).toHaveLength(21);
-    expect(new Date(dates[20]).toISOString().slice(0, 10)).toBe("2026-12-22");
+    // The historical frequency-only fixture uses the established 09:00
+    // daily default; orderedAt at 08:00 is not an authored dosing clock.
+    const expected = ["2026-11-18", "2026-12-02", "2026-12-16"].flatMap(start =>
+      Array.from({ length: 7 }, (_, day) =>
+        new Date(Date.parse(start + "T09:00:00Z") + day * 86400000).toISOString().replace(".000Z", "+00:00")));
+    expect(dates).toEqual(expected);
     expect(getCourseCycleCount(toDosageDetails(persist(toFhirR5Dosages(migrated))))).toBe(3);
     const current: FhirR6DosageInstruction = { repeatCycle: { value: 14, unit: "d", code: "d" },
       step: [{ count: 2, component: [{ ...persist(rowDose), timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, boundsDuration: { value: 1, unit: "d", code: "d" } } } }] }] };

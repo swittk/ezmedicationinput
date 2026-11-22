@@ -271,6 +271,14 @@ function terminalTreatmentPauseDays(clause: CanonicalSigClause): number | undefi
   return pause.durationDays;
 }
 
+/** A divided daily total retains its denominator as derivation; the resolved
+ * per-administration dose does not become an infusion-method antecedent. */
+function isAdministrationRate(quantity: CanonicalSigClause["clinicalQuantity"]): boolean {
+  return !!quantity && (quantity.representation !== "dose" ||
+    quantity.status !== "resolved" && !!quantity.dailyTotal &&
+      quantity.denominators.some(term => term.dimension === "time"));
+}
+
 /**
  * License sequential schedule inheritance on the typed regimen graph before
  * canonical clauses are lowered to FHIR. A complete predecessor phase owns
@@ -540,8 +548,7 @@ export function scopeSequentialPhaseSemantics(
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
-    const priorHasRate = prior.every(index => states[index]?.primaryClause.clinicalQuantity
-      ?.denominators.some(term => term.dimension === "time"));
+    const priorHasRate = prior.every(index => isAdministrationRate(states[index]?.primaryClause.clinicalQuantity));
     const sharedMethod = (edge.relation.semanticLicense === 'target-transition' ||
       edge.relation.semanticLicense === 'dose-continuation') &&
       sourceMethods[0] &&
@@ -582,7 +589,7 @@ export function scopeSequentialPhaseSemantics(
           fields.push('site');
         }
       }
-      const recipientHasRate = clause.clinicalQuantity?.denominators.some(term => term.dimension === "time");
+      const recipientHasRate = isAdministrationRate(clause.clinicalQuantity);
       if (sharedMethod && !clause.method && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         fields.push('method');

@@ -765,13 +765,13 @@ describe("round25 strict wire and retained source boundaries", () => {
     const second = { id: "second-cap", scope, valueQuantity: q(6) };
     const rows = persist(toFhirR5Dosages(course({ safety: { doseLimit: [first, second] } })));
     const field = scope === "administration" ? "maxDosePerAdministration" : "maxDosePerLifetime";
-    expect(rows[0][field]?.value).toBe(6);
+    expect(rows[0][field]?.value).toBe(4);
     delete rows[0][field];
     let output = toDosageDetails(rows);
-    for (let save = 0; save < 3; save++) {
-      expect(output.step![0].component[0].safety?.doseLimit).toEqual([first]);
+    for (let save = 0; save <= 3; save++) {
+      expect(output.step![0].component[0].safety?.doseLimit).toEqual([second]);
       const reopened = persist(toFhirR5Dosages(output));
-      expect(reopened[0][field]).toEqual(q(4));
+      expect(reopened[0][field]).toEqual(q(6));
       output = toDosageDetails(reopened);
     }
   });
@@ -1277,9 +1277,18 @@ it.each(["limit", "action"] as const)("round27 reconciles a live lifted safety %
       expect(scoped.course.doseLimit).toEqual(courseSafety.doseLimit);
       expect(scoped.step).toEqual(stepSafety);
     }
-    const retired = current.safety!.extension!.find(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL)!
-      .extension!.find(item => item.url === R6_SCOPED_SAFETY_MODIFIER_URL)!;
-    expect(decodeR6SourceMetadata(retired, "safety")).toEqual({ course: courseSafety, step: stepSafety });
+    const retired: unknown[] = [];
+    const collect = (extensions: readonly FhirExtension[] | undefined): void => {
+      for (const item of extensions ?? []) {
+        if (item.url === R6_SCOPED_SAFETY_MODIFIER_URL) retired.push(decodeR6SourceMetadata(item, "safety"));
+        collect(item.extension);
+      }
+    };
+    // Reconciled phase ownership retains the original complete policy in
+    // course history; component-local reconciliation retains it on safety.
+    collect(current.extension);
+    collect(current.safety?.extension);
+    expect(retired).toContainEqual({ course: courseSafety, step: stepSafety });
   }
 });
 
@@ -2643,9 +2652,15 @@ describe("round33 interchange ownership families", () => {
     if (edit === "limit") wire.safety!.doseLimit![0].valueQuantity!.value = 3;
     else wire.safety!.ifExceeded = "Contact the clinician";
     const native = importCanonicalCourse(wire);
-    expect(native.stages[0].safety).toBeUndefined();
-    if (edit === "limit") expect(native.safety?.limits?.[0].amount?.value).toBe(3);
-    else expect(native.safety?.ifExceeded).toBe("Contact the clinician");
+    if (edit === "limit") {
+      expect(native.stages[0].safety).toBeUndefined();
+      expect(native.safety?.limits?.[0].amount?.value).toBe(3);
+    } else {
+      expect(native.safety?.ifExceeded).toBe("Contact the clinician");
+      expect(native.safety?.limits ?? []).toEqual([]);
+      expect(native.stages[0].safety?.limits?.[0].amount?.value).toBe(2);
+      expect(native.stages[0].safety?.ifExceeded).toBeUndefined();
+    }
   });
 
   it("keeps an explicit planned pause after a successor cadence edit", () => {
@@ -3649,9 +3664,24 @@ describe("round35 interchange field ownership", () => {
       expect(imported.contextIssue).toBeUndefined();
       expect(imported.cycleInterval).toMatchObject({ value: 28, code: "d", system: ucum });
     } else expect(imported.contextIssue).toBe("missing-course-context");
-    const retained = JSON.stringify(toDosageDetails(rows));
-    expect(retained).toContain(historicalCycle.unit);
-    expect(retained).toContain(currentCycle.unit);
+    let output = toDosageDetails(rows);
+    for (let save = 0; save <= 3; save++) {
+      const intervals: FhirR6Quantity[] = output.repeatCycle ? [output.repeatCycle] : [];
+      const collect = (markers: readonly FhirExtension[] | undefined): void => {
+        for (const marker of markers ?? []) {
+          if (marker.url === "course" || marker.url === "dosageDetails") {
+            const decoded = decodeR5RetainedFields({ url: DOSAGE_DETAILS_R5_URL,
+              extension: [{ url: "course", extension: marker.extension }] });
+            if (decoded.course?.repeatCycle) intervals.push(decoded.course.repeatCycle);
+          }
+          collect(marker.extension);
+        }
+      };
+      collect(output.extension);
+      expect(intervals).toContainEqual(historicalCycle);
+      expect(intervals).toContainEqual(currentCycle);
+      if (save < 3) output = toDosageDetails(persist(toFhirR5Dosages(output)));
+    }
   });
 
   it("retains authored history IDs and contents through text-only R5 edits", () => {
@@ -3956,5 +3986,310 @@ describe("round36 external policy ownership and current source replay", () => {
       expect(JSON.stringify(saved)).toContain("note second");
       saved = r6Save(persist(saved));
     }
+  });
+});
+
+
+describe("round37 interchange phase, limit and source ownership", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const member = (value = 1, repeat: NonNullable<FhirR6Timing["repeat"]> = {}): FhirR6Dosage => ({
+    doseAndRate: [{ doseQuantity: q(value) }], timing: { repeat: { ...daily, ...repeat } },
+  });
+  const options = { from: "2026-11-21T00:00:00Z", orderedAt: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 10 };
+
+  it.each([
+    { edited: false, compact: false }, { edited: false, compact: true }, { edited: true, compact: true },
+  ])("keeps a historical header carrier separate from mixed live rows (clinical edit=$edited, compact=$compact)", ({ edited, compact }) => {
+    const carrier = toFhirR5Dosages({ renderedInstruction: "Consult clinician" })[0];
+    carrier.id = "original-source-carrier";
+    carrier.extension = [{ url: "urn:source-note", valueString: "Retain this source" }];
+    if (edited) carrier.doseAndRate = [{ doseQuantity: q(3) }];
+    const live = toFhirR5Dosages({ step: [{ ...(compact ? { id: "active-dose-phase" } : {}), component: [
+      { ...member(2), safety: { doseLimit: [{ scope: "administration", valueQuantity: q(4) }] } },
+    ] }] })[0];
+    let rows = persist([carrier, live]);
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(rows);
+      const administrations = native.stages.map(stage => stage.administrations).reduce((all, members) => all.concat(members), []);
+      expect(administrations.map(value => value.amounts?.[0]?.quantity?.value)).toEqual(edited ? [3, 2] : [2]);
+      const output = projectCanonicalCourse(native);
+      expect(JSON.stringify(output.fhirNext)).toContain("Consult clinician");
+      expect(JSON.stringify(output.fhirNext)).toContain("original-source-carrier");
+      expect(JSON.stringify(output.fhirNext)).toContain("Retain this source");
+      if (save < 3) rows = persist(output.fhir);
+    }
+  });
+
+  it.each([false, true])("aligns historical real members around a source carrier (carrier first=%s)", carrierFirst => {
+    const carrier = toFhirR5Dosages({ renderedInstruction: "Historical header only" })[0];
+    const historical: FhirDosage = { sequence: 1, doseAndRate: [{ doseQuantity: q(5) }],
+      modifierExtension: [{ url: DOSAGE_DETAILS_R5_URL, extension: [{ url: "dosageDetails", extension: [
+        encodeR6SourceMetadata("step", { component: [member(5)] }, "step"),
+      ] }] }],
+    };
+    const compact = toFhirR5Dosages({ step: [{ id: "current-phase", component: [member(2)] }] })[0];
+    let rows = persist([...(carrierFirst ? [carrier, historical] : [historical, carrier]), compact]);
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(rows);
+      expect(native.stages.map(stage => stage.administrations).reduce((all, members) => all.concat(members), [])
+        .map(value => value.amounts?.[0]?.quantity?.value)).toEqual([5, 2]);
+      const output = projectCanonicalCourse(native);
+      expect(JSON.stringify(output.fhirNext)).toContain("Historical header only");
+      if (save < 3) rows = persist(output.fhir);
+    }
+  });
+
+  it.each([true, false])("keeps an absolute component start independent after predecessor deletion (absolute=%s)", absolute => {
+    const input: FhirR6DosageInstruction = { step: [
+      { id: "loading", component: [member(1, { count: 1 })] },
+      { component: [member(2, { count: 2, ...(absolute ? { boundsPeriod: { start: "2026-11-24T00:00:00Z" } } : {}) })] },
+    ] };
+    let rows = persist(toFhirR5Dosages(input).slice(1));
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(rows);
+      const active = native.stages.map(stage => stage.administrations).reduce((all, members) => all.concat(members), []);
+      expect(active.map(value => value.amounts?.[0]?.quantity?.value)).toEqual([2]);
+      if (absolute) {
+        expect(native.contextIssue).toBeUndefined();
+        expect(nextDueDoses(rows, options)).toEqual([
+          "2026-11-24T08:00:00+00:00", "2026-11-25T08:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ ...options, dosage: rows, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
+      } else {
+        expect(native.contextIssue).toBe("missing-course-context");
+        expect(() => nextDueDoses(rows, options)).toThrow(/complete dosage array/i);
+      }
+      if (save < 3) rows = persist(projectCanonicalCourse(native).fhir);
+    }
+  });
+
+  it("retains implicit successor membership without inventing a new treatment origin", () => {
+    const input: FhirR6DosageInstruction = { step: [
+      { component: [member(1, { count: 1 })] }, { component: [member(2, { count: 3 })] },
+    ] };
+    const full = persist(toFhirR5Dosages(input));
+    expect(nextDueDoses(full, options)).toEqual([
+      "2026-11-21T08:00:00+00:00", "2026-11-22T08:00:00+00:00",
+      "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ ...options, dosage: full, durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(7);
+    let rows = full.slice(1);
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(rows);
+      expect(native.stages.map(stage => stage.administrations).reduce((all, members) => all.concat(members), []).map(value => value.amounts?.[0]?.quantity?.value)).toEqual([2]);
+      expect(native.contextIssue).toBe("missing-course-context");
+      expect(() => nextDueDoses(rows, options)).toThrow(/complete dosage array/i);
+      if (save < 3) rows = persist(projectCanonicalCourse(native).fhir);
+    }
+  });
+
+  it.each([
+    { scope: "administration" as const, values: [2, 4] }, { scope: "administration" as const, values: [4, 2] },
+    { scope: "lifetime" as const, values: [2, 4] }, { scope: "lifetime" as const, values: [4, 2] },
+  ])("projects the tighter exact $scope cap independently of order $values", ({ scope, values }) => {
+    const limits = values.map(value => ({ scope, valueQuantity: q(value), text: value + "-tablet authored cap" }));
+    let wire = course({ ...member(), safety: { doseLimit: limits } });
+    for (let save = 0; save <= 3; save++) {
+      const rows = persist(toFhirR5Dosages(wire));
+      expect(scope === "administration" ? rows[0].maxDosePerAdministration : rows[0].maxDosePerLifetime).toEqual(q(2));
+      const reopened = toDosageDetails(rows);
+      expect(reopened.step![0].component[0].safety?.doseLimit).toEqual(limits);
+      if (save < 3) wire = persist(reopened);
+    }
+  });
+
+  it.each([
+    { saved: "compact", edit: "change" }, { saved: "compact", edit: "delete" },
+    { saved: "full", edit: "change" }, { saved: "full", edit: "delete" },
+    { saved: "current", edit: "change" }, { saved: "current", edit: "delete" },
+  ])("edits the actual shown maximum from $saved R5 storage ($edit)", ({ saved, edit }) => {
+    const amount = (value: number, id: string) => ({ value, unit: "tab", id,
+      extension: [{ url: "urn:quantity-note", valueString: id }] });
+    const limits = [
+      { id: "first-cap", scope: "administration" as const, valueQuantity: amount(2, "first-quantity"), text: "First cap" },
+      { id: "volume-cap", scope: "administration" as const, valueQuantity: { value: 4, unit: "mL", id: "volume-quantity" }, text: "Independent volume cap" },
+      { id: "last-cap", scope: "administration" as const, valueQuantity: amount(4, "last-quantity"), text: "Last cap" },
+      { id: "period-cap", scope: "period" as const, valueQuantity: q(8), period: { value: 1, unit: "d" },
+        extension: [{ url: "urn:period-note", valueString: "Keep period annotation" }] },
+    ];
+    const component = { doseAndRate: [{ doseQuantity: q(1) }], safety: { doseLimit: limits } };
+    // Captured from the public writer at 6c0e3cd: the shown cap was 4,
+    // with its exact annotated projected-safety fingerprint. This fixture
+    // does not derive its expected original ownership from today's writer.
+    const historical: FhirDosage = { sequence: 1, doseAndRate: [{ doseQuantity: q(1) }],
+      maxDosePerAdministration: amount(4, "last-quantity"),
+      maxDosePerPeriod: [{ id: "period-cap", numerator: q(8), denominator: { value: 1, unit: "d" },
+        extension: [{ url: "urn:period-note", valueString: "Keep period annotation" }] }],
+      modifierExtension: [{ url: DOSAGE_DETAILS_R5_URL, extension: saved === "full"
+        ? [{ url: "dosageDetails", extension: [encodeR6SourceMetadata("step", { component: [component] }, "step")] }]
+        : encodeR5RetainedFields({ rowIndex: 0, sequence: 1, stepCount: 1, countScope: "step",
+          component: { safety: { doseLimit: limits } }, baseline: { safety: "ced94fe0a80e7663" } }),
+      }],
+    };
+    let rows = persist(saved === "current" ? toFhirR5Dosages(course(component)) : [historical]);
+    expect(rows[0].maxDosePerAdministration!.value).toBe(saved === "current" ? 2 : 4);
+    if (edit === "delete") delete rows[0].maxDosePerAdministration;
+    else rows[0].maxDosePerAdministration!.value = 3;
+    const shownId = saved === "current" ? "first-cap" : "last-cap";
+    const expected = limits.filter(limit => edit !== "delete" || limit.id !== shownId).map(limit =>
+      edit === "change" && limit.id === shownId ? { ...limit, valueQuantity: { ...limit.valueQuantity, value: 3 } } : limit);
+    for (let save = 0; save <= 3; save++) {
+      const wire = toDosageDetails(rows);
+      const actual = wire.step![0].component[0].safety!.doseLimit!;
+      expect(actual).toHaveLength(expected.length);
+      for (const limit of expected) expect(actual.find(value => value.id === limit.id)).toEqual(limit);
+      expect(JSON.stringify(wire)).toContain("first-quantity");
+      expect(JSON.stringify(wire)).toContain("last-quantity");
+      if (save < 3) rows = persist(toFhirR5Dosages(wire));
+    }
+  });
+
+  it.each([
+    { amounts: [{ value: 2, unit: "tab" }, { value: 4, unit: "mL" }, { value: 4, unit: "tab" }], owner: 0 },
+    { amounts: [{ value: 4, unit: "tab" }, { value: 4, unit: "mL" }, { value: 2, unit: "tab" }], owner: 2 },
+    { amounts: [{ value: 2, unit: "mL" }, { value: 4, unit: "tab" }, { value: 4, unit: "mL" }], owner: 0 },
+    { amounts: [{ value: 4, unit: "mL" }, { value: 2, unit: "tab" }, { value: 4, unit: "tab" }, { value: 2, unit: "mL" }], owner: 3 },
+  ])("keeps the tighter annotated maximum within the last interleaved unit (owner=$owner)", ({ amounts, owner }) => {
+    const limits = amounts.map((amount, index) => ({ id: "cap-" + index, scope: "administration" as const,
+      valueQuantity: { ...amount, id: "quantity-" + index }, text: "Authored cap " + index }));
+    let wire = course({ safety: { doseLimit: limits } });
+    for (let save = 0; save <= 3; save++) {
+      const rows = persist(toFhirR5Dosages(wire));
+      expect(rows[0].maxDosePerAdministration).toEqual({ ...amounts[owner], id: "quantity-" + owner });
+      wire = toDosageDetails(rows);
+      expect(wire.step![0].component[0].safety?.doseLimit).toEqual(limits);
+    }
+  });
+
+  it.each(["~", "<"] as const)("retains the exact minimum around an authored %s maximum", comparator => {
+    const limits = [
+      { id: "exact-tight", scope: "administration" as const, valueQuantity: { ...q(2), id: "exact-quantity" } },
+      { id: "qualified", scope: "administration" as const, valueQuantity: { ...q(1), comparator, id: "qualified-quantity" } },
+      { id: "exact-later", scope: "administration" as const, valueQuantity: q(4) },
+    ];
+    let wire = course({ safety: { doseLimit: limits } });
+    for (let save = 0; save <= 3; save++) {
+      const rows = persist(toFhirR5Dosages(wire));
+      expect(rows[0].maxDosePerAdministration).toEqual({ ...q(2), id: "exact-quantity" });
+      wire = toDosageDetails(rows);
+      expect(wire.step![0].component[0].safety?.doseLimit).toEqual(limits);
+    }
+  });
+
+  it("keeps the edited annotated cap as the shown owner when its value reaches an equal sibling", () => {
+    const limits = [
+      { id: "edited-cap", scope: "administration" as const, valueQuantity: { ...q(4), id: "edited-quantity" }, text: "Edited owner" },
+      { id: "hidden-cap", scope: "administration" as const, valueQuantity: { ...q(6), id: "hidden-quantity" }, text: "Independent sibling" },
+    ];
+    let rows = persist(toFhirR5Dosages(course({ safety: { doseLimit: limits } })));
+    for (const value of [6, 5]) {
+      expect(rows[0].maxDosePerAdministration!.id).toBe("edited-quantity");
+      rows[0].maxDosePerAdministration!.value = value;
+      for (let save = 0; save <= 3; save++) {
+        const output = toDosageDetails(rows);
+        const actual = output.step![0].component[0].safety!.doseLimit!;
+        expect(actual.find(limit => limit.id === "edited-cap")).toEqual({
+          ...limits[0], valueQuantity: { ...q(value), id: "edited-quantity" },
+        });
+        expect(actual.find(limit => limit.id === "hidden-cap")).toEqual(limits[1]);
+        rows = persist(toFhirR5Dosages(output));
+        expect(rows[0].maxDosePerAdministration).toEqual({ ...q(value), id: "edited-quantity" });
+      }
+    }
+  });
+
+  it.each(["unit", "comparator"] as const)("retains incomparable %s caps without converting authored quantities", difference => {
+    const last: FhirR6Quantity = difference === "unit" ? { value: 4, unit: "mL" } : { ...q(4), comparator: "<" };
+    const limits = [{ scope: "administration" as const, valueQuantity: q(2) }, { scope: "administration" as const, valueQuantity: last }];
+    let wire = course({ safety: { doseLimit: limits } });
+    for (let save = 0; save <= 3; save++) {
+      const rows = persist(toFhirR5Dosages(wire));
+      expect(quantityFromR5(rows[0].maxDosePerAdministration)).toEqual(last);
+      wire = toDosageDetails(rows);
+      expect(wire.step![0].component[0].safety?.doseLimit).toEqual(limits);
+    }
+  });
+
+  it.each(["keep", "delete", "replace", "duplicate"] as const)("separates a course action edit from unchanged phase cap ownership (%s)", edit => {
+    let wire = r6Save({ safety: { ifExceeded: "Original course action" }, step: [{
+      id: "induction", safety: { doseLimit: [{ scope: "administration", valueQuantity: q(2), text: "Induction only" }] },
+      component: [member()],
+    }] });
+    wire.step!.push({ id: "maintenance", component: [member(3)] });
+    wire.safety!.ifExceeded = "Contact clinician";
+    if (edit === "delete") wire.safety!.doseLimit = [];
+    if (edit === "replace") wire.step![0].id = "replacement";
+    if (edit === "duplicate") wire.step![1].id = "induction";
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(persist(wire));
+      expect(native.safety?.ifExceeded).toBe("Contact clinician");
+      expect(native.safety?.limits ?? []).toEqual([]);
+      expect(native.stages[1].safety?.limits).toBeUndefined();
+      expect(native.stages[0].safety?.limits?.map(limit => limit.amount?.value) ?? []).toEqual(edit === "keep" ? [2] : []);
+      expect(native.stages[1].administrations[0].amounts![0].quantity?.value).toBe(3);
+      const output = projectCanonicalCourse(native);
+      expect(JSON.stringify(output.fhirNext)).toContain("Induction only");
+      if (save < 3) wire = persist(save === 1 ? toDosageDetails(output.fhir) : output.fhirNext);
+    }
+  });
+
+  it.each([false, true])("keeps incomplete annotated period maxima source-only through editable saves (valid sibling=%s)", valid => {
+    const incomplete: FhirRatio = { id: "incomplete-limit", numerator: q(2), denominator: {
+      unit: "d", extension: [{ url: "urn:period-note", valueString: "Period value was not authored" }],
+    } };
+    const complete: FhirRatio = { id: "complete-limit", numerator: q(2), denominator: { value: 1, unit: "d" } };
+    let rows = toEzDosages([{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      maxDosePerPeriod: [incomplete, ...(valid ? [complete] : [])] }]);
+    expect(rows[0].safety?.doseLimit?.map(limit => limit.id) ?? []).toEqual(valid ? ["complete-limit"] : []);
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(persist(rows));
+      const limits = native.stages[0].administrations[0].limits ?? [];
+      expect(limits.map(limit => ({ amount: limit.amount?.value, period: limit.period?.value }))).toEqual(valid ? [{ amount: 2, period: 1 }] : []);
+      const output = projectCanonicalCourse(native);
+      expect(JSON.stringify(output.fhirNext)).toContain("Period value was not authored");
+      expect(JSON.stringify(output.fhirNext)).toContain("incomplete-limit");
+      if (save < 3) rows = toEzDosages(persist(output.fhir));
+    }
+  });
+
+  it("invalidates warm source replay only when the effective site target count changes", () => {
+    const countUrl = "urn:ezmedicationinput:body-site-administration-target-count";
+    const source = "Apply 1 g to each of 2 lesions daily max 2 g/day";
+    const input: FhirDosage = {
+      text: source, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat: daily },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "g" }, denominator: { value: 1, unit: "d" } }],
+      site: { text: "lesions", extension: [{ url: countUrl, valueInteger: 2 }] },
+    };
+    let row = persist(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0]);
+    const proof = captureSourceReplayConcept(row.site, true);
+    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(source);
+    const marker = { ...row.site!.extension!.find(item => item.url === countUrl)!, id: "unchanged-count-new-annotation" };
+    row.site!.extension = [marker];
+    expect(matchesSourceReplayConcept(row.site, proof)).toBe(true);
+    marker.valueInteger = 3;
+    expect(matchesSourceReplayConcept(row.site, proof)).toBe(false);
+    const edited = formatSig(row, "long", { realizationMode: "roundtrip" });
+    expect(edited).not.toContain("2 lesions");
+    expect(edited).toBe(formatSig(persist(row), "long", { realizationMode: "roundtrip" }));
+    expect(row.text).toBe(source);
+    for (let save = 0; save <= 3; save++) {
+      const native = importCanonicalCourse(row);
+      expect(native.stages[0].administrations[0].targetCount).toBe(3);
+      const output = projectCanonicalCourse(native);
+      expect(JSON.stringify(output.fhirNext)).toContain(source);
+      if (save < 3) row = persist(output.fhir[0]);
+    }
+  });
+
+  it.each([false, true])("shows a source-less ordinary R5 rate Ratio in both previews (dose=%s)", dose => {
+    const row: FhirDosage = { doseAndRate: [{ ...(dose ? { doseQuantity: q(1) } : {}),
+      rateRatio: { numerator: { value: 100, unit: "mL" }, denominator: { value: 2, unit: "h" } },
+    }] };
+    for (const displayed of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
+      expect(displayed).toContain("100 mL / 2 h");
+      if (dose) expect(displayed).toMatch(/1 (?:tab|tablet)/);
+    }
+    row.text = "Authored infusion instructions";
+    expect(formatSig(row, "long")).toBe("Authored infusion instructions");
   });
 });

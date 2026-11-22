@@ -31,6 +31,7 @@ export interface InstructionActionRealizationInput {
   result?: string;
   activity?: string;
   time?: string;
+  timeRelation?: AdviceRelation;
   /** Optional output evidence requested by a rich primary formatter. Set only
    * at the branch that actually includes the selected Time in its wording. */
   timeWasRendered?: boolean;
@@ -146,14 +147,18 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
     if (themeArg && substanceArg && amountArg) break;
   }
-  const theme = themeArg ? c.translateArgumentConcept(themeArg) : undefined;
+  const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
+  const theme = themeArg
+    ? themeArg.quantity && !themeAmount
+      ? themeArg.text || themeArg.normalized
+      : c.translateArgumentConcept(themeArg)
+    : undefined;
   const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
   const substance = substanceArg
     ? substanceArg.quantity && !substanceQuantity
       ? substanceArg.text || substanceArg.normalized
       : c.translateArgumentConcept(substanceArg)
     : c.substance;
-  const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
   // c.amount already preserves a partial quantity's authored wording. Reusing
   // it avoids fabricating a number or attaching a tablet amount to plain water.
   const coextensiveAmount = themeArg && amountArg?.quantity &&
@@ -198,9 +203,10 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         (withComplement || c.frame.relation === AdviceRelation.In)
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "with";
-      const timeRelation = c.frame.relation &&
-        (relationHasSemanticClass(c.frame.relation, "temporal") || c.frame.relation === AdviceRelation.In)
-        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : "at";
+      const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
+      const timeRelation = timeSemanticRelation &&
+        (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
+        ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : "at";
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       return `${c.label}${themeText}${substance ? ` ${materialRelation} ${amountText}${substance}` : ""}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
     }
@@ -346,9 +352,10 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
           : themeText ? "กับ" : "";
       const substanceText = substance
         ? `${materialRelation}${substance}${substanceAmount ? `${amountSeparator}${substanceAmount}` : ""}` : "";
-      const timeRelation = c.frame.relation &&
-        (relationHasSemanticClass(c.frame.relation, "temporal") || c.frame.relation === AdviceRelation.In)
-        ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : " เวลา ";
+      const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
+      const timeRelation = timeSemanticRelation &&
+        (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
+        ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : " เวลา ";
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       return `${c.label}${themeText}${substanceText}${c.time ? `${timeRelation}${c.time}` : ""}`;
     }

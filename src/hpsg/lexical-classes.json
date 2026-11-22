@@ -871,6 +871,7 @@
   "maximumPeriodPrepositions": [
     "in",
     "within",
+    "over",
     "per",
     "/",
     "a"
@@ -1122,6 +1123,7 @@
     "monthly": "Month",
     "hourly": "Hour"
   },
+  "daypartIntervalTokens": ["night", "nights"],
   "intervalUnitTokens": {
     "min": "Minute",
     "mins": "Minute",

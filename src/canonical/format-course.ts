@@ -544,7 +544,7 @@ function formatCanonicalBase(
   // A structured import already built this exact scoped clause for item
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
   // of reconstructing the same dose/timing from native fields five times.
-  const clause = compiled ?? clauseForAdministration(a);
+  const clause = compiled ?? clauseForAdministration(a, options);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
   // Timing alone cannot replace the only authored dose/manner directions.
   // Label retained source separately from the current cadence: those words
@@ -974,11 +974,13 @@ export function formatCanonicalCourse(
       const previous = !step.start && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
       const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
         ? treatmentStepOffsetQuantity(previous.end) : undefined;
+      const reversedWindow = startAnchor === endAnchor &&
+        startDays !== undefined && endDays !== undefined && endDays <= startDays;
       if (
         (step.start && startDays === undefined) ||
         (inheritedStart && startDays === undefined) ||
         (step.end && endDays === undefined) ||
-        (startDays !== undefined && endDays !== undefined && endDays <= startDays)
+        reversedWindow
       ) {
         // Unsupported event anchors must stay visible instead of becoming
         // an unconditional dose when the original source text is absent.
@@ -993,7 +995,7 @@ export function formatCanonicalCourse(
         if (
           (!step.start || startQuantity) &&
           (!step.end || endQuantity) &&
-          !(startDays !== undefined && endDays !== undefined && endDays <= startDays)
+          !reversedWindow
         ) {
           timing = formatCalendarStepWindow(startQuantity, endQuantity, words, startAnchor, endAnchor);
         } else {
@@ -1030,6 +1032,8 @@ export function formatCanonicalCourse(
           endDays === undefined ? undefined : { value: endDays, code: "d" },
           words, startAnchor, endAnchor
         );
+        if (index > 0 && !step.start && startDays === undefined)
+          timing = words.afterPreviousPhase + "; " + timing;
       } else if (index > 0) {
         // The next phase is ordered even when its predecessor has no exact
         // end; displaying it without this context would make it immediate.

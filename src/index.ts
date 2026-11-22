@@ -1218,7 +1218,7 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     return true;
   const primary = dosage.doseAndRate?.[0];
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
-  if (primary?.rateQuantity && !dosage.text?.trim()) return true;
+  if ((primary?.rateQuantity || primary?.rateRatio) && !dosage.text?.trim()) return true;
   // Explicit normalization uses the existing rich native realizer; source
   // replay must not hide a retained infusion qualifier or requested locale.
   if (options?.realizationMode === "normalized" &&
@@ -1282,7 +1282,7 @@ export function formatSig(
     if (typeof dosage.text === "string" && dosage.text.trim().length > 0) {
       return dosage.text;
     }
-    const clause = canonicalFromFhir(dosage);
+    const clause = canonicalFromFhir(dosage, options);
     const localization = resolveSigLocalization(options?.locale, options?.i18n);
     let displayed = provisionalFhirDisplay(dosage, clause, style, localization, options, false);
     if (displayCondition) {
@@ -1309,7 +1309,7 @@ export function formatSig(
     dosage.excludedDates?.length ||
     hasDisplayRelevantModifier
   )) return dosage.text;
-  const clause = canonicalFromFhir(dosage);
+  const clause = canonicalFromFhir(dosage, options);
   // Roundtrip can reuse an HPSG-owned source quantity omitted from the
   // auxiliary action graph only when the persisted R5 clinical projection
   // STILL matches. A newly added/edited dose invalidates that source replay.
@@ -1412,7 +1412,7 @@ export function fromFhir(
   const items: ParseResult[] = [];
   let row = 0;
   for (const stage of native.stages) for (const administration of stage.administrations) {
-    const clause = clauseForAdministration(administration);
+    const clause = clauseForAdministration(administration, options);
     compiled.set(administration, clause);
     const projection = r5Rows[row++];
     items.push({
@@ -1533,7 +1533,7 @@ function fromFhirDosageInternal(
     ? dosage.text
     : undefined;
   const suppressMaximumDisplay = hasMaximumDose && maximumDoseSource === undefined;
-  const clause = native ? clauseForAdministration(native) : canonicalFromFhir(dosage);
+  const clause = native ? clauseForAdministration(native, options) : canonicalFromFhir(dosage, options);
   const compiled = native ? new Map([[native, clause]]) : undefined;
   // The saved fingerprint proves that a primary source dose still matches
   // its exported R5 clinical fields, even if the auxiliary instruction

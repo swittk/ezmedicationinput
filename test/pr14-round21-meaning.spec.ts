@@ -151,7 +151,17 @@ describe("review 21 current structured course preview", () => {
           expect(text.split(" then ")[0]).toContain(action);
           expect(text.split(" then ").slice(1).join(" then ")).not.toContain(action);
         }
-        if (scope === "course") expect(text).toContain("Across this course:");
+        if (scope === "course") {
+          for (const [rendered, label, exceeded] of [
+            [text, "Across this course: ", "If the limit is exceeded: "],
+            [thai, "ตลอดแผนการใช้ยานี้: ", "หากเกินขีดจำกัด: "],
+          ]) {
+            const [administration, courseSafety] = rendered.split(label);
+            expect(courseSafety).toContain(exceeded + action);
+            expect(administration).not.toContain(action);
+            if (numeric) expect(courseSafety).toContain("8 tab / 1 d");
+          }
+        }
       }
     }
   );

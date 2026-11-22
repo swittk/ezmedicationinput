@@ -3,7 +3,7 @@ import { resolveMedicationInstructionActionForMethod, selectMedicationInstructio
  * course. No FHIR serialization or reconstruction occurs in this module.
  * Source grammar is interpreted once; numerical execution consumes only
  * these normalized facts and preserves syntax as read-only evidence. */
-import type { CanonicalSigClause, CanonicalCalendarEventExpr, CanonicalPrnReasonExpr } from "../types";
+import type { CanonicalSigClause, CanonicalCalendarEventExpr, CanonicalPrnReasonExpr, ParseOptions } from "../types";
 import type {
   CanonicalAdministration,
   CanonicalAmount,
@@ -445,7 +445,7 @@ export function doseRangeNeedsEndpointPreview(range: CanonicalRange): boolean {
  * This is NOT a parser and reads no wire object: grammar evidence and source
  * spans remain unchanged; edited dose/schedule/guard values are authoritative.
  */
-export function clauseForAdministration(a: CanonicalAdministration): CanonicalSigClause {
+export function clauseForAdministration(a: CanonicalAdministration, options?: ParseOptions): CanonicalSigClause {
   const rawText=a.syntax?.rawText??a.text??"";
   const base=a.syntax;
   // ES6 object spread is emitted as per-property defineProperty helper loops.
@@ -559,10 +559,10 @@ export function clauseForAdministration(a: CanonicalAdministration): CanonicalSi
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
   }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
   else result.site=undefined;
-  const methodCode=selectMedicationInstructionMethodCoding(a.method?.coding);
+  const methodCode=selectMedicationInstructionMethodCoding(a.method?.coding, options);
   if(a.method){
     const liveMethod={text:a.method.text,coding:methodCode};
-    const text=resolveMedicationInstructionActionForMethod(liveMethod)?.display ??
+    const text=resolveMedicationInstructionActionForMethod(liveMethod, options)?.display ??
       a.method.text ?? methodCode?.display;
     const same=text===base?.method?.text&&methodCode?.code===base?.method?.coding?.code;
     result.method=Object.assign({},same?base?.method:undefined,{text});

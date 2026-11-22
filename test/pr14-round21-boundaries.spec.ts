@@ -518,11 +518,15 @@ describe("strict R6 projection preserves current editable facts", () => {
     const wire = courseToR6(native), amounts = wire.step![0].component[0].doseAndRate!;
     const simple = [amounts[0].doseQuantity, amounts[1].rateQuantity, amounts[2].doseRange!.low,
       amounts[3].rateRange!.high, amounts[4].rateRatio!.denominator];
-    for (const q of simple) {
+    const expected = [[2, "tab"], [100, "mL/h"], [1, "tab"], [100, "mL/h"], [2, "h"]] as const;
+    simple.forEach((q, index) => {
+      expect(q).toMatchObject({ value: expected[index][0], unit: expected[index][1] });
       expect(q).not.toHaveProperty("comparator");
       expect(getQuantityComparator(q)).toBe(comparator);
-    }
-    expect(amounts[4].rateRatio!.numerator!.comparator).toBe(comparator);
+    });
+    expect(amounts[2].doseRange!.high).toMatchObject({ value: 2, unit: "tab" });
+    expect(getQuantityComparator(amounts[2].doseRange!.high)).toBeUndefined();
+    expect(amounts[4].rateRatio!.numerator).toMatchObject({ value: 500, unit: "mL", comparator });
     const restored = importCanonicalCourse(wire).stages[0].administrations[0].amounts!;
     expect(restored[0].quantity?.comparator).toBe(comparator);
     expect(restored[4].rateRatio?.denominator?.comparator).toBe(comparator);
@@ -892,5 +896,24 @@ describe("round34 positional clock primitive annotations", () => {
       }
       expect(JSON.stringify(source)).toBe(before);
     }
+  });
+});
+
+it("round37 updates a known equality display after a code-only edit and preserves unchanged equality", () => {
+  const marker = { url: "http://ema.europa.eu/fhir/extension/comparator",
+    valueCoding: { id: "authored-equality", system: "http://spor.ema.europa.eu/v1/lists/100000000008",
+      code: "100000000049", display: "equal to" } };
+  const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 2, unit: "tab", extension: [marker] } }] };
+  expect(toDosageDetails([row]).step![0].component[0].doseAndRate![0].doseQuantity?.extension).toEqual([marker]);
+  const edited = persist(row);
+  edited.doseAndRate![0].doseQuantity!.extension![0].valueCoding!.code = "100000000052";
+  const changed = toDosageDetails([edited]).step![0].component[0].doseAndRate![0].doseQuantity!;
+  expect(changed).toMatchObject({ value: 2, unit: "tab" });
+  expect(getQuantityComparator(changed)).toBe("<=");
+  expect(changed.extension).toContainEqual({ ...marker,
+    valueCoding: { ...marker.valueCoding, code: "100000000052", display: "less than or equal to" } });
+  expect(changed.extension).toContainEqual({
+    url: "urn:ezmedicationinput:StructureDefinition:quantity-operator-source",
+    valueCoding: { ...marker.valueCoding, code: "100000000052" },
   });
 });

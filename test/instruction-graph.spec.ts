@@ -1,3 +1,4 @@
+import { courseFromR6 } from "../src/adapters/canonical-course";
 import { AdviceArgumentRole, AdviceForce, AdviceRelation, EventTiming, type MedicationCondition } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
@@ -3591,10 +3592,9 @@ describe("round36 configured identity and active cadence", () => {
     expect(parsed.meta.canonical.clauses[0].schedule?.activityTiming?.[0].activity.coding).toMatchObject(coding);
     for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
       const reopened = toDosageDetails(JSON.parse(JSON.stringify(rows)));
-      const json = JSON.stringify(reopened);
-      expect(json).toContain("code-note");
-      expect(json).toContain("selected-note");
-      expect(json).toContain('"userSelected":false');
+      const current = courseFromR6(reopened).stages[0].administrations[0]
+        .schedule?.recurrence?.activityTiming?.[0].activity.coding;
+      expect(current).toEqual(coding);
     }
     expect(JSON.stringify(options)).toBe(before);
   });
@@ -3639,7 +3639,7 @@ describe("round36 rich primary rendered argument ownership", () => {
       expect(text).toContain(locale === "en" ? "foam" : "ฟอง");
       expect(text).toContain(locale === "en" ? "gently" : "เบาๆ");
       expect(text.match(/(?:^|\D)2 g\b/gu)).toHaveLength(1);
-      expect(text).not.toMatch(/(?:^|\D)1 (?:g|กรัม)\b/u);
+      expect(text).not.toMatch(/(?:^|\D)1 (?:g|กรัม)(?![\p{L}\p{N}])/u);
     }
     expect(JSON.stringify(saved)).toBe(before);
   });
@@ -3802,5 +3802,152 @@ describe("round36 live predicate and explicit amountless primary controls", () =
     expect(text).toMatch(/^Drink[;,]/u);
     expect(text).toMatch(retainedStep);
     expect(JSON.stringify(graph)).toBe(before);
+  });
+});
+
+describe("round37 action participant and method ownership", () => {
+  it.each([AdviceRelation.With, undefined])("keeps spanless participant quantities only when independently related (%s)", relation => {
+    const source = "Take 1 tablet with 1 tablet of folic acid";
+    const frame = parseInstructionActions("Take 1 tablet with water")[0];
+    frame.sourceText = source;
+    frame.args = [
+      { role: AdviceArgumentRole.Amount, text: "1 tablet", normalized: "tab", quantity: { value: 1, unit: "tab" } },
+      { role: AdviceArgumentRole.Object, text: "1 tablet of folic acid", normalized: "folic acid",
+        relation, quantity: { value: 1, unit: "tab" } }
+    ];
+    const graph = { sourceText: source, sourceLocale: "en", actions: [frame], primaryAdministrationSpan: frame.span };
+    const row = { doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      method: { text: "Take" }, extension: [buildInstructionGraphExtension(graph)!] };
+    const before = JSON.stringify(row);
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text).toContain("folic acid");
+        if (relation) expect(text).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
+        else expect(text).not.toMatch(/1 (?:tablets?|เม็ด)(?![\p{L}\p{N}])/u);
+      }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(parseInstructionGraphExtension(row.extension)?.actions[0].args[1].quantity).toEqual({ value: 1, unit: "tab" });
+  });
+
+  it.each([false, true])("retains a saved Mix Theme's quantity wording (complete %s)", complete => {
+    const frame = parseInstructionActions("Mix powder with water")[0];
+    frame.sourceText = "";
+    frame.args.unshift({ role: AdviceArgumentRole.Theme,
+      text: complete ? "2 g of powder" : "up to the prescribed amount of powder",
+      normalized: "powder", quantity: complete ? { value: 2, unit: "g" } : { comparator: "<=", unit: "g" } });
+    const graph = { sourceText: "", sourceLocale: "en", actions: [frame] };
+    const before = JSON.stringify(graph);
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, recovered]) for (const locale of ["en", "th"]) {
+      const text = realizeInstructionGraph(candidate, locale)!;
+      expect(text).toContain(complete ? "2" : "up to the prescribed amount of powder");
+      expect(text).toContain(locale === "en" ? "water" : "น้ำ");
+      if (complete) expect(text).toContain("powder");
+    }
+    const row = { extension: [buildInstructionGraphExtension(graph)!] };
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(complete ? "2" : "up to the prescribed amount of powder");
+        expect(text).toContain(locale === "en" ? "water" : "น้ำ");
+      }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("uses the selected Time's before relation when the Mix frame says after", () => {
+    const frame = parseInstructionActions("Mix powder after breakfast")[0];
+    frame.sourceText = "";
+    frame.relation = AdviceRelation.After;
+    frame.args = [
+      { role: AdviceArgumentRole.Theme, text: "powder", normalized: "powder" },
+      { role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming["Before Breakfast"],
+        relation: AdviceRelation.Before, i18n: { en: "breakfast", th: "อาหารเช้า" } }
+    ];
+    const graph = { sourceText: "", sourceLocale: "en", actions: [frame] };
+    const before = JSON.stringify(graph);
+    const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
+    for (const candidate of [graph, recovered]) for (const locale of ["en", "th"]) {
+      const text = realizeInstructionGraph(candidate, locale)!;
+      expect(text).toContain(locale === "en" ? "before breakfast" : "ก่อนอาหารเช้า");
+      expect(text).not.toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+    }
+    const row = { extension: [buildInstructionGraphExtension(graph)!] };
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
+        expect(text).not.toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+      }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it("selects a request's custom method before a recognized default through public imports", () => {
+    const coding = { system: "urn:clinic:method", code: "chew-slowly" };
+    const options = { realizationMode: "normalized" as const, instructionActionMap: {
+      "chew-slowly": { code: "chew-slowly", display: "Chew slowly", i18n: { th: "เคี้ยวช้าๆ" },
+        primaryAdministrationHead: true, administrationMethod: coding }
+    } };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      method: { coding: [coding, { system: "http://snomed.info/sct", code: "738992009", display: "Chew" }] } };
+    const before = JSON.stringify(row);
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { ...options, locale });
+        expect(text).toContain(locale === "en" ? "Chew slowly" : "เคี้ยวช้าๆ");
+        expect(text).toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
+      }
+      expect(fromFhirDosage(row, { ...options, locale: "en" }).longText).toContain("Chew slowly");
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "normalized" })).toContain("Chew 1 tablet");
+  });
+});
+
+describe("round37 rendered primary action identity", () => {
+  it.each([false, true])("renders an imported Mix primary once and retains an independent Drink (structured amount %s)", structured => {
+    const frame = parseInstructionActions("Mix powder with water")[0];
+    frame.sourceText = "";
+    const theme = { role: AdviceArgumentRole.Theme,
+      text: structured ? "2 g of powder" : "up to the prescribed amount of powder",
+      normalized: "powder", quantity: structured ? { value: 2, unit: "g" } : { comparator: "<=" as const, unit: "g" } };
+    frame.args.unshift(theme);
+    if (structured) frame.args.push({ role: AdviceArgumentRole.Amount, text: "2 g", normalized: "g",
+      quantity: { value: 2, unit: "g" } });
+    const independent = parseInstructionActions("Drink 5 mL")[0];
+    independent.span = { start: frame.span.end + 7, end: frame.span.end + 17 };
+    independent.sequenceIndex = 1;
+    const graph = { sourceText: "Mix the prescribed powder with water, then drink 5 mL", sourceLocale: "en",
+      primaryAdministrationSpan: frame.span, actions: [frame, independent] };
+    const row = { method: { text: "Mix" }, extension: [buildInstructionGraphExtension(graph)!],
+      ...(structured ? { doseAndRate: [{ doseQuantity: { value: 2, unit: "g" } }] } : {}) };
+    const before = JSON.stringify(row);
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"])
+        for (const realizationMode of ["normalized", "roundtrip"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text.match(locale === "en" ? /mix/giu : /ผสม/gu)).toHaveLength(1);
+          expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(1);
+          expect(text).toContain(locale === "en" ? "5 mL" : "5 มิลลิลิตร");
+          expect(text.match(/up to the prescribed amount of powder/gu)?.length ?? 0).toBe(structured ? 0 : 1);
+          if (structured) expect(text.match(/(?:^|\D)2 g/gu)).toHaveLength(1);
+          expect(text).toContain(locale === "en" ? "with water" : "กับน้ำ");
+        }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(row)).toBe(before);
   });
 });

@@ -566,7 +566,8 @@ export function resolveMedicationInstructionActionByMethod(
  * Select its recognized identity in one pass and retain the first code as
  * the fallback for wholly unfamiliar concepts. The source array is untouched. */
 export function selectMedicationInstructionMethodCoding(
-  codings: readonly FhirCoding[] | undefined
+  codings: readonly FhirCoding[] | undefined,
+  options?: ParseOptions
 ): FhirCoding | undefined {
   if (!codings?.length) return undefined;
   if (codings.length === 1) return codings[0].code ? codings[0] : undefined;
@@ -574,7 +575,7 @@ export function selectMedicationInstructionMethodCoding(
   for (const coding of codings) {
     if (!coding.code) continue;
     if (!fallback) fallback = coding;
-    if (resolveMedicationInstructionActionByMethod(coding)) return coding;
+    if (resolveMedicationInstructionActionByMethod(coding, options)) return coding;
   }
   return fallback;
 }

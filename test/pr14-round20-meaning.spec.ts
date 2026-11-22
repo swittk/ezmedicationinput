@@ -200,7 +200,7 @@ describe("review family: course preview preserves partial clinical bounds", () =
   it("compiles a finite active/rest course count at course scope", () => {
     const parsed = parseSig("Take 1 tablet daily for 7 days then stop for 7 days repeat for 3 cycles");
     expect(parsed.meta.canonical.course?.cycleCount).toBe(3);
-    expect(parsed.meta.canonical.course?.cycleInterval).toMatchObject({ value: 14 });
+    expect(parsed.meta.canonical.course?.cycleInterval).toMatchObject({ value: 14, unit: "d" });
     expect(parsed.meta.canonical.course?.stages[0].count).toBeUndefined();
   });
 
@@ -677,4 +677,28 @@ describe("round36 clock positions and retained source directions", () => {
     expect(structured.longText).not.toContain(source);
     expect(structured.longText).not.toContain(locale === "en" ? "original directions:" : "ข้อความเดิม:");
   });
+});
+
+it("round37 inherits Chew for a resolved divided daily dose, while a real rate keeps its own method", () => {
+  const divided = parseSig("Chew 2 tablets once, then 4 tablets daily in 2 divided doses");
+  expect(divided.meta.canonical.clauses).toHaveLength(2);
+  const second = divided.meta.canonical.clauses[1];
+  expect(second.method?.coding?.code).toBe("738992009");
+  expect(second.dose).toMatchObject({ value: 2, unit: "tab" });
+  expect(second.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+  for (const row of [divided.fhir[1], divided.fhirNext.step[1].component[0]]) {
+    expect(row.method?.coding).toContainEqual(expect.objectContaining({ code: "738992009" }));
+    expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+  }
+  for (const predecessor of ["Chew 2 tablets once", "Chew 4 tablets daily in 2 divided doses"]) {
+    const rate = parseSig(predecessor + ", then at 4 mL per hour");
+    expect(rate.meta.canonical.clauses).toHaveLength(2);
+    expect(rate.meta.canonical.clauses[1].clinicalQuantity?.representation).toBe("rate-quantity");
+    expect(rate.meta.canonical.clauses[1].method).toBeUndefined();
+    for (const row of [rate.fhir[1], rate.fhirNext.step[1].component[0]]) {
+      expect(row.method).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 4, unit: "mL/h" });
+    }
+  }
 });

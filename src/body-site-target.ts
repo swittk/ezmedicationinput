@@ -25,7 +25,7 @@ interface BodySiteTargetCountOptions {
   bodySiteContext?: string;
 }
 
-function normalizeAdministrationTargetCount(value: number | undefined): number | undefined {
+export function normalizeAdministrationTargetCount(value: number | undefined): number | undefined {
   // Counts 0/1 do not require a multiplicity marker. Avoid a conversion for
   // the overwhelmingly common absent/single-target values.
   return value !== undefined && value >= 2 && Number.isFinite(value)

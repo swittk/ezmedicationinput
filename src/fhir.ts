@@ -4,6 +4,7 @@ import {
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
   retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL
 } from "./dosage-course";
+import type { ParseOptions } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
@@ -2008,7 +2009,8 @@ function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clini
  * Native-course import supplies an R6 CodeableReference's concept explicitly. */
 export function deserializeCanonicalContext(
   dosage: Pick<FhirDosage, "text" | "route" | "site" | "method" | "extension" |
-    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction">
+    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction">,
+  options?: ParseOptions
 ): CanonicalSigClause {
   const rawText = dosage.text ?? "";
   const clause = createEmptyCanonicalClause(rawText);
@@ -2057,14 +2059,14 @@ export function deserializeCanonicalContext(
     };
   }
 
-  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding);
+  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding, options);
   if (dosage.method?.text || dosage.method?._text || methodCoding?.code) {
     const action = resolveMedicationInstructionActionForMethod({
       text: dosage.method?.text, coding: methodCoding
-    });
+    }, options);
     const authoredText = dosage.method?.text;
     const compatibleText = authoredText && (!action || action.display === authoredText ||
-      resolveMedicationInstructionActionForMethod({ text: authoredText }) === action);
+      resolveMedicationInstructionActionForMethod({ text: authoredText }, options) === action);
     const methodText = compatibleText ? authoredText : action?.display ?? authoredText ?? methodCoding?.display;
     clause.method = {
       text: methodText,
@@ -2158,8 +2160,8 @@ export function deserializeCanonicalContext(
   return clause;
 }
 
-export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
-  const clause = deserializeCanonicalContext(dosage);
+export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): CanonicalSigClause {
+  const clause = deserializeCanonicalContext(dosage, options);
   clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const repeat = dosage.timing?.repeat;
   const timingCode = timingCodeFromFhir(dosage);
@@ -2305,7 +2307,7 @@ export function canonicalFromFhir(dosage: FhirDosage): CanonicalSigClause {
   return clause;
 }
 
-export function parserStateFromFhir(dosage: FhirDosage): ParserState {
+export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions): ParserState {
   const state = new ParserState(dosage.text ?? "", []);
   state.primaryClause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const timingBounds = extractCanonicalTimingBounds(dosage);
@@ -2482,7 +2484,7 @@ export function parserStateFromFhir(dosage: FhirDosage): ParserState {
     state.siteSource = "text";
   }
 
-  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding);
+  const methodCoding = selectMedicationInstructionMethodCoding(dosage.method?.coding, options);
   if (methodCoding?.code) {
     state.methodCoding = {
       code: methodCoding.code,

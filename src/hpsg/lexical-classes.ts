@@ -321,6 +321,8 @@ export const DOSE_NUMBER_WORDS = new Map<string, number>(
   numberEntries(source.doseNumberWords as Record<string, number>)
 );
 export const DOSE_UNIT_CONNECTORS = setOf(source.doseUnitConnectors);
+/** Calendar dayparts are not elapsed periods for rolling medication limits. */
+export const DAYPART_INTERVAL_TOKENS = setOf(source.daypartIntervalTokens);
 export const MILLION_DOSE_MULTIPLIER_TOKENS = setOf(source.millionDoseMultiplierTokens);
 export const SCHEDULE_UNIT_SEPARATOR_TOKENS = setOf(source.scheduleUnitSeparatorTokens);
 export const COMPACT_LIST_SEPARATORS = setOf(source.compactListSeparators);

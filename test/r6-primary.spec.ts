@@ -6134,7 +6134,17 @@ describe("review 20: typed expression identity and normalized calendar equivalen
       const opts = { from: "2026-12-14T02:30:00-05:00",
         orderedAt: "2026-12-14T02:30:00-05:00", timeZone: "America/New_York",
         limit: 400 };
-      const expected = nextDueDoses(alternate, opts);
+      const offsetFormat = new Intl.DateTimeFormat("en-US", {
+        timeZone: opts.timeZone, timeZoneName: "longOffset",
+      });
+      const expected = Array.from({ length: opts.limit }, (_, day) => {
+        const civil = new Date(Date.UTC(2026, 11, 14 + day));
+        // Noon identifies this civil day's offset independently of execution;
+        // the authored 03:00 is after either New York clock transition.
+        const offset = offsetFormat.formatToParts(new Date(civil.getTime() + 12 * 3600000))
+          .find(part => part.type === "timeZoneName")!.value.replace("GMT", "");
+        return civil.toISOString().slice(0, 10) + "T03:00:00" + offset;
+      });
       const amount = calculateTotalUnits({ dosage: alternate, ...opts,
         durationValue: 390, durationUnit: FhirPeriodUnit.Day }).totalUnits;
       // One tablet at 03:00 on each civil day, with no rest gap.

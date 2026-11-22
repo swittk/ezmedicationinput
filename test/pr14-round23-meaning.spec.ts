@@ -1386,6 +1386,12 @@ describe("round 28: retained phase origins and clinical meaning", () => {
     const participants = imported.stages.flatMap(stage => stage.administrations)
       .filter(a => a.phasePredecessors !== undefined);
     expect(participants.map(a => [a.sourceMember, a.phasePredecessors])).toEqual([[0, []], [1, [0]]]);
+    for (const administrations of [members, imported.stages.flatMap(stage => stage.administrations)]) {
+      expect(administrations.map(a => a.target?.text)).toEqual(["right eye", "right eye", "left eye"]);
+      expect(administrations.map(a => a.target?.coding?.[0]?.code)).toEqual([
+        "1290032005", "1290032005", "1290031003",
+      ]);
+    }
   });
 
   it.each([

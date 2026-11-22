@@ -3843,7 +3843,7 @@ function realizeAction(
   const definition = getMedicationInstructionAction(frame.predicate.lemma);
   let input: InstructionActionRealizationInput = {
     frame, locale, label, amount, theme, container, destination, site,
-    substance, result, activity, time, duration, material, manner,
+    substance, result, activity, time, timeRelation: timeArg?.relation, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
     timeWasRendered: coverage ? false : undefined,
@@ -4455,7 +4455,7 @@ function frameWithReconciledAmount(
         // their values and units happen to match.
         const ownsSource = arg.span && amount.span
           ? arg.span.start <= amount.span.start && arg.span.end >= amount.span.end
-          : hasLabel;
+          : !arg.relation && hasLabel;
         if (ownsSource) {
           sourceAmount = amount;
           labelOffset = hasLabel ? at : -1;
@@ -4782,6 +4782,9 @@ export function realizeInstructionGraph(
     includeWarnings?: boolean;
     onlyWarnings?: boolean;
     omitCanonicalAdministration?: CanonicalSigClause;
+    /** The selected primary action already realized with its full arguments.
+     * Identity remains valid even when imported source wording is absent. */
+    omitRenderedAction?: AdviceFrame;
     /** Prefer each understood action's exact source wording when source and target locales match. */
     preferSourceText?: boolean;
     /** Source phrases already rendered through another semantic channel. */
@@ -4836,6 +4839,7 @@ export function realizeInstructionGraph(
   const frames: AdviceFrame[] = [];
   let displayedAmountOwner = amountOwner;
   for (const sourceFrame of graph.actions) {
+    if (sourceFrame === options?.omitRenderedAction) continue;
     const ownsPrimary = primaryAction >= 0
       ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
     const frame = ownsPrimary && options?.omitCanonicalAdministration

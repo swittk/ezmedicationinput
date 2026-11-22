@@ -43,6 +43,7 @@ import {
   CLOCK_LEAD_TOKENS,
   COMPACT_LIST_SEPARATORS,
   DAY_RANGE_CONNECTORS,
+  DAYPART_INTERVAL_TOKENS,
   CALENDAR_MONTH_DAY_FRAMES,
   DOSE_TARGET_EVENT_MEMBERS,
   DURATION_LEAD_TOKENS,
@@ -2623,10 +2624,14 @@ function occurrenceCapPeriodAt(
   return undefined;
 }
 
+type MaximumDosePeriod =
+  | { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit }
+  | { tokens: Token[]; daypart: true };
+
 function maximumDosePeriodAt(
   context: HpsgClauseContext,
   start: number
-): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
+): MaximumDosePeriod | undefined {
   const defined = occurrenceCapPeriodAt(context, start);
   if (defined) return defined;
 
@@ -2648,10 +2653,13 @@ function maximumDosePeriodAt(
     const unit = context.tokens[cursor + 1];
     const amount = value?.kind === LexKind.Number ? value.value
       : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined;
-    const periodUnit = unit && mapIntervalUnit(normalizeTokenLower(unit));
+    const unitLower = unit && normalizeTokenLower(unit);
+    const periodUnit = unitLower && mapIntervalUnit(unitLower);
     if (amount !== undefined && amount > 0 && periodUnit &&
         value && unit && !context.state.consumed.has(value.index) && !context.state.consumed.has(unit.index)) {
-      return { tokens: context.tokens.slice(start, cursor + 2), period: amount, periodUnit };
+      const tokens = context.tokens.slice(start, cursor + 2);
+      return DAYPART_INTERVAL_TOKENS.has(unitLower!)
+        ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
     }
   }
   if (connectorLower !== "/" && connectorLower !== "per" && connectorLower !== "a") {
@@ -2660,7 +2668,9 @@ function maximumDosePeriodAt(
   const unitLower = normalizeTokenLower(unitToken);
   const periodUnit = mapIntervalUnit(unitLower);
   if (periodUnit) {
-    return { tokens: [connector, unitToken], period: 1, periodUnit };
+    const tokens = [connector, unitToken];
+    return DAYPART_INTERVAL_TOKENS.has(unitLower)
+      ? { tokens, daypart: true } : { tokens, period: 1, periodUnit };
   }
   if (unitLower !== "24") return undefined;
   const hourToken = context.tokens[start + 2];
@@ -2725,12 +2735,25 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     matched.push(valueToken, unitToken);
     cursor += 2;
 
-    const compactPeriod = compactPeriodUnit
-      ? { tokens: [] as Token[], period: 1, periodUnit: compactPeriodUnit }
+    const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
+      ? DAYPART_INTERVAL_TOKENS.has(compactUnitPeriod![2])
+        ? { tokens: [], daypart: true }
+        : { tokens: [], period: 1, periodUnit: compactPeriodUnit }
       : undefined;
     const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
     if (!period) return [];
     if (!periodFirst) matched.push(...period.tokens);
+    if ("daypart" in period) {
+      // Own the complete maximum constituent without turning its daypart into
+      // either an elapsed cap, another administration event, or course duration.
+      const text = context.state.input.slice(matched[0].sourceStart, matched[matched.length - 1].sourceEnd);
+      return [lexicalSign({
+        type: "instruction-sign", rule: "hpsg.lex.instruction.maximumPerDaypart",
+        tokens: matched, synsem: {
+          head: {}, valence: { instructions: [{ text }] }, cont: { clauseKind: "administration" }
+        }, score: 35 + matched.length
+      })];
+    }
 
     return [lexicalSign({
       type: "schedule-sign",

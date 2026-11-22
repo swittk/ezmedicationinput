@@ -735,11 +735,20 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
   const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
   if (value === undefined || value <= 0 || (!unit && !available(context, numericStart + 1))) return [];
+  // The numeric daughter owns the article/preposition in a fractional unit
+  // complement ("half a mL", "three quarters of a mg"). All dimensional
+  // constructions start after that complement, keeping its original value.
+  let quantityEnd = numericStart;
+  if (!unit && (value < 1 || exactMixed || exactFraction || qualified &&
+      DOSE_FRACTION_DENOMINATOR_WORDS.has(normalizeTokenLower(context.tokens[qualified.numericIndex])))) {
+    while (available(context, quantityEnd + 1) &&
+        DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[quantityEnd + 1]))) quantityEnd++;
+  }
   const comparator = qualified?.comparator;
-  const activeInCarrier = qualifyClinicalSign(context, phraseStart, numericStart,
-    activeDoseInCarrierOverTime(context, numericStart, value, unit, phraseStart), comparator);
-  const volume = activeInCarrier ?? qualifyClinicalSign(context, phraseStart, numericStart,
-    fixedVolumeOverTime(context, numericStart, value, unit, phraseStart), comparator);
+  const activeInCarrier = qualifyClinicalSign(context, phraseStart, quantityEnd,
+    activeDoseInCarrierOverTime(context, quantityEnd, value, unit, phraseStart), comparator);
+  const volume = activeInCarrier ?? qualifyClinicalSign(context, phraseStart, quantityEnd,
+    fixedVolumeOverTime(context, quantityEnd, value, unit, phraseStart), comparator);
   if (volume) {
     // The volume-over-time construction owns its leading rate marker too.
     const sign = phraseStart > start ? lexicalSign({
@@ -756,7 +765,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
     /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
   const expression = compactUnitExpression(
-    context, numericStart + 1, accepts, unit ?? ""
+    context, quantityEnd + 1, accepts, unit ?? ""
   );
   if (!expression) {
     // Only a scalar unit can finish the additive dose construction. A per-time
@@ -764,8 +773,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     const additive = exactMixed ? additiveFractionDose(context, phraseStart) : undefined;
     return additive ? [additive] : [];
   }
-  const weight = qualifyClinicalSign(context, phraseStart, numericStart,
-    weightQuantity(context, numericStart, value, expression, phraseStart), comparator);
+  const weight = qualifyClinicalSign(context, phraseStart, quantityEnd,
+    weightQuantity(context, quantityEnd, value, expression, phraseStart), comparator);
   if (weight) {
     // Weight rates own the same external AT/@ marker as fixed rates.
     // Publish ownership before the site fallback examines that marker.
@@ -774,8 +783,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [weight]);
     return [weight];
   }
-  const rate = qualifyClinicalSign(context, phraseStart, numericStart,
-    fixedRate(context, numericStart, value, expression, phraseStart), comparator);
+  const rate = qualifyClinicalSign(context, phraseStart, quantityEnd,
+    fixedRate(context, quantityEnd, value, expression, phraseStart), comparator);
   if (rate) {
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of rate.tokens) owned.add(token.index);

@@ -12820,3 +12820,124 @@ Representative accepted measurements (microseconds per call):
 The seven existing non-equivalent cases remain R6-complex formatting/import in EN and TH, edited/added-dose Thai R5 roundtrips, and R6 author-source formatting. Complete reports are retained as ezmed14-round36-master-full.json, master-confirm.json and performance-accepted.json; the 49-item evidence ledger is ezmed14-round36-ledger.json.
 
 The PR stays at 100 changed paths, with no new repository files. GitHub access is CLI-only. This round has no new inline threads to reply to, and no top-level comment or new full-review request is posted. The commit and non-force push target the existing PR branch.
+
+## 2026-11-22 — PR #14 round 37: ownership fixes and independent clinical oracles
+
+Reviewed HEAD 6c0e3cdc89819019b5282dabfc3caf669242d7f9 against the new review 6010603254 and overflow 7074964052. The complete inventory is 41 findings: 22 major and 19 minor. Three workers handled execution, interchange and meaning; root integrated their changes, independently audited the root grammar/regimen changes, and reviewed the final production diffs. GitHub operations remain CLI-only. No new inline thread was created in this batch; all 168 existing threads were already resolved.
+
+The intended disposition is 23 production fixes, 15 clinical-oracle improvements and 3 declined findings. The full per-item ledger records requirement, harm, natural owner, cost, preserved behavior, independent oracle, failed-before evidence and precise attribution. Existing public prescriptions and external structured edits define support. No native-model editor lifecycle, internal mutation compatibility, generic schema trimming, new files, or older R6 compatibility was added.
+
+### Ownership and family corrections
+
+- Finite execution uses actual administration history as the phase's authoritative past. It must not also spend inferred pre-query opportunities. The same chronological quota handles off-clock records and snapshots the remaining count before future ranged planning. Count eligibility remains independent of recurrence origin. Native/R5/currentR6 controls cover recorded counts, late queries, fixed ends, independent cycles, staggered members and a binding 3 tab / 24 h ceiling. Review #22's nominal-plus-actual numeric example conflicts with this established policy and was not copied.
+- Historical source-only R5 carriers do not become live administrations, including mixed historical/compact rows and either row order. Implicit successor membership survives saving; absolute independently dated members do not require a deleted predecessor. Missing period denominator values remain retained source instead of usable safety limits.
+- R5's scalar administration/lifetime maximum selects the tighter of exact comparable quantities in the same authored unit. One shared selector also retains that exact minimum across interleaved units or qualified limits; its map is allocated only after the unit/comparison family changes. Other limits and source annotations remain retained. Edit/delete ownership must identify the cap actually projected in an existing saved R5 row, including the earlier last-cap writer. A changed course action no longer widens unchanged phase limits. Target-count edits invalidate stale wording in the existing observation loop.
+- Fractional numeric heads own their article/preposition before the dimensional unit. Half-a-mL/hour stays 0.5 mL/h; the same constituent boundary covers fixed-volume, carrier and weight constructions. A per-night maximum owns its whole source constituent but remains an instruction: it does not become a rolling 24 h limit, an extra NIGHT administration, or a two-day regimen. Day/hour/24h caps remain executable.
+- One regimen predicate distinguishes an actual rate from the derivation denominator of a resolved divided daily dose, on both donor and recipient sides of method inheritance. This retains Chew for 2 tablets BID and prevents Chew from transferring onto 4 mL/h.
+- Partial Mix Themes, independent accompaniment amounts and each Time argument's own relation retain their meanings. An already rendered rich primary is omitted by its selected frame identity in the existing graph walk, including imported empty-source frames; independent actions remain. Request-local action options reach the existing method selection. Upper-only cadence/duration and bounded successor order remain visible; only boundaries with the same origin are numerically ordered.
+
+Root's independent review caught the initial night-cap rejection leaving NIGHT free as a second event, and the initially unchanged divided-dose donor predicate lending Chew to an infusion. Both were corrected at their existing owners before full gates. The interchange family audit also checked historical carrier cursor alignment and saved maximum field ownership. These are bounded neighboring cases, not extra grammars or generic mutation defenses.
+
+### Oracle decisions and declined scope
+
+The strengthened tests independently bind values and units to each scalar, range endpoint and Ratio endpoint; enumerate 400 civil daily timestamps and 21 migrated cycle dates; assert target laterality, active Coding metadata, IV route, course-action scope, final-dose onward wording, phase dose ownership, cap-versus-dose meaning, converted container quantity and 14-day cycle units. The migrated daily fixture authors no clock, so its established 09:00 default remains; the review's 08:00 assumption was declined.
+
+- #8: optional current-R6 step supports empty/text-only instructions. An older required-step compatibility shim or synthetic step contradicts the current-R6 contract.
+- #12: the supported public explicit-day overlap already selects the correct day 5 successor and 4 drops/day on reviewed and prior builds. The proposed alternative repairs an unsupported private builder construction and risks replacing authored phase semantics.
+- #14: supported external cycle-day deletion/reordering already preserves surviving day IDs and their nested annotations in warm and cold save paths. Stale private native/source divergence does not justify an internal editing reconciliation layer.
+
+The reviewed and prior builds were frozen before reproduction. Fractional-rate and upper-only timing gaps also occur on equivalent master inputs; divided-successor method loss is a PR regression, while divided-donor rate inheritance also occurs on master. The simple off-clock count regression arose in the immediately reviewed implementation. Cases whose historical master lacks the same complete structured model are explicitly not treated as equivalent causal comparisons.
+
+Prescriber-owned values, units, qualifiers and range endpoints remain active and unchanged. No conversion is introduced to satisfy a wire restriction. Shipping .fhir remains R5; .fhirNext and import remain the pinned current R6 contract. Existing downstream application storage is validated through its actual conversion and save/reopen helpers.
+
+
+### Complete review disposition
+
+| Finding | Severity | Decision | Subject |
+|---|---|---|---|
+| 1 | major | fixed | Keep a historical header carrier out of the live dosage list. |
+| 2 | major | fixed | Do not record a missing predecessor for a component with its own absolute start. |
+| 3 | major | fixed | Retain membership for phases with an implicit start. |
+| 4 | major | fixed | Keep the tighter maximum in the R5 core field. |
+| 5 | major | fixed | Keep an unchanged phase limit scoped when the course action changes. |
+| 6 | major | fixed | Keep period maxima without a denominator value out of lifted safety. |
+| 7 | major | fixed | Invalidate saved wording when the administration target count changes. |
+| 8 | major | declined | Account for the public `fhirNext.step` compatibility break. |
+| 9 | major | fixed | Show source-less R5 infusion ratios in both previews. |
+| 10 | major | fixed | Do not turn a nightly maximum into a rolling 24-hour maximum. |
+| 11 | major | fixed | Keep the article with the fractional rate. |
+| 12 | major | declined | Do not let a predecessor cadence cover an explicit same-track successor onset. |
+| 13 | major | fixed | Keep a spanless accompaniment's quantity when the dose changes. |
+| 14 | major | declined | Keep annotations attached to the cycle day that survives an edit. |
+| 15 | major | fixed | Keep the authored wording of a partial Mix Theme. |
+| 16 | major | fixed | Render the Mix time phrase with the Time argument's relation. |
+| 17 | major | fixed | Do not turn an upper-only period into a daily cadence. |
+| 18 | major | fixed | Show an upper-only infusion duration. |
+| 19 | major | fixed | Show the sequence when a bounded successor has no exact start. |
+| 20 | major | fixed | Do not spend a bounded phase’s count on both an off-clock record and its nominal dose. |
+| 21 | major | fixed | Apply the stage’s eligibility start to counted members with their own recurrence origin. |
+| 22 | major | fixed | Ranged phase plans must use the count left after all actual administrations in that phase. |
+| 23 | minor | oracle-strengthened | Assert both retained cycle intervals, not just their unit labels. |
+| 24 | minor | oracle-strengthened | Assert the numeric value and unit for each wire slot. |
+| 25 | minor | oracle-strengthened | Use an independent calendar oracle for the equivalent intervals. |
+| 26 | minor | oracle-strengthened | Check the active dates in all three migrated cycles. |
+| 27 | minor | fixed | Treat `equal to` as a known operator display. |
+| 28 | minor | oracle-strengthened | Assert which dose belongs to each stage. |
+| 29 | minor | oracle-strengthened | Check that “onward” describes the final dose. |
+| 30 | minor | oracle-strengthened | Assert that the edited value is a maximum, not the dose. |
+| 31 | minor | oracle-strengthened | Assert the civil anchor for both members. |
+| 32 | minor | fixed | Keep the inherited method for divided daily doses. |
+| 33 | minor | oracle-strengthened | Assert the cycle interval unit. |
+| 34 | minor | oracle-strengthened | Assert which eye owns each predecessor edge. |
+| 35 | minor | fixed | Pass request options into method-coding selection. |
+| 36 | minor | oracle-strengthened | Assert the IV route in the route-determiner test. |
+| 37 | minor | oracle-strengthened | Make the stale-dose check work for Thai grams. |
+| 38 | minor | oracle-strengthened | Check the annotations on the live physiotherapy Coding. |
+| 39 | minor | oracle-strengthened | Require the action to appear in the course safety section. |
+| 40 | minor | fixed | Do not compare equal day offsets from different origins. |
+| 41 | minor | oracle-strengthened | Assert the converted container quantity. |
+
+
+### Validation on the frozen candidate
+
+- **6,072 source tests in 55 files passed**, including the configured strict ES6 typecheck.
+- **4 distribution tests passed** after ESM, CommonJS and declaration builds.
+- **23 actual downstream R5 storage roundtrips passed**, with complete JSON equality through conversion and save/reopen. New fractional-rate, divided-method, night-maximum and old/new multiple-cap cases join the existing 18. Old 6c0 rows retain the previously displayed 6-tab maximum; new rows expose 4 tab. Subsequent edits and deletions affect the appropriate original owner in each case.
+- The original Thai parallel case remains 2 shipping R5 rows; the English taper remains 4. No downstream application code or database changed.
+- Source, built candidate, exact-master build and benchmark harness remained frozen throughout their gates.
+
+Source SHA-256: ba8aa3d8d710e46a814b67800b8c8c49dc2a2410618189cc854d9dcce1c2fbf6. Built ESM SHA-256: e88e440690c34d093c4e730d7bd6b233437c7406ae788704aef18afb5a08ec2c. Exact master build SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2. Harness SHA-256: 68eff00076248fe44cbe7e211d00570e3e002c91d4fde0942bbbc1b654d49d95 (git blob 251c6db2a138fc615d3f55314eaff43ccfa5b912).
+
+### Performance and delivery
+
+The exact-master comparison covers **117/117 public functions**, with **181 paired scenarios: 174 equivalent and the same seven established non-equivalent cases**. All 174 equivalent scenarios meet the per-scenario 4% ceiling after prescribed confirmations. Six candidate-only APIs have seven separate measurements. No exclusions or measurement errors were added.
+
+The full run used 22 balanced paired rounds at 35 ms per batch. Every initial flag was confirmed on the identical frozen builds/harness with 72 rounds at 140 ms, reversed first order and 36 pairs starting each way. Accepted percentages are median-log paired ratios; neither APIs nor scenarios are averaged together. The unchanged harness retains the 16 deterministic order-bias/threshold controls from round 36.
+
+Highest accepted change: **+3.735%**, for buildSnomedFindingSiteCoding.
+
+| Initially flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| formatSig/R5/en | +17.995% | -5.913% |
+| fromFhirDosage/en | +5.280% | -9.978% |
+| parseStrengthComponents | +4.438% | -0.977% |
+| listSymptomDefinitions | +6.048% | +0.278% |
+| inferMedicationLocale | +4.222% | +1.527% |
+
+Representative accepted measurements (microseconds per call):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| parseSig/ordinary | 1770.513 | 1719.470 | +0.161% |
+| parseSig/thai | 6395.689 | 6168.782 | -5.099% |
+| parseSig/eye | 6788.171 | 6837.541 | -1.888% |
+| parseSig/staged | 9974.789 | 9810.609 | -1.456% |
+| formatSig/R5/en | 17.304 | 16.060 | -5.913% |
+| formatSig/R6/en | 26.343 | 25.944 | -2.376% |
+| fromFhirDosage/en | 19.105 | 16.842 | -9.978% |
+| fromFhirDosage/th | 37.301 | 39.382 | +3.366% |
+| calculateTotalUnits/scalar | 360.288 | 48.561 | -86.629% |
+
+Reports are retained under ezmed14-round37: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json and the complete 41-item ledger.json. The seven prior non-equivalent scenarios remain exactly unchanged.
+
+The PR remains at 100 changed paths with no new repository files. GitHub access is CLI-only. No comment or additional full-review request was posted. Commit and non-force push target the existing PR branch.

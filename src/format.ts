@@ -423,7 +423,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
-  const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
+  const rangedPeriod = periodMax !== undefined && periodMax !== period;
   const countPrefix = frequency !== undefined &&
     (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
     ? frequencyMax !== undefined && frequencyMax !== frequency
@@ -432,6 +432,10 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
     : frequencyMax !== undefined && frequency === undefined
       ? `up to ${stripTrailingZero(frequencyMax)} times ` : "";
 
+  if (period === undefined && periodMax !== undefined && periodUnit) {
+    const unit = ENGLISH_COURSE.timeUnit(periodUnit, periodMax) ?? periodUnit;
+    return `${countPrefix}every up to ${stripTrailingZero(periodMax)} ${unit}`;
+  }
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
@@ -1119,12 +1123,10 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined): string |
 function describeAdministrationDuration(schedule: CanonicalScheduleExpr | undefined): string | undefined {
   const value = schedule?.administrationDuration;
   const unit = schedule?.administrationDurationUnit;
-  if (value === undefined || !unit) return undefined;
-  const label = unit === FhirPeriodUnit.Minute ? (value === 1 ? "minute" : "minutes")
-    : unit === FhirPeriodUnit.Hour ? (value === 1 ? "hour" : "hours")
-      : unit === FhirPeriodUnit.Second ? (value === 1 ? "second" : "seconds")
-        : unit === FhirPeriodUnit.Day ? (value === 1 ? "day" : "days") : unit;
   const max = schedule?.administrationDurationMax;
+  if ((value === undefined && max === undefined) || !unit) return undefined;
+  const label = ENGLISH_COURSE.timeUnit(unit, value ?? max) ?? unit;
+  if (value === undefined) return `over up to ${stripTrailingZero(max!)} ${label}`;
   const lower = quantityComparatorText(schedule?.administrationDurationComparator, "en") + stripTrailingZero(value);
   return max !== undefined && max !== value
     ? `over ${lower} to ${stripTrailingZero(max)} ${label}`
@@ -1211,7 +1213,9 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     const site = formatSite(clause, resolveRouteGrammar(clause));
     if (site) parts.push(site);
   }
-  if (hasDailyRecurrenceAcrossClocks(schedule)) {
+  if (schedule.period === undefined && schedule.periodMax !== undefined && schedule.periodUnit) {
+    parts.push(describeFrequency(schedule)!);
+  } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
   } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
@@ -1287,10 +1291,13 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+  if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
+      schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
-    const lower = (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
-    const duration = max !== undefined && max !== schedule.administrationDuration
+    const lower = schedule.administrationDuration === undefined
+      ? "<=" + stripTrailingZero(max!)
+      : (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
+    const duration = schedule.administrationDuration !== undefined && max !== undefined && max !== schedule.administrationDuration
       ? `${lower}-${stripTrailingZero(max)}`
       : lower;
     parts.push(`over${duration}${schedule.administrationDurationUnit}`);
@@ -1485,7 +1492,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
   const needsCurrentPrimary = Boolean(primaryGraphAction && (
-    clause.sourceProjectionVerified === false ||
+    !primaryGraphAction.sourceText.trim() || clause.sourceProjectionVerified === false ||
     !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
   ));
   const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
@@ -1639,9 +1646,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
           instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
-          omitSourceTexts: richPrimaryGraphAction
-            ? [...additionalSemanticSourceTexts, richPrimaryGraphAction.sourceText]
-            : additionalSemanticSourceTexts
+          omitSourceTexts: additionalSemanticSourceTexts,
+          omitRenderedAction: richPrimaryGraphAction
         })
       : undefined;
   if (!graphWholeInstruction) {
@@ -1683,9 +1689,6 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })
     : undefined;
   const graphPrimaryForOmission = primaryGraphAction ?? richPrimaryGraphAction;
-  const postGraphOmissions = graphPrimaryForOmission
-    ? [...additionalSemanticSourceTexts, graphPrimaryForOmission.sourceText]
-    : additionalSemanticSourceTexts;
   const postGraphInstruction = positionedGraph && clause.instructionGraph
     ? realizeInstructionGraph(clause.instructionGraph, "en", {
         includeWarnings: true,
@@ -1693,7 +1696,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         instructionActionMap: options?.instructionActionMap,
         preferSourceText: roundTrip,
         roundtripSafe: roundTrip,
-        omitSourceTexts: postGraphOmissions,
+        omitSourceTexts: additionalSemanticSourceTexts,
+        omitRenderedAction: graphPrimaryForOmission,
         position: "post"
       })
     : undefined;
@@ -1706,7 +1710,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
           instructionActionMap: options?.instructionActionMap,
           preferSourceText: roundTrip,
           roundtripSafe: roundTrip,
-          omitSourceTexts: postGraphOmissions
+          omitSourceTexts: additionalSemanticSourceTexts,
+          omitRenderedAction: graphPrimaryForOmission
         })
       : undefined
   );

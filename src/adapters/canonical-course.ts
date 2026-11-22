@@ -1128,8 +1128,74 @@ function updateNativeTimingAnnotations(
   );
   return target;
 }
-/** Emit native R6 directly from modeled clinical facts. Shared serializers
- * encode vocabulary and grammar-source annotations only, never an R5 course. */
+interface SelectedR5Maximum { quantity: CanonicalMeasure; exact: boolean; index?: number }
+export interface R5MaximumSelection extends SelectedR5Maximum {
+  groups?: Map<string, SelectedR5Maximum>;
+}
+function sameMaximumUnit(left: CanonicalMeasure, right: CanonicalMeasure): boolean {
+  return left.system && left.code && right.system && right.code
+    ? left.system === right.system && left.code === right.code
+    : left.unit !== undefined && left.unit === right.unit &&
+      left.system === right.system && left.code === right.code;
+}
+function unitKeyPart(value: string | undefined): string {
+  return value === undefined ? "-" : value.length + ":" + value;
+}
+function maximumUnitKey(quantity: CanonicalMeasure, exact: boolean): string | undefined {
+  const unit = quantity.system && quantity.code
+    ? "c" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code)
+    : quantity.unit !== undefined
+      ? "u" + unitKeyPart(quantity.system) + unitKeyPart(quantity.code) + unitKeyPart(quantity.unit)
+      : undefined;
+  return unit === undefined ? undefined : (exact ? "e" : "q") + unit;
+}
+/** One selection pass for writing R5 maxima and identifying their editable
+ * source positions. Equal values retain the last annotated owner. Interleaved
+ * units or qualified siblings allocate a map; same-unit exact limits keep
+ * scalar state. Operators are observed once, never compared or normalized. */
+export function selectR5Maximum(
+  current: R5MaximumSelection | undefined, quantity: CanonicalMeasure, index?: number
+): R5MaximumSelection {
+  const exact = quantity.value !== undefined && !getQuantityComparator(quantity);
+  if (!current) return { quantity, exact, index };
+  if (!current.groups && current.exact === exact && sameMaximumUnit(current.quantity, quantity)) {
+    if (!exact || current.quantity.value! >= quantity.value!) {
+      current.quantity = quantity;
+      current.index = index;
+    }
+    return current;
+  }
+  if (!current.groups) {
+    current.groups = new Map();
+    const previousKey = maximumUnitKey(current.quantity, current.exact);
+    if (previousKey !== undefined)
+      current.groups.set(previousKey, { quantity: current.quantity, exact: current.exact, index: current.index });
+  }
+  const key = maximumUnitKey(quantity, exact);
+  const previous = key === undefined ? undefined : current.groups.get(key);
+  if (previous && exact && previous.quantity.value! < quantity.value!) {
+    current.quantity = previous.quantity;
+    current.exact = previous.exact;
+    current.index = previous.index;
+  } else {
+    current.quantity = quantity;
+    current.exact = exact;
+    current.index = index;
+    if (previous) { previous.quantity = quantity; previous.index = index; }
+    else if (key !== undefined) current.groups.set(key, { quantity, exact, index });
+  }
+  return current;
+}
+
+/** Shared wire serializer for current maxima and retained R5 edit baselines. */
+export function periodMaximumToR5(amount: CanonicalMeasure, period: CanonicalMeasure, source?: object): FhirRatio {
+  const { scope: _scope, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
+    valueExpression: _expression, period: _period, text: _text,
+    numerator: _numerator, denominator: _denominator, ...metadata
+  } = (source ?? {}) as Record<string, unknown>;
+  return { ...metadata, numerator: generalQuantityForR5(amount), denominator: simpleQuantityForR5(period) };
+}
+
 /** Write the requested external shape directly from clinical facts. The
  * common vocabulary/source work is shared; no output version is the input to
  * another version's serializer. Target-specific choices are made as written. */
@@ -1689,6 +1755,7 @@ function administrationToWire(
     delete output.maxDosePerAdministration;
     delete output.maxDosePerLifetime;
     let periodLimits = sourceMaxima;
+    let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
     for (const limit of a.limits ?? []) {
       if (!limit.amount) continue;
       const amount = {
@@ -1704,25 +1771,21 @@ function administrationToWire(
             ? { system: "http://unitsofmeasure.org", code: limit.period.unit }
             : {}),
         };
-        const {
-          scope: _scope, valueQuantity: _amount, valueInteger: _count, _valueInteger: _countMetadata,
-          valueExpression: _expression, period: _period, text: _text,
-          numerator: _numerator, denominator: _denominator, ...metadata
-        } = (limit.provenance ?? {}) as Record<string, unknown>;
-        (periodLimits ??= []).push({
-          ...metadata,
-          numerator: generalQuantityForR5(amount),
-          denominator: simpleQuantityForR5(period),
-        });
+        (periodLimits ??= []).push(periodMaximumToR5(amount, period, limit.provenance));
       } else if (limit.scope === "administration")
-        output.maxDosePerAdministration = simpleQuantityForR5(amount);
-      else if (limit.scope === "lifetime") output.maxDosePerLifetime = simpleQuantityForR5(amount);
+        administrationMaximum = selectR5Maximum(administrationMaximum, amount);
+      else if (limit.scope === "lifetime")
+        lifetimeMaximum = selectR5Maximum(lifetimeMaximum, amount);
     }
+    if (administrationMaximum) output.maxDosePerAdministration = simpleQuantityForR5(administrationMaximum.quantity);
+    if (lifetimeMaximum) output.maxDosePerLifetime = simpleQuantityForR5(lifetimeMaximum.quantity);
     if (periodLimits) output.maxDosePerPeriod = periodLimits;
   }
   return output as FhirDosage | FhirR6Dosage;
 }
 /** Direct native-to-R6 component writer. */
+/** Emit native R6 directly from modeled clinical facts. Shared serializers
+ * encode vocabulary and grammar-source annotations only, never an R5 course. */
 export function administrationToR6(
   a: CanonicalAdministration,
   options?: FhirProjectionOptions,

@@ -2339,7 +2339,6 @@ function resolveAdministrationWindow(
   // after its predecessor remains eligible even when its nominal origin
   // equals that predecessor's point; keep its count-only identity intact.
   const countEligibilityStart =
-    !cadence.hasPhaseOrigin &&
     eligibleFrom > durationOrigin &&
     hasDefiniteAdministrationCount(recurrence)
       ? eligibleFrom
@@ -2756,6 +2755,8 @@ interface CycleEventQuota {
   historyEnd?: number;
   recordedTimes?: number[];
   recordedIndex?: number;
+  /** Actual history replaces inferred past opportunities for this finite phase. */
+  hasActualHistory?: true;
   /** Chronological replay must not spend a recorded instant again as a planned clock. */
   lastRecordedAt?: number;
   /** Lazily advance a finite capped phase after its candidate is decided. */
@@ -3453,6 +3454,7 @@ function chronologicalRepeatedEvents(
         // Only queued records are guaranteed to be spent. A finite phase
         // may finish after one; leave its other candidates for the next phase.
         if (!claimActualHistory(actualReplay!.get(key)!, recorded)) continue;
+        quota.hasActualHistory = true;
         available--;
         queue.push({ at: recorded, iso: formatZonedIso(new Date(recorded), zone),
           key, member, quota, recorded: true, serial: serial++ });
@@ -3488,7 +3490,14 @@ function chronologicalRepeatedEvents(
       // A recorded administration already occupies the rolling ledger. Its
       // matching replay spends its finite phase count, never another amount.
       // Earlier PRN opportunities are not evidence of administration.
-      const accepted = actual || ((event.at >= from.getTime() || !event.member.asNeeded) && accept(event));
+      // A finite phase with actual records follows the same policy as local
+      // finite completion: replay those records, then offer its remaining uses
+      // from the query. Nominal history must not spend the allowance again,
+      // whether the record coincides with its planned clock or arrives later.
+      // This also ensures a ranged plan first observes the quota after all
+      // of this phase's actual history has drained.
+      const accepted = actual || ((event.at >= from.getTime() ||
+        (!event.member.asNeeded && !event.quota.hasActualHistory)) && accept(event));
       if (actual) event.quota.lastRecordedAt = event.at;
       if (actual && event.quota.remaining !== undefined && event.quota.remaining > 0) event.quota.remaining--;
       event.quota.advance?.(event.at, accepted);

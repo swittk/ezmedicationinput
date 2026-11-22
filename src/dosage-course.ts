@@ -1,7 +1,8 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
+import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL, normalizeAdministrationTargetCount } from "./body-site-target";
 import {courseFromR5} from "./adapters/r5-import";
 import { getTimingClocks, TIMING_ADDITIONAL_CLOCK_EXTENSION_URL, parsePrnTriggerPhase, ADMINISTRATION_OFFSET_EXTENSION_URL, CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_FREQUENCY_MIN_EXTENSION_URL, TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL, TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_WEEKDAY_ORDINAL_EXTENSION_URL, TIMING_CLOCK_WINDOW_EXTENSION_URL, TIMING_OCCURRENCE_CAP_EXTENSION_URL, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL, BODY_SITE_RESTRICTION_EXTENSION_URL } from "./fhir";
-import {courseFromR6,courseToR6,administrationFromR6,administrationToR5} from "./adapters/canonical-course";
+import {courseFromR6,courseToR6,administrationFromR6,administrationToR5,selectR5Maximum,periodMaximumToR5,type R5MaximumSelection} from "./adapters/canonical-course";
 import {projectNativeR5Course} from "./adapters/r5-course";
 /** FHIR R5/R6 bridging uses typed extension children exclusively. Source,
  * course, condition and edit metadata remain structured and independently editable. */
@@ -655,7 +656,7 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
 function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
   const doseLimit: NonNullable<FhirR6DosageSafety["doseLimit"]> = [];
   for (const maximum of dosage.maxDosePerPeriod ?? []) {
-    if (maximum.numerator?.value === undefined || !maximum.denominator) continue;
+    if (maximum.numerator?.value === undefined || maximum.denominator?.value === undefined) continue;
     const { numerator, denominator, ...metadata } = maximum;
     doseLimit.push({
       ...metadata, scope: "period", valueQuantity: quantityFromR5(numerator)!,
@@ -680,20 +681,42 @@ function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
   return limit.scope === "administration" || limit.scope === "lifetime";
 }
 
-/** Exactly the original limit positions emitted by fromR6Dosage's R5
- * fields. Period maxima are an array; administration/lifetime maxima are
- * singular, so only the LAST eligible member of those scopes is editable
- * through the R5 projection. All others remain active R6-only siblings. */
-function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[]): Set<number> {
+/** Singular R5 maxima expose the tightest comparable exact amount; all
+ * other limits remain active siblings. The saved projection hash also
+ * identifies rows written when singular fields exposed the last limit. */
+function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[], baseline?: string): Set<number> {
   const indices = new Set<number>();
-  let administration: number | undefined;
-  let lifetime: number | undefined;
+  let administrationSelection: R5MaximumSelection | undefined, lifetimeSelection: R5MaximumSelection | undefined;
+  let lastAdministration: number | undefined, lastLifetime: number | undefined;
   for (let index = 0; index < limits.length; index++) {
     const limit = limits[index];
     if (!isR5RepresentableSafetyLimit(limit)) continue;
     if (limit.scope === "period") indices.add(index);
-    else if (limit.scope === "administration") administration = index;
-    else if (limit.scope === "lifetime") lifetime = index;
+    else if (limit.scope === "administration") {
+      lastAdministration = index;
+      administrationSelection = selectR5Maximum(administrationSelection, limit.valueQuantity!, index);
+    } else if (limit.scope === "lifetime") {
+      lastLifetime = index;
+      lifetimeSelection = selectR5Maximum(lifetimeSelection, limit.valueQuantity!, index);
+    }
+  }
+  let administration = administrationSelection?.index, lifetime = lifetimeSelection?.index;
+  if (baseline && (administration !== lastAdministration || lifetime !== lastLifetime)) {
+    // Only differing multi-limit projections need this historical proof.
+    // Reuse the real wire serializers and already classified period indices.
+    const previous: FhirDosage = {};
+    for (const index of indices) {
+      const limit = limits[index];
+      (previous.maxDosePerPeriod ??= []).push(periodMaximumToR5(limit.valueQuantity!, limit.period!, limit));
+    }
+    if (lastAdministration !== undefined)
+      previous.maxDosePerAdministration = simpleQuantityForR5(limits[lastAdministration].valueQuantity);
+    if (lastLifetime !== undefined)
+      previous.maxDosePerLifetime = simpleQuantityForR5(limits[lastLifetime].valueQuantity);
+    if (baseline === compactProjectionFingerprint(toR6Safety(previous))) {
+      administration = lastAdministration;
+      lifetime = lastLifetime;
+    }
   }
   if (administration !== undefined) indices.add(administration);
   if (lifetime !== undefined) indices.add(lifetime);
@@ -708,7 +731,8 @@ function r5ProjectedSafetyLimitIndices(limits: readonly FhirR6DoseLimit[]): Set<
  */
 export function reconcileR5SafetyEdits(
   retained: FhirR6DosageSafety,
-  projected: FhirR6DosageSafety | undefined
+  projected: FhirR6DosageSafety | undefined,
+  baseline?: string
 ): FhirR6DosageSafety | undefined {
   const oldLimits = retained.doseLimit ?? [];
   const live = projected?.doseLimit ?? [];
@@ -716,7 +740,7 @@ export function reconcileR5SafetyEdits(
   // An explicit Element.id owns its limit even after amount or order edits.
   // ID-less limits use independently retained annotations and unit/window
   // identity. Ambiguous rows never inherit arbitrary metadata.
-  const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits);
+  const projectedIndices = r5ProjectedSafetyLimitIndices(oldLimits, baseline);
   const representable = oldLimits.map((_, index) => projectedIndices.has(index));
   // Amount is editable, not identity. A unique retained Ratio annotation or
   // clinical unit/window can own an anonymous limit; duplicate anonymous
@@ -826,10 +850,9 @@ export function reconcileR5SafetyEdits(
     } = original;
     return { ...metadata, ...replacement } as FhirR6DoseLimit;
   });
-  // R5 singular maxima own the LAST representable item of their scope.
-  // Hidden R6 siblings must be placed BEFORE the current R5-owned maximum,
-  // or an immediate re-export would expose a different limit and invert
-  // ownership again. Array-valued period limits retain the live R5 order.
+  // Keep singular hidden siblings before the edited field. Comparable
+  // exact caps still project the tighter value; equal or uncomparable caps
+  // keep the edited field as the final tie owner. Period limits retain live order.
   const hiddenByScope = new Map<string, FhirR6DoseLimit[]>();
   const remainingHidden: FhirR6DoseLimit[] = [];
   oldLimits.forEach((limit, index) => {
@@ -875,7 +898,7 @@ export function reconcileR5SafetySnapshot(
   if (row.safety !== undefined && !equalStructuredValues(row.safety, retained)) return row.safety;
   const projected = r5SafetyBaseline(row);
   if (baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
-  return reconcileR5SafetyEdits(retained, projected);
+  return reconcileR5SafetyEdits(retained, projected, baseline);
 }
 
 /** A lifted safety mirror and its R5 maxima are two views of one value.
@@ -1370,6 +1393,7 @@ interface SourceConceptObservation {
   text?: string;
   triggerPhase?: "onset";
   restrictions?: SourcePredicateObservation[][] | null;
+  targetCount?: number;
   codings: Array<{ original: FhirCoding; system?: string; version?: string;
     code?: string; display?: string; userSelected?: boolean }>;
 }
@@ -1381,12 +1405,19 @@ export function captureSourceReplayConcept(value: FhirCodeableConcept | undefine
     original, system: original.system, version: original.version, code: original.code,
     display: original.display, userSelected: original.userSelected,
   });
-  // Only a site owns body restrictions. Other concept annotations stay opaque.
+  // Only a site owns body restrictions and administration target count.
+  // Observe both in the same extension walk; other annotations stay opaque.
   let restrictions: SourcePredicateObservation[][] | null | undefined = observeRestrictions ? null : undefined;
-  if (observeRestrictions) for (const marker of value.extension ?? [])
+  let targetCount: number | undefined, countSeen = false;
+  if (observeRestrictions) for (const marker of value.extension ?? []) {
     if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL)
       (restrictions ??= []).push(captureReplayPredicate(marker)!);
-  return { original: value, text: value.text, codings, restrictions };
+    else if (!countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
+      targetCount = normalizeAdministrationTargetCount(marker.valueInteger);
+      countSeen = true;
+    }
+  }
+  return { original: value, text: value.text, codings, restrictions, targetCount };
 }
 export function matchesSourceReplayConcept(
   value: FhirCodeableConcept | undefined, proof: SourceConceptObservation | undefined
@@ -1401,12 +1432,17 @@ export function matchesSourceReplayConcept(
       return false;
   }
   if (proof.restrictions === undefined) return true;
-  let restrictionIndex = 0;
-  for (const marker of value.extension ?? []) if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
-    const prior = proof.restrictions?.[restrictionIndex++];
-    if (marker !== prior?.[0].original || !matchesReplayPredicate(prior)) return false;
+  let restrictionIndex = 0, targetCount: number | undefined, countSeen = false;
+  for (const marker of value.extension ?? []) {
+    if (marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
+      const prior = proof.restrictions?.[restrictionIndex++];
+      if (marker !== prior?.[0].original || !matchesReplayPredicate(prior)) return false;
+    } else if (!countSeen && marker.url === BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL) {
+      targetCount = normalizeAdministrationTargetCount(marker.valueInteger);
+      countSeen = true;
+    }
   }
-  return restrictionIndex === (proof.restrictions?.length ?? 0);
+  return restrictionIndex === (proof.restrictions?.length ?? 0) && targetCount === proof.targetCount;
 }
 /** Observe an ordered clinical concept list only when one is supplied. */
 export function captureSourceReplayConceptList(

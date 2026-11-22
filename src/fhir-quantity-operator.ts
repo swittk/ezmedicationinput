@@ -53,7 +53,7 @@ const emaDisplayByComparator: Record<NonNullable<FhirR6Quantity["comparator"]>, 
   ad: "quantity sufficient"
 };
 
-const knownEmaDisplays = new Set<string>();
+const knownEmaDisplays = new Set<string>(["equal to"]);
 for (const comparator of ["<", "<=", ">", ">=", "~", "ad"] as const)
   knownEmaDisplays.add(emaDisplayByComparator[comparator]);
 

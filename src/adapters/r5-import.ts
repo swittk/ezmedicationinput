@@ -13,6 +13,7 @@ import type {
   FhirExtension,
   FhirR6Dosage,
   FhirR6DosageInstruction,
+  FhirR6DoseLimit,
   FhirR6DosageStep,
 } from "../types";
 import type { CanonicalCourse, CanonicalStage, CanonicalAdministration } from "../canonical/course";
@@ -676,11 +677,12 @@ function reconcileNativeCompactCourse(
   // Mixed saved rows keep their own boundary codec. Reconcile the historical
   // subset once; never let the presence of an unrelated compact row erase a
   // reference-only site or other known row fact from its full source marker.
-  let historicalMembers: Map<number, CanonicalAdministration> | undefined;
+  let historicalMembers: Map<number, CanonicalAdministration | null> | undefined;
   let historicalStages: Map<number, CanonicalStage> | undefined;
   let historicalHeader: Omit<FhirR6DosageInstruction, "step"> | undefined;
   if (historicalRows) {
-    const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext);
+    const historicalCarriers = new Set<number>();
+    const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext, historicalCarriers);
     // A saved full-course row owns its shared clinical header as well as its
     // members. Its old complete SIG is not wording for the newly mixed rows.
     const { renderedInstruction: _historicalInstruction, ...fields } =
@@ -701,6 +703,10 @@ function reconcileNativeCompactCourse(
     }
     historicalMembers = new Map();
     for (let index = 0; index < historicalRows.length; index++) {
+      if (historicalCarriers.has(index)) {
+        historicalMembers.set(historicalIndices![index], null);
+        continue;
+      }
       const requested = historicalRows[index].sequence ?? 1;
       const sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
       const cursor = cursors.get(sequence) ?? 0;
@@ -962,8 +968,10 @@ function reconcileNativeCompactCourse(
         "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction."
       );
     const local = localRows[index];
+    const historical = historicalMembers?.get(index);
+    if (historical === null) return;
     const restored = local ? restoreComponentDelta(dosage, local.value, warnings, sourceContext) : undefined;
-    const liveComponent = restored?.dosage ?? historicalMembers?.get(index) ??
+    const liveComponent = restored?.dosage ?? historical ??
       administrationFromR5(dosage, sourceContext);
     const component =
       local && conflictingPhases.has(local.value.sequence)
@@ -1007,8 +1015,8 @@ function reconcileNativeCompactCourse(
     steps.push(!fields && historical ? { ...historical, administrations }
       : stageFromFields(r6StepMetadata(fields?.step ?? {}), administrations));
   }
-  // A removed predecessor is harmless when the surviving phase has its own
-  // treatment-relative start. A contextual stage/member start still needs
+  // A removed predecessor is harmless with an independent phase start or
+  // absolute calendar start on every member. Contextual starts still need
   // that predecessor's completion; an explicit shared start cannot supply it.
   let missingPredecessor = false;
   for (const step of steps) {
@@ -1017,8 +1025,9 @@ function reconcileNativeCompactCourse(
       continue;
     }
     if (missingPredecessor && step.administrations.length &&
-        (!step.start || step.start.anchor === "previous-phase-next-day" ||
-          step.administrations.some(a => a.phaseStart?.anchor === "previous-phase-next-day")))
+        (step.start?.anchor === "previous-phase-next-day" ||
+          step.administrations.some(a => a.phaseStart?.anchor === "previous-phase-next-day" ||
+            !step.start && (a.phaseStart !== undefined || !a.schedule?.recurrence?.calendarWindow?.start))))
       missing.add("predecessor");
     if (step.start || step.end || step.administrations.length) missingPredecessor = false;
   }
@@ -1131,7 +1140,8 @@ function reconcileNativeRetainedCourse(
   retainedSource?: FhirExtension,
   additionalSources: readonly FhirExtension[] = [],
   sourceContext = false,
-  baselineInstruction?: string
+  baselineInstruction?: string,
+  sourceCarrierIndices?: ReadonlySet<number>
 ): CanonicalCourse {
   const retainedSteps = retained.step ?? [];
   const sourceRows = new Map<
@@ -1147,14 +1157,37 @@ function reconcileNativeRetainedCourse(
     // Exact historical matches still have the normalized live R5 sequence.
     // Mixed codecs use that typed identity to restore the owning stage.
     native.stageOrdinal = sequence;
-    existing = { native, row: administrationToR5(native, sequence) };
+    const row = administrationToR5(native, sequence);
+    // Full-course markers were written with last-limit singular maxima.
+    // Reconstruct that original external view before comparing live edits.
+    if ((component.safety?.doseLimit?.length ?? 0) > 1) {
+      let administration: FhirR6DoseLimit | undefined, lifetime: FhirR6DoseLimit | undefined;
+      for (const limit of component.safety!.doseLimit!) {
+        if (!limit.valueQuantity) continue;
+        if (limit.scope === "administration") administration = limit;
+        else if (limit.scope === "lifetime") lifetime = limit;
+      }
+      if (administration) row.maxDosePerAdministration = simpleQuantityForR5(administration.valueQuantity);
+      if (lifetime) row.maxDosePerLifetime = simpleQuantityForR5(lifetime.valueQuantity);
+    }
+    existing = { native, row };
     phases.set(sequence, existing);
     return existing;
   };
   const warnings = [...initialWarnings];
   const sourceFragments = [...additionalSources];
   const groups = new Map<number, (FhirDosage | EzDosage)[]>();
-  for (const dosage of dosages) {
+  for (let index = 0; index < dosages.length; index++) {
+    const dosage = dosages[index];
+    if (sourceCarrierIndices?.has(index)) {
+      preserveRetainedMarkers = true;
+      if (dosage.id !== undefined || dosage.extension?.length)
+        sourceFragments.push(retainField("r5SourceCarrier", {
+          ...(dosage.id !== undefined ? { id: dosage.id } : {}),
+          ...(dosage.extension?.length ? { extension: dosage.extension } : {}),
+        }));
+      continue;
+    }
     const requestedSequence = dosage.sequence ?? 1;
     const sequence = Number.isInteger(requestedSequence) && requestedSequence >= 1 ? requestedSequence : 1;
     if (sequence !== requestedSequence) {
@@ -1613,12 +1646,27 @@ function equalRepeatCycle(left: object, right: object): boolean {
   return equalStructuredValues(left, right);
 }
 
+/** A decoded empty-course source can occupy an R5 row without owning a dose.
+ * Any live clinical field, including recognized exclusions, makes it a member. */
+function isSourceOnlyCarrier(carrier: FhirDosage | EzDosage): boolean {
+  return carrier.modifierExtension?.length === 1 &&
+    carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL &&
+    Object.keys(carrier).every(key => {
+      if (key === "text" || key === "modifierExtension" || key === "id") return true;
+      if (key === "extension") return !carrier.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
+      if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
+      const value = (carrier as Record<string, unknown>)[key];
+      return value === undefined || Array.isArray(value) && value.length === 0;
+    });
+}
+
 export function courseFromR5(
   dosages: readonly (FhirDosage | EzDosage)[],
   renderedInstruction?: string,
   course?: EzCourseMetadata,
   options?: { resolvedPhaseSequences?: readonly number[] },
-  sourceContext = false
+  sourceContext = false,
+  classifiedCarriers?: Set<number>
 ): CanonicalCourse {
   if (dosages.some(compactCourseMarker))
     return reconcileNativeCompactCourse(
@@ -1636,9 +1684,13 @@ export function courseFromR5(
   let retained: FhirR6DosageInstruction | undefined;
   let retainedSource: FhirExtension | undefined;
   const reconciliationSources: FhirExtension[] = [];
-  let preserveRetainedMarkers = false;
+  let preserveRetainedMarkers = false, retainedHasNoMembers = false;
+  // A mixed-codec caller reuses this classification to align real members;
+  // source carriers must consume no slot in its historical-member cursor.
+  let sourceCarrierIndices = classifiedCarriers;
   const warnings: string[] = [];
-  for (const dosage of dosages) {
+  for (let index = 0; index < dosages.length; index++) {
+    const dosage = dosages[index];
     for (const extension of dosage.modifierExtension ?? []) {
       if (extension.url !== DOSAGE_DETAILS_R5_URL) continue;
       if (
@@ -1659,7 +1711,11 @@ export function courseFromR5(
         continue;
       }
       for (const child of markers) {
-        if (original && equalStructuredValues(child, original)) continue;
+        if (original && equalStructuredValues(child, original)) {
+          if (retainedHasNoMembers && isSourceOnlyCarrier(dosage))
+            (sourceCarrierIndices ??= new Set()).add(index);
+          continue;
+        }
         const parsed = decodeCourseDetails(child);
         if (!parsed) {
           reconciliationSources.push(extension);
@@ -1670,6 +1726,9 @@ export function courseFromR5(
           );
           continue;
         }
+        const hasNoMembers = !(parsed.step ?? []).some(step => step.component.length);
+        if (hasNoMembers && isSourceOnlyCarrier(dosage))
+          (sourceCarrierIndices ??= new Set()).add(index);
         if (retained) {
           reconciliationSources.push(extension);
           preserveRetainedMarkers = true;
@@ -1680,6 +1739,7 @@ export function courseFromR5(
           continue;
         }
         retained = parsed;
+        retainedHasNoMembers = hasNoMembers;
         original = child;
         retainedSource = extension;
       }
@@ -1749,23 +1809,9 @@ export function courseFromR5(
     // not an invented active dose. Restore it without manufacturing a step.
     const carrier = effectiveDosages[0];
     if (
-      retainedSteps.every((step) => !step.component.length) &&
       effectiveDosages.length === 1 &&
-      carrier &&
-      Object.keys(carrier).every((key) => {
-        if (key === "text" || key === "modifierExtension" || key === "id") return true;
-        // Weekday exclusions are the live dosage-level ordinary extension;
-        // other clinical guards are modifier extensions checked below.
-        if (key === "extension") return !carrier.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
-        if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
-        const value = (carrier as Record<string, unknown>)[key];
-        // R5 mappers may materialize all optional keys as undefined and
-        // normalize absent repeated fields into []. Neither is a dose or
-        // an instruction. Any actual new field is a live R5 edit.
-        return value === undefined || (Array.isArray(value) && value.length === 0);
-      }) &&
-      carrier.modifierExtension?.length === 1 &&
-      carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL
+      sourceCarrierIndices?.has(0) &&
+      carrier
     ) {
       const instruction = currentInstruction ?? carrier.text;
       if (carrier.id !== undefined || carrier.extension?.length)
@@ -1858,7 +1904,8 @@ export function courseFromR5(
       retainedSource,
       reconciliationSources,
       sourceContext,
-      instructionStillMatches ? savedInstruction : undefined
+      instructionStillMatches ? savedInstruction : undefined,
+      sourceCarrierIndices
     );
     return withPreservedSourceExtension(result, instructionSource ??
       (savedInstruction !== undefined && result.instruction !== savedInstruction ? instructionMarker : undefined));

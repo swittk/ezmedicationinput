@@ -176,12 +176,12 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
     if (!saved?.step || !current) return undefined;
     const sameAction = current.ifExceeded === saved.projected.ifExceeded;
     const sameModifiers = equalStructuredValues(current.modifierExtension, saved.projected.modifierExtension);
-    if (!sameAction || !sameModifiers) return undefined;
+    if (!sameModifiers) return undefined;
     const unchanged = equalStructuredValues(current.doseLimit, saved.projected.doseLimit);
     // Header Element metadata follows the policy that supplied the projection.
     // Changes to a different limit do not widen the surviving phase limits.
     let course = saved.course, step = saved.step;
-    if (!unchanged) {
+    if (!unchanged || !sameAction) {
       const reconciled = reconcileSafetyScopes(current, saved, true);
       // An edited header limit remains the current header's authority. Only
       // unchanged surviving phase limits can reuse the previous phase scope.
@@ -190,7 +190,8 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       if (!saved.course) step = { ...step, ...metadata };
       const limits = current.doseLimit?.filter(limit => !reconciled.stepLimits.has(limit));
-      const action = sameAction ? reconciled.course?.ifExceeded : current.ifExceeded;
+      const action = sameAction || current.ifExceeded === reconciled.step?.ifExceeded
+        ? reconciled.course?.ifExceeded : current.ifExceeded;
       const modifiers = sameModifiers ? reconciled.course?.modifierExtension : current.modifierExtension;
       course = {
         ...(saved.course ? metadata : {}),

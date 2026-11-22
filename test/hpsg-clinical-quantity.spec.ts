@@ -2414,7 +2414,11 @@ describe("round36 complete quantity constituents", () => {
       const clause = parsed.meta.canonical.clauses[0];
       expect(clause.dose).toMatchObject({ value: 500, unit: "mL" });
       expect(clause.clinicalQuantity?.administrationDuration).toEqual({ value: 2, unit: "h" });
+      expect(clause.route?.code).toBe("47625008");
       for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+        expect(row.route?.coding).toContainEqual(expect.objectContaining({
+          system: "http://snomed.info/sct", code: "47625008",
+        }));
         expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
           numerator: { value: 500, code: "mL" }, denominator: { value: 2, code: "h" }
         });
@@ -2502,4 +2506,64 @@ describe("round36 authored duration endpoints", () => {
     expect(canonicalToFhir(canonicalFromFhir(row)).timing?.repeat?.boundsDuration)
       .toEqual(row.timing!.repeat!.boundsDuration);
   });
+});
+
+describe("round37 fractional unit complements and event-period limits", () => {
+  it.each([
+    ["half a", 0.5], ["half of a", 0.5], ["three quarters of a", 0.75],
+    ["five quarters of a", 1.25], ["about half a", 0.5], ["a", 1], ["0.5", 0.5],
+  ] as const)("retains the full numeric head of %s mL per hour", (amount, value) => {
+    const parsed = parsePublicSig("Infuse " + amount + " mL per hour");
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const q = parsed.meta.canonical.clauses[0].clinicalQuantity;
+    expect(q).toMatchObject({ representation: "rate-quantity", status: "resolved",
+      numerator: { value, unit: "mL" }, denominators: [{ value: 1, unit: "h", dimension: "time" }] });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value, unit: "mL/h" });
+      expect(getQuantityComparator(row.doseAndRate?.[0].rateQuantity)).toBe(amount.startsWith("about") ? "~" : undefined);
+    }
+  });
+
+  it("keeps a fractional volume and a fractional weight rate with their own denominators", () => {
+    const volume = parsePublicSig("Infuse half a mL over 1 hour");
+    for (const row of [volume.fhir[0], volume.fhirNext.step[0].component[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 0.5, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+        numerator: { value: 0.5, unit: "mL" }, denominator: { value: 1, unit: "h" },
+      });
+    }
+    const weight = parsePublicSig("Infuse half a mg per kg per hour");
+    expect(weight.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { value: 0.5, unit: "mg" },
+      denominators: [{ value: 1, unit: "kg" }, { value: 1, unit: "h" }],
+    });
+  });
+
+  it.each(["per night", "/night", "/nights", "per 2 nights", "over 2 nights"])(
+    "retains %s without inventing a rolling 24-hour maximum", period => {
+      const source = "Take 1 tablet at bedtime as needed, max 1 tablet" + (period.startsWith("/") ? "" : " ") + period;
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+      const schedule = parsed.meta.canonical.clauses[0].schedule;
+      expect(schedule?.maxDosePerPeriod).toBeUndefined();
+      expect(schedule?.when).toEqual(["HS"]);
+      expect(schedule?.duration).toBeUndefined();
+      expect(parsed.fhir.every(row => !row.maxDosePerPeriod?.length)).toBe(true);
+      for (const input of [parsed, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+        expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+          timeZone: "UTC", eventClock: { NIGHT: "20:00", HS: "22:00" }, limit: 3 })).toEqual([
+          "2026-01-01T22:00:00+00:00", "2026-01-02T22:00:00+00:00", "2026-01-03T22:00:00+00:00",
+        ]);
+      expect(parsed.longText).toMatch(/max 1 tablet/i);
+      expect(parsed.fhir.map(row => row.text).join(" ")).toContain(period);
+    });
+
+  it.each([["per day", "d"], ["/day", "d"], ["per hour", "h"], ["/24h", "d"]] as const)(
+    "retains the declared elapsed maximum %s", (period, unit) => {
+      const parsed = parsePublicSig("Take 1 tablet as needed, max 2 tablets" + (period.startsWith("/") ? "" : " ") + period);
+      expect(parsed.fhir[0].maxDosePerPeriod?.[0]).toMatchObject({
+        numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit },
+      });
+    });
 });

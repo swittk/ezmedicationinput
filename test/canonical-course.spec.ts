@@ -1142,7 +1142,9 @@ describe("review 27 live clinical source proofs and language receivers", () => {
       : scope === "administration" ? row.maxDosePerAdministration! : row.maxDosePerLifetime!;
     quantity.value = 2;
     for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
-      expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
+      expect(text).toMatch(/(?:Take|Use) 1 tablet\b/u);
+      expect(text).toMatch(scope === "period" ? /max per period: 2 tab \/ 1 d\b/u
+        : scope === "administration" ? /max per administration: 2 tab\b/u : /max lifetime: 2 tab\b/u);
       expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
       expect(text).toMatch(/as needed|when needed/iu);
     }
@@ -1558,8 +1560,9 @@ describe("round35 partial authored directions and sequential previews", () => {
     const before = JSON.stringify(raw);
     for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
       expect(text.match(/onward/gu)).toHaveLength(1);
-      expect(text).toContain("2 tablets once daily");
-      expect(text).toContain("1 tablet once daily");
+      expect(text).toMatch(/^treatment start: [^.]*2 tablets once daily[^.]*\./u);
+      expect(text).toMatch(/From 7 days after treatment start onward: [^.]*1 tablet once daily/u);
+      expect(text.slice(0, text.indexOf("From 7 days"))).not.toContain("onward");
       expect(text).not.toContain("until 7 days");
       if (duration) expect(text).toContain("for 3 days");
     }
@@ -1567,5 +1570,112 @@ describe("round35 partial authored directions and sequential previews", () => {
       from: "2026-11-28T00:00:00Z", timeZone: "UTC", limit: 2 }))
       .toEqual(["2026-11-28T09:00:00+00:00", "2026-11-29T09:00:00+00:00"]);
     expect(JSON.stringify(raw)).toBe(before);
+  });
+});
+
+describe("round37 upper-only timing and stage origins", () => {
+  const options = { realizationMode: "normalized" as const };
+  const relative = (value: number, dayStart = false) => ({
+    contextCode: { coding: [{ system: dayStart ? "urn:ezmedicationinput:CodeSystem:course-phase-event"
+      : "http://hl7.org/fhir/evidence-variable-event", code: dayStart ? "treatment-day-start" : "treatment-start" }] },
+    offsetDuration: { value, unit: "d" }
+  });
+  const component = (dose: number): FhirR6Dosage => ({
+    doseAndRate: [{ doseQuantity: { value: dose, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
+  });
+
+  it.each([2, 1])("shows an upper-only %i-day period without a fabricated daily cadence", maximum => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, periodMax: maximum, periodUnit: FhirPeriodUnit.Day } } };
+    const before = JSON.stringify(row);
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"])
+        for (const style of ["short", "long"] as const) {
+          const text = formatSig(input, style, { ...options, locale });
+          expect(text).toContain(locale === "en" ? "twice every up to " + maximum + " day"
+            : "2 ครั้ง ทุกไม่เกิน " + maximum + " วัน");
+          expect(text).not.toMatch(/twice daily|2x\/d|วันละ 2 ครั้ง/u);
+        }
+      const repeat = saved.step[0].component[0].timing!.repeat!;
+      expect(repeat.period).toBeUndefined();
+      expect(repeat.periodMax).toBe(maximum);
+      expect(repeat.frequency).toBe(2);
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(row)).toBe(before);
+    const daily = { ...row, timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    expect(formatSig(daily, "long", { ...options, locale: "en" })).toContain("twice daily");
+    expect(formatSig(daily, "long", { ...options, locale: "th" })).toContain("วันละ 2 ครั้ง");
+  });
+
+  it.each([undefined, 15, 30])("retains a 30-minute infusion maximum with lower endpoint %s", minimum => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }],
+      method: { text: "Infuse" },
+      timing: { repeat: { duration: minimum, durationMax: 30, durationUnit: FhirPeriodUnit.Minute } } };
+    const before = JSON.stringify(row);
+    let saved = toDosageDetails([row]);
+    for (let save = 0; save < 3; save++) {
+      for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"])
+        for (const style of ["short", "long"] as const) {
+          const text = formatSig(input, style, { ...options, locale });
+          const span = minimum === undefined ? "<=30" : minimum === 15 ? "15-30" : "30";
+          if (style === "short") expect(text).toContain((locale === "en" ? "over" : "นาน") + span + "min");
+          else if (minimum === undefined) expect(text).toContain(locale === "en" ? "over up to 30 minutes" : "ไม่เกิน 30 นาที");
+          else expect(text).toContain(locale === "en" ? (minimum === 15 ? "over 15 to 30 minutes" : "over 30 minutes")
+            : (minimum === 15 ? "15 ถึง 30 นาที" : "30 นาที"));
+          expect(text).toContain("100");
+        }
+      const repeat = saved.step[0].component[0].timing!.repeat!;
+      expect(repeat.duration).toBe(minimum);
+      expect(repeat.durationMax).toBe(30);
+      expect(repeat.durationUnit).toBe(FhirPeriodUnit.Minute);
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("orders a bounded successor after the previous phase without inventing its start", () => {
+    const first = component(2);
+    first.timing!.repeat!.boundsDuration = { value: 1, unit: "wk" };
+    const raw: FhirR6DosageInstruction = { step: [
+      { component: [first] }, { end: relative(14), component: [component(1)] }
+    ] };
+    let saved = raw;
+    for (let save = 0; save < 3; save++) {
+      for (const input of [saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { ...options, locale });
+        expect(text).toContain(locale === "en" ? "After the previous phase; Until 14 days after treatment start"
+          : "หลังขั้นตอนก่อนหน้า; จนถึง14 วันหลังเริ่มการรักษา");
+        expect(text).toMatch(locale === "en" ? /After the previous phase[^.]*1 tablet once daily/u
+          : /หลังขั้นตอนก่อนหน้า[^.]*1 เม็ด วันละครั้ง/u);
+        expect(text).toContain(locale === "en" ? "2 tablets once daily for 1 week" : "2 เม็ด วันละครั้ง เป็นเวลา 1 สัปดาห์");
+      }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    expect(raw.step[1].start).toBeUndefined();
+  });
+
+  it.each([false, true])("compares boundary offsets only within the same origin (same origin %s)", sameOrigin => {
+    const raw: FhirR6DosageInstruction = { step: [{
+      start: relative(1, !sameOrigin), end: relative(1), component: [component(1)]
+    }] };
+    let saved = raw;
+    for (let save = 0; save < 3; save++) {
+      for (const input of [saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { ...options, locale });
+        if (sameOrigin) expect(text).toContain(locale === "en" ? "Timing requires review" : "ต้องตรวจสอบช่วงเวลา");
+        else {
+          expect(text).not.toContain(locale === "en" ? "Timing requires review" : "ต้องตรวจสอบช่วงเวลา");
+          expect(text).toContain(locale === "en" ? "1 day after the start of the first treatment day" : "1 วันหลังต้นวันแรกของการรักษา");
+          expect(text).toContain(locale === "en" ? "until 1 day after treatment start" : "จนถึง1 วันหลังเริ่มการรักษา");
+        }
+      }
+      saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
+    }
+    if (!sameOrigin) expect(nextDueDoses(raw, { orderedAt: "2026-11-22T12:00:00Z",
+      from: "2026-11-23T00:00:00Z", timeZone: "UTC", limit: 2 }))
+      .toEqual(["2026-11-23T09:00:00+00:00"]);
   });
 });

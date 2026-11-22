@@ -1154,7 +1154,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
   const timingCode = schedule?.timingCode;
-  const rangedPeriod = period !== undefined && periodMax !== undefined && periodMax !== period;
+  const rangedPeriod = periodMax !== undefined && periodMax !== period;
   const countPrefix = frequency !== undefined &&
     (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
     ? frequencyMax !== undefined && frequencyMax !== frequency
@@ -1163,6 +1163,10 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
     : frequencyMax !== undefined && frequency === undefined
       ? `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง ` : "";
 
+  if (period === undefined && periodMax !== undefined && periodUnit) {
+    const unit = THAI_COURSE.timeUnit(periodUnit, periodMax) ?? periodUnit;
+    return `${countPrefix}ทุกไม่เกิน ${stripTrailingZero(periodMax)} ${unit}`;
+  }
   if (
     frequency !== undefined &&
     frequencyMax !== undefined &&
@@ -1939,12 +1943,13 @@ function describeAdministrationDurationThai(
 ): string | undefined {
   const value = schedule?.administrationDuration;
   const unit = schedule?.administrationDurationUnit;
-  if (value === undefined || !unit) return undefined;
+  const max = schedule?.administrationDurationMax;
+  if ((value === undefined && max === undefined) || !unit) return undefined;
   const label = unit === FhirPeriodUnit.Minute ? "นาที"
     : unit === FhirPeriodUnit.Hour ? "ชั่วโมง"
       : unit === FhirPeriodUnit.Second ? "วินาที"
         : unit === FhirPeriodUnit.Day ? "วัน" : unit;
-  const max = schedule?.administrationDurationMax;
+  if (value === undefined) return `${prefix} ไม่เกิน ${stripTrailingZero(max!)} ${label}`;
   const lower = quantityComparatorText(schedule?.administrationDurationComparator, "th") + stripTrailingZero(value);
   return max !== undefined && max !== value
     ? `${prefix} ${lower} ถึง ${stripTrailingZero(max)} ${label}`
@@ -2120,10 +2125,13 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
-  if (schedule.administrationDuration !== undefined && schedule.administrationDurationUnit) {
+  if ((schedule.administrationDuration !== undefined || schedule.administrationDurationMax !== undefined) &&
+      schedule.administrationDurationUnit) {
     const max = schedule.administrationDurationMax;
-    const lower = (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
-    const duration = max !== undefined && max !== schedule.administrationDuration
+    const lower = schedule.administrationDuration === undefined
+      ? "<=" + stripTrailingZero(max!)
+      : (schedule.administrationDurationComparator ?? "") + stripTrailingZero(schedule.administrationDuration);
+    const duration = schedule.administrationDuration !== undefined && max !== undefined && max !== schedule.administrationDuration
       ? `${lower}-${stripTrailingZero(max)}`
       : lower;
     parts.push(`นาน${duration}${schedule.administrationDurationUnit}`);
@@ -2481,16 +2489,15 @@ function formatLongThai(
       }
     }
   }
-  const graphRealizationOmissions = richPrimaryGraphAction
-    ? [...additionalSemanticSourceTexts, ...codedWarningSources, richPrimaryGraphAction.sourceText]
-    : [...additionalSemanticSourceTexts, ...codedWarningSources];
+  const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
   const graphRealizationOptions = {
     includeWarnings: true,
     omitCanonicalAdministration: clause,
     instructionActionMap: options?.instructionActionMap,
     preferSourceText: roundTrip,
     roundtripSafe: roundTrip,
-    omitSourceTexts: graphRealizationOmissions
+    omitSourceTexts: graphRealizationOmissions,
+    omitRenderedAction: richPrimaryGraphAction
   } as const;
   const preGraphInstruction = positionedGraph && clause.instructionGraph
     ? realizeInstructionGraph(clause.instructionGraph, "th", {

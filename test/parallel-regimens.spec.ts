@@ -1033,9 +1033,12 @@ it("round35 retains a shared authored onset for all coordinated parallel members
   const parsed = parseSig("From day 4 1 drop OD at 08:00 daily for 5 days and from day 4 2 drops OD at 20:00 daily for 3 days" +
     " then 3 drops OD at 06:00 the next morning; 1 drop OS at 12:00 daily for 7 days then 2 drops OS at 12:00 daily");
   const members = parsed.meta.canonical.course!.stages[0].administrations;
-  expect(members.slice(0, 2).map(member => member.phaseStart?.displacement?.value)).toEqual([3, 3]);
+  expect(members.slice(0, 2).map(member => member.phaseStart)).toMatchObject([
+    { anchor: "treatment-day-start", displacement: { value: 3, unit: "d" } },
+    { anchor: "treatment-day-start", displacement: { value: 3, unit: "d" } },
+  ]);
   const rows = parsed.fhir.filter(row => row.site?.text === "right eye");
-  expect(nextDueDoses(rows, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+  expect(nextDueDoses(rows, { orderedAt: "2026-11-21T17:00:00Z", from: "2026-11-21T17:00:00Z",
     timeZone: "UTC", limit: 9 })).toEqual([
       "2026-11-24T08:00:00+00:00", "2026-11-24T20:00:00+00:00",
       "2026-11-25T08:00:00+00:00", "2026-11-25T20:00:00+00:00",

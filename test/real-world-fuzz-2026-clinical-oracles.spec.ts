@@ -630,6 +630,16 @@ describe("source-less R6 treatment-relative step display", () => {
       expect(strictEnglish).not.toContain("No doses");
       expect(strictThai).not.toContain("งดยา");
     }
+    for (const text of [english, strictEnglish]) {
+      expect(text).toMatch(/From treatment start until 7 days after treatment start: [^.]*1 tablet at 8:00 am\./u);
+      const second = text.slice(text.indexOf("From " + secondStart + " days after treatment start"));
+      expect(second).toMatch(/^[^:]*: [^.]*2 tablets at 8:00 am\./u);
+    }
+    for (const text of [thai, strictThai]) {
+      expect(text).toMatch(/ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*1 เม็ด เวลา 08:00\./u);
+      const second = text.slice(text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา"));
+      expect(second).toMatch(/^[^:]*: [^.]*2 เม็ด เวลา 08:00\./u);
+    }
     const source = "keep the clinician-authored dosing text exactly";
     const authored = { ...course, renderedInstruction: source };
     expect(formatSig(authored, "long")).toBe(english);
