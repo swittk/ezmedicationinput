@@ -18,8 +18,7 @@ import type {
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { getDoseQuantityUnit } from "../maps";
-import { getDoseUnitKind } from "../unit-lexicon";
-import { formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
+import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -40,8 +39,7 @@ function courseEnvironment(options?: FormatOptions): CourseFormatEnvironment {
 }
 
 function usesTargetScope(quantity: CanonicalMeasure | undefined): boolean {
-  const kind = getDoseUnitKind(getDoseQuantityUnit(quantity));
-  return kind !== undefined && kind !== "metric" && kind !== "biologic_unit";
+  return doseUnitUsesTargetScope(getDoseQuantityUnit(quantity));
 }
 
 export function joinGeneratedClauses(clauses: readonly string[], separator = "; "): string {

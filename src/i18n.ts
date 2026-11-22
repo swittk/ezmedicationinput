@@ -5,7 +5,7 @@ import { THAI_COURSE } from "./locales/course/th";
 import { getQuantityDurationUnit } from "./unit-lexicon";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
-import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence } from "./format";
+import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, doseUnitUsesTargetScope } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -1077,7 +1077,7 @@ function formatDoseThaiPerTarget(dose: CanonicalDoseExpr | undefined): string | 
 }
 
 function perTargetSiteThai(clause: CanonicalSigClause): string | undefined {
-  if (!clause.dose) return undefined;
+  if (!doseUnitUsesTargetScope(clause.dose?.unit)) return undefined;
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   if (!text) return undefined;
   return resolveBodySitePhrase(text)?.definition?.perTargetI18n?.th;
@@ -2036,6 +2036,17 @@ function translatePrnReasonThai(reason: CanonicalPrnReasonExpr): string | undefi
       // ("ไข้" -> "มีไข้", "ไมเกรน" -> "มีอาการไมเกรน"); different authored
       // wording remains intact in ordinary, coordinated and onset contexts.
       text = definition?.conditionI18n?.th ?? definition?.i18n?.th ?? text;
+    } else if (definition?.coding && sourceText) {
+      const oldLabel = resolveSymptomDefinition(translated);
+      // An exact registered label can survive a wire edit of the indication.
+      // Retire it in the preview only when the current source and code agree;
+      // unknown or more specific authored wording remains intact.
+      if (oldLabel?.coding && oldLabel.coding.code !== definition.coding.code) {
+        const currentSource = resolveSymptomDefinition(sourceText);
+        if (currentSource?.coding?.code === definition.coding.code &&
+            currentSource?.coding?.system === definition.coding.system)
+          text = definition.conditionI18n?.th ?? definition.i18n?.th ?? text;
+      }
     }
   }
   const spatial = translateSpatialSiteThai(undefined, reason.spatialRelation);
@@ -2672,7 +2683,9 @@ function formatLongThai(
     schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
+    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
+    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
+    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
     schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
   );

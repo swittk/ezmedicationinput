@@ -1,4 +1,5 @@
 import { TIMING_ABBREVIATIONS } from "./maps";
+import { getDoseUnitKind } from "./unit-lexicon";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import type { CourseLanguage } from "./locales/course/types";
@@ -918,6 +919,12 @@ function appendSiteRestrictionsEnglish(
   return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** Discrete doses distribute across paired targets; metric amounts are totals. */
+export function doseUnitUsesTargetScope(unit: string | undefined): boolean {
+  const kind = getDoseUnitKind(unit);
+  return kind !== undefined && kind !== "metric" && kind !== "biologic_unit";
+}
+
 function formatSite(
   clause: CanonicalSigClause,
   grammar: RouteGrammar,
@@ -960,15 +967,14 @@ function formatSite(
   if (isVaginalRoute && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
-  if (resolvedSite?.features.kind === "locative") {
-    return appendSiteRestrictionsEnglish(clause, resolvedSite.englishObjectText);
-  }
-  const perTargetNoun = clause.dose ? resolvedSite?.definition?.perTargetText : undefined;
+  const perTargetNoun = doseUnitUsesTargetScope(clause.dose?.unit)
+    ? resolvedSite?.definition?.perTargetText : undefined;
   let noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   const count = clause.site?.administrationTargetCount;
   if (count !== undefined && count > 1 && count !== resolvedSite?.definition?.administrationTargetCount)
     noun += " (" + words.applicationSites(count) + ")";
-  if (directObject) return appendSiteRestrictionsEnglish(clause, noun);
+  if (resolvedSite?.features.kind === "locative" || directObject)
+    return appendSiteRestrictionsEnglish(clause, noun);
   const preferredPreposition = resolvedSite?.preferredPreposition;
   const primarySiteRelation = instructionGraphPrimarySiteRelation(clause);
   const sourcePreposition = relationHasSemanticClass(primarySiteRelation, "locative")
@@ -1202,7 +1208,13 @@ export function timingCodeMatchesRecurrence(
   if (interval?.when?.length && schedule.when?.length &&
       (interval.when.length !== schedule.when.length ||
        schedule.when.some((event, index) => event !== interval.when![index]))) return false;
-  if (daily === undefined && interval?.period === undefined) return true;
+  if (daily === undefined && interval?.period === undefined) {
+    // Free text is not a recurrence abbreviation. Typed cadence owns the
+    // preview while the authored label stays on the source timing.
+    return Boolean(interval) || (schedule.frequency === undefined &&
+      schedule.frequencyMax === undefined && schedule.period === undefined &&
+      schedule.periodMax === undefined && schedule.periodUnit === undefined);
+  }
   const frequency = code === "QOD" ? 1 : daily ?? interval!.frequency ?? 1;
   const period = code === "QOD" ? 2 : interval?.period ?? 1;
   const unit = interval?.periodUnit ?? FhirPeriodUnit.Day;
@@ -1838,7 +1850,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     schedule.timeOfDay?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
-    schedule.durationUnit !== undefined || schedule.offset !== undefined ||
+    schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||
+    schedule.administrationDurationMax !== undefined || schedule.administrationDurationUnit !== undefined ||
+    schedule.administrationDurationRange !== undefined || schedule.offset !== undefined ||
     schedule.offsetMin !== undefined || schedule.offsetMax !== undefined ||
     Boolean(schedule.activityTiming?.length) || schedule.occurrenceCap !== undefined
   );

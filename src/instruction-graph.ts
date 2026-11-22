@@ -4874,7 +4874,11 @@ export function realizeInstructionGraph(
     const frame = ownsPrimary && options?.omitCanonicalAdministration
       ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
     if (sourceFrame === amountOwner) displayedAmountOwner = frame;
-    if (!inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex)) continue;
+    const inPosition = inRequestedPosition(frame.span.start, frame.span.end, frame.sequenceIndex);
+    // A preposed condition can precede its canonically rendered primary
+    // action. Resolve that one target even when the action is outside PRE.
+    if (!inPosition && !(position === "pre" && primaryAction >= 0 &&
+        sourceFrame === graph.actions[primaryAction] && options?.omitCanonicalAdministration)) continue;
     const frameSource = normalizedInstructionSurface(sourceFrame.sourceText);
     // A partial text overlap is not evidence that an independent action was
     // rendered. In particular, it cannot erase one half of a prohibition.
@@ -4891,8 +4895,14 @@ export function realizeInstructionGraph(
       (!hasAmount || amountOwner === sourceFrame) &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
         primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined, sourceFrame)) {
+      // The administration sentence covers this action, not its graph-only
+      // conditional relation. Keep the target without emitting the action twice.
+      if (!options?.onlyWarnings &&
+          !(options?.includeWarnings === false && frame.polarity === AdvicePolarity.Negate))
+        conditionTargets.set(frame.sequenceIndex, frame);
       continue;
     }
+    if (!inPosition) continue;
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     if (
       options?.omitCanonicalAdministration &&

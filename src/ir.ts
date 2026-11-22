@@ -206,7 +206,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.administrationDuration !== undefined ||
     schedule.administrationDurationMax !== undefined ||
     schedule.administrationDurationUnit !== undefined ||
-      schedule.administrationDurationRange !== undefined ||
+    schedule.administrationDurationRange !== undefined ||
     schedule.offset !== undefined ||
     schedule.offsetMin !== undefined ||
     schedule.offsetMax !== undefined ||
@@ -216,7 +216,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.count !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
+    schedule.eventWindow || schedule.when?.length ||
     schedule.timeOfDay?.length ||
     schedule.calendarEvents?.length
   ));

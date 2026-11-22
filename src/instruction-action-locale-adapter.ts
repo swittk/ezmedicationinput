@@ -139,22 +139,30 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const withComplement = relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
     relationHasSemanticClass(c.frame.relation, "accompaniment");
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
-    amountArg: AdviceArgument | undefined;
+    unmarkedSubstance: AdviceArgument | undefined, amountArg: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
     const nominal = arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container;
-    // The construction marks the companion's attachment independently of
-    // lexical role. A tablet Object before WITH remains the mixed theme.
-    if (!themeArg && (arg.role === AdviceArgumentRole.Theme || nominal && !arg.relation)) themeArg = arg;
-    if (!substanceArg && (arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material ||
-        nominal && arg.relation &&
-        (relationHasGrammarFeature(arg.relation, "accompanimentComplement") ||
-          relationHasSemanticClass(arg.relation, "accompaniment") || arg.relation === AdviceRelation.In)))
+    const material = arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material;
+    // Attachment owns the mixing vehicle independently of lexical noun role.
+    // An unmarked Substance can be the theme before an explicit WITH vehicle.
+    const companion = arg.relation &&
+      (relationHasGrammarFeature(arg.relation, "accompanimentComplement") ||
+        relationHasSemanticClass(arg.relation, "accompaniment") || arg.relation === AdviceRelation.In);
+    if (!themeArg && !arg.relation && (arg.role === AdviceArgumentRole.Theme || nominal)) themeArg = arg;
+    if (!substanceArg && companion && (material || nominal || arg.role === AdviceArgumentRole.Theme))
       substanceArg = arg;
+    else if (!unmarkedSubstance && material && !arg.relation) unmarkedSubstance = arg;
     if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
     if (themeArg && substanceArg && amountArg) break;
   }
+  if (substanceArg) themeArg ??= unmarkedSubstance;
+  else substanceArg = unmarkedSubstance;
   const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
-  const theme = themeArg
+  // A quantity-only daughter carries its unit as normalized identity; it has
+  // no ingredient noun to repeat as "5 mL of mL".
+  const quantityOnlyTheme = themeArg?.quantity && !themeArg.conceptId && !themeArg.coding &&
+    !themeArg.codings?.length && themeArg.normalized === themeArg.quantity.unit;
+  const theme = themeArg && !quantityOnlyTheme
     ? themeArg.quantity && !themeAmount
       ? themeArg.text || themeArg.normalized
       : c.translateArgumentConcept(themeArg)
@@ -188,9 +196,9 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
       themeArg.text.includes(amountArg.text.trim()));
   // A separate medication Amount belongs with the Theme, never with an
   // unmeasured accompaniment. A measured Substance owns its own quantity.
-  const primaryAmount = theme && !amountAlreadyInTheme ? c.amount : undefined;
+  const primaryAmount = themeArg && !amountAlreadyInTheme ? c.amount : undefined;
   const substanceAmount = substanceArg?.quantity ? substanceQuantity
-    : theme || amountAlreadyInTheme ? undefined : c.amount;
+    : themeArg || amountAlreadyInTheme ? undefined : c.amount;
   return { withComplement, theme, themeAmount, substance, substanceArg, amountArg,
     coextensiveAmount, primaryAmount, substanceAmount };
 }
@@ -218,7 +226,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme
         ? ` ${primaryAmount ? `${primaryAmount} of ` : ""}${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
-        : "";
+        : primaryAmount || coextensiveAmount || themeAmount
+          ? " " + (primaryAmount ?? coextensiveAmount ?? themeAmount) : "";
       const amountText = substanceAmount ? `${substanceAmount}${amountArg?.conceptId && !substanceArg?.quantity ? " of " : " "}` : "";
       const materialRelation = c.frame.relation &&
         (withComplement || c.frame.relation === AdviceRelation.In)
@@ -367,7 +376,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const { theme, themeAmount, substance, substanceArg, amountArg,
         coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme ? (coextensiveAmount ??
-        `${theme}${themeAmount ? ` ${themeAmount}` : ""}${primaryAmount ? ` ${primaryAmount}` : ""}`) : "";
+        `${theme}${themeAmount ? ` ${themeAmount}` : ""}${primaryAmount ? ` ${primaryAmount}` : ""}`) : primaryAmount ?? coextensiveAmount ?? themeAmount ?? "";
       const amountSeparator = substanceArg?.quantity ? " " : amountArg?.conceptId ? "" : " ";
       const materialRelation = c.frame.relation === AdviceRelation.Without
         ? "โดยไม่ใช้"
