@@ -421,29 +421,36 @@ function mergeDose(
   if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
       clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
-    // A carrier numerator belongs to the rate; the separately typed active
-    // amount owns the divided dose and its comparator.
-    const activeDose = clinicalQuantity.projectedDose ?? clinicalQuantity.numerator;
-    let doseUnit = activeDose.unit;
-    if (!clinicalQuantity.projectedDose) {
-      for (const term of clinicalQuantity.denominators)
-        if (term.dimension !== "time") doseUnit += "/" + term.unit;
-    }
-    value = activeDose.value / divisionCount;
-    unit = doseUnit;
-    clinicalQuantity = {
-      ...clinicalQuantity, status: "resolved", reviewReason: undefined,
-      // Equal divisions of the preparation divide its separate carrier too.
-      // The authored total remains in numerator; neither volume is repeated
-      // in full for every divided dose.
-      ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
-        ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
-      } } : {}),
-      dividedDoseCount: divisionCount, projectedDose: {
-        value, unit, ...(activeDose.comparator
-          ? { comparator: activeDose.comparator } : {})
+    // A fixed rate owns no total dose. Its separately merged amount may
+    // arrive before or after the division daughter; never divide the rate.
+    const activeDose = clinicalQuantity.projectedDose ??
+      (clinicalQuantity.representation === "rate-quantity"
+        ? value !== undefined && unit ? {
+            value, unit, comparator: mergeOptionalScalar(left.comparator, right.comparator)
+          } : undefined
+        : clinicalQuantity.numerator);
+    if (activeDose) {
+      let doseUnit = activeDose.unit;
+      if (!clinicalQuantity.projectedDose) {
+        for (const term of clinicalQuantity.denominators)
+          if (term.dimension !== "time") doseUnit += "/" + term.unit;
       }
-    };
+      value = activeDose.value / divisionCount;
+      unit = doseUnit;
+      clinicalQuantity = {
+        ...clinicalQuantity, status: "resolved", reviewReason: undefined,
+        // A carrier preparation also divides its separate administered volume.
+        // Its original total stays in numerator; an independent fixed flow-rate
+        // numerator stays unchanged.
+        ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
+          ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
+        } } : {}),
+        dividedDoseCount: divisionCount, projectedDose: {
+          value, unit, ...(activeDose.comparator
+            ? { comparator: activeDose.comparator } : {})
+        }
+      };
+    }
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
     // Independently supplied volume and rate are compatible arguments of one
     // administration. Neither may erase the other during feature unification.

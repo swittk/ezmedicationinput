@@ -1310,3 +1310,64 @@ describe("round43 ordered clock continuation", () => {
     expect(recurring.meta.canonical.clauses.map(clause => clause.schedule?.frequency)).toEqual([1, 1]);
   });
 });
+
+
+describe("round45 explicit onset and parallel successor ownership", () => {
+  it.each([
+    "Take 1 tablet starting the next day as needed for pain",
+    "Starting the next day take 1 tablet as needed for pain"
+  ])("keeps a PRN onset without inventing a lifetime count: %s", input => {
+    const parsed = parseSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(clause.prn).toMatchObject({ enabled: true, reason: { text: "pain" } });
+    expect(clause.schedule).toMatchObject({ treatmentStartOffsetDays: 1, phaseStartReference: "treatment-day-start" });
+    expect(clause.schedule?.count).toBeUndefined();
+    const strict = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const dosage of [parsed, parsed.fhirNext, strict]) {
+      const native = importCanonicalCourse(dosage);
+      expect(native.stages[0].start).toMatchObject({
+        anchor: "treatment-day-start", displacement: { value: 1, unit: "d" }
+      });
+      const administration = native.stages[0].administrations[0];
+      expect(administration.asNeeded).toBe(true);
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(administration.schedule?.recurrence?.count).toBeUndefined();
+    }
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], strict[0]]) {
+      expect(row.asNeeded).toBe(true);
+      expect(row.timing?.repeat?.count).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ["on 2026-12-05", ["2026-12-05"]],
+    ["on 2026-12-07 and 2026-12-05", ["2026-12-07", "2026-12-05"]]
+  ] as const)("ends only the replaced eye cadence at its first explicit successor date: %s", (dates, events) => {
+    const input = "Instill 1 drop OD QID, then instill 2 drops OD " + dates +
+      " at 08:00; instill 1 drop OS BID";
+    const parsed = parseSig(input, { datePolicy: { referenceDate: "2026-12-01" } });
+    expect(parsed.meta.canonical.clauses).toHaveLength(3);
+    expect(parsed.meta.canonical.clauses[0].schedule?.boundsEnd).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule?.calendarEvents?.map(event => event.isoDate)).toEqual(events);
+    const strict = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], strict[0]])
+      expect(row.timing?.repeat?.boundsPeriod).toEqual({ end: "2026-12-04" });
+    for (const row of [parsed.fhir[1], parsed.fhirNext.step[0].component[1], strict[1]]) {
+      expect(row.timing?.event).toEqual(events);
+      expect(row.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 2, unit: "drop" });
+    }
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const dosage of [parsed, parsed.fhirNext, strict]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-06T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+      expect(calculateTotalUnits({ ...query, from: "2026-12-06T00:00:00Z", dosage,
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(2);
+    }
+  });
+});

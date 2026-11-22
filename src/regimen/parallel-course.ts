@@ -141,6 +141,17 @@ function withCalendarEnd(clause: CanonicalSigClause, boundsEnd: string): Canonic
   };
 }
 
+/** A source date list supplies a known calendar onset without replacing its
+ * explicit events. An authored start bound retains its existing ownership. */
+function calendarPhaseStart(clause: CanonicalSigClause): string | undefined {
+  const schedule = clause.schedule;
+  if (schedule?.boundsStart) return schedule.boundsStart;
+  let earliest: string | undefined;
+  for (const event of schedule?.calendarEvents ?? [])
+    if (earliest === undefined || event.isoDate < earliest) earliest = event.isoDate;
+  return earliest;
+}
+
 /** Normalize one already calendar-bound phase using its own successor.
  * Both complete and partial parallel courses retain these same known cuts. */
 function calendarPhaseMembers(
@@ -231,10 +242,12 @@ function partialParallelRegimen(
         }
         return { member, clause };
       });
-      const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);
-      if (calendar && members.every(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd)) {
+      const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
+        item.clause.schedule?.calendarEvents?.length);
+      if (calendar && members.every(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
+          item.clause.schedule?.calendarEvents?.length)) {
         const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member =>
-          clauses[member].schedule?.boundsStart));
+          calendarPhaseStart(clauses[member])));
         if (typeof normalized !== "string") members = normalized;
       }
       // A dated successor also closes an undated predecessor on this track.
@@ -243,7 +256,7 @@ function partialParallelRegimen(
       if (calendar && index > 0 && phases[index - 1].kind === "relative") {
         const previous = phases[index - 1];
         const normalized = calendarPhaseMembers(previous.members,
-          members.map(item => item.clause.schedule?.boundsStart));
+          members.map(item => calendarPhaseStart(item.clause)));
         if (typeof normalized !== "string") previous.members = normalized;
       }
       const first = members[0] && durationPosition(members[0].clause);

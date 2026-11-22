@@ -625,7 +625,9 @@ export function projectHpsgSignToState(
       if (positions?.length) state.primaryClause.schedule.when = positions;
       else delete state.primaryClause.schedule.when;
     }
-    state.count = Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+    // A PRN onset locates eligibility; it does not prescribe one lifetime use.
+    if (!state.asNeeded)
+      state.count = Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
   }
 
   const clinicalDuration = dose?.attachmentClass !== "procedure"

@@ -1486,22 +1486,24 @@ describe("qualified infusion duration imported as a Ratio denominator", () => {
 
 describe("comparative mixed numbers and shared dimensional quantities", () => {
   it.each([
-    ["Take at most two and a half tablets at bedtime", 2.5, "<="],
-    ["Take approximately 2 and a quarter tablets daily", 2.25, "~"],
-    ["Take >=2 and three quarters tablets daily", 2.75, ">="],
-    ["Take ≤2 and one half tablets daily", 2.5, "<="],
-    ["Take ~2 and 1/2 tablets daily", 2.5, "~"],
-    ["Take at least one and two thirds tablets daily", 1 + 2 / 3, ">="],
-    ["Dissolve at most two and a half tablets in water", 2.5, "<="],
-    ["squeeze at most two and a half cm ribbon cream onto each spot", 2.5, "<="]
-  ] as const)("retains the qualified mixed number in %s", (text, value, comparator) => {
+    ["Take at most two and a half tablets at bedtime", 2.5, "tab", "<="],
+    ["Take approximately 2 and a quarter tablets daily", 2.25, "tab", "~"],
+    ["Take >=2 and three quarters tablets daily", 2.75, "tab", ">="],
+    ["Take ≤2 and one half tablets daily", 2.5, "tab", "<="],
+    ["Take ~2 and 1/2 tablets daily", 2.5, "tab", "~"],
+    ["Take at least one and two thirds tablets daily", 1 + 2 / 3, "tab", ">="],
+    ["Dissolve at most two and a half tablets in water", 2.5, "tab", "<="],
+    ["squeeze at most two and a half cm ribbon cream onto each spot", 2.5, "cm ribbon", "<="]
+  ] as const)("retains the qualified mixed number in %s", (text, value, unit, comparator) => {
     const parsed = parsePublicSig(text);
-    const quantity = parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity;
-    expect(quantity?.value).toBeCloseTo(value);
-    expectSimpleQuantityOperator(quantity, comparator);
-    expect(getEmaQuantityComparator(parsed.fhir[0].doseAndRate?.[0].doseQuantity)).toBe(comparator);
-    expectSimpleQuantityOperator(toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir))).step[0]
-      .component[0].doseAndRate?.[0].doseQuantity, comparator);
+    const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
+    for (const quantity of [parsed.fhir[0].doseAndRate?.[0].doseQuantity,
+      parsed.fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity,
+      reopened.step[0].component[0].doseAndRate?.[0].doseQuantity]) {
+      expect(quantity?.value).toBeCloseTo(value);
+      expect(quantity?.unit).toBe(unit);
+      expectSimpleQuantityOperator(quantity, comparator);
+    }
     expect(parsed.input).toBe(text);
   });
 
@@ -3061,5 +3063,48 @@ describe("round43 IV route after carrier volume", () => {
       });
     }
     expect(parsed.input).toBe(source);
+  });
+});
+
+
+describe("round45 authored volume and rate ownership", () => {
+  it.each([
+    "Infuse 100 mL at 30 mL/hr in 2 divided doses",
+    "Infuse 100 mL in 2 divided doses at 30 mL/hr"
+  ])("divides the authored volume while retaining the independent rate: %s", input => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 50, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      numerator: { value: 30, unit: "mL" }, dividedDoseCount: 2,
+      projectedDose: { value: 50, unit: "mL" }
+    });
+    const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+      toFhirR5Dosages(parsed.fhirNext)[0], reopened.step[0].component[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value: 30, unit: "mL/h" });
+    }
+    expect(parsed.input).toBe(input);
+  });
+
+  it("keeps the completed IV volume ahead of its trailing rate maximum", () => {
+    const parsed = parsePublicSig("Infuse 100 mL IV, no more than 50 mL/hr");
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate).toEqual([{
+        doseQuantity: { value: 100, unit: "mL", code: "mL", system: "http://unitsofmeasure.org" }
+      }]);
+      expect(row.maxDosePerPeriod).toMatchObject([{
+        numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
+      }]);
+    }
+    expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
+      scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value: 1, unit: "h" }
+    }]);
+    const control = parsePublicSig("IV, at most 50 mL/hr");
+    expect(control.fhir[0].doseAndRate![0].doseQuantity).toBeUndefined();
+    expect(control.fhir[0].doseAndRate![0].rateQuantity).toMatchObject({ value: 50, unit: "mL/h" });
+    expect(getQuantityComparator(control.fhir[0].doseAndRate![0].rateQuantity)).toBe("<=");
   });
 });
