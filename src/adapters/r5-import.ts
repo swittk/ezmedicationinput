@@ -307,9 +307,13 @@ function restoreComponentDelta(
       delta.site.reference &&
       Object.prototype.hasOwnProperty.call(row, "siteReference") &&
       row.siteReference === undefined;
+    // The unmarked legacy writer fingerprinted only the R5 concept. A live
+    // reference field still owns its replacement or explicit clearing.
     const unchanged =
       local.baseline?.site ===
-      compactProjectionFingerprint({ concept: row.site, reference: row.siteReference });
+      compactProjectionFingerprint({ concept: row.site, reference: row.siteReference }) ||
+      local.countScope === undefined && !Object.prototype.hasOwnProperty.call(row, "siteReference") &&
+      local.baseline?.site === compactProjectionFingerprint(row.site);
     if (!referenceCleared && unchanged) {
       fresh.target = fresh.target ? { ...delta.site.concept, ...fresh.target } : delta.site.concept;
       fresh.siteReference = fresh.siteReference

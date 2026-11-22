@@ -197,6 +197,14 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
     add(localized, valueString("fallbackObject", config.fallbackObject));
     add(localized, valueBoolean("implicitMedicationObject", config.implicitMedicationObject));
     add(localized, valueBoolean("directSiteObject", config.directSiteObject));
+    add(localized, valueBoolean("directDose", config.directDose));
+    add(localized, valueString("administrationDurationPrefix", config.administrationDurationPrefix));
+    if (config.routePhrases) for (const route of Object.keys(config.routePhrases)) {
+      localized.push({ url: "routePhrase", extension: [
+        { url: "route", valueCode: route },
+        { url: "text", valueString: config.routePhrases[route] }
+      ] });
+    }
     for (const conceptId of config.suppressActivityConcepts ?? []) {
       add(localized, valueString("suppressActivityConcept", conceptId));
     }
@@ -358,19 +366,30 @@ function parseRealizerLocale(extension:FhirExtension):{
   locale:string;config:NonNullable<NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]>[string]
 }|undefined {
   let locale:FhirExtension|undefined,fallback:FhirExtension|undefined,
-    implicit:FhirExtension|undefined,direct:FhirExtension|undefined;
+    implicit:FhirExtension|undefined,direct:FhirExtension|undefined,
+    directDose:FhirExtension|undefined,durationPrefix:FhirExtension|undefined;
+  let routePhrases:Record<string,string>|undefined;
   const activities:string[]=[],sites:string[]=[];
   for(const field of extension.extension??[])switch(field.url){
     case "locale":if(!locale)locale=field;break;
     case "fallbackObject":if(!fallback)fallback=field;break;
     case "implicitMedicationObject":if(!implicit)implicit=field;break;
     case "directSiteObject":if(!direct)direct=field;break;
+    case "directDose":if(!directDose)directDose=field;break;
+    case "administrationDurationPrefix":if(!durationPrefix)durationPrefix=field;break;
+    case "routePhrase": {
+      const route=field.extension?.find(part=>part.url==="route")?.valueCode;
+      const text=field.extension?.find(part=>part.url==="text")?.valueString;
+      if(route!==undefined&&text!==undefined)(routePhrases??={})[route]=text;
+      break;
+    }
     case "suppressActivityConcept":if(field.valueString)activities.push(field.valueString);break;
     case "suppressSiteConcept":if(field.valueString)sites.push(field.valueString);break;
   }
   if(!locale?.valueCode)return undefined;
   return {locale:locale.valueCode,config:{fallbackObject:fallback?.valueString,
     implicitMedicationObject:implicit?.valueBoolean,directSiteObject:direct?.valueBoolean,
+    directDose:directDose?.valueBoolean,routePhrases,administrationDurationPrefix:durationPrefix?.valueString,
     suppressActivityConcepts:activities.length?activities:undefined,suppressSiteConcepts:sites.length?sites:undefined}};
 }
 function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {

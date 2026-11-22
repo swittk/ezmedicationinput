@@ -71,6 +71,7 @@ export function retainDraftSteps(
 function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
   if (!timing) return undefined;
   const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
+  delete (repeat as Record<string, unknown>)._count;
   if (repeat.boundsDuration?.id !== undefined) {
     const { id: _durationId, ...duration } = repeat.boundsDuration;
     repeat.boundsDuration = duration;

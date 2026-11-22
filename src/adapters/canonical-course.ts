@@ -55,6 +55,7 @@ import {
   DOSAGE_CONDITION_R5_URL,
   exactConditionBridgePredicate,
   isRenderedInstructionMarker,
+  hasUnrecognizedEditMetadata,
   retainField,
   readRetainedField,
   encodeR6SourceMetadata,
@@ -1792,6 +1793,8 @@ function administrationToWire(
       const e = priorExtensions[i];
       if (isRenderedInstructionMarker(e) || isCompactSourceAgreementMarker(e)) {
         if (!kept) kept = priorExtensions.slice(0, i);
+        if (hasUnrecognizedEditMetadata(e))
+          kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [e] });
       } else if (kept) kept.push(e);
     }
     if (kept) assign(output, "extension", kept.length ? kept : undefined);

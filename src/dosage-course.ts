@@ -2822,7 +2822,9 @@ export function retainedDoseRateMatches(
         dose: compactProjectionFingerprint({ doseQuantity: simpleQuantityForR5(entry.doseQuantity), doseRange: entry.doseRange }),
         rate: compactProjectionFingerprint({ rateQuantity: simpleQuantityForR5(entry.rateQuantity), rateRange: entry.rateRange, rateRatio: entry.rateRatio }),
       });
-      if (key !== oldProjectionKeys![index]) unchangedProjectionOrder = false;
+      // An established same-position identity owns its own edits; only the
+      // residual anonymous slots need unchanged projected ordering.
+      if (matches.get(index) !== index && key !== oldProjectionKeys![index]) unchangedProjectionOrder = false;
       return key;
     });
     const oldProjected = new Map<string, number>(), liveProjected = new Map<string, number>();
