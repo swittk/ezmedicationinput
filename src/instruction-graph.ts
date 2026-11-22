@@ -3982,7 +3982,9 @@ export function realizeRichPrimaryWithCanonicalDose(
   frame = frameWithCanonicalPrimaryContext(frame, clause);
   if (primaryActionAmountConflicts(frame, clause.dose,
       !clause.dose && clause.sourceProjectionVerified === false))
-    frame = frameWithReconciledAmount(frame, clause.dose);
+    frame = frameWithReconciledAmount(frame, clause.dose, Boolean(
+      clause.instructionGraph && primaryDoseAmountOwner(clause.instructionGraph, clause, options) === sourceFrame
+    ));
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);

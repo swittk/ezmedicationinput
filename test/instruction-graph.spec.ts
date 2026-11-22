@@ -4835,3 +4835,27 @@ it("round43: keeps an exactly verified cleared dose absent in an older saved R5 
   expect(JSON.stringify(parseInstructionGraphExtension(exported[0].extension)))
     .toBe(JSON.stringify(parseInstructionGraphExtension(row.extension)));
 });
+
+
+it.each(["Dissolve 2 tablets in 100 mL solvent", "Dissolve 2 tablets in water at 08:00"])(
+  "round43: retains the current amount at its declared preparation owner: %s", source => {
+    const edited = JSON.parse(JSON.stringify(parsePublicSig(source).fhirNext));
+    edited.step[0].component[0].doseAndRate[0].doseQuantity.value = 3;
+    const before = JSON.stringify(edited);
+    for (const input of [edited, JSON.parse(JSON.stringify(toFhirR5Dosages(edited)))])
+      for (const realizationMode of ["normalized", "roundtrip"] as const)
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text.match(locale === "en" ? /3 tablets/gu : /3 เม็ด/gu)).toHaveLength(1);
+          expect(text).not.toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          if (source.includes("100 mL")) {
+            expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+            expect(text).toContain("solvent");
+          } else {
+            expect(text).toContain(locale === "en" ? "water" : "น้ำ");
+            expect(text).toMatch(/(?:08:00|8:00 am)/u);
+          }
+        }
+    expect(JSON.stringify(edited)).toBe(before);
+  }
+);
