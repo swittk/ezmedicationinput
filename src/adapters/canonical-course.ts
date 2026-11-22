@@ -1507,7 +1507,7 @@ function administrationToWire(
   // authoritative. In particular, a safety-only delta must not hide the
   // original authored condition coding/text on the R5 row.
   const sourceRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
-  const conditionSource = sourceRow?.condition?.length ? sourceRow : source;
+  const conditionSource = sourceRow?.condition !== undefined ? sourceRow : source;
   const sourceCondition = conditionSource ? getDosageCondition(conditionSource as EzDosage) : undefined;
   if (conditionSource?.condition?.length === 0 && output.modifierExtension) {
     const kept: FhirExtension[] = [], retired: FhirExtension[] = [];

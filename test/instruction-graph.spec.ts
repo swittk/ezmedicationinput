@@ -4227,6 +4227,8 @@ describe("round39 independent graph arguments and current conditions", () => {
       expect(en.match(/until clear/gu) ?? []).toHaveLength(endpoint ? 1 : 0);
       expect(th.match(/ก่อนแต่ละครั้ง/gu)).toHaveLength(1);
       expect(th.match(/จนกว่าใส/gu) ?? []).toHaveLength(endpoint ? 1 : 0);
+      expect(en.includes("once daily")).toBe(scheduled);
+      expect(th.includes("วันละครั้ง")).toBe(scheduled);
       if (endpoint) {
         expect(en.indexOf("before each dose")).toBeLessThan(en.indexOf("until clear"));
         expect(th.indexOf("ก่อนแต่ละครั้ง")).toBeLessThan(th.indexOf("จนกว่าใส"));
@@ -4354,4 +4356,32 @@ it("does not revive an externally cleared primary dose while retaining its saved
   expect(JSON.stringify(parseInstructionGraphExtension(component.extension))).toBe(savedGraph);
   expect(parseInstructionGraphExtension(component.extension)!.actions[0].args)
     .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" } }));
+});
+
+
+describe("round40 public graph amount preservation", () => {
+  it.each(["Take with breakfast 1 tablet", "Take 1 tablet with breakfast"])(
+    "keeps medication quantity independent of the temporal WITH daughter: %s", source => {
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" }
+    }));
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Time, normalized: EventTiming.Breakfast
+    }));
+    const graph = parseInstructionGraphExtension([buildInstructionGraphExtension({ sourceText: source, actions: [frame] })!])!;
+    expect(graph.actions[0].args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" }
+    }));
+    expect(parsePublicSig(source).longText).toContain("1 tablet orally with breakfast");
+  });
+
+  it("keeps the measured accompaniment out of the medication Amount", () => {
+    const frame = parseInstructionActions("Take with 200 mL water")[0];
+    expect(frame.args.some(arg => arg.role === AdviceArgumentRole.Amount)).toBe(false);
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Substance, relation: AdviceRelation.With,
+      quantity: { value: 200, unit: "mL" }
+    }));
+  });
 });

@@ -589,6 +589,16 @@ describe("R6 course marker in-memory persistence fidelity", () => {
 
 
 describe("source-less R6 treatment-relative step display", () => {
+  const phaseDose = {
+    en: [
+      /From treatment start until 7 days after treatment start: [^.]*(?:^|[^0-9.])1 tablet at 8:00 am\./u,
+      /^[^:]*: [^.]*(?:^|[^0-9.])2 tablets at 8:00 am\./u
+    ],
+    th: [
+      /ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])1 เม็ด เวลา 08:00\./u,
+      /^[^:]*: [^.]*(?:^|[^0-9.])2 เม็ด เวลา 08:00\./u
+    ]
+  };
   const relative = (days: number) => ({
     contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
       code: "treatment-start" }] },
@@ -631,14 +641,14 @@ describe("source-less R6 treatment-relative step display", () => {
       expect(strictThai).not.toContain("งดยา");
     }
     for (const text of [english, strictEnglish]) {
-      expect(text).toMatch(/From treatment start until 7 days after treatment start: [^.]*(?:^|[^0-9])1 tablet at 8:00 am\./u);
+      expect(text).toMatch(phaseDose.en[0]);
       const second = text.slice(text.indexOf("From " + secondStart + " days after treatment start"));
-      expect(second).toMatch(/^[^:]*: [^.]*(?:^|[^0-9])2 tablets at 8:00 am\./u);
+      expect(second).toMatch(phaseDose.en[1]);
     }
     for (const text of [thai, strictThai]) {
-      expect(text).toMatch(/ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: [^.]*(?:^|[^0-9])1 เม็ด เวลา 08:00\./u);
+      expect(text).toMatch(phaseDose.th[0]);
       const second = text.slice(text.indexOf("ตั้งแต่" + secondStart + " วันหลังเริ่มการรักษา"));
-      expect(second).toMatch(/^[^:]*: [^.]*(?:^|[^0-9])2 เม็ด เวลา 08:00\./u);
+      expect(second).toMatch(phaseDose.th[1]);
     }
     const source = "keep the clinician-authored dosing text exactly";
     const authored = { ...course, renderedInstruction: source };
@@ -647,6 +657,20 @@ describe("source-less R6 treatment-relative step display", () => {
     expect(imported.fhirNext.renderedInstruction).toBe(source);
     const saved = JSON.parse(JSON.stringify(imported.fhir));
     expect(toDosageDetails(saved).renderedInstruction).toBe(source);
+  });
+
+  it.each(["en", "th"] as const)("rejects decimal and multi-digit substitutes with the actual %s phase matchers", locale => {
+    for (const phase of [0, 1]) {
+      const prefix = phase === 0
+        ? locale === "en" ? "From treatment start until 7 days after treatment start: Take "
+          : "ตั้งแต่เริ่มการรักษาจนถึง7 วันหลังเริ่มการรักษา: ใช้ครั้งละ "
+        : locale === "en" ? "From 7 days after treatment start: Take " : "ตั้งแต่7 วันหลังเริ่มการรักษา: ใช้ครั้งละ ";
+      const suffix = locale === "en" ? (phase === 0 ? " tablet" : " tablets") + " at 8:00 am." : " เม็ด เวลา 08:00.";
+      for (const quantity of ["1.2", "2.1", "12", "1", "2"]) {
+        const matches = phaseDose[locale][phase].test(prefix + quantity + suffix);
+        expect(matches, locale + " phase " + phase + " quantity " + quantity).toBe(quantity === String(phase + 1));
+      }
+    }
   });
 });
 
@@ -704,25 +728,21 @@ describe("round38 implicit successor with calendar end", () => {
     for (const input of [course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))]) {
       const english = formatSig(input, "long");
       const thai = formatSig(input, "long", { locale: "th" });
-      expect(english).toContain("1 month after treatment start");
-      expect(english).toMatch(/(?:^|[^0-9])2 tablets once daily\b/u);
-      if (exactPredecessor) {
-        expect(english).toContain("From 7 days after treatment start");
-        expect(english).not.toContain("After the previous phase");
-      } else {
-        expect(english).toContain("After the previous phase; Until 1 month after treatment start");
-        expect(thai).toContain("หลังขั้นตอนก่อนหน้า");
-      }
-      expect(thai).toContain("1 เดือนหลังเริ่มการรักษา");
-      expect(thai).toMatch(/(?:^|[^0-9])2 เม็ด(?:\s|$)/u);
+      const englishStart = exactPredecessor ? "From 7 days after treatment start" : "After the previous phase";
+      const thaiStart = exactPredecessor ? "ตั้งแต่7 วันหลังเริ่มการรักษา" : "หลังขั้นตอนก่อนหน้า";
+      expect(english.indexOf(englishStart)).toBeGreaterThanOrEqual(0);
+      expect(thai.indexOf(thaiStart)).toBeGreaterThanOrEqual(0);
+      const englishSuccessor = english.slice(english.indexOf(englishStart));
+      const thaiSuccessor = thai.slice(thai.indexOf(thaiStart));
+      expect(englishSuccessor).toMatch(exactPredecessor
+        ? /^From 7 days after treatment start until 1 month after treatment start: [^.]*(?:^|[^0-9.])2 tablets once daily\./u
+        : /^After the previous phase; Until 1 month after treatment start: [^.]*(?:^|[^0-9.])2 tablets once daily\./u);
+      expect(thaiSuccessor).toMatch(exactPredecessor
+        ? /^ตั้งแต่7 วันหลังเริ่มการรักษาจนถึง1 เดือนหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])2 เม็ด วันละครั้ง\./u
+        : /^หลังขั้นตอนก่อนหน้า; จนถึง1 เดือนหลังเริ่มการรักษา: [^.]*(?:^|[^0-9.])2 เม็ด วันละครั้ง\./u);
+      if (exactPredecessor) expect(english).not.toContain("After the previous phase");
     }
   });
 
-  it.each(["12 tablets", "12 เม็ด"])("rejects a twelve-unit substitute in the second-phase oracle (%s)", dose => {
-    const expected = dose.includes("tablets") ? /^[^:]*: [^.]*(?:^|[^0-9])2 tablets at 8:00 am\./u
-      : /^[^:]*: [^.]*(?:^|[^0-9])2 เม็ด เวลา 08:00\./u;
-    const clock = dose.includes("tablets") ? " at 8:00 am." : " เวลา 08:00.";
-    expect("Phase: Take " + dose + clock).not.toMatch(expected);
-    expect("Phase: Take " + dose.slice(1) + clock).toMatch(expected);
-  });
+
 });

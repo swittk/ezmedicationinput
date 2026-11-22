@@ -1016,6 +1016,7 @@ interface ActionArgumentParseContext {
   relIndex: number;
   relationTargetEnd: number;
   conditionalTail: boolean;
+  relationTime?: AdviceArgument;
   amount?: AdviceArgument;
   duration?: AdviceArgument;
   separableParticleIndex?: number;
@@ -1082,8 +1083,7 @@ const DEFAULT_ACTION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
   if (typedLocalTime && duration) pushArgument(args, duration);
   else if (relationHasGrammarFeature(relation, "includeDuration") && duration) pushArgument(args, duration);
   else if (relIndex >= 0 && !conditionalTail) {
-    const time = relationHasGrammarFeature(relation, "timeComplement")
-      ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+    const time = c.relationTime;
     const relationDuration = relationHasGrammarFeature(relation, "durationComplement")
       ? parseAnyDurationArgument(parts, relIndex + 1, relationTargetEnd, input, offset)
       : undefined;
@@ -1673,7 +1673,14 @@ function buildActionFrame(
   // flexible word order; other valences may license postdestination amounts
   // too, e.g. Pour into a cup 5 mL.
   const directObjectValence = !definition.argumentParser || definition.argumentParser === "default";
-  const headOwnsAmount = directObjectValence && relationHasGrammarFeature(relation, "accompanimentComplement") ||
+  // Resolve the typed event daughter once, before deciding which complement
+  // owns a quantity. WITH breakfast is temporal; WITH 200 mL water owns its
+  // own amount. The default argument parser reuses this same daughter.
+  const relationTime = directObjectValence && relIndex >= 0 && !conditionalTail &&
+    relationHasGrammarFeature(relation, "timeComplement")
+    ? timeArgumentFromParts(parts, relIndex + 1, relationTargetEnd, input) : undefined;
+  const headOwnsAmount = directObjectValence && !relationTime &&
+      relationHasGrammarFeature(relation, "accompanimentComplement") ||
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
   const amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
@@ -1688,7 +1695,7 @@ function buildActionFrame(
     DEFAULT_ACTION_ARGUMENT_PARSER;
   const parsed = argumentParser({
     definition, parts, actionIndex, argumentStart, segmentEnd, input, offset, options,
-    relation, relIndex, relationTargetEnd, conditionalTail, amount, duration,
+    relation, relIndex, relationTargetEnd, conditionalTail, relationTime, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;

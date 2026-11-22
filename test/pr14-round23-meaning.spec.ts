@@ -1020,7 +1020,8 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     row.timing!.repeat!.when = [EventTiming.Morning];
     for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const text = formatSig(row, "long", { locale, realizationMode });
-      expect(text).toContain(locale === "en" ? "morning" : "ตอนเช้า");
+      expect(text).toBe(locale === "en" ? "Take 1 tablet orally in the morning." :
+        realizationMode === "roundtrip" ? "รับประทาน 1 เม็ด เช้า." : "รับประทานครั้งละ 1 เม็ด ตอนเช้า.");
       expect(text).not.toMatch(/bedtime|sleep|นอน/);
       expect(text.match(locale === "en" ? /1 tablet/g : /1 เม็ด/g)).toHaveLength(1);
     }
@@ -3763,12 +3764,16 @@ describe("round33 complete native amount and cadence previews", () => {
       expect(en).toContain("Calculated dose: 2 mg");
       expect(en).toContain("Ordered dose: 3 mg");
       expect(en).not.toMatch(/(?:Use|Take) (?:2|3) mg/u);
-      expect(th).toContain("ขนาดยาที่คำนวณ: 2 mg");
-      expect(th).toContain("ขนาดยาที่สั่ง: 3 mg");
+      expect(th).toContain(style === "short" ? "ขนาดยาที่คำนวณ: 2 มก" : "ขนาดยาที่คำนวณ: ครั้งละ 2 มิลลิกรัม");
+      expect(th).toContain(style === "short" ? "ขนาดยาที่สั่ง: 3 มก" : "ขนาดยาที่สั่ง: ครั้งละ 3 มิลลิกรัม");
       expect(th).not.toMatch(/ใช้ครั้งละ (?:2|3) /u);
     }
     expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
-    expect(fromFhirDosage(toFhirR5Dosages(raw)[0]).meta.canonical.clauses[0].dose).toBeUndefined();
+    const rows = toFhirR5Dosages(raw);
+    expect(fromFhirDosage(rows[0]).meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(rows[0].doseAndRate?.map(amount => amount.doseQuantity?.unit)).toEqual(["mg", "mg"]);
+    expect(toDosageDetails(rows).step![0].component[0].doseAndRate?.map(amount => amount.doseQuantity?.unit))
+      .toEqual(["mg", "mg"]);
     expect(JSON.stringify(raw)).toBe(before);
   });
   it.each([false, true])("keeps discrete each-target scope and metric totals in either role order (%s)", reverse => {

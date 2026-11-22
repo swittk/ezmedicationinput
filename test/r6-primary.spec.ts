@@ -2767,6 +2767,21 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       typeProfiles: { Quantity: ["http://hl7.org/fhir/StructureDefinition/SimpleQuantity"] } });
     expect(field("Dosage", "Dosage.sequence")).toBeUndefined();
 
+    // Exercise tim-10 on the emitted combination, not just the allowed keys.
+    // One recurrence owns the event-relative opportunity and independent clock.
+    const mixed = toDosageDetails([{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, count: 3,
+        when: [EventTiming["Before Breakfast"]], offset: 30, timeOfDay: ["09:00:00"] } } }]);
+    expect(mixed.step).toHaveLength(1);
+    expect(mixed.step[0].component).toHaveLength(1);
+    const mixedRepeat = mixed.step[0].component[0].timing!.repeat!;
+    expect(Boolean(mixedRepeat.timeOfDay?.length && mixedRepeat.when?.length)).toBe(false);
+    expect(mixedRepeat).toMatchObject({ count: 3, when: [EventTiming["Before Breakfast"]], offset: 30 });
+    expect(getTimingClocks(mixedRepeat)).toEqual(["09:00:00"]);
+    expect(mixedRepeat.extension).toContainEqual({
+      url: "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock", valueTime: "09:00:00",
+    });
+
     const permitted = (name: keyof typeof profiles, parent: string) =>
       new Set(profiles[name].elements
         .filter(entry => entry.path.startsWith(parent + ".") &&

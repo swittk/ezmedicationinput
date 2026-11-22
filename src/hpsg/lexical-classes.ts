@@ -403,7 +403,6 @@ export function isThaiDaypartListSeparator(
     THAI_DAYPART_LIST_SEPARATORS.has(separator.canonical ?? separator.lower) &&
     /[\u0E00-\u0E7F]/u.test(left.original) && /[\u0E00-\u0E7F]/u.test(right.original));
 }
-export const DEVICE_GAUGE_HEADS = setOf(source.deviceGaugeHeads);
 export const MEDICATION_OBJECT_FILLERS = setOf(source.medicationObjectFillers);
 /** Typed resultative adjustment leads; the following cadence owns the new phase. */
 export const PHASE_ADJUSTMENT_LEAD_SEQUENCES =
@@ -476,6 +475,7 @@ export const ACTION_COORDINATION_CONNECTORS = setOf(source.actionCoordinationCon
 /** Closed-class contrast that connects two instructions, not a new action. */
 export const ACTION_DISCOURSE_CONNECTORS = setOf(source.actionDiscourseConnectors);
 /** Compositional phrasal sequencers; single-token THEN remains the relation lexicon's authority. */
+export const TRAILING_PHASE_RELATION_ADVERBS = setOf(source.trailingPhaseRelationAdverbs);
 export const REGIMEN_SEQUENCE_CONNECTOR_PHRASES: readonly (readonly string[])[] =
   source.regimenSequenceConnectorPhrases
     .map(parts => [...parts])

@@ -13358,3 +13358,295 @@ Representative accepted measurements (microseconds per call):
 Reports are retained under ezmed14-round39: master-full.json, master-confirm.json (if required), performance-accepted.json, storage-check.json, null-storage-audit-final.json, consolidation-proof.json and the complete 38-item ledger.json.
 
 The PR remains at 100 changed paths. GitHub access is CLI-only. Delivery targets the existing PR branch with a normal push. Only the 18 original inline threads receive concise commit/test-linked replies and resolution; no top-level comment, private downstream project name or additional full-review request is posted.
+
+
+## 2026-11-22 — PR #14 round 40: refactor scope, preserved behavior and narrower integration
+
+Reviewed commit: `81ab17be01c981a62a26b33d6eb21854d5e9cffb`. Review 6011864663 and overflow comments 7078089171 / 7078089688 contain 53 findings (25 Major, 23 Minor, 5 Trivial), with zero new inline-root discussions. Final dispositions: **16 runtime fixes, nine oracle improvements, one documentation update, one import cleanup, and 26 declines/deferrals**.
+
+The owner's [initial scope correction](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078410416) withdrew catheter/device recognition, ambiguous minute abbreviation and manufactured custom-action collision work. The later [refactor-only directive](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078752389), mirrored in local AgentBoard #38, applies to every current finding. It supersedes the earlier broader acceptance ledger. This PR centralizes established medication SIG semantics and current R5/R6 interoperability; it does not expand English understanding, device specifications or speculative editor histories.
+
+All three named expansions were removed. A final check against actual master additionally found device-specific code inherited from round39: a gauge lexical set/export/import and a next-token lookup in the existing bounded cue scan. It was small extra work, not zero impact, so the hook and its six fixtures were removed across the full PR. Reassessment against actual master deferred **22 more proposed fixes** and removed **50 newly added test cases** tied to them. All unrelated pre-existing test cases remain. The subsequent full-PR device check also removes six unsupported gauge/catheter cases introduced in round39, as explicitly requested by the owner. Pre-existing supported defects are recorded as deferred work, not declared invalid input and not used as merge blockers. No further feature audit or full-review request was started.
+
+The narrower patch retains proven losses of existing behavior and source data, plus preservation required by the requested current-R6 adapter contract. These categories are stated separately below; old R6 representations are not claimed equivalent to the pinned current format. Public-only probes also corrected #34: the apparent translation-edit failure depended on manually stamped internal provenance, while actual public workflows already pass. The entire new tracking path was removed.
+
+The coordinator retains the two-field #15/#17 correction to the already-existing recurrence-copy owner: dropping a recognized ordinal or month-day in the new partial copy fabricates a different executable cadence. No new grammar, recurrence algorithm or inheritance owner is added. Actual master's unresolved combined continuation is not described as a working master scenario.
+
+The existing master at `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb` is merged. The only append conflict in `test/multi-dose-regimen.spec.ts` retains both complete test blocks, including master's existing trailing phase-adverb lexical owner. No earlier investigation was restarted solely because of the handoff.
+
+### Decisions and independent evidence
+
+**#1 — declined: Do not use infusion duration as a recurring dosing period.**
+
+The wrong infusion cadence also exists on actual master. Defer this old timing correction; keep only the independent carrier projection regression in #13. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#2 — declined: Keep the configured realizer on accepted semantic proposals.**
+
+The configured resolver realization-profile omission also occurs on actual master. A documented API does not turn an old defect into a refactor regression. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#3 — declined: Retire the old offset when the core timing field replaces it.**
+
+The offset replace/save/delete behavior is pre-existing. No new edit-history machinery is required by this refactor. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#4 — fix: Keep an explicit R5 condition clear authoritative.**
+
+Requirement: An explicit condition=[] on supported editable R5 must remain a clear even when retained R6 safety is available; absence on strict R5 retains current bridge meaning. Harm: A cleared systolic-BP>140 restriction revives from the old modifier on the next import. Owner: canonical-course.administrationToWire chooses condition source by property presence. Cost: Replaces length check with presence check and reuses existing modifier retirement; no new walks. Preservation: Keeps old condition as inactive source and unrelated4-tablet limit unchanged. Strict R5 absent-condition control still reads active bridge. Oracle: Cleared row has no predicate/active modifier through3 mixed saves; strict row without nativecondition still has the original measurement predicate. Evidence: proven master-relative regression
+
+**#5 — fix: Preserve historical carrier annotations when a compact header has extensions.**
+
+Requirement: Historical R5 carrier source annotations survive combination with a compact course whose active header has its own extension. Harm: Carrier rowID and authored note silently disappear when the compact header overwrites historical extension array. Owner: r5-import.reconcileNativeCompactCourse historical-source collection. Cost: Only mixed historical/compact import collects already-decoded reconciliation children; existing final source buckets deduplicate. Ordinary compact/native path unchanged. Preservation: Compact header remains active; carrier ID/note remain independently under existing source owner. No reconstruction of obsolete R6 wire compatibility. Oracle: One active administration, exact active header annotation, carrier ID and note present across3 R5 saves; original input unchanged. Evidence: requested current interchange preservation parity
+
+**#6 — fix: Keep a text-only carrier inactive when `Dosage.text` gains an annotation.**
+
+Requirement: Dosage._text is standard narrative primitive metadata and cannot make a source-only R5 carrier into a dose. Harm: Adding only a narrative translation invents an active R6 administration. Owner: r5-import.isSourceOnlyCarrier + both existing carrier-source payload owners; FhirDosage._text wire type. Cost: One existing key allowlist branch and one retained optional field; no added scan/parser. Preservation: Retains primitive ID/translation opaquely. A real doseAndRate edit still activates the row. R5 remains shipping storage format. Oracle: Metadata-only carrier stays0stages and retains narrative; adding2tab yields1component. Repeated source saves preserve IDs/translations and input JSON. Evidence: requested current interchange preservation parity
+
+**#7 — fix: Keep a modifier-only safety policy on its original phase.**
+
+Requirement: An independently authored modifier-only induction policy stays scoped to induction when maintenance and a new header modifier are added. Harm: Old induction qualifier is widened to the whole course, affecting maintenance semantics. Owner: r6-editable-metadata.retainedSingleStepSafety existing scope/modifier reconciliation. Cost: Moves policy-survival decision after the already-existing modifier reconciliation. Qualifier-only survival is enabled only when original step had no numeric limits; numeric edited/ambiguous limits keep existing fallback path. Preservation: Surviving qualifier follows unique phase owner; new header qualifier remains course-level; removed qualifier stays removed; unknown modifier fields remain source. Oracle: Both retain/delete controls across3mixed saves assert induction source scope, separate header scope and no maintenance safety. Existing scoped numeric cases retained unchanged. Evidence: requested current R6 scoped-safety preservation parity
+
+**#8 — fix: Keep the planned pause after a Timing annotation edit.**
+
+Requirement: Changing Timing Element/positional annotations alone must preserve count-based stage completion and a retained planned pause. Harm: Timing.id edit moves maintenance fromJan6 toJan3 by dropping the pause. Owner: r6-editable-metadata.sameDraftStageOwnership rare changed-owner comparison. Cost: Two shallow comparison views only when a saved stage changed. Reuses existing structured comparator for event/code/remaining repeat, omits Timing Element metadata and repeat id/_timeOfDay. No second recurrence-field list, deep clone, native parse or ordinary comparison mode. Preservation: Original Timing objects/metadata unchanged. Actual count edits still invalidate old ownership. Unfamiliar repeat-extension changes remain conservative. Oracle: Timing.id,Timing.extension,_event,repeat.id,_timeOfDay controls retain stage lengths[1,0,1] andJan1/2,6/7 at08UTC. count2→3 control removes retained pause. Evidence: requested current R6 timing/preservation parity
+
+**#9 — declined: Do not restore a deleted R5 period-limit annotation.**
+
+The removed Ratio annotation restoration behavior is pre-existing on actual master and both reviewed builds. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#10 — fix: Preserve the leading decimal in an attached cap period.**
+
+Requirement: Attached decimal periods in existing maximum-dose SIG syntax retain their number. Harm: .5h was projected as5hours, altering a real medication cap. Owner: Existing maximumDosePeriodAt attached-number call. Cost: Pass decimal-preserving token surface to existing numeric parser; unit-name normalization unchanged, no new pass. Preservation: 0.5h remains0.5h; authored source and mg numerator unchanged; no conformance unit conversion. Oracle: .5h/.25h/0.5h/0.5 h yield0.5/0.25/0.5/0.5-hour caps through R5/currentR6->R5, independent1mg daily dose unchanged. Evidence: Reviewed81/prior496 both wrong5h; exact master does not recognize attached .5h cap (unsupported there), so do not call master correct/equivalent on that syntax.
+
+**#11 — declined: Do not count a `22 G` catheter size as a medication amount.**
+
+Catheter/device gauge recognition requires extra lexicon and context logic outside the medication SIG scope. All gauge-specific implementation and tests introduced by the PR were removed, including the round39 lexical set, next-token lookup and six device fixtures. No new runtime path or test from this declined finding remains. General medication/rate handling is preserved; six unsupported prior-round device fixtures are deliberately removed under the named owner withdrawal.
+
+**#12 — declined: Preview a source-less R5 expression in default mode.**
+
+Source-less expression preview already returns the generic fallback on actual master. This standalone display improvement is deferred. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#13 — fix: Keep the carrier quantity in the divided-infusion projection.**
+
+Requirement: Existing active medication in carrier infusion construction must retain both quantities when explicitly divided. Harm: Changing representation to scalar dose omitted the separately known carrier/rate on both wire projections. Owner: HPSG mergeDose existing typed preparation division. Cost: Preserve representation and derive the already-present carrier scalar alongside projected drug amount; no new model or projection scans. Preservation: Original total carrier100mL and authored20mg source preserved; per-division10mg/50mL are restored without relabeling units. Pre-existing timing defect is explicitly deferred. Oracle: Existing compound-preparation cases assert10mg active dose,50mL divided carrier with its qualifier, original100mL source numerator and1h rate denominator across native/R5/R6. No new finite-count or cadence interpretation. Evidence: Master retains divided50mL carrier but loses active drug (pre-existing). Reviewed/prior retain10mg active drug but drop the previously retained carrier. Keep narrow carrier-fidelity correction as introduced projection loss; defer the separately pre-existing cadence bug (#1).
+
+**#14 — declined: Do not let a same-day pair pass when the right dose has no clock and the order is unknown.**
+
+The mixed clock/event ordering failure pre-exists, and the proposed change does not establish the complete intended timing. No new grammar interpretation is retained. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#15 — fix: Carry `weekdayOrdinal` into the inherited monthly recurrence.**
+
+Requirement: Onset-only dose continuation inherits the complete recognized recurrence selector. Harm: First Monday became late-month Monday after week5. Owner: src/regimen/regimen.ts scopeSequentialPhaseSemantics recurrence object (review points to grammar, but copying belongs here). Cost: One scalar field in existing inheritance object/loop; no new scan. Preservation: No inheritance of predecessor boundsStart/duration/count; authored ordinal and evidence retained. Oracle: Public first-Monday09:00 THEN fromweek5 returns Feb2,Mar2,Apr6,May4 2026; February supply2tab. Evidence: Round39 partial inheritance regressed unresolved successor to wrong executable monthly cadence; prior/master already lacked executable onset-only recurrence.
+
+**#16 — fix: End the undated OD predecessor at the calendar successor start.**
+
+Requirement: A known calendar successor replaces only its own track's preceding cadence. Harm: Reviewed ISO-date input executes old OD QID plus new OD BID plus OS BID, double treating right eye. Owner: src/regimen/parallel-course.ts partialParallelRegimen; coordinated compile.ts end-only calendarWindow creation by meaning owner. Cost: Existing calendar normalization helper on rare relative-to-calendar track transition; no parser or additional global course walk. Preservation: QID source and absent authored end remain; execution-only endDec4 inclusive; no start invented. Oracle: Public starting2026-12-05 fixture: Dec5 due08/08/20/20,6drops. OS unaffected. Authored2day predecessor leaves gap and Dec4 supply2drops, unbounded predecessor Dec4 supply6. Evidence: Pre-existing PR defect on reviewed/prior; master also mishandled dated parallel continuation (kept old cadence instead of executing correct new one).
+
+**#17 — fix: Carry the month-day selector into the onset-only recurrence.**
+
+Requirement: Day-of-month recurrence must not become daily after onset-only change. Harm: Days1and15 continuation emitted every day. Owner: src/regimen/regimen.ts existing recurrence inheritance. Cost: One existing object field; clone only when this selector is actually inherited, as existing field policy. Preservation: Independent onset28days remains and source recurrence endpoints untouched. Oracle: FromFeb1 successor dueFeb1/15 andMar1/15 at09; February supply4tab. Evidence: Same round39 partial inheritance regression as15; original master feature gap.
+
+**#18 — declined: Custom procedures can replace the built-in `nebulize` action in the right-side procedure check.**
+
+A manufactured custom-action code collision does not justify new identity flags, serialization or planner architecture. All coordinated additions were removed. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#19 — declined: Keep an explicitly attached vehicle when the mixed ingredient is also a `Substance`.**
+
+The configured mixing theme/vehicle omission is also present on actual master. Defer the independent old formatter defect. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#20 — declined: Keep graph-only conditions when canonical fields cover the primary action.**
+
+The graph-only condition omission also occurs on actual master. Defer this unrelated formatter cleanup. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#21 — documentation: Document how R5 consumers read clocks in mixed schedules.**
+
+Requirement: External R5 consumers can recover mixed event and clock timing without a private package getter. Harm: Documentation omitted the active additional-clock bridge used by existing mixed schedules. Owner: README R5 interchange section. Cost: Documentation only; no runtime or new export. Preservation: Keeps current repeat.when plus extension valueTime/_valueTime design. Oracle: Documented with-meals/@10:00 example and exact extension URL. Evidence: Documentation gap, not a new runtime defect.
+
+**#22 — declined: Keep the retained suites independently runnable.**
+
+Keep the accepted test consolidation and existing file budget; no suite split or new files. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#23 — maintenance: Reuse module imports in the preserved test groups.**
+
+Requirement: Reuse module imports while retaining scoped fixture names and every preserved suite body. Harm: Redundant generated import aliases obscure ownership but do not create a clinical bug. Owner: test/canonical-course.spec.ts module imports; retained block scopes stay. Cost: No production runtime effect. Preservation: SHA256 of BEGIN/END PRESERVED followup/language bodies is unchanged; proof saved separately. Oracle: Preserved test bodies were independently checked; the final integrated source/type gate passed 6,332 tests. Retained fixtures still scoped and normal imports resolve same exports. Evidence: Test-only cleanup with no claimed clinical regression.
+
+**#24 — oracle: Assert the reparsed event anchors in the round-trip test.**
+
+Requirement: Built entrypoint round-trip test must prove event identities, not just frequency/site. Harm: A dropped noon anchor could pass previous four-times-daily assertion. Owner: Existing test-dist export test. Cost: Test only. Preservation: Current requested roundtrip mode honored after#48; normalized reparsed preview and original source checked independently. Oracle: Reparsed when exactlyMORN/NOON/EVE/HS plus eye/frequency and Thai normalized preview. Evidence: Oracle improvement; expected roundTripText updated only for deliberate#48 mode behavior, not weakened.
+
+**#25 — declined: Apply a scheduled count range after exclusions.**
+
+Actual master already omits the second eligible administration after an exclusion. This is a real old count-range defect, not an introduced regression. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#26 — fix: Use the effective treatment start when counting recorded doses.**
+
+Requirement: Finite-use history starts after latest applicable order/calendar/count-eligibility boundary. Harm: Pre-order Jan2at09 record spent total count although order was Jan2noon and24h rolling cap expired. Owner: src/execution/engine.ts counted-cap history origin. Cost: Up to2date comparisons in existing counted-cap branch; no extra history walk. Preservation: The authored order/calendar/eligibility boundaries and administration-history records are unchanged. Only records in the existing effective window consume the count. Oracle: Jan2noonorder→Jan3and4; Jan2at08order accepts09record→onlyJan3. All surfaces/supply/source unchanged. Evidence: PR regression: exact master returns2 future doses, reviewed and prior1 for same supported R5 cap-array fixture.
+
+**#27 — declined: Keep lifetime-capped rounding consistent for a single R5 row and its array wrapper.**
+
+Actual master already disagrees between scalar and wrapper rounding after a lifetime cap. Defer the standalone correction. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#28 — declined: Do not complete an infusion phase at the lower end of its duration range.**
+
+Actual master already opens the successor prematurely for a numeric infusion-duration range. Defer this old completion bug. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#29 — declined: Keep the logical cycle date after a gap crosses midnight.**
+
+The cross-midnight DST family is already defective on master; the broad logical-date machinery and adjacent repeated-step seed lack a demonstrated previously correct baseline. All current-round additions and cases were removed. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#30 — declined: Stop flagging independently anchored member starts as missing predecessor context.**
+
+Public-only probes show actual master and reviewed code both reject the removed-predecessor subset. The proposed fix adds acceptance for a newer nested-start representation; no established regression was demonstrated. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#31 — oracle: Assert the current primitive annotation on the R6 clock carrier.**
+
+Requirement: Existing clock edit test must assert ownership of current primitive metadata as well as new clock value. Harm: Coverage gap could allow stale annotation on correct10:00 clock without failing. Owner: Existing round33 current-clock-carrier test outside protected consolidated bodies. Cost: Test-only; one existing find reused for2assertions. Preservation: Production preservation untouched. Oracle: The edited clock is 10:00:00 and its _valueTime equals exactly {id: 'current-clock'} before the carrier is deleted. Evidence: existing-contract coverage only
+
+**#32 — declined: Reconcile stale equality labels on the R6 import path too.**
+
+Direct known comparator-display reconciliation is pre-existing behavior. Only the neutral shared decoder pieces needed by #42 remain. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#33 — fix: Keep an authored repeat-level `_timeOfDay` when an event anchor is added to an unchanged R5 clock bridge.**
+
+Requirement: Adding an event anchor to an unchanged bridge must not delete separately authored R5 repeat._timeOfDay metadata. Harm: Independent narrative/primitive annotation disappears while clock bridge stays active. Owner: fhir.projectTimingClocks unchanged-bridge branch. Cost: Removes deletion; no added walks or allocations. Preservation: Keeps the round39 unchanged R5 metadata-only bridge active, with the independent authored primitive array untouched. Each bridge _valueTime retains its own annotations. No alignment, normalization, storage-schema change or source dropping. Oracle: Adding MORN preserves the exact bridge array and separate primitive annotation. No core timeOfDay is invented; the clock reader still returns 09:00. Original JSON is unchanged. Evidence: proven master-relative preservation regression
+
+**#34 — declined: Compare activity translations in the warm concept proof.**
+
+The original failure depended on manually stamping internal provenance. Real public parser/persistence and public export paths already handle the translation edit on reviewed code. All added observation fields/helpers/guards and tests were removed. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#35 — oracle: Check `tim-10` on the emitted repeat.**
+
+Requirement: The pinned R6 snapshot test must exercise tim-10 on the emitted combined event/clock recurrence, alongside its field-name assertions. Harm: The previous fixture could not detect an illegal combination of individually legal timing fields. Owner: The existing pinned R6 snapshot contract test in test/r6-primary.spec.ts. Cost: Test-only; no runtime FHIR schema filtering. Preservation: One count-three recurrence and one component retain the before-breakfast event, 30-minute offset and independent 09:00 clock. Oracle: No simultaneously populated core when/timeOfDay. Count, event and offset remain unchanged. getTimingClocks returns 09:00 through the existing bridge. Evidence: existing current-R6 contract coverage only
+
+**#36 — declined: Do not give a missing dose-range unit to both endpoints.**
+
+Actual master already uses a known endpoint unit in the compact display while preserving raw independent endpoints. The new unspecified-unit display and compact-metadata behavior are deferred; all inherited assertions restored. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#37 — declined: Keep the minute duration in `over about 30 m` infusions.**
+
+Ambiguous 30 m does not authorize interpreting m as minutes. No abbreviation expansion retained. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#38 — declined: Do not bypass R6 draft restoration for a text-bearing header.**
+
+Actual master also omits incomplete draft policy from this preview. No new draft-display requirement retained. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#39 — declined: Keep restored stage policy in `formatParseBatch`.**
+
+No distinct supported master regression was established for the incomplete draft batch preview. The extra stage lookup and its later fast-path optimization are both removed. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#40 — oracle: Assert the authored endpoint codes and IDs after each projection.**
+
+Requirement: Authored independent duration range endpoints retain values, units, codes and IDs on every projection. Harm: Old assertions could miss source ID/code loss or unit normalization. Owner: Existing HPSG clinical-quantity range projection test. Cost: Test only. Preservation: No conversions; original mixed90min/2h, comparative and open endpoints retained. Oracle: Original endpoint value/unit/code/id checked in compact/native/R6/R5 across3cycles; operators checked semantically. Evidence: Oracle strengthening; no additional production change required.
+
+**#41 — declined: Render a bare mixing quantity without repeating its unit.**
+
+Quantity-only mixing unit duplication is also present on actual master. Defer the standalone formatter correction. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#42 — fix: Preserve FHIR annotations on a graph quantity comparator.**
+
+Requirement: Persisted instruction-graph quantity operator annotations survive decode and rebuild. Harm: The EMA comparator survives, but Coding.id, _code and Extension.id disappear. Owner: Typed AdviceArgument.quantity.comparatorExtensions; the existing graph quantity-child walk and common quantityFromWire/simpleQuantityForR5 boundaries. Cost: Collects operator/source markers during the existing graph walk. Only annotated operators retain source metadata. The shared decoder consumes exact generated markers, preserving ordinary graph shape without a new cache or compatibility layer. Preservation: Original coding, primitive and wrapper metadata stays opaque; the current comparator owns meaning. Fresh generated operators keep their prior wire/native shape. Oracle: Three external graph saves preserve the exact annotated operator. A current code edit from <= to >= changes meaning. An ordinary generated operator parses back to the original quantity. Evidence: requested current graph/FHIR preservation parity
+
+**#43 — oracle: Check that the scheduled dilution case retains its daily cadence.**
+
+Requirement: A saved scheduled procedural action must retain its once-daily cadence alongside every adjunct. Harm: Existing fixture could pass while daily administration cadence disappeared. Owner: Existing dilution adjunct test in instruction-graph.spec.ts. Cost: No production change. Preservation: Original graph/wire fixtureandadjunct oracles remain. Oracle: Scheduled EN contains once daily/THวันละครั้ง; unscheduled controls do not; beforeeachdose/untilclear/order checks remain. Evidence: Coverage-only. No new production failure claimed; allthree strengthening rows pass.
+
+**#44 — fix: Keep the medication amount when `with` introduces a time.**
+
+Requirement: WITH meal/event daughters must not bound off a later medication Amount; quantified accompaniment still owns its own amount. Harm: Public parseInstructionActions(Take with breakfast1tablet) losttypedAmount while postposedmealretainedit. Whole-parser preview independentlycorrect beforefix; claim limited to publicgraph contract. Owner: buildActionFrame existing direct-object valence, sharing precomputed temporal daughter with default argument parser. Cost: Move the existing time-daughter resolution before amount ownership and reuseit; no repeated timing scan or separateparser. Preservation: Authored amount spans and temporal relation retained, no dose created for200mLwateraccompaniment. Oracle: Pre/postmealframes bothcontainAmount1tab+TimeCM and survivegraphFHIR; Takewith200mLwater containsSubstance200mL andnoAmount. Evidence: CORRECTED from raw saved probe: exact master7d62823 parseInstructionActions(Take with breakfast 1 tablet) contains Amount {value:1,unit:tab}; reviewed81ab and prior496 omit it. Whole parseSig preview stays correct on all three. Retained scope is introduced loss in existing public graph API, using the same temporal daughter once; no new English grammar rule.
+
+**#45 — declined: Keep administration duration in the long preview when the graph-only exit applies.**
+
+Graph-only administration-duration omission is pre-existing on actual master. No new scenario or display correction retained. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#46 — declined: Keep event-window-only directions in long previews.**
+
+Event-window-only long-preview omission is pre-existing on actual master. Defer the standalone correction. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#47 — declined: Show the application-site count for locative sites.**
+
+English locative site-count omission is pre-existing on actual master. Defer the standalone correction. No new runtime path or test from this declined finding remains. Existing source values and pre-round behavior are retained; the saved baseline comparison is evidence for deferral, not a new acceptance requirement.
+
+**#48 — fix: Honor roundtrip formatting without replaying stale R6 text.**
+
+Requirement: Requested roundtrip generation mode is independent of eligibility to replay source text. Harm: Source-less structuredR6 forcednormalizedmode, hidingcallerselectedattachment-safe wording/callback behavior; removingoverride requireslive source-rejection toreachbothcourseandcomponent. Owner: Canonical source shortcut gates in format-course.ts; coordinated index.ts ownerpropagates knownfalse tocourse+administration, keepsmode. Cost: Remove options cloning/forcedmode and replacewithconstant provenancechecks. Course factscanonlyneededwhenactualtextfallbackcouldapply. Preservation: Saved course/component wording retained inwire; currentstructuredfieldsgoverndisplay; text-onlyfallbackstillused. Oracle: Customlocale seesroundtrip forsource-lessandstale-textR6 course/component/formatSig; text-onlydirections retained. Existing warmedBP160→180 regression passes aftercourseproofpropagation; existingrate-rangefixtures pass. Evidence: Reviewedandpriorcallback receive normalized2; exactmaster receivesroundtrip2 onthecommon structured-dose fixture. OldR6identitynotgenerallyequivalent, butcallbackmodecontractis directlycomparable.
+
+**#49 — fix: Localize labelled doses that have no per-target scope.**
+
+Requirement: Labelled scalar doses use existing dose-localization hook even without a per-target scope. Harm: Ordered1tab inThaiusedrawtab instead ofknownThaiเม็ดunit. Owner: formatCanonicalBase labelledscalarbranch invokesexistingformatDose withundefinedscope asappropriate. Cost: Oneexistinglabelledamountloop; scalarobject/hook onlyforalreadylabelleddoses. No new repeatedwalk. Preservation: Authoredunitandrole remainwireunchanged; displayedknownunit localized; metric totalsneverassignedper-targetscope. Oracle: Orderedoral1tab yieldsThaiขนาดยาที่สั่ง…1เม็ด andENOrdered dose1tablet acrossR6/coldR5; labelleddrop/metriccontrol retained. Evidence: Required parity in the requested current-R6 labelled-amount projection: master localizes the scalar but drops its role. Reuse the existing scalar locale hook while retaining the role; old R6 output is not an equivalent oracle.
+
+**#50 — oracle: Assert the complete set of active month-day extensions.**
+
+Requirement: Editedmonth-day output contains exactlyone active day15 extension, notold1plusnew15. Harm: Containment-only assertion could permit obsolete recurringdates toremainactive. Owner: Existingcanonicalcalendareditfixture in canonical-course.spec.ts; executionownsrecurrencedata. Cost: No production change. Preservation: Keepunrecognizedextensionandoriginalday1sourceimmutability assertions; schedulingdatesretained. Oracle: FilteronlyTIMING_DAY_OF_MONTH URL andexactarray[{day15}], plus existingexpectedNov15/Dec15andunknownextensionretention. Evidence: Coverage-only; strengthenedfixturepasses; no new calendar source fix required for#50.
+
+**#51 — oracle: Add the label to the discrete dose fixture.**
+
+Requirement: A role-labelled per-target drop range must actuallyexercisean orderedrole besidea metric total. Harm: Existing testname promisedlabelledcasebutfixturehadnone, leaving role path untested. Owner: Existing canonical discrete-range/metric-total fixture. Cost: No production change beyondindependent#49scalarfix. Preservation: Onlydrop-range amount receivesorderedCodeSystemrole; metricentrystaysunlabelledtotal. Oracle: ENOrdered dose1to2drops(per administration target), independentDose1mLwithoutperscope; Thaiorderedlabel+per-target drops, no1mLper-target, acrossR6+coldR5. Evidence: Coverage-only. Role-specific fixture nowrunsrealbranch; alloraclespass.
+
+**#52 — oracle: Check the one-month end on the two-tablet phase.**
+
+Requirement: The one-month end and two-tablet dose must belong to the same successor phase. Harm: Independent substring assertions accepted the end on the wrong phase. Owner: Existing real-world clinical-oracle file. Cost: Test only. Preservation: Exact start and unknown predecessor-dependent wording kept in both locales. Oracle: One contiguous successor sentence contains its exact/predecessor-relative start, one-month end and2tablet daily dose in EN/TH. Evidence: Oracle strengthening; current production passes.
+
+**#53 — oracle: Make the phase dose assertions reject decimal substitutes.**
+
+Requirement: Actual phase-dose matchers must reject decimal/multi-digit substitutes. Harm: Old regex accepted1.2 as2 through a decimal-point boundary. Owner: Same phase matchers in existing real-world clinical-oracle file. Cost: Test only. Preservation: Both original source-less stage cases and both locales retained. Oracle: Same matcher objects used by real clinical assertions and controls1.2,2.1,12,1,2 for both phases/locales. Evidence: Oracle defect demonstrated by regex; current rendered clinical outputs unchanged.
+
+### Integration and preservation
+
+Five of the six protected consolidated test blocks are byte-identical to reviewed HEAD. The remaining meaning21 block contains only the retained #49 style-specific localization assertions and exact R5/R6 wire-unit checks; its case count and type-error assertions are unchanged, with expectations increasing from 226 to 228. Every #36 protected assertion amendment was restored. The independent proof is retained as ezmed14-round40-consolidation-proof.json.
+
+The earlier full run exposed five meaning-integration failures on the broader candidate. Those results are historical. The now-deferred mixing helper and independent-unit display changes are fully removed. The requested #48 roundtrip mode and #49 scalar localization checks remain. Fresh correctness, build, storage and timing evidence applies only to the final narrower source.
+
+The first completed timing comparison of the broader candidate reproduced R5 English formatting at +4.466% and staged-batch formatting at +11.065% against master. No small-cost or average-performance waiver was used. The #34 translation-tracking and #39 extra batch-stage paths, including their temporary optimizations, are now entirely removed because the underlying findings failed the stricter scope gate. Those rejected timing reports remain preserved; the final comparison is rebuilt and rerun.
+
+### Validation on the final frozen candidate
+
+The scratch storage probe also contained the withdrawn gauge-infusion fixture. It was removed with the named device scope; the final retained suite has 38 attempts, 37 preserved round trips and the same one pre-existing raw-null consumer limitation. No performance scenario or exclusion changed.
+
+Final validation figures are appended from the fresh source/build/storage reports, followed by the exact-master performance evidence. .fhir remains the shipping R5 output; .fhirNext and the dedicated import follow the pinned current R6 contract. Existing application/database storage code is unchanged. No automatic conversion, trimming or native compatibility framework is introduced.
+
+
+- **6,332 source tests in 48 files passed**, including strict ES6 type checking.
+- **Four distribution tests passed** after ESM, CommonJS and declaration builds.
+- **37 actual R5 converter/storage save-reopen round trips passed** with complete JSON equality.
+- The remaining attempted input retains the established raw core timeOfDay null consumer limitation, also present on actual master and earlier builds. It was not trimmed or normalized to manufacture a pass.
+- The original Thai parallel instruction remains two shipping R5 rows; the English taper remains four.
+- The PR remains at **100 changed paths**, with no new repository files this round.
+- Local AgentBoard thread27 received a corrective supplement and scope updates; the original handoff messages were not reposted.
+
+
+Source SHA-256: 361d864ab3f166305fe370637dcd45d20db0c6bb213a4755e8592f930b4114f7. Built ESM SHA-256: f605d10a4e70feb21da491be5f8a2475c0947bc9379b499291fd15b6dffa2452. Exact-master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
+
+### Performance and delivery
+
+The final exact-master comparison covers **117/117 public functions**, **181 paired scenarios**, and **174 equivalent scenarios**, all meeting the **4% per-scenario ceiling**. The same seven established non-equivalent cases remain visible. Six candidate-only APIs have seven separate measurements; no scenario was newly excluded.
+
+The first timed attempt was stopped after its clinical oracle rejected the valid requested Thai roundtrip phrase `หยอด 2 หยด ที่ตาขวา`. The oracle allowed a direct right-eye noun but omitted the existing locative `ที่`. Only that optional locative was added. Twelve positive/negative controls verify correct two-drop/right-eye phrases and reject wrong doses, decimal substitutes, missing/wrong eyes, negation and duplicate doses. A complete 181-scenario precheck passes with the same seven non-equivalent cases. This is an explicitly recorded oracle amendment, not a timing change or a new exclusion.
+
+The complete timing run was restarted on the frozen corrected oracle. The measurement algorithm, scenario definitions and 4% threshold are byte-identical. It uses 22 balanced paired rounds at 35 ms per batch; any initial flags receive 72 balanced paired rounds at 140 ms with reversed first order on the same frozen artifacts. Percentages are median-log paired ratios, not ratios of separately aggregated medians; APIs and scenarios are not averaged together. The existing 16 statistical controls remain applicable to the unchanged measurement code.
+
+Harness SHA-256: 10aae1e96f04edeefdd53471f1508998897f30ce34e99d7ab042fa97d109f1fb (git blob 42a4c7b898a778a092be550cd454d6bf39041879). Previous harness SHA-256: 68eff00076248fe44cbe7e211d00570e3e002c91d4fde0942bbbc1b654d49d95. The exact one-line oracle amendment and controls are retained with the reports.
+
+Highest accepted equivalent-scenario change: **+3.848%**, for `buildSnomedFindingSiteCoding`.
+
+| Initially flagged scenario | First paired change | Confirmation paired change |
+|---|---:|---:|
+| formatSig/R5/en | +18.876% | -4.936% |
+| parseStrength | +9.939% | +0.341% |
+| findSymptomDefinitionByCoding | +4.900% | -2.403% |
+| registerMedicationLexerLocalePack | +6.898% | +3.128% |
+
+Representative accepted measurements (microseconds per call):
+
+| Scenario | Master us | Candidate us | Paired change |
+|---|---:|---:|---:|
+| parseSig/ordinary | 1735.755 | 1703.030 | -2.429% |
+| parseSig/thai | 7269.531 | 6769.331 | -9.369% |
+| parseSig/eye | 7554.421 | 7634.500 | +1.856% |
+| parseSig/staged | 10671.316 | 10696.966 | +0.147% |
+| formatSig/R5/en | 16.395 | 15.065 | -4.936% |
+| formatSig/R6/en | 26.722 | 23.967 | -11.854% |
+| fromFhirDosage/en | 20.727 | 21.489 | +2.167% |
+| fromFhirDosage/th | 41.752 | 39.049 | -6.177% |
+| calculateTotalUnits/scalar | 325.002 | 44.344 | -86.397% |
+
+All 53 dispositions and gate evidence are retained under ezmed14-round40: ledger.json, source-final.log, dist-final.log, storage-check.json, consolidation-proof.json, benchmark-oracle-amendment.json, benchmark-oracle-controls.json, master-full.json, master-confirm.json (when needed), and performance-accepted.json.
+
+Delivery completes the existing master merge and uses a normal push to the existing PR branch. GitHub access is CLI-only. This review has no new inline roots; no replacement top-level comment or full-review request is created. The local AgentBoard thread carries the handoff and scope state.

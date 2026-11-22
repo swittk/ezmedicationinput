@@ -660,6 +660,8 @@ export interface FhirDosage extends FhirBackboneElement {
   /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */
   sequence?: number;
   text?: string;
+  /** Primitive metadata belongs to the authored narrative, not a new dose. */
+  _text?: FhirPrimitiveElement;
   patientInstruction?: string;
   timing?: FhirTiming;
   route?: FhirCodeableConcept;
@@ -965,6 +967,8 @@ export interface AdviceArgument {
     unit?: string;
     /** Authored qualifier follows this amount through graph matching and FHIR. */
     comparator?: FhirR6Quantity["comparator"];
+    /** Original wire operator annotations; the current comparator owns meaning. */
+    comparatorExtensions?: FhirExtension[];
   };
   span?: TextRange;
 }

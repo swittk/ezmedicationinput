@@ -176,14 +176,17 @@ describe("published package entrypoints", () => {
           originalInstruction: parsed.fhirNext.renderedInstruction,
           roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
           roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
+          roundTripAnchors: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.when,
           longText: reparsed.longText
         }));
       `
     );
-    expect(result.roundTripText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
+    expect(result.roundTripText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
     expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);
+    expect(result.roundTripAnchors).toEqual(["MORN", "NOON", "EVE", "HS"]);
+    expect(result.longText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
   });
 
 });

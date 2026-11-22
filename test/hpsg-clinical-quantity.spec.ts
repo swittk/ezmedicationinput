@@ -2350,11 +2350,18 @@ describe("round35 quantity ownership and lexical neighbors", () => {
     expect(clause.dose?.comparator).toBe(doseComparator);
     expect(clause.clinicalQuantity?.projectedDose).toEqual({ value: 10, unit: "mg",
       ...(doseComparator ? { comparator: doseComparator } : {}) });
-    expect(clause.clinicalQuantity?.rateNumerator).toEqual({ value: 100, unit: "mL",
+    expect(clause.clinicalQuantity?.rateNumerator).toEqual({ value: 50, unit: "mL",
       ...(carrierComparator ? { comparator: carrierComparator } : {}) });
-    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0]]) {
+    expect(clause.clinicalQuantity?.numerator).toMatchObject({ value: 100, unit: "mL" });
+    expect(clause.clinicalQuantity?.numerator.comparator).toBe(carrierComparator);
+    expect(parsed.fhirNext.renderedInstruction).toBe("Infuse " + amount + " over 1 hour in 2 divided doses");
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 10, unit: "mg" });
       expect(getQuantityComparator(row.doseAndRate?.[0].doseQuantity)).toBe(doseComparator);
+      expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+        numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
+      });
+      expect(getQuantityComparator(row.doseAndRate?.[0].rateRatio?.numerator)).toBe(carrierComparator);
     }
   });
 
@@ -2657,10 +2664,28 @@ describe("round38 independent occurrence duration endpoints", () => {
       expect(clause.schedule?.administrationDurationRange?.low?.value).toBe(low?.value);
       expect(clause.schedule?.administrationDurationRange?.high?.value).toBe(high?.value);
       const detail = toDosageDetails([row]);
+      const r6Range = detail.step[0].component[0].timing?.repeat?.extension?.find(
+        item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueRange;
+      for (const side of ["low", "high"] as const) {
+        const authored = side === "low" ? low : high;
+        const original = authored ? { value: authored.value, unit: authored.unit, code: authored.code, id: side } : undefined;
+        for (const projected of [clause.schedule?.administrationDurationRange?.[side], r6Range?.[side]]) {
+          if (original) expect(projected).toMatchObject(original);
+          else expect(projected).toBeUndefined();
+          expect(getQuantityComparator(projected)).toBe(authored && "comparator" in authored ? authored.comparator : undefined);
+        }
+      }
       for (const input of [[row], detail]) {
         const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!;
         expect(recurrence.occurrenceDurationRange?.low?.value).toBe(low?.value);
         expect(recurrence.occurrenceDurationRange?.high?.value).toBe(high?.value);
+        for (const side of ["low", "high"] as const) {
+          const authored = side === "low" ? low : high;
+          const endpoint = recurrence.occurrenceDurationRange?.[side];
+          if (authored) expect(endpoint).toMatchObject({ value: authored.value, unit: authored.unit, code: authored.code, id: side });
+          else expect(endpoint).toBeUndefined();
+          expect(getQuantityComparator(endpoint)).toBe(authored && "comparator" in authored ? authored.comparator : undefined);
+        }
         expect(recurrence.occurrenceDuration).toBeUndefined();
         const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
         const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
@@ -2675,8 +2700,8 @@ describe("round38 independent occurrence duration endpoints", () => {
       const range = written.timing?.repeat?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueRange;
       for (const side of ["low", "high"] as const) {
         const expected = side === "low" ? low : high;
-        expect(range?.[side]?.value).toBe(expected?.value);
-        expect(range?.[side]?.unit).toBe(expected?.unit);
+        if (expected) expect(range?.[side]).toMatchObject({ value: expected.value, unit: expected.unit, code: expected.code, id: side });
+        else expect(range?.[side]).toBeUndefined();
         expect(getQuantityComparator(range?.[side])).toBe(expected && "comparator" in expected ? expected.comparator : undefined);
       }
       const clauseWritten = canonicalToFhir(clause);
@@ -2718,7 +2743,7 @@ it("keeps an explicitly added upper duration endpoint with its authored unit and
 });
 
 
-describe("round39 independent delimiters, device sizes and annotated durations", () => {
+describe("round39 independent delimiters and annotated durations", () => {
   it.each(["", " ", "\n        ", "\t\t"])(
     "keeps the spaced maximum period after an independent delimiter (%j)", indent => {
       const parsed = parsePublicSig("Take 1 tablet in the morning;" + indent +
@@ -2746,21 +2771,6 @@ describe("round39 independent delimiters, device sizes and annotated durations",
     expect(parsed.fhir[1].timing?.repeat?.when).toEqual(["EVE"]);
   });
 
-  it.each(["Infuse via a 22 gauge IV catheter", "Run via an 18 gauge IV catheter",
-    "Administer via an 18 gauge IV catheter", "Infuse via a 22 gauge peripheral IV catheter",
-    "Infuse via a 22 gauge peripheral IV catheter at", "Infuse via an IV catheter"])("keeps a device size out of the dose in %s", lead => {
-      const source = lead + " 100 mL/hr";
-      const parsed = parsePublicSig(source);
-      const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
-      for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
-        reopened.step[0].component[0]]) {
-        expect(row.doseAndRate).toHaveLength(1);
-        expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
-        expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
-        expect(row.doseAndRate?.[0].doseRange).toBeUndefined();
-      }
-      expect(parsed.input).toBe(source);
-    });
 
   it.each(["min", "min{infusion}", "min{infusion}{pump}"])(
     "interprets %s without rewriting the authored duration", code => {
@@ -2802,4 +2812,22 @@ describe("round39 independent delimiters, device sizes and annotated durations",
           item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueQuantity).toEqual(duration);
       }
     });
+});
+
+
+describe("round40 supported decimal dose periods", () => {
+  it.each([[".5h", 0.5], [".25h", 0.25], ["0.5h", 0.5], ["0.5 h", 0.5]] as const)(
+    "retains the exact attached cap period %s", (period, value) => {
+      const input = "Take 1 mg daily, max 2 mg per " + period;
+      const parsed = parsePublicSig(input);
+      expect(parsed.fhirNext.renderedInstruction).toBe(input);
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "mg" });
+        expect(row.maxDosePerPeriod?.[0]).toMatchObject({
+          numerator: { value: 2, unit: "mg" }, denominator: { value, unit: "h", code: "h" }
+        });
+        expect(row.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      }
+    });
+
 });

@@ -571,7 +571,7 @@ function completeThaiDose(output, action, unit, expected, requiredSite) {
   // Accept that complete prefix, never an arbitrary substring after a negator.
   const preparation = action === "หยอด" ? "ล้างมือก่อนหยอดตา" : "ผสมน้ำ";
   const lead = "^\\s*(?:" + preparation + "\\s*(?:[.;,]\\s*|จากนั้น\\s*|แล้ว\\s*)?)?";
-  const siteAfter = action === "หยอด" ? "(?:\\s*ตาขวา)?" : "";
+  const siteAfter = action === "หยอด" ? "(?:\\s*(?:ที่)?ตาขวา)?" : "";
   const phrase = new RegExp(lead + verb + "\\s*(?:ครั้งละ\\s*)?" +
     number + "\\s*" + unit + siteAfter + "(?=$|[\\s.;,])", "u").exec(output);
   const quantities = [...output.matchAll(new RegExp("(?<![\\d.])" + number +

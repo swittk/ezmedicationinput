@@ -125,6 +125,28 @@ leaves the relation unresolved.
 The existing R5 course metadata preserves this boundary and its annotations
 through saves. Patient-facing wording comes from the course language facet.
 
+### R5 clocks alongside event-based timing
+
+For mixed schedules such as `1 tab with meals and @ 10:00`, the R5
+`Timing.repeat.when` retains the meal event. Additional clocks are stored in
+`Timing.repeat.extension` under
+`urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock`.
+Read each matching extension's `valueTime`; `_valueTime` holds its optional
+primitive metadata. Do not rely only on `repeat.timeOfDay` to recover clocks
+from a mixed R5 schedule.
+
+```json
+{
+  "repeat": {
+    "when": ["C"],
+    "extension": [{
+      "url": "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock",
+      "valueTime": "10:00:00"
+    }]
+  }
+}
+```
+
 ### Internal native clinical model (unstable)
 
 **INTERNAL USE ONLY — NOT A BACKWARD-COMPATIBLE API OR PERSISTENCE FORMAT.**

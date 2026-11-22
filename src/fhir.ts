@@ -390,7 +390,8 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
     // The native writer supplied timeOfDay temporarily for projection.
     const output = { ...repeat };
     delete output.timeOfDay;
-    if (mixed) delete output._timeOfDay;
+    // With no authored core clock array, _timeOfDay is independent source
+    // metadata; the unchanged bridge owns only its own _valueTime annotations.
     return output;
   }
   if (markers) kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });

@@ -4018,8 +4018,11 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const requestedFrom = coerceDate(options.from, "from");
     const zone = options.timeZone ?? options.config?.timeZone;
     if (!zone) throw new Error("A timeZone is required for counted capped scheduling");
-    const origin = eligibleAt ?? resolveRepeatBoundsStart(repeatForCount, zone) ??
-      (options.orderedAt === undefined ? requestedFrom : coerceDate(options.orderedAt, "orderedAt"));
+    let origin = options.orderedAt === undefined ? undefined : coerceDate(options.orderedAt, "orderedAt");
+    const calendarStart = resolveRepeatBoundsStart(repeatForCount, zone);
+    if (calendarStart && (!origin || calendarStart > origin)) origin = calendarStart;
+    if (eligibleAt && (!origin || eligibleAt > origin)) origin = eligibleAt;
+    origin ??= requestedFrom;
     let used = options.priorCount ?? 0;
     let countedActualTimes: Set<number> | undefined;
     if (options.priorCount === undefined) {

@@ -299,8 +299,10 @@ export function courseFromPartialParallel(
         if (phase.phaseEnd) a.phaseEnd = phase.phaseEnd;
         // Keep the authored clause in syntax; only this owned execution window
         // receives the calendar end inferred within its independent track.
-        const calendar = a.schedule?.recurrence?.calendarWindow;
-        if (calendar && item.effectiveBoundsEnd) calendar.end = item.effectiveBoundsEnd;
+        if (item.effectiveBoundsEnd) {
+          const recurrence = (a.schedule ??= {}).recurrence ??= {};
+          (recurrence.calendarWindow ??= {}).end = item.effectiveBoundsEnd;
+        }
         if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
         else if (a.onsetReference === "previous-phase-next-day" && index > 0) {
           a.phaseStart = boundaryForOnset(a);

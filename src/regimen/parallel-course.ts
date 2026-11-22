@@ -237,6 +237,15 @@ function partialParallelRegimen(
           clauses[member].schedule?.boundsStart));
         if (typeof normalized !== "string") members = normalized;
       }
+      // A dated successor also closes an undated predecessor on this track.
+      // Retain its relative origin and authored duration; only the execution
+      // end is inferred, using the same calendar cutoff as dated predecessors.
+      if (calendar && index > 0 && phases[index - 1].kind === "relative") {
+        const previous = phases[index - 1];
+        const normalized = calendarPhaseMembers(previous.members,
+          members.map(item => item.clause.schedule?.boundsStart));
+        if (typeof normalized !== "string") previous.members = normalized;
+      }
       const first = members[0] && durationPosition(members[0].clause);
       const exact = first && members.every(item => {
         const duration = durationPosition(item.clause);

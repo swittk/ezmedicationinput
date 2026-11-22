@@ -1152,7 +1152,8 @@ export function formatSig(
     // fingerprint. Carry that already-known result into the generated view.
     const administration = course.stages[0]?.administrations[0];
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
-    return formatCanonicalCourse(course, style, { ...options, realizationMode: "normalized" });
+    (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
+    return formatCanonicalCourse(course, style, options ?? {});
   }
   if (needsNativeR5Preview(dosage, options))
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style, options ?? {});

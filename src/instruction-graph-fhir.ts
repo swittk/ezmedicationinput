@@ -1,4 +1,4 @@
-import { getQuantityComparator, simpleQuantityForR5 } from "./fhir-quantity-operator";
+import { quantityFromWire, simpleQuantityForR5, EMA_QUANTITY_COMPARATOR_EXTENSION_URL, QUANTITY_OPERATOR_SOURCE_URL } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -144,8 +144,9 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     add(quantity, valueString("unit", argument.quantity.unit));
     // Use the published EMA Coding for an operator, not a private graph code.
     // Exact graph quantities keep their existing wire shape.
-    if (argument.quantity.comparator) quantity.push(
-      ...(simpleQuantityForR5({ comparator: argument.quantity.comparator })?.extension ?? [])
+    if (argument.quantity.comparator || argument.quantity.comparatorExtensions?.length) quantity.push(
+      ...(simpleQuantityForR5({ comparator: argument.quantity.comparator,
+        extension: argument.quantity.comparatorExtensions })?.extension ?? [])
     );
     nested.push({ url: "quantity", extension: quantity });
   }
@@ -328,15 +329,20 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
   if(quantity){
     let value:FhirExtension|undefined,low:FhirExtension|undefined,high:FhirExtension|undefined,unit:FhirExtension|undefined;
+    let comparatorExtensions:FhirExtension[]|undefined;
     for(const field of quantity.extension??[])switch(field.url){
       case "value":if(!value)value=field;break;case "low":if(!low)low=field;break;
       case "high":if(!high)high=field;break;case "unit":if(!unit)unit=field;break;
+      case EMA_QUANTITY_COMPARATOR_EXTENSION_URL:case QUANTITY_OPERATOR_SOURCE_URL:
+        (comparatorExtensions??=[]).push(field);break;
     }
     const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;
-    const comparator=getQuantityComparator(quantity);
-    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined)
+    const current=comparatorExtensions?quantityFromWire({extension:comparatorExtensions}):undefined;
+    const comparator=current?.comparator;
+    comparatorExtensions=current?.extension;
+    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorExtensions?.length)
       result.quantity={value:amount,range:lower!==undefined||upper!==undefined?{low:lower,high:upper}:undefined,
-        unit:units,...(comparator?{comparator}:{})};
+        unit:units,...(comparator?{comparator}:{}),...(comparatorExtensions?{comparatorExtensions}:{})};
   }
   if(i18n)result.i18n=i18n;
   return result;

@@ -1244,7 +1244,6 @@
       "เหลือ"
     ]
   ],
-  "deviceGaugeHeads": ["gauge"],
   "medicationObjectFillers": [
     "medication",
     "medicine",
@@ -2313,6 +2312,11 @@
       "เพิ่ม",
       "additional"
     ]
+  ],
+  "trailingPhaseRelationAdverbs": [
+    "afterwards",
+    "thereafter",
+    "subsequently"
   ],
   "openEndedContinuationTokens": [
     "thereafter",

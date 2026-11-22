@@ -545,7 +545,8 @@ function formatCanonicalBase(
     a.siteReference ||
     a.excludedDates?.length ||
     a.excludedWeekdays?.length;
-  if (options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
+  if (source.provenance?.format !== "r6" && source.provenance?.sourceTextVerified !== false &&
+      options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
       a.text?.trim() && (maxima || rich)) return a.text;
   // A structured import already built this exact scoped clause for item
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
@@ -598,9 +599,10 @@ function formatCanonicalBase(
       const unit = amount.quantity.unit ?? getDoseQuantityUnit(amount.quantity);
       const fallback = (amount.quantity.value === undefined ? words.unspecified
         : (getQuantityComparator(amount.quantity) ?? "") + amount.quantity.value) + (unit ? " " + unit : "");
-      const dose = targetScope && amount.quantity.value !== undefined
+      const dose = amount.quantity.value !== undefined
         ? { value: amount.quantity.value, unit, comparator: getQuantityComparator(amount.quantity) } : fallback;
-      ranges.push(amountLabel(amount, "dose", words) + (targetScope ? formatDose.call(env.localization, dose, style, scope) ?? fallback : fallback));
+      ranges.push(amountLabel(amount, "dose", words) +
+        (formatDose.call(env.localization, dose, style, scope) ?? fallback));
     }
     if (amount.range && (labelled || doseRangeNeedsEndpointPreview(amount.range))) {
       const text = rateRangePreview(amount.range);
@@ -625,15 +627,9 @@ export function formatCanonicalAdministration(
   options?: FormatOptions,
   compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
 ): string {
-  // External R6 fields can be edited independently of their saved wording.
-  // Keep that wording in provenance, but preview the current clinical fields.
-  if ((a.provenance?.format === "r6" || a.provenance?.sourceTextVerified === false) &&
-      options?.realizationMode !== "normalized" && administrationHasClinicalFacts(a)) {
-    options = Object.assign({}, options);
-    options.realizationMode = "normalized";
-  }
   // A component's authored source is distinct from a course-wide instruction.
   if (
+    a.provenance?.format !== "r6" && a.provenance?.sourceTextVerified !== false &&
     options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
     a.text?.trim() &&
     (a.schedule?.recurrence?.startOffset ||
@@ -661,16 +657,12 @@ export function formatCanonicalCourse(
   // R6 imports preserve original text for interchange. Without an agreement
   // proof it cannot override independently editable structured dose/timing.
   // Parser-owned native courses and reconciled R5 imports retain source mode.
-  if (oneOrCourse.provenance?.format === "r6" || oneOrCourse.provenance?.sourceTextVerified === false) {
-    const hasFacts = courseHasClinicalFacts(oneOrCourse);
-    if (!hasFacts && oneOrCourse.instruction) return oneOrCourse.instruction;
-    if (hasFacts && options?.realizationMode !== "normalized") {
-      options = Object.assign({}, options);
-      options.realizationMode = "normalized";
-    }
-  }
+  const sourceReplayAllowed = oneOrCourse.provenance?.format !== "r6" &&
+    oneOrCourse.provenance?.sourceTextVerified !== false;
+  if (!sourceReplayAllowed && oneOrCourse.instruction && !courseHasClinicalFacts(oneOrCourse))
+    return oneOrCourse.instruction;
   if (
-    oneOrCourse.instruction &&
+    sourceReplayAllowed && oneOrCourse.instruction &&
     (options === undefined ||
       options.realizationMode === "roundtrip" ||
       (oneOrCourse.stages.length === 0 && !courseHasClinicalFacts(oneOrCourse)) ||

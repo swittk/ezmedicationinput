@@ -96,7 +96,7 @@ function exactGeneratedComparatorExtension(
 
 /** Translations describe a particular code, not an operator slot. Preserve
  * superseded labels under their original Coding, outside the active operator. */
-const QUANTITY_OPERATOR_SOURCE_URL =
+export const QUANTITY_OPERATOR_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:quantity-operator-source";
 function editedOperator(
   extension: FhirExtension,
@@ -185,10 +185,10 @@ export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quant
   return changed ? { ...quantity, extension: extension.length ? extension : undefined } : quantity;
 }
 
-/** Recover the current R6 native comparator from the published EMA Coding.
- * Only an exact canonical extension can be consumed on normalization.
- * Unfamiliar/carrying-extra-metadata extensions remain in the source. */
-export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | undefined):
+/** Read the current quantity operator at either FHIR boundary. The same EMA
+ * coding owns a SimpleQuantity in R5 and R6; native comparators take priority.
+ * Authored annotations and superseded labels remain recoverable source. */
+export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirSimpleQuantity | undefined):
   FhirR6Quantity | undefined {
   if (!quantity) return undefined;
   if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
@@ -257,3 +257,6 @@ export function quantityFromR5(quantity: FhirQuantity | FhirSimpleQuantity | und
     ...(remaining.length ? { extension: remaining } : { extension: undefined })
   };
 }
+
+// Existing R5 adapter name shares the boundary owner without a wrapper.
+export { quantityFromWire as quantityFromR5 };

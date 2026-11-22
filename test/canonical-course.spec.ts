@@ -10,13 +10,14 @@ import {
   parseSig,
   fromFhir,
   fromFhirDosage,
-  formatSig,
+  formatSig, formatSigBatch, setDosageAlternativeChoice,
 
   projectCanonicalCourse,
   toFhirR5Dosages,
   toDosageDetails,
 } from "../src/index";
-import { formatCanonicalCourse } from "../src/canonical/format-course";
+import { formatCanonicalCourse, formatCanonicalAdministration,
+  appendMedicationConditionText, appendMedicationExcludedWeekdaysText } from "../src/canonical/format-course";
 import { clauseForAdministration, courseFromAdministrations } from "../src/canonical/compile";
 import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
@@ -31,7 +32,10 @@ import {
 import { cloneStructuredValue } from "../src/stable-structure";
 import { dosageMatchesSavedProjection, withDosageEditProvenance } from "../src/dosage-course";
 import { registerMedicationLocaleDetector, inferMedicationLocale } from "../src/locale-detection";
-import { registerSigLocalization, resolveSigLocalization } from "../src/i18n";
+import { registerSigLocalization, resolveSigLocalization, DAY_NAMES_THAI, joinWithAndThai } from "../src/i18n";
+import { formatCanonicalClause, DAY_NAMES, joinWithAnd } from "../src/format";
+import { instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
+import { ENGLISH_DAY_NAMES, THAI_DAY_NAMES, joinLocalizedList } from "../src/locales/course/weekday-vocabulary";
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/fhir-quantity-operator";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type FhirDosage, type FhirR6Dosage, type FhirR6DosageInstruction, type FhirR6DoseLimit } from "../src/types";
@@ -247,10 +251,12 @@ describe("native ownership of source-encoded semantics", () => {
     a.schedule!.recurrence!.monthDays = [15];
     a.delayMinutes = undefined;
     const out = courseToR6(native);
-    expect(out.step[0].component[0].timing?.repeat?.extension).toContainEqual({
+    expect(out.step[0].component[0].timing?.repeat?.extension?.filter(
+      marker => marker.url === TIMING_DAY_OF_MONTH_EXTENSION_URL
+    )).toEqual([{
       url: TIMING_DAY_OF_MONTH_EXTENSION_URL,
       valuePositiveInt: 15,
-    });
+    }]);
     expect(out.step[0].component[0].timing?.repeat?.extension).toContainEqual({
       url: "urn:test:unrecognized",
       valueString: "retained",
@@ -1691,27 +1697,7 @@ describe("round37 upper-only timing and stage origins", () => {
  * chronology and through a clinician's live R5 dose edits.
  * These are independent oracles, not roundtrips of the same broken output.
  */
-import { describe as round38_followup_describe, expect as round38_followup_expect, it as round38_followup_it } from "vitest";
-import { calculateTotalUnits as round38_followup_calculateTotalUnits, formatSig as round38_followup_formatSig, nextDueDoses as round38_followup_nextDueDoses, parseSig as round38_followup_parseSig, EMA_QUANTITY_COMPARATOR_EXTENSION_URL as round38_followup_EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM as round38_followup_EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/index";
-import { formatCanonicalClause as round38_followup_formatCanonicalClause } from "../src/format";
-import { resolveSigLocalization as round38_followup_resolveSigLocalization } from "../src/i18n";
-import { instructionGraphSourceConflictsWithDose as round38_followup_instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
-import { FhirPeriodUnit as round38_followup_FhirPeriodUnit } from "../src/types";
 {
-  const describe = round38_followup_describe;
-  const expect = round38_followup_expect;
-  const it = round38_followup_it;
-  const calculateTotalUnits = round38_followup_calculateTotalUnits;
-  const formatSig = round38_followup_formatSig;
-  const nextDueDoses = round38_followup_nextDueDoses;
-  const parseSig = round38_followup_parseSig;
-  const EMA_QUANTITY_COMPARATOR_EXTENSION_URL = round38_followup_EMA_QUANTITY_COMPARATOR_EXTENSION_URL;
-  const EMA_QUANTITY_OPERATOR_SYSTEM = round38_followup_EMA_QUANTITY_OPERATOR_SYSTEM;
-  const formatCanonicalClause = round38_followup_formatCanonicalClause;
-  const resolveSigLocalization = round38_followup_resolveSigLocalization;
-  const instructionGraphSourceConflictsWithDose = round38_followup_instructionGraphSourceConflictsWithDose;
-  const FhirPeriodUnit = round38_followup_FhirPeriodUnit;
-  type FhirPeriodUnit = round38_followup_FhirPeriodUnit;
 // BEGIN PRESERVED followup
 /**
  * November 18 review: preserve clinical meaning through repeated-course
@@ -2130,40 +2116,7 @@ describe("November 18 review: dose ranges own upper-bound rolling-cap quantity",
 /** Course language is a facet of the existing localization registry, not
  * another clinical engine. Independent oracles cover both built-in surfaces
  * and a third-language extension without editing canonical semantics. */
-import { describe as round38_language_describe, it as round38_language_it, expect as round38_language_expect } from "vitest";
-import { readFileSync as round38_language_readFileSync } from "node:fs";
-import { registerSigLocalization as round38_language_registerSigLocalization, resolveSigLocalization as round38_language_resolveSigLocalization } from "../src/i18n";
-import { formatSigBatch as round38_language_formatSigBatch, setDosageAlternativeChoice as round38_language_setDosageAlternativeChoice } from "../src/index";
-import type { FhirDosage as round38_language_FhirDosage } from "../src/types";
-import { ENGLISH_COURSE as round38_language_ENGLISH_COURSE } from "../src/locales/course/en";
-import { DAY_NAMES as round38_language_DAY_NAMES, joinWithAnd as round38_language_joinWithAnd } from "../src/format";
-import { DAY_NAMES_THAI as round38_language_DAY_NAMES_THAI, joinWithAndThai as round38_language_joinWithAndThai } from "../src/i18n";
-import { ENGLISH_DAY_NAMES as round38_language_ENGLISH_DAY_NAMES, THAI_DAY_NAMES as round38_language_THAI_DAY_NAMES, joinLocalizedList as round38_language_joinLocalizedList } from "../src/locales/course/weekday-vocabulary";
-import { formatCanonicalCourse as round38_language_formatCanonicalCourse, formatCanonicalAdministration as round38_language_formatCanonicalAdministration, appendMedicationConditionText as round38_language_appendMedicationConditionText, appendMedicationExcludedWeekdaysText as round38_language_appendMedicationExcludedWeekdaysText } from "../src/canonical/format-course";
-import type { CanonicalCourse as round38_language_CanonicalCourse } from "../src/canonical/course";
 {
-  const describe = round38_language_describe;
-  const it = round38_language_it;
-  const expect = round38_language_expect;
-  const readFileSync = round38_language_readFileSync;
-  const registerSigLocalization = round38_language_registerSigLocalization;
-  const resolveSigLocalization = round38_language_resolveSigLocalization;
-  const formatSigBatch = round38_language_formatSigBatch;
-  const setDosageAlternativeChoice = round38_language_setDosageAlternativeChoice;
-  type FhirDosage = round38_language_FhirDosage;
-  const ENGLISH_COURSE = round38_language_ENGLISH_COURSE;
-  const DAY_NAMES = round38_language_DAY_NAMES;
-  const joinWithAnd = round38_language_joinWithAnd;
-  const DAY_NAMES_THAI = round38_language_DAY_NAMES_THAI;
-  const joinWithAndThai = round38_language_joinWithAndThai;
-  const ENGLISH_DAY_NAMES = round38_language_ENGLISH_DAY_NAMES;
-  const THAI_DAY_NAMES = round38_language_THAI_DAY_NAMES;
-  const joinLocalizedList = round38_language_joinLocalizedList;
-  const formatCanonicalCourse = round38_language_formatCanonicalCourse;
-  const formatCanonicalAdministration = round38_language_formatCanonicalAdministration;
-  const appendMedicationConditionText = round38_language_appendMedicationConditionText;
-  const appendMedicationExcludedWeekdaysText = round38_language_appendMedicationExcludedWeekdaysText;
-  type CanonicalCourse = round38_language_CanonicalCourse;
 // BEGIN PRESERVED language
 /** Course language is a facet of the existing localization registry, not
  * another clinical engine. Independent oracles cover both built-in surfaces
@@ -2479,16 +2432,18 @@ describe("round39 metric totals and live event identity", () => {
     const raw: FhirR6DosageInstruction = { step: [{ component: [{
       site: { concept: { text: "both eyes", coding: [{ system: "http://snomed.info/sct", code: "40638003" }] } },
       doseAndRate: [
-        { doseRange: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } },
+        { type: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code: "ordered" }] },
+          doseRange: { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } } },
         { doseQuantity: { value: 1, unit: "mL" } }
       ]
     }] }] };
     for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      expect(text).toMatch(/Dose: 1 to 2 drops \(per administration target\)/u);
+      expect(text).toMatch(/Ordered dose: 1 to 2 drops \(per administration target\)/u);
       expect(text).toContain("Dose: 1 mL");
       expect(text).not.toMatch(/1 mL \(per administration target\)/u);
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain("ขนาดยาที่สั่ง:");
       expect(thai).toContain("แต่ละจุด");
       expect(thai).not.toContain("แต่ละจุด 1 mL");
     }
@@ -2519,5 +2474,73 @@ describe("round39 metric totals and live event identity", () => {
     }
     expect(JSON.stringify(raw)).toBe(original);
     expect(courseToR6(courseFromR6(raw)).step![0].component[0].timing!.code!.text).toBe(code);
+  });
+});
+
+
+describe("round40 current R6 generation and localized previews", () => {
+  it.each([false, true])("preserves requested generation mode with live structured R6 data (saved text %s)", hasText => {
+    const seen: string[] = [];
+    registerSigLocalization({
+      locale: "round40-mode",
+      formatLong: context => {
+        seen.push(context.realizationMode);
+        return context.realizationMode + " dose " + context.clause.dose?.value;
+      },
+      formatShort: context => {
+        seen.push(context.realizationMode);
+        return context.realizationMode + " dose " + context.clause.dose?.value;
+      }
+    });
+    const raw: FhirR6DosageInstruction = {
+      ...(hasText ? { renderedInstruction: "Old course: 9 tablets" } : {}),
+      step: [{ component: [{
+        ...(hasText ? { text: "Old component: 9 tablets" } : {}),
+        doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
+      }] }]
+    };
+    const original = JSON.stringify(raw), course = courseFromR6(raw);
+    for (const style of ["short", "long"] as const) {
+      const options = { locale: "round40-mode", realizationMode: "roundtrip" as const };
+      expect(formatSig(raw, style, options)).toContain("roundtrip dose 2");
+      expect(formatCanonicalCourse(course, style, options)).toContain("roundtrip dose 2");
+      expect(formatCanonicalAdministration(course.stages[0].administrations[0], style, options))
+        .toContain("roundtrip dose 2");
+    }
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(mode => mode === "roundtrip")).toBe(true);
+    expect(JSON.stringify(raw)).toBe(original);
+    expect(courseToR6(course).renderedInstruction).toBe(raw.renderedInstruction);
+    expect(courseToR6(course).step[0].component[0].text).toBe(raw.step[0].component[0].text);
+  });
+
+  it("keeps text-only external R6 directions when no clinical fields can replace them", () => {
+    const raw: FhirR6DosageInstruction = {
+      renderedInstruction: "Follow specialist directions", step: [{ component: [{ text: "Use the supplied instructions" }] }]
+    };
+    expect(formatSig(raw, "long", { locale: "en", realizationMode: "roundtrip" }))
+      .toBe("Follow specialist directions");
+    const course = courseFromR6(raw);
+    expect(formatCanonicalAdministration(course.stages[0].administrations[0], "long",
+      { locale: "en", realizationMode: "roundtrip" })).toBe("Use the supplied instructions");
+  });
+
+  it("localizes a labelled scalar independently of a per-target scope", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      route: { text: "oral" },
+      doseAndRate: [{ type: { coding: [{
+        system: "http://terminology.hl7.org/CodeSystem/dose-rate-type", code: "ordered"
+      }] }, doseQuantity: { value: 1, unit: "tab" } }]
+    }] }] };
+    const original = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))]) {
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toContain("ขนาดยาที่สั่ง:");
+      expect(th).toContain("1 เม็ด");
+      expect(th).not.toMatch(/1 tab|แต่ละจุด/u);
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(en).toContain("Ordered dose: 1 tablet");
+    }
+    expect(JSON.stringify(raw)).toBe(original);
   });
 });

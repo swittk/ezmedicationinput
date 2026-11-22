@@ -1063,3 +1063,29 @@ it("round35 retains a shared authored onset for all coordinated parallel members
       "2026-11-29T06:00:00+00:00"
     ]);
 });
+
+describe("round40 dated parallel cutoff", () => {
+  it.each(["", " for 2 days"])("ends only the replaced eye cadence at a known calendar successor: %s", duration => {
+    const text = "Instill 1 drop OD QID" + duration +
+      ", then starting 2026-12-05 instill 2 drops OD BID; instill 1 drop OS BID";
+    const parsed = parseSig(text, { datePolicy: { referenceDate: "2026-12-01" } });
+    const before = JSON.stringify(parsed);
+    const members = parsed.meta.canonical.course!.stages[0].administrations;
+    expect(members[0].schedule?.recurrence?.calendarWindow).toEqual({ end: "2026-12-04" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.boundsEnd).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.timingCode).toBe("QID");
+    expect(members[2].schedule?.recurrence?.calendarWindow).toBeUndefined();
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(6);
+      expect(calculateTotalUnits({ ...query, from: "2026-12-04T00:00:00Z", dosage,
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(duration ? 2 : 6);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});

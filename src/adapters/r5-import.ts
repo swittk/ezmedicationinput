@@ -688,6 +688,11 @@ function reconcileNativeCompactCourse(
     const { renderedInstruction: _historicalInstruction, ...fields } =
       restored.provenance?.data ?? {};
     historicalHeader = fields;
+    // Active compact header fields may replace the historical header. Its
+    // inactive row annotations still belong to these sources independently.
+    for (const marker of historicalHeader.extension ?? [])
+      if (marker.url === DOSAGE_RECONCILIATION_SOURCE_URL && marker.extension?.length)
+        sources.push(...marker.extension);
     const cursors = new Map<number, number>();
     const membersBySequence = new Map<number, readonly CanonicalAdministration[]>();
     historicalStages = new Map();
@@ -1181,9 +1186,10 @@ function reconcileNativeRetainedCourse(
     const dosage = dosages[index];
     if (sourceCarrierIndices?.has(index)) {
       preserveRetainedMarkers = true;
-      if (dosage.id !== undefined || dosage.extension?.length)
+      if (dosage.id !== undefined || dosage._text !== undefined || dosage.extension?.length)
         sourceFragments.push(retainField("r5SourceCarrier", {
           ...(dosage.id !== undefined ? { id: dosage.id } : {}),
+          ...(dosage._text !== undefined ? { _text: dosage._text } : {}),
           ...(dosage.extension?.length ? { extension: dosage.extension } : {}),
         }));
       continue;
@@ -1655,7 +1661,7 @@ function isSourceOnlyCarrier(carrier: FhirDosage | EzDosage): boolean {
   return carrier.modifierExtension?.length === 1 &&
     carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL &&
     Object.keys(carrier).every(key => {
-      if (key === "text" || key === "modifierExtension" || key === "id") return true;
+      if (key === "text" || key === "_text" || key === "modifierExtension" || key === "id") return true;
       if (key === "extension") return !carrier.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
       if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
       const value = (carrier as Record<string, unknown>)[key];
@@ -1817,9 +1823,10 @@ export function courseFromR5(
       carrier
     ) {
       const instruction = currentInstruction ?? carrier.text;
-      if (carrier.id !== undefined || carrier.extension?.length)
+      if (carrier.id !== undefined || carrier._text !== undefined || carrier.extension?.length)
         reconciliationSources.push(retainField("r5SourceCarrier", {
           ...(carrier.id !== undefined ? { id: carrier.id } : {}),
+          ...(carrier._text !== undefined ? { _text: carrier._text } : {}),
           ...(carrier.extension?.length ? { extension: carrier.extension } : {}),
         }));
       // Even an incomplete clinician-authored stage is live editable data.

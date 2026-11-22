@@ -432,7 +432,13 @@ function mergeDose(
     value = activeDose.value / divisionCount;
     unit = doseUnit;
     clinicalQuantity = {
-      ...clinicalQuantity, representation: "dose", status: "resolved", reviewReason: undefined,
+      ...clinicalQuantity, status: "resolved", reviewReason: undefined,
+      // Equal divisions of the preparation divide its separate carrier too.
+      // The authored total remains in numerator; neither volume is repeated
+      // in full for every divided dose.
+      ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
+        ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
+      } } : {}),
       dividedDoseCount: divisionCount, projectedDose: {
         value, unit, ...(activeDose.comparator
           ? { comparator: activeDose.comparator } : {})

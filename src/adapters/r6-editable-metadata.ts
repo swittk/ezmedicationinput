@@ -6,7 +6,7 @@
  */
 import type {
   FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
-  FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio,
+  FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio, FhirR6Timing,
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
@@ -64,6 +64,15 @@ export function retainDraftSteps(
 /** A pause belongs to the ordered phase boundaries, not its successor's dose.
  * Changed anonymous stages need a unique boundary identity; position alone
  * cannot prove which stage survived a deletion, replacement or reordering. */
+/** Compare the completion-bearing Timing fields only at the changed draft
+ * owner boundary. Element IDs and positional primitive annotations do not
+ * change completion. Keep the original Timing/repeat untouched and compare
+ * every remaining recurrence field, including known and unfamiliar extensions. */
+function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
+  if (!timing) return undefined;
+  const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
+  return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
+}
 function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[], firstIsTreatmentOrigin: boolean): boolean {
   if (!Array.isArray(saved) || active.length < saved.length) return false;
   // Unchanged projections need no identity index or boundary hashes. Remember
@@ -91,7 +100,8 @@ function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6Dosage
     // without an explicit step.end. Dose edits leave that declared completion.
     for (let member = 0; member < prior.component.length; member++)
       if (prior.component[member].id !== current.component[member].id ||
-          !prior.end && !equalStructuredValues(prior.component[member].timing, current.component[member].timing))
+          !prior.end && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
+            draftCompletionTiming(current.component[member].timing)))
         return false;
     changed.push(identity);
   }
@@ -185,8 +195,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       // An edited header limit remains the current header's authority. Only
       // unchanged surviving phase limits can reuse the previous phase scope.
       const independentStepAction = !saved.step.doseLimit?.length && reconciled.step?.ifExceeded !== undefined;
-      if (!reconciled.stepLimits.size && !independentStepAction) return undefined;
-      step = reconciled.step!;
+      step = reconciled.step ?? {};
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       if (!saved.course) step = { ...step, ...metadata };
       const limits = current.doseLimit?.filter(limit => !reconciled.stepLimits.has(limit));
@@ -232,6 +241,11 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
           }
         }
       }
+      // A surviving phase qualifier is a policy even without a numeric
+      // limit. Decide scope only after current modifiers have been reconciled.
+      const independentStepModifiers = !saved.step.doseLimit?.length && Boolean(step.modifierExtension?.length);
+      if (!reconciled.stepLimits.size && !independentStepAction && !independentStepModifiers)
+        return undefined;
       course = {
         ...(saved.course ? metadata : {}),
         ...(limits?.length ? { doseLimit: limits } : {}),

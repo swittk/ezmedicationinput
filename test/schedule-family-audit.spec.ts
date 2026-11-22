@@ -4084,3 +4084,59 @@ it("round39: still rejects an explicitly inverted phase window", () => {
       .toThrowError(expect.objectContaining({ code: "invalid-stage-order" }));
   }
 });
+
+describe("round40: inherited selectors and finite-use history", () => {
+  const origin = "2026-01-01T00:00:00Z";
+  const opts = { orderedAt: origin, from: origin, timeZone: "UTC", limit: 4 };
+  const representations = (course: FhirR6DosageInstruction) => [
+    courseFromR6(course), course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))
+  ];
+  const clocked = (clock = "09:00:00"): FhirDosage => ({
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: [clock] } }
+  });
+
+  it.each([
+    ["on the first Monday of each month", ["2026-02-02", "2026-03-02", "2026-04-06", "2026-05-04"], { weekdayOrdinal: 1 }],
+    ["on days 1 and 15 of each month", ["2026-02-01", "2026-02-15", "2026-03-01", "2026-03-15"], { dayOfMonth: [1, 15] }]
+  ])("inherits the full calendar selector in an onset-only dose continuation: %s", (selection, dates, selector) => {
+    const parsed = parseSig("Take 1 tablet at 09:00 " + selection + ", then from week 5 take 2 tablets",
+      { datePolicy: { referenceDate: "2026-01-01" } });
+    const before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      ...selector as object, treatmentStartOffsetDays: 28, timeOfDay: ["09:00:00"]
+    });
+    expect(parsed.meta.canonical.clauses[1].schedule?.boundsStart).toBeUndefined();
+    const expected = (dates as string[]).map(date => date + "T09:00:00+00:00");
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(dosage, { ...opts, from: "2026-02-01T00:00:00Z" })).toEqual(expected);
+      expect(calculateTotalUnits({ ...opts, from: "2026-02-01T00:00:00Z", dosage,
+        durationValue: 28, durationUnit: FhirPeriodUnit.Day }).totalUnits)
+        .toBe(selection === "on the first Monday of each month" ? 2 : 4);
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["2026-01-02T12:00:00Z", 2],
+    ["2026-01-02T08:00:00Z", 1]
+  ] as const)("counts actual finite-use history only after both calendar and order origins: %s", (orderedAt, remaining) => {
+    const scalar = clocked();
+    Object.assign(scalar.timing!.repeat!, { count: 2, boundsPeriod: { start: "2026-01-01" } });
+    scalar.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab" },
+      denominator: { value: 24, unit: "h", code: "h", system: "http://unitsofmeasure.org" } }];
+    const source = toDosageDetails([scalar]), before = JSON.stringify(source);
+    const query = { ...opts, orderedAt, from: "2026-01-03T00:00:00Z",
+      priorDoseTimes: ["2026-01-02T09:00:00Z"] };
+    for (const dosage of [scalar, [scalar], ...representations(source)]) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-01-03T09:00:00+00:00", ...(remaining === 2 ? ["2026-01-04T09:00:00+00:00"] : [])
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 3, durationUnit: FhirPeriodUnit.Day })
+        .totalUnits).toBe(remaining);
+    }
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+});

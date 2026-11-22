@@ -84,7 +84,8 @@ import {
   WAKE_EVENT_ALIASES,
   CYCLE_COUNT_HEADS,
   CYCLE_WORDS,
-  sequenceConnectorEnd
+  sequenceConnectorEnd,
+  TRAILING_PHASE_RELATION_ADVERBS
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
@@ -1371,6 +1372,26 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       return [];
     }
     const lower = normalizeTokenLower(token);
+    // A postposed discourse adjunct can restate a transition already licensed
+    // by the regimen sequence construction ("then ... afterwards"). It owns
+    // its source token as a typed temporal adjunct, without creating another
+    // dosage, phase, event clock, or patient instruction. Never claim a token
+    // inside a procedural action (e.g. "rinse mouth afterwards").
+    if (TRAILING_PHASE_RELATION_ADVERBS.has(lower) && start > 0 &&
+        !context.tokens.slice(start + 1, context.limit).some(next => !isPunctuation(normalizeTokenLower(next))) &&
+        !getProceduralFrames(context).some(frame =>
+          frame.span.start <= token.sourceStart && token.sourceEnd <= frame.span.end &&
+          sourceRangeAttachmentClass(context, frame.span.start, frame.span.end) === "procedure")) {
+      return [lexicalSign({
+        type: "schedule-sign", rule: "hpsg.lex.schedule.trailing-phase-relation",
+        tokens: [token],
+        synsem: {
+          head: { schedule: { sourceRanges: [{ start: token.sourceStart, end: token.sourceEnd }] } },
+          valence: {}, cont: { clauseKind: "administration" }
+        },
+        score: 31
+      })];
+    }
     for (const parts of TIMING_ANAPHORA_PHRASES) {
       if (parts[0] !== lower) continue;
       const members = tokensAvailable(context, start, parts.length);
@@ -2676,7 +2697,7 @@ function maximumDosePeriodAt(
     return DAYPART_INTERVAL_TOKENS.has(unitLower)
       ? { tokens, daypart: true } : { tokens, period: 1, periodUnit };
   }
-  const attached = attachedNumberUnitAt(unitLower);
+  const attached = attachedNumberUnitAt(unitToken.lower.replace(/[{};]+|\.+$/gu, ""));
   const amount = attached?.value ?? (unitToken.kind === LexKind.Number
     ? unitToken.value : FREQUENCY_NUMBER_WORDS[unitLower]);
   const elapsedUnit = attached ? undefined : context.tokens[start + 2];

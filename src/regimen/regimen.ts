@@ -607,6 +607,7 @@ export function scopeSequentialPhaseSemantics(
           frequency: shared.frequency, frequencyMax: shared.frequencyMax,
           period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
           timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
+          dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
           when: shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
           timeOfDay: shared.timeOfDay, eventWindow: shared.eventWindow,
           offset: shared.offset, offsetMin: shared.offsetMin, offsetMax: shared.offsetMax
