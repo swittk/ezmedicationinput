@@ -95,6 +95,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
   const identities = new Map<string, number>();
   const ownerIdentities: Array<string | undefined> = [];
   const validOwners = new Set<number>();
+  const changedCompletions = new Set<number>();
   const changed: number[] = [];
   const firstIsTreatmentOrigin = drafts[0]?.index !== 0;
   const identityOf = (step: FhirR6DosageStep, index: number) => step.id !== undefined ? "id:" + step.id :
@@ -121,13 +122,18 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
     // A uniquely identified successor owns its boundary independently of
     // newly added concurrent doses. Earlier/anonymous owners still need members.
     let membersMatch = true;
-    for (let member = 0; needsMembers && member < prior.component.length; member++)
-      if (prior.component[member].id !== current.component[member].id ||
-          !prior.end && index <= lastDraftPredecessor && !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
-            draftCompletionTiming(current.component[member].timing))) {
+    for (let member = 0; needsMembers && member < prior.component.length; member++) {
+      if (prior.component[member].id !== current.component[member].id) {
         membersMatch = false;
         break;
       }
+      // A middle phase can receive one pause and precede another. Its changed
+      // completion retires only the outgoing pause, not its unchanged start.
+      if (!prior.end && index <= lastDraftPredecessor &&
+          !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
+            draftCompletionTiming(current.component[member].timing)))
+        changedCompletions.add(index);
+    }
     if (!membersMatch) continue;
     validOwners.add(index);
     changed.push(index);
@@ -148,7 +154,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
   const retained = new Set<number>();
   for (let index = 0; index < drafts.length; index++) {
     const predecessor = drafts[index].index - index - 1, receiver = predecessor + 1;
-    if ((predecessor < 0 || validOwners.has(predecessor)) &&
+    if ((predecessor < 0 || validOwners.has(predecessor) && !changedCompletions.has(predecessor)) &&
         (receiver >= saved.length || validOwners.has(receiver))) retained.add(index);
   }
   return retained.size === drafts.length ? true : retained;

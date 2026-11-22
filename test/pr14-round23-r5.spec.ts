@@ -7164,7 +7164,7 @@ describe("round46 public display and pause ownership", () => {
     }
   });
 
-  it.each(["unchanged", "last-start", "first-duration"] as const)("retains independently owned pauses after a %s edit", edit => {
+  it.each(["unchanged", "last-start", "first-duration", "middle-duration"] as const)("retains independently owned pauses after a %s edit", edit => {
     const note = { url: "urn:test:pause-note", id: "authored-pause-note", valueString: "second planned pause" };
     let wire = r6Save({ step: [
       { id: "induction", component: [member("initial", 1, { ...daily, boundsDuration: { value: 7, unit: "d" } })] },
@@ -7175,16 +7175,20 @@ describe("round46 public display and pause ownership", () => {
     ] });
     if (edit === "last-start") wire.step!.find(step => step.id === "resume-b")!.start = boundary(30);
     if (edit === "first-duration") wire.step![0].component[0].timing!.repeat!.boundsDuration!.value = 10;
-    const expectedIds = edit === "last-start" ? ["induction", "pause-a", "resume-a", "resume-b"]
+    if (edit === "middle-duration") wire.step![1].component[0].timing!.repeat!.boundsDuration!.value = 8;
+    const expectedIds = edit === "last-start" || edit === "middle-duration" ? ["induction", "pause-a", "resume-a", "resume-b"]
       : edit === "first-duration" ? ["induction", "resume-a", "pause-b", "resume-b"]
       : ["induction", "pause-a", "resume-a", "pause-b", "resume-b"];
     for (let save = 0; save < 3; save++) {
       const before = persist(wire), view = fromDosageDetails(wire);
       expect(view.course.step?.map(step => step.id)).toEqual(expectedIds);
+      expect(importCanonicalCourse(wire).stages.map(step => step.provenance?.id)).toEqual(expectedIds);
       expect(view.course.step?.find(step => step.id === "resume-a")?.start)
         .toEqual(edit === "first-duration" ? boundary(14) : undefined);
       expect(view.course.step?.find(step => step.id === "resume-b")?.start)
-        .toEqual(edit === "last-start" ? boundary(30) : undefined);
+        .toEqual(edit === "last-start" ? boundary(30) : edit === "middle-duration" ? boundary(28) : undefined);
+      if (edit === "middle-duration")
+        expect(wire.step![1].component[0].timing!.repeat!.boundsDuration!.value).toBe(8);
       expect(wire.step!.map(step => step.component[0].doseAndRate![0].doseQuantity!.value)).toEqual([1, 2, 3]);
       expect(JSON.stringify(wire)).toContain("second planned pause");
       expect(JSON.stringify(wire)).toContain("authored-pause-note");
