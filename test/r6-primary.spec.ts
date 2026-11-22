@@ -3237,7 +3237,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         valueQuantity: { value: 5, unit: "mg", comparator: "~" } }] }
     };
     const previews: [FhirR6DosageInstruction, string][] = [
-      [source, "Call clinic for dose; Across this course: max per administration: ~5 mg"],
+      [source, "Current: Across this course: max per administration: ~5 mg; original directions: Call clinic for dose"],
       [{ renderedInstruction: source.renderedInstruction }, "Call clinic for dose"],
       [{ safety: source.safety }, "Across this course: max per administration: ~5 mg"]
     ];
@@ -3246,7 +3246,8 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       const before = JSON.stringify(input);
       const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(input))) as FhirDosage[];
       for (const locale of ["en", "th"]) {
-        const localized = locale === "th" ? expected.replace("Across this course:", "ตลอดแผนการใช้ยานี้:") : expected;
+        const localized = locale === "th" ? expected.replace("Across this course:", "ตลอดแผนการใช้ยานี้:")
+          .replace("Current:", "ปัจจุบัน:").replace("original directions:", "ข้อความเดิม:") : expected;
         const imported = fromFhir(input, { locale, realizationMode: "normalized" });
         expect(imported.longText).toBe(localized);
         expect(imported.items.map(item => item.longText)).toEqual([localized]);

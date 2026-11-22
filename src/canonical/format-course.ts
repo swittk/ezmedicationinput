@@ -785,10 +785,11 @@ export function formatCanonicalCourse(
     const repetition = oneOrCourse.cycleInterval
       ? formatCourseRepeatCycle(oneOrCourse.cycleInterval, words, oneOrCourse.cycleCount)
       : oneOrCourse.cycleCount === undefined ? "" : words.repeatCount(oneOrCourse.cycleCount);
-    // With no administrations, the authored course instruction is the only
-    // directions text. Repetition and safety qualify it rather than replace it.
-    const directions = joinGeneratedClauses([oneOrCourse.instruction ?? "", repetition].filter(Boolean));
-    return appendDoseLimits(directions, oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
+    // With no administrations, source may be the only dose/manner directions,
+    // but can also contain an older cap. Label it beside current structured
+    // facts using the same source/current distinction as timing-only members.
+    const rendered = appendDoseLimits(repetition, oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
+    return oneOrCourse.instruction ? words.withAuthoredDirections(rendered, oneOrCourse.instruction) : rendered;
   }
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;

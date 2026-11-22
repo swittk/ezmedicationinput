@@ -545,7 +545,7 @@ describe("round 24: live projection and course boundaries", () => {
     }
   });
 
-  it.each([undefined, []])("shows a live zero-step cap instead of stale header wording (steps=%s)", step => {
+  it.each([undefined, []])("labels the original zero-step header separately from the live cap (steps=%s)", step => {
     const wire = {
       renderedInstruction: "maximum 3 administrations", step,
       safety: { doseLimit: [{ scope: "dosage" as const, valueInteger: 2 }] },
@@ -554,8 +554,11 @@ describe("round 24: live projection and course boundaries", () => {
       formatSig(wire, "long", { locale: "en" }),
       fromFhir(wire, { locale: "en" }).longText,
     ]) {
-      expect(preview).toContain("max per dosage: 2");
-      expect(preview).not.toContain("3 administrations");
+      expect(preview).toBe("Current: Across this course: max per dosage: 2 administrations; original directions: maximum 3 administrations");
+      const [current, original] = preview.split("; original directions: ");
+      expect(current).toBe("Current: Across this course: max per dosage: 2 administrations");
+      expect(current).not.toContain("3 administrations");
+      expect(original).toBe("maximum 3 administrations");
     }
     const saved = courseToR6(inputToCanonical(wire));
     expect(saved.renderedInstruction).toBe("maximum 3 administrations");
