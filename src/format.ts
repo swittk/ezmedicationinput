@@ -932,8 +932,10 @@ function formatSite(
   words: CourseLanguage = ENGLISH_COURSE
 ): string | undefined {
   let text = clause.site?.text?.trim();
-  if (!text) {
-    const spatialSite = renderSpatialSiteEnglish(clause.site?.spatialRelation, grammar);
+  const spatial = clause.site?.spatialRelation;
+  const targetText = (spatial?.targetText ?? spatial?.targetCoding?.display)?.trim();
+  if (!text || targetText && text.toLowerCase() === targetText.toLowerCase()) {
+    const spatialSite = renderSpatialSiteEnglish(spatial, grammar);
     if (spatialSite) {
       return appendSiteRestrictionsEnglish(clause, spatialSite);
     }

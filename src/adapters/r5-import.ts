@@ -781,7 +781,8 @@ function reconcileNativeCompactCourse(
       let unmarked = false, marked = false;
       const firstRows: NonNullable<typeof localRows[number]>[] = [];
       for (const local of localRows) {
-        if (local?.value.sequence !== 1 || local.value.context !== header.context) continue;
+        if (local?.value.sequence !== 1 ||
+            local.value.context !== header.context && local.value.countScope === undefined) continue;
         firstRows.push(local);
         if (local.value.countScope === undefined) unmarked = true;
         else marked = true;
@@ -976,7 +977,13 @@ function reconcileNativeCompactCourse(
     const historical = historicalMembers?.get(index);
     if (historical === null) return;
     const restored = local ? restoreComponentDelta(dosage, local.value, warnings, sourceContext) : undefined;
-    const liveComponent = restored?.dosage ?? historical ??
+    // The outer course baseline may know that this historical row's text is
+    // stale even when the historical subset has no copy of that baseline.
+    const historicalMember = historical && dosage !== dosages[index]
+      ? { ...historical, text: dosage.text,
+        provenance: { ...historical.provenance!, sourceTextVerified: false } }
+      : historical;
+    const liveComponent = restored?.dosage ?? historicalMember ??
       administrationFromR5(dosage, sourceContext);
     const component =
       local && conflictingPhases.has(local.value.sequence)

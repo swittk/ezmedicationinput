@@ -71,6 +71,10 @@ export function retainDraftSteps(
 function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
   if (!timing) return undefined;
   const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
+  if (repeat.boundsDuration?.id !== undefined) {
+    const { id: _durationId, ...duration } = repeat.boundsDuration;
+    repeat.boundsDuration = duration;
+  }
   return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
 }
 function sameDraftStageOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],

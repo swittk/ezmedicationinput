@@ -1474,7 +1474,7 @@ function matchesSourceSpatial(value: FhirExtension, proof: SourceSpatialObservat
 interface SourceConceptObservation {
   original: FhirCodeableConcept;
   text?: string;
-  triggerPhase?: "onset";
+  triggerPhase?: "onset" | null;
   spatial?: SourceSpatialObservation | null;
   restrictions?: SourcePredicateObservation[][] | null;
   targetCount?: number;
@@ -1490,16 +1490,16 @@ export function captureSourceReplayConcept(value: FhirCodeableConcept | undefine
     display: original.display, userSelected: original.userSelected,
   });
   // Only a site owns body restrictions and administration target count.
-  // Observe both in the same extension walk; other annotations stay opaque.
+  // Observe these with its spatial relation; unrelated annotations stay opaque.
   let restrictions: SourcePredicateObservation[][] | null | undefined = observeRestrictions ? null : undefined;
   let targetCount: number | undefined, countSeen = false, phaseSeen = false;
-  let spatial: SourceSpatialObservation | null | undefined = observePrn ? null : undefined;
-  let triggerPhase: "onset" | undefined;
+  let spatial: SourceSpatialObservation | null | undefined = observeRestrictions || observePrn ? null : undefined;
+  let triggerPhase: "onset" | null | undefined = observePrn ? null : undefined;
   if (observeRestrictions || observePrn) for (const marker of value.extension ?? []) {
-    if (observePrn && marker.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL && spatial === null)
+    if (marker.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL && spatial === null)
       spatial = captureSourceSpatial(marker);
     else if (observePrn && !phaseSeen && marker.url === PRN_TRIGGER_PHASE_EXTENSION_URL) {
-      triggerPhase = marker.valueCode === "onset" ? "onset" : undefined;
+      triggerPhase = marker.valueCode === "onset" ? "onset" : null;
       phaseSeen = true;
     } else if (observeRestrictions && marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL)
       (restrictions ??= []).push(captureReplayPredicate(marker)!);
@@ -1524,13 +1524,13 @@ export function matchesSourceReplayConcept(
   }
   if (proof.restrictions === undefined && proof.spatial === undefined) return true;
   let restrictionIndex = 0, targetCount: number | undefined, countSeen = false, phaseSeen = false, spatialSeen = false;
-  let triggerPhase: "onset" | undefined;
+  let triggerPhase: "onset" | null | undefined = proof.triggerPhase === undefined ? undefined : null;
   for (const marker of value.extension ?? []) {
     if (proof.spatial !== undefined && !spatialSeen && marker.url === BODY_SITE_SPATIAL_RELATION_EXTENSION_URL) {
       if (!matchesSourceSpatial(marker, proof.spatial)) return false;
       spatialSeen = true;
-    } else if (proof.spatial !== undefined && !phaseSeen && marker.url === PRN_TRIGGER_PHASE_EXTENSION_URL) {
-      triggerPhase = marker.valueCode === "onset" ? "onset" : undefined;
+    } else if (proof.triggerPhase !== undefined && !phaseSeen && marker.url === PRN_TRIGGER_PHASE_EXTENSION_URL) {
+      triggerPhase = marker.valueCode === "onset" ? "onset" : null;
       phaseSeen = true;
     } else if (proof.restrictions !== undefined && marker.url === BODY_SITE_RESTRICTION_EXTENSION_URL) {
       const prior = proof.restrictions?.[restrictionIndex++];

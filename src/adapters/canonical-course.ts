@@ -1135,13 +1135,20 @@ function updateNativeTimingAnnotations(
     ? original.extension?.find(item => item.url === TIMING_OFFSET_EXACT_EXTENSION_URL) : undefined;
   const supersededOffset = exactOffset &&
     getExactTimingOffsetMinutes({ extension: [exactOffset] }) !== original?.offset;
-  if (!fromR6 && !durationChanged && !supersededOffset) return target;
+  const frequencyMinimum = original?.extension?.find(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL);
+  const supersededMinimum = frequencyMinimum?.valueInteger === 0 && live?.frequency !== 0;
+  if (!fromR6 && !durationChanged && !supersededOffset && !supersededMinimum) return target;
   const oldMarkers = original ? { extension: original.extension, offset: original.offset } : undefined;
   const changes = new Set<string>();
   if (supersededOffset) {
     changes.add(TIMING_OFFSET_EXACT_EXTENSION_URL);
     output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
       { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [exactOffset] }];
+  }
+  if (supersededMinimum) {
+    changes.add(TIMING_FREQUENCY_MIN_EXTENSION_URL);
+    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [frequencyMinimum!] }];
   }
   const changed = (url: string, before: unknown, after: unknown) => {
     if (!same(before, after)) changes.add(url);
@@ -1176,7 +1183,7 @@ function updateNativeTimingAnnotations(
     );
     changed(
       TIMING_FREQUENCY_MIN_EXTENSION_URL,
-      oldMarkers?.extension?.find((e) => e.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger === 0,
+      frequencyMinimum?.valueInteger === 0,
       live?.frequency === 0
     );
     if (!same(getAdministrationOffsetMinutes(raw as FhirDosage), a.delayMinutes))
