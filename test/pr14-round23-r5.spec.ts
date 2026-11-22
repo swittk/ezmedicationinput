@@ -6778,18 +6778,21 @@ describe("round44 interop ownership", () => {
     expect(importCanonicalCourse(persist(wire)).stages).toHaveLength(1);
   });
 
-  it.each(["fresh", "persisted"] as const)("observes a changed live carrier after a warm %s preview", kind => {
+  it.each([["fresh", false], ["fresh", true], ["persisted", true]] as const)(
+    "observes a changed live carrier on a %s row (warm=%s)", (kind, warm) => {
     const parsed = parseSig("Infuse 20 mg in 100 mL saline over 2 hours, max 100 mg per day");
     const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
-    expect(formatSig(row, "long")).toContain("saline");
+    if (warm) expect(formatSig(row, "long")).toContain("saline");
     const marker = row.extension!.find(e => e.url === carrierUrl)!;
     marker.extension!.find(e => e.url === "material")!.valueString = "dextrose";
     const current = persist(row);
+    const directSaves = [persist(toFhirR5Dosages([row]))[0], persist(toFhirR5Dosages([persist(row)]))[0]];
     expect(formatSig(row, "long")).not.toContain("saline");
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
       const options = { locale: "en", realizationMode };
       for (const text of [formatSig(row, "long", options), formatSig(persist(row), "long", options),
-        fromFhirDosage(row, options).longText, formatSig(toDosageDetails([row]), "long", options)]) {
+        fromFhirDosage(row, options).longText, formatSig(toDosageDetails([row]), "long", options),
+        ...directSaves.map(saved => formatSig(saved, "long", options))]) {
         expect(text).not.toContain("saline");
         expect(text).toContain("dextrose");
         expect(text).toContain("20 mg");
@@ -6797,9 +6800,31 @@ describe("round44 interop ownership", () => {
       }
     }
     expect(row).toEqual(current);
+    for (const saved of directSaves) {
+      // A saved row may retain stale wording in provenance instead of active text.
+      expect(JSON.stringify(saved)).toContain(JSON.stringify(current.text));
+      expect(saved.extension!.find(e => e.url === carrierUrl)).toEqual(marker);
+      expect(saved.doseAndRate).toEqual(current.doseAndRate);
+    }
     const saved = persist(toFhirR5Dosages(toDosageDetails([row])))[0];
     expect(saved.extension!.find(e => e.url === carrierUrl)).toEqual(marker);
     expect(saved.doseAndRate).toEqual(current.doseAndRate);
+  });
+
+  it.each(["fresh", "persisted"] as const)("retains explicit clinician text edits on a %s carrier row", kind => {
+    const parsed = parseSig("Infuse 20 mg in 100 mL saline over 2 hours, max 100 mg per day");
+    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    row.extension!.find(e => e.url === carrierUrl)!.extension!.find(e => e.url === "material")!.valueString = "dextrose";
+    row.text = "Use the dextrose carrier per the agreed infusion plan";
+    const authored = persist(row);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+    expect(fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText).toBe(row.text);
+    const normalized = formatSig(row, "long", { locale: "en", realizationMode: "normalized" });
+    expect(normalized).toContain("dextrose");
+    expect(normalized).toContain("20 mg");
+    expect(normalized).toContain("100 mL");
+    expect(normalized).not.toContain("saline");
+    expect(row).toEqual(authored);
   });
 
   it.each(["unresolved", "recognized", "missing"] as const)("keeps the explicit %s duration owner ahead of a ratio fallback", kind => {

@@ -90,6 +90,7 @@ import {
   deserializeCanonicalContext,
   cycleDayConstraintExtension,
   infusionCarrierMaterialExtension,
+  INFUSION_CARRIER_MATERIAL_EXTENSION_URL,
   clinicalCarrierQuantityFromFhir,
   getAdministrationOffsetMinutes,
   getAnchoredCourseDuration,
@@ -650,22 +651,34 @@ function baseAdministration(
   const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
   let weekdaysMarker: FhirExtension | undefined;
   let sourceFields: ReturnType<typeof sourceOwnership>;
+  let hasCarrierMaterial = false;
   for (const e of raw.extension ?? []) {
     if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL && !weekdaysMarker) weekdaysMarker = e;
     else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceFields === undefined)
       sourceFields = sourceOwnership(e);
+    else if (e.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL) hasCarrierMaterial = true;
   }
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
     amounts!.push(amountFromWire(value as NonNullable<FhirR6Dosage["doseAndRate"]>[number], format === "r5"));
   let sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
-  if (format === "r5" && sourceContext && sourceTextVerified !== false && raw.extension?.length &&
-      dosageMatchesSavedProjection(input) === false) {
-    const originalText = getDosageSourceTextFingerprint(raw);
-    // A cached clinical mismatch invalidates old graph wording, while an
-    // explicitly replaced external text still owns its current display.
-    if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
+  const carrier = raw.doseAndRate?.[0]?.rateRatio && (sourceContext || format === "r5" && hasCarrierMaterial)
+    ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined;
+  if (format === "r5" && (sourceContext || carrier?.carrierMaterial) &&
+      sourceTextVerified !== false && raw.extension?.length) {
+    const matches = dosageMatchesSavedProjection(input);
+    if (matches === false) {
+      const originalText = getDosageSourceTextFingerprint(raw);
+      // A cached clinical mismatch invalidates old graph wording, while an
+      // explicitly replaced external text still owns its current display.
+      if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
+        sourceTextVerified = false;
+    } else if (matches === undefined && sourceTextVerified === undefined &&
+        carrier?.carrierMaterial && !getFreshDoseProof(input)) {
+      // A cold standalone carrier has no source agreement to certify on save.
+      // Preserve its text, while its current typed material owns the preview.
       sourceTextVerified = false;
+    }
   }
   const duration = anchored ? getAnchoredCourseDuration(raw) : undefined;
   let schedule = timing(raw.timing, format === "r5");
@@ -675,7 +688,7 @@ function baseAdministration(
       !raw.timing?.repeat?.extension?.some(e => e.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
     // Only an explicitly recognized carrier/self-carrier infusion supplies an
     // administration duration. An arbitrary rate denominator is not a dose time.
-    const administrationDuration = clinicalCarrierQuantityFromFhir(raw as FhirDosage)?.administrationDuration;
+    const administrationDuration = (carrier ?? clinicalCarrierQuantityFromFhir(raw as FhirDosage))?.administrationDuration;
     if (administrationDuration?.comparator) {
       schedule ??= {};
       const recurrence = schedule.recurrence ??= {};
@@ -778,10 +791,7 @@ function baseAdministration(
     });
     // The existing typed carrier feature supplies only its current material
     // label to presentation; native amounts still own every dose/rate value.
-    if (raw.doseAndRate?.[0]?.rateRatio) {
-      const carrier = clinicalCarrierQuantityFromFhir(raw as FhirDosage);
-      if (carrier?.carrierMaterial) output.syntax.clinicalQuantity = carrier;
-    }
+    if (carrier?.carrierMaterial) output.syntax.clinicalQuantity = carrier;
   }
   const graph = output.syntax?.instructionGraph;
   if (format === "r5" && sourceTextVerified === false && !amounts?.length && graph && !graph.primaryAdministrationSpan) {

@@ -30,8 +30,9 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
     return false;
   const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
   // A persisted standalone item can have no source fingerprint. Its explicit
-  // live guard still owns clinical display; unverified narrative is provenance.
+  // live guards and carrier material own clinical display; unverified narrative is provenance.
   return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
+    first?.rateRatio && clinicalCarrierQuantityFromFhir(dosage)?.carrierMaterial ||
     (dosage as EzDosage).condition?.length ||
     (dosage as EzDosage).excludedDates?.length || dosage.modifierExtension?.some(item =>
       item.url === DOSAGE_CONDITION_R5_URL || item.url === DOSAGE_EXCLUDED_DATES_R5_URL) ||
@@ -126,7 +127,7 @@ import {
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
 import { formatCanonicalClause } from "./format";
-import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, clinicalCarrierQuantityFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
