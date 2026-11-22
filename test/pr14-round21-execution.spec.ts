@@ -1959,11 +1959,19 @@ describe("round 30 execution clinical oracles", () => {
     }
     member.schedule!.recurrence = { frequency: 1, period: 2, periodMax: 4, periodUnit: Unit.Hour };
     const ranged = wire(value, version), rangedSource = JSON.stringify(ranged);
+    // Q4H is a concrete cadence inside the authored 2–4 hour range.
+    // Maximum supply still uses the independent range ceiling.
     expect(nextDueDoses(ranged, { ...options, limit: 3 })).toEqual([
-      "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00", "2026-01-01T04:00:00+00:00",
+      "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00",
     ]);
     expect(calculateTotalUnits({ ...options, dosage: ranged, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(12);
     expect(JSON.stringify(ranged)).toBe(rangedSource);
+    delete member.schedule!.code;
+    const uncoded = wire(value, version), uncodedSource = JSON.stringify(uncoded);
+    expect(nextDueDoses(uncoded, { ...options, limit: 3 })).toEqual([
+      "2026-01-01T00:00:00+00:00", "2026-01-01T02:00:00+00:00", "2026-01-01T04:00:00+00:00",
+    ]);
+    expect(JSON.stringify(uncoded)).toBe(uncodedSource);
   });
 
   it.each(versions)("keeps local timing codes separate from GTS cadence while honoring institution clocks (%s)", version => {

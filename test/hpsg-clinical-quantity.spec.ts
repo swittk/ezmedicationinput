@@ -2901,8 +2901,11 @@ describe("round39 independent delimiters and annotated durations", () => {
       const details = toDosageDetails([row]);
       for (const input of [[row], details]) {
         const recurrence = importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence;
-        expect(recurrence?.occurrenceDuration).toBeUndefined();
+        expect(recurrence?.occurrenceDuration).toBe(30);
+        expect(recurrence?.occurrenceDurationUnit).toBeUndefined();
         const projected = toFhirR5Dosages(Array.isArray(input) ? toDosageDetails(input) : input);
+        expect(projected[0].timing?.repeat?.duration).toBeUndefined();
+        expect(projected[0].timing?.repeat?.durationUnit).toBeUndefined();
         expect(projected[0].timing?.repeat?.extension?.find(item =>
           item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueQuantity).toEqual(duration);
       }
