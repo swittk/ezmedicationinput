@@ -180,6 +180,14 @@ describe("locale-extensible language architecture", () => {
       canonical: "dose"
     });
 
+    const originalPack = getMedicationLexerLocalePack("xy")!;
+    const regionalPack = { ...originalPack, locale: " xY_Clinic " };
+    registerMedicationLexerLocalePack(regionalPack);
+    expect(regionalPack.locale).toBe(" xY_Clinic ");
+    expect(getMedicationLexerLocalePack("XY-Other")?.locale).toBe("xy");
+    expect(getMedicationLexerLocalePack("xy")?.apply).toBe(originalPack.apply);
+    expect(listMedicationLocaleLexemes("xy-XY")).toContainEqual({ surface: "xy-dose", canonical: "dose" });
+
     registerMedicationSurfaceSegmenter({
       locale: "xy",
       script: /\u2603/u,

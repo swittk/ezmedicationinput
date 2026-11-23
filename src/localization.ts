@@ -8,7 +8,10 @@ export function normalizeLocaleTag(locale: string | undefined): string | undefin
 }
 
 export function baseLanguageTag(locale: string | undefined): string | undefined {
-  return normalizeLocaleTag(locale)?.split("-", 1)[0];
+  const normalized = normalizeLocaleTag(locale);
+  if (normalized === undefined) return undefined;
+  const separator = normalized.indexOf("-");
+  return separator < 0 ? normalized : normalized.slice(0, separator);
 }
 
 export function localeFallbackChain(locale: string | undefined): string[] {
