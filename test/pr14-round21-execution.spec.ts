@@ -501,7 +501,9 @@ describe("review 24: phase history, dimensions, and independent supply oracles",
     expect(exact.kind).toBe("resolved");
     if (exact.kind === "resolved") {
       expect(exact.stages[0].end).toEqual({ value: 1, unit: "d" });
-      expect(exact.stages[0].components[0].clause.schedule?.durationMaxUnit).toBeUndefined();
+      expect(exact.stages[0].components[0].clause.schedule).toMatchObject({
+        duration: 1, durationUnit: "d", durationMax: 1, durationMaxUnit: "d"
+      });
     }
     clauses[0].schedule!.durationIsRange = true;
     clauses[0].schedule!.durationMax = undefined;
