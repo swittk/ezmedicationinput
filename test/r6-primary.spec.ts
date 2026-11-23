@@ -1944,7 +1944,14 @@ it("normalizes editable R5 and R6 course previews while retaining original wordi
   const text = formatSigBatch(r5, "long");
   expect(text).toMatch(/every 2 hours[\s\S]*four times daily/iu);
   expect(text).toContain("right eye");
-  expect(formatSig(parsed.fhirNext, "long")).toMatch(/every 2 hours[\s\S]*four times daily/iu);
+  const phases = formatSig(parsed.fhirNext, "long").split(/\bthen\b/iu);
+  expect(phases).toHaveLength(2);
+  expect(phases[0]).toMatch(/Instill 1 drop every 2 hours[\s\S]*in the right eye/iu);
+  expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
+  const thaiPhases = formatSig(parsed.fhirNext, "long", { locale: "th" }).split("จากนั้น");
+  expect(thaiPhases).toHaveLength(2);
+  expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
+  expect(thaiPhases[1]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง/u);
   expect(parsed.fhirNext.renderedInstruction).toBe(source);
   expect(formatSigBatch(r5, "long", { locale: "th" })).toContain("ตาขวา");
 });

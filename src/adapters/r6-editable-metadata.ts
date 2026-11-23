@@ -9,6 +9,7 @@ import type {
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio, FhirR6Timing,
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
+import { getAdministrationOffsetMinutes } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
 
@@ -139,6 +140,8 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         const before = prior.component[member], after = current.component[member];
         // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+            (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==
+              (getAdministrationOffsetMinutes({ modifierExtension: after.modifierExtension }) ?? 0) ||
             !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
               getDosageExcludedDates({ modifierExtension: after.modifierExtension })) ||
             !equalStructuredValues(getDosageExcludedWeekdays({ extension: before.extension }).sort(),
@@ -167,7 +170,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
   for (let index = 0; index < drafts.length; index++) {
     const predecessor = drafts[index].index - index - 1, receiver = predecessor + 1;
     if ((predecessor < 0 || validOwners.has(predecessor) && !changedCompletions.has(predecessor)) &&
-        (receiver >= saved.length || validOwners.has(receiver))) retained.add(index);
+        (receiver >= saved.length && receiver >= active.length || validOwners.has(receiver))) retained.add(index);
   }
   return retained.size === drafts.length ? true : retained;
 }

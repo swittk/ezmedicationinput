@@ -413,9 +413,17 @@ export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay"
   }
   const output = { ...repeat };
   if (!mixed && restorePositions) output.timeOfDay = clocks;
-  if (!mixed && unchangedBridge && bridgeClocks) output.timeOfDay = bridgeClocks;
-  if (!mixed && unchangedBridge && bridgeMetadata && output._timeOfDay === undefined)
-    output._timeOfDay = bridgeMetadata;
+  if (!mixed && unchangedBridge && bridgeClocks) {
+    output.timeOfDay = bridgeClocks;
+    // A core companion without an authored core clock is independent source.
+    // Promotion attaches only the bridge's own primitive annotation.
+    if (repeat._timeOfDay !== undefined) kept.push({
+      url: DOSAGE_RECONCILIATION_SOURCE_URL,
+      extension: [retainField("_timeOfDay", repeat._timeOfDay)],
+    });
+    if (bridgeMetadata) output._timeOfDay = bridgeMetadata;
+    else delete output._timeOfDay;
+  }
   if (kept.length) output.extension = kept;
   else delete output.extension;
   if (mixed) {

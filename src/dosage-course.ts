@@ -688,7 +688,10 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
 function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
   const quantity = limit.valueQuantity;
   if (!quantity) return false;
-  if (limit.scope === "period") return Boolean(limit.period);
+  // Match the clinical R5 safety baseline. A partial Ratio is retained R6
+  // information, not a missing numeric limit when an unrelated maximum changes.
+  if (limit.scope === "period")
+    return quantity.value !== undefined && limit.period?.value !== undefined;
   return limit.scope === "administration" || limit.scope === "lifetime";
 }
 

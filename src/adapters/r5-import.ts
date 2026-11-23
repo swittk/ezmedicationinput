@@ -839,9 +839,11 @@ function reconcileNativeCompactCourse(
     // Compact rows keep R6 wrappers; edit fields are R5. Split their owners
     // before merging so clearing native extensions does not clear modifiers.
     const merged = r6StepMetadata({ ...r5StepMetadata(previous?.step ?? {}), ...fields });
-    // Explicit course and phase counts own separate scopes in the current edit.
+    // An explicit course count or complete modifier clear owns course scope;
+    // a simultaneously supplied phase count must stay on that phase.
     if (legacyCycleCount !== undefined && sequence === 1 &&
         Number.isInteger(fields.count) && fields.count! > 0 &&
+        editedCourse?.modifierExtension?.length !== 0 &&
         !editedCourse?.modifierExtension?.some(item => item.url === COURSE_CYCLE_COUNT_EXTENSION_URL)) {
       if (fields.count !== legacyCycleCount) metadataEdited = true;
       legacyCycleCount = fields.count;
