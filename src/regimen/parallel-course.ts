@@ -164,7 +164,11 @@ function calendarPhaseMembers(
   const inferredEnd = nextStart ? precedingCalendarDay(nextStart) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {
-    const schedule = item.clause.schedule!;
+    const schedule = item.clause.schedule;
+    if (!schedule) {
+      normalized.push(item);
+      continue;
+    }
     const durationEnd = anchoredScheduleDurationEnd(schedule);
     const durationCutsEarlier = Boolean(durationEnd && schedule.boundsEnd &&
       durationEnd < schedule.boundsEnd);

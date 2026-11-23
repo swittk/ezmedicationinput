@@ -945,6 +945,10 @@ describe("round34 partial same-track cadence cutoffs", () => {
       ]);
       expect(calculateTotalUnits({ ...shifted, dosage: input,
         durationValue: 1, durationUnit: "d" }).totalUnits).toBe(dayStart ? 4 : duration ? 2 : 3);
+      expect(calculateTotalUnits({ ...shifted, dosage: input,
+        durationValue: 12, durationUnit: "h" }).totalUnits).toBe(dayStart ? 2 : duration ? 0 : 1);
+      expect(calculateTotalUnits({ ...shifted, dosage: input, from: "2026-11-23T12:00:00+07:00",
+        durationValue: 12, durationUnit: "h" }).totalUnits).toBe(2);
     }
 
     expect(left[0].phaseEnd).toBeUndefined();
@@ -1588,5 +1592,67 @@ describe("round48 parallel duration display boundaries", () => {
       expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(expected);
       expect(JSON.stringify(input)).toBe(before);
     }
+  });
+});
+
+
+describe("round49 qualified clocks and partial parallel members", () => {
+  it.each([
+    ["every morning at 10 AM starting the next day", false, true],
+    ["in the morning at 10 AM", false, false],
+    ["every morning at 10 AM and in the evening starting the next day", true, true]
+  ] as const)("executes the qualified morning clock once and preserves an independent evening: %s",
+    (timing, evening, onset) => {
+    const source = "Take 1 tablet " + timing;
+    const parsed = parseSig(source);
+    const schedule = parsed.meta.canonical.clauses[0].schedule;
+    expect(schedule?.when).toEqual(evening ? ["EVE"] : undefined);
+    expect(schedule?.timeOfDay).toEqual(["10:00:00"]);
+    expect(schedule?.count).toBeUndefined();
+    expect(schedule?.treatmentStartOffsetDays).toBe(onset ? 1 : undefined);
+    if (onset) expect(schedule).toMatchObject({ period: 1, periodUnit: "d" });
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-02T00:00:00Z",
+      timeZone: "UTC", eventClock: { MORN: "08:00", EVE: "18:00" }, limit: 4 };
+    const expected = evening ? [
+      "2026-12-02T10:00:00+00:00", "2026-12-02T18:00:00+00:00",
+      "2026-12-03T10:00:00+00:00", "2026-12-03T18:00:00+00:00"
+    ] : [
+      "2026-12-02T10:00:00+00:00", "2026-12-03T10:00:00+00:00",
+      "2026-12-04T10:00:00+00:00", "2026-12-05T10:00:00+00:00"
+    ];
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: "d" }).totalUnits)
+        .toBe(evening ? 2 : 1);
+    }
+  });
+
+  it.each([false, true])("retains a partial eye track without requiring a schedule on every member (%s)", scheduled => {
+    const source = "Instill 1 drop OD" + (scheduled ? " daily" : "") +
+      ", then instill 2 drops OD from 2026-12-05; instill 1 drop OS BID";
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(3);
+    const native = parsed.meta.canonical.course!;
+    const members = native.stages[0].administrations;
+    expect(members.map(member => member.amounts?.[0].quantity?.value)).toEqual([1, 2, 1]);
+    expect(members.map(member => member.target?.text)).toEqual(["right eye", "right eye", "left eye"]);
+    if (scheduled) expect(members[0].schedule?.recurrence?.calendarWindow?.end).toBe("2026-12-04");
+    else {
+      expect(members[0].schedule).toBeUndefined();
+      expect(members[0].phaseEnd).toBeUndefined();
+    }
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const rows of [parsed.fhir, cold]) {
+      expect(rows).toHaveLength(3);
+      expect(rows.map(row => row.doseAndRate?.[0].doseQuantity?.value)).toEqual([1, 2, 1]);
+      expect(rows[1].timing?.repeat?.boundsPeriod?.start).toBe("2026-12-05");
+      expect(rows[2].timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      if (!scheduled) expect(rows[0].timing).toBeUndefined();
+    }
+    expect(parsed.fhirNext.step[0].component).toHaveLength(3);
+    expect(formatSig(native, "long", { locale: "en" })).toContain("Instill 1 drop");
+    expect(formatSig(native, "long", { locale: "en" })).toContain("left eye");
   });
 });

@@ -572,6 +572,11 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
       expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      for (const amount of row.doseAndRate ?? []) {
+        expect(amount.rateQuantity).toBeUndefined();
+        expect(amount.rateRange).toBeUndefined();
+        expect(amount.rateRatio).toBeUndefined();
+      }
       expect(row.timing?.repeat?.duration).toBeUndefined();
     }
     for (const row of [parsed.fhir[0], cold[0]])
@@ -608,6 +613,10 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
     const parsed = parsePublicSig(input);
     expect(parsed.meta.canonical.clauses[0].schedule?.administrationOffsetMinutes).toBe(360);
     expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(count);
+    expect(parsed.meta.canonical.clauses[0].prn?.reason?.text).toBe(prn ? "pain" : undefined);
+    if (prn) expect(parsed.meta.canonical.clauses[0].prn?.reason?.coding).toMatchObject({
+      system: "http://snomed.info/sct", code: "22253000"
+    });
     expect(parsed.meta.canonical.course?.stages[0].start).toMatchObject({
       anchor: "treatment-start", displacement: { value: 6, unit: "h" }
     });
@@ -615,6 +624,10 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
       expect(row.timing?.repeat?.count).toBe(count);
       expect(row.asNeeded).toBe(prn);
+      if (prn) expect(row.asNeededFor).toEqual([expect.objectContaining({
+        text: "pain", coding: [expect.objectContaining({ system: "http://snomed.info/sct", code: "22253000" })]
+      })]);
+      else expect(row.asNeededFor).toBeUndefined();
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
     }
   });

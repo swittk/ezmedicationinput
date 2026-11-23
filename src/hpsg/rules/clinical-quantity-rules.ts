@@ -197,9 +197,9 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
     if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount || allowPrecedingDose;
     if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
         DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
-        // An article counts as ONE only when it selects a medication unit;
-        // route determiners (via a peripheral IV) are not earlier doses.
-        (!DOSE_FRACTION_ARTICLES.has(lower) || directDoseUnitAfter(context, index + 1)))
+        // Only a medication amount owns the cue. Product strengths (0.9 %)
+        // and route determiners (via a peripheral IV) are not earlier doses.
+        directDoseUnitAfter(context, index + 1))
       precedingAmount = true;
   }
   return false;

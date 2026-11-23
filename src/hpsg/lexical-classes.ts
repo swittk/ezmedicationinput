@@ -532,8 +532,15 @@ export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
 export const FIXED_CLOCK_DAYPART_QUALIFICATION_RULE = "hpsg.cx.schedule.fixed-clock-daypart-qualification";
 function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number): boolean {
   let before = start - 1;
-  const previous = tokens[before];
-  if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower)) before--;
+  let previous = tokens[before];
+  if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower))
+    previous = tokens[--before];
+  // An optional clock belongs to the same end nominal: UNTIL 8 AM NEXT day.
+  // The lexical gate only locates its governor; the end rule parses the clock.
+  const clock = tokens[before - 1];
+  if (previous && MERIDIEM_TOKENS.has(previous.canonical ?? previous.lower) &&
+      clock && (clock.kind === LexKind.Number || clock.kind === LexKind.TimeLike)) before -= 2;
+  else if (previous?.kind === LexKind.TimeLike) before--;
   const governor = tokens[before];
   return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
 }
@@ -780,10 +787,13 @@ export function millionDoseNumberAt(
 ): { value: number; numericIndex: number } | undefined {
   let index = start + 1;
   let next = index < limit ? tokens[index] : undefined;
-  // A fractional multiplier licenses its article: "half a million".
-  // Exact and comparative heads consume the same complete numeric phrase.
-  if(value > 0 && value < 1 && next && DOSE_FRACTION_ARTICLES.has(next.canonical ?? next.lower))
-    next = ++index < limit ? tokens[index] : undefined;
+  // Fractional multipliers share the quantity's optional partitive/article:
+  // "half a million" and "three quarters of a million" own the same scale.
+  if (value > 0 && value < 1) {
+    for (let count = 0; count < 2 && next &&
+        DOSE_UNIT_CONNECTORS.has(next.canonical ?? next.lower); count++)
+      next = ++index < limit ? tokens[index] : undefined;
+  }
   // Most doses have no multiplier. Avoid allocating a placeholder result
   // for every routine '1 tab' token on the phone parsing hot path.
   return next && MILLION_DOSE_MULTIPLIER_TOKENS.has(next.canonical ?? next.lower)

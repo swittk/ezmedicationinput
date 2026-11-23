@@ -594,6 +594,27 @@ export function projectHpsgSignToState(
     applySchedule(state, schedule, deps);
   }
 
+  // Existing typed constructions distinguish daypart qualifiers from
+  // independently coordinated events, with or without a recurring cadence.
+  let positions = schedule?.when;
+  if (positions?.length && schedule?.timeOfDay?.length) {
+    let qualifiedDayparts: Set<EventTiming> | undefined;
+    for (const evidence of sign.evidence) {
+      if (evidence.rule !== FIXED_CLOCK_DAYPART_QUALIFICATION_RULE) continue;
+      const indices = new Set(evidence.tokenIndices);
+      for (const token of sign.tokens) {
+        if (!indices.has(token.index)) continue;
+        const event = EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
+        if (event) (qualifiedDayparts ??= new Set()).add(event);
+      }
+    }
+    if (qualifiedDayparts?.size && state.primaryClause.schedule) {
+      positions = positions.filter(event => !qualifiedDayparts!.has(event));
+      if (positions.length) state.primaryClause.schedule.when = positions;
+      else delete state.primaryClause.schedule.when;
+    }
+  }
+
   // NEXT day/daypart locates the composed administration positions once.
   // An independently stated cadence or course keeps its own recurrence; the onset supplies
   // neither a daily repetition nor an invented event clock.
@@ -606,25 +627,6 @@ export function projectHpsgSignToState(
       !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
       schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
       !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
-    // Existing constructions distinguish qualifiers from coordinated events.
-    // Keep an authored daypart field without counting its clock twice.
-    const qualifiedDayparts = new Set<EventTiming>();
-    for (const evidence of sign.evidence) {
-      if (evidence.rule !== FIXED_CLOCK_DAYPART_QUALIFICATION_RULE) continue;
-      const indices = new Set(evidence.tokenIndices);
-      for (const token of sign.tokens) {
-        if (!indices.has(token.index)) continue;
-        const event = EVENT_TIMING_TOKENS[token.canonical ?? token.lower];
-        if (event) qualifiedDayparts.add(event);
-      }
-    }
-    const positions = schedule.when?.filter(event => !qualifiedDayparts.has(event));
-    if (qualifiedDayparts.size && state.primaryClause.schedule) {
-      // Like the existing NEXT-clock refinement, only the authored exact
-      // clock executes. A configured daypart clock cannot add an earlier dose.
-      if (positions?.length) state.primaryClause.schedule.when = positions;
-      else delete state.primaryClause.schedule.when;
-    }
     // A PRN onset locates eligibility; it does not prescribe one lifetime use.
     if (!state.asNeeded)
       state.count = Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));

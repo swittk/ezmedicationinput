@@ -3559,10 +3559,12 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   if (context.dateSpans.some(span => span.start <= lead.sourceStart && span.end > lead.sourceStart)) {
     return undefined;
   }
-  const article = context.tokens[start + 1];
   let next = start + 1;
+  const clock = parseClockToken(context.tokens[next], context.tokens[next + 1]);
+  if (clock) next += clock.tokens.length;
+  const article = context.tokens[next];
   if (article && normalizeTokenLower(article) === 'the') next += 1;
-  // A relative end owns the whole NEXT + day/daypart nominal. Its clock is
+  // A relative end owns its optional clock and NEXT + day/daypart nominal. Its clock is
   // unresolved, so retain the authored ending instruction without creating a
   // recurring morning/evening dose or inventing an absolute end instant.
   const modifier = context.tokens[next], head = context.tokens[next + 1];

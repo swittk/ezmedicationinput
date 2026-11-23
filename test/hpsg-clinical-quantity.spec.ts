@@ -2610,7 +2610,8 @@ describe("round37 fractional unit complements and event-period limits", () => {
           timeZone: "UTC", eventClock: { NIGHT: "20:00", HS: "22:00" }, limit: 3 })).toEqual([
           "2026-01-01T22:00:00+00:00", "2026-01-02T22:00:00+00:00", "2026-01-03T22:00:00+00:00",
         ]);
-      expect(parsed.longText).toMatch(/max 1 tablet/i);
+      const completeMaximum = "max 1 tablet" + (period.startsWith("/") ? "" : " ") + period;
+      expect(parsed.longText.toLowerCase()).toContain(completeMaximum);
       expect(parsed.fhir.map(row => row.text).join(" ")).toContain(period);
     });
 
@@ -2963,6 +2964,9 @@ describe("round42 infusion arguments and saved action lookup", () => {
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "L" });
     expect(parsed.input).toBe(source);
+    expect(parsed.fhir).toHaveLength(1);
+    expect(toFhirR5Dosages(parsed.fhirNext)).toHaveLength(1);
+    expect(parsed.fhirNext.step.reduce((count, step) => count + step.component.length, 0)).toBe(1);
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "L" });
       expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
@@ -2976,6 +2980,9 @@ describe("round42 infusion arguments and saved action lookup", () => {
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     const clause = parsed.meta.canonical.clauses[0];
     expect(clause.dose).toEqual({ range: { low: 500, high: 1000 }, unit: "mL" });
+    expect(parsed.fhir).toHaveLength(1);
+    expect(toFhirR5Dosages(parsed.fhirNext)).toHaveLength(1);
+    expect(parsed.fhirNext.step.reduce((count, step) => count + step.component.length, 0)).toBe(1);
     expect(clause.clinicalQuantity?.administrationDuration).toBeUndefined();
     expect(clause.clinicalQuantity?.projectedDose).toBeUndefined();
     expect(parsed.meta.canonical.course?.stages[0].administrations[0].amounts).toEqual([{
@@ -3135,14 +3142,18 @@ describe("round46 supported quantity and boundary ownership", () => {
       }
     });
 
-  it("retains a recognized relative ending without executing an unbounded course", () => {
-    const source = "Take 1 tablet every 6 hours until the next morning";
+  it.each(["until the next morning", "until 8 AM the next morning", "until 08:00 the next morning",
+    "until 8am next morning"])("retains the relative ending %s without turning it into an onset", ending => {
+    const source = "Take 1 tablet every 6 hours " + ending;
     const parsed = parsePublicSig(source);
     const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
       timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 10 };
     const course = parsed.meta.canonical.course!;
+    expect(parsed.meta.canonical.clauses[0].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
     expect(course.stages[0].administrations[0].phaseEnd)
-      .toEqual({ anchor: "unresolved", description: "until the next morning" });
+      .toEqual({ anchor: "unresolved", description: ending });
     for (const input of [parsed, course, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(() => nextDueDoses(input, query)).toThrow(/treatment-start offset/);
@@ -3151,10 +3162,10 @@ describe("round46 supported quantity and boundary ownership", () => {
     }
     for (const input of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
       const member = importCanonicalCourse(input).stages[0].administrations[0];
-      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: "until the next morning" });
+      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: ending });
       expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h" });
       expect(member.schedule?.recurrence?.anchors).toBeUndefined();
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toContain("until the next morning");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toContain(ending);
     }
     const bounded = parsePublicSig("Take 1 tablet every 6 hours for 1 day");
     for (const input of [bounded, bounded.fhirNext, JSON.parse(JSON.stringify(bounded.fhir))]) {
@@ -3178,5 +3189,60 @@ describe("round46 supported quantity and boundary ownership", () => {
     expect(text).toContain("daily");
     expect(text).not.toContain("1 tablet");
     expect(formatCanonicalCourse(course, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+  });
+});
+
+
+describe("round49 product strength and complete fractional quantities", () => {
+  it("keeps saline strength outside the administered volume's duration cue", () => {
+    const source = "Infuse saline 0.9 % 500 mL for 2 hours";
+    const parsed = parsePublicSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 500, unit: "mL" });
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "dose-with-rate-ratio", numerator: { value: 500, unit: "mL" },
+      denominators: [{ value: 2, unit: "h" }], administrationDuration: { value: 2, unit: "h" }
+    });
+    expect(clause.schedule?.duration).toBeUndefined();
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateRatio).toMatchObject({
+        numerator: { value: 500, unit: "mL" }, denominator: { value: 2, unit: "h" }
+      });
+      expect(row.timing?.repeat).toMatchObject({ count: 1, duration: 2, durationUnit: "h" });
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+    }
+    const earlierDose = parsePublicSig("Infuse 100 mL, no more than 50 mL over 2 hours");
+    expect(earlierDose.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    expect(earlierDose.meta.canonical.clauses[0].schedule?.maxDosePerPeriod).toEqual([
+      { amount: 50, unit: "mL", period: 2, periodUnit: "h" }
+    ]);
+    expect(earlierDose.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+  });
+
+  it.each([
+    ["Take three quarters of a million units daily", 750000, undefined],
+    ["Take half a million units daily", 500000, undefined],
+    ["Take a quarter million units daily", 250000, undefined],
+    ["Inject less than three quarters of a million units daily", 750000, "<"],
+    ["Infuse three quarters of a million units over 1 hour", 750000, undefined]
+  ] as const)("keeps the complete million multiplier and qualifier: %s", (source, value, comparator) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({
+      value, unit: "U", ...(comparator ? { comparator } : {})
+    });
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value, unit: "U" });
+      expectSimpleQuantityOperator(row.doseAndRate?.[0].doseQuantity, comparator);
+    }
+    expect(parsed.meta.canonical.course?.stages[0].administrations[0].amounts?.[0].quantity)
+      .toMatchObject({ value, unit: "U", ...(comparator ? { comparator } : {}) });
   });
 });

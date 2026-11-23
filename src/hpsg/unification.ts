@@ -3,7 +3,7 @@ import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -1028,7 +1028,7 @@ function fixedClockEventAdjunctSynsem(
 ): { synsem: HpsgSynsem; qualifiedDaypartTokens?: number[] } | undefined {
   const clock = clockSign.synsem.head.schedule;
   const meal = mealSynsem.head.schedule;
-  if (!clock?.timeOfDay?.length || clock.when?.length || !meal?.when?.length ||
+  if (!clock?.timeOfDay?.length || !meal?.when?.length ||
       meal.timeOfDay?.length || !context.sourceText ||
       (clockSign.synsem.head.dose && mealSynsem.head.dose)) return undefined;
   const isMeal = (event: NonNullable<HpsgScheduleFeature["when"]>[number]) => {
@@ -1099,7 +1099,8 @@ function fixedClockEventAdjunctSynsem(
       token.sourceStart >= bridgeStart && token.sourceEnd <= bridgeEnd);
     if (!bridge.length || bridge.some(token =>
       coordinationConnectorKind(token.canonical ?? token.lower) !== "unknown" ||
-      (!/^[,;:]$/u.test(token.original) && !allowed.has(token.index)))) return undefined;
+      (!/^[,;:]$/u.test(token.original) &&
+        !CLOCK_LEAD_TOKENS.has(token.canonical ?? token.lower) && !allowed.has(token.index)))) return undefined;
   }
   const text = context.sourceText(mealStart, mealEnd).trim();
   if (!text) return undefined;
