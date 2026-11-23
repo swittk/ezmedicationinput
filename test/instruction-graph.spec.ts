@@ -2666,12 +2666,12 @@ describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
     expect(text).not.toBe(source);
     expect(entry.doseQuantity.value).toBe(1);
   });
-  it("rechecks the live dose after a previously verified external R5 row is edited in place", () => {
+  it("checks each freshly submitted external R5 dose against its source", () => {
     const source="ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
     // The authoritative persisted top-level R5 row owns the saved edit
     // fingerprint; per-item parser previews intentionally do not.
     const row=structuredClone(parsePublicSig(source,{locale:"th"}).fhir[0]);
-    const show=()=>formatSig(row,"long",{locale:"th",realizationMode:"roundtrip"});
+    const show=()=>formatSig(structuredClone(row),"long",{locale:"th",realizationMode:"roundtrip"});
     expect(show()).toBe(source);
     const dose=row.doseAndRate?.[0]?.doseQuantity;
     if(!dose)throw new Error("authored dose missing");
@@ -3795,11 +3795,11 @@ describe("round36 selected Time output evidence", () => {
 
 
 describe("round36 live predicate and explicit amountless primary controls", () => {
-  it("uses only the live predicate after a warmed supported wire restriction edit in both locales", () => {
+  it("uses the current predicate from fresh submitted wire restrictions in both locales", () => {
     const source = "Apply 1 g to skin where skin is red daily max 2 g/day";
-    const row = parseSig(source).items[0].fhir;
+    const row = structuredClone(parsePublicSig(source).fhir[0]);
     for (const locale of ["en", "th"])
-      formatSig(row, "long", { locale, realizationMode: "roundtrip" });
+      formatSig(structuredClone(row), "long", { locale, realizationMode: "roundtrip" });
     const restriction = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
     restriction.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
     const before = JSON.stringify(row);
@@ -3983,11 +3983,11 @@ describe("round37 rendered primary action identity", () => {
 });
 
 describe("round38 live dose and action participant ownership", () => {
-  it.each([10, 2.5])("uses an edited scalar weight dose of %s without replaying the old amount", value => {
+  it.each([10, 2.5])("uses a freshly submitted scalar weight dose of %s without replaying the old amount", value => {
     const source = "Take 5 mg/kg once daily";
     const parsed = parsePublicSig(source);
-    const fresh = parsed.items[0].fhir!;
-    expect(formatSig(fresh, "long")).toBe(source);
+    const fresh = structuredClone(parsed.fhir[0]!);
+    expect(formatSig(structuredClone(fresh), "long")).toBe(source);
     fresh.doseAndRate![0].doseQuantity!.value = value;
     for (const input of [fresh, JSON.parse(JSON.stringify(toFhirR5Dosages([fresh])))]) {
       for (const locale of ["en", "th"]) {

@@ -1,3 +1,13 @@
+# OWNER IMMUTABLE-CALLER CLARIFICATION — 2026-11-24
+
+Inputs and outputs are immutable by caller contract after crossing an API boundary. Detecting later in-place edits to an already-consumed or returned object instance is not supported. Do not keep field snapshots, repeated revalidation, defensive recursive comparisons, freezing, or mutation-isolation machinery solely for that misuse. A simple result memo for an immutable instance does not need mutation detection.
+
+Fresh independently constructed or persisted R5/current-R6 values are supported interchange inputs. On their first submission, honor their current clinical fields and retain all unrelated known and unknown data. Keep the source/projection evidence needed for fresh import and save/reopen fidelity; stale former dose, timing, phase, site or condition must not override an explicitly submitted new value. Tests of caller edits must prepare a new value rather than mutate an already-consumed instance.
+
+The existing explicit spatial clone retains its narrow field/value contract: distinct clone shells and detached standard primitive companions, extension content and translations. Preserve opaque extra values, which may remain shared under the immutable contract; do not introduce universal recursive isolation for arbitrary custom metadata.
+
+The current PR #14 engineering loop is authorized to continue through full CodeRabbit reviews after source, storage and the unchanged per-scenario 4% performance gates pass. Reply in original threads and resolve addressed findings before requesting exactly a full review. B4's pure-event same-day policy remains settled; no new chronology inference is authorized. No merge, publishing or deployment.
+
 # OWNER UNIT-PRESERVATION CLARIFICATION — 2026-11-22
 
 The prescriber owns authored quantity values and unit choices. Preserve independently authored range endpoints in the internal model and R5/R6 projections. Do not convert, normalize, drop, or rewrite those values/units merely to satisfy FHIR Range constraints; retaining originals only in provenance does not authorize changing the active prescription. Calculations may compare compatible units internally without changing stored/exported prescription quantities. A validator's rejection is an interoperability limitation, not permission to rewrite the prescription.

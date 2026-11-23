@@ -22,8 +22,7 @@ import {
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   setDosageExcludedDates, getDosageExcludedDates, setDosageExcludedWeekdays, R5_RATE_MODIFIERS_R6_URL,
-  captureSourceReplayTiming, matchesSourceReplayTiming, dosageMatchesSavedProjection,
-  captureSourceReplayConcept, matchesSourceReplayConcept, R5_EXPRESSION_SLOT_SOURCE_URL, fromR6Dosage,
+  dosageMatchesSavedProjection, R5_EXPRESSION_SLOT_SOURCE_URL, fromR6Dosage,
 } from "../src/dosage-course";
 import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM, QUANTITY_OPERATOR_SOURCE_URL,
@@ -429,18 +428,24 @@ describe("round23 external R6 wording across R5", () => {
 
 describe("round23 typed timing replay observations", () => {
   it.each([TIMING_OFFSET_EXACT_EXTENSION_URL, TIMING_OFFSET_MIN_EXTENSION_URL, TIMING_OFFSET_MAX_EXTENSION_URL])(
-    "invalidates cached timing after an in-place typed offset edit: %s", url => {
-      const timing = { repeat: { extension: [{ url, valueDecimal: 0.5 }] } };
-      const proof = captureSourceReplayTiming(timing);
-      expect(matchesSourceReplayTiming(timing, proof)).toBe(true);
-      timing.repeat.extension[0].valueDecimal = 1.5;
-      expect(matchesSourceReplayTiming(timing, proof)).toBe(false);
+    "imports each newly submitted typed offset value: %s", url => {
+      const input: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { repeat: { extension: [{ url, valueDecimal: 0.5 }] } } };
+      const field = url === TIMING_OFFSET_EXACT_EXTENSION_URL ? "offset"
+        : url === TIMING_OFFSET_MIN_EXTENSION_URL ? "offsetMin" : "offsetMax";
+      expect(importCanonicalCourse(input).stages[0].administrations[0].schedule?.recurrence?.[field]).toBe(0.5);
+      const submitted = persist(input);
+      submitted.timing!.repeat!.extension![0].valueDecimal = 1.5;
+      const before = persist(submitted);
+      expect(importCanonicalCourse(submitted).stages[0].administrations[0].schedule?.recurrence?.[field]).toBe(1.5);
+      expect(submitted).toEqual(before);
     });
 
-  it.each([false, true])("renders an externally edited Thai minimum offset from 30 to 60 minutes (persisted %s)", saved => {
+  it.each([false, true])("renders a newly submitted Thai minimum offset from 30 to 60 minutes (original persisted %s)", saved => {
     const parsed = parseSig("รับประทาน 1 เม็ด ก่อนอาหารอย่างน้อย 30 นาที", { locale: "th" });
-    const row = saved ? persist(parsed.fhir[0]) : parsed.fhir[0];
+    let row = saved ? persist(parsed.fhir[0]) : parsed.fhir[0];
     expect(formatSig(row, "long", { locale: "th" })).toContain("30 นาที");
+    row = persist(row);
     row.timing!.repeat!.extension!.find(item => item.url === TIMING_OFFSET_MIN_EXTENSION_URL)!.valueInteger = 60;
     const text = formatSig(row, "long", { locale: "th" });
     expect(text).toBe("รับประทานครั้งละ 1 เม็ด ก่อนอาหารอย่างน้อย 1 ชั่วโมง.");
@@ -572,13 +577,14 @@ describe("round24 supported FHIR edit boundaries", () => {
     { text: "at most 5 mg every morning and at most 3 mg every evening", counts: [2] },
   ])("assigns final source indices to qualified parser rows: $text", ({ text, counts }) => {
     const parsed = parseSig(text);
-    const rows = persist(parsed.fhir);
+    let rows = persist(parsed.fhir);
     expect(rows.map(row => decodeR5RetainedFields(row.modifierExtension!
       .find(value => value.url === DOSAGE_DETAILS_R5_URL)!).rowIndex)).toEqual([0, 1]);
     const unchanged = toDosageDetails(rows);
     expect(unchanged.renderedInstruction).toBe(text);
     expect(unchanged.step!.map(step => step.component.length)).toEqual(counts);
     expect(unchanged.extension?.some(value => value.url === DOSAGE_RECONCILIATION_SOURCE_URL)).not.toBe(true);
+    rows = persist(rows);
     rows[1].doseAndRate![0].doseQuantity!.value = 7;
     const edited = toDosageDetails(rows);
     const components = edited.step!.length === 2
@@ -600,10 +606,11 @@ describe("round24 supported FHIR edit boundaries", () => {
     expect(getQuantityComparator(amount.rateRatio!.denominator)).toBe(">=");
   });
 
-  it.each([false, true])("invalidates the live month-day replay proof after an in-place edit (persisted=%s)", saved => {
+  it.each([false, true])("uses a newly submitted month-day edit (original persisted=%s)", saved => {
     const parsed = parseSig("Take 1 tablet PO on day 1 of every month");
-    const row = saved ? persist(parsed.fhir[0]) : parsed.fhir[0];
+    let row = saved ? persist(parsed.fhir[0]) : parsed.fhir[0];
     formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+    row = persist(row);
     const marker = row.timing!.repeat!.extension!.find(value => value.url === TIMING_DAY_OF_MONTH_EXTENSION_URL)!;
     expect(marker.valuePositiveInt).toBe(1);
     marker.valuePositiveInt = 15;
@@ -1467,7 +1474,7 @@ describe("round28 live interchange authority and retained clinical identity", ()
     }
   });
 
-  it.each([false, true])("observes an in-place saved R5 condition edit after warming replay (compound %s)", compound => {
+  it.each([false, true])("uses a newly submitted saved R5 condition threshold (compound %s)", compound => {
     const text = "Take 1 tablet daily if SBP > 160, maximum 2 tablets per administration";
     const predicate = { kind: "measurement" as const, name: "SBP", operation: "gt" as const,
       value: 160, unit: "mmHg", text: "SBP > 160" };
@@ -1476,9 +1483,10 @@ describe("round28 live interchange authority and retained clinical identity", ()
       maxDosePerAdministration: q(2) };
     setDosageCondition(raw, compound ? { kind: "all", conditions: [predicate,
       { kind: "state", name: "dizziness", expected: false, text: "no dizziness" }] } : predicate);
-    const row = persist(withDosageEditProvenance([raw], text)[0]);
+    let row = persist(withDosageEditProvenance([raw], text)[0]);
     expect(formatSig(row)).toBe(text);
     expect(formatSig(row)).toBe(text);
+    row = persist(row);
     const root = row.modifierExtension!.find(item => item.url === DOSAGE_CONDITION_R5_URL)!.extension![0];
     const leaf = compound ? root.extension!.find(item => item.url === "conditions")! : root;
     leaf.extension!.find(item => item.url === "value")!.valueDecimal = 150;
@@ -1489,12 +1497,13 @@ describe("round28 live interchange authority and retained clinical identity", ()
     expect(warm).not.toContain("160");
   });
 
-  it("observes an in-place state predicate polarity edit without replaying its old text", () => {
+  it("uses a newly submitted state predicate polarity without replaying its old text", () => {
     const text = "Take 1 tablet if dizziness, maximum 2 tablets per administration";
     const raw: FhirDosage = { text, doseAndRate: [{ doseQuantity: q(1) }], maxDosePerAdministration: q(2) };
     setDosageCondition(raw, { kind: "state", name: "dizziness", expected: true, text: "dizziness" });
-    const row = persist(withDosageEditProvenance([raw], text)[0]);
+    let row = persist(withDosageEditProvenance([raw], text)[0]);
     expect(formatSig(row)).toBe(text);
+    row = persist(row);
     const leaf = row.modifierExtension!.find(item => item.url === DOSAGE_CONDITION_R5_URL)!.extension![0];
     leaf.extension!.find(item => item.url === "expected")!.valueBoolean = false;
     const warm = formatSig(row);
@@ -1503,15 +1512,16 @@ describe("round28 live interchange authority and retained clinical identity", ()
     expect(row.text).toBe(text);
   });
 
-  it("observes a later strict R5 capped row's rate edit without losing unchanged authored text", () => {
+  it("uses a newly submitted later capped R5 rate without losing unchanged authored text", () => {
     const text = "Infuse 5 mL/h, maximum 10 mL per administration";
     const input: FhirDosage[] = [
       { sequence: 1, text: "Give 1 mL", doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }] },
       { sequence: 2, text, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
         maxDosePerAdministration: { value: 10, unit: "mL" } },
     ];
-    const rows = persist(toFhirR5Dosages(withDosageEditProvenance(input, "Initial dose, then maintenance")));
+    let rows = persist(toFhirR5Dosages(withDosageEditProvenance(input, "Initial dose, then maintenance")));
     expect(formatSig(rows[1])).toBe(text);
+    rows = persist(rows);
     rows[1].doseAndRate![0].rateQuantity!.value = 6;
     const preview = formatSig(rows[1]);
     expect(preview).toBe(formatSig(persist(rows[1])));
@@ -1745,10 +1755,11 @@ describe("round29 interchange ownership", () => {
     if (!identified) expect(JSON.stringify(result.extension)).toContain("BodyStructure/right-eye");
   });
 
-  it("observes a fresh parser row's condition threshold without stale source text", () => {
-    const row = parseSig("1 tab BID only if BP > 160").items[0].fhir;
+  it("uses a newly submitted parser-row condition threshold without stale source text", () => {
+    let row = toFhirR5Dosages(parseSig("1 tab BID only if BP > 160").fhir)[0];
     const original = row.text;
     expect(formatSig(row)).toContain("160");
+    row = persist(row);
     const marker = row.modifierExtension!.find(item => item.url === DOSAGE_CONDITION_R5_URL)!;
     const pending = [marker];
     for (let index = 0; index < pending.length; index++) {
@@ -1765,10 +1776,11 @@ describe("round29 interchange ownership", () => {
     expect(row.text).toBe(original);
   });
 
-  it.each(["fresh", "saved"] as const)("does not revive a removed %s condition", mode => {
-    const parsed = parseSig("1 tab BID only if BP > 160").items[0].fhir;
-    const row = mode === "fresh" ? parsed : persist(withDosageEditProvenance([parsed], parsed.text)[0]);
+  it.each(["fresh", "saved"] as const)("does not revive a removed condition in a newly submitted %s value", mode => {
+    const parsed = toFhirR5Dosages(parseSig("1 tab BID only if BP > 160").fhir)[0];
+    let row = mode === "fresh" ? parsed : persist(withDosageEditProvenance([parsed], parsed.text)[0]);
     expect(formatSig(row)).toContain("160");
+    row = persist(row);
     row.modifierExtension = row.modifierExtension!.filter(item => item.url !== DOSAGE_CONDITION_R5_URL);
     const text = formatSig(row);
     expect(text).not.toMatch(/BP|160|only if/u);
@@ -1777,9 +1789,9 @@ describe("round29 interchange ownership", () => {
   });
 
   it.each(["relation", "activity", "offset", "offsetMin", "offsetMax"] as const)(
-    "observes a nested activity-window %s edit after warming source replay", field => {
+    "uses a newly submitted nested activity-window %s edit", field => {
       const text = "Take 1 tablet 30 minutes after dialysis";
-      const row = persist(withDosageEditProvenance([{
+      let row = persist(withDosageEditProvenance([{
         text, doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { extension: [{
           url: TIMING_ACTIVITY_WINDOW_EXTENSION_URL, extension: [
             { url: "relation", valueCode: "after" }, { url: "activity", valueCodeableConcept: { text: "dialysis" } },
@@ -1791,6 +1803,7 @@ describe("round29 interchange ownership", () => {
         }] } },
       }], text)[0]);
       expect(dosageMatchesSavedProjection(row)).toBe(true);
+      row = persist(row);
       const parts = row.timing!.repeat!.extension![0].extension!;
       if (field === "relation") parts[0].valueCode = "before";
       else if (field === "activity") parts[1].valueCodeableConcept!.text = "physiotherapy";
@@ -1966,8 +1979,8 @@ describe("round30 interchange meaning", () => {
       expect(JSON.stringify(projectCanonicalCourse(native).fhirNext.extension)).toContain(R6_SINGLE_STEP_SAFETY_SOURCE_URL);
     });
 
-  it.each(["date", "weekday"] as const)("invalidates fresh source wording when a %s exclusion is added", kind => {
-    const row = parseSig("Take 1 tablet twice daily").items[0].fhir;
+  it.each(["date", "weekday"] as const)("uses a newly submitted %s exclusion instead of former source wording", kind => {
+    const row = persist(parseSig("Take 1 tablet twice daily").fhir[0]);
     const original = row.text;
     if (kind === "date") setDosageExcludedDates(row, ["2026-01-02"]);
     else setDosageExcludedWeekdays(row, [FhirDayOfWeek.Monday]);
@@ -1978,14 +1991,15 @@ describe("round30 interchange meaning", () => {
     expect(row.text).toBe(original);
   });
 
-  it.each(["date", "weekday"] as const)("observes a %s exclusion edit after warming persisted source replay", kind => {
+  it.each(["date", "weekday"] as const)("uses newly submitted %s exclusion edits and clears", kind => {
     const row: FhirDosage = { text: kind === "date" ? "Take one tablet except 2026-01-02." : "Take one tablet except Monday.",
       doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
     if (kind === "date") setDosageExcludedDates(row, ["2026-01-02"]);
     else setDosageExcludedWeekdays(row, [FhirDayOfWeek.Monday]);
-    const saved = persist(withDosageEditProvenance([row], row.text)[0]);
+    let saved = persist(withDosageEditProvenance([row], row.text)[0]);
     expect(dosageMatchesSavedProjection(saved)).toBe(true);
     expect(formatSig(saved, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    saved = persist(saved);
     const marker = kind === "date"
       ? saved.modifierExtension!.find(value => value.url === DOSAGE_EXCLUDED_DATES_R5_URL)!
       : saved.extension!.find(value => value.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)!;
@@ -1998,6 +2012,7 @@ describe("round30 interchange meaning", () => {
       expect(actual).not.toMatch(kind === "date" ? /2026-01-02/u : /Mon(?:day)?/u);
       expect(fromFhirDosage(input).longText).toMatch(kind === "date" ? /2026-01-03/u : /Tue(?:sday)?/u);
     }
+    saved = persist(saved);
     if (kind === "date") setDosageExcludedDates(saved, []);
     else setDosageExcludedWeekdays(saved, []);
     for (const input of [saved, persist(saved)]) {
@@ -2017,12 +2032,13 @@ describe("round30 interchange meaning", () => {
     expect(row.text).toBe("Take one tablet daily.");
   });
 
-  it("observes the existing extended R5 excluded-date array without reviving stale text", () => {
-    const row = toEzDosages([parseSig("Take 1 tablet daily").items[0].fhir])[0];
+  it("uses a newly submitted extended R5 excluded-date array without reviving stale text", () => {
+    const row = persist(toEzDosages([parseSig("Take 1 tablet daily").fhir[0]])[0]);
     row.excludedDates = ["2026-01-02"];
     expect(formatSig(row, "long")).toContain("2026-01-02");
-    const saved = persist(withDosageEditProvenance([row], "Take one tablet except 2026-01-02.")[0]);
+    let saved = persist(withDosageEditProvenance([row], "Take one tablet except 2026-01-02.")[0]);
     expect(dosageMatchesSavedProjection(saved)).toBe(true);
+    saved = persist(saved);
     saved.excludedDates![0] = "2026-01-03";
     expect(dosageMatchesSavedProjection(saved)).toBe(false);
     expect(formatSig(saved, "long")).toContain("2026-01-03");
@@ -2114,42 +2130,58 @@ describe("round30 interchange meaning", () => {
     expect(JSON.stringify(output.step![0].component[0].extension)).toContain("numerator-note");
   });
   it.each(["value", "unit", "code", "system", "comparator", "ema", "removed"] as const)(
-    "invalidates administration-duration source replay after a live %s edit", field => {
+    "imports newly submitted administration-duration %s values", field => {
       const quantity = quantityForR5({ value: 2, unit: "h", code: "h", system: "http://unitsofmeasure.org", comparator: "~" })!;
-      const timing = { repeat: { extension: [{ url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: quantity }] } };
-      const proof = captureSourceReplayTiming(timing);
-      expect(matchesSourceReplayTiming(timing, proof)).toBe(true);
-      if (field === "value") quantity.value = 3;
-      else if (field === "unit") quantity.unit = "min";
-      else if (field === "code") quantity.code = "min";
-      else if (field === "system") quantity.system = "urn:test:duration-unit";
-      else if (field === "comparator") quantity.comparator = ">";
-      else if (field === "ema") quantity.extension![0].valueCoding!.code = "100000000051";
-      else timing.repeat.extension.length = 0;
-      expect(matchesSourceReplayTiming(timing, proof)).toBe(false);
+      const original: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
+        timing: { repeat: { extension: [{ url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: quantity }] } } };
+      expect(importCanonicalCourse(original).stages[0].administrations[0].schedule?.recurrence).toMatchObject({
+        occurrenceDuration: 2, occurrenceDurationUnit: "h", occurrenceDurationComparator: "~",
+      });
+      const submitted = persist(original);
+      const current = submitted.timing!.repeat!.extension![0].valueQuantity!;
+      if (field === "value") current.value = 3;
+      else if (field === "unit") current.unit = "min";
+      else if (field === "code") current.code = "min";
+      else if (field === "system") current.system = "urn:test:duration-unit";
+      else if (field === "comparator") current.comparator = ">";
+      else if (field === "ema") current.extension![0].valueCoding!.code = "100000000051";
+      else submitted.timing!.repeat!.extension!.length = 0;
+      const before = persist(submitted);
+      const recurrence = importCanonicalCourse(submitted).stages[0].administrations[0].schedule?.recurrence;
+      expect(recurrence?.occurrenceDuration).toBe(field === "removed" ? undefined : field === "value" ? 3 : 2);
+      if (field !== "removed") {
+        expect(recurrence?.occurrenceDurationUnit).toBe(field === "system" ? undefined : field === "code" ? "min" : "h");
+        expect(recurrence?.occurrenceDurationComparator).toBe(field === "comparator" || field === "ema" ? ">" : "~");
+      }
+      expect(submitted).toEqual(before);
     });
 
   it("keeps first-marker semantics for an incomplete administration duration", () => {
     const empty: FhirExtension = { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL };
     const timing = { repeat: { extension: [empty,
       { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: { value: 8, unit: "h" } }] } };
-    const proof = captureSourceReplayTiming(timing);
-    expect(matchesSourceReplayTiming(timing, proof)).toBe(true);
-    timing.repeat.extension[1].valueQuantity!.value = 9;
-    expect(matchesSourceReplayTiming(timing, proof)).toBe(true);
-    empty.valueQuantity = { value: 2, unit: "h", comparator: ">" };
-    expect(matchesSourceReplayTiming(timing, proof)).toBe(false);
+    const original: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }], timing };
+    expect(importCanonicalCourse(original).stages[0].administrations[0].schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+    const laterMarkerEdit = persist(original);
+    laterMarkerEdit.timing!.repeat!.extension![1].valueQuantity!.value = 9;
+    expect(importCanonicalCourse(laterMarkerEdit).stages[0].administrations[0].schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+    const firstMarkerEdit = persist(laterMarkerEdit);
+    firstMarkerEdit.timing!.repeat!.extension![0].valueQuantity = { value: 2, unit: "h", comparator: ">" };
+    expect(importCanonicalCourse(firstMarkerEdit).stages[0].administrations[0].schedule?.recurrence).toMatchObject({
+      occurrenceDuration: 2, occurrenceDurationUnit: "h", occurrenceDurationComparator: ">",
+    });
   });
 
-  it("rejects stale persisted rate-duration wording after an in-place duration edit", () => {
+  it("uses a newly submitted rate-duration value instead of stale wording", () => {
     const row: FhirDosage = { text: "Infuse at 5 mL/hour over approximately two hours.",
       doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }], timing: { repeat: { extension: [{
         url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
         valueQuantity: quantityForR5({ value: 2, unit: "h", comparator: "~" }),
       }] } } };
-    const saved = persist(withDosageEditProvenance([row], row.text)[0]);
+    let saved = persist(withDosageEditProvenance([row], row.text)[0]);
     expect(dosageMatchesSavedProjection(saved)).toBe(true);
     expect(formatSig(saved, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    saved = persist(saved);
     saved.timing!.repeat!.extension![0].valueQuantity!.value = 3;
     for (const input of [saved, persist(saved)]) {
       expect(dosageMatchesSavedProjection(input)).toBe(false);
@@ -2778,14 +2810,15 @@ describe("round33 interchange ownership families", () => {
     expect(getDosageCalendarDayCondition(row)).toBeUndefined();
   });
 
-  it.each(["remove", "add"] as const)("invalidates warm PRN reason replay after trigger phase %s", edit => {
+  it.each(["remove", "add"] as const)("uses a newly submitted PRN reason after trigger phase %s", edit => {
     const phase: FhirExtension = { url: PRN_TRIGGER_PHASE_EXTENSION_URL, valueCode: "onset" };
     const text = edit === "remove" ? "Take 1 tablet at onset of migraine, maximum 2 tablets per dose"
       : "Take 1 tablet as needed for migraine, maximum 2 tablets per dose";
-    const rows = toFhirR5Dosages([{ text, doseAndRate: [{ doseQuantity: q(1) }],
+    let rows = toFhirR5Dosages([{ text, doseAndRate: [{ doseQuantity: q(1) }],
       asNeeded: true, asNeededFor: [{ text: "migraine", extension: edit === "remove" ? [phase] : [] }],
       maxDosePerAdministration: q(2) }]);
     formatSig(rows[0]);
+    rows = persist(rows);
     rows[0].asNeededFor![0].extension = edit === "remove" ? [] : [phase];
     const before = JSON.stringify(rows[0]);
     for (const row of [rows[0], persist(rows[0])]) {
@@ -2908,10 +2941,11 @@ describe("round33 mixed clock carrier ownership", () => {
     expect(repeat.extension?.some(item => item.url === TIMING_ADDITIONAL_CLOCK_EXTENSION_URL) ?? false).toBe(false);
   });
 
-  it("observes an edited bridge clock in the public display after warming the source proof", () => {
+  it("uses a newly submitted bridge clock in the public display", () => {
     const text = "Take 1 tablet in the morning and at 09:00";
-    const rows = withDosageEditProvenance([{ ...input(), text }], text);
+    let rows = withDosageEditProvenance([{ ...input(), text }], text);
     formatSig(rows[0], "long");
+    rows = persist(rows);
     rows[0].timing!.repeat!.extension![0].valueTime = "10:00:00";
     expect(dosageMatchesSavedProjection(rows[0])).toBe(false);
     for (const row of [rows[0], persist(rows[0])]) {
@@ -3326,15 +3360,16 @@ describe("round34 interchange current clinical ownership", () => {
     expect(getDosageExcludedDates({ modifierExtension: wire.step![0].component[0].modifierExtension })).toEqual(dates);
   });
 
-  it.each(["value", "period", "scope", "action", "expression"] as const)("invalidates a warmed lifted safety preview after a live %s edit", edit => {
+  it.each(["value", "period", "scope", "action", "expression"] as const)("uses a newly submitted lifted safety %s edit in the preview", edit => {
     const row: EzDosage = { text: "Take one tablet daily; maximum four tablets per dose.",
       doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
       safety: { doseLimit: [{ scope: "administration", valueQuantity: q(4) }] } };
     if (edit === "period") row.safety!.doseLimit![0] = { scope: "period", valueQuantity: q(4), period: { value: 1, unit: "d" } };
     if (edit === "expression") row.safety!.doseLimit![0] = { scope: "administration", valueExpression: expression("originalLimit") };
-    const saved = persist(withDosageEditProvenance([row], row.text)[0]);
+    let saved = persist(withDosageEditProvenance([row], row.text)[0]);
     expect(dosageMatchesSavedProjection(saved)).toBe(true);
     expect(formatSig(saved, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+    saved = persist(saved);
     if (edit === "value") saved.safety!.doseLimit![0].valueQuantity!.value = 2;
     else if (edit === "period") saved.safety!.doseLimit![0].period!.value = 2;
     else if (edit === "scope") saved.safety!.doseLimit![0].scope = "lifetime";
@@ -3638,9 +3673,9 @@ describe("round35 interchange field ownership", () => {
     }
   });
 
-  it("invalidates a fresh capped scheduled preview when only asNeededBoolean is edited", () => {
+  it("uses a newly submitted asNeededBoolean in a capped scheduled preview", () => {
     const parsed = parseSig("Take 1 tablet daily, maximum 2 tablets per day");
-    const row = parsed.fhir[0] as FhirDosage & { asNeededBoolean?: boolean };
+    const row = persist(parsed.fhir[0]) as FhirDosage & { asNeededBoolean?: boolean };
     expect(row.text).toBeTruthy();
     row.asNeededBoolean = true;
     expect(fromFhirDosage(row).longText).toMatch(/as needed/i);
@@ -3653,10 +3688,11 @@ describe("round35 interchange field ownership", () => {
     expect(importCanonicalCourse(row).stages[0].administrations[0].asNeeded).toBe(asNeeded);
   });
 
-  it.each(["doseExpression", "rateExpression"] as const)("invalidates warm replay after in-place %s edits", field => {
+  it.each(["doseExpression", "rateExpression"] as const)("uses newly submitted %s edits instead of the saved baseline", field => {
     const row: EzDosage = { text: "Use the specified expression.", doseAndRate: [{ [field]: expression("original") }] };
-    const saved = persist(withDosageEditProvenance([row], row.text)[0]) as EzDosage;
+    let saved = persist(withDosageEditProvenance([row], row.text)[0]) as EzDosage;
     expect(dosageMatchesSavedProjection(saved)).toBe(true);
+    saved = persist(saved);
     saved.doseAndRate![0][field]!.expression = "%current";
     expect(dosageMatchesSavedProjection(saved)).toBe(false);
     expect(dosageMatchesSavedProjection(persist(saved))).toBe(false);
@@ -3828,15 +3864,9 @@ describe("round36 external policy ownership and current source replay", () => {
     const liveMarker = () => firstRow().timing!.repeat!.extension!.find(item => item.url === marker.url)!;
     for (const max of [2, 3]) {
       if (max === 3) {
-        // Saved text replay belongs to the editable R5 surface. Current R6
-        // is verified below through native reimport and its own projections.
-        if (Array.isArray(current)) {
-          const timing = current[0].timing!;
-          const proof = captureSourceReplayTiming(timing);
-          expect(matchesSourceReplayTiming(timing, proof)).toBe(true);
-          liveMarker().valueRange!.high!.value = 3;
-          expect(matchesSourceReplayTiming(timing, proof)).toBe(false);
-        } else liveMarker().valueRange!.high!.value = 3;
+        // The application independently submits its next edit at either boundary.
+        current = persist(current);
+        liveMarker().valueRange!.high!.value = 3;
       }
       for (let save = 0; save <= 3; save++) {
         const native = importCanonicalCourse(current);
@@ -3876,23 +3906,22 @@ describe("round36 external policy ownership and current source replay", () => {
     }
   });
 
-  it("invalidates a warmed site restriction proof without changing the source wording", () => {
+  it("uses a newly submitted site restriction without changing the source wording", () => {
     const source = "Apply 1 g to skin where skin is red daily max 2 g/day";
-    const row = parseSig(source).items[0].fhir;
-    const proof = captureSourceReplayConcept(row.site, true);
+    let row = parseSig(source).fhir[0];
     formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+    row = persist(row);
     const restriction = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
     restriction.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
-    expect(matchesSourceReplayConcept(row.site, proof)).toBe(false);
     const text = formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
     expect(text).toContain("itchy");
     expect(text).not.toContain("skin is red");
     expect(row.text).toBe(source);
   });
 
-  it.each(["dose", "rate"] as const)("uses a newly supplied %s expression instead of fresh scalar source text", dimension => {
-    const row = parseSig("Take 1 tablet daily").items[0].fhir as EzDosage;
-    const item = row.doseAndRate![0];
+  it.each(["dose", "rate"] as const)("uses newly submitted %s expressions instead of former scalar source text", dimension => {
+    let row = persist(parseSig("Take 1 tablet daily").fhir[0]) as EzDosage;
+    let item = row.doseAndRate![0];
     if (dimension === "dose") delete item.doseQuantity;
     item[dimension === "dose" ? "doseExpression" : "rateExpression"] = {
       language: "text/fhirpath", expression: "weight-based current " + dimension
@@ -3907,6 +3936,8 @@ describe("round36 external policy ownership and current source replay", () => {
         if (dimension === "dose") expect(text).not.toMatch(/\b1 tablet\b/);
       }
     }
+    row = persist(row);
+    item = row.doseAndRate![0];
     item[dimension === "dose" ? "doseExpression" : "rateExpression"]!.expression = "second current " + dimension;
     expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toContain("second current " + dimension);
     expect(source).toContain("weight-based current " + dimension);
@@ -4275,7 +4306,7 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
   });
 
-  it("invalidates warm source replay only when the effective site target count changes", () => {
+  it("keeps unchanged site counts and uses a newly submitted target count", () => {
     const countUrl = "urn:ezmedicationinput:body-site-administration-target-count";
     const source = "Apply 1 g to each of 2 lesions daily max 2 g/day";
     const input: FhirDosage = {
@@ -4284,13 +4315,13 @@ describe("round37 interchange phase, limit and source ownership", () => {
       site: { text: "lesions", extension: [{ url: countUrl, valueInteger: 2 }] },
     };
     let row = persist(projectCanonicalCourse(importCanonicalCourse(input)).fhir[0]);
-    const proof = captureSourceReplayConcept(row.site, true);
     expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(source);
+    row = persist(row);
     const marker = { ...row.site!.extension!.find(item => item.url === countUrl)!, id: "unchanged-count-new-annotation" };
     row.site!.extension = [marker];
-    expect(matchesSourceReplayConcept(row.site, proof)).toBe(true);
-    marker.valueInteger = 3;
-    expect(matchesSourceReplayConcept(row.site, proof)).toBe(false);
+    expect(importCanonicalCourse(row).stages[0].administrations[0].targetCount).toBe(2);
+    row = persist(row);
+    row.site!.extension![0].valueInteger = 3;
     const edited = formatSig(row, "long", { realizationMode: "roundtrip" });
     expect(edited).not.toContain("2 lesions");
     expect(edited).toMatch(/\b1 g\b/);
@@ -4309,13 +4340,14 @@ describe("round37 interchange phase, limit and source ownership", () => {
   });
 
   it.each([false, true])("shows a source-less ordinary R5 rate Ratio in both previews (dose=%s)", dose => {
-    const row: FhirDosage = { doseAndRate: [{ ...(dose ? { doseQuantity: q(1) } : {}),
+    let row: FhirDosage = { doseAndRate: [{ ...(dose ? { doseQuantity: q(1) } : {}),
       rateRatio: { numerator: { value: 100, unit: "mL" }, denominator: { value: 2, unit: "h" } },
     }] };
     for (const displayed of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
       expect(displayed).toContain("100 mL / 2 h");
       if (dose) expect(displayed).toMatch(/1 (?:tab|tablet)/);
     }
+    row = persist(row);
     row.text = "Authored infusion instructions";
     expect(formatSig(row, "long")).toBe("Authored infusion instructions");
   });
@@ -4504,13 +4536,14 @@ describe("round38 external safety, identity, and source ownership", () => {
     expect(history).toContain("second annotation");
   });
 
-  it.each([false, true])("invalidates explicit empty condition replay on a saved capped R5 row (warm=%s)", warm => {
+  it.each([false, true])("uses an explicitly cleared condition in a new capped R5 submission (submitted directly=%s)", warm => {
     const raw: FhirDosage = { ...component, text: "Take 1 tablet daily if SBP > 160, maximum 2 tablets per administration",
       maxDosePerAdministration: q(2) };
     setDosageCondition(raw, predicate(160));
-    const row = persist(toFhirR5Dosages([raw])[0]) as EzDosage;
+    let row = persist(toFhirR5Dosages([raw])[0]) as EzDosage;
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     expect(formatSig(row, "long", options)).toContain("SBP");
+    row = persist(row);
     row.condition = [];
     const edited = warm ? row : persist(row);
     expect(getDosageCondition(edited)).toBeUndefined();
@@ -4539,7 +4572,7 @@ describe("round38 external safety, identity, and source ownership", () => {
   });
 
 
-  it.each([false, true])("uses current PRN spatial target after a capped-row preview (warm=%s)", warm => {
+  it.each([false, true])("uses a newly submitted PRN spatial target after a capped-row preview (submitted directly=%s)", warm => {
     const location: FhirExtension = { url: "urn:ezmedicationinput:body-site-spatial-relation", extension: [
       { url: "relationText", valueString: "in" },
       { url: "target", valueCodeableConcept: { text: "right eye" } },
@@ -4547,9 +4580,10 @@ describe("round38 external safety, identity, and source ownership", () => {
     const raw: FhirDosage = { ...component, text: "Take 1 tablet daily as needed for headache in right eye, maximum 2 tablets per administration",
       asNeeded: true, asNeededFor: [{ coding: [{ system: "http://snomed.info/sct", code: "25064002", display: "Headache" }], extension: [location] }],
       maxDosePerAdministration: q(2) };
-    const row = persist(toFhirR5Dosages([raw])[0]);
+    let row = persist(toFhirR5Dosages([raw])[0]);
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     expect(formatSig(row, "long", options)).toContain("right eye");
+    row = persist(row);
     row.asNeededFor![0].extension![0].extension![1].valueCodeableConcept!.text = "left eye";
     const preview = formatSig(warm ? row : persist(row), "long", options);
     expect(preview).toContain("left eye");
@@ -4637,11 +4671,12 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(decodeR5RetainedFields(persist(marker)).component?.safety?.ifExceeded).toBe("hold");
   });
 
-  it.each(["timing", "repeat"] as const)("invalidates a saved replay proof when %s extensions are replaced", owner => {
-    const row = withDosageEditProvenance<FhirDosage>([{
+  it.each(["timing", "repeat"] as const)("checks newly submitted %s extensions against the saved baseline", owner => {
+    let row = withDosageEditProvenance<FhirDosage>([{
       ...persist(rowDose), timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
     }], "Take one tablet daily.")[0];
     expect(dosageMatchesSavedProjection(row)).toBe(true);
+    row = persist(row);
     const annotation = [{ url: "urn:example:clinical-timing", valueInteger: 2 }];
     if (owner === "timing") row.timing!.extension = annotation;
     else row.timing!.repeat!.extension = annotation;
@@ -4937,17 +4972,18 @@ describe("round39 external interchange ownership and positional primitives", () 
     }
   });
 
-  it.each(["code", "system", "version", "text", "delete"] as const)("agrees with the cold persisted replay proof after a dose/rate role %s edit", field => {
+  it.each(["code", "system", "version", "text", "delete"] as const)("checks newly submitted dose/rate role %s values against the saved baseline", field => {
     const role = { text: "Prescribed", coding: [{ system: "urn:dose-role", code: "ordered", version: "1" }] };
-    const row = persist(withDosageEditProvenance([{
+    let row = persist(withDosageEditProvenance([{
       text: "Take one tablet daily", doseAndRate: [{ type: role, doseQuantity: q(1) }], timing: { repeat: daily },
     }], "Take one tablet daily")[0]);
     expect(dosageMatchesSavedProjection(row)).toBe(true);
+    row = persist(row);
     if (field === "delete") delete (row.doseAndRate![0] as { type?: typeof role }).type;
     else if (field === "text") row.doseAndRate![0].type!.text = "Calculated";
     else row.doseAndRate![0].type!.coding![0][field] = "calculated";
     // A version-only annotation is outside the persisted clinical fingerprint;
-    // both warm and cold proofs keep that existing equivalence policy.
+    // independently submitted values keep that existing equivalence policy.
     const expected = field === "version";
     expect(dosageMatchesSavedProjection(row)).toBe(expected);
     expect(dosageMatchesSavedProjection(persist(row))).toBe(expected);
@@ -4956,8 +4992,8 @@ describe("round39 external interchange ownership and positional primitives", () 
     expect(row.text).toBe("Take one tablet daily");
   });
 
-  it.each(["administration", "period", "lifetime"] as const)("shows an added fresh editable %s safety limit", scope => {
-    const row = parseSig("take one tablet daily").items[0].fhir as EzDosage;
+  it.each(["administration", "period", "lifetime"] as const)("shows a newly submitted %s safety limit", scope => {
+    const row = persist(parseSig("take one tablet daily").fhir[0]) as EzDosage;
     const originalText = row.text;
     row.safety = { doseLimit: [{ scope, valueQuantity: q(2),
       ...(scope === "period" ? { period: { value: 1, unit: "d" } } : {}) }] };
@@ -5734,11 +5770,12 @@ describe("provider registration and explicit cloning preserve owned data", () =>
 }
 
 describe("round 25 live rate and wire boundary regressions", () => {
-  it.each([false, true])("uses a changed rate-only R5 amount after persisted=%s", persisted => {
+  it.each([false, true])("uses a newly submitted rate-only R5 amount (original persisted=%s)", persisted => {
     const source = "Infuse at 5 mL/h";
     const fresh = parseSig(source).fhir[0];
-    const row = persisted ? persist(fresh) : fresh;
+    let row = persisted ? persist(fresh) : fresh;
     expect(formatSig(row, "long", { locale: "en" })).toBe(source);
+    row = persist(row);
     row.doseAndRate![0].rateQuantity!.value = 10;
     for (const text of [formatSig(row, "long", { locale: "en" }),
       formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }),
@@ -5751,10 +5788,12 @@ describe("round 25 live rate and wire boundary regressions", () => {
       .toMatchObject({ value: 10, unit: "mL/h" });
   });
 
-  it.each([false, true])("uses an independently changed R5 rate ratio after persisted=%s", persisted => {
+  it.each([false, true])("uses an independently submitted R5 rate ratio (original persisted=%s)", persisted => {
     const source = "Infuse 120 mL over 2 hours";
-    const fresh = parseSig(source).fhir[0], row = persisted ? persist(fresh) : fresh;
+    const fresh = parseSig(source).fhir[0];
+    let row = persisted ? persist(fresh) : fresh;
     expect(formatSig(row, "long", { locale: "en" })).toBe(source);
+    row = persist(row);
     row.doseAndRate![0].rateRatio!.denominator!.value = 4;
     for (const text of [formatSig(row, "long", { locale: "en" }),
       fromFhirDosage(row, { locale: "en" }).longText]) {
@@ -6570,15 +6609,16 @@ describe("round42 public compatibility output and explicit source clears", () =>
     expect(parsed.input).toContain(ending);
   });
 
-  it.each(["fresh", "persisted"] as const)("keeps roundtrip callbacks after a %s explicit text clear", kind => {
+  it.each(["fresh", "persisted"] as const)("keeps roundtrip callbacks after a newly submitted text clear (original %s)", kind => {
     const parsed = parseSig("Swallow 1 tablet whole at bedtime per the agreed plan.");
-    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    let row = kind === "fresh" ? structuredClone(parsed.fhir[0]) : persist(parsed.fhir[0]);
     const seen: string[] = [];
     const options: FormatOptions = { locale: "en", realizationMode: "roundtrip", i18n: {
       formatLong(context) { seen.push(context.realizationMode); return context.defaultText; },
     } };
     row.text = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
     expect(fromFhirDosage(row, options).longText).toBe(row.text);
+    row = persist(row);
     row.text = "";
     for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
       expect(text).not.toContain("per the agreed plan");
@@ -6782,10 +6822,11 @@ describe("round44 interop ownership", () => {
   });
 
   it.each([["fresh", false], ["fresh", true], ["persisted", true]] as const)(
-    "observes a changed live carrier on a %s row (warm=%s)", (kind, warm) => {
+    "uses a newly submitted carrier on a %s row (original previewed=%s)", (kind, warm) => {
     const parsed = parseSig("Infuse 20 mg in 100 mL saline over 2 hours, max 100 mg per day");
-    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    let row = kind === "fresh" ? parsed.fhir[0] : persist(parsed.fhir[0]);
     if (warm) expect(formatSig(row, "long")).toContain("saline");
+    row = persist(row);
     const marker = row.extension!.find(e => e.url === carrierUrl)!;
     marker.extension!.find(e => e.url === "material")!.valueString = "dextrose";
     const current = persist(row);
@@ -6814,9 +6855,9 @@ describe("round44 interop ownership", () => {
     expect(saved.doseAndRate).toEqual(current.doseAndRate);
   });
 
-  it.each(["fresh", "persisted"] as const)("retains explicit clinician text edits on a %s carrier row", kind => {
+  it.each(["fresh", "persisted"] as const)("retains explicit clinician text on a newly submitted %s carrier row", kind => {
     const parsed = parseSig("Infuse 20 mg in 100 mL saline over 2 hours, max 100 mg per day");
-    const row = kind === "fresh" ? parsed.items[0].fhir : persist(parsed.fhir[0]);
+    const row = kind === "fresh" ? structuredClone(parsed.fhir[0]) : persist(parsed.fhir[0]);
     row.extension!.find(e => e.url === carrierUrl)!.extension!.find(e => e.url === "material")!.valueString = "dextrose";
     row.text = "Use the dextrose carrier per the agreed infusion plan";
     const authored = persist(row);
@@ -7041,7 +7082,7 @@ describe("round45 public interop preservation", () => {
 
   const spatialUrl = "urn:ezmedicationinput:body-site-spatial-relation";
   const ear = { text: "ear", coding: [{ system: "http://snomed.info/sct", code: "117590005", display: "Ear-related structure" }] };
-  it.each(["en", "th"] as const)("uses current coherent site spatial text through warm/cold/R6/R5 %s previews", locale => {
+  it.each(["en", "th"] as const)("uses newly submitted coherent site spatial text through R6/R5 %s previews", locale => {
     const source: FhirDosage = { text: "Apply 1 g below the ear daily, max 2 g per day",
       doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }], timing: { repeat: daily },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "g" }, denominator: { value: 1, unit: "d" } }],
@@ -7050,9 +7091,10 @@ describe("round45 public interop preservation", () => {
         { url: "target", valueCodeableConcept: persist(ear) },
       ] }] },
     };
-    const row = persist(toFhirR5Dosages([source]))[0];
+    let row = persist(toFhirR5Dosages([source]))[0];
     expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" })).toBe(source.text);
     expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" })).toBe(source.text);
+    row = persist(row);
     row.site!.extension![0].extension![0].valueString = "above";
     const edited = persist(row), r6 = toDosageDetails([row]);
     const saved = persist(toFhirR5Dosages(r6))[0];

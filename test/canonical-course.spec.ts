@@ -577,14 +577,14 @@ describe("round 24: live projection and course boundaries", () => {
   });
 
   it("captures fresh timing ownership for a dose-less graph and retains its source after an external clock edit", () => {
-    const row = parseSig("Swallow slowly with water at 08:00").fhir[0];
+    const row = structuredClone(parseSig("Swallow slowly with water at 08:00").fhir[0]);
     const original = JSON.stringify(row.extension);
     const authoredText = row.text;
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     expect(row.doseAndRate).toBeUndefined();
-    expect(formatSig(row, "long", options)).toContain("08:00");
+    expect(formatSig(structuredClone(row), "long", options)).toContain("08:00");
     row.timing!.repeat!.timeOfDay = ["10:00:00"];
-    const preview = formatSig(row, "long", options);
+    const preview = formatSig(structuredClone(row), "long", options);
     expect(preview).toContain("10:00");
     expect(preview).not.toContain("08:00");
     expect(preview).toContain("slowly");
@@ -841,28 +841,28 @@ describe("saved R5 source replay observes all live timing values", () => {
     ["course length", row => { row.timing!.repeat!.boundsDuration!.value = 14; }],
     ["dose unit system", row => { row.doseAndRate![0].doseQuantity!.system = "urn:other-unit"; }],
   ];
-  it.each(edits)("invalidates replay after changing the %s in place", (_, edit) => {
+  it.each(edits)("verifies a fresh submission after changing the %s", (_, edit) => {
     const row = savedRow();
-    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(true);
     edit(row);
-    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(false);
   });
 
   it.each(["fresh", "persisted"] as const)(
     "invalidates the %s authored Thai source after editing its second clock", (kind) => {
     const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด เวลา 08:00 และ 20:00 แล้วหลับตา";
     const parsed = parseSig(source, { locale: "th" });
-    const row = kind === "fresh" ? parsed.items[0].fhir
-      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const row = structuredClone(kind === "fresh" ? parsed.fhir[0]
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage);
     const options = { locale: "th", realizationMode: "roundtrip" as const };
-    expect(formatSig(row, "long", options)).toBe(source);
+    expect(formatSig(structuredClone(row), "long", options)).toBe(source);
     row.timing!.repeat!.timeOfDay![1] = "22:00:00";
-    const edited = formatSig(row, "long", options);
+    const edited = formatSig(structuredClone(row), "long", options);
     expect(edited).toContain("22:00");
     expect(edited).not.toContain("20:00");
     expect(edited).toContain("1 หยด");
     row.timing!.repeat!.timeOfDay![1] = "20:00:00";
-    expect(formatSig(row, "long", options)).toBe(source);
+    expect(formatSig(structuredClone(row), "long", options)).toBe(source);
   });
 
   it("does not replay BID source after a code-only R5 schedule is edited to TID", () => {
@@ -873,10 +873,10 @@ describe("saved R5 source replay observes all live timing values", () => {
     delete parsed.timing!.repeat;
     const row = withDosageEditProvenance([parsed], source)[0];
     const options = { locale: "th", realizationMode: "roundtrip" as const };
-    expect(formatSig(row, "long", options)).toBe(source);
+    expect(formatSig(structuredClone(row), "long", options)).toBe(source);
     row.timing!.code!.coding![0].code = "TID";
     row.timing!.code!.text = "TID";
-    const edited = formatSig(row, "long", options);
+    const edited = formatSig(structuredClone(row), "long", options);
     expect(edited).not.toBe(source);
     expect(edited).toContain("3 ครั้ง");
     expect(edited).not.toContain("bid");
@@ -916,23 +916,23 @@ describe("review 26 external display ownership", () => {
   it.each(["fresh", "persisted"] as const)("uses the edited weekday ordinal in a %s graph-backed row", kind => {
     const source = "Swallow 1 tablet whole on the first Monday of each month";
     const parsed = parseSig(source);
-    const row = kind === "fresh" ? parsed.items[0].fhir
-      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const row = structuredClone(kind === "fresh" ? parsed.fhir[0]
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage);
     const options = { locale: "en", realizationMode: "roundtrip" as const };
-    expect(formatSig(row, "long", options)).toContain("first Monday");
+    expect(formatSig(structuredClone(row), "long", options)).toContain("first Monday");
     const ordinal = row.timing!.repeat!.extension!.find(x => x.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL)!;
     expect(ordinal.valueInteger).toBe(1);
     ordinal.valueInteger = 2;
-    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(text).toMatch(/second Monday|2nd Monday/iu);
       expect(text).not.toContain("first Monday");
       expect(text).toContain("1 tablet");
     }
     ordinal.valueInteger = 1;
-    expect(formatSig(row, "long", options)).toContain("first Monday");
+    expect(formatSig(structuredClone(row), "long", options)).toContain("first Monday");
   });
 
-  it("uses current clock-window endpoints on a second preview of a persisted infusion", () => {
+  it("uses current clock-window endpoints from fresh persisted infusion submissions", () => {
     const source = "Infuse 5 mL/h between 08:00 and 18:00";
     const row = JSON.parse(JSON.stringify(withDosageEditProvenance([{
       text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
@@ -943,23 +943,23 @@ describe("review 26 external display ownership", () => {
         ] }] } }
     }], source)[0])) as FhirDosage;
     const options = { locale: "en", realizationMode: "roundtrip" as const };
-    expect(formatSig(row, "long", options)).toBe(source);
-    expect(formatSig(row, "long", options)).toBe(source);
+    expect(formatSig(structuredClone(row), "long", options)).toBe(source);
+    expect(formatSig(structuredClone(row), "long", options)).toBe(source);
     const window = row.timing!.repeat!.extension![0].extension!;
     window[0].valueTime = "09:00:00";
-    const text = formatSig(row, "long", options);
+    const text = formatSig(structuredClone(row), "long", options);
     expect(text).toMatch(/09:00|9:00 am/u);
     expect(text).toMatch(/18:00|6:00 pm/u);
     expect(text).not.toMatch(/08:00|8:00 am/u);
     expect(text).toContain("5 mL/h");
     window[1].valueTime = "17:00:00";
-    expect(formatSig(row, "long", options)).toMatch(/17:00|5:00 pm/u);
-    expect(formatSig(row, "long", options)).not.toMatch(/18:00|6:00 pm/u);
+    expect(formatSig(structuredClone(row), "long", options)).toMatch(/17:00|5:00 pm/u);
+    expect(formatSig(structuredClone(row), "long", options)).not.toMatch(/18:00|6:00 pm/u);
     window[0].valueTime = "08:00:00";
     window[1].valueTime = "18:00:00";
-    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(true);
     window[2].valueBoolean = false;
-    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(false);
   });
 
   it("does not replay a removed persisted rate beside an unchanged maximum", () => {
@@ -968,14 +968,14 @@ describe("review 26 external display ownership", () => {
       text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
       maxDosePerAdministration: { value: 10, unit: "mL" }
     }], source)[0])) as FhirDosage;
-    expect(formatSig(row, "long")).toBe(source);
+    expect(formatSig(structuredClone(row), "long")).toBe(source);
     delete row.doseAndRate![0].rateQuantity;
-    for (const text of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long"), fromFhirDosage(structuredClone(row)).longText]) {
       expect(text).not.toContain("5 mL/h");
       expect(text).toContain("10 mL");
     }
     row.text = "Clinician replacement instruction: maximum 10 mL";
-    expect(formatSig(row, "long")).toBe(row.text);
+    expect(formatSig(structuredClone(row), "long")).toBe(row.text);
   });
 
   it.each(["en", "th"])("keeps a strict high dose endpoint in both %s public previews", locale => {
@@ -1078,19 +1078,19 @@ describe("review 26 independent partial phase boundaries", () => {
 
 it.each(["fresh", "persisted"] as const)("keeps %s clinician text edits and honors an explicit text clear", kind => {
   const parsed = parseSig("Swallow 1 tablet whole at bedtime per the agreed plan.");
-  const row = kind === "fresh" ? parsed.items[0].fhir
-    : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+  const row = structuredClone(kind === "fresh" ? parsed.fhir[0]
+    : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage);
   const options = { locale: "en", realizationMode: "roundtrip" as const };
   const replacement = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
   row.text = replacement;
-  expect(formatSig(row, "long", options)).toBe(replacement);
-  expect(fromFhirDosage(row, options).longText).toBe(replacement);
-  const normalized = formatSig(row, "long", { ...options, realizationMode: "normalized" });
+  expect(formatSig(structuredClone(row), "long", options)).toBe(replacement);
+  expect(fromFhirDosage(structuredClone(row), options).longText).toBe(replacement);
+  const normalized = formatSig(structuredClone(row), "long", { ...options, realizationMode: "normalized" });
   expect(normalized).toContain("1 tablet");
   expect(normalized).toMatch(/bedtime|on sleep/u);
   expect(normalized).not.toContain("discussion with the clinician");
   row.text = "";
-  for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+  for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
     expect(text).not.toContain("per the agreed plan");
     expect(text).not.toContain("discussion with the clinician");
     expect(text).toContain("1 tablet");
@@ -1121,22 +1121,22 @@ it("keeps replacement text authoritative on a qualified range while preserving r
 
 
 describe("review 27 live clinical source proofs and language receivers", () => {
-  it.each(["fresh", "persisted"] as const)("invalidates a %s occurrence-cap proof after each nested edit", kind => {
+  it.each(["fresh", "persisted"] as const)("honors each freshly submitted %s occurrence-cap edit", kind => {
     const source = "Dissolve 1 tablet in water as needed, maximum 3 doses per day";
     const parsed = parseSig(source);
-    const row = kind === "fresh" ? parsed.items[0].fhir
-      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
+    const row = structuredClone(kind === "fresh" ? parsed.fhir[0]
+      : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage);
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     const originalRowText = row.text;
-    expect(formatSig(row, "long", options)).toContain("3 doses per day");
+    expect(formatSig(structuredClone(row), "long", options)).toContain("3 doses per day");
     const cap = row.timing!.repeat!.extension!.find(e => e.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL)!;
     cap.extension!.find(e => e.url === "max")!.valueInteger = 2;
-    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(text).toContain("maximum 2 doses per day");
       expect(text).not.toContain("3 doses");
     }
     cap.extension!.find(e => e.url === "period")!.valueQuantity!.value = 2;
-    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(text).toContain("maximum 2 doses per 2 days");
       expect(text).not.toContain("3 doses");
     }
@@ -1144,7 +1144,7 @@ describe("review 27 live clinical source proofs and language receivers", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 
-  it.each(["period", "administration", "lifetime"] as const)("invalidates a warm saved %s maximum proof", scope => {
+  it.each(["period", "administration", "lifetime"] as const)("honors a freshly submitted saved %s maximum edit", scope => {
     const suffix = scope === "period" ? "per day" : "per " + scope;
     const text = "Take 1 tablet as needed, max 4 tablets " + suffix;
     const raw: FhirDosage = { text, asNeeded: true,
@@ -1154,11 +1154,11 @@ describe("review 27 live clinical source proofs and language receivers", () => {
         : { maxDosePerLifetime: { value: 4, unit: "tab" } }) };
     const row = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0])) as FhirDosage;
     const options = { locale: "en", realizationMode: "roundtrip" as const };
-    expect(formatSig(row, "long", options)).toContain("4 tablets");
+    expect(formatSig(structuredClone(row), "long", options)).toContain("4 tablets");
     const quantity = scope === "period" ? row.maxDosePerPeriod![0].numerator!
       : scope === "administration" ? row.maxDosePerAdministration! : row.maxDosePerLifetime!;
     quantity.value = 2;
-    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(text).toMatch(/(?:Take|Use) 1 tablet\b/u);
       expect(text).toMatch(scope === "period" ? /max per period: 2 tab \/ 1 d\b/u
         : scope === "administration" ? /max per administration: 2 tab\b/u : /max lifetime: 2 tab\b/u);
@@ -1167,7 +1167,7 @@ describe("review 27 live clinical source proofs and language receivers", () => {
     }
     if (scope === "period") {
       row.maxDosePerPeriod![0].denominator!.value = 2;
-      for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText])
+      for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText])
         expect(text).toMatch(/(?<![\d.])2 (?:tablets per 2 days|tab \/ 2 d)\b/u);
     }
   });
@@ -1206,16 +1206,16 @@ describe("review 27 live clinical source proofs and language receivers", () => {
   });
 });
 
-it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("keeps a fresh item maximum edit live for %s", head => {
+it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("honors a freshly submitted R5 maximum edit for %s", head => {
   const batch = parseSig(head + " as needed, max 4 tablets per day");
-  const row = batch.items[0].fhir;
+  const row = structuredClone(batch.fhir[0]);
   const originalText = row.text;
   expect(row).not.toBe(batch.fhir[0]);
-  expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toContain("4 tablets");
+  expect(formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" })).toContain("4 tablets");
   row.maxDosePerPeriod![0].numerator!.value = 2;
   for (const realizationMode of ["roundtrip", "normalized"] as const) {
     const options = { locale: "en", realizationMode };
-    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
       expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
     }
@@ -1223,19 +1223,19 @@ it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("keeps a fresh item max
   expect(row.text).toBe(originalText);
 });
 
-it("keeps inserted and removed maxima live on direct parser items", () => {
-  const row = parseSig("Take 1 tablet daily").items[0].fhir;
+it("honors inserted and removed maxima on fresh R5 submissions", () => {
+  const row = structuredClone(parseSig("Take 1 tablet daily").fhir[0]);
   const sourceText = row.text;
-  expect(formatSig(row, "long")).not.toMatch(/max|limit/iu);
+  expect(formatSig(structuredClone(row), "long")).not.toMatch(/max|limit/iu);
   row.maxDosePerPeriod = [{ numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }];
   for (const realizationMode of ["roundtrip", "normalized"] as const)
-    for (const text of [formatSig(row, "long", { realizationMode }),
-      fromFhirDosage(row, { realizationMode }).longText])
+    for (const text of [formatSig(structuredClone(row), "long", { realizationMode }),
+      fromFhirDosage(structuredClone(row), { realizationMode }).longText])
       expect(text).toMatch(/(?<![\d.])4 (?:tablets per day|tab \/ 1 d)\b/u);
   delete row.maxDosePerPeriod;
   for (const realizationMode of ["roundtrip", "normalized"] as const)
-    for (const text of [formatSig(row, "long", { realizationMode }),
-      fromFhirDosage(row, { realizationMode }).longText]) {
+    for (const text of [formatSig(structuredClone(row), "long", { realizationMode }),
+      fromFhirDosage(structuredClone(row), { realizationMode }).longText]) {
       expect(text).toContain("1 tablet");
       expect(text).not.toMatch(/max|limit|4 tab/iu);
     }
@@ -1282,11 +1282,11 @@ describe("round 28 live capped source concepts", () => {
       "uses the live eye in both previews after a %s edit (saved=" + saved + ")",
       edit => {
         const batch = parseSig("1 drop OD BID max 2 drops/day");
-        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
-          : batch.items[0].fhir;
+        const row = structuredClone(saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
+          : batch.fhir[0]);
         const source = row.text;
         expect(row.maxDosePerPeriod?.[0].numerator?.value).toBe(2);
-        expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }))
+        expect(formatSig(structuredClone(row), "long", { locale: "en", realizationMode: "roundtrip" }))
           .toMatch(/right eye|\bOD\b/iu);
         if (edit === "replace")
           row.site = { text: "left eye", coding: [{
@@ -1296,8 +1296,8 @@ describe("round 28 live capped source concepts", () => {
         else row.site!.coding![0].code = "1290031003";
         for (const mode of ["roundtrip", "normalized"] as const) {
           const options = { locale: "en", realizationMode: mode };
-          const imported = fromFhirDosage(row, options);
-          for (const text of [formatSig(row, "short", options), formatSig(row, "long", options),
+          const imported = fromFhirDosage(structuredClone(row), options);
+          for (const text of [formatSig(structuredClone(row), "short", options), formatSig(structuredClone(row), "long", options),
             imported.shortText, imported.longText]) {
             expect(text).toMatch(/left eye|\bOS\b/iu);
             expect(text).not.toMatch(/right eye|\bOD\b/iu);
@@ -1311,11 +1311,11 @@ describe("round 28 live capped source concepts", () => {
       "invalidates the capped source for a live %s edit (saved=" + saved + ")",
       field => {
         const batch = parseSig("Take 1 tablet PO daily max 2 tablets/day");
-        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
-          : batch.items[0].fhir;
+        const row = structuredClone(saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage
+          : batch.fhir[0]);
         const source = row.text;
         expect(row.maxDosePerPeriod?.[0].numerator?.value).toBe(2);
-        formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+        formatSig(structuredClone(row), "long", { locale: "en", realizationMode: "roundtrip" });
         if (field === "prn") row.asNeeded = true;
         else if (field === "route") {
           row.route!.text = "sublingual";
@@ -1325,8 +1325,8 @@ describe("round 28 live capped source concepts", () => {
           Object.assign(row.method!.coding![0], { code: "738992009", display: "Chew" });
         }
         const options = { locale: "en", realizationMode: "roundtrip" as const };
-        const imported = fromFhirDosage(row, options);
-        for (const text of [formatSig(row, "long", options), imported.longText]) {
+        const imported = fromFhirDosage(structuredClone(row), options);
+        for (const text of [formatSig(structuredClone(row), "long", options), imported.longText]) {
           if (field === "route") {
             expect(text).toMatch(/sublingual|\bSL\b/iu);
             expect(text).not.toMatch(/by mouth|\bPO\b/iu);
@@ -1345,11 +1345,11 @@ describe("round 28 live source concept lists", () => {
     it.each(["replace", "nested", "coding", "remove"] as const)(
       "updates a capped PRN reason after %s (saved=" + saved + ")", edit => {
         const batch = parseSig("Take 1 tablet PO daily as needed for pain max 2 tablets/day");
-        const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.items[0].fhir;
+        const row = structuredClone(saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.fhir[0]);
         const source = row.text;
         expect(row.asNeeded).toBe(true);
         expect(row.asNeededFor?.[0].text).toBe("pain");
-        expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toMatch(/pain/i);
+        expect(formatSig(structuredClone(row), "long", { locale: "en", realizationMode: "roundtrip" })).toMatch(/pain/i);
         if (edit === "replace") row.asNeededFor = [{ text: "nausea" }];
         else if (edit === "nested") {
           row.asNeededFor![0].text = "nausea";
@@ -1359,8 +1359,8 @@ describe("round 28 live source concept lists", () => {
         const edited = JSON.stringify(row);
         for (const realizationMode of ["roundtrip", "normalized"] as const) {
           const options = { locale: "en", realizationMode };
-          const imported = fromFhirDosage(row, options);
-          for (const text of [formatSig(row, "long", options), imported.longText]) {
+          const imported = fromFhirDosage(structuredClone(row), options);
+          for (const text of [formatSig(structuredClone(row), "long", options), imported.longText]) {
             expect(text).toMatch(/as needed|when needed/iu);
             expect(text).not.toMatch(/\bpain\b/iu);
             if (edit !== "remove") expect(text).toMatch(/\bnausea\b/iu);
@@ -1373,14 +1373,14 @@ describe("round 28 live source concept lists", () => {
 
     it("shows newly supplied advice beside the current cap (saved=" + saved + ")", () => {
       const batch = parseSig("Take 1 tablet PO daily max 2 tablets/day");
-      const row = saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.items[0].fhir;
+      const row = structuredClone(saved ? JSON.parse(JSON.stringify(batch.fhir[0])) as FhirDosage : batch.fhir[0]);
       const source = row.text;
-      formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
+      formatSig(structuredClone(row), "long", { locale: "en", realizationMode: "roundtrip" });
       row.additionalInstruction = [{ text: "Avoid grapefruit" }];
       const edited = JSON.stringify(row);
       for (const text of [
-        formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" }),
-        fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText
+        formatSig(structuredClone(row), "long", { locale: "en", realizationMode: "roundtrip" }),
+        fromFhirDosage(structuredClone(row), { locale: "en", realizationMode: "roundtrip" }).longText
       ]) {
         expect(text).toContain("Avoid grapefruit");
         expect(text).toMatch(/max(?:imum)?[^\d]*2\s*(?:tab|tablet).*?(?:day|1\s*d)/i);
@@ -1455,7 +1455,7 @@ describe("round30 current cadence and duration metadata", () => {
 
 describe("round31 live source replay observations", () => {
   const options = { locale: "en", realizationMode: "roundtrip" as const };
-  it("shows an edited meal-window endpoint after warming a saved capped R5 row", () => {
+  it("shows a freshly submitted meal-window endpoint on a saved capped R5 row", () => {
     const text = "Take 1 tablet every 4 hours between breakfast and dinner, maximum 4 tablets per day.";
     const raw: FhirDosage = { text,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
@@ -1466,11 +1466,11 @@ describe("round31 live source replay observations", () => {
       }] } }
     };
     const row: FhirDosage = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0]));
-    expect(formatSig(row, "long", options)).toContain("dinner");
-    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    expect(formatSig(structuredClone(row), "long", options)).toContain("dinner");
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(true);
     row.timing!.repeat!.extension![0].extension![1].valueCode = "CD";
     const before = JSON.stringify(row);
-    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(false);
     for (const input of [row, JSON.parse(before)]) {
       for (const output of [formatSig(input, "long", options), fromFhirDosage(input, options).longText]) {
         expect(output).toContain("between breakfast and lunch");
@@ -1481,7 +1481,7 @@ describe("round31 live source replay observations", () => {
     expect(row.text).toBe(text);
   });
 
-  it.each(["quantity", "range", "mixed"] as const)("shows an edited anchored %s after warming its saved proof", kind => {
+  it.each(["quantity", "range", "mixed"] as const)("shows a freshly submitted anchored %s edit", kind => {
     const text = "Take 1 tablet daily from 2026-11-21 for " + (kind === "quantity" ? "7 days" : kind === "range" ? "7–9 days" : "1 week to 10 days") +
       ", maximum 2 tablets per day.";
     const duration = kind === "quantity" ? { valueQuantity: { value: 7, code: "d", unit: "days" } }
@@ -1497,15 +1497,15 @@ describe("round31 live source replay observations", () => {
         boundsPeriod: { start: "2026-11-21", end: "2026-11-27" } } }
     };
     const row: FhirDosage = JSON.parse(JSON.stringify(withDosageEditProvenance([raw], text)[0]));
-    expect(formatSig(row, "long", options)).toContain(kind === "mixed" ? "1 week" : "7");
-    expect(dosageMatchesSavedProjection(row)).toBe(true);
+    expect(formatSig(structuredClone(row), "long", options)).toContain(kind === "mixed" ? "1 week" : "7");
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(true);
     const marker = row.modifierExtension![0];
     if (kind === "quantity") marker.valueQuantity!.value = 10;
     else if (kind === "mixed") {
       marker.extension![0].valueQuantity!.value = 2; marker.extension![1].valueQuantity!.value = 17;
     } else { marker.valueRange!.low!.value = 10; marker.valueRange!.high!.value = 12; }
     const before = JSON.stringify(row);
-    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(false);
     for (const input of [row, JSON.parse(before)]) {
       expect(getAnchoredCourseDuration(input)).toMatchObject(kind === "quantity"
         ? { valueQuantity: { value: 10 } } : kind === "mixed"
@@ -1520,12 +1520,12 @@ describe("round31 live source replay observations", () => {
   });
 
   it.each(["1 tab BID only if BP > 160", "1 tab BID"])("adds patient instructions to fresh %s without replaying stale text", source => {
-    const row = parseSig(source).items[0].fhir;
+    const row = structuredClone(parseSig(source).fhir[0]);
     const originalText = row.text;
-    formatSig(row, "long", options);
+    formatSig(structuredClone(row), "long", options);
     row.patientInstruction = "Swallow whole.";
     const before = JSON.stringify(row);
-    for (const output of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    for (const output of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
       expect(output).toMatch(/swallow whole/iu);
       if (source.includes("BP")) expect(output).toMatch(/BP\s*(?:>|greater than)\s*160\b/u);
     }
@@ -1836,10 +1836,10 @@ describe("repeated-course clinical chronology", () => {
 });
 
 describe("R5 source dose identity after live edits", () => {
-  it("does not reuse an HPSG dose's source text after an in-place edit of its original parser row", () => {
+  it("honors independently submitted edits of an HPSG-owned R5 dose", () => {
     const source = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
-    const row = parseSig(source, { locale: "th" }).items[0].fhir;
-    const display = () => formatSig(row, "long", { locale: "th", realizationMode: "roundtrip" });
+    const row = structuredClone(parseSig(source, { locale: "th" }).fhir[0]);
+    const display = () => formatSig(structuredClone(row), "long", { locale: "th", realizationMode: "roundtrip" });
     expect(display()).toBe(source);
     const dose = row.doseAndRate?.[0]?.doseQuantity;
     expect(dose?.value).toBe(1);

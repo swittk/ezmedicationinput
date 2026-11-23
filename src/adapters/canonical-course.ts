@@ -61,7 +61,7 @@ import {
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
-  getFreshDoseProof, sameFreshDose,
+  getFreshDoseSource,
   getDosageSourceTextFingerprint,
   dosageTextFingerprint,
   DOSAGE_RECONCILIATION_SOURCE_URL,
@@ -556,7 +556,7 @@ export function amountFromWire(
 function savedR5DoseOwner(
   raw: FhirDosage, graph: NonNullable<CanonicalSigClause["instructionGraph"]>
 ): AdviceFrame | undefined {
-  if (raw.doseAndRate?.length || graph.primaryAdministrationSpan ||
+  if (raw.doseAndRate?.length || graph.primaryAdministrationSpan || getFreshDoseSource(raw) ||
       getDosageSourceTextAgreement(raw, false) === false) return undefined;
   let owner: AdviceFrame | undefined;
   for (const action of graph.actions) {
@@ -577,8 +577,7 @@ function savedR5DoseOwner(
   } } : amount.value !== undefined ? { doseQuantity: coded(amount.value) } : undefined;
   if (!dose) return undefined;
   const restored = { ...raw, doseAndRate: [dose] };
-  const fresh = getFreshDoseProof(raw);
-  const matches = fresh ? sameFreshDose(restored, fresh) : dosageMatchesSavedProjection(restored);
+  const matches = dosageMatchesSavedProjection(restored);
   return matches === true ? owner : undefined;
 }
 function baseAdministration(
@@ -692,7 +691,7 @@ function baseAdministration(
       if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
         sourceTextVerified = false;
     } else if (matches === undefined && sourceTextVerified === undefined &&
-        carrier?.carrierMaterial && !getFreshDoseProof(input)) {
+        carrier?.carrierMaterial && !getFreshDoseSource(input)) {
       // A cold standalone carrier has no source agreement to certify on save.
       // Preserve its text, while its current typed material owns the preview.
       sourceTextVerified = false;
@@ -843,12 +842,6 @@ export function administrationFromR5(
   sourceContext = false
 ): CanonicalAdministration {
   const result = baseAdministration(raw, "r5", sourceContext);
-  // Reuse the original parser-row proof at this external import boundary.
-  // A fresh conversion cannot certify stale wording after a live dose edit;
-  // explicitly replaced clinician text keeps its existing display authority.
-  const fresh = getFreshDoseProof(raw);
-  if (fresh && (!raw.text?.trim() || raw.text === fresh.text) && !sameFreshDose(raw, fresh))
-    result.provenance!.sourceTextVerified = false;
   // Most rows have only R5 maxima and need no mirror reconciliation.
   // Lifted safety has a persisted baseline so either current view can own an edit.
   if ((raw as EzDosage).safety) {

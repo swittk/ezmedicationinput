@@ -336,10 +336,11 @@ If learned behavior is added later, it should be:
   scopes, limits and exclusive quantity/count/expression choices, site
   references, and event anchors are now typed. Truly unknown wire metadata
   remains opaque provenance only, never executable clinical data.
-- Outputs are immutable **by caller contract**, not by defensive copying or
-  freezing. The explicit edit API creates a new course. Do not cache an
-  externally supplied wire input across imports: reimporting a changed input
-  must read its current contents, per existing editable-input tests.
+- Inputs and outputs are immutable **by caller contract**, not by defensive
+  copying, freezing or same-instance mutation detection. There is no public
+  native edit API. Fresh independently submitted wire values must read their
+  current clinical contents; per-instance verification need not recheck an
+  already-consumed object for later caller mutation.
 - Performance acceptance: no reproducible >4% slowdown in ANY parser,
   import, formatter, scheduling or supply domain versus origin/master;
   target faster in every domain, with no aggregate-median waiver.

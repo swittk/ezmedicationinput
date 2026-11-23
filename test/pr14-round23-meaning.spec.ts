@@ -2718,9 +2718,9 @@ describe("round32 phase origin and numeric ownership audit", () => {
       }
     });
 
-  it("invalidates warm capped source replay after a live minimum-frequency edit", () => {
+  it("uses a newly submitted minimum-frequency edit beside retained capped source", () => {
     const text = "Take 1 tablet zero to three times per day, maximum 3 tablets per day.";
-    const row = withDosageEditProvenance<FhirDosage>([{
+    let row = withDosageEditProvenance<FhirDosage>([{
       text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { frequencyMax: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
         extension: [{ url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }] } },
@@ -2728,6 +2728,7 @@ describe("round32 phase origin and numeric ownership audit", () => {
     }], text)[0];
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     expect(formatSig(row, "long", options)).toBe(text);
+    row = structuredClone(row);
     row.timing!.repeat!.extension![0].valueInteger = 2;
     expect(canonicalFromFhir(row).schedule?.frequency).toBe(2);
     const warm = formatSig(row, "long", options);
@@ -2740,7 +2741,7 @@ describe("round32 phase origin and numeric ownership audit", () => {
 
 
 describe("round32 live schedule modifier proof family", () => {
-  it.each(["delay", "cycle"] as const)("observes an in-place %s modifier edit on a warmed capped row", kind => {
+  it.each(["delay", "cycle"] as const)("uses a newly submitted %s modifier edit beside retained capped source", kind => {
     const modifier = kind === "delay"
       ? { url: ADMINISTRATION_OFFSET_EXTENSION_URL, valueQuantity: { value: 30, unit: "min", code: "min" } }
       : { url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, extension: [
@@ -2752,7 +2753,7 @@ describe("round32 live schedule modifier proof family", () => {
     const text = kind === "delay"
       ? "Take 1 tablet daily after a 30-minute delay, maximum 2 tablets daily."
       : "Take 1 tablet on days 1 and 8 of each cycle, maximum 2 tablets daily.";
-    const row = withDosageEditProvenance<FhirDosage>([{
+    let row = withDosageEditProvenance<FhirDosage>([{
       text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
@@ -2760,6 +2761,7 @@ describe("round32 live schedule modifier proof family", () => {
     }], text)[0];
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     expect(formatSig(row, "long", options)).toBe(text);
+    row = structuredClone(row);
     if (kind === "delay") row.modifierExtension![0].valueQuantity!.value = 60;
     else row.modifierExtension![0].extension![1].valueInteger = 15;
     const clause = canonicalFromFhir(row);
@@ -3341,9 +3343,9 @@ describe("review 21 source graph amount ownership", () => {
     "does not revive a removed %s dose but retains duration and the independent spit action", kind => {
       const source = "Swish 10 mL for 30 seconds, then spit";
       const parsed = parseSig(source);
-      const row = kind === "fresh" ? parsed.items[0].fhir
+      const row = kind === "fresh" ? structuredClone(toFhirR5Dosages(parsed.fhir)[0])
         : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
-      const savedGraph = canonicalFromFhir(row).instructionGraph;
+      const savedGraph = canonicalFromFhir(kind === "fresh" ? structuredClone(row) : row).instructionGraph;
       delete row.doseAndRate;
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(row, "long", { locale: "en", realizationMode });
@@ -3641,7 +3643,7 @@ describe("round32 live cycle qualifier", () => {
     { advice: true, days: [1, 15], label: "1, 15" },
     { advice: false, days: [1, 2, 3, 8, 15, 16], label: "1-3, 8, 15-16" },
     { advice: true, days: [1, 2, 3, 8, 15, 16], label: "1-3, 8, 15-16" },
-  ])("uses edited cycle days $label beside retained source wording (advice $advice)", ({ advice, days, label }) => {
+  ])("uses newly submitted cycle days $label beside retained source wording (advice $advice)", ({ advice, days, label }) => {
     const qualifier = "on days 1 and 8 of each cycle";
     const modifier = { url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, extension: [
       { url: "day", valueInteger: 1 }, { url: "day", valueInteger: 8 },
@@ -3650,7 +3652,7 @@ describe("round32 live cycle qualifier", () => {
       { url: "source", valueString: qualifier }
     ] };
     const text = "Take 1 tablet " + qualifier + ", maximum 2 tablets daily.";
-    const row: FhirDosage = withDosageEditProvenance([{
+    let row: FhirDosage = withDosageEditProvenance([{
       text, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }],
@@ -3658,7 +3660,8 @@ describe("round32 live cycle qualifier", () => {
       ...(advice ? { additionalInstruction: [{ text: qualifier }] } : {})
     }], text)[0];
     formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" });
-    modifier.extension.splice(0, 2, ...days.map(day => ({ url: "day", valueInteger: day })));
+    row = structuredClone(row);
+    row.modifierExtension![0].extension!.splice(0, 2, ...days.map(day => ({ url: "day", valueInteger: day })));
     const before = JSON.stringify(row);
     for (const input of [row, JSON.parse(before)]) for (const locale of ["en", "th"]) {
       const current = formatSig(input, "long", { locale, realizationMode: "roundtrip" });

@@ -14,22 +14,14 @@ import { getDoseQuantityUnit } from "./maps";
 /** Source edits are separate from clinical edits: replacement clinician text
  * owns roundtrip display, while a clear or stale projection uses live facts. */
 function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
+  // Parser rows are immutable by caller contract. Fresh external submissions
+  // have no identity marker and verify their supplied fields below.
+  if (getFreshDoseSource(dosage)) return false;
   const first = (dosage as EzDosage).doseAndRate?.[0];
-  const fresh = getFreshDoseProof(dosage);
-  const originalText = fresh ? undefined : getDosageSourceTextFingerprint(dosage);
-  const textChanged = fresh ? fresh.text !== dosage.text
-    : originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
+  const originalText = getDosageSourceTextFingerprint(dosage);
+  const textChanged = originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   if (textChanged) return dosage.text?.trim() ? dosage.text : true;
-  if (fresh && fresh.patientInstruction !== dosage.patientInstruction) return true;
-  if (fresh && !fresh.quantity?.unit?.includes("/kg") && !first?.doseQuantity?.unit?.includes("/kg") &&
-      !fresh.modifiers && !dosage.modifierExtension?.length &&
-      !(dosage as EzDosage).condition?.length && !(dosage as EzDosage).excludedDates &&
-      !dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL) && !fresh.rate && !first?.rateQuantity && !first?.rateRange && !first?.rateRatio &&
-      !fresh.doseExpression && !fresh.rateExpression && !first?.doseExpression && !first?.rateExpression &&
-      !fresh.maxima && !dosage.maxDosePerPeriod?.length && !dosage.maxDosePerAdministration && !dosage.maxDosePerLifetime &&
-      !(dosage as EzDosage).safety)
-    return false;
-  const matches = fresh ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  const matches = dosageMatchesSavedProjection(dosage);
   // A persisted standalone item can have no source fingerprint. Its explicit
   // live guards and carrier material own clinical display; unverified narrative is provenance.
   return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
@@ -41,7 +33,7 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
 }
 
 /** Source wording is authoritative only when the live dose still matches its
- * original source. Direct parser rows use primitive comparisons; serialized
+ * original source. Direct parser rows carry ownership flags; serialized
  * R5 rows use their existing persisted edit fingerprint. A failed match must
  * override stale lexical evidence retained in a deserialized grammar graph. */
 function markOriginalGraphSource(
@@ -51,11 +43,11 @@ function markOriginalGraphSource(
   sourceOwnershipRead = false
 ): void {
   if (!clause.instructionGraph) return;
-  const fresh = getFreshDoseProof(dosage);
+  const fresh = getFreshDoseSource(dosage);
   if (fresh) {
-    clause.sourceHasStructuredClocks = Boolean(fresh.timing?.clocks?.length);
-    clause.sourceHasStructuredEvents = Boolean(fresh.timing?.anchors?.length);
-    clause.sourceHasStructuredSite = Boolean(fresh.site);
+    clause.sourceHasStructuredClocks = fresh.clocks;
+    clause.sourceHasStructuredEvents = fresh.events;
+    clause.sourceHasStructuredSite = fresh.site;
   } else if (!sourceOwnershipRead &&
       (clause.sourceHasStructuredClocks === undefined || clause.sourceHasStructuredEvents === undefined ||
         clause.sourceHasStructuredSite === undefined)) {
@@ -67,7 +59,7 @@ function markOriginalGraphSource(
     if (sourceOwnership?.site !== undefined) clause.sourceHasStructuredSite = sourceOwnership.site;
   }
   if (options?.realizationMode !== "roundtrip" && clause.dose) return;
-  const verified = fresh && !fresh.defaulted ? sameFreshDose(dosage, fresh) : dosageMatchesSavedProjection(dosage);
+  const verified = fresh && !fresh.defaulted ? true : dosageMatchesSavedProjection(dosage);
   // A matching dose cannot revive source text that the native import has
   // already rejected, including an explicit text clear.
   clause.sourceProjectionVerified = clause.sourceProjectionVerified !== false && verified;
@@ -99,7 +91,7 @@ import {
   toFhirR5Dosages as toFhirR5DosagesInternal, toEzDosages,
   assertCurrentR6DosageInstruction,
   withDosageEditProvenance,
-  dosageMatchesSavedProjection, captureFreshDose, sameFreshDose, getFreshDoseProof,
+  dosageMatchesSavedProjection, markFreshDoseSource, getFreshDoseSource,
   getDosageSourceTextAgreement,
   getDosageSourceOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
@@ -1162,8 +1154,8 @@ export function formatSig(
   if (typeof edit === "string" && options?.realizationMode !== "normalized") return edit;
   if (getDosageSourceTextAgreement(dosage, false) === false || edit !== false) {
     const course = courseFromR5([dosage], undefined, undefined, undefined, true);
-    // The fresh primitive proof can reject source that has no saved
-    // fingerprint. Carry that already-known result into the generated view.
+    // Source agreement or the submitted fields rejected retained wording.
+    // Carry that result into the generated native view.
     const administration = course.stages[0]?.administrations[0];
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
@@ -1751,10 +1743,9 @@ function buildParseResult(
     bodySitePostcoordination: options?.bodySitePostcoordination,
     includeTranslationExtensions: Boolean(options?.locale || options?.i18n)
   });
-  // Every emitted external item is editable, including an initially
-  // uncapped ordinary row that later gains a maximum. Capture its small live
-  // projection once; defaulted amounts still do not prove graph authorship.
-  captureFreshDose(fhir, clause.dose?.defaulted === true);
+  // Mark immutable parser-origin source ownership. Defaulted amounts still
+  // do not prove graph authorship; fresh submitted copies use persisted proof.
+  markFreshDoseSource(fhir, clause.dose?.defaulted === true);
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];
