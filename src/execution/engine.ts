@@ -873,7 +873,22 @@ function exactTimingEventOccurrences(
   for (const value of timing.explicitEvents) {
     // FHIR dateTime permits year/month precision. It names no exact dose
     // instant and must not spend an occurrence slot or become midnight.
-    if (/^\d{4}(?:-\d{2})?$/u.test(value)) { partialEvent = true; continue; }
+    if (/^\d{4}(?:-\d{2})?$/u.test(value)) {
+      if (quantityEstimation && !partialEvent) {
+        const year = Number(value.slice(0, 4));
+        const wholeYear = value.length === 4;
+        const month = wholeYear ? 1 : Number(value.slice(5));
+        // These bound the possible date range; they are never dose instants.
+        const start = calendarBoundaryDate(timeZone, year, month, 1, 0, 0, 0);
+        const end = calendarBoundaryDate(timeZone,
+          wholeYear || month === 12 ? year + 1 : year,
+          wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
+        const begin = orderedAt && orderedAt > from ? orderedAt : from;
+        partialEvent = !start || !end || end > begin &&
+          (!courseEnd || start < courseEnd && begin < courseEnd);
+      }
+      continue;
+    }
     const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
     if (dateOnly) {
       const day = calendarBoundaryDate(

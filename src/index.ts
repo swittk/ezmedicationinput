@@ -1122,7 +1122,9 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   if (options?.realizationMode === "normalized" &&
       (primary?.rateQuantity || primary?.rateRatio || primary?.rateRange ||
        primary?.doseExpression || primary?.rateExpression || dosage.maxDosePerPeriod?.length ||
-       dosage.maxDosePerAdministration || dosage.maxDosePerLifetime || dosage.safety)) return true;
+       dosage.maxDosePerAdministration || dosage.maxDosePerLifetime || dosage.safety ||
+       dosage.condition?.length || dosage.modifierExtension?.some(extension =>
+         extension.url === DOSAGE_CONDITION_R5_URL))) return true;
   const range = primary?.doseRange;
   return Boolean(range && (getQuantityComparator(range.low) || getQuantityComparator(range.high) ||
     range.low?.value !== undefined && range.high?.value !== undefined &&

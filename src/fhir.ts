@@ -1372,7 +1372,9 @@ export function extractCanonicalDoseRange(
     return {};
   }
 
-  const unit = lowUnit ?? highUnit;
+  // A unit-only endpoint is retained data, not the unit of the valued bound.
+  const unit = canonicalRange.low === undefined ? highUnit
+    : canonicalRange.high === undefined ? lowUnit : lowUnit ?? highUnit;
   let warning: string | undefined;
   if (lowUnit && highUnit && lowUnit !== highUnit) {
     warning = `FHIR doseRange low/high units differ (${lowUnit} vs ${highUnit}); preserved numeric bounds using ${unit}.`;

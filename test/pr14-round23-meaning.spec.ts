@@ -4283,9 +4283,10 @@ describe("round48 saved sequence and locale ownership", () => {
     for (const style of ["long", "short"] as const) {
       const options = { locale: "round48-" + locale, realizationMode: "normalized" as const,
         i18n: { inherit: locale, course } };
-      expect(formatSig(row, style, options)).toContain("2 custom-days");
+      expect(formatSig(row, style, options))
+        .toContain(locale === "en" ? "every up to 2 custom-days" : "ทุกไม่เกิน 2 custom-days");
       expect(formatSig(row, style, { locale, realizationMode: "normalized" }))
-        .toContain(locale === "en" ? "2 days" : "2 วัน");
+        .toContain(locale === "en" ? "every up to 2 days" : "ทุกไม่เกิน 2 วัน");
     }
     expect(JSON.stringify(row)).toBe(saved);
   });

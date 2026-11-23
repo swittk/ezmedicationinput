@@ -533,3 +533,79 @@ describe("source-less multi-administration treatment course realization", () => 
     expect(fromFhirDosage(dosage).warnings).toEqual([]);
   });
 });
+
+describe("round49 endpoint units and normalized conditions", () => {
+  const cases: Array<{
+    name: string;
+    range: import("../src/types").FhirRange;
+    short: [string, string];
+    long: [string, string];
+  }> = [
+    { name: "authored upper endpoint", range: {
+      low: { id: "unit-only-low", unit: "mg", _unit: { id: "low-unit" } },
+      high: { id: "valued-high", value: 1, unit: "g", _unit: { id: "high-unit" },
+        extension: [{ url: "urn:round49:quantity-note", valueString: "authored gram" }] }
+    }, short: ["<=1 g", "<=1 g"], long: ["Use up to 1 g.", "ใช้ครั้งละ ไม่เกิน 1 g."] },
+    { name: "coded upper endpoint", range: {
+      low: { unit: "mg" }, high: { value: 1, code: "g", system: "http://unitsofmeasure.org" }
+    }, short: ["<=1 g", "<=1 g"], long: ["Use up to 1 g.", "ใช้ครั้งละ ไม่เกิน 1 g."] },
+    { name: "authored lower endpoint", range: {
+      low: { value: 1, unit: "g" }, high: { unit: "mg" }
+    }, short: [">=1 g", ">=1 g"], long: ["Use at least 1 g.", "ใช้ครั้งละ อย่างน้อย 1 g."] },
+    { name: "same-unit endpoints", range: {
+      low: { value: 1, unit: "mg" }, high: { value: 2, unit: "mg" }
+    }, short: ["1-2 mg", "1-2 มก."], long: ["Use 1 to 2 mg.", "ใช้ครั้งละ 1 ถึง 2 มิลลิกรัม."] },
+    { name: "independently valued endpoints", range: {
+      low: { value: 1, unit: "mg" }, high: { value: 1, unit: "g" }
+    }, short: ["; Dose: 1 mg – 1 g", "; ขนาดยาต่อครั้ง: 1 mg – 1 g"],
+      long: ["Use; Dose: 1 mg – 1 g", "ใช้; ขนาดยาต่อครั้ง: 1 mg – 1 g"] }
+  ];
+
+  it.each(cases)("uses the valued unit without rewriting $name", ({ range, short, long }) => {
+    const row: import("../src/types").FhirDosage = { doseAndRate: [{ doseRange: range }],
+      extension: [{ url: "urn:round49:row-note", valueString: "preserve unrelated data" }] };
+    const saved = JSON.stringify(row);
+    for (const [index, locale] of ["en", "th"].entries()) {
+      const options = { locale, realizationMode: "normalized" as const };
+      expect(formatSig(row, "short", options)).toBe(short[index]);
+      expect(formatSig(row, "long", options)).toBe(long[index]);
+      const imported = fromFhirDosage(row, options);
+      expect(imported.shortText).toBe(short[index]);
+      expect(imported.longText).toBe(long[index]);
+      expect(imported.fhir).toEqual(row);
+    }
+    const r6 = toDosageDetails([row]);
+    expect(r6.step![0].component[0].doseAndRate?.[0].doseRange).toEqual(range);
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    expect(cold[0].doseAndRate[0].doseRange).toEqual(range);
+    expect(JSON.stringify(row)).toBe(saved);
+  });
+
+  it.each(["en", "th"] as const)("normalizes the verified condition in %s while retaining roundtrip source", locale => {
+    const source = "Take 1 tablet BID only if BP >160, otherwise hold";
+    const row = parseSig(source).fhir;
+    const saved = JSON.stringify(row);
+    const short = locale === "en" ? "1 tab PO BID only if BP > 160."
+      : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.";
+    const condition = locale === "en" ? "only if BP > 160" : "เฉพาะเมื่อ BP > 160";
+    const dose = locale === "en" ? "Take 1 tablet orally twice daily" : "รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง";
+    for (const dosage of [row, JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([row]))))[0]]) {
+      const options = { locale, realizationMode: "normalized" as const };
+      expect(formatSig(dosage, "short", options)).toBe(short);
+      const long = formatSig(dosage, "long", options);
+      expect(long).toContain(dose);
+      expect(long).toContain(condition);
+      const imported = fromFhirDosage(dosage, options);
+      expect(imported.shortText).toBe(short);
+      expect(imported.longText).toContain(dose);
+      expect(imported.longText).toContain(condition);
+      expect(dosage.text).toBe(source);
+    }
+    // Only the verified original row owns exact source replay. The strict cold
+    // form already uses structured realization when its source proof differs.
+    for (const style of ["short", "long"] as const)
+      expect(formatSig(row, style, { locale, realizationMode: "roundtrip" })).toBe(source);
+    expect(fromFhirDosage(row, { locale, realizationMode: "roundtrip" }).longText).toBe(source);
+    expect(JSON.stringify(row)).toBe(saved);
+  });
+});

@@ -4376,3 +4376,61 @@ describe("round48 inferred slots and unresolved events", () => {
     expect(toDosageDetails([row]).step![0].component[0].timing?.event).toEqual(event);
   });
 });
+
+describe("round49 partial-event supply windows and external inputs", () => {
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]];
+  };
+
+  it.each([
+    ["past month", "2026-11", "2026-12-01T00:00:00Z", 2, Unit.Day, "UTC", 0],
+    ["overlapping month", "2026-11", "2026-11-21T00:00:00Z", 2, Unit.Day, "UTC", undefined],
+    ["future month", "2026-12", "2026-11-21T00:00:00Z", 2, Unit.Day, "UTC", 0],
+    ["past year", "2026", "2027-01-01T00:00:00Z", 2, Unit.Day, "UTC", 0],
+    ["overlapping year", "2026", "2026-12-01T00:00:00Z", 2, Unit.Day, "UTC", undefined],
+    ["future year", "2027", "2026-12-01T00:00:00Z", 2, Unit.Day, "UTC", 0],
+    ["exclusive month boundary", "2026-12", "2026-11-30T00:00:00Z", 1, Unit.Day, "UTC", 0],
+    ["crossed month boundary", "2026-12", "2026-11-30T12:00:00Z", 1, Unit.Day, "UTC", undefined],
+    ["past local month", "2026-11", "2026-11-30T17:00:00Z", 2, Unit.Day, "Asia/Bangkok", 0],
+    ["overlapping local month", "2026-11", "2026-11-30T16:00:00Z", 1, Unit.Hour, "Asia/Bangkok", undefined]
+  ] as const)("distinguishes a disjoint %s from unknown administration time",
+    (_name, partial, from, durationValue, durationUnit, timeZone, total) => {
+      const event = [partial, "2026-11-20T08:00:00Z"];
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { event } };
+      const query = { from, orderedAt: "2026-01-01T00:00:00Z", timeZone,
+        durationValue, durationUnit, limit: 3 };
+      for (const dosage of forms(row)) {
+        const saved = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual([]);
+        const calculate = () => calculateTotalUnits({ dosage, ...query });
+        if (total === undefined) expect(calculate).toThrow(expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits: total, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(saved);
+      }
+      expect(toDosageDetails([row]).step![0].component[0].timing?.event).toEqual(event);
+    });
+
+  it("imports current external R6 edits while retaining the original parsed batch", () => {
+    const batch = parseSig("Take 1 tablet daily at 08:00");
+    const original = JSON.stringify(batch);
+    const external = JSON.parse(JSON.stringify(batch.fhirNext)) as FhirR6DosageInstruction;
+    const component = external.step![0].component[0];
+    const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z",
+      timeZone: "UTC", limit: 1, durationValue: 1, durationUnit: Unit.Day };
+    for (const [clock, quantity] of [["10:00:00", 2], ["11:00:00", 3]] as const) {
+      component.timing!.repeat!.timeOfDay = [clock];
+      component.doseAndRate![0].doseQuantity!.value = quantity;
+      const saved = JSON.stringify(external);
+      for (const dosage of [external, fromFhir(external)]) {
+        expect(nextDueDoses(dosage, query)).toEqual(["2026-11-23T" + clock + "+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: quantity, unit: "tab" });
+      }
+      expect(JSON.stringify(external)).toBe(saved);
+    }
+    expect(nextDueDoses(batch, query)).toEqual(["2026-11-23T08:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: batch, ...query })).toMatchObject({ totalUnits: 1, unit: "tab" });
+    expect(JSON.stringify(batch)).toBe(original);
+  });
+});
