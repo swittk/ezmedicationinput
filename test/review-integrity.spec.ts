@@ -12,7 +12,7 @@ import {
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_CONDITION_R6_LOGIC_URL,
   DOSAGE_DETAILS_R5_URL, DOSAGE_EXCLUDED_DATES_R5_URL,
-  DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL
+  DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RECONCILIATION_WARNING_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL
 } from "../src/dosage-course";
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { parseClauseState } from "../src/parser";
@@ -1250,7 +1250,11 @@ it("retains unfamiliar children on recognized course and edit markers even witho
   expect(source?.extension).toContainEqual(course);
   const savedDisplay = restored.extension?.find(value => value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
   expect(savedDisplay?.extension).toContainEqual({ url: "externalSigner", valueString: "retained author" });
-  expect(restored.step).toEqual(parseSig(parallel).fhirNext.step);
+  const expectedSteps = parseSig(parallel).fhirNext.step;
+  expectedSteps[0].component[0].extension = [{
+    url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [display]
+  }];
+  expect(restored.step).toEqual(expectedSteps);
 });
 
 
