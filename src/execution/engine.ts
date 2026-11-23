@@ -843,7 +843,7 @@ function inferWhenFallbackEntries(whenCodes: string[], repeat: CanonicalRecurren
   });
 }
 /** Deferred callers retain their own quota and actual supply window. */
-type ExplicitEventStatus = { possible: boolean; from?: Date };
+type ExplicitEventStatus = { possible: boolean; from?: Date; end?: Date };
 function unresolvedExplicitEventSupply(): never {
   throw new MedicationQuantityCalculationError("timing-required",
     "The remaining explicit events have only year or month precision; supply calculation requires a resolved administration date.");
@@ -891,9 +891,10 @@ function exactTimingEventOccurrences(
           wholeYear || month === 12 ? year + 1 : year,
           wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
         const queryFrom = eventStatus?.from ?? from;
+        const queryEnd = earlierDate(courseEnd, eventStatus?.end ?? null);
         const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
         partialEvent = !start || !end || end > begin &&
-          (!courseEnd || start < courseEnd && begin < courseEnd);
+          (!queryEnd || start < queryEnd && begin < queryEnd);
       }
       continue;
     }
@@ -1018,7 +1019,8 @@ function standardTimingCodeFrequency(coding: TimingCoding | undefined, includeIn
 }
 /** Resolves fallback clock arrays for frequency-only schedules. */
 function resolveFrequencyClocks(
-  timing: CanonicalTiming, config: NextDueDoseConfig, coding = executionTimingCoding(timing)
+  timing: CanonicalTiming, config: NextDueDoseConfig, coding = executionTimingCoding(timing),
+  clockOwner?: { configured: boolean }
 ): string[] {
   const configured = config.frequencyDefaults;
   const collected = new Set<string>();
@@ -1036,6 +1038,8 @@ function resolveFrequencyClocks(
       (isStandardTimingCoding(coding) ? DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode] : undefined)
     : undefined;
   if (codeClocks) {
+    if (clockOwner && codeClocks.length && codeClocks === configured?.byCode?.[normalizedCode!])
+      clockOwner.configured = true;
     for (const clock of codeClocks) collected.add(normalizeClock(clock));
   }
   // A code and a frequency describe the same opportunities. A local code can
@@ -1045,7 +1049,11 @@ function resolveFrequencyClocks(
     const perPeriodKey = `freq:${repeat.frequency}/per:${repeat.period}${repeat.periodUnit}`;
     const clocks = configured?.byFrequency?.[perPeriodKey] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[perPeriodKey] ??
       configured?.byFrequency?.[key] ?? DEFAULT_FREQUENCY_DEFAULTS.byFrequency[key];
-    if (clocks) for (const clock of clocks) collected.add(normalizeClock(clock));
+    if (clocks) {
+      if (clockOwner && clocks.length && (clocks === configured?.byFrequency?.[perPeriodKey] ||
+          clocks === configured?.byFrequency?.[key])) clockOwner.configured = true;
+      for (const clock of clocks) collected.add(normalizeClock(clock));
+    }
     if (collected.size === 0 && repeat.period === 1 && repeat.periodUnit === "d") {
       for (const clock of inferDailyFrequencyClocks(repeat.frequency)) collected.add(clock);
     }
@@ -2843,6 +2851,8 @@ interface UncommittedCycleEvent extends ChronologicalEvent {
 }
 interface CycleEventQuota {
   remaining: number | undefined;
+  /** Explicit-event uncertainty is checked after this phase's accepted plan. */
+  explicitEventStatus?: ExplicitEventStatus;
   /** Eligible recorded use consumes this phase's finite allowance once. */
   historyStart?: number;
   historyEnd?: number;
@@ -2971,7 +2981,9 @@ function scheduleTreatmentRelativeCourse(
   sourceClock?: TreatmentWallClock,
   rollingUsage?: RollingCycleUsage,
   collect?: EmitCycleOpportunity,
-  capContext?: MedicationContext
+  capContext?: MedicationContext,
+  eventQueryFrom?: Date,
+  eventQueryEnd?: Date
 ): string[] {
   const limit = Math.floor(options.limit ?? 10);
   if (!Number.isFinite(limit) || limit <= 0) return [];
@@ -3074,8 +3086,13 @@ function scheduleTreatmentRelativeCourse(
             } },
           } : {}),
         };
+        const eventStatus = collect && (options as PhaseCountOptions).quantityEstimation &&
+          original.schedule?.explicitEvents?.length
+          ? quota.explicitEventStatus = { possible: false, from: eventQueryFrom ?? from, end: eventQueryEnd }
+          : undefined;
         const localOptions = {
           ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin,
+          ...(eventStatus ? { explicitEventStatus: eventStatus } : {}),
           ...(collect ? { priorDoseTimes: undefined } : rollingUsage
             ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) } : {}),
           ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
@@ -3113,6 +3130,8 @@ function scheduleTreatmentRelativeCourse(
           return;
         }
         const times = nextDueDoses(execution, { ...localOptions, limit });
+        // Register even an all-partial list so history can exhaust its quota.
+        if (eventStatus) collect!(undefined, key, original, quota);
         let history = rollingUsage?.get(key);
         for (const at of times) {
           if (effectiveEnd && Date.parse(at) >= effectiveEnd.getTime()) break;
@@ -3569,7 +3588,10 @@ function chronologicalRepeatedEvents(
   if (prior.length > 1) prior.sort((a, b) => a - b);
   let serial = 0;
   const actualReplay = prior.length ? new Map<string, Map<number, number>>() : undefined;
+  let explicitQuotas: Map<CycleEventQuota, number> | undefined;
   const emit: EmitCycleOpportunity = (iso, key, member, quota) => {
+    if (quota.explicitEventStatus && !explicitQuotas?.has(quota))
+      (explicitQuotas ??= new Map()).set(quota, 0);
     const at = iso === undefined ? undefined : Date.parse(iso);
     if (at !== undefined && !Number.isFinite(at)) return false;
     let queuedActual = false;
@@ -3639,6 +3661,8 @@ function chronologicalRepeatedEvents(
       if (actual && event.quota.remaining !== undefined && event.quota.remaining > 0) event.quota.remaining--;
       event.quota.advance?.(event.at, accepted);
       if (accepted && event.at >= from.getTime()) {
+        if (explicitQuotas?.has(event.quota))
+          explicitQuotas.set(event.quota, explicitQuotas.get(event.quota)! + 1);
         results.push(event);
         if (results.length >= resultLimit) return;
       }
@@ -3668,7 +3692,9 @@ function chronologicalRepeatedEvents(
       sourceClock,
       undefined,
       emit,
-      context
+      context,
+      from,
+      until
     );
     drain(next?.getTime() ?? until?.getTime() ?? Number.POSITIVE_INFINITY);
     if (!next) break;
@@ -3677,7 +3703,17 @@ function chronologicalRepeatedEvents(
     if (results.length >= resultLimit) break;
   }
   if (results.length < resultLimit) drain(until?.getTime() ?? Number.POSITIVE_INFINITY);
-  return accept.finish(results, from.getTime());
+  const selected = accept.finish(results, from.getTime());
+  if (explicitQuotas) {
+    for (const event of selected) if (explicitQuotas.has(event.quota))
+      explicitQuotas.set(event.quota, explicitQuotas.get(event.quota)! - 1);
+    // Past/recorded use is already spent. Replace only provisional future
+    // admissions with the final range plan before deciding if a slot remains.
+    for (const [quota, difference] of explicitQuotas)
+      if (quota.explicitEventStatus?.possible &&
+          (quota.remaining === undefined || quota.remaining + difference > 0)) unresolvedExplicitEventSupply();
+  }
+  return selected;
 }
 
 function scheduleRepeatedCourse(
@@ -4857,7 +4893,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     // Pure frequency schedules (e.g., BID/TID) rely on institution clocks that
     // clinicians expect. These can be overridden via configuration when
     // facilities use bespoke medication rounds.
-    const clocks = resolveFrequencyClocks(timing, config);
+    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
+    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
     const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
@@ -4870,7 +4907,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         orderedAt,
         courseEnd,
         clocks,
-        calendarDays
+        calendarDays,
+        clockOwner?.configured
       );
     }
     if (clocks.length === 0) return [];
@@ -5088,7 +5126,8 @@ function derivePriorCountFromHistory(
     return count + generated.length;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
-    const clocks = resolveFrequencyClocks(timing, config);
+    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
+    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
     const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
@@ -5103,7 +5142,8 @@ function derivePriorCountFromHistory(
           orderedAt,
           from,
           clocks,
-          calendarDays
+          calendarDays,
+          clockOwner?.configured
         ).length
       );
     }
@@ -5298,7 +5338,8 @@ function generateFrequencyPerPeriodSeries(
   orderedAt: Date | null,
   upperBound?: Date | null,
   clocks: readonly (string | ClockEntry)[] = [],
-  calendarDays?: CalendarDaySelection
+  calendarDays?: CalendarDaySelection,
+  configuredClock = false
 ): string[] {
   const frequency = positiveInteger(repeat.frequency);
   const period = positiveNumber(repeat.period);
@@ -5326,7 +5367,7 @@ function generateFrequencyPerPeriodSeries(
       ? calendarDayStepper(baseTime, dayCount!, timeZone)
       : createIntervalStepper({ period, periodUnit }, timeZone);
   const implicitClock = clocklessCalendarPeriod ? toLocalClock(baseTime, timeZone) : undefined;
-  const inferredMilliseconds = !repeat.clocks?.length && !repeat.anchors?.length
+  const inferredMilliseconds = !configuredClock && !repeat.clocks?.length && !repeat.anchors?.length
     ? baseTime.getUTCMilliseconds() : 0;
   if (!advanceCycle) return [];
   const results: string[] = [];
@@ -5434,7 +5475,7 @@ function generateFrequencyPerPeriodSeries(
           candidate = makeZonedDateFromDay(day, timeZone, clock);
         }
         // Inferred calendar clocks inherit the source fractional second.
-        // Authored clocks and elapsed distributions retain their own precision.
+        // Authored/caller-configured clocks and elapsed distributions retain their own precision.
         if (candidate && inferredMilliseconds) candidate.setUTCMilliseconds(inferredMilliseconds);
       } else {
         candidate = new Date(
@@ -5838,7 +5879,8 @@ function countScheduleEvents(
     return count + generated.length;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
-    const clocks = resolveFrequencyClocks(timing, config);
+    const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
+    const clocks = resolveFrequencyClocks(timing, config, undefined, clockOwner);
     const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
@@ -5853,7 +5895,8 @@ function countScheduleEvents(
           orderedAt,
           to,
           clocks,
-          calendarDays
+          calendarDays,
+          clockOwner?.configured
         ).length
       );
     }
@@ -6093,14 +6136,19 @@ function measureRangedSchedule(
     throw new MedicationQuantityCalculationError("schedule-horizon-too-dense",
       "More than 10,000 administrations could occur in the requested supply window. Use a shorter calculation window.");
   const accepted: UncommittedCycleEvent[] = [];
+  let provisionalFutureCount = 0;
   for (let index = 0; index < candidates.length; index++) {
     const iso = candidates[index], at = Date.parse(iso);
     if (countedActual?.has(at)) continue;
     const event: UncommittedCycleEvent = { at, iso, key: "range", member: dosage, quota, serial: index };
-    if (accept(event)) accepted.push(event);
+    if (accept(event)) {
+      accepted.push(event);
+      if (at >= from.getTime()) provisionalFutureCount++;
+    }
   }
   const selected = accept.finish(accepted, from.getTime());
-  if (eventStatus?.possible && quota.remaining !== 0) unresolvedExplicitEventSupply();
+  if (eventStatus?.possible && (quota.remaining === undefined ||
+      quota.remaining + provisionalFutureCount - selected.length > 0)) unresolvedExplicitEventSupply();
   let quantity = 0;
   const times: string[] = [];
   for (const event of selected) {

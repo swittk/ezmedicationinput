@@ -138,9 +138,13 @@ describe("canonical course architecture", () => {
 
 describe("native course and sibling projections", () => {
   it("preserves external element/coding metadata exactly on untouched R6 import/export", () => {
-    const native = courseFromR6(source, true);
-    expect(courseToR6(native)).toEqual(source);
-    expect(fromFhir(source).meta.canonical.course?.kind).toBe("course");
+    const input = cloneStructuredValue(source);
+    const original = cloneStructuredValue(input);
+    const native = courseFromR6(input, true);
+    expect(courseToR6(native)).toEqual(original);
+    expect(input).toEqual(original);
+    expect(fromFhir(input).meta.canonical.course?.kind).toBe("course");
+    expect(input).toEqual(original);
   });
   it("clearing one target side cannot resurrect it from the retained CodeableReference wrapper", () => {
     const native = courseFromR6(source, true);
@@ -3137,6 +3141,44 @@ describe("round51 relative phase cutoffs and route-only source", () => {
     for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
         JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       const before = JSON.stringify(dosage);
+      const course = inputToCanonical(dosage);
+      const members: Array<{ stage: CanonicalCourse["stages"][number]; member: CanonicalAdministration }> = [];
+      for (const stage of course.stages) for (const member of stage.administrations) members.push({ stage, member });
+      const rightEye = members.filter(({ member }) => member.target?.coding?.some(code => code.code === "1290032005"));
+      const leftEye = members.filter(({ member }) => member.target?.coding?.some(code => code.code === "1290031003"));
+      expect(rightEye.map(({ member }) => ({
+        value: member.amounts?.[0].quantity?.value, unit: member.amounts?.[0].quantity?.unit,
+        clocks: member.schedule?.recurrence?.clocks,
+      }))).toEqual([
+        { value: 1, unit: "drop", clocks: ["08:00:00"] },
+        { value: 2, unit: "drop", clocks: ["08:00:00"] },
+        { value: 3, unit: "drop", clocks: ["08:00:00"] },
+      ]);
+      // The first phase can retain an explicit zero origin or use the course's implicit start.
+      expect(rightEye[0].member.phaseOrigin?.value ?? 0).toBe(0);
+      if (rightEye[0].member.phaseStart) expect(rightEye[0].member.phaseStart)
+        .toMatchObject({ anchor: "treatment-start", displacement: { value: 0, unit: "d" } });
+      expect(rightEye[0].stage.start).toBeUndefined();
+      expect(rightEye[0].member.schedule?.recurrence?.calendarWindow?.start).toBeUndefined();
+      expect(rightEye[0].member.phaseEnd ?? rightEye[0].stage.end)
+        .toMatchObject({ anchor: "treatment-start", displacement: { value: 7, unit: "d" } });
+      expect(rightEye[1].member.phaseOrigin).toMatchObject({ value: 7, unit: "d" });
+      if (text.includes("from 2026-12-10")) {
+        expect(rightEye[1].member.schedule?.recurrence?.calendarWindow?.end).toBe("2026-12-09");
+        expect(rightEye[2].member.schedule?.recurrence?.calendarWindow?.start).toBe("2026-12-10");
+      } else {
+        expect(rightEye[1].stage.start).toMatchObject({ anchor: "treatment-start", displacement: { value: 7, unit: "d" } });
+        expect(rightEye[1].stage.end).toMatchObject({ anchor: "treatment-start", displacement: { value: 9, unit: "d" } });
+        expect(rightEye[2].member.phaseOrigin).toMatchObject({ value: 9, unit: "d" });
+      }
+      expect(leftEye).toHaveLength(course.stages.length);
+      for (const { member } of leftEye) {
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "drop" });
+        expect(member.schedule?.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+        expect(member.phaseStart).toBeUndefined();
+        expect(member.phaseEnd).toBeUndefined();
+        expect(member.schedule?.recurrence?.calendarWindow).toBeUndefined();
+      }
       expect(calculateTotalUnits({ ...context, dosage, durationValue: 12, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(44);
       // The same total can hide two early 2-drop doses and an omitted middle phase.
       for (const [day, expected] of [[1, 3], [7, 3], [8, 4], [9, 4], [10, 5]] as const) {

@@ -1493,6 +1493,16 @@ describe("round47 authored timing ownership", () => {
       expect(members[0].schedule?.explicitEvents).toEqual(["2026-12-05"]);
       expect(members[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
       expect(members[1].schedule?.explicitEvents).toEqual(["2026-12-05"]);
+      expect(members.map(member => ({
+        eye: member.target?.coding?.find(code => code.system === "http://snomed.info/sct")?.code,
+        dose: { value: member.amounts?.[0].quantity?.value, unit: member.amounts?.[0].quantity?.unit },
+        clocks: member.schedule?.recurrence?.clocks,
+        frequency: member.schedule?.recurrence?.frequency,
+      }))).toEqual([
+        { eye: "1290032005", dose: { value: 1, unit: "drop" }, clocks: ["08:00:00"], frequency: undefined },
+        { eye: "1290032005", dose: { value: 2, unit: "drop" }, clocks: ["20:00:00"], frequency: undefined },
+        { eye: "1290031003", dose: { value: 1, unit: "drop" }, clocks: undefined, frequency: 2 },
+      ]);
       expect(nextDueDoses(dosage, query)).toEqual([
         "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
         "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00",
