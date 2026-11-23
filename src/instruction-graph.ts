@@ -4541,6 +4541,14 @@ function primaryActionAmountConflicts(
     arg.quantity && (!dose || !quantityCoveredByDose(arg, dose))));
 }
 
+/** Locate an existing Amount label within its source nominal. */
+function sourceAmountLabelOffset(text: string, label: string): number {
+  const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
+  return at >= 0 &&
+    (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
+    (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length])) ? at : -1;
+}
+
 /** Realize an edited administration without rewriting its saved graph.
  * Its old Amount may also be embedded in a larger Object ('1 tablet of
  * amoxicillin'); remove only the source-owned amount, keep the drug name and
@@ -4573,10 +4581,8 @@ function frameWithReconciledAmount(
       let labelOffset = -1;
       for (const amount of superseded) {
         const label = amount.text ?? "";
-        const at = label ? text.toLowerCase().indexOf(label.toLowerCase()) : -1;
-        const hasLabel = at >= 0 &&
-          (at === 0 || !/[a-z0-9]/i.test(text[at - 1])) &&
-          (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length]));
+        const at = sourceAmountLabelOffset(text, label);
+        const hasLabel = at >= 0;
         // Disjoint source spans identify independent quantities even when
         // their values and units happen to match.
         const ownsSource = arg.span && amount.span
@@ -4649,9 +4655,10 @@ function primaryDoseAmountOwner(
       // A separate quantified material is not the medication amount merely
       // because it is the sole preparation, including saved spanless graphs.
       // Dose-owning nominals retain their original Amount constituent after edits.
-      const ownsAmount = !theme || quantityCoveredByDose(theme, amount.quantity) &&
-        (!theme.span || !amount.span ||
-          theme.span.start <= amount.span.start && amount.span.end <= theme.span.end);
+      const ownsAmount = !theme || (theme.span && amount.span
+        ? theme.span.start <= amount.span.start && amount.span.end <= theme.span.end
+        : quantityCoveredByDose(theme, amount.quantity) || !theme.relation &&
+          sourceAmountLabelOffset(theme.text ?? "", amount.text ?? "") >= 0);
       // Both spanless fallbacks respect that same independent-material evidence.
       if (ownsAmount && (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
           (!earliest || action.span.start < earliest.span.start)) earliest = action;

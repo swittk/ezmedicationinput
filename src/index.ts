@@ -1,3 +1,4 @@
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "./instruction-graph-fhir";
 import { courseFromR5 } from "./adapters/r5-import";
 import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
@@ -1115,8 +1116,11 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     return true;
   const primary = dosage.doseAndRate?.[0];
   // With no structured dose or method, authored text may be the only
-  // directions. The existing native preview retains it beside partial facts.
-  if (!primary && !dosage.method && dosage.text?.trim()) return true;
+  // directions. Preserve the existing graph realizer when that owner exists;
+  // the native fallback retains plain directions beside partial facts.
+  if (!primary && !dosage.method && dosage.text?.trim() &&
+      (dosage.route || !dosage.extension?.some(extension =>
+        extension.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;
