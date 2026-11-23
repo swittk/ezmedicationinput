@@ -4287,3 +4287,90 @@ describe("round47 calendar quantity and month-day ownership", () => {
       }
     });
 });
+
+
+describe("round48 inferred slots and unresolved events", () => {
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[]];
+  };
+  const quantity = { doseQuantity: { value: 1, unit: "tab" } };
+
+  it.each([
+    [1.5, Unit.Day, 36, "2026-01-03T06:00:00Z", [
+      "2026-01-01T00:00:00", "2026-01-01T18:00:00", "2026-01-02T12:00:00",
+      "2026-01-03T06:00:00", "2026-01-04T00:00:00", "2026-01-04T18:00:00"
+    ]],
+    [0.5, Unit.Week, 84, "2026-01-06T06:00:00Z", [
+      "2026-01-01T00:00:00", "2026-01-02T18:00:00", "2026-01-04T12:00:00",
+      "2026-01-06T06:00:00", "2026-01-08T00:00:00", "2026-01-09T18:00:00"
+    ]]
+  ] as const)("distributes two doses in %s %s using elapsed slots", (period, periodUnit, hours, from, dates) => {
+    for (const repeat of [{ frequency: 2, period, periodUnit },
+      { frequency: 2, period: hours, periodUnit: Unit.Hour }]) {
+      const row: FhirDosage = { doseAndRate: [quantity], timing: { repeat } };
+      for (const dosage of forms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, { ...options, limit: 6 }))
+          .toEqual(dates.map(date => date + "+00:00"));
+        expect(calculateTotalUnits({ dosage, ...options, from,
+          durationValue: 1, durationUnit: Unit.Hour })).toMatchObject({ totalUnits: 1, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    }
+  });
+
+  it.each(["coded", "explicit interval"] as const)(
+    "seeks %s history without spending the final occurrence", variant => {
+      const row: FhirDosage = { doseAndRate: [quantity], timing: {
+        ...(variant === "coded" ? { code: { coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q4H"
+        }] } } : {}),
+        repeat: { frequency: variant === "coded" ? 6 : 1,
+          period: variant === "coded" ? 1 : 4,
+          periodUnit: variant === "coded" ? Unit.Day : Unit.Hour, count: 1080 }
+      } };
+      for (const dosage of forms(row)) {
+        const before = JSON.stringify(dosage);
+        for (const [from, expected] of [
+          ["2026-06-30T00:00:00Z", "2026-06-30T00:00:00+00:00"],
+          ["2026-06-30T02:00:00Z", "2026-06-30T04:00:00+00:00"]
+        ]) {
+          const query = { ...options, from, priorCount: 1079, limit: 2 };
+          expect(nextDueDoses(dosage, query)).toEqual([expected]);
+          expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+            .toMatchObject({ totalUnits: 1, unit: "tab" });
+          expect(nextDueDoses(dosage, { ...query, priorCount: 1080 })).toEqual([]);
+          expect(calculateTotalUnits({ dosage, ...query, priorCount: 1080,
+            durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+        }
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each([
+    ["history remaining", 2, undefined, false, undefined],
+    ["explicit remaining", 2, 1, false, undefined],
+    ["history exhausted", 1, undefined, false, 0],
+    ["explicit exhausted", 2, 2, false, 0],
+    ["known future", 2, undefined, true, 1],
+    ["uncapped remaining", undefined, undefined, false, undefined]
+  ] as const)("keeps partial events unresolved after exact filtering (%s)", (_name, count, priorCount, future, total) => {
+    const event = ["2026-11", "2026-11-20T08:00:00Z",
+      ...(future ? ["2026-11-22T08:00:00Z"] : [])];
+    const row: FhirDosage = { id: "round48-partial-event", doseAndRate: [quantity],
+      timing: { event, ...(count === undefined ? {} : { repeat: { count } }) } };
+    const query = { from: "2026-11-21T00:00:00Z", orderedAt: "2026-11-01T00:00:00Z",
+      timeZone: "UTC", limit: 3, ...(priorCount === undefined ? {} : { priorCount }) };
+    for (const dosage of forms(row)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(future ? ["2026-11-22T08:00:00+00:00"] : []);
+      const calculate = () => calculateTotalUnits({ dosage, ...query,
+        durationValue: 2, durationUnit: Unit.Day });
+      if (total === undefined) expect(calculate).toThrow(expect.objectContaining({ code: "timing-required" }));
+      else expect(calculate()).toMatchObject({ totalUnits: total, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(toDosageDetails([row]).step![0].component[0].timing?.event).toEqual(event);
+  });
+});

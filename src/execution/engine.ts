@@ -901,10 +901,6 @@ function exactTimingEventOccurrences(
     if (!Number.isNaN(instant.getTime())) candidates.push(instant);
   }
   const countCap = repeat ? repeatOccurrenceCap(repeat) : undefined;
-  if (quantityEstimation && partialEvent && !candidates.length &&
-      (countCap === undefined || countCap > (derivePriorCount ? 0 : priorCount)))
-    throw new MedicationQuantityCalculationError("timing-required",
-      "The explicit events have only year or month precision; supply calculation requires a resolved administration date.");
   candidates.sort((left, right) => left.getTime() - right.getTime());
   const unique: Date[] = [];
   let historicalCount = 0;
@@ -930,6 +926,9 @@ function exactTimingEventOccurrences(
   const effectivePriorCount = derivePriorCount ? historicalCount : priorCount;
   const remaining =
     countCap === undefined ? limit : Math.max(0, Math.min(limit, countCap - effectivePriorCount));
+  if (quantityEstimation && partialEvent && !unique.length && remaining > 0)
+    throw new MedicationQuantityCalculationError("timing-required",
+      "The remaining explicit events have only year or month precision; supply calculation requires a resolved administration date.");
   return unique.slice(0, remaining).map((candidate) => formatZonedIso(candidate, timeZone));
 }
 function mergeFrequencyDefaults(
@@ -5259,6 +5258,7 @@ function generateFrequencyPerPeriodSeries(
   const period = positiveNumber(repeat.period);
   const periodUnit = repeat.periodUnit;
   if (!frequency || !period || !periodUnit || effectiveLimit <= 0) return [];
+  const calendarInterval = normalizedCalendarInterval(period, periodUnit);
   // Explicit calendar clocks own the same hour across a DST boundary.
   // Only exact per-day clock schedules take this branch: ordinary elapsed
   // intervals and generic frequency distributions keep their old semantics.
@@ -5298,7 +5298,7 @@ function generateFrequencyPerPeriodSeries(
   const pending = interlacingClocks ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
   let serial = 0;
   let cycleStart = baseTime;
-  if (!normalizedCalendarInterval(period, periodUnit)) {
+  if (!calendarInterval) {
     const firstEnd = advanceCycle(baseTime);
     if (!firstEnd || firstEnd <= baseTime) return results;
     const width = firstEnd.getTime() - baseTime.getTime();
@@ -5323,19 +5323,14 @@ function generateFrequencyPerPeriodSeries(
   ) {
     const cycleEnd = advanceCycle(cycleStart);
     if (!cycleEnd || cycleEnd <= cycleStart) break;
-    const calendarUnit =
-      periodUnit === DurationUnit.Day ||
-      periodUnit === DurationUnit.Week ||
-      periodUnit === DurationUnit.Month ||
-      periodUnit === DurationUnit.Year;
-    const spanDays = calendarUnit
+    const spanDays = calendarInterval
       ? Math.max(1, getLocalDayNumber(cycleEnd, timeZone) - getLocalDayNumber(cycleStart, timeZone))
       : 0;
     const baseClock = implicitClock ?? toLocalClock(cycleStart, timeZone);
     // Explicit daily clocks must remain authoritative when a multi-day
     // frequency is their exact total (e.g. 42 doses/21 days at 08:00/20:00).
     // Without a matching clock count, retain the existing distributor.
-    const clockedDays = calendarUnit && clocks.length > 0 && frequency === spanDays * clocks.length;
+    const clockedDays = calendarInterval && clocks.length > 0 && frequency === spanDays * clocks.length;
     // A cycle may begin partway through a local day. The first day's
     // earlier clocks are excluded, but the following boundary day's
     // earlier clocks still belong to this cycle. Inspect that final
@@ -5348,7 +5343,7 @@ function generateFrequencyPerPeriodSeries(
         // Zero displacement already has an exact instant, including which
         // occurrence of a folded wall clock and its source milliseconds.
         candidate = cycleStart;
-      } else if (calendarUnit && (frequency <= spanDays || clockedDays || clocklessCalendarPeriod)) {
+      } else if (calendarInterval && (frequency <= spanDays || clockedDays || clocklessCalendarPeriod)) {
         const entry = clocks[index % Math.max(1, clocks.length)];
         const dayShift = typeof entry === "object" ? entry.dayShift : 0;
         shiftedClock = dayShift !== 0;
@@ -5755,7 +5750,9 @@ function countScheduleEvents(
   if (treatAsInterval && supportsDayFilteredInterval) {
     const increment = createIntervalStepper(repeat, timeZone);
     if (!increment) return count;
-    let current = baseTime;
+    let current = seekIntervalNearQuery(baseTime, from, repeat, timeZone);
+    // Preserve the original calendar clock when the query skips historical intervals.
+    if (current !== baseTime) increment(baseTime);
     let guard = 0;
     const maxIterations = hardLimit * 1000;
     // Advance to "from"
