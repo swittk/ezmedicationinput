@@ -14375,3 +14375,141 @@ The completed storage run passed complete original inputs through the actual con
 Round artifacts use `/tmp/ezmed14-round47-*`: both actual review records, the 31-item disposition ledger, root/worker notes, public before/master/after evidence, frozen wire fixtures, focused reports, and the completed integrated source/dist/storage/performance/audit artifacts. Initial test-only oracle/API corrections remain archived separately; failed preliminary checks are not counted as passing gates.
 
 All eight original inline IDs are mapped to actual GraphQL threads. The pre-delivery paginated audit has 263 total threads and exactly these eight unresolved. The twenty-three body findings are covered in the related original-thread replies and the full ledger above, with no replacement top-level findings comment. After the mandatory gates and normal push, root verifies the delivered head, replies and resolves each original thread, audits all threads again, updates the PR body and requests the exact `@coderabbitai full review`. The loop waits for an actual full review on that delivered head. No merge, release or deployment is claimed or performed .
+
+## 2026-11-23 — PR14 full review round48
+
+### Review, scope and method
+
+Actual full review [6015461452](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) reviewed round 47 delivery `ec5048c8c71ff8d227d9bbadbdba017be75da4ab`. It arrived on November 23 at 07:50 Bangkok time (00:50:21 UTC). The review body and live original threads contain **12 inline + 14 unique body findings = 26 findings**, with zero duplicate occurrences. Twenty-three findings receive a bounded correction, type/oracle improvement, or local allocation reduction; **I1, I9, and B6 are rejected**. I6's cited `over 1h` form already works; the accepted fix is its ordinary `over .5h` sibling.
+
+The user authorized continuation after recovery, with independently scoped own ChatGPT workers and strict product boundaries: fix demonstrated supported correctness, reject code expansion and unsupported ambiguous or malformed input. The same contract remains: `.fhir` is R5; `.fhirNext` is the pinned supported R6 Snapshot 1; the native clinical representation is private and unstable. Public producer/read-only formatter and saved public graph/wire workflows remain supported. Current structured edits govern meaning, while authored values, independently authored endpoint units, original source, and opaque metadata remain recoverable. No native editor, new persisted schema, unit conversion, generic recovery framework, downstream application repair, or additional parser pass is introduced.
+
+Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no HPSERVER Codex or Gemini workers were launched. Each scope compared supported public inputs with the frozen reviewed artifact and pinned master before production changes. Root judged the fixes and rejections, integrated exact owned-file commits, and retained responsibility for full gates, actual storage, performance, original-thread replies, and delivery.
+
+| Owner | Independent scope |
+|---|---|
+| Interop worker | I1, I2, B1–B5: count migration boundary, translations, pause annotations, cycle-day metadata, wire-key oracle, and identifier typing |
+| Execution worker | I4, I5, B6, B11: fractional slot placement, late-query counts, partial-event uncertainty, and the rejected contradictory-input validation |
+| Grammar worker | I6, I12, B7, B8, B10, B14: maximum/rate numeric forms, delayed PRN, authored parallel duration, focused allocation removal, and second-date oracles |
+| Root | I3, I7–I11, B9, B12, B13: course and saved-graph previews, method/event ownership, locale facets, callback snapshots, final integration, and all delivery gates |
+
+### Complete disposition ledger
+
+| Finding | Disposition | Independent public result / oracle |
+|---|---|---|
+| [I1](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873301) | Reject: settled legacy ambiguity | Pinned master emits byte-identical unversioned compact course/count metadata for historical course repetition and an explicit local phase count. Complete R5 rows are not identical. The metadata cannot distinguish the scopes; the round 29 migration decision remains, with no new inference or warning policy. |
+| [I2](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873304) | Fix: independent explicit counts | On actual archived master rows, an explicit current course-count modifier no longer consumes a separately supplied phase count. Course 3 / phase 2 remains 3 / 2; the control whose phase count equals the legacy value and repeated cold saves retain both scopes. |
+| [I3](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873305) | Fix: implicit successor preview | The existing range-end formatter uses the same after-previous-phase qualifier as the scalar-end path. Explicit starts remain unchanged; independent range endpoint quantities and annotations survive both locales, preview styles, and R5/R6/cold saves. |
+| [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873309) | Fix: fractional recurrence slots | The existing normalized interval classification makes two doses per `1.5d` agree with `36h` at 18-hour spacing, and two per `0.5wk` agree with `84h` at 42-hour spacing. Integral calendar behavior, narrow supply windows, and raw authored inputs remain intact. |
+| [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873313) | Fix: late-query supply count | Supply seeks near the query with the existing interval helper, then primes from the original order anchor. A `Q4H` course with `count = 1080` and 1079 prior doses has one remaining dose, including the off-grid control. Neither cadence origin nor search budget changes. |
+| [I6](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873317) | Cited case already correct; fix ordinary sibling | The exact `over 1h` report already preserves the 100 mL dose and 50 mL/hour maximum on the reviewed build. Ordinary `over .5h` did promote the maximum into the dose. The existing attached-number reader now preserves 100 mL with a 50 mL maximum per 0.5 hour and invents no infusion duration; `1h`, `1hr`, and `0.5h` controls remain. |
+| [I7](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873319) | Fix: saved primary quantity owner | A valid public saved `Mix` graph with a `With` vehicle and no `Theme` keeps the medication `Amount` on the primary action. A measured vehicle retains its own 100 mL; unmeasured water receives no tablet count. Exact English/Thai previews and unchanged inputs are covered. |
+| [I8](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873320) | Fix: demonstrated legacy preview loss | The ordinary R5 dilution row produced by pinned master retains its 1 mL amount through the existing unbound `Object` fallback, with exact English and Thai preview checks. The current 1 mL-to-10 mL control verifies both independently owned quantities exactly once in English. |
+| [I9](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873325) | Reject: malformed-action recovery expansion | The example omits required serialized `AdviceFrame` fields: predicate lemma, span, source text, or force. No valid producer or ordinary edit path supplies that incomplete entry. The codecs are public; adding incomplete-action index remapping and unresolved-relation recovery is the rejected scope expansion. |
+| [I10](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873329) | Fix: qualified method identity | The existing bounded resolver exposes a qualified lexical head only for method-identity comparison. A saved rich `Reapply` frame follows a current `Apply gently` edit while dose, site, manner, and the authored display label remain intact. Bare, unchanged, qualified, coding-only, and annotation controls remain. |
+| [I11](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873331) | Fix: independent event ownership | Existing tri-state provenance distinguishes explicit `false` for an independent graph event from `true` replacement/deletion ownership and `undefined` native inference. An added evening event no longer removes the independent morning event across English/Thai and R5/R6/cold saves. |
+| [I12](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4660873335) | Fix: delayed PRN semantics | A six-hour onset no longer invents `count = 1` for as-needed use. The authored dose, delay, and PRN survive. An unqualified delayed single administration retains its established one-dose default. |
+| [B1](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`13bed3ea691c3a71927e09ea`) | Fix: zero-step translation ownership | A wording edit retires only inherited translation extensions from the active primitive. Its ID and unrelated annotations remain; the original translation stays with the original wording in retained source. Unchanged, annotation-only, and explicitly replaced companions are covered. |
+| [B2](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`3d4af3f21fb89a0f73434414`) | Fix: annotation-only pause edits | Completion comparison ignores a named list of standard cadence primitive companions while retaining them on the wire. Actual values, unfamiliar recurrence fields, and semantic extensions still participate; genuine completion edits continue to retire the old pause. |
+| [B3](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`2d105db59b7603e2d40ed6f5`) | Fix: cycle-day child ownership | A metadata-only `day` child no longer consumes the numerical day position. Day 8 retains its own ID and primitive metadata, and the valueless annotated child stays intact through cold interchange. |
+| [B4](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`7c553592fb169e6598d234a0`) | Fix: pinned wire-key test oracle | Legal primitive companions and correctly capitalized primitive choice suffixes are admitted by the R6 oracle. Complex-type companions and unknown fields remain rejected. This changes validation only, with no runtime field filtering. |
+| [B5](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`76f63efb04a1e4a56bcaa97b`) | Fix: public identifier typing | `Reference.identifier` declares the existing legal `_use`, `_system`, and `_value` primitive companions. A typed public fixture retains all three through repeated R5 interchange; runtime behavior is unchanged. |
+| [B6](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`561451dfc8cc7f599d28c600`) | Reject: contradictory-input policy expansion | Simultaneous `QID` and ranged monthly/yearly directives do not establish one supported intended cadence. Extending the calendar conflict matrix would add a defensive validation policy for contradictory input. Raw repeat/code data remains preserved. |
+| [B7](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`9e5c63133ec5d908819d50a9`) | Bounded allocation removal | The touched volume, weight, and fixed-rate lexical branches reuse their already-created singleton result for cache and return. No helper framework, extra scan, or separate optimization project is introduced. |
+| [B8](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`fd7374bbd15e9a07481988e1`) | Fix: authored parallel durations | Active components retain `1wk` versus `7d` and the independent `1mo` length across global cuts. Existing phase origins prevent restart. The formatter suppresses a redundant scalar phrase only where the existing stage window proves coverage; shortened edits, ranges, qualifiers, incomparable bounds, and first-stage authored week wording remain visible. |
+| [B9](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`39a71fb6ac8fefbe3689c99d`) | Strengthen existing Thai oracle | The exact breakfast-to-lunch window phrase is removed from the assertion view before checking the independent Thai morning anchor. The original window assertion remains. |
+| [B10](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`72674664d2019f862521356d`) | Strengthen second-date execution oracle | Both existing cases now execute December 7: the second explicit date requires 4 drops, while the single-date case requires 2 drops. Scheduling and supply are checked through public representations; production behavior was already correct. |
+| [B11](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`63f95deed40946b10545e6d6`) | Fix: partial-event supply uncertainty | After exact-event filtering and historical-count accounting, an unresolved remaining partial event returns `timing-required` instead of an invented zero. Exhausted counts stay zero, and known exact future candidates remain available. |
+| [B12](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`3e7faa24da4ab3a6534d998d`) | Fix: selected locale facet | Maximum-only recurrence periods use the selected `CourseLanguage.timeUnit` in English and Thai frequency helpers and both preview styles. Inherited custom facets and unchanged built-in defaults are covered. |
+| [B13](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`20271cbe965b2cd106c2ba60`) | Fix: detector registration snapshots | Constructor-owned detector callbacks retain their registration snapshot, while prototype/private-field methods keep the original instance receiver. Reusing a provider for another locale no longer changes the earlier marker behavior; no detection-time work is added. |
+| [B14](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015461452) (`b1084536d014deb691445c24`) | Fix: ordinary leading-decimal denominator | The existing weight-rate reader accepts `.5h` as it already accepts `0.5h`. The 5 µg numerator, 1 kg denominator, and 0.5 hour time denominator remain distinct; the established 10 µg/kg/hour wire projection is verified. |
+
+### Baseline distinctions and bounded implementation
+
+The I1 rejection retains the explicit round 29 decision in `/tmp/ezmed14-round29-legacy-count-evidence.json`. What is byte-identical is the unversioned compact course/count modifier metadata, not the complete R5 rows: dose, unit, text, and source fields can differ. There is no lossless scope discriminator in that metadata. I2 instead uses an unambiguous current edit that explicitly supplies both scopes; it does not add an origin-guessing policy.
+
+For I6, frozen `parseSig("Infuse 100 mL, no more than 50 mL over 1h")` already retains the 100 mL dose and 50 mL/hour cap, with no administration duration. Pinned master keeps the dose but does not recognize that maximum. The ordinary `over .5h` sibling is a real reviewed regression: the maximum displaced the intended dose and became an invented infusion. The fix is confined to the existing maximum-period attached-number reader. B14 likewise extends only the existing numeric suffix pattern; master also mishandles the leading-decimal denominator.
+
+I4's fractional day/week slot-placement family and B11's partial-event zero also occur on master. I5 is not supported by the review's claimed baseline of one: master returns six in the coded `Q4H` case and zero in the explicit `4h` case. The independent recurrence/count oracle proves one remaining dose. Both scheduling and supply keep the original anchor and existing search budget. Supported older defects are corrected without describing every change as a regression.
+
+B8 removes the existing destructive duration-stripping copy. It retains the original `1wk`, `7d`, and `1mo` facts in active components, using the existing phase origin for execution across global cuts. I8 separately uses the exact saved R5 row generated by master to prove the legacy dilution preview loss. I7 uses a valid saved public codec graph; an ordinary freshly parsed Mix instruction was already correct. For B2, the accepted fixture is actual strict R6 output from the public producer followed by a primitive annotation edit; a preliminary direct strict input containing an empty-component stage was correctly rejected and is not defect evidence.
+
+I9 does not reject graph-codec use: those codecs are public. It rejects an incomplete serialized action with missing required fields and the requested recovery/index-remapping policy. B6 similarly requests a new contradictory-cadence validation matrix, with no single competent intended cadence to recover. Neither is converted into a new mandatory defensive contract.
+
+### Frozen validation inputs
+
+| Frozen input | Commit or SHA-256 |
+|---|---|
+| Reviewed delivery | `ec5048c8c71ff8d227d9bbadbdba017be75da4ab` |
+| Reviewed ESM | `04a1a5dda17c17eb3d9d625e6fe49636619d23800e95e96d713494073c8a7ce2` |
+| Final production/source-test head | `f3c522ceb96bbcfe3557cfdef731332798fe46b4` |
+| Production-source digest | `d9a5eea453d15571f11259da8f4757e6f892a69e1096e6c7566673229cd9fc1d` |
+| Final candidate ESM | `ff122eac113cbeaf76ba1f190a9bcee40e9156a68c54ceca18da34cc866299e3` |
+| Pinned master | `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb` |
+| Baseline ESM | `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2` |
+| Unchanged benchmark harness | `50a8f63f826f47376551ca893d11966905ba094ddbbd01db6cd45af5e43e7b82` |
+| Benchmark harness Git blob | `27e224c197414522bd8f6cda6efaab39d113f244` |
+
+The production-source digest is SHA-256 over sorted tracked `src` paths, each followed by NUL, its contents, and NUL. Integration and build records are `/tmp/ezmed14-round48-integration.json` and `/tmp/ezmed14-round48-gates.json`. Source remained unchanged across the completed correctness gates.
+
+### Completed correctness gates and pending delivery gates
+
+| Mandatory gate | Observed result |
+|---|---|
+| Full source suite and strict ES6 types | 6,796/6,796 tests across 48 files; no failures or skipped cases; strict ES6 gate passed |
+| Packaged ESM/CommonJS/declarations | Build and 4/4 distribution tests passed |
+| Actual converter and UsageMap save/reopen | 190 attempted; 188 exact complete-JSON round-trips; exactly the same two explicit downstream limitations |
+| Prior test files and per-file floors | All 48 prior files and their case floors retained; 66 tests added to the prior 6,730 |
+| Storage case retention | All 140 prior cases retained unchanged, plus 50 new cases |
+| Benchmark coverage and method | Required inventory remains 184 ordered scenario/API pairs, 117 public functions, 177 equivalent cases, and the same seven non-equivalent exclusions |
+| Individual equivalent-case performance | All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.761290556% for `getSuggestLocaleAdapter`. The full 184-case sweep used 22 rounds at 35 ms; exactly eight first-pass flags each received the single prescribed 72-round, 140 ms candidate-first confirmation. |
+| Changed PR paths and whitespace | 99 changed PR paths; `git diff --check` passed |
+| Independent raw-artifact audit | Passed 3,414 independent checks on completed frozen raw artifacts and terminal process metadata. |
+| Delivery and fresh thread audit | Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in `/tmp/ezmed14-round48-delivery.json` and AgentBoard thread 27. |
+
+### Initial failed source gate and bounded integration repairs
+
+The first integrated source gate at `99d3976b809d5250f017e6664572dfe482f4479f` reported **6,783 passed out of 6,787, with four failures**. It stopped at source: no distribution build, actual storage run, or performance measurement was executed for that attempt. Its source digest was `f0a609a5389df2ddafc889c57834dc6fdc345311465689322bd8cb898a591088`. The failed report remains archived under `/tmp/ezmed14-round48-attempt1-*` and is not counted as passing validation.
+
+All four failures followed the required preservation of authored parallel durations. One old internal assertion still required the authored upper endpoint's duration unit to be stripped; root replaced that expectation with the exact original endpoint/unit, retaining the existing clinical execution assertions. One unchanged-projection preview repeated the original one-month duration under a later day-seven-to-month-one heading, which could read as a restarted course. The existing read-only display copy now suppresses only a scalar duration whose phase origin and existing position comparison prove it covers the stage window. It retains first-stage `1wk` wording under a derived `7d` heading and leaves shorter edits, ranges, qualifiers, and incomparable calendar bounds visible. Native data, wire quantities, and the exact old preview oracle remain unchanged.
+
+The other two failures were the existing strict R5 storage ceilings: 12,038 and 12,040 bytes against the unchanged **less-than-12,000-byte** assertions. The authored duration fields remain. The writer instead omits newly generated nested `row.sourceAgreement` values only when identical to the containing marker's existing default; its reader already uses that fallback. Explicit differing row overrides, local fingerprints, and independent row markers remain. An annotated prior flag, including its ID, primitive metadata, and unfamiliar child, retains its exact original marker as inert source. This saves 282 bytes in each fixture: **11,756 and 11,758 bytes**. Parser R5 and R6 data remains identical, and cold public reopening is exact.
+
+The bounded follow-ups are integrated as `f6e3caba71bb27c54ed5fdc3ca8e1a502eaf0b5f` (typed endpoint oracle), `943c36034341821b89759432a658a129d4df57f3` (generated default compaction), and `f3c522ceb96bbcfe3557cfdef731332798fe46b4` (phase-aware duration display). Six new display controls and three compaction controls account for the nine tests added after the first attempt. The initial 43 new storage fixtures remain unchanged; four display and three compaction fixtures bring the final addition to 50. The completed second correctness attempt reports the source, distribution, and storage results above.
+
+### Actual storage and unchanged downstream limitations
+
+The completed actual-converter and UsageMap run retains all 140 round 47 cases and adds 50: 12 interop, 10 grammar, nine execution, 12 root, four duration-display controls, and three source-agreement compaction controls. The exact inventory and fixture hashes are in `/tmp/ezmed14-round48-storage-case-manifest.json`.
+
+The same two historical losses remain explicitly `preserved: false`:
+
+- `primitive-clock-position` passes the raw `timeOfDay: [null, "08:00:00"]` and positional primitive metadata directly to the unchanged downstream converter. It still reports `Invalid FHIR timeOfDay: null`.
+- `r46-unit-only-quantity-cadence` retains `doseQuantity: { unit: "tab" }` at converter import, then loses that scalar quantity through the existing numeric-value-dependent export, leaving an empty `doseAndRate` entry. Its value is not invented to make storage pass. Existing unit-only range controls preserve exactly.
+
+These limitations remain attributed to the unchanged downstream application using the prior direct-raw, pinned-master, and current evidence. Neither is repaired in this PR. All 190 records retain full original, converter, saved, and post-call input snapshots, with error details where the converter cannot complete, in `/tmp/ezmed14-round48-storage-raw-snapshots.json`. The original input is checked unchanged. No source field or opaque metadata is trimmed or normalized to conceal a difference. The round 46 failed attempt and scalar-loss attribution remain available in `/tmp/ezmed14-round46-before-storage-diagnosis-storage-final.log` and `/tmp/ezmed14-round46-storage-unit-only-audit.json`.
+
+### Exact performance methodology
+
+The benchmark harness is unchanged from round 47. Its existing prepared-drink and staged-batch clinical oracles, all 184 ordered scenario/API pairs, all 117 public APIs, the 177 equivalent scenarios, and the same seven exclusions remain mandatory. No new exemption or cross-scenario averaging can conceal a slower equivalent case.
+
+The prescribed full sweep uses 22 rounds at a 35 ms target with baseline first. Exactly the first-pass flagged cases may receive one 72-round, 140 ms candidate-first confirmation; optional remeasurement is excluded. Paired-log statistics, fresh-calendar preparation, contiguous raw ordinals, and the individual **+4% ceiling** are unchanged. Source, candidate ESM, baseline ESM, and harness hashes are pinned in `/tmp/ezmed14-round48-benchmark-manifest.json`. Correctness results do not certify performance or substitute for the independent raw-artifact audit.
+
+Performance result: All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.761290556% for `getSuggestLocaleAdapter`. The full 184-case sweep used 22 rounds at 35 ms; exactly eight first-pass flags each received the single prescribed 72-round, 140 ms candidate-first confirmation.
+
+Independent raw-artifact audit counts and status: Passed 3,414 independent checks on completed frozen raw artifacts and terminal process metadata.
+
+The independent fresh-calendar audit verified 3,025 calls and 38 blocks for each build, including 2,816 measured calls (22 × 128). The complete validated record is `/tmp/ezmed14-round48-validated-summary.json`.
+
+### Evidence and original-thread delivery
+
+The complete current finding set, public before/master/after evidence, lane notes, raw wire fixtures, and gate results are retained under `/tmp/ezmed14-round48-*`. The source and distribution reports are `-source-final.json` and `-dist-final.json`; the completed actual save/reopen report is `-storage-check.json`, with full snapshots in `-storage-raw-snapshots.json`. Worker focused runs are supporting evidence and do not replace integrated gates.
+
+The independent reply-content audit in `/tmp/ezmed14-round48-reply-plan-audit.json` approves all 26 findings mapped exactly once to the 12 actual original comment/thread IDs. All 14 review-body items retain their actual title, hash, and review provenance; they have no separate GitHub thread. The audit also verifies the precise I1 metadata distinction and the space in I6's actual `over 1h` input. The audited reply plan SHA-256 is `6cb608242bc37257b9e84b2777c1bb7b9354da8e9d671fcc7ef97996403d3adc`. At the content audit it was `readyToPost: false`; root adds the completed gate summary and verifies the documentation-only delivery head before posting.
+
+The pre-delivery paginated thread snapshot contains 275 threads, with exactly the 12 round 48 originals unresolved and no older unresolved thread. B1–B5 belong with I2; B12/B13 with I3; B6 with I4; B11 with I5; B7/B14 with I6; B9 with I11; and B8/B10 with I12. Root replies in those original threads, preserving explicit body-item provenance, rather than posting a replacement top-level findings dump.
+
+Delivery head: Documentation-only child of validated source `f3c522ceb96bbcfe3557cfdef731332798fe46b4`; the exact pushed commit is recorded in `/tmp/ezmed14-round48-delivery.json`.
+
+Delivery, original-thread replies/resolutions, and fresh paginated audit status: Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in `/tmp/ezmed14-round48-delivery.json` and AgentBoard thread 27.
+
+With the mandatory performance and independent audit gates complete, root verifies a normal push and the delivered head, posts and resolves the original threads, audits all threads again, updates the PR body, and requests the exact `@coderabbitai full review`. The loop waits for an actual full review on that head. No merge, release, or deployment is claimed or performed.
