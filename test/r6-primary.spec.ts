@@ -5535,6 +5535,12 @@ describe("adversarial DST calendar-cycle and clockless active-window oracles", (
         expect(new Set(due).size).toBe(due.length);
         expect(due.filter(date => date.startsWith(boundary + "T03:00:00"))).toHaveLength(1);
         for (const date of due) expect(date).toMatch(/T03:00:00[-+]\d\d:\d\d$/);
+        if (unit === "a") {
+          const afterGapYear = nextDueDoses(input, {
+            ...options, from: "2028-03-14T00:00:00-04:00", limit: 2,
+          });
+          expect(afterGapYear[0]).toBe("2028-03-14T03:00:00-04:00");
+        }
         if (unit !== "a") expect(calculateTotalUnits({
           dosage: input, ...options,
           durationValue: 84, durationUnit: FhirPeriodUnit.Day

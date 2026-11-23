@@ -1575,8 +1575,12 @@ function reconcileNativeRetainedCourse(
       // This is the same native restoration rule as compact row imports.
       const local: CompactCourseRow = { rowIndex: j, sequence, stepCount: retainedSteps.length };
       if (old && baseline) {
+        // Unlike compact deltas, a historical full component also contains
+        // modifiers that R5 represents directly. Only the live row owns those;
+        // the original list stays in the full-course reconciliation source.
+        const { modifierExtension: _modifiers, ...sourceFields } = old;
         local.component = positionOnly?.has(j) && old.site?.reference
-          ? { ...old, site: { ...old.site, reference: undefined } } : old;
+          ? { ...sourceFields, site: { ...old.site, reference: undefined } } : sourceFields;
         if (positionOnly?.has(j)) addWarning(warnings,
           "A site reference without established row identity was retained as source provenance rather than attached by position.");
         local.baseline = {

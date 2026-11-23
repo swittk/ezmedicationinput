@@ -10,7 +10,7 @@ import type {
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
-import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL } from "../dosage-course";
+import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
@@ -135,10 +135,15 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       }
       // A middle phase can receive one pause and precede another. Its changed
       // completion retires only the outgoing pause, not its unchanged start.
-      if (!prior.end && index <= lastDraftPredecessor &&
-          !equalStructuredValues(draftCompletionTiming(prior.component[member].timing),
-            draftCompletionTiming(current.component[member].timing)))
-        changedCompletions.add(index);
+      if (!prior.end && index <= lastDraftPredecessor) {
+        const before = prior.component[member], after = current.component[member];
+        if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+            !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
+              getDosageExcludedDates({ modifierExtension: after.modifierExtension })) ||
+            !equalStructuredValues(getDosageExcludedWeekdays({ extension: before.extension }),
+              getDosageExcludedWeekdays({ extension: after.extension })))
+          changedCompletions.add(index);
+      }
     }
     if (!membersMatch) continue;
     validOwners.add(index);
@@ -366,11 +371,12 @@ function reconcileSafetyScopes(
   const claimed = new Set<FhirR6DoseLimit>();
   const stepLimits = new Set<FhirR6DoseLimit>();
   const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
-  const shapeMatch = (limit: FhirR6DoseLimit): FhirR6DoseLimit | undefined => {
+  const shapeMatch = (limit: FhirR6DoseLimit, unchangedValue = false): FhirR6DoseLimit | undefined => {
     // Only unmatched anonymous edits need this short clinical comparison.
     // No object serialization or opaque metadata participates in identity.
     let replacement: FhirR6DoseLimit | undefined;
     for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
+        (!unchangedValue || sameClinicalValue(limit, item)) &&
         (!item.id || !sourceIds.has(item.id) &&
           sameClinicalValue(item, limit))) {
       if (replacement) return undefined;
@@ -379,7 +385,8 @@ function reconcileSafetyScopes(
     if (!replacement) return undefined;
     let sourceCount = 0;
     for (const item of sourceGroups.keys())
-      if (sameShape(limit, item) && ++sourceCount > 1) return undefined;
+      if (sameShape(limit, item) && (!unchangedValue || sameClinicalValue(limit, item)) &&
+          ++sourceCount > 1) return undefined;
     return sourceCount === 1 ? replacement : undefined;
   };
   // Exact-equal anonymous limits still have distinct scope ownership.
@@ -439,8 +446,10 @@ function reconcileSafetyScopes(
       changed = true;
       // A changed multiplicity is not an amount edit. Neither an ID
       // fallback nor shape matching can prove which identical copy won.
-      if (phase && unchangedStepOnly || group.live.length || limit.id) continue;
-      const replacement = shapeMatch(limit);
+      if (group.live.length || limit.id) continue;
+      // A unique anonymous annotation edit keeps its clinical value and phase
+      // owner. A changed amount still belongs to the edited header authority.
+      const replacement = shapeMatch(limit, phase && unchangedStepOnly);
       if (replacement) {
         limits.push(replacement);
         if (phase) stepLimits.add(replacement);
