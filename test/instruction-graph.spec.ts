@@ -5727,10 +5727,64 @@ describe("round 49 saved instruction ownership", () => {
           const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
           expect(text.match(unit === "tab" ? /3 tablets/gu : /3 mg/gu)).toHaveLength(1);
           expect(text).toMatch(new RegExp("^" + source.split(" ")[0]));
+          if (source.startsWith("Disperse")) {
+            const amount = unit === "tab" ? "3 tablets" : "3 mg";
+            const preparation = text.split(/[.;]/u)[0];
+            const swallowing = text.match(/\bswallow\b.*$/iu)?.[0];
+            expect(preparation).toContain(amount);
+            expect(swallowing).toBeDefined();
+            expect(swallowing).not.toContain(amount);
+          }
         }
         expect(JSON.stringify(input)).toBe(before);
       }
       expect(JSON.stringify(r6)).toBe(original);
     }
   );
+});
+
+
+describe("round50 configured safety action identity", () => {
+  it.each(["defer", "clinic-defer"])("retains conditional advice under saved code %s", code => {
+    const options: ParseOptions = { instructionActionMap: { defer: {
+      code, display: "Defer", semanticClass: "procedure", procedural: true, safetyScopeTarget: true
+    } } };
+    const source = "Defer if BP >160";
+    const parsed = parsePublicSig(source, options);
+    expect(parsed.input).toBe(source);
+    const advice = parsed.meta.canonical.clauses[0].additionalInstructions!;
+    expect(advice).toHaveLength(1);
+    expect(advice[0].text).toBe(source);
+    expect(advice[0].frames).toHaveLength(1);
+    expect(advice[0].frames![0].predicate.lemma).toBe(code);
+    const before = JSON.stringify(parsed.fhirNext);
+    for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
+        expect(text).toMatch(/Defer if BP >\s*160(?![0-9]|[.][0-9])/u);
+      }
+    }
+    expect(JSON.stringify(parsed.fhirNext)).toBe(before);
+  });
+});
+
+
+describe("round50 saved frame-level accompaniment ownership", () => {
+  // Exact R5 graph fixtures produced by pinned master 7d628239.
+  const savedRows: FhirDosage[][] = JSON.parse("[[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421463005\",\"display\":\"With - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"swallow\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Swallow\"},{\"url\":\"semanticClass\",\"valueString\":\"ingest\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"กลืน\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"738995006\",\"display\":\"Swallow\"}},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421521009\",\"display\":\"Swallow - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":24},{\"url\":\"sourceText\",\"valueString\":\"Swallow syrup with water\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"substance\"},{\"url\":\"text\",\"valueString\":\"syrup\"},{\"url\":\"normalized\",\"valueString\":\"syrup\"},{\"url\":\"conceptId\",\"valueString\":\"clinic-syrup\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"urn:ezmedicationinput:CodeSystem:medication-instruction-concept\",\"code\":\"clinic-syrup\",\"display\":\"syrup\",\"_display\":{\"extension\":[{\"url\":\"http://hl7.org/fhir/StructureDefinition/translation\",\"extension\":[{\"url\":\"lang\",\"valueCode\":\"th\"},{\"url\":\"content\",\"valueString\":\"น้ำเชื่อม\"}]}]}}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"urn:ezmedicationinput:CodeSystem:medication-instruction-concept\",\"code\":\"clinic-syrup\",\"display\":\"syrup\",\"_display\":{\"extension\":[{\"url\":\"http://hl7.org/fhir/StructureDefinition/translation\",\"extension\":[{\"url\":\"lang\",\"valueCode\":\"th\"},{\"url\":\"content\",\"valueString\":\"น้ำเชื่อม\"}]}]}}},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"syrup\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"น้ำเชื่อม\"}]}]},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"substance\"},{\"url\":\"text\",\"valueString\":\"water\"},{\"url\":\"normalized\",\"valueString\":\"water\"},{\"url\":\"conceptId\",\"valueString\":\"water\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"11713004\",\"display\":\"Water\"}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"11713004\",\"display\":\"Water\"}},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"water\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"น้ำ\"}]}]}]}]}]}],[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421463005\",\"display\":\"With - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"swallow\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Swallow\"},{\"url\":\"semanticClass\",\"valueString\":\"ingest\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"กลืน\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"738995006\",\"display\":\"Swallow\"}},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421521009\",\"display\":\"Swallow - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":18},{\"url\":\"sourceText\",\"valueString\":\"Swallow with water\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"substance\"},{\"url\":\"text\",\"valueString\":\"water\"},{\"url\":\"normalized\",\"valueString\":\"water\"},{\"url\":\"conceptId\",\"valueString\":\"water\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"11713004\",\"display\":\"Water\"}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"11713004\",\"display\":\"Water\"}},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"water\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"น้ำ\"}]}]}]}]}]}]]");
+  it.each([0, 1])("keeps the saved object and accompaniment distinct (fixture %s)", index => {
+    const row = savedRows[index], original = JSON.stringify(row);
+    const r6 = toDosageDetails(row), cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [row, r6, cold]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode }))
+          .toBe(index === 0 ? "Swallow syrup with water." : "Swallow with water.");
+        expect(formatSig(input, "long", { locale: "th", realizationMode }))
+          .toBe(index === 0 ? "กลืนน้ำเชื่อมร่วมกับน้ำ." : "กลืนร่วมกับน้ำ.");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(original);
+  });
 });

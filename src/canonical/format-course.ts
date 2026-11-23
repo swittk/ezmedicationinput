@@ -863,8 +863,9 @@ export function formatCanonicalCourse(
           // the full-period frequency that this offset-only preview omits.
           const structuredCount = _frequency !== undefined || _frequencyMax !== undefined;
           const { code: timingCode, ...withoutCode } = display.schedule;
-          const codeAgrees = timingCodeMatchesRecurrence(display.schedule.recurrence,
-            timingCode?.coding?.[0]?.code ?? timingCode?.text);
+          const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
+            timingCodeMatchesRecurrence(display.schedule.recurrence,
+              timingCode?.coding?.[0]?.code ?? timingCode?.text);
           display = { ...display, schedule: {
             ...(structuredCount || !codeAgrees ? withoutCode : display.schedule), recurrence: rest
           } };
@@ -1002,7 +1003,8 @@ export function formatCanonicalCourse(
               unevaluatedExpressionText(amount.rateExpression, "rate", words));
         }
         const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
-        let memberTiming: string | undefined;
+        let memberTiming = component.phasePredecessors?.length && !component.phaseStart && !origin
+          ? words.afterPreviousPhase : undefined;
         if (component.phaseStart) {
           const boundary = component.phaseStart;
           const quantity = treatmentStepOffsetQuantity(boundary);

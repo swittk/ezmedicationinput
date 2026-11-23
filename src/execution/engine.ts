@@ -2327,7 +2327,7 @@ interface PhaseDependencies {
   members: Set<number>;
   pending: number;
   resolve: (administration: CanonicalAdministration, sourceIndex: number,
-    predecessorEnd: Date) => ResolvedAdministrationWindow;
+    predecessor: AcceptedStageCompletion) => ResolvedAdministrationWindow;
 }
 interface TreatmentStepWindow {
   start: Date;
@@ -2347,7 +2347,7 @@ function resolveAdministrationWindow(
   sourceClock: TreatmentWallClock | undefined, capClock: TreatmentWallClock | undefined,
   options: NextDueDoseOptions | undefined, predecessorPoint: Date | undefined,
   successorFloor: Date | undefined, deferFiniteCompletion: boolean,
-  capContext?: MedicationContext, ownPredecessorEnd?: Date
+  capContext?: MedicationContext, ownPredecessor?: AcceptedStageCompletion
 ): ResolvedAdministrationWindow {
   const recurrence = administration.schedule?.recurrence;
   const absoluteStart = resolveRepeatBoundsStart(recurrence, timeZone);
@@ -2367,9 +2367,15 @@ function resolveAdministrationWindow(
       "invalid-calendar-order",
       "Absolute calendar component end precedes its start: the calendar-bound dosage ends before its stated start date; correct the date interval."
     );
-  const implicitStart = stage.start
+  // A same-track implicit successor uses the same completed point and
+  // exclusive eligibility fence as an ordinary next stage. Explicit member
+  // origins remain authoritative; no unrelated track supplies this boundary.
+  const implicitPredecessor = !administration.phaseStart && !administration.phaseOrigin ? ownPredecessor : undefined;
+  if (implicitPredecessor?.point) successorFloor = implicitPredecessor.end;
+  const implicitStart = stage.start && !implicitPredecessor
     ? start
-    : successorIntervalStart(administration, predecessorPoint, start, timeZone);
+    : successorIntervalStart(administration, implicitPredecessor?.point ?? predecessorPoint,
+        implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start, timeZone);
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
   const cadence = recurrence?.calendarWindow && !administration.phaseStart
     ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
@@ -2380,7 +2386,7 @@ function resolveAdministrationWindow(
         implicitStart,
         sourceClock,
         componentClock,
-        ownPredecessorEnd ?? (index > 0 ? previousEnd : undefined)
+        ownPredecessor?.end ?? (index > 0 ? previousEnd : undefined)
       );
   const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
     ? absoluteStart ?? start : implicitStart;
@@ -2483,10 +2489,12 @@ function completePhaseDependency(
     for (const pending of waiting) {
       if (--pending.remaining > 0) continue;
       dependencies.pending--;
-      let latest = item.completion.end;
-      for (const predecessor of pending.administration.phasePredecessors!)
-        if (dependencies.completed.get(predecessor)!.end > latest)
-          latest = dependencies.completed.get(predecessor)!.end;
+      let latest = item.completion;
+      for (const predecessor of pending.administration.phasePredecessors!) {
+        const completed = dependencies.completed.get(predecessor)!;
+        if (completed.end > latest.end || completed.end.getTime() === latest.end.getTime() && !completed.point)
+          latest = completed;
+      }
       const window = dependencies.resolve(pending.administration, pending.sourceIndex, latest);
       (ready ??= []).push(window);
       if (!window.completionPending && window.endExclusive && window.administration.sourceMember !== undefined)
@@ -2540,10 +2548,10 @@ function treatmentStepWindow(
     if (predecessors?.length && !dependencies) {
       dependencies = {
         completed: new Map(), waiting: new Map(), members: new Set(), pending: 0,
-        resolve: (member, memberIndex, predecessorEnd) => {
+        resolve: (member, memberIndex, predecessor) => {
           const resolved = resolveAdministrationWindow(member, stage, index, anchor, start, previousEnd,
             timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
-            deferFiniteCompletion, capContext, predecessorEnd);
+            deferFiniteCompletion, capContext, predecessor);
           resolved.sourceIndex = memberIndex;
           return resolved;
         },
@@ -2561,13 +2569,14 @@ function treatmentStepWindow(
     }
     const sourceMember = administration.sourceMember;
     if (dependencies && sourceMember !== undefined) dependencies.members.add(sourceMember);
-    let ownPredecessorEnd: Date | undefined;
+    let ownPredecessor: AcceptedStageCompletion | undefined;
     if (predecessors?.length) {
       const pending: PendingPhaseAdministration = { administration, sourceIndex, remaining: 0 };
       for (const predecessor of predecessors) {
         const completed = dependencies!.completed.get(predecessor);
         if (completed) {
-          if (!ownPredecessorEnd || completed.end > ownPredecessorEnd) ownPredecessorEnd = completed.end;
+          if (!ownPredecessor || completed.end > ownPredecessor.end ||
+              completed.end.getTime() === ownPredecessor.end.getTime() && !completed.point) ownPredecessor = completed;
         } else {
           pending.remaining++;
           const waiting = dependencies!.waiting.get(predecessor);
@@ -2579,7 +2588,7 @@ function treatmentStepWindow(
     }
     const window = resolveAdministrationWindow(administration, stage, index, anchor, start, previousEnd,
       timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
-      deferFiniteCompletion, capContext, ownPredecessorEnd);
+      deferFiniteCompletion, capContext, ownPredecessor);
     if (dependencies) window.sourceIndex = sourceIndex;
     administrations.push(window);
     completionPending ||= Boolean(window.completionPending);

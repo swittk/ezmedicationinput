@@ -120,16 +120,16 @@ describe("round 23: language provider callable contracts", () => {
       custom: { code: "custom", display: "Custom action", semanticClass: "procedure" }
     };
     const contexts: SigFormatContext[] = [];
-    const callback = (context: SigFormatContext) => {
+    const callback = (style: string) => (context: SigFormatContext) => {
       contexts.push(context);
-      return context.instructionActionMap?.custom.display ?? "No custom action";
+      return style + ": " + (context.instructionActionMap?.custom.display ?? "No custom action");
     };
-    const localization = { locale: "round23-custom", formatShort: callback, formatLong: callback };
+    const localization = { locale: "round23-custom", formatShort: callback("short"), formatLong: callback("long") };
     for (const style of ["short", "long"] as const) {
       expect(formatCanonicalClause(clause, style, localization, { instructionActionMap }))
-        .toBe("Custom action");
+        .toBe(style + ": Custom action");
       expect(contexts[contexts.length - 1]?.instructionActionMap).toBe(instructionActionMap);
-      expect(formatCanonicalClause(clause, style, localization)).toBe("No custom action");
+      expect(formatCanonicalClause(clause, style, localization)).toBe(style + ": No custom action");
       expect(contexts[contexts.length - 1]?.instructionActionMap).toBeUndefined();
     }
   });
@@ -1918,6 +1918,12 @@ describe("round 30: completed phase origins and exact boundary display", () => {
       JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: from as string,
         timeZone: "UTC", limit: (expected as string[]).length })).toEqual(expected);
+      if ((source as string).includes("from day 4")) {
+        expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-26T00:00:00Z",
+          timeZone: "UTC", limit: 3 })).toEqual([
+          "2026-11-26T20:00:00+00:00", "2026-11-29T06:00:00+00:00", "2026-11-29T07:00:00+00:00"
+        ]);
+      }
     }
     expect(next.start).toMatchObject({ anchor: "previous-phase-next-day", displacement: { value: 2, unit: "d" } });
   });
@@ -2597,8 +2603,27 @@ describe("round32 phase origin and numeric ownership audit", () => {
     });
     expect(members[1].phaseOrigin).toBeUndefined();
     expect(members[2].phaseOrigin).toBeUndefined();
-    expect(members[2].phaseStart).toEqual({ anchor: "unresolved" });
+    // The exact same-track completion now supplies a dependency, never an
+    // invented absolute origin. The unchanged original clinical input is
+    // checked below through all representations, including the pause dates.
+    expect(members[2].phaseStart).toBeUndefined();
+    expect(members[2].phasePredecessors).toEqual([1]);
     expect(members[3].phaseOrigin).toMatchObject({ value: 0, unit: "d" });
+    const parsed = parseSig(source);
+    for (const input of [course, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...query, from: "2026-11-26T00:00:00Z", limit: 7 })).toEqual([
+        "2026-11-26T08:00:00+00:00", "2026-11-26T20:00:00+00:00",
+        "2026-11-27T08:00:00+00:00", "2026-11-27T20:00:00+00:00",
+        "2026-11-28T08:00:00+00:00", "2026-11-28T08:00:00+00:00", "2026-11-28T20:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 12, durationUnit: "d" }).totalUnits).toBe(41);
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-11-30T00:00:00Z",
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+      expect(calculateTotalUnits({ dosage: input, ...query, from: "2026-12-01T00:00:00Z",
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(5);
+      expect(JSON.stringify(input)).toBe(before);
+    }
 
     const explicit = parseSig(source.replace("then 3 drops OD daily", "then from day 10 take 3 drops OD daily"))
       .meta.canonical.course!.stages[0].administrations;
@@ -2963,6 +2988,16 @@ describe("round36 clock positions and retained source directions", () => {
     const parsed = parseSig("Take 1 tablet " + timing);
     expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
     expect(parsed.longText.toLowerCase()).toContain("before breakfast");
+    for (const wire of [parsed.fhir, parsed.fhirNext]) {
+      const saved = JSON.parse(JSON.stringify(wire));
+      const before = JSON.stringify(saved);
+      const reopened = importCanonicalCourse(saved);
+      const preview = formatSig(reopened, "long", { locale: "en", realizationMode: "roundtrip" });
+      expect((preview + JSON.stringify(projectCanonicalCourse(reopened))).toLowerCase()).toContain("before breakfast");
+      expect(nextDueDoses(reopened, { ...clockOptions, limit: 2 })).toEqual(["2026-11-22T07:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...clockOptions, dosage: reopened, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(1);
+      expect(JSON.stringify(saved)).toBe(before);
+    }
     expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
     for (const dosage of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
       JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {

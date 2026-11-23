@@ -300,7 +300,9 @@ export function courseFromPartialParallel(
       const phase = track.phases[index];
       const phaseStart = administrations.length;
       let predecessors: number[] | undefined;
+      let finitePredecessors: boolean | undefined;
       for (const item of phase.members) {
+        let dependsOnPrevious = false;
         const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
         a.sourceMember = item.member;
         // An inferred successor cut cannot replace the clause's authored end.
@@ -319,6 +321,33 @@ export function courseFromPartialParallel(
         if (a.onsetReference === "treatment-day-start") a.phaseStart = boundaryForOnset(a);
         else if (a.onsetReference === "previous-phase-next-day" && index > 0) {
           a.phaseStart = boundaryForOnset(a);
+          dependsOnPrevious = true;
+        } else if (a.onsetDays !== undefined)
+          a.phaseOrigin = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
+        else if (phase.kind === "relative" && phase.start) {
+          if (phase.startReference)
+            a.phaseStart = { anchor: phase.startReference, displacement: clinicalBoundary(phase.start).displacement };
+          else a.phaseOrigin = clinicalBoundary(phase.start).displacement;
+        } else if (!a.schedule?.explicitEvents?.length &&
+            (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart)) {
+          // An implicit cut after a declared finite phase belongs to that
+          // track's actual completion, never to an unrelated parallel member.
+          // Execution retains ownership of the actual count/date arithmetic.
+          if (index > 0 && finitePredecessors === undefined) {
+            finitePredecessors = priorEnd > priorStart;
+            for (let parent = priorStart; finitePredecessors && parent < priorEnd; parent++) {
+              const previous = administrations[parent], repeat = previous.schedule?.recurrence;
+              finitePredecessors = Boolean(previous.phaseEnd || repeat?.calendarWindow?.end ||
+                repeat?.courseLength?.value !== undefined &&
+                  !repeat.courseLength.comparator ||
+                repeat?.count !== undefined &&
+                  (repeat.countMax === undefined || repeat.countMax === repeat.count));
+            }
+          }
+          if (finitePredecessors) dependsOnPrevious = true;
+          else a.phaseStart = { anchor: "unresolved" };
+        }
+        if (dependsOnPrevious) {
           if (!predecessors) {
             predecessors = [];
             for (let parent = priorStart; parent < priorEnd; parent++) {
@@ -328,15 +357,7 @@ export function courseFromPartialParallel(
             }
           }
           a.phasePredecessors = predecessors;
-        } else if (a.onsetDays !== undefined)
-          a.phaseOrigin = clinicalBoundary({ value: a.onsetDays, unit: "d" }).displacement;
-        else if (phase.kind === "relative" && phase.start) {
-          if (phase.startReference)
-            a.phaseStart = { anchor: phase.startReference, displacement: clinicalBoundary(phase.start).displacement };
-          else a.phaseOrigin = clinicalBoundary(phase.start).displacement;
-        } else if (!a.schedule?.explicitEvents?.length &&
-            (phase.kind === "relative" || index > 0 && !item.clause.schedule?.boundsStart))
-          a.phaseStart = { anchor: "unresolved" };
+        }
         administrations.push(a);
       }
       priorStart = phaseStart;

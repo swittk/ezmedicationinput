@@ -3672,10 +3672,16 @@ type ActionRealizationContext = InstructionActionRealizationInput;
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
 function defaultActionArguments(frame: AdviceFrame) {
-  const explicitAccompaniment = frame.args.some(arg =>
-    (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-      arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) &&
-    relationHasSemanticClass(arg.relation, "accompaniment"));
+  let explicitAccompaniment = false, unmarkedSubstances = 0;
+  for (const arg of frame.args) {
+    if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
+    if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) &&
+        relationHasSemanticClass(arg.relation, "accompaniment")) {
+      explicitAccompaniment = true;
+      break;
+    }
+  }
   let objectArg: AdviceArgument | undefined;
   let relationTargetArg: AdviceArgument | undefined;
   let amountArg: AdviceArgument | undefined;
@@ -3687,7 +3693,8 @@ function defaultActionArguments(frame: AdviceFrame) {
       // is implicit. A bare substance without that relation can be the object.
       if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
           !explicitAccompaniment && arg.role === AdviceArgumentRole.Substance &&
-            relationHasSemanticClass(frame.relation, "accompaniment"))
+            relationHasSemanticClass(frame.relation, "accompaniment") &&
+            (unmarkedSubstances < 2 || objectArg !== undefined))
         relationTargetArg ??= arg;
       else if (!objectArg) objectArg = arg;
       else relationTargetArg ??= arg;

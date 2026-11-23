@@ -594,11 +594,11 @@ describe("round49 endpoint units and normalized conditions", () => {
       expect(formatSig(dosage, "short", options)).toBe(short);
       const long = formatSig(dosage, "long", options);
       expect(long).toContain(dose);
-      expect(long).toContain(condition);
+      expect(long).toMatch(new RegExp(condition + "(?![0-9]|[.][0-9])", "u"));
       const imported = fromFhirDosage(dosage, options);
       expect(imported.shortText).toBe(short);
       expect(imported.longText).toContain(dose);
-      expect(imported.longText).toContain(condition);
+      expect(imported.longText).toMatch(new RegExp(condition + "(?![0-9]|[.][0-9])", "u"));
       expect(dosage.text).toBe(source);
     }
     // Only the verified original row owns exact source replay. The strict cold

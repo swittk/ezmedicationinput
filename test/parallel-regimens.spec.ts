@@ -1656,3 +1656,78 @@ describe("round49 qualified clocks and partial parallel members", () => {
     expect(formatSig(native, "long", { locale: "en" })).toContain("left eye");
   });
 });
+
+
+describe("round50 counted implicit successors in independent tracks", () => {
+  const context = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+  it.each([false, true])("keeps the right-eye counted cutover independent of track order (%s)", reversed => {
+    const right = "1 drop OD daily at 08:00 for 3 doses, then 2 drops OD daily at 08:00";
+    const left = "1 drop OS BID";
+    const source = reversed ? left + "; " + right : right + "; " + left;
+    const parsed = parseSig(source);
+    expect(parsed.input).toBe(source);
+    const members = parsed.meta.canonical.course!.stages[0].administrations;
+    const rightMembers = members.filter(member => member.target?.text === "right eye");
+    const leftMember = members.find(member => member.target?.text === "left eye")!;
+    expect(rightMembers.map(member => member.amounts![0].quantity!.value)).toEqual([1, 2]);
+    expect(rightMembers[0].schedule?.recurrence?.count).toBe(3);
+    expect(rightMembers[0].phasePredecessors).toEqual([]);
+    expect(rightMembers[1].phasePredecessors).toEqual([rightMembers[0].sourceMember]);
+    expect(rightMembers[1].phaseStart).toBeUndefined();
+    expect(leftMember.phasePredecessors).toBeUndefined();
+    const expected: string[] = [];
+    for (let day = 1; day <= 5; day++) {
+      const date = "2026-01-0" + day;
+      expected.push(date + "T08:00:00+00:00", date + "T08:00:00+00:00", date + "T20:00:00+00:00");
+    }
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...context, limit: 15 })).toEqual(expected);
+      // Three 1-drop then two 2-drop right-eye doses, plus ten left-eye doses.
+      expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 5, durationUnit: "d" }).totalUnits).toBe(17);
+      expect(calculateTotalUnits({ dosage: input, ...context, from: "2026-01-04T00:00:00Z",
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" }))
+      .toContain("After the previous phase: Instill 2 drops");
+  });
+
+  it("starts an elapsed successor from the final accepted point without a millisecond drift", () => {
+    const parsed = parseSig("1 drop OD q12h for 3 doses, then 2 drops OD q12h; 1 drop OS BID");
+    const expected = [
+      "2026-01-01T00:00:00+00:00", "2026-01-01T08:00:00+00:00",
+      "2026-01-01T12:00:00+00:00", "2026-01-01T20:00:00+00:00",
+      "2026-01-02T00:00:00+00:00", "2026-01-02T08:00:00+00:00",
+      "2026-01-02T12:00:00+00:00", "2026-01-02T20:00:00+00:00"
+    ];
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...context, limit: 8 })).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(9);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("waits for both finite members of the preceding right-eye phase", () => {
+    const parsed = parseSig("1 drop OD daily at 08:00 for 3 doses and 1 drop OD daily at 20:00 for 4 doses, then 2 drops OD daily at 08:00; 1 drop OS BID");
+    const members = parsed.meta.canonical.course!.stages[0].administrations;
+    expect(members[2].phasePredecessors).toEqual([members[0].sourceMember, members[1].sourceMember]);
+    expect(members[3].phasePredecessors).toBeUndefined();
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...context, from: "2026-01-04T00:00:00Z", limit: 5 })).toEqual([
+        "2026-01-04T08:00:00+00:00",
+        "2026-01-04T20:00:00+00:00", "2026-01-04T20:00:00+00:00",
+        "2026-01-05T08:00:00+00:00", "2026-01-05T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 6, durationUnit: "d" }).totalUnits).toBe(23);
+      expect(calculateTotalUnits({ dosage: input, ...context, from: "2026-01-04T00:00:00Z",
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});

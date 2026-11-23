@@ -680,6 +680,13 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   });
 }
 
+function isSafetyTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
+  // Semantic frames carry saved codes; lexical frames can still carry surfaces.
+  return frame.polarity === AdvicePolarity.Negate ||
+    getMedicationInstructionAction(frame.predicate.lemma, context.options)?.safetyScopeTarget === true ||
+    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
+}
+
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
   const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   return Boolean(
@@ -781,10 +788,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const conditionEnd = Math.max(...tokens.map((token) => token.sourceEnd));
       const text = context.state.input.slice(lead.sourceStart, conditionEnd).trim();
       const fullText = context.state.input.slice(lead.sourceStart, targetEnd).trim();
-      const safety = program.some((frame) => isScopeTarget(context, frame) && (
-        frame.polarity === AdvicePolarity.Negate ||
-        medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
-      ));
+      const safety = program.some((frame) => isScopeTarget(context, frame) && isSafetyTarget(context, frame));
       const sourceRange = { start: lead.sourceStart, end: conditionEnd };
       const withheld = withholdingAdjunct(context, sourceRange, program);
       return [lexicalSign({
@@ -829,8 +833,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const sourceEnd = Math.max(...tokens.map((token) => token.sourceEnd));
     const text = context.state.input.slice(lead.sourceStart, sourceEnd).trim();
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
-    const safety = previous.polarity === AdvicePolarity.Negate ||
-      medicationInstructionActionIsSafetyScopeTarget(previous.predicate.lemma, context.options);
+    const safety = isSafetyTarget(context, previous);
     const sourceRange = { start: lead.sourceStart, end: sourceEnd };
     const withheld = withholdingAdjunct(context, sourceRange, [previous]);
     return [lexicalSign({

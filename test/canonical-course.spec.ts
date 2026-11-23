@@ -3091,3 +3091,35 @@ describe("round47 pooled calendar release windows", () => {
     }
   });
 });
+
+
+describe("round50 upper-only periods with native offsets", () => {
+  it.each([false, true])("retains an exact timing code only for an exact matching period (%s)", exact => {
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { ...(exact ? { period: 6 } : { periodMax: 6 }),
+        periodUnit: FhirPeriodUnit.Hour, startOffset: { value: 1, unit: "h" } },
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q6H" }] } }
+    }] }] };
+    const original = JSON.stringify(wire), cold = JSON.parse(JSON.stringify(toFhirR5Dosages(wire)));
+    for (const input of [wire, cold, toDosageDetails(cold)]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        const cadence = locale === "en" ? "every 6 hours" : "ทุก 6 ชั่วโมง";
+        if (exact) expect(text).toContain(cadence);
+        else {
+          expect(text).not.toContain(cadence);
+          expect(text).toContain(locale === "en" ? "up to 6 hours" : "ไม่เกิน 6 ชั่วโมง");
+        }
+        expect(text).toContain(locale === "en" ? "1 hour after" : "หลังเริ่มรอบ 1 ชั่วโมง");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const reopened = toDosageDetails(cold).step![0].component[0].timing!;
+    expect(reopened.code!.coding![0].code).toBe("Q6H");
+    expect(reopened.repeat!.period).toBe(exact ? 6 : undefined);
+    expect(reopened.repeat!.periodMax).toBe(exact ? undefined : 6);
+    expect(JSON.stringify(wire)).toBe(original);
+  });
+});
