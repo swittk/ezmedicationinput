@@ -1406,15 +1406,22 @@ describe("calendar date interpretation", () => {
 
   it("does not double count a morning qualifier for the same fixed clock", () => {
     const source = "รับประทาน 1 เม็ด ทุกวันจันทร์และวันพฤหัสบดี เวลา 08:00 ตอนเช้า";
-    const result = parseSig(source, { locale: "th" });
-    expect(result.meta.canonical.clauses[0]?.schedule).toMatchObject({
+    const result = parseBatch(source, { locale: "th" });
+    const firstDosage = result.items[0].fhir;
+    const clause = result.meta.canonical.clauses[0];
+    const course = result.meta.canonical.course!;
+    expect(clause.schedule).toMatchObject({
       frequency: 2, period: 1, periodUnit: "wk",
       dayOfWeek: ["mon", "thu"],
-      timeOfDay: ["08:00:00"],
-      when: ["MORN"]
+      timeOfDay: ["08:00:00"]
     });
-    expect(result.fhir.timing?.repeat?.frequency).toBe(2);
-    expect(nextDueDoses(result.fhir, {
+    // Morning qualifies the authored clock; it is not another administration.
+    expect(clause.schedule?.when).toBeUndefined();
+    expect(course.stages[0].administrations[0].schedule?.recurrence?.anchors).toBeUndefined();
+    expect(firstDosage.timing?.repeat?.frequency).toBe(2);
+    expect(firstDosage.timing?.repeat?.when).toBeUndefined();
+    expect(result.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
+    expect(nextDueDoses(firstDosage, {
       from: "2026-11-02T00:00:00+07:00",
       orderedAt: "2026-11-02T00:00:00+07:00",
       timeZone: "Asia/Bangkok",
@@ -1423,6 +1430,38 @@ describe("calendar date interpretation", () => {
       "2026-11-02T08:00:00+07:00",
       "2026-11-05T08:00:00+07:00"
     ]);
+
+    const qualification = {
+      rule: "hpsg.cx.schedule.fixed-clock-daypart-qualification",
+      spans: [{ start: source.indexOf("ตอนเช้า"), end: source.length, text: "ตอนเช้า" }]
+    };
+    expect(clause.rawText).toBe(source);
+    expect(clause.evidence).toContainEqual(expect.objectContaining(qualification));
+    expect(course.instruction).toBe(source);
+    expect(course.stages[0].administrations[0].syntax?.evidence)
+      .toContainEqual(expect.objectContaining(qualification));
+    expect(result.fhirNext.renderedInstruction).toBe(source);
+    const coldR5: typeof result.fhir = JSON.parse(JSON.stringify(result.fhir));
+    expect(coldR5[0].extension?.find(item =>
+      item.url === "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction"
+    )?.extension?.find(item => item.url === "instruction")?.valueString).toBe(source);
+
+    const query = {
+      from: "2026-11-02T00:00:00+07:00",
+      orderedAt: "2026-11-02T00:00:00+07:00",
+      timeZone: "Asia/Bangkok",
+      eventClock: { MORN: "07:00" },
+      limit: 2
+    };
+    for (const input of [course, result.fhir, result.fhirNext, coldR5]) {
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-11-02T08:00:00+07:00",
+        "2026-11-05T08:00:00+07:00"
+      ]);
+      expect(calculateTotalUnits({
+        ...query, dosage: input, durationValue: 7, durationUnit: FhirPeriodUnit.Day
+      })).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "scheduled" });
+    }
   });
 
   it("encodes multiple explicit weekly weekdays with matching weekly frequency in Thai", () => {
