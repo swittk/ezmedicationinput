@@ -7521,3 +7521,152 @@ describe("round47 public retained-field preservation", () => {
     expect(row).toEqual(before);
   });
 });
+
+
+describe("round48 interop value ownership and primitive annotations", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const boundary = (value: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value, unit: "d" } });
+
+  it.each([{ phase: 2, cycles: 3 }, { phase: 3, cycles: 4 }])(
+    "keeps independently supplied phase $phase and course $cycles counts on legacy rows", ({ phase, cycles }) => {
+      // Actual master 7d62823 wire fixture: its unmarked old count still uses
+      // the established migration policy until the caller supplies both scopes.
+      const rows: FhirDosage[] = [{
+        timing: { repeat: { frequency: 1, boundsDuration: { value: 7, unit: "days", system: "http://unitsofmeasure.org", code: "d" }, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        text: "Use 1 tablet once daily for 7 days.", sequence: 1,
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", system: "http://standardterms.edqm.eu", code: "15054000" } }],
+        modifierExtension: [{ url: DOSAGE_DETAILS_R5_URL, extension: [
+          { url: "rowIndex", valueInteger: 0 }, { url: "sequence", valueInteger: 1 }, { url: "stepCount", valueInteger: 1 },
+          { url: "step", extension: [{ url: "count", valueInteger: 3 }] },
+          { url: "context", valueString: "72f2f03d1f8289c5" }, { url: "contextRequired", valueBoolean: true },
+          { url: "course", extension: [{ url: "repeatCycle", valueQuantity: { value: 14, unit: "d", code: "d", system: "http://unitsofmeasure.org" } }] },
+        ] }], extension: [{ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
+          { url: "instruction", valueString: "1 tablet daily for 7 days then stop for 7 days, repeat for 3 cycles" },
+          { url: "row", extension: [{ url: "projectionFingerprint", valueString: "4346df4e5678f52b" }, { url: "textFingerprint", valueString: "dab22a241c7d0f4f" }] },
+        ] }],
+      }];
+      const edits = { modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: cycles }],
+        step: [{ sequence: 1, count: phase }] };
+      const before = persist({ rows, edits });
+      let wire = toDosageDetails(rows, undefined, edits);
+      expect({ rows, edits }).toEqual(before);
+      for (let save = 0; save < 3; save++) {
+        expect(getCourseCycleCount(wire)).toBe(cycles);
+        expect(wire.step![0].count).toBe(phase);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+    }
+  );
+
+  it.each(["unchanged", "annotation", "row-text", "course-text", "replacement"] as const)(
+    "keeps only currently owned zero-step translations after a %s edit", edit => {
+      const translation = (value: number): FhirExtension => ({
+        url: "http://hl7.org/fhir/StructureDefinition/translation",
+        extension: [{ url: "lang", valueCode: "th" }, { url: "content", valueString: "รับประทาน " + value + " เม็ด ทุกวัน" }],
+      });
+      const author = { url: "urn:test:author", valueString: "original" };
+      const primitive = { id: "english-text", extension: [translation(1), author] };
+      const source = { renderedInstruction: "Take 1 tablet daily", _renderedInstruction: primitive };
+      const rows = persist(toFhirR5Dosages(source));
+      const original = persist(rows[0].modifierExtension!.find(item => item.url === DOSAGE_DETAILS_R5_URL)!);
+      const edited = edit === "row-text" || edit === "course-text" || edit === "replacement";
+      if (edit === "row-text" || edit === "replacement") rows[0].text = "Take 2 tablets daily";
+      const edits: (EzCourseMetadata & Pick<FhirR6DosageInstruction, "_renderedInstruction">) | undefined =
+        edit === "course-text" ? { renderedInstruction: "Take 2 tablets daily" }
+        : edit === "replacement" ? { _renderedInstruction: { id: "replacement-text", extension: [translation(2), author] } }
+        : edit === "annotation" ? { extension: [{ url: "urn:test:course-note", valueString: "unchanged wording" }] }
+        : undefined;
+      const before = persist({ rows, edits, source });
+      let wire = toDosageDetails(rows, undefined, edits);
+      expect(persist({ rows, edits, source })).toEqual(before);
+      for (let save = 0; save < 3; save++) {
+        expect(wire.renderedInstruction).toBe(edited ? "Take 2 tablets daily" : source.renderedInstruction);
+        expect(wire._renderedInstruction).toEqual(edit === "replacement" ? edits!._renderedInstruction
+          : edited ? { id: primitive.id, extension: [author] } : primitive);
+        if (edited) expect(wire.extension?.some(item =>
+          item.url === DOSAGE_RECONCILIATION_SOURCE_URL && item.extension?.some(child =>
+            JSON.stringify(child) === JSON.stringify(original)))).toBe(true);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+    }
+  );
+
+  it.each(["_frequency", "_frequencyMax", "_period", "_periodMax", "_periodUnit",
+    "_countMax", "_duration", "_durationMax", "_durationUnit", "_dayOfWeek", "_when", "_offset"] as const)(
+    "keeps the editable pause after a %s annotation-only edit", field => {
+      const repeat = { ...daily, frequencyMax: 1, periodMax: 1, count: 7, countMax: 7,
+        duration: 1, durationMax: 1, durationUnit: FhirPeriodUnit.Hour };
+      let wire = r6Save({ step: [
+        { id: "induction", component: [{ id: "initial", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat } }] },
+        { id: "pause", end: boundary(14), component: [] },
+        { id: "resume", component: [{ id: "later", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }] },
+      ] });
+      const annotation = field === "_dayOfWeek" || field === "_when"
+        ? [{ id: "cadence-annotation", extension: [{ url: "urn:test:note", valueString: "retain" }] }]
+        : { id: "cadence-annotation", extension: [{ url: "urn:test:note", valueString: "retain" }] };
+      (wire.step![0].component[0].timing!.repeat! as unknown as Record<string, unknown>)[field] = annotation;
+      for (let save = 0; save < 3; save++) {
+        const before = persist(wire), view = fromDosageDetails(wire);
+        expect(view.course.step?.map(step => step.id)).toEqual(["induction", "pause", "resume"]);
+        expect(wire).toEqual(before);
+        const current = wire.step![0].component[0].timing!.repeat!;
+        expect(current).toMatchObject(repeat);
+        expect((current as unknown as Record<string, unknown>)[field]).toEqual(annotation);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+    }
+  );
+
+  it.each(["frequency", "period", "semantic-extension", "unknown-companion"] as const)(
+    "still retires the old pause on a %s completion edit", edit => {
+      const wire = r6Save({ step: [
+        { id: "induction", component: [{ id: "initial", doseAndRate: [{ doseQuantity: q(1) }],
+          timing: { repeat: { ...daily, count: 7 } } }] },
+        { id: "pause", end: boundary(14), component: [] },
+        { id: "resume", component: [{ id: "later", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }] },
+      ] });
+      const repeat = wire.step![0].component[0].timing!.repeat!;
+      if (edit === "frequency" || edit === "period") repeat[edit] = 2;
+      else if (edit === "semantic-extension") repeat.extension = [{ url: "urn:clinic:cadence-policy", valueString: "current" }];
+      else (repeat as unknown as Record<string, unknown>)._clinicCadence = { id: "unfamiliar" };
+      const before = persist(wire), view = fromDosageDetails(wire);
+      expect(view.course.step?.map(step => step.id)).toEqual(["induction", "resume"]);
+      expect(wire).toEqual(before);
+    }
+  );
+
+  it.each([8, 9])("keeps metadata-only cycle-day children apart from numerical day %s", day => {
+    const marker = { id: "cycle", url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, extension: [
+      { id: "metadata-only", url: "day", extension: [{ url: "urn:test:empty-day-note", valueString: "retained" }] },
+      { id: "eighth-day", url: "day", valueInteger: day, _valueInteger: { id: "eight-value" } },
+    ] };
+    const rows: FhirDosage[] = [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily }, modifierExtension: [marker] }];
+    const before = persist(rows);
+    let wire = toDosageDetails(rows);
+    for (let save = 0; save < 3; save++) {
+      const saved = persist(toFhirR5Dosages(wire));
+      expect(saved[0].modifierExtension?.find(item => item.url === CYCLE_DAY_ELIGIBILITY_EXTENSION_URL)).toEqual(marker);
+      wire = toDosageDetails(saved);
+    }
+    expect(rows).toEqual(before);
+  });
+
+  it("accepts and preserves Reference.identifier primitive companions in the public types", () => {
+    const source = course({ site: { reference: {
+      reference: "BodyStructure/site", identifier: {
+        use: "official", _use: { id: "identifier-use" },
+        system: "https://clinic.example/sites", _system: { id: "identifier-system" },
+        value: "left-arm", _value: { id: "identifier-value", extension: [{ url: "urn:test:source", valueString: "authored" }] },
+      },
+    } } });
+    const before = persist(source);
+    let wire = source;
+    for (let save = 0; save < 3; save++) {
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      expect(wire.step![0].component[0].site).toEqual(source.step![0].component[0].site);
+    }
+    expect(source).toEqual(before);
+  });
+});

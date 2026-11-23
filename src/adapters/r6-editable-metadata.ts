@@ -71,7 +71,12 @@ export function retainDraftSteps(
 function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
   if (!timing) return undefined;
   const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
-  delete (repeat as Record<string, unknown>)._count;
+  // Only standard primitive companions are annotations. Keep unfamiliar
+  // recurrence fields and extensions in the completion comparison.
+  for (const field of ["_count", "_countMax", "_frequency", "_frequencyMax",
+    "_period", "_periodMax", "_periodUnit", "_duration", "_durationMax",
+    "_durationUnit", "_dayOfWeek", "_when", "_offset"])
+    delete (repeat as Record<string, unknown>)[field];
   if (repeat.boundsDuration?.id !== undefined) {
     const { id: _durationId, ...duration } = repeat.boundsDuration;
     repeat.boundsDuration = duration;

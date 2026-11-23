@@ -599,9 +599,12 @@ export interface FhirReference extends FhirElement {
     id?: string;
     extension?: FhirExtension[];
     use?: string;
+    _use?: FhirPrimitiveElement;
     type?: FhirCodeableConcept;
     system?: string;
+    _system?: FhirPrimitiveElement;
     value?: string;
+    _value?: FhirPrimitiveElement;
     period?: FhirPeriod;
     assigner?: FhirReference;
   };

@@ -2789,21 +2789,33 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       url: "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock", valueTime: "09:00:00",
     });
 
+    const primitiveTypes = new Set(["base64Binary", "boolean", "canonical", "code", "date", "dateTime",
+      "decimal", "id", "instant", "integer", "integer64", "markdown", "oid", "positiveInt",
+      "string", "time", "unsignedInt", "uri", "url", "uuid"]);
     const permitted = (name: keyof typeof profiles, parent: string) =>
       new Set(profiles[name].elements
         .filter(entry => entry.path.startsWith(parent + ".") &&
           !entry.path.slice(parent.length + 1).includes("."))
         .flatMap(entry => {
           const fieldName = entry.path.slice(parent.length + 1);
-          return fieldName.endsWith("[x]")
-            ? entry.types.map(type => fieldName.slice(0, -3) + type)
-            : [fieldName];
+          return entry.types.flatMap(type => {
+            const key = fieldName.endsWith("[x]")
+              ? fieldName.slice(0, -3) + type[0].toUpperCase() + type.slice(1) : fieldName;
+            return primitiveTypes.has(type) ? [key, "_" + key] : [key];
+          });
         }));
     const assertWireKeys = (value: object, keys: Set<string>) => {
       for (const key of Object.keys(value)) {
         expect(keys.has(key), `R6 wire field ${key} is absent from the pinned profile`).toBe(true);
       }
     };
+    assertWireKeys({ renderedInstruction: "Take one tablet", _renderedInstruction: { id: "authored-text" } },
+      permitted("DosageInstruction", "DosageInstruction"));
+    assertWireKeys({ valueInteger: 3, _valueInteger: { id: "authored-limit" } },
+      permitted("DosageSafety", "DosageSafety.doseLimit"));
+    expect(permitted("DosageSafety", "DosageSafety.doseLimit").has("valueinteger")).toBe(false);
+    expect(permitted("Dosage", "Dosage.doseAndRate").has("_doseQuantity")).toBe(false);
+    expect(permitted("DosageInstruction", "DosageInstruction").has("_unknownClinicalField")).toBe(false);
     const parsed = parseSig("1 drop OD q2h for 1 week then qid for 1 month");
     expect(parsed.fhirNext.step).toHaveLength(2);
     expect(parsed.fhirNext.step[0].component).toHaveLength(1);

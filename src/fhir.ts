@@ -132,6 +132,11 @@ export function cycleDayConstraintExtension(
   const children: FhirExtension[] = [];
   let changed = false;
   for (const child of previous.extension ?? []) {
+    // The reader consumes numerical day values only. Annotation-only children
+    // must not take the positional ownership of a later authored day.
+    if (child.url === "day" && typeof child.valueInteger !== "number") {
+      children.push(child); continue;
+    }
     if (child.url !== "day" && child.url !== "periodDays" && child.url !== "cycles" &&
         child.url !== "anchor" && child.url !== "reason" && child.url !== "source") {
       children.push(child); continue;

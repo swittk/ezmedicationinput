@@ -27,6 +27,7 @@ import {
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
+import { FHIR_TRANSLATION_EXTENSION_URL } from "../fhir-translations";
 import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
 import { quantityFromR5, simpleQuantityForR5, quantityForR5 } from "../fhir-quantity-operator";
 import {
@@ -838,8 +839,10 @@ function reconcileNativeCompactCourse(
     // Compact rows keep R6 wrappers; edit fields are R5. Split their owners
     // before merging so clearing native extensions does not clear modifiers.
     const merged = r6StepMetadata({ ...r5StepMetadata(previous?.step ?? {}), ...fields });
+    // Explicit course and phase counts own separate scopes in the current edit.
     if (legacyCycleCount !== undefined && sequence === 1 &&
-        Number.isInteger(fields.count) && fields.count! > 0) {
+        Number.isInteger(fields.count) && fields.count! > 0 &&
+        !editedCourse?.modifierExtension?.some(item => item.url === COURSE_CYCLE_COUNT_EXTENSION_URL)) {
       if (fields.count !== legacyCycleCount) metadataEdited = true;
       legacyCycleCount = fields.count;
       delete merged.count;
@@ -1882,6 +1885,18 @@ export function courseFromR5(
         ...replacementHeader
       } = course ?? {};
       const header = { ...originalHeader, ...replacementHeader };
+      // A translation belongs to its original wording. Keep unrelated Element
+      // annotations active; the existing retained source archives the old text
+      // and translation together. An explicit replacement companion owns itself.
+      if (instruction !== retained.renderedInstruction &&
+          !Object.prototype.hasOwnProperty.call(replacementHeader, "_renderedInstruction") &&
+          header._renderedInstruction?.extension?.some(item => item.url === FHIR_TRANSLATION_EXTENSION_URL)) {
+        const { extension, ...annotations } = header._renderedInstruction;
+        const current = extension!.filter(item => item.url !== FHIR_TRANSLATION_EXTENSION_URL);
+        if (current.length) header._renderedInstruction = { ...annotations, extension: current };
+        else if (Object.keys(annotations).length) header._renderedInstruction = annotations;
+        else delete header._renderedInstruction;
+      }
       if (instruction !== retained.renderedInstruction || !equalStructuredValues(originalHeader, header))
         edited = true;
       const updated = courseFromFields(
