@@ -850,6 +850,35 @@ export function formatCanonicalCourse(
         const repeat = component.schedule?.recurrence;
         const hasOffsets = repeat?.startOffset !== undefined || repeat?.endOffset !== undefined;
         let display = component;
+        const origin = component.phaseOrigin, length = repeat?.courseLength;
+        if (origin && length && !component.phaseStart && !component.delayMinutes &&
+            !repeat?.calendarWindow && !repeat?.courseLengthRange &&
+            step.end?.anchor === "treatment-start" &&
+            (!step.start || step.start.anchor === "treatment-start") &&
+            !getQuantityComparator(origin) && !getQuantityComparator(length)) {
+          const end = treatmentStepOffsetQuantity(step.end);
+          const from = treatmentPosition(origin), duration = treatmentPosition(length);
+          const until = end && !getQuantityComparator(end) ? treatmentPosition(end) : undefined;
+          // Reuse the same conservative position arithmetic as parallel stages.
+          // Month additions remain unresolved because their clamping depends on the date.
+          const ownEnd = from?.value === 0 ? duration :
+            from?.unit === "d" && duration?.unit === "d"
+              ? { unit: "d" as const, value: from.value + duration.value } : undefined;
+          const order = until && ownEnd ? compareRegimenPositions(until, ownEnd) : undefined;
+          const start = step.start && treatmentStepOffsetQuantity(step.start);
+          const stageOrigin = start && !getQuantityComparator(start) ? treatmentPosition(start) : undefined;
+          const startsHere = from && (stageOrigin ? compareRegimenPositions(from, stageOrigin) === 0 :
+            !step.start && from.value === 0);
+          // A first-stage authored week must not disappear behind a derived day heading.
+          const distinctAuthoredUnit = startsHere && order === 0 &&
+            (length.code ?? length.unit) !== (end?.code ?? end?.unit);
+          if ((order === 0 || order === -1) && !distinctAuthoredUnit) {
+            // The heading already bounds this copied phase. Displaying its whole
+            // source length here would suggest restarting it at this global cut.
+            const { courseLength: _length, ...cadence } = repeat!;
+            display = { ...display, schedule: { ...display.schedule, recurrence: cadence } };
+          }
+        }
         // Once R6 offsets restrict the active window, a plain R5 formatter
         // cannot safely describe the entire period as the dose cadence.
         // The read-only display copy drops that misleading interpretation.
@@ -1019,7 +1048,6 @@ export function formatCanonicalCourse(
               : words.calendarWindow(point ?? (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart))
             : words.reviewTiming(point ?? boundary.description);
         }
-        const origin = component.phaseOrigin;
         if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
           const stageOrigin = treatmentStepOffsetQuantity(step.start);
           let stageCoversOrigin = false;

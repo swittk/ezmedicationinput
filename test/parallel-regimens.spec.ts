@@ -1,7 +1,7 @@
 import { projectCanonicalCourse } from "../src/index";
 import { describe, expect, it } from "vitest";
 import {
-  parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits,
+  parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits, formatSig,
   toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition, importCanonicalCourse
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
@@ -1546,4 +1546,47 @@ describe("round48 authored parallel course lengths", () => {
         expect(calculateTotalUnits({ ...monthQuery, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(6);
       }
     });
+});
+
+
+describe("round48 parallel duration display boundaries", () => {
+  it.each(["7d", "1wk"])("does not restart x%s beneath a copied stage heading", duration => {
+    const parsed = parseSig(`1 drop OD q2h x${duration} then QID; 1 drop OS QID x1mo then BID`);
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    const firstDuration = duration === "1wk" ? " for 1 week" : "";
+    const expected = "From treatment start until 7 days after treatment start: " +
+      "Instill 1 drop every 2 hours" + firstDuration + " in the right eye; " +
+      "Instill 1 drop four times daily in the left eye. " +
+      "From 7 days after treatment start until 1 month after treatment start: " +
+      "Instill 1 drop four times daily in the right eye; Instill 1 drop four times daily in the left eye. " +
+      "From 1 month after treatment start onward: " +
+      "Instill 1 drop four times daily in the right eye; Instill 1 drop twice daily in the left eye.";
+    for (const input of [parsed.meta.canonical.course!, parsed.fhirNext, cold]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(expected);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["shorter", "for 2 days", 0, 0],
+    ["range", "for 1 to 9 days", 0, 0],
+    ["qualified", "for <8 days", 0, 0],
+    ["calendar", "for 30 days", 1, 1]
+  ] as const)("keeps a current %s course length visible beside the global window", (kind, expected, stage, member) => {
+    const current = JSON.parse(JSON.stringify(parseSig(twoSites).fhirNext));
+    const repeat = current.step[stage].component[member].timing.repeat;
+    const quantity = (value: number) => ({ value, unit: "d", code: "d", system: "http://unitsofmeasure.org" });
+    if (kind === "range") {
+      delete repeat.boundsDuration;
+      repeat.boundsRange = { low: quantity(1), high: quantity(9) };
+    } else repeat.boundsDuration = { ...quantity(kind === "shorter" ? 2 : kind === "qualified" ? 8 : 30),
+      ...(kind === "qualified" ? { comparator: "<" } : {}) };
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(current)));
+    for (const input of [importCanonicalCourse(current), current, cold]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(expected);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
 });
