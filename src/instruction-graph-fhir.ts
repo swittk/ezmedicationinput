@@ -1,4 +1,4 @@
-import { quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
+import { getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -144,11 +144,16 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     add(quantity, valueString("unit", argument.quantity.unit));
     // Use the published EMA Coding for an operator, not a private graph code.
     // Exact graph quantities keep their existing wire shape.
-    if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) quantity.push(
-      ...(simpleQuantityForR5({ comparator: argument.quantity.comparator,
-        _comparator: argument.quantity.comparatorElement,
-        extension: argument.quantity.comparatorExtensions })?.extension ?? [])
-    );
+    if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) {
+      // The public graph quantity owns its current comparator. A cleared
+      // comparator must not reactivate an annotated carrier retained at import.
+      const extensions = argument.quantity.comparator ? argument.quantity.comparatorExtensions :
+        argument.quantity.comparatorExtensions?.map(extension =>
+          getEmaQuantityComparator({ extension: [extension] })
+            ? { url: QUANTITY_OPERATOR_SOURCE_URL, extension: [extension] } : extension);
+      quantity.push(...(simpleQuantityForR5({ comparator: argument.quantity.comparator,
+        _comparator: argument.quantity.comparatorElement, extension: extensions })?.extension ?? []));
+    }
     nested.push({ url: "quantity", extension: quantity });
   }
   for (const locale of Object.keys(argument.i18n ?? {})) {

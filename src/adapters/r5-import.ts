@@ -93,6 +93,19 @@ function stageFromFields(
     provenance: fields,
   };
 }
+/** A translation describes its authored wording, while unrelated primitive
+ * annotations still belong to the current header slot. Callers retain the
+ * displaced wording and complete companion in the existing source envelope. */
+function removeInstructionTranslations(header: Omit<FhirR6DosageInstruction, "step">): boolean {
+  if (!header._renderedInstruction?.extension?.some(item => item.url === FHIR_TRANSLATION_EXTENSION_URL))
+    return false;
+  const { extension, ...annotations } = header._renderedInstruction;
+  const current = extension!.filter(item => item.url !== FHIR_TRANSLATION_EXTENSION_URL);
+  if (current.length) header._renderedInstruction = { ...annotations, extension: current };
+  else if (Object.keys(annotations).length) header._renderedInstruction = annotations;
+  else delete header._renderedInstruction;
+  return true;
+}
 function courseFromFields(
   fields: Omit<FhirR6DosageInstruction, "step">,
   stages: CanonicalStage[],
@@ -964,6 +977,8 @@ function reconcileNativeCompactCourse(
       }
       const original = {
         ...header.course,
+        ...(savedInstruction !== undefined && header.course._renderedInstruction
+          ? { renderedInstruction: savedInstruction } : {}),
         ...(envelopes ? { extension: envelopes } : {}),
       };
       sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({ course: original }) });
@@ -1089,6 +1104,21 @@ function reconcileNativeCompactCourse(
     ...courseEdits,
     ...(instruction !== undefined ? { renderedInstruction: instruction } : {}),
   };
+  const inheritedPrimitive = currentHeader._renderedInstruction;
+  const replacementPrimitive = (courseEdits as Omit<FhirR6DosageInstruction, "step">)._renderedInstruction;
+  if (savedInstruction !== undefined && instruction !== savedInstruction &&
+      (replacementPrimitive === undefined ||
+        equalStructuredValues(replacementPrimitive,
+          header?.course?._renderedInstruction ?? historicalHeader?._renderedInstruction)) &&
+      removeInstructionTranslations(currentHeader)) {
+    // fromDosageDetails lifts an unchanged companion along with the old text.
+    // Only a different supplied companion is a replacement. Preserve the old
+    // wording with that entire companion before retiring its active translations.
+    const original: Omit<FhirR6DosageInstruction, "step"> = {
+      renderedInstruction: savedInstruction, _renderedInstruction: inheritedPrimitive,
+    };
+    sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({ course: original }) });
+  }
   // Legacy rows have no course-count entry for a partial modifier edit to
   // remove. Preserve their migrated count unless the caller clears all
   // modifiers with [] or explicitly supplies the course-count entry. Once
@@ -1899,14 +1929,8 @@ export function courseFromR5(
       // annotations active; the existing retained source archives the old text
       // and translation together. An explicit replacement companion owns itself.
       if (instruction !== retained.renderedInstruction &&
-          !Object.prototype.hasOwnProperty.call(replacementHeader, "_renderedInstruction") &&
-          header._renderedInstruction?.extension?.some(item => item.url === FHIR_TRANSLATION_EXTENSION_URL)) {
-        const { extension, ...annotations } = header._renderedInstruction;
-        const current = extension!.filter(item => item.url !== FHIR_TRANSLATION_EXTENSION_URL);
-        if (current.length) header._renderedInstruction = { ...annotations, extension: current };
-        else if (Object.keys(annotations).length) header._renderedInstruction = annotations;
-        else delete header._renderedInstruction;
-      }
+          !Object.prototype.hasOwnProperty.call(replacementHeader, "_renderedInstruction"))
+        removeInstructionTranslations(header);
       if (instruction !== retained.renderedInstruction || !equalStructuredValues(originalHeader, header))
         edited = true;
       const updated = courseFromFields(

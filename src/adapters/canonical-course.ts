@@ -332,16 +332,16 @@ function timingAnnotations(
   if (event) out.eventWindow = getTimingEventWindow({ extension: [event] });
   return out;
 }
-/** Metadata-only weekday positions stay on the wire, not in recurrence facts. */
-function timingWeekdays(source: NonNullable<FhirTiming["repeat"]>["dayOfWeek"]) {
+/** Metadata-only primitive positions stay on the wire, not in recurrence facts. */
+function timingPrimitiveValues<T>(source: T[] | undefined): T[] | undefined {
   if (!source) return undefined;
-  let weekdays: typeof source | undefined;
+  let values: T[] | undefined;
   for (let index = 0; index < source.length; index++) {
-    const day = source[index];
-    if (day === null) weekdays ??= source.slice(0, index);
-    else if (weekdays) weekdays.push(day);
+    const value = source[index];
+    if (value === null) values ??= source.slice(0, index);
+    else if (values) values.push(value);
   }
-  return weekdays ?? source;
+  return values ?? source;
 }
 function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): CanonicalTiming | undefined {
   if (!t) return undefined;
@@ -369,8 +369,8 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       courseLengthRange: rangeFromFhir(r.boundsRange),
       calendarWindow: r.boundsPeriod,
       clocks: r.timeOfDay !== undefined ? getTimingClocks(r) : annotations?.clocks,
-      anchors: r.when,
-      dayOfWeek: timingWeekdays(r.dayOfWeek),
+      anchors: timingPrimitiveValues(r.when),
+      dayOfWeek: timingPrimitiveValues(r.dayOfWeek),
       offset: annotations?.offset ?? r.offset,
       offsetMin: annotations?.offsetMin,
       offsetMax: annotations?.offsetMax,
@@ -1045,6 +1045,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     // Imported native facts are immutable; retain the original primitive slots
     // and their annotations just as the event projection does below.
     const dayOfWeek = prior?.dayOfWeek ?? r.dayOfWeek;
+    const when = prior?.when ?? r.anchors;
     if (
       prior &&
       prior.count === r.count &&
@@ -1062,7 +1063,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       prior.boundsDuration === duration &&
       prior.boundsRange === lengthRange &&
       prior.boundsPeriod === r.calendarWindow &&
-      prior.when === r.anchors &&
+      prior.when === when &&
       prior.timeOfDay === r.clocks &&
       prior.startOffset === start &&
       prior.endOffset === end
@@ -1085,7 +1086,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       assign(value, "boundsDuration", duration);
       assign(value, "boundsRange", lengthRange);
       assign(value, "boundsPeriod", r.calendarWindow);
-      assign(value, "when", r.anchors);
+      assign(value, "when", when);
       assign(value, "timeOfDay", r.clocks);
       assign(value, "startOffset", start);
       assign(value, "endOffset", end);

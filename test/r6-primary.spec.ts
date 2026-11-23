@@ -1,5 +1,5 @@
 import { ENGLISH_COURSE } from "../src/locales/course/en";
-import { decodeR5RetainedFields } from "../src/dosage-course";
+import { decodeR5RetainedFields, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { equalStructuredValues, cloneStructuredValue } from "../src/stable-structure";
 import { describe, expect, it } from "vitest";
 import conditionalDoseProfile from "../fhir/r5/medication-conditional-dose.json";
@@ -6667,6 +6667,11 @@ describe("review 27 external editing and batch course semantics", () => {
       expect(reopened.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(2);
       const preview = formatSig(reopened, "long", { realizationMode: "roundtrip" });
       if (replaceText) expect(reopened.renderedInstruction).toBe(replacement);
+      else {
+        const retained = reopened.extension?.find(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)
+          ?.extension?.find(item => item.url === "instruction")?.valueString;
+        expect([reopened.renderedInstruction, retained]).toContain(original);
+      }
       expect(preview).toContain("2 tablets");
       expect(preview).not.toContain("1 tablet");
       editable = fromDosageDetails(reopened);

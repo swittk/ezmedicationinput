@@ -5,7 +5,8 @@ import {
   FhirCoding,
   FhirExtension
 } from "./types";
-import { cloneExtensions, cloneI18nRecord, clonePrimitiveElement } from "./fhir-translations";
+import { cloneI18nRecord } from "./fhir-translations";
+import { cloneStructuredValue } from "./stable-structure";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -22,15 +23,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   if (!coding?.code) {
     return undefined;
   }
-  return {
-    system: coding.system,
-    version: coding.version,
-    code: coding.code,
-    display: coding.display,
-    extension: cloneExtensions(coding.extension),
-    _display: clonePrimitiveElement(coding._display),
-    i18n: cloneI18nRecord(coding.i18n)
-  };
+  return cloneStructuredValue(coding);
 }
 
 /** Shared immutable-by-contract Coding fields for ordinary projection and

@@ -10,6 +10,7 @@ import type {
   FhirR6Dosage, FhirR6Quantity, FhirR6RelativeTime, FhirRange,
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
+import { boundaryFromR6 } from "./canonical-course";
 import { getAdministrationOffsetMinutes, getAnchoredCourseDuration } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
@@ -137,10 +138,11 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
     const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
     if (index > lastDraftOwner) continue;
-    // An implicit phase inherits its predecessor's completion. Carry the
-    // existing ownership invalidation forward; do not resolve dates here.
-    // An authored start or end owns the boundary independently of that chain.
-    if (index > 0 && changedCompletions.has(index - 1) && current && !current.start && !current.end)
+    // Implicit and previous-phase-next-day starts inherit predecessor
+    // completion. Reuse the boundary decoder only on this changed-owner path;
+    // independent authored starts and fixed ends still stop the chain.
+    if (index > 0 && changedCompletions.has(index - 1) && current && !current.end &&
+        (!current.start || boundaryFromR6(current.start)?.anchor === "previous-phase-next-day"))
       changedCompletions.add(index);
     if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) {
       validOwners.add(index);
