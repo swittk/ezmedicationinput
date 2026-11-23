@@ -1723,10 +1723,11 @@ function administrationToWire(
     };
     const phaseOrigin = simpleQuantityForR5(a.phaseOrigin);
     // A member interval uses the existing relative step fields. Convert its
-    // scalar origin to the equivalent start only when an end also needs that
-    // envelope; an Extension cannot combine a valueQuantity and children.
+    // scalar origin to the equivalent start when an end or dependency identity
+    // needs that envelope; an Extension cannot combine a value and children.
     const phaseStart = a.phaseStart ? boundaryToWire(a.phaseStart)
-      : a.phaseEnd && a.phaseOrigin ? boundaryToWire({ anchor: "treatment-start", displacement: a.phaseOrigin }) : undefined;
+      : (a.phaseEnd || phaseParticipant) && a.phaseOrigin
+        ? boundaryToWire({ anchor: "treatment-start", displacement: a.phaseOrigin }) : undefined;
     const phaseEnd = a.phaseEnd ? boundaryToWire(a.phaseEnd) : undefined;
     let generatedInterval: FhirExtension | undefined;
     let found = false;

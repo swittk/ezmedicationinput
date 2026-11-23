@@ -5,6 +5,7 @@ import {
   toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition, importCanonicalCourse
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
+import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
 import { shiftCanonicalSigClauses } from "../src/ir";
 import { administrationFromClause, courseFromAdministrations, courseFromPartialParallel } from "../src/canonical/compile";
 import { parseClauseState } from "../src/parser";
@@ -1675,6 +1676,18 @@ describe("round50 counted implicit successors in independent tracks", () => {
     expect(rightMembers[1].phasePredecessors).toEqual([rightMembers[0].sourceMember]);
     expect(rightMembers[1].phaseStart).toBeUndefined();
     expect(leftMember.phasePredecessors).toBeUndefined();
+    for (const rows of [parsed.fhir, parsed.fhirNext.step[0].component]) {
+      let participants = 0;
+      for (const row of rows) for (const marker of row.modifierExtension ?? []) {
+        if (marker.url !== PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||
+            !marker.extension?.some(child => child.url === "sourceMember")) continue;
+        participants++;
+        // The real storage converter rejects value[x] together with children.
+        // Both the origin and dependency identity use the existing envelope.
+        expect(marker.valueQuantity).toBeUndefined();
+      }
+      expect(participants).toBe(2);
+    }
     const expected: string[] = [];
     for (let day = 1; day <= 5; day++) {
       const date = "2026-01-0" + day;
