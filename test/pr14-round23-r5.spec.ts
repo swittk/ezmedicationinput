@@ -7735,8 +7735,9 @@ describe("round49 current interop ownership", () => {
 
   it.each(["unchanged", "dose", "delete", "replace"] as const)(
     "keeps the live modifier list authoritative beside a historical full component (%s)", edit => {
-      const policy: FhirExtension = { id: "old-policy", url: "urn:clinic:member-policy", valueString: "current policy",
-        extension: [{ url: "urn:clinic:opaque", valueString: "preserve policy annotation" }] };
+      const policy: FhirExtension & { _valueString: FhirElement } = {
+        id: "old-policy", url: "urn:clinic:member-policy", valueString: "current policy",
+        _valueString: { extension: [{ url: "urn:clinic:opaque", valueString: "preserve policy annotation" }] } };
       const dates: FhirExtension = { id: "old-dates", url: DOSAGE_EXCLUDED_DATES_R5_URL, extension: [
         { id: "excluded-date", url: "date", valueDate: "2026-01-02" },
       ] };
