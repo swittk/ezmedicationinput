@@ -2667,6 +2667,19 @@ describe("round32 phase origin and numeric ownership audit", () => {
     ]);
     const separate = parseSig("Take 1 tablet the next morning at 9 AM and in the evening");
     expect(separate.meta.canonical.clauses[0].schedule?.when).toEqual(["EVE"]);
+    expect(separate.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["09:00:00"]);
+    expect(separate.meta.canonical.clauses[0].schedule?.count).toBe(2);
+    const combinedQuery = { ...query, eventClock: { MORN: "08:00", EVE: "18:00" }, limit: 3 };
+    for (const input of [separate.meta.canonical.course!, separate.fhir, separate.fhirNext,
+      JSON.parse(JSON.stringify(separate.fhir))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, combinedQuery)).toEqual([
+        "2026-11-22T09:00:00+00:00", "2026-11-22T18:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...combinedQuery, dosage: input,
+        durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+      expect(JSON.stringify(input)).toBe(before);
+    }
   });
 
   it.each(["≤.๕เม็ด", "≤.๕ เม็ด", "≤.5เม็ด", "<=.5เม็ด", "≥.๕เม็ด", "~.๕เม็ด", "≤0.๕เม็ด"])(

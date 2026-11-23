@@ -807,7 +807,7 @@ export function millionDoseNumberAt(
 export function attachedNumberUnitAt(lower: string):
   { value: number; rawUnit: string } | undefined {
   if (!/^(?:\d|\.)/u.test(lower)) return undefined;
-  const matched = lower.match(/^((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)$/u);
+  const matched = lower.match(/^((?:\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/(?:\d*\.\d+[a-z]+|[a-z0-9]+))*)$/u);
   return matched ? { value: Number(matched[1]), rawUnit: matched[2] } : undefined;
 }
 
@@ -826,7 +826,7 @@ export function doseComparatorNumberAt(
   value: number; numericIndex: number; rawUnit?: string } | undefined {
   if (!DOSE_COMPARATOR_PREFIXES.has(lower) &&
       !DOSE_COMPARATOR_SYMBOLS[lower] && !/^[~≈<>≥≤]/u.test(lower)) return undefined;
-  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+\/\d+|\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/[a-z0-9]+)*)?$/u);
+  const glued = lower.match(/^(~|≈|>=|≥|<=|≤|>|<)((?:\d+\/\d+|\d+(?:\.\d+)?|\.\d+))([a-zμµ]+(?:\/(?:\d*\.\d+[a-z]+|[a-z0-9]+))*)?$/u);
   if (glued) {
     const slash = glued[2].indexOf("/");
     const value = slash < 0 ? Number(glued[2]) :

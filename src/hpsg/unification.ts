@@ -431,7 +431,9 @@ function mergeDose(
         : clinicalQuantity.numerator);
     if (activeDose) {
       let doseUnit = activeDose.unit;
-      if (!clinicalQuantity.projectedDose) {
+      // A separate authored dose already owns its unit; patient-mass
+      // denominators on an independent infusion rate cannot qualify it.
+      if (!clinicalQuantity.projectedDose && clinicalQuantity.representation !== "rate-quantity") {
         for (const term of clinicalQuantity.denominators)
           if (term.dimension !== "time") doseUnit += "/" + term.unit;
       }

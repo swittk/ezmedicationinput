@@ -627,8 +627,9 @@ export function scopeSequentialPhaseSemantics(
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
           when: schedule.clockWindow ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
           timeOfDay: schedule.clockWindow ? undefined : shared.timeOfDay,
-          clockWindow: shared.clockWindow, eventWindow: shared.eventWindow,
-          activityTiming: shared.activityTiming,
+          clockWindow: shared.clockWindow,
+          eventWindow: schedule.clockWindow ? undefined : shared.eventWindow,
+          activityTiming: schedule.clockWindow ? undefined : shared.activityTiming,
           offset: schedule.clockWindow ? undefined : shared.offset,
           offsetMin: schedule.clockWindow ? undefined : shared.offsetMin,
           offsetMax: schedule.clockWindow ? undefined : shared.offsetMax

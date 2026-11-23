@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig,
-  parseSig as parsePublicSig, toFhirR5Dosages } from "../src/index";
+  parseSig as parsePublicSig, toFhirR5Dosages, importCanonicalCourse, nextDueDoses } from "../src/index";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
@@ -599,10 +599,22 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
         { value: 0.5, unit: "h", dimension: "time" }
       ]
     });
+    expect(parsed.meta.canonical.course?.stages).toHaveLength(1);
+    expect(parsed.meta.canonical.course?.stages[0].administrations).toHaveLength(1);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    const nativeAmounts = parsed.meta.canonical.course!.stages[0].administrations[0].amounts!;
+    expect(nativeAmounts).toHaveLength(1);
+    expect(nativeAmounts[0].quantity).toBeUndefined();
+    expect(nativeAmounts[0].range).toBeUndefined();
+    expect(nativeAmounts[0].rate).toMatchObject({ value: 10, unit: "ug/kg/h" });
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
-    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
-      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
-      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 10, unit: "ug/kg/h" });
+    for (const rows of [parsed.fhir, parsed.fhirNext.step[0].component, cold]) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0].doseAndRate).toHaveLength(1);
+      const amount = rows[0].doseAndRate![0];
+      expect(amount.doseQuantity).toBeUndefined();
+      expect(amount.doseRange).toBeUndefined();
+      expect(amount.rateQuantity).toMatchObject({ value: 10, unit: "ug/kg/h" });
     }
   });
 
@@ -620,6 +632,20 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
     expect(parsed.meta.canonical.course?.stages[0].start).toMatchObject({
       anchor: "treatment-start", displacement: { value: 6, unit: "h" }
     });
+    for (const input of [JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      const reopened = importCanonicalCourse(input);
+      expect(reopened.stages).toHaveLength(1);
+      expect(reopened.stages[0].start).toMatchObject({
+        anchor: "treatment-start", displacement: { value: 6, unit: "h" }
+      });
+      expect(reopened.stages[0].administrations).toHaveLength(1);
+      const administration = reopened.stages[0].administrations[0];
+      expect(administration.delayMinutes).toBeUndefined();
+      expect(administration.schedule?.recurrence?.count).toBe(count);
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
       expect(row.timing?.repeat?.count).toBe(count);
@@ -629,6 +655,86 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
       })]);
       else expect(row.asNeededFor).toBeUndefined();
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    }
+  });
+});
+
+
+describe("round50 selected monthly mornings and local continuation windows", () => {
+  it.each([
+    ["every morning on the first Monday of each month", "mo",
+      ["2026-12-07T08:00:00+00:00", "2027-01-04T08:00:00+00:00", "2027-02-01T08:00:00+00:00"]],
+    ["every morning", "d",
+      ["2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"]],
+    ["every morning starting the next day", "d",
+      ["2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00", "2026-12-04T08:00:00+00:00"]]
+  ] as const)("retains the selected morning and cadence in %s", (timing, unit, expected) => {
+    const source = "Take 1 tablet " + timing;
+    const parsed = parsePublicSig(source, { datePolicy: { referenceDate: "2026-12-01" } });
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ when: ["MORN"], period: 1, periodUnit: unit });
+    if (unit === "mo") expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      dayOfWeek: ["mon"], weekdayOrdinal: 1, frequency: 1, boundsStart: "2026-12-07"
+    });
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 };
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+      JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["daily 30 minutes before exercise", true],
+    ["daily 30 minutes before exercise", false],
+    ["every 3 hours while awake", true],
+    ["every 3 hours while awake", false]
+  ] as const)("keeps local anchor ownership after %s (clock window: %s)", (timing, localWindow) => {
+    const source = "1 tablet " + timing + ", then 2 tablets " +
+      (localWindow ? "between 18:00 and 20:00 " : "") + "from day 8";
+    const parsed = parsePublicSig(source);
+    const activity = timing.startsWith("daily");
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose)).toEqual([
+      { value: 1, unit: "tab" }, { value: 2, unit: "tab" }
+    ]);
+    const original = parsed.meta.canonical.clauses[0].schedule!;
+    const successor = parsed.meta.canonical.clauses[1].schedule!;
+    expect(successor).toMatchObject({ treatmentStartOffsetDays: 7, phaseStartReference: "treatment-day-start",
+      period: activity ? 1 : 3, periodUnit: activity ? "d" : "h" });
+    if (activity) expect(original.activityTiming).toMatchObject([{
+      relation: "before", offset: 30, activity: { text: "exercise", coding: { code: "256235009" } }
+    }]);
+    else expect(original.eventWindow).toEqual({ start: "WAKE", end: "HS" });
+    for (const course of [parsed.meta.canonical.course!,
+      importCanonicalCourse(JSON.parse(JSON.stringify(parsed.fhir))),
+      importCanonicalCourse(JSON.parse(JSON.stringify(parsed.fhirNext)))]) {
+      expect(course.stages).toHaveLength(2);
+      const prior = course.stages[0].administrations[0].schedule!.recurrence!;
+      const stage = course.stages[1];
+      expect(stage.start).toMatchObject({ anchor: "treatment-day-start", displacement: { value: 7, unit: "d" } });
+      expect(stage.administrations).toHaveLength(1);
+      const next = stage.administrations[0];
+      expect(next.amounts![0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(next.delayMinutes).toBeUndefined();
+      const recurrence = next.schedule!.recurrence!;
+      expect(recurrence).toMatchObject({ period: activity ? 1 : 3, periodUnit: activity ? "d" : "h" });
+      if (localWindow) {
+        expect(recurrence.clockWindow).toEqual({ start: "18:00:00", end: "20:00:00", endInclusive: true });
+        expect(recurrence.activityTiming).toBeUndefined();
+        expect(recurrence.eventWindow).toBeUndefined();
+      } else {
+        expect(recurrence.clockWindow).toBeUndefined();
+        if (activity) expect(recurrence.activityTiming).toEqual(prior.activityTiming);
+        else expect(recurrence.eventWindow).toEqual(prior.eventWindow);
+      }
+      if (activity) expect(prior.activityTiming![0]).toMatchObject({ relation: "before", offset: 30 });
+      else expect(prior.eventWindow).toEqual({ start: "WAKE", end: "HS" });
     }
   });
 });
