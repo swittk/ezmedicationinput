@@ -2462,7 +2462,9 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     const localReplay = row.text !== undefined && Boolean(row.maxDosePerPeriod?.length ||
       row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety);
     const baseline: FhirExtension[] = [{ url: "textFingerprint", valueString: currentText }];
-    if (instruction !== undefined && (!sourceAgreement || rowSources))
+    // The containing marker already owns the default; retain only a row's
+    // explicit override here. Local row markers still own independent edits.
+    if (instruction !== undefined && rowAgreement !== sourceAgreement)
       baseline.push({ url: "sourceAgreement", valueBoolean: rowAgreement });
     const local = row.text !== undefined && (!rowAgreement || !sourceAgreement || localReplay) &&
       (index > 0 || instruction === undefined);

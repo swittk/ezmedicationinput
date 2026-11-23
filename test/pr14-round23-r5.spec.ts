@@ -17,7 +17,7 @@ import {
 import {
   DOSAGE_CONDITION_R5_URL, DOSAGE_RECONCILIATION_SOURCE_URL, DOSAGE_RENDERED_INSTRUCTION_R5_URL, DOSAGE_RETAINED_R5_SEQUENCE_URL,
   setDosageCondition, getDosageCondition, getDosageCalendarDayCondition, conditionToR6, toEzDosages, isExactConditionBridge, DOSAGE_DETAILS_R5_URL, decodeR5RetainedFields, encodeR5RetainedFields,
-  decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, retainField, sourceWithoutNestedHistory, withDosageEditProvenance, isRenderedInstructionMarker,
+  decodeR6SourceMetadata, encodeR6SourceMetadata, readRetainedField, retainField, sourceWithoutNestedHistory, withDosageEditProvenance, isRenderedInstructionMarker, getDosageSourceTextAgreement,
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   setDosageExcludedDates, getDosageExcludedDates, setDosageExcludedWeekdays, R5_RATE_MODIFIERS_R6_URL,
@@ -7668,5 +7668,59 @@ describe("round48 interop value ownership and primitive annotations", () => {
       expect(wire.step![0].component[0].site).toEqual(source.step![0].component[0].site);
     }
     expect(source).toEqual(before);
+  });
+});
+
+
+describe("round48 source agreement default ownership", () => {
+  it.each([true, false])("stores only row overrides of the %s containing default", agreement => {
+    const rows: FhirDosage[] = [
+      { text: "Take one tablet daily", doseAndRate: [{ doseQuantity: q(1) }] },
+      { text: "Take two tablets daily", doseAndRate: [{ doseQuantity: q(2) }] },
+    ];
+    const before = persist(rows);
+    const output = withDosageEditProvenance(rows, "Two independent directions", agreement,
+      [{ sourceAgreement: agreement }, { sourceAgreement: !agreement }]);
+    const marker = output[0].extension!.find(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)!;
+    const baseline = marker.extension!.filter(item => item.url === "row");
+    expect(marker.extension).toContainEqual({ url: "sourceAgreement", valueBoolean: agreement });
+    expect(baseline[0].extension?.some(item => item.url === "sourceAgreement")).toBe(false);
+    expect(baseline[1].extension).toContainEqual({ url: "sourceAgreement", valueBoolean: !agreement });
+    expect(output.map(row => getDosageSourceTextAgreement(row))).toEqual([agreement, !agreement]);
+    // Older generated rows redundantly repeated this same default. The public
+    // importer reads either representation as the exact same course.
+    const verbose = persist(output);
+    verbose[0].extension!.find(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)!
+      .extension!.find(item => item.url === "row")!.extension!
+      .push({ url: "sourceAgreement", valueBoolean: agreement });
+    expect(toDosageDetails(persist(output))).toEqual(toDosageDetails(verbose));
+    const edited = persist(output);
+    const stale = agreement ? 1 : 0;
+    edited[stale].text = "Current explicit replacement instruction";
+    expect(getDosageSourceTextAgreement(edited[stale])).toBe(true);
+    expect(getDosageSourceTextAgreement(edited[stale], false)).toBe(false);
+    expect(rows).toEqual(before);
+  });
+
+  it("retains an annotated prior equal flag as exact source when writing the compact default", () => {
+    const rows = withDosageEditProvenance<FhirDosage>([
+      { text: "Take one tablet daily", doseAndRate: [{ doseQuantity: q(1) }] },
+    ], "Take one tablet daily", false);
+    const original = rows[0].extension!.find(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)!;
+    const annotated = { id: "external-agreement", url: "sourceAgreement", valueBoolean: false,
+      _valueBoolean: { id: "external-primitive", extension: [{ url: "urn:clinic:agreement-note", valueString: "keep exact" }] } };
+    original.extension!.find(item => item.url === "row")!.extension!.push(annotated);
+    original.extension!.push({ url: "urn:clinic:foreign-baseline", valueString: "keep exact too" });
+    const before = persist(rows), source = persist(original);
+    const output = withDosageEditProvenance(rows, "Take one tablet daily", false);
+    const marker = output[0].extension!.find(item => item.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)!;
+    expect(marker.extension!.find(item => item.url === "row")!.extension!
+      .some(item => item.url === "sourceAgreement")).toBe(false);
+    expect(output[0].extension).toContainEqual({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
+    expect(getDosageSourceTextAgreement(output[0])).toBe(false);
+    expect(rows).toEqual(before);
+    const reopened = toDosageDetails(persist(output));
+    expect(reopened.step![0].component[0].extension)
+      .toContainEqual({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
   });
 });
