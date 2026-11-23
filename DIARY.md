@@ -14261,3 +14261,117 @@ The final storage report preserves original, converter and saved snapshots for t
 Round artifacts use `/tmp/ezmed14-round46-*`: full disposition ledger; root/execution/grammar/interop notes; public before/master/after probes; source/dist reports; actual storage check; benchmark manifest, full and exact-flag confirmation reports; independent raw audit; and original-thread reply/verification records. The preliminary execution reproduction’s native Node abort is retained as failed before-fix evidence, never as a passing gate.
 
 The nine original inline threads are mapped directly. The twenty body findings are recorded above and in their related original-thread replies, not a replacement top-level findings summary. The pre-delivery paginated audit covers 255 threads with exactly these nine unresolved. After normal push, root verifies the head, posts individual evidence-based replies, resolves the original threads, freshly audits every thread, updates the PR body and requests the exact `@coderabbitai full review`. The loop waits for the actual review on the delivered head. No merge, release, publication or deployment is performed.
+
+## 2026-11-23 — PR14 full review round47
+
+### Review, scope and method
+
+Actual full review records [6015104645](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015104645) and [6015105945](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6015105945) reviewed delivery `86af9c6e6647e2c8e5cbbc7919324bff92434d8c`. The first supplied eight original inline findings and sixteen body findings; the second repeated those sixteen and supplied seven additional body findings. Checking the normalized titles against both saved review bodies confirms **8 inline + 23 unique body = 31 findings**, after removing sixteen repeated body occurrences. B2 and B11 remain separate ledger entries but share one underlying repair. Twenty-five findings receive bounded fixes or stronger independent oracles; six are explicitly rejected.
+
+The accepted scope remains supported public behavior, including bugs already present on pinned master. `.fhir` is R5, `.fhirNext` is pinned R6 Snapshot 1, and the native clinical course remains private/unstable. Public producer/read-only formatter and saved public graph/wire workflows are supported. Authored values, independently authored endpoint units, source text and opaque metadata remain intact. No new clinical model, grammar vocabulary, native editor contract, generic malformed-input defense, unit conversion, downstream application repair or performance exclusion is added.
+
+Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no HPSERVER Codex/Gemini workers were launched. Supported public routes were compared against exact reviewed and frozen master artifacts before repairs. Focused tests and independent clinical oracles preceded integration. The mandatory integrated gates and independent raw-artifact audit below are complete; focused worker results are not substituted for final validation.
+
+### Complete disposition ledger
+
+| Finding | Disposition | Independent public result / oracle |
+|---|---|---|
+| I1 | Fix: legacy public interchange | Unchanged frozen legacy R5 rows recover the BodyStructure reference, ID and primitive annotation. Current rows, changed concepts and explicit reference clears retain their existing authority through cold saves. |
+| I2 | Fix: authored end ownership | A day-4 successor cannot overwrite “until the next morning” with an inferred end. The authored unresolved boundary and existing numerical-execution error remain; the successor and independent eye track retain their own timing. |
+| I3 | Fix: nonfinal range heading | A range-start stage followed by a replacement no longer says “onward.” A final stage still does. Both authored range endpoints, units and independent IDs remain exact. |
+| I4 | Fix: resolver registration snapshot | Constructor-owned ordinary functions run with each copied registration configuration: reusing one instance for A/1000 and B/1001 yields A2026/B2025. Prototype methods still bind to their instance for private fields. |
+| I5 | Reject: agreed scope boundary | The cross-midnight Nuuk date drift is real and also occurs on master, but repairing that previously excluded stepping mechanism requires the out-of-scope logical-date work. Ordinary New York gap controls remain correct on current source. |
+| I6 | Fix: supported baseline preview defect | An authored every-two-days morning repeat renders “1 tab Q2D MORN” despite source code QAM. Code-only and daily controls remain unchanged; the raw QAM code and current repeat survive. |
+| I7 | Reject: public false positive | The literal comma-separated NEXT source preserves the first 1-tablet MORN/NEXT daughter and the separate 2-tablet 09:00 daughter on parsed/R6/cold R5 routes. Qualification and AND controls pass; no speculative internal guard is added. |
+| I8 | Fix: graph condition target | Graph relations target original action-array positions, independently of optional sequenceIndex. Index 0, absent and 9 all retain pre/postposed conditions in decoded realization and primary-suppressed public EN/TH previews. |
+| B1 | Fix: independent slot ownership | Changing the identified third rate from 10 to 12 does not deactivate two unchanged anonymous retained expressions. Changing an anonymous projected rate still keeps the ambiguous expressions inert under the existing no-guess rule. |
+| B2 | Fix: shared pooled calendar defect | The existing cyclic PRN quota and monthly ceiling yield maxima 1, 2 and 2 tablets over 20, 60 and 1,455 minutes. Search is partitioned by civil day before existing offset cuts; quota identity and search budgets are unchanged. |
+| B3 | Fix: actual-time calendar caps | Monthly/yearly supply ceilings use the displaced administration instant already used for admission. The monthly case yields 0, its fixed 30-day control 1, and the leap-year boundary control 1. |
+| B4 | Fix: supported baseline month-day defect | An explicit fifteenth selector owns the date within eligible months. Monthly dues are January/February/March 15 at 09:00; every-two-month dues are January/March/May 15. No-selector month-end clamping remains. |
+| B5 | Fix: finite dated predecessor | A Dec-5 08:00 dose is not cut off on Dec 4 before a Dec-5 20:00 successor. Four Dec-5 events total 5 drops; the next day contains only the independent two-drop eye track. Open recurring predecessor cutoffs remain. |
+| B6 | Fix: registered connector whitespace | The existing “and again” alias classifies consistently with internal whitespace and a comma prefix. It keeps Dec-1 18:00 then Dec-2 08:00, count 1 each, while preserving exact source text. |
+| B7 | Fix: local evening window ownership | An authored 18:00–20:00 successor window blocks inherited breakfast anchors and their offsets while keeping daily cadence. December 11–13 occur at 18:00; no-local-window breakfast controls remain. |
+| B8 | Fix: retired-marker metadata | A clean generated text marker is retired; an annotated original remains exactly in the existing inert source envelope. Its ID and unknown child survive without replaying obsolete one-tablet wording beside the current two-tablet dose. |
+| B9 | Fix: annotation-only pause edit | Adding only _count.id preserves the seven-dose induction pause and annotation. A real count change from 7 to 10 still retires that pause; unchanged and cold-save controls remain. |
+| B10 | Reject: speculative architecture guard | No current forbidden bracket-property read was demonstrated. Expanding the static matcher for hypothetical future modifierExtension syntax is outside the accepted correctness work. |
+| B11 | Fix: same underlying defect as B2 | This is the same pooled calendar-expiry problem as B2, not a second policy. The shared bounded repair and exact 1/2/2 supply oracle cover both review records. |
+| B12 | Fix: public saved partial quantity | Saved quantity-only Mix theme/companion arguments retain authored mL when no numeric value exists, including WITH. Complete 5 mL and 100 mL controls remain single quantities, with exact EN/TH across R5/R6/cold saves. |
+| B13 | Reject: private legacy writer expansion | The cited unexported clause-writer path is outside the public contract. Actual public R5/current R6 imports and exports preserve unknown-unit scalar course bounds, exact values, units, systems, codes and annotations through three cold saves on current and master. |
+| B14 | Reject: private legacy writer expansion | Public range endpoints preserve their independent authored units and annotations exactly in both foreign-lower and foreign-upper controls. Do not add raw-unit slots or conversions for the same unexported legacy writer previously rejected. |
+| B15 | Fix: generated registered action code | Public resolve accepts clean-applicator generated from the registered “clean applicator” surface, matching registration/get. Full surface precedence and includeCode=false behavior remain; saved codes do not become parser aliases. |
+| B16 | Strengthen existing oracle | Dissolve must own the edited three-tablet dose. Exact public edited-R6 English/Thai and the original 100 mL vehicle and five-minute wait checks prevent a bare digit elsewhere from satisfying the assertion. |
+| B17 | Fix: existing locale codec omission | The public graph codec retains the already-declared directDose, routePhrases and administrationDurationPrefix fields, including false directDose. Lexical and semantic producers plus older profiles survive cold saves. |
+| B18 | Strengthen existing oracle | The existing source-only authored-directions fixture with independent administration caps now matches the full edited two-tablet quantity/unit, rejecting 12 and 1.2. Its shape is unchanged; this is not a unit-only source-quantity case. |
+| B19 | Strengthen existing oracle | Both one-tablet and two-tablet Thai doses explicitly include หลังอาหารเช้า กลางวัน และเย็น in ordinary and repeat-cycle previews. Separate 28-day-cycle and raw-source assertions remain. |
+| B20 | Strengthen existing oracle | The full one-tablet daily seven-day predecessor is required before the exact/implicit successor heading in both languages. The existing two-tablet successor remains clockless; distinct dependency headings remain. |
+| B21 | Strengthen benchmark oracle | Prepared-drink equivalence requires the complete unconditional two-tablet instruction. Nonsemantic separators pass; an added pain condition, missing preparation or negation fails. |
+| B22 | Reject: previously excluded harness defense | Do not reopen hypothetical missing-build/reused-output checkpoint hardening. No valid supported run failure was shown; no checkpoint mechanism is added. |
+| B23 | Strengthen benchmark oracle | The existing own-batch staged case requires all three complete stages, doses, timing, durations and weekdays in order. Candidate failures are case errors; a failing baseline keeps timings without a regression verdict. No scenario is added or removed. |
+
+### Baseline distinctions and bounded implementation
+
+Pinned master is `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb`, with ESM digest `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`. The exact reviewed ESM digest is `d2e0e77188e5fa79075650dcb632ddba25a0778cc8f4e1047f6aa5e832273dbf`.
+
+Legacy site-reference recovery, the independent identified-slot edit, the annotated retired marker and the own-function resolver snapshot have demonstrated master/current regressions. Other accepted findings also fail on master or involve newer supported representations. Master treats the relative “until the next morning” end as opaque text plus a recurring morning event; it does not implement the current explicit unresolved boundary. In the same-day dated-eye case, master keeps the first dose but loses its successor, whereas the reviewed build lost the first dose. Master lacks corrected finite NEXT coordination and onset-only recurrence inheritance, and also has the two-day QAM short-preview defect. These differences are recorded rather than describing every finding as a clean regression.
+
+For B2/B11, an initial noncyclic one-use fixture with one prior use was fully spent and correctly returned zero; it was rejected as defect evidence. The accepted public fixture uses an existing two-day cycle so its current phase quota is independent of the older rolling-cap record. One two-tablet administration becomes feasible after the calendar-month release, and the one-use quota proves two is optimal. The exact 20/60/1,455-minute horizons and fixed-elapsed/spent-quota controls isolate the defect. Partitioning the existing search by civil day keeps quota identity and the 32-slot/50,000-state budgets. Master returns zero because of an older cyclic quota issue. B3 and B4 likewise repair existing supported baseline defects, preserving actual quantities and units.
+
+B12 uses frozen public saved graphs containing authored text and a quantity unit with no numeric value. The decoder already preserves that representation; only preview suppression lost the text. Numeric realization now controls whether the unit identity is hidden, with no invented value. Master already mishandles the companion and duplicates the partial theme unit. B17 extends only three existing typed locale codec fields. Both builds' configured lexical producer demonstrates that omission; the current semantic-proposal producer is additional evidence, not a capability attributed to master. The primitive count annotation case also preserves the distinction between metadata edits and the current numeric-count pause-retirement policy, which master does not implement in the same way.
+
+I5 is explicitly not repaired. The observed current Nuuk sequence is March 21 23:30, March 29 00:30 at the cross-midnight gap, then April 5 23:30 instead of the logical April 4 date. Master also drifts to April 5 and retains 00:30. This remains the previously excluded logical-date stepping mechanism. Ordinary current New York timing returns from shifted March 8 03:30 to March 15/22 02:30; master retained 03:30 after the gap. No claim is made that all timezone cases are correct.
+
+I7 is a separate rejection: its claimed first-dose loss does not occur through the exact public input. The boundary planner keeps both authored dose daughters; no malformed alternate source or private hand-built sign is used to force a fix. B13/B14 request the same unexported legacy clause-writer guarantee previously rejected. Actual public scalar/range controls retain exact foreign units and annotations through direct export and three cold saves on both builds. B10 and B22 request hypothetical future static-test or missing-build defenses. The agreed scope decisions are not reopened.
+
+### Exact oracles and performance methodology
+
+The original Dissolve cases now require the three-tablet amount on Dissolve itself, with the independent 100 mL vehicle and five-minute wait retained. Exact public edited-R6 English/Thai previews cover water/wait/drink and solvent variants. The source-only authored-directions fixture with independent administration caps requires the full edited two-tablet quantity/unit, rejecting 12 and 1.2; its shape is unchanged and it is not a unit-only source-quantity fixture. Both Thai meal-timed doses require the complete after-breakfast/lunch/dinner wording. The calendar-end fixture requires the complete one-tablet daily seven-day predecessor before its exact or implicit successor heading. The successor remains clockless.
+
+Benchmark commit `c2d9111b0c246d22db332733fe34f0c5357fa8f4` strengthens two existing equivalence oracles without adding or removing scenarios. Prepared-drink equivalence requires the full unconditional two-tablet instruction and rejects an added pain condition, while allowing nonsemantic separators. The existing own-batch staged case requires all three stages in order, including their amounts, timing, durations and weekday set. Candidate failures remain case errors; a baseline with different clinical output retains raw timings without a regression verdict.
+
+The available two-case oracle smoke used the frozen reviewed ESM and measured **zero timed comparisons**. The prepared-drink baseline remains an existing non-equivalent case because it omits the edited dose; both own-batch staged previews pass the new oracle. This smoke is not final-candidate performance validation. The final run must retain the established 184 paired scenarios, 117 public APIs, the same seven exclusions and each equivalent scenario's individual 4% ceiling. No cross-scenario averaging or new exemption may conceal a slower equivalent case.
+
+### Frozen validation
+
+First attempted source/test head: `1f45a7b8460ab63c0e56605c16bf5f9dbfef9e1c`.
+Current frozen source/test head: `7649c1056b0e5458bdc69db9d505260551287995`.
+Production-source digest: `21436811d9c540f32864b21d0f236c7bc28d8d61c29cfb28048e44f0fb9ea80c` (unchanged by the test-only reconciliation).
+Final candidate ESM digest: `04a1a5dda17c17eb3d9d625e6fe49636619d23800e95e96d713494073c8a7ce2`.
+Baseline ESM digest: `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`.
+Benchmark harness digest: `50a8f63f826f47376551ca893d11966905ba094ddbbd01db6cd45af5e43e7b82`.
+The independent fresh-calendar audit verified 3,025 calls and 38 blocks for each build, including 22 × 128 measured calls, contiguous ordinals 0–3024 and no ordinal reuse.
+
+| Mandatory gate | Observed result |
+|---|---|
+| Full source suite and strict ES6 checks | 6,730/6,730 across 48 files; no skipped or failed assertions; strict ES6 type gate passed |
+| ESM/CommonJS/declarations build and distribution suite | ESM/CommonJS/declarations build and 4/4 distribution tests passed |
+| Actual converter and UsageMap save/reopen | 140 attempted; 138 exact complete-JSON round-trips; the same two demonstrated downstream limitations remain explicitly preserved:false |
+| Prior test files and per-file case retention | All 48 prior files and per-file floors retained; 59 assertions added to the prior 6,671 |
+| Public API and scenario coverage | All 184 prior ordered scenario/API pairs, 117/117 functions, 177 equivalent cases and the same seven non-equivalent cases retained |
+| Individual equivalent-work performance ceiling | All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.561% for `buildBodySiteSpatialRelationExtensions`. The full 184-case sweep used 22 rounds at 35 ms; exactly 9 first-pass flags received the single prescribed 72-round, 140 ms candidate-first confirmation. The independent raw-artifact audit passed 2,611 checks. |
+| Changed PR paths and whitespace check | 99 changed PR paths; git diff --check passed |
+| Independent raw-artifact audit | Passed 2,611 independent checks on completed frozen raw artifacts and terminal process metadata |
+| Fresh post-delivery thread audit | Pre-delivery: three pages, 263 threads, exactly eight current originals unresolved. Post-delivery audit is required before requesting the next full review. |
+
+All results above come from the completed integrated run and independent audit. The 140 storage attempts retain all 113 prior cases and add sixteen worker cases plus eleven root cases.
+
+### Initial failed mandatory attempt and test reconciliation
+
+The first integrated source gate at `1f45a7b8460ab63c0e56605c16bf5f9dbfef9e1c` reported **6,729 passed out of 6,730 assertions, with one failure**. It remains an unaccepted attempt. The existing review-integrity case “retains unfamiliar children on recognized course and edit markers even without clinical edits” compared an annotated restoration with a pristine source step array.
+
+The independent public probe establishes the sole difference: the exact original annotated display is now retained in the existing inert source envelope at `step[0].component[0].extension`. Adding precisely that expected archive makes the full step array equal; all active clinical fields, top-level audit/signer annotations, normalized preview, cold-save result and original input remain exact. This is the preservation required by B8, not changed clinical meaning. Evidence is `/tmp/ezmed14-round47-integrity-annotation-probe.json` and `-cause.json`.
+
+Root's test-only commit `7649c1056b0e5458bdc69db9d505260551287995` explicitly requires that exact archive and retains full step equality and all original assertions. Production source did not change: its digest remains `21436811d9c540f32864b21d0f236c7bc28d8d61c29cfb28048e44f0fb9ea80c`. The focused verification command exceeded the host's ten-second lifetime; although its JSON reports one passed and 221 skipped assertions, that command is **not counted as a passing gate**.
+
+Attempt 1 stopped at its source failure: **no build, storage run or timing run was executed**. Its archived evidence remains `/tmp/ezmed14-round47-attempt1-gates.json`, `-source-final.json` and `-source-final.log`. A new complete attempt started at 00:07:49 UTC on the corrected frozen head. The complete second attempt passed source, distribution, storage and performance gates; its terminal result and frozen artifacts passed the independent audit reported above.
+
+### Unchanged downstream storage limitations
+
+The two previously demonstrated downstream losses remain explicit `preserved:false` cases. A raw core `timeOfDay` null still raises `Invalid FHIR timeOfDay: null`. A unit-only scalar `doseQuantity: {unit: 'tab'}` remains present on actual converter import but is removed by its unchanged numeric-value-dependent export, leaving an empty doseAndRate entry. Existing unit-only range controls preserve exactly. These losses were independently attributed through direct raw R5, frozen current and pinned master paths in the prior round. Neither is repaired here.
+
+The completed storage run passed complete original inputs through the actual converter and UsageMap save/reopen, retaining original/converter/saved snapshots. Inputs are not trimmed, normalized or given invented values to hide a loss. The unchanged downstream application remains outside this PR.
+
+### Evidence and original-thread delivery
+
+Round artifacts use `/tmp/ezmed14-round47-*`: both actual review records, the 31-item disposition ledger, root/worker notes, public before/master/after evidence, frozen wire fixtures, focused reports, and the completed integrated source/dist/storage/performance/audit artifacts. Initial test-only oracle/API corrections remain archived separately; failed preliminary checks are not counted as passing gates.
+
+All eight original inline IDs are mapped to actual GraphQL threads. The pre-delivery paginated audit has 263 total threads and exactly these eight unresolved. The twenty-three body findings are covered in the related original-thread replies and the full ledger above, with no replacement top-level findings comment. After the mandatory gates and normal push, root verifies the delivered head, replies and resolves each original thread, audits all threads again, updates the PR body and requests the exact `@coderabbitai full review`. The loop waits for an actual full review on that delivered head. No merge, release or deployment is claimed or performed .
