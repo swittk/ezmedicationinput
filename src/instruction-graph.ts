@@ -3856,7 +3856,8 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const destination = joinLocalizedTokens(c.locale, destinations);
   const materialValue = targetArgument
     ? materialArgument && translatedArgument(materialArgument, c.locale)
-    : c.material ?? (!relation || c.destination ? c.substance : undefined);
+    : c.material ?? (!relation || c.destination ? c.substance : undefined) ??
+      (materialArgument && translatedArgument(materialArgument, c.locale));
   const material = materialValue
     ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
@@ -4297,7 +4298,7 @@ function actionMatchesCanonicalMethod(
   // Compare declared identities; an unknown custom source cannot be treated as
   // a different default action merely because its local lemma is unfamiliar.
   if (definition && method.text?.trim()) {
-    const current = resolveMedicationInstructionActionForMethod(method, options);
+    const current = resolveMedicationInstructionActionForMethod(method, options, true);
     if (current) return current.code === definition.code;
   }
   if (method.coding?.code) {
@@ -4402,7 +4403,10 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
     schedule?.offsetMax !== undefined;
   const hasClocks = Boolean(schedule?.timeOfDay?.length);
   const ownsClocks = clause.sourceHasStructuredClocks === true;
-  const ownsEvents = hasOffset || Boolean(schedule?.when?.length) || clause.sourceHasStructuredEvents === true;
+  // A saved false means the graph event was independent. Native clauses
+  // without source evidence keep their existing schedule-owned interpretation.
+  const ownsEvents = clause.sourceHasStructuredEvents === true ||
+    clause.sourceHasStructuredEvents !== false && (hasOffset || Boolean(schedule?.when?.length));
   const site = clause.site;
   const ownsSite = Boolean(site) || clause.sourceHasStructuredSite === true;
   // Both callers have already selected the source primary. A simultaneous

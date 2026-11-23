@@ -416,7 +416,7 @@ export function hasDailyRecurrenceAcrossClocks(schedule: CanonicalScheduleExpr |
   return clocks.some(clock => (clock.length === 5 ? clock + ":00" : clock) !== first);
 }
 
-function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (hasDailyRecurrenceAcrossClocks(schedule)) return "daily";
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
@@ -434,7 +434,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined): string 
       ? `up to ${stripTrailingZero(frequencyMax)} times ` : "";
 
   if (period === undefined && periodMax !== undefined && periodUnit) {
-    const unit = ENGLISH_COURSE.timeUnit(periodUnit, periodMax) ?? periodUnit;
+    const unit = words.timeUnit(periodUnit, periodMax) ?? periodUnit;
     return `${countPrefix}every up to ${stripTrailingZero(periodMax)} ${unit}`;
   }
   if (
@@ -1238,7 +1238,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     if (site) parts.push(site);
   }
   if (schedule.period === undefined && schedule.periodMax !== undefined && schedule.periodUnit) {
-    parts.push(describeFrequency(schedule)!);
+    parts.push(describeFrequency(schedule, words)!);
   } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
   } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
@@ -1408,7 +1408,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     : undefined;
   const frequencyPart =
     alternateEventCadence ??
-    describeFrequency(schedule) ??
+    describeFrequency(schedule, words) ??
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);

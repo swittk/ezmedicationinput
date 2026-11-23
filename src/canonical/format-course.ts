@@ -1089,6 +1089,8 @@ export function formatCanonicalCourse(
           if ((startRange || !step.start || startQuantity) &&
               (endRange || !step.end || endQuantity) && (startRange || endRange)) {
             timing = words.calendarWindow(startRange ?? courseBoundaryPoint(startQuantity, startAnchor, words, cycleStart), endRange ?? courseBoundaryPoint(endQuantity, endAnchor, words, cycleStart));
+            if (index > 0 && !step.start && !startQuantity)
+              timing = words.afterPreviousPhase + "; " + timing;
           } else {
             // Current structured bounds own the window. Descriptive source is
             // a fallback, and each side is a point rather than an open window.

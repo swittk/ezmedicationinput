@@ -595,7 +595,9 @@ export function selectMedicationInstructionMethodCoding(
  * a recognized edited code replaces an incompatible retained verb. */
 export function resolveMedicationInstructionActionForMethod(
   method: CanonicalMethodExpr | undefined,
-  options?: ParseOptions
+  options?: ParseOptions,
+  // Identity comparison may inspect a declared head without replacing its qualified label.
+  includeQualifiedHead = false
 ): MedicationInstructionActionDefinition | undefined {
   if (!method) return undefined;
   let authored = method.text ? resolveMedicationInstructionAction(method.text, options) : undefined;
@@ -643,8 +645,10 @@ export function resolveMedicationInstructionActionForMethod(
   }
   if (authored && (!coding?.code || sameMethodCoding(authored.administrationMethod, coding) ||
       sameMethodCoding(authored.coding, coding) ||
-      authored.externalCodings?.some(value => sameMethodCoding(value, coding)))) return qualified ? undefined : authored;
-  return coded ?? resolveMedicationInstructionActionByMethod(coding, options) ?? (qualified ? undefined : authored);
+      authored.externalCodings?.some(value => sameMethodCoding(value, coding))))
+    return qualified && !includeQualifiedHead ? undefined : authored;
+  return coded ?? resolveMedicationInstructionActionByMethod(coding, options) ??
+    (qualified && !includeQualifiedHead ? undefined : authored);
 }
 
 export function getMedicationInstructionAction(

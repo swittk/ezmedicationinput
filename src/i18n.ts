@@ -1174,7 +1174,7 @@ function describeAlternateEventCadenceThai(
   return undefined;
 }
 
-function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
+function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (hasDailyRecurrenceAcrossClocks(schedule)) return "ทุกวัน";
   const frequency = schedule?.frequency;
   const frequencyMax = schedule?.frequencyMax;
@@ -1192,7 +1192,7 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined): str
       ? `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง ` : "";
 
   if (period === undefined && periodMax !== undefined && periodUnit) {
-    const unit = THAI_COURSE.timeUnit(periodUnit, periodMax) ?? periodUnit;
+    const unit = words.timeUnit(periodUnit, periodMax) ?? periodUnit;
     return `${countPrefix}ทุกไม่เกิน ${stripTrailingZero(periodMax)} ${unit}`;
   }
   if (
@@ -2112,7 +2112,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     const site = formatSiteThai(clause, resolveRouteGrammarThai(clause), words);
     if (site) parts.push(site);
   }
-  const timing = describeFrequencyThai(schedule);
+  const timing = describeFrequencyThai(schedule, words);
   if (timing) {
     parts.push(timing);
   } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
@@ -2303,7 +2303,7 @@ function formatLongThai(
     : undefined;
   const frequencyPart =
     alternateEventCadence ??
-    describeFrequencyThai(schedule) ??
+    describeFrequencyThai(schedule, words) ??
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);

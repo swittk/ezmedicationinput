@@ -208,9 +208,14 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
       themeArg.text.includes(amountArg.text.trim()));
   // A separate medication Amount belongs with the Theme, never with an
   // unmeasured accompaniment. A measured Substance owns its own quantity.
-  const primaryAmount = themeArg && !amountAlreadyInTheme ? c.amount : undefined;
+  const vehicleRelation = substanceArg?.relation ?? c.frame.relation;
+  const hasSeparateVehicle = substanceArg && vehicleRelation &&
+    (relationHasGrammarFeature(vehicleRelation, "accompanimentComplement") ||
+      relationHasSemanticClass(vehicleRelation, "accompaniment") ||
+      relationHasSemanticClass(vehicleRelation, "locative"));
+  const primaryAmount = (themeArg || hasSeparateVehicle) && !amountAlreadyInTheme ? c.amount : undefined;
   const substanceAmount = substanceArg?.quantity ? substanceQuantity
-    : themeArg || amountAlreadyInTheme ? undefined : c.amount;
+    : themeArg || hasSeparateVehicle || amountAlreadyInTheme ? undefined : c.amount;
   return { theme, themeAmount, substance, substanceArg, amountArg,
     coextensiveAmount, primaryAmount, substanceAmount };
 }

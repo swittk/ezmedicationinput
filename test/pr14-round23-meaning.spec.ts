@@ -2223,7 +2223,7 @@ describe("round 31: bounded event windows remain in preview", () => {
       expect(th).toContain("ระหว่างอาหารเช้าถึงอาหารกลางวัน");
       // The authored object may retain its English source lexeme in Thai.
       expect(th).toMatch(/(?:พร้อม|กับ)\s*(?:น้ำ|water)/u);
-      expect(th).toContain("เช้า");
+      expect(th.replace("ระหว่างอาหารเช้าถึงอาหารกลางวัน", "")).toContain("เช้า");
     }
     expect(JSON.stringify(row)).toBe(before);
     expect(row.text).toBe(originalText);
@@ -4234,5 +4234,77 @@ describe("round47 public preview timing and resolver ownership", () => {
       expect(toDosageDetails(toFhirR5Dosages(input)).step[0].component[0].timing).toEqual(timing);
       expect(JSON.stringify(input)).toBe(before);
     }
+  });
+});
+
+
+describe("round48 saved sequence and locale ownership", () => {
+  it.each([false, true])("keeps count-ended sequencing beside a ranged end (explicit start %s)", explicit => {
+    const contextCode = { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+    }] };
+    const range = {
+      low: { value: 7, unit: "d", code: "d", system: "http://unitsofmeasure.org", id: "low" },
+      high: { value: 7, unit: "d", code: "d", system: "http://unitsofmeasure.org", id: "high" }
+    };
+    const component = (value: number, count?: number): FhirR6Dosage => ({
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00"], ...(count ? { count } : {}) } }
+    });
+    const raw: FhirR6DosageInstruction = { step: [
+      { component: [component(1, 2)] },
+      { ...(explicit ? { start: { contextCode, offsetDuration: {
+        value: 2, unit: "d", code: "d", system: "http://unitsofmeasure.org"
+      } } } : {}), end: { contextCode, offsetRange: range }, component: [component(2)] }
+    ] };
+    const rows = toFhirR5Dosages(raw);
+    for (const input of [raw, rows, JSON.parse(JSON.stringify(rows))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"]) for (const style of ["long", "short"] as const) {
+        const words = locale === "en" ? ENGLISH_COURSE : THAI_COURSE;
+        const text = formatSig(input, style, { locale, realizationMode: "normalized" });
+        expect(text.includes(words.afterPreviousPhase + "; ")).toBe(!explicit);
+        expect(text).toContain(locale === "en" ? "7 days – 7 days" : "7 วัน – 7 วัน");
+        if (explicit) expect(text).toContain(locale === "en" ? "From 2 days" : "ตั้งแต่2 วัน");
+      }
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[1].end?.offsetRange).toEqual(range);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["en", "th"])("uses the inherited %s course facet for maximum-only periods", locale => {
+    const base = locale === "en" ? ENGLISH_COURSE : THAI_COURSE;
+    const course = { ...base, timeUnit: (unit: string, value: number | undefined) =>
+      unit === "d" ? "custom-days" : base.timeUnit(unit, value) };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { periodMax: 2, periodUnit: FhirPeriodUnit.Day } } };
+    const saved = JSON.stringify(row);
+    for (const style of ["long", "short"] as const) {
+      const options = { locale: "round48-" + locale, realizationMode: "normalized" as const,
+        i18n: { inherit: locale, course } };
+      expect(formatSig(row, style, options)).toContain("2 custom-days");
+      expect(formatSig(row, style, { locale, realizationMode: "normalized" }))
+        .toContain(locale === "en" ? "2 days" : "2 วัน");
+    }
+    expect(JSON.stringify(row)).toBe(saved);
+  });
+
+  it("snapshots constructor-owned locale callbacks when a provider is registered again", () => {
+    class Detector implements MedicationLocaleDetector {
+      locale = "round48owna";
+      marker = "__round48_locale_a__";
+      priority = 902;
+      test: MedicationLocaleDetector["test"];
+      constructor() { this.test = function (this: Detector, text: string) { return text === this.marker; }; }
+    }
+    const detector = new Detector();
+    registerMedicationLocaleDetector(detector);
+    detector.locale = "round48ownb";
+    detector.marker = "__round48_locale_b__";
+    registerMedicationLocaleDetector(detector);
+    expect(inferMedicationLocale("__round48_locale_a__")).toBe("round48owna");
+    expect(inferMedicationLocale("__round48_locale_b__")).toBe("round48ownb");
+    expect(inferMedicationLocale("ordinary English")).toBe("en");
   });
 });

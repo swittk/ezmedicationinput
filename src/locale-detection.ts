@@ -21,7 +21,8 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
   if (prototype !== Object.prototype && prototype !== null) {
     normalized.priority = detector.priority;
     normalized.joinsAdjacentSourceTokens = detector.joinsAdjacentSourceTokens;
-    normalized.test = detector.test.bind(detector);
+    if (!Object.prototype.hasOwnProperty.call(detector, "test"))
+      normalized.test = detector.test.bind(detector);
   }
   const previous = DETECTOR_INDEX.get(locale),
     priority = normalized.priority ?? 0;

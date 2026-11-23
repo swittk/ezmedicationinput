@@ -3220,6 +3220,7 @@ describe("round32 source clock ownership", () => {
 describe("round32 source event ownership", () => {
   it.each([
     [false, "dose", true, false],
+    [false, "add", true, true],
     [true, "dose", true, false],
     [true, "replace", false, true],
     [true, "delete", false, false]
@@ -3241,6 +3242,7 @@ describe("round32 source event ownership", () => {
     const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
     expect(getDosageSourceOwnership(saved)?.events).toBe(structured);
     saved.doseAndRate[0].doseQuantity.value = 2;
+    if (edit === "add") saved.timing = { repeat: { when: [EventTiming.Evening] } };
     if (edit === "replace") saved.timing.repeat.when = [EventTiming.Evening];
     if (edit === "delete") delete saved.timing.repeat.when;
     const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
@@ -3316,7 +3318,7 @@ it("round32: later-stage saved R5 rows retain their own source clock ownership",
 });
 
 describe("round33 current rich-primary ownership", () => {
-  it.each(["Apply", "Reapply", "coding-only", "metadata"])("honors shared-code method identity %s", edit => {
+  it.each(["Apply", "Apply gently", "Reapply", "Reapply gently", "coding-only", "metadata"])("honors shared-code method identity %s", edit => {
     const source = "Reapply 1 g to the skin gently";
     const row = JSON.parse(JSON.stringify(parsePublicSig(source).fhir[0]));
     const primary = parseInstructionActions(source)[0];
@@ -3336,7 +3338,7 @@ describe("round33 current rich-primary ownership", () => {
     const before = JSON.stringify(saved);
     for (const input of [saved, toDosageDetails([saved])]) {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      expect(text).toMatch(edit === "Reapply" || edit === "metadata" ? /^Reapply\b/u : /^Apply\b/u);
+      expect(text).toMatch(edit.startsWith("Reapply") || edit === "metadata" ? /^Reapply\b/u : /^Apply\b/u);
       expect(text).toContain("1 g");
       expect(text).toContain("gently");
     }
@@ -5578,5 +5580,45 @@ describe("round47 public saved graph conditions and partial quantities", () => {
     expect(restored.actions[0].args.find(argument => argument.quantity?.unit === "mL")?.quantity)
       .toEqual(quantityArgument.quantity);
     expect(JSON.stringify(row)).toBe(original);
+  });
+});
+
+
+describe("round48 saved preparation quantities", () => {
+  it.each([false, true])("keeps a live medication amount separate from a saved With vehicle (%s)", measured => {
+    const source = "Mix with " + (measured ? "100 mL water" : "water");
+    const frame = parseInstructionActions(source)[0];
+    const row: FhirDosage = { method: { text: "Mix" },
+      doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+        primaryAdministrationSpan: frame.span, actions: [frame] })!] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode }))
+          .toBe("Mix 2 tablets with " + (measured ? "100 mL water." : "water."));
+        expect(formatSig(input, "long", { locale: "th", realizationMode }))
+          .toBe("ผสม2 เม็ดกับน้ำ" + (measured ? " 100 มิลลิลิตร." : "."));
+      }
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("keeps the object quantity from a pinned-master saved dilution graph", () => {
+    // Exact ordinary parser row from 7d62823, with no saved predicate realizer.
+    const legacy: FhirDosage = JSON.parse("{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Dilute 1 mL\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"predicateLemma\",\"valueString\":\"dilute\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Dilute\"},{\"url\":\"semanticClass\",\"valueString\":\"prepare\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"เจือจาง\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421399004\",\"display\":\"Dilute - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":11},{\"url\":\"sourceText\",\"valueString\":\"Dilute 1 mL\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"object\"},{\"url\":\"text\",\"valueString\":\"1 mL\"},{\"url\":\"normalized\",\"valueString\":\"1 ml\"}]}]},{\"url\":\"coverage\",\"extension\":[{\"url\":\"understoodCharacters\",\"valueInteger\":11},{\"url\":\"opaqueCharacters\",\"valueInteger\":0},{\"url\":\"ratio\",\"valueDecimal\":1},{\"url\":\"complete\",\"valueBoolean\":true}]}]},{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Dilute 1 mL\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"aad6e640fa986e9e\"},{\"url\":\"textFingerprint\",\"valueString\":\"2911d1f74ead3591\"}]}]}],\"text\":\"Dilute 1 mL.\",\"patientInstruction\":\"Dilute 1 mL\"}");
+    const before = JSON.stringify(legacy), r6 = toDosageDetails([legacy]);
+    for (const input of [legacy, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Dilute 1 mL.");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toBe("เจือจาง1 มิลลิลิตร.");
+    }
+    const current = parsePublicSig("Dilute 1 mL to 10 mL");
+    for (const input of [current.fhirNext, JSON.parse(JSON.stringify(current.fhir))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Dilute 1 mL to 10 mL.");
+    }
+    expect(JSON.stringify(legacy)).toBe(before);
   });
 });
