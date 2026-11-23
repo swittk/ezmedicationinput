@@ -3,6 +3,7 @@ import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
 import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, setDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
 import { parseMedicationGuard } from "../src/medication-condition";
+import { setDosageCondition } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { getDosageAlternativeChoice, setDosageAlternativeChoice, DOSAGE_ALTERNATIVE_CHOICE_URL, fromFhir, fromFhirDosage, parseSig as parseBatch } from "../src";
 
@@ -3394,4 +3395,134 @@ describe("Thai sequential first dose cannot silently disappear", () => {
       .toMatchObject({ value: 2, unit: "tab" });
     expect(parsed.input).toBe(source);
   });
+});
+
+
+describe("round52 live site and partial-direction previews", () => {
+  it.each(["local-first", "preferred-first", "local-only"] as const)(
+    "keeps the preferred site and every supplied coding for %s", (order) => {
+      const local = { system: "https://example.org/site", code: "SITE-OD", id: "local-coding", version: "2026" };
+      const right = { system: "http://snomed.info/sct", code: "1290032005", id: "right-coding", version: "2026" };
+      const coding = order === "local-only" ? [local] : order === "local-first" ? [local, right] : [right, local];
+      const r6: ReturnType<typeof toDosageDetails> = { step: [{ component: [{
+        site: { concept: { coding } }, doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" } }
+      }] }] };
+      const expected = JSON.parse(JSON.stringify(r6));
+      const rows = toFhirR5Dosages(r6);
+      const cold = JSON.parse(JSON.stringify(rows));
+      for (const input of [r6, cold]) {
+        const before = JSON.parse(JSON.stringify(input));
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(en).toContain("1 drop");
+        expect(en).toContain(order === "local-only" ? "SITE-OD" : "right eye");
+        if (order !== "local-only") {
+          expect(en).not.toContain("SITE-OD");
+          expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ตาขวา");
+        }
+        expect(input).toEqual(before);
+      }
+      expect(toDosageDetails(cold).step?.[0].component?.[0].site?.concept?.coding).toEqual(expected.step[0].component[0].site.concept.coding);
+      expect(r6).toEqual(expected);
+    }
+  );
+
+  it.each([false, true])("retains the live skin restriction with omitted label=%s", (omitLabel) => {
+    const r6 = JSON.parse(JSON.stringify(parseBatch("Apply 1 g to skin where skin is red daily max 2 g/day").fhirNext)) as ReturnType<typeof toDosageDetails>;
+    const site = r6.step![0].component![0].site!.concept!;
+    if (omitLabel) delete site.text;
+    const expectedSite = JSON.parse(JSON.stringify(site));
+    const expected = JSON.parse(JSON.stringify(r6));
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [r6, rows]) for (const locale of ["en", "th"] as const) {
+      const preview = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(preview).toContain("where skin is red");
+      expect(preview).toContain("1 g");
+      expect(preview).toContain("2 g");
+    }
+    expect(toDosageDetails(rows).step?.[0].component?.[0].site?.concept).toEqual(expectedSite);
+    expect(r6).toEqual(expected);
+  });
+
+  it.each([false, true])("keeps the condition and authored directions with live dose=%s", (liveDose) => {
+    const authored = "Swallow 1 tablet whole";
+    const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" } as const;
+    const row: Parameters<typeof setDosageCondition>[0] = { text: authored };
+    setDosageCondition(row, condition);
+    if (liveDose) row.doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+    const expected = JSON.parse(JSON.stringify(row));
+    const r6 = toDosageDetails([row]);
+    const reopened = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [[row], r6, reopened]) {
+      const before = JSON.parse(JSON.stringify(input));
+      for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
+        const preview = formatSig(input, "long", { locale, realizationMode: mode });
+        expect(preview).toContain("SBP > 160");
+        if (liveDose) {
+          expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          expect(preview).not.toContain("1 tablet");
+        } else expect(preview).toContain(authored);
+      }
+      expect(input).toEqual(before);
+    }
+    expect(getDosageCondition(reopened[0])).toEqual(condition);
+    expect(JSON.stringify(r6)).toContain(authored);
+    expect(row).toEqual(expected);
+  });
+});
+
+
+describe("round52 source-only and repeated-window preview ownership", () => {
+  it("keeps an ordinary text-only R5 direction through the native preview route", () => {
+    const row = { text: "Swallow 1 tablet whole", id: "authored-only", extension: [{ url: "https://example.org/annotation", valueString: "keep" }] };
+    const before = JSON.parse(JSON.stringify(row));
+    const r6 = toDosageDetails([row]);
+    const reopened = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [[row], r6, reopened]) for (const locale of ["en", "th"] as const)
+      for (const mode of ["normalized", "roundtrip"] as const)
+        expect(formatSig(input, "long", { locale, realizationMode: mode })).toContain("Swallow 1 tablet whole");
+    expect(row).toEqual(before);
+    expect(reopened[0].text).toBe(before.text);
+    expect(reopened[0].id).toBe(before.id);
+    expect(reopened[0].extension).toEqual(expect.arrayContaining(before.extension));
+  });
+
+  it.each(["implicit-followup", "explicit-followup", "implicit-first"] as const)(
+    "does not promise an unproved no-dose window for %s", (variant) => {
+      const boundary = (value: number) => ({ contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+      }] }, offsetDuration: { value, unit: "d" } });
+      const component = () => [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["12:30:00"] } } }];
+      const first = variant === "implicit-first";
+      const r6: ReturnType<typeof toDosageDetails> = { step: first ? [
+        { count: 2, end: boundary(2), component: component() },
+        { start: boundary(5), end: boundary(6), component: component() }
+      ] : [
+        { end: boundary(1), component: component() },
+        { count: 2, ...(variant === "explicit-followup" ? { start: boundary(1) } : {}), end: boundary(2), component: component() },
+        { start: boundary(4), end: boundary(5), component: component() }
+      ] };
+      const expected = JSON.parse(JSON.stringify(r6));
+      const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+      for (const input of [r6, rows]) {
+        const preview = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(preview).toContain("Perform this phase 2 times");
+        if (variant === "implicit-followup") expect(preview).not.toContain("No doses");
+        else expect(preview).toContain(first
+          ? "No doses from 4 days after treatment start until 5 days after treatment start"
+          : "No doses from 3 days after treatment start until 4 days after treatment start");
+        const context = { orderedAt: "2026-10-30T12:00:00-04:00", from: "2026-10-30T12:00:00-04:00", timeZone: "America/New_York" };
+        const expectedDates = ["2026-10-30T12:30:00-04:00", "2026-10-31T12:30:00-04:00", "2026-11-01T12:30:00-05:00"];
+        if (variant !== "explicit-followup") expectedDates.push("2026-11-02T12:30:00-05:00");
+        expectedDates.push(first ? "2026-11-04T12:30:00-05:00" : "2026-11-03T12:30:00-05:00");
+        expect(nextDueDoses(input, { ...context, limit: 12 })).toEqual(expectedDates);
+        expect(calculateTotalUnits({ ...context, dosage: input, durationValue: first ? 6 : 5, durationUnit: "d" }).totalUnits)
+          .toBe(variant === "explicit-followup" ? 4 : 5);
+      }
+      expect(toDosageDetails(rows).step?.map(step => ({ count: step.count, start: step.start, end: step.end })))
+        .toEqual(expected.step.map((step: NonNullable<typeof r6.step>[number]) => ({ count: step.count, start: step.start, end: step.end })));
+      expect(r6).toEqual(expected);
+    }
+  );
 });

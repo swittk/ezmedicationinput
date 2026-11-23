@@ -459,7 +459,11 @@ function previewCourseWindows(
     windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart });
     let activeEnd = end, repetitionResolved = true;
     if (step.count !== undefined && step.count !== 1) {
+      // A later implicit start repeats its resolved elapsed span in execution.
+      // Across DST that span is not the difference of nominal civil offsets,
+      // so it cannot license a global medication-free day window here.
       if (Number.isInteger(step.count) && step.count > 0 &&
+          (step.start || step === course.stages[0]) &&
           start !== undefined && end !== undefined && end > start && startAnchor === endAnchor) {
         activeEnd = start + (end - start) * step.count;
       } else {
@@ -625,10 +629,10 @@ function formatCanonicalBase(
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a, options);
   let rendered = formatCanonicalClause(clause, style, env.localization, options);
-  // Timing alone cannot replace the only authored dose/manner directions.
-  // Label retained source separately from the current cadence: those words
-  // may contain an older timing, and are not a second active instruction.
-  if (a.text?.trim() && (source.schedule || source.route) && !administrationHasAmountFacts(source) && !source.method &&
+  // A route, timing or condition alone cannot replace the only authored
+  // dose/manner directions. Label retained source separately from current
+  // structured facts; it cannot override a live structured dose or method.
+  if (a.text?.trim() && (source.schedule || source.route || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
   if (a.predicate && (style !== "long" || !canFormatConditionInPrimary(env.localization)))

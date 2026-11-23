@@ -583,10 +583,16 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     result.route=Object.assign({},same?base?.route:undefined,{code:routeCode,text:a.route.text});
   }else result.route=undefined;
   let targetCode:NonNullable<NonNullable<typeof a.target>["coding"]>[number]|undefined;
-  for(const code of a.target?.coding??[])if(code.code){targetCode=code;break;}
+  // Match the interchange decoder's site priority while retaining the full
+  // concept on the administration: a local translation is not the preferred
+  // clinical site when the same concept also supplies a SNOMED coding.
+  for(const code of a.target?.coding??[])if(code.code){
+    targetCode??=code;
+    if(code.system===SNOMED_SYSTEM){targetCode=code;break;}
+  }
   if(a.target){
-    const same=a.target.text===base?.site?.text&&targetCode?.code===base?.site?.coding?.code;
-    const changedCode=base?.site?.coding?.code!==targetCode?.code;
+    const changedCode=base?.site?.coding?.code!==targetCode?.code ||
+      (base?.site?.coding?.system??SNOMED_SYSTEM)!==(targetCode?.system??SNOMED_SYSTEM);
     // A failed whole-row source proof does not invalidate a live site's
     // qualified text. Only an unchanged old site label or an exact known
     // contradictory site label licenses replacing it with the coded label.
@@ -597,7 +603,9 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     const text=targetCode?.code && (!a.target.text || staleText ||
       changedCode && a.target.text===base?.site?.text)
       ? getBodySiteText(targetCode) ?? a.target.text : a.target.text;
-    result.site=Object.assign({},same?base?.site:undefined,{text,administrationTargetCount:a.targetCount});
+    // A decoded restriction belongs to the live site, independently of
+    // whether its optional text was supplied or derived from that code.
+    result.site=Object.assign({},changedCode?undefined:base?.site,{text,administrationTargetCount:a.targetCount});
     if(targetCode?.code)result.site.coding=Object.assign({},targetCode,{code:targetCode.code});
   }else if(a.siteReference?.display)result.site={text:a.siteReference.display,administrationTargetCount:a.targetCount};
   else result.site=undefined;

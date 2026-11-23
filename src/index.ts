@@ -1114,8 +1114,9 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
     return true;
   const primary = dosage.doseAndRate?.[0];
-  // A route qualifies the only authored directions; the compact preview cannot replace them.
-  if (!primary && !dosage.method && dosage.route && dosage.text?.trim()) return true;
+  // With no structured dose or method, authored text may be the only
+  // directions. The existing native preview retains it beside partial facts.
+  if (!primary && !dosage.method && dosage.text?.trim()) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;
