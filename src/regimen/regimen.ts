@@ -295,10 +295,10 @@ export function scopeSequentialPhaseSemantics(
   for (const state of states) {
     const clause = state.primaryClause, schedule = clause.schedule;
     materializeAnchoredScheduleWindow(schedule);
-    // A typed relative delay without a recurrence denotes one future point.
-    // Establish it before both native and R5 projection; neither execution
-    // nor an interchange adapter should infer it from an empty repeat.
-    if (schedule?.administrationOffsetMinutes !== undefined &&
+    // A typed relative delay locates one future administration unless the
+    // clause supplies recurring or as-needed use. Establish it before native
+    // and R5 projection; an empty repeat cannot decide this at execution time.
+    if (schedule?.administrationOffsetMinutes !== undefined && !clause.prn?.enabled &&
         schedule.count === undefined && schedule.countMax === undefined &&
         !hasRecurringSchedule(schedule) && schedule.frequencyMax === undefined &&
         schedule.periodMax === undefined && schedule.periodUnit === undefined &&

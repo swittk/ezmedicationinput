@@ -2679,14 +2679,16 @@ function maximumDosePeriodAt(
     if (modifier && !context.state.consumed.has(modifier.index) &&
         MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
     const value = context.tokens[cursor];
-    const unit = context.tokens[cursor + 1];
-    const amount = value?.kind === LexKind.Number ? value.value
-      : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined;
-    const unitLower = unit && normalizeTokenLower(unit);
+    const attached = value?.kind !== LexKind.Number && value
+      ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+    const unit = attached ? undefined : context.tokens[cursor + 1];
+    const amount = attached?.value ?? (value?.kind === LexKind.Number ? value.value
+      : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined);
+    const unitLower = attached?.rawUnit ?? (unit && normalizeTokenLower(unit));
     const periodUnit = unitLower && mapIntervalUnit(unitLower);
-    if (amount !== undefined && amount > 0 && periodUnit &&
-        value && unit && !context.state.consumed.has(value.index) && !context.state.consumed.has(unit.index)) {
-      const tokens = context.tokens.slice(start, cursor + 2);
+    if (amount !== undefined && amount > 0 && periodUnit && value &&
+        !context.state.consumed.has(value.index) && (!unit || !context.state.consumed.has(unit.index))) {
+      const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
       return DAYPART_INTERVAL_TOKENS.has(unitLower!)
         ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
     }

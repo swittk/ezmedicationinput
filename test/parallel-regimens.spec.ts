@@ -214,8 +214,13 @@ describe("concurrent independent treatment sequences", () => {
       .toMatchObject({ duration: 1, durationUnit: "wk" });
     expect(regimen.tracks[0].phases[1].members[0].clause.clinicalAdjuncts?.condition)
       .toMatchObject({ kind: "measurement", operation: "gt", value: 160 });
-    expect(regimen.stages.flatMap(stage => stage.components)
-      .every(component => component.clause.schedule?.duration === undefined)).toBe(true);
+    expect(regimen.stages.map(stage => stage.components.map(component => [
+      component.clause.schedule?.duration, component.clause.schedule?.durationUnit
+    ]))).toEqual([
+      [[1, "wk"], [1, "mo"]],
+      [[undefined, undefined], [1, "mo"]],
+      [[undefined, undefined], [undefined, undefined]]
+    ]);
   });
 
   it("owns inferred calendar phase ends before any FHIR projection", () => {
@@ -312,7 +317,7 @@ describe("concurrent independent treatment sequences", () => {
       .toBe("treatment-start");
     expect(parsed.fhirNext.step[2].start?.offsetDuration?.code).toBe("mo");
     expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.boundsDuration)
-      .toBeUndefined();
+      .toMatchObject({ value: 1, code: "wk" });
     expect(parsed.fhirNext.renderedInstruction).toBe(twoSites);
   });
 
@@ -1368,6 +1373,12 @@ describe("round45 explicit onset and parallel successor ownership", () => {
       expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
       expect(calculateTotalUnits({ ...query, from: "2026-12-06T00:00:00Z", dosage,
         durationValue: 1, durationUnit: "d" }).totalUnits).toBe(2);
+      const lastDay = { ...query, from: "2026-12-07T00:00:00Z", limit: events.length > 1 ? 3 : 2 };
+      expect(nextDueDoses(dosage, lastDay)).toEqual(events.length > 1 ? [
+        "2026-12-07T08:00:00+00:00", "2026-12-07T08:00:00+00:00", "2026-12-07T20:00:00+00:00"
+      ] : ["2026-12-07T08:00:00+00:00", "2026-12-07T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...lastDay, dosage, durationValue: 1, durationUnit: "d" }).totalUnits)
+        .toBe(events.length > 1 ? 4 : 2);
     }
   });
 });
@@ -1494,4 +1505,45 @@ describe("round47 authored timing ownership", () => {
     }
     expect(parsed.meta.canonical.course?.instruction).toBe(source);
   });
+});
+
+
+describe("round48 authored parallel course lengths", () => {
+  it.each([["1wk", 1, "wk"], ["7d", 7, "d"]] as const)(
+    "keeps x%s active without restarting it at another eye's stage cut", (duration, value, unit) => {
+      const input = `1 drop OD q2h x${duration} then QID; 1 drop OS QID x1mo then BID`;
+      const parsed = parseSig(input);
+      const stages = parsed.meta.canonical.course!.stages;
+      expect(stages).toHaveLength(3);
+      expect(stages[0].end?.displacement).toMatchObject({ value: 7, unit: "d" });
+      expect(stages[1].end?.displacement).toMatchObject({ value: 1, unit: "mo" });
+      expect(stages[0].administrations[0].schedule?.recurrence?.courseLength).toMatchObject({ value, unit });
+      for (const stage of stages.slice(0, 2)) {
+        expect(stage.administrations[1].schedule?.recurrence?.courseLength).toMatchObject({ value: 1, unit: "mo" });
+        expect(stage.administrations[1].phaseOrigin).toMatchObject({ value: 0, unit: "d" });
+      }
+      const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+      const components = parsed.fhirNext.step.map(step => step.component).reduce((all, part) => all.concat(part));
+      for (const rows of [parsed.fhir, components, cold]) {
+        expect(rows[0].timing?.repeat?.boundsDuration).toMatchObject({ value, code: unit });
+        expect(rows[1].timing?.repeat?.boundsDuration).toMatchObject({ value: 1, code: "mo" });
+        expect(rows[3].timing?.repeat?.boundsDuration).toMatchObject({ value: 1, code: "mo" });
+        expect(rows[2].timing?.repeat?.boundsDuration).toBeUndefined();
+        expect(rows[5].timing?.repeat?.boundsDuration).toBeUndefined();
+      }
+      for (const dosage of [parsed, parsed.fhirNext, cold]) {
+        const weekQuery = options("2026-10-26T08:00:00+07:00", 4);
+        expect(nextDueDoses(dosage, weekQuery)).toEqual([
+          "2026-10-26T08:00:00+07:00", "2026-10-26T08:00:00+07:00",
+          "2026-10-26T12:00:00+07:00", "2026-10-26T12:00:00+07:00"
+        ]);
+        expect(calculateTotalUnits({ ...weekQuery, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(8);
+        const monthQuery = options("2026-11-19T08:00:00+07:00", 4);
+        expect(nextDueDoses(dosage, monthQuery)).toEqual([
+          "2026-11-19T08:00:00+07:00", "2026-11-19T08:00:00+07:00",
+          "2026-11-19T12:00:00+07:00", "2026-11-19T16:00:00+07:00"
+        ]);
+        expect(calculateTotalUnits({ ...monthQuery, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(6);
+      }
+    });
 });

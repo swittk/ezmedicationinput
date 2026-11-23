@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig } from "../src/index";
+import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig,
+  parseSig as parsePublicSig, toFhirR5Dosages } from "../src/index";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
@@ -552,4 +553,69 @@ describe("multi-clause parsing", () => {
     expect(semicolonTail.meta.segments).toHaveLength(1);
   });
 
+});
+
+
+describe("round48 clinical quantity and delayed PRN ownership", () => {
+  it.each([
+    ["1h", 1], ["1hr", 1], ["0.5h", 0.5], [".5h", 0.5]
+  ] as const)("keeps a maximum over %s separate from the administered volume", (period, value) => {
+    const parsed = parsePublicSig(`Infuse 100 mL, no more than 50 mL over ${period}`);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 100, unit: "mL" });
+    expect(clause.schedule?.maxDosePerPeriod).toEqual([
+      { amount: 50, unit: "mL", period: value, periodUnit: "h" }
+    ]);
+    expect(clause.clinicalQuantity).toBeUndefined();
+    expect(clause.schedule?.administrationDuration).toBeUndefined();
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+    }
+    for (const row of [parsed.fhir[0], cold[0]])
+      expect(row.maxDosePerPeriod).toEqual([{
+        numerator: { value: 50, unit: "mL", system: "http://unitsofmeasure.org", code: "mL" },
+        denominator: { value, unit: "h", system: "http://unitsofmeasure.org", code: "h" }
+      }]);
+    expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
+      scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value, unit: "h" }
+    }]);
+  });
+
+  it.each([".5h", "0.5h"])("preserves a leading-decimal weight-rate denominator: %s", period => {
+    const parsed = parsePublicSig(`Infuse 5 mcg/kg/${period}`);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved",
+      numerator: { value: 5, unit: "ug", dimension: "mass" },
+      denominators: [
+        { value: 1, unit: "kg", dimension: "patient-mass" },
+        { value: 0.5, unit: "h", dimension: "time" }
+      ]
+    });
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 10, unit: "ug/kg/h" });
+    }
+  });
+
+  it.each([
+    ["After 6 hours, take 1 tablet as needed for pain", undefined, true],
+    ["After 6 hours, take 1 tablet", 1, undefined]
+  ] as const)("keeps delay and authored PRN distinct from a one-time administration: %s", (input, count, prn) => {
+    const parsed = parsePublicSig(input);
+    expect(parsed.meta.canonical.clauses[0].schedule?.administrationOffsetMinutes).toBe(360);
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(count);
+    expect(parsed.meta.canonical.course?.stages[0].start).toMatchObject({
+      anchor: "treatment-start", displacement: { value: 6, unit: "h" }
+    });
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], cold[0]]) {
+      expect(row.timing?.repeat?.count).toBe(count);
+      expect(row.asNeeded).toBe(prn);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+    }
+  });
 });

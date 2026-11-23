@@ -485,7 +485,7 @@ function weightQuantity(
   const perDose = suffix === "dose";
   // Compound denominator morphology (e.g. /24h or /30min) is independent of
   // the medication, route, and placement of a division complement.
-  const timeParts = suffix?.match(/^(\d+(?:\.\d+)?)?([a-z]+)$/u);
+  const timeParts = suffix?.match(/^(\d+(?:\.\d+)?|\.\d+)?([a-z]+)$/u);
   let periodValue = timeParts?.[1] ? Number(timeParts[1]) : 1;
   let periodUnit: FhirPeriodUnit | undefined = timeParts
     ? /^(?:day|daily|d)$/u.test(timeParts[2]) ? FhirPeriodUnit.Day : weightRatePeriodUnit(timeParts[2])
@@ -768,8 +768,9 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     }) : volume;
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of sign.tokens) owned.add(token.index);
-    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [sign]);
-    return [sign];
+    const signs = [sign];
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
+    return signs;
   }
   const accepts = (candidate: string) =>
     /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
@@ -790,15 +791,18 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     // Publish ownership before the site fallback examines that marker.
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of weight.tokens) owned.add(token.index);
-    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [weight]);
-    return [weight];
+    const signs = [weight];
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
+    return signs;
   }
   const rate = qualifyClinicalSign(context, phraseStart, quantityEnd,
     fixedRate(context, quantityEnd, value, expression, phraseStart, comparator), comparator);
   if (rate) {
     const owned = context.clinicalCache.rateTokenIndices ??= new Set<number>();
     for (const token of rate.tokens) owned.add(token.index);
-    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, [rate]);
+    const signs = [rate];
+    (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
+    return signs;
   } else {
     // Unit morphology already established a per-time quantity. Without a
     // licensed rate head it remains source text; its numeric daughter must
@@ -808,5 +812,5 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
       owned.add(context.tokens[index].index);
     }
   }
-  return rate ? [rate] : [];
+  return [];
 }

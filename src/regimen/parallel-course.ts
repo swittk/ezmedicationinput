@@ -185,23 +185,6 @@ function calendarPhaseMembers(
   return normalized;
 }
 
-/** A global step owns its window, so its component keeps cadence but not the
- * source track's relative duration. This is a canonical stage, not a FHIR edit. */
-function componentClause(clause: CanonicalSigClause): CanonicalSigClause {
-  const schedule = clause.schedule;
-  if (!schedule || schedule.duration === undefined ||
-      schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined) return clause;
-  const {
-    duration: _duration,
-    durationMax: _durationMax,
-    durationUnit: _durationUnit,
-    durationMaxUnit: _durationMaxUnit,
-    durationIsRange: _durationIsRange,
-    ...cadence
-  } = schedule;
-  return { ...clause, schedule: cadence };
-}
-
 /** A phase's authored treatment onset owns its origin; an exact prior end is
  * only the default when this phase omits an onset. Coordinated members must
  * agree before one origin can represent their complete phase. Null marks
@@ -469,7 +452,8 @@ export function buildCanonicalParallelRegimen(
       if (phase) {
         components.push(...phase.members.map(item => ({
           ...item,
-          clause: phase.end ? componentClause(item.clause) : item.clause,
+          // Retain the authored course length; its own phase origin prevents
+          // an unrelated global step cut from restarting that duration.
           phaseOrigin: phase.start
         })));
       }
