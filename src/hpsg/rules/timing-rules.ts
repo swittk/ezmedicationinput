@@ -3570,18 +3570,25 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   const modifier = context.tokens[next], head = context.tokens[next + 1];
   if (modifier && head && NEXT_DAY_MODIFIERS.has(normalizeTokenLower(modifier)) &&
       NEXT_DAY_HEADS.has(normalizeTokenLower(head))) {
-    const tokens = tokensAvailable(context, start, next + 2 - start);
+    let endIndex = next + 2;
+    const trailingLead = context.tokens[endIndex];
+    if (trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead))) {
+      const trailingClock = parseClockToken(context.tokens[endIndex + 1], context.tokens[endIndex + 2]);
+      if (trailingClock) endIndex += 1 + trailingClock.tokens.length;
+    }
+    const tokens = tokensAvailable(context, start, endIndex - start);
     if (tokens) {
-      const text = context.state.input.slice(lead.sourceStart, head.sourceEnd);
+      const end = tokens[tokens.length - 1].sourceEnd;
+      const text = context.state.input.slice(lead.sourceStart, end);
       return lexicalSign({
         type: "instruction-sign", rule: "hpsg.lex.instruction.relativeCourseEnd", tokens,
         synsem: { head: {}, valence: { instructions: [{ text }] },
           cont: { clauseKind: "administration", clinicalAdjunct: {
             unresolved: true,
-            localRanges: [{ start: lead.sourceStart, end: head.sourceEnd }],
+            localRanges: [{ start: lead.sourceStart, end }],
             evidence: [{
               rule: "hpsg.lex.instruction.relativeCourseEnd", kind: "unresolved",
-              ranges: [{ start: lead.sourceStart, end: head.sourceEnd }]
+              ranges: [{ start: lead.sourceStart, end }]
             }]
           } } },
         score: 58 + tokens.length

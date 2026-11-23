@@ -337,15 +337,18 @@ export function scopeSequentialPhaseSemantics(
     const schedules = prior.map(index => states[index]?.primaryClause.schedule);
     if (edge.relation.semanticLicense === 'dose-continuation' && prior.length === 1 && next.length === 1) {
       const precedingClock = singleClockWithoutRecurrence(schedules[0]);
-      const followingClock = precedingClock && singleClockWithoutRecurrence(states[next[0]]?.primaryClause.schedule);
-      if (precedingClock && followingClock && precedingClock > followingClock) {
+      const followingSchedule = states[next[0]]?.primaryClause.schedule;
+      const followingClock = precedingClock && singleClockWithoutRecurrence(followingSchedule);
+      const followingEvent = !followingSchedule?.timeOfDay?.length &&
+        followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
+      if (precedingClock && (followingEvent || followingClock && precedingClock > followingClock)) {
         // The existing clock-order construction kept these daughters sequential.
         // Complete its initial point; native phase completion owns the next
-        // eligible successor clock, including an order after today's first clock.
+        // eligible clock or caller-resolved event without adding an event clock.
         schedules[0]!.count = 1;
         states[prior[0]].primaryClause.evidence.push({
           rule: "hpsg.regimen.single-clock-before-clock-transition", spans: [], scheduleFields: ["count"],
-          note: "The explicit backward-clock continuation follows this initial administration."
+          note: "The sequential clock or event continuation follows this initial administration."
         });
       }
     }

@@ -635,28 +635,31 @@ export function projectHpsgSignToState(
   const clinicalDuration = dose?.attachmentClass !== "procedure"
     ? dose?.clinicalQuantity?.administrationDuration
     : undefined;
-  if (clinicalDuration) {
+  const dividedCount = dose?.attachmentClass !== "procedure"
+    ? dose?.clinicalQuantity?.dividedDoseCount : undefined;
+  if (clinicalDuration || dividedCount !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
-    target.administrationDuration = clinicalDuration.value;
-    target.administrationDurationUnit = clinicalDuration.unit;
-    target.administrationDurationComparator = clinicalDuration.comparator;
-    // Duration qualifies each infusion. It is never regimen boundsDuration;
-    // an occurrence count is only appropriate without a recurrence. Explicit
-    // divisions retain their finite cardinality; otherwise this is one infusion.
-    // Keep a separately owned course duration (for example, daily for three
-    // days). Only the overlapping timing artifact without typed schedule-field
-    // ownership belongs to the clinical quantity's elapsed-time daughter.
-    const hasCourseDurationEvidence = sign.evidence.some(item =>
-      item.scheduleFields?.some(field =>
-        field === "duration" || field === "durationMax" || field === "durationUnit"
-      )
-    );
-    if (!hasCourseDurationEvidence) {
-      delete target.duration;
-      delete target.durationMax;
-      delete target.durationUnit;
+    if (clinicalDuration) {
+      target.administrationDuration = clinicalDuration.value;
+      target.administrationDurationUnit = clinicalDuration.unit;
+      target.administrationDurationComparator = clinicalDuration.comparator;
+      // Duration qualifies each infusion. It is never regimen boundsDuration;
+      // an occurrence count is only appropriate without a recurrence. Explicit
+      // divisions retain their finite cardinality; otherwise this is one infusion.
+      // Keep a separately owned course duration (for example, daily for three
+      // days). Only the overlapping timing artifact without typed schedule-field
+      // ownership belongs to the clinical quantity's elapsed-time daughter.
+      const hasCourseDurationEvidence = sign.evidence.some(item =>
+        item.scheduleFields?.some(field =>
+          field === "duration" || field === "durationMax" || field === "durationUnit"
+        )
+      );
+      if (!hasCourseDurationEvidence) {
+        delete target.duration;
+        delete target.durationMax;
+        delete target.durationUnit;
+      }
     }
-    const dividedCount = dose?.clinicalQuantity?.dividedDoseCount;
     // The explicit daily schedule owns the total's divisions. The rate's
     // elapsed duration never supplies a recurring period.
     if (dividedCount !== undefined && target.frequency === 1 &&

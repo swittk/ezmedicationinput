@@ -1122,6 +1122,21 @@ it("preserves THEN between a clock and an event anchor without inventing its eve
     eventClock: { MORN: "08:00" }, limit: 4 };
   for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
     expect(nextDueDoses(input, query)).toEqual([
+      "2026-12-01T22:00:00+00:00", "2026-12-02T08:00:00+00:00",
+      "2026-12-03T08:00:00+00:00", "2026-12-04T08:00:00+00:00"
+    ]);
+    expect(nextDueDoses(input, { ...query, eventClock: { MORN: "10:00" }, limit: 2 })).toEqual([
+      "2026-12-01T22:00:00+00:00", "2026-12-02T10:00:00+00:00"
+    ]);
+    expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: "d" }))
+      .toMatchObject({ totalUnits: 5, unit: "tab" });
+  }
+  expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+  const recurring = parseSig("Take 1 tablet daily at 22:00, then 2 in the morning");
+  expect(recurring.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+  for (const input of [recurring, recurring.meta.canonical.course!, recurring.fhirNext,
+    JSON.parse(JSON.stringify(recurring.fhir))]) {
+    expect(nextDueDoses(input, query)).toEqual([
       "2026-12-01T22:00:00+00:00", "2026-12-02T22:00:00+00:00",
       "2026-12-03T22:00:00+00:00", "2026-12-04T22:00:00+00:00"
     ]);

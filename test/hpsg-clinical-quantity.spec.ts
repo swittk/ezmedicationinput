@@ -2831,6 +2831,16 @@ describe("round38 independent occurrence duration endpoints", () => {
       const clauseWritten = canonicalToFhir(clause);
       expect(clauseWritten.timing?.repeat?.duration).toBeUndefined();
       expect(clauseWritten.timing?.repeat?.extension?.some(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL && item.valueRange)).toBe(true);
+      const clauseRange = clauseWritten.timing?.repeat?.extension?.find(
+        item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)?.valueRange;
+      for (const side of ["low", "high"] as const) {
+        const expected = side === "low" ? low : high;
+        if (expected) expect(clauseRange?.[side]).toMatchObject({
+          value: expected.value, unit: expected.unit, code: expected.code, id: side
+        });
+        else expect(clauseRange?.[side]).toBeUndefined();
+        expect(getQuantityComparator(clauseRange?.[side])).toBe(expected && "comparator" in expected ? expected.comparator : undefined);
+      }
       expect(JSON.stringify(row)).toBe(before);
       row = JSON.parse(JSON.stringify(written));
     }
@@ -3171,7 +3181,8 @@ describe("round46 supported quantity and boundary ownership", () => {
     });
 
   it.each(["until the next morning", "until 8 AM the next morning", "until 08:00 the next morning",
-    "until 8am next morning"])("retains the relative ending %s without turning it into an onset", ending => {
+    "until 8am next morning", "until the next morning at 8 AM",
+    "until the next morning at 08:00"])("retains the relative ending %s without turning it into an onset", ending => {
     const source = "Take 1 tablet every 6 hours " + ending;
     const parsed = parsePublicSig(source);
     const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
@@ -3374,5 +3385,71 @@ describe("round50 attached decimal rates and independent divided doses", () => {
       expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 10, unit: "mg/kg" });
       expect(row.doseAndRate![0].rateQuantity).toBeUndefined();
     }
+  });
+});
+
+describe("round51 divided infusion and relative-end ownership", () => {
+  it.each([
+    ["Infuse 100 mL at 30 mL/hr in 2 divided doses", false],
+    ["Infuse 100 mL at 30 mL/hr daily in 2 divided doses", true],
+    ["Infuse 100 mL daily in 2 divided doses at 30 mL/hr", true],
+    ["Infuse 100 mL in 2 divided doses daily at 30 mL/hr", true],
+    ["Infuse 100 mL daily at 30 mL/hr in 2 divided doses", true],
+  ] as const)("retains authored divisions and independent rate: %s", (source, daily) => {
+    const parsed = parsePublicSig(source);
+    const before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 50, unit: "mL" });
+    expect(clause.clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { value: 30, unit: "mL" },
+      denominators: [{ value: 1, unit: "h", dimension: "time" }],
+      dividedDoseCount: 2, projectedDose: { value: 50, unit: "mL" }
+    });
+    expect(clause.schedule?.administrationDuration).toBeUndefined();
+    expect(clause.schedule?.duration).toBeUndefined();
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+      toFhirR5Dosages(JSON.parse(JSON.stringify(parsed.fhirNext)))[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 30, unit: "mL/h" });
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+      expect(row.timing?.repeat?.durationUnit).toBeUndefined();
+      expect(row.timing?.repeat?.boundsDuration).toBeUndefined();
+      if (daily) {
+        expect(row.timing?.repeat).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+        expect(row.timing?.repeat?.count).toBeUndefined();
+      } else {
+        expect(row.timing?.repeat?.count).toBe(2);
+        expect(row.timing?.repeat?.frequency).toBeUndefined();
+        expect(row.timing?.repeat?.period).toBeUndefined();
+        expect(row.timing?.repeat?.periodUnit).toBeUndefined();
+      }
+    }
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      if (daily) expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 300, unit: "mL" });
+      else {
+        expect(nextDueDoses(input, query)).toEqual([]);
+        expect(() => calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+          .toThrow(/no executable frequency or dosing time/);
+      }
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("keeps an independently authored onset clock before the unresolved course end", () => {
+    const source = "Take 1 tablet every 6 hours at 8 AM until the next morning";
+    const parsed = parsePublicSig(source);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.phaseEnd).toMatchObject({ anchor: "unresolved", description: "until the next morning" });
+      expect(member.schedule?.recurrence).toMatchObject({ period: 6, periodUnit: "h", clocks: ["08:00:00"] });
+    }
+    expect(parsed.input).toBe(source);
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
