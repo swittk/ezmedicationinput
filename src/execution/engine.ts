@@ -2691,12 +2691,16 @@ function stepRepeatSpan(stage: CanonicalStage, window: TreatmentStepWindow, impl
     // A missing start is only a zero offset for the first treatment step;
     // validate the resulting span against the resolved window below.
   }
-  for (const member of window.administrations) {
-    if (member.endExclusive?.getTime() !== window.end.getTime() ||
-        member.recurrenceOrigin.getTime() !== window.start.getTime()) continue;
-    const duration = member.administration.anchoredLength?.quantity ??
-      member.administration.schedule?.recurrence?.courseLength;
-    if (duration && !duration.comparator) return duration;
+  // A coincident member end cannot change an explicitly elapsed stage span
+  // into civil repetition. Members supply the span only when they own its end.
+  if (!stage.end) {
+    for (const member of window.administrations) {
+      if (member.endExclusive?.getTime() !== window.end.getTime() ||
+          member.recurrenceOrigin.getTime() !== window.start.getTime()) continue;
+      const duration = member.administration.anchoredLength?.quantity ??
+        member.administration.schedule?.recurrence?.courseLength;
+      if (duration && !duration.comparator) return duration;
+    }
   }
   return { value: (window.end.getTime() - window.start.getTime()) / 1000, unit: DurationUnit.Second };
 }
@@ -5166,7 +5170,7 @@ function clockAnchoredElapsedOrigin(
   return next;
 }
 /** Seek by source recurrence arithmetic, NOT by the requested output limit.
- * Elapsed seconds/minutes/hours jump by a fixed timestamp multiplier. Whole
+ * Elapsed seconds/minutes/hours and fractional days/weeks use a fixed multiplier. Whole
  * civil days/weeks jump by calendar day count with the original clock; month
  * jumps are safe when month-end clipping cannot change the anchor day.
  * All irregular calendar intervals retain their real stepper semantics.
@@ -5179,7 +5183,9 @@ function seekIntervalNearQuery(
   const elapsedUnit =
     unit === DurationUnit.Second ? 1000 :
     unit === DurationUnit.Minute ? 60000 :
-    unit === DurationUnit.Hour ? 3600000 : undefined;
+    unit === DurationUnit.Hour ? 3600000 :
+    unit === DurationUnit.Day && !Number.isInteger(repeat.period) ? 86400000 :
+    unit === DurationUnit.Week && !Number.isInteger(repeat.period * 7) ? 604800000 : undefined;
   if (elapsedUnit !== undefined) {
     const increment = repeat.period * elapsedUnit;
     const count = Math.max(0, Math.floor((from.getTime() - base.getTime()) / increment));

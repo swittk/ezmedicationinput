@@ -1432,11 +1432,16 @@ describe("previous-phase next-day execution", () => {
       { ...boundary, displacement: { value: 1, unit: "d" },
         displacementRange: { low: { value: 1, unit: "d" }, high: { value: 1, unit: "d" } } },
     ];
-    for (const start of invalid) {
-      const value = course(); value.stages[1].start = start;
+    const diagnostics = [
+      /requires a treatment-start offset/,
+      /range endpoints must resolve to the same treatment-start offset/,
+      expect.objectContaining({ code: "phase-boundary-displacement-conflict" }),
+    ];
+    for (let index = 0; index < invalid.length; index++) {
+      const value = course(); value.stages[1].start = invalid[index];
       const original = JSON.stringify(value);
-      expect(() => nextDueDoses(value, { ...options, limit: 10 })).toThrow();
-      expect(() => supply(value, 10)).toThrow();
+      expect(() => nextDueDoses(value, { ...options, limit: 10 })).toThrow(diagnostics[index]);
+      expect(() => supply(value, 10)).toThrow(diagnostics[index]);
       expect(JSON.stringify(value)).toBe(original);
     }
   });
@@ -2843,6 +2848,14 @@ describe("round35 execution cap and history oracles", () => {
     expect(nextDueDoses(wire(course, version), { ...query, limit: 3 })).toEqual([
       "2026-12-01T22:00:00+00:00", "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00",
     ]);
+    loading.schedule!.recurrence!.calendarWindow!.end = "2026-12-01T21:00:00Z";
+    const earlier = wire(course, version), earlierBefore = JSON.stringify(earlier);
+    expect(nextDueDoses(earlier, { ...query, limit: 3 })).toEqual([
+      "2026-12-02T06:00:00+00:00", "2026-12-03T06:00:00+00:00", "2026-12-04T06:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: earlier, ...query, from: "2026-12-01T00:00:00Z",
+      durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    expect(JSON.stringify(earlier)).toBe(earlierBefore);
   });
 
   it.each(versions)("intersects compatible spaced mass maxima without changing authored measurements (%s)", version => {
@@ -2851,7 +2864,10 @@ describe("round35 execution cap and history oracles", () => {
       value.limits = [{ scope: "lifetime", amount: { value: 1, unit: "g " } },
         { scope: "lifetime", amount: { value: 2000, unit: "mg" } }];
       if (reverse) value.limits.reverse();
+      const authored = JSON.stringify(value);
+      const authoredLimits = JSON.parse(JSON.stringify(value.limits)) as NonNullable<CanonicalAdministration["limits"]>;
       const input = wire(value, version), before = JSON.stringify(input);
+      expect(JSON.stringify(value)).toBe(authored);
       const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 7, durationUnit: Unit.Day });
       expect(result).toMatchObject({ totalUnits: 1000, unit: "mg" });
       expect(result.explanation).not.toContain("could not be applied");
@@ -2859,7 +2875,8 @@ describe("round35 execution cap and history oracles", () => {
       const projected = projectCanonicalCourse({ kind: "course", stages: [{ administrations: [value] }] });
       for (const exported of [projected.fhir, projected.fhirNext])
         expect(importCanonicalCourse(exported).stages[0].administrations[0].limits)
-          .toEqual(expect.arrayContaining(value.limits!.map(limit => expect.objectContaining(limit))));
+          .toEqual(expect.arrayContaining(authoredLimits.map(limit => expect.objectContaining(limit))));
+      expect(JSON.stringify(value)).toBe(authored);
     }
   });
 
@@ -4393,13 +4410,16 @@ describe("round49 partial-event supply windows and external inputs", () => {
     ["exclusive month boundary", "2026-12", "2026-11-30T00:00:00Z", 1, Unit.Day, "UTC", 0],
     ["crossed month boundary", "2026-12", "2026-11-30T12:00:00Z", 1, Unit.Day, "UTC", undefined],
     ["past local month", "2026-11", "2026-11-30T17:00:00Z", 2, Unit.Day, "Asia/Bangkok", 0],
-    ["overlapping local month", "2026-11", "2026-11-30T16:00:00Z", 1, Unit.Hour, "Asia/Bangkok", undefined]
+    ["overlapping local month", "2026-11", "2026-11-30T16:00:00Z", 1, Unit.Hour, "Asia/Bangkok", undefined],
+    ["order at month end", "2026-11", "2026-11-30T00:00:00Z", 2, Unit.Day, "UTC", 0, "2026-12-01T00:00:00Z"],
+    ["order inside month", "2026-11", "2026-11-30T00:00:00Z", 2, Unit.Day, "UTC", undefined, "2026-11-30T12:00:00Z"],
+    ["order after query", "2026-11", "2026-11-30T00:00:00Z", 2, Unit.Day, "UTC", 0, "2026-12-03T00:00:00Z"]
   ] as const)("distinguishes a disjoint %s from unknown administration time",
-    (_name, partial, from, durationValue, durationUnit, timeZone, total) => {
+    (_name, partial, from, durationValue, durationUnit, timeZone, total, orderedAt?: string) => {
       const event = [partial, "2026-11-20T08:00:00Z"];
       const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         timing: { event } };
-      const query = { from, orderedAt: "2026-01-01T00:00:00Z", timeZone,
+      const query = { from, orderedAt: orderedAt ?? origin, timeZone,
         durationValue, durationUnit, limit: 3 };
       for (const dosage of forms(row)) {
         const saved = JSON.stringify(dosage);

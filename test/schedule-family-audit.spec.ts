@@ -4404,3 +4404,95 @@ describe("round50: explicit event quota and interval query ownership", () => {
       expect(toDosageDetails(toFhirR5Dosages(course)).step![0].component[0].timing?.event).toEqual([event]);
     });
 });
+
+describe("round51 repeated-window ownership and elapsed history", () => {
+  const contextCode = { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] };
+  const amount = () => ({ doseQuantity: { value: 1, unit: "tab" } });
+  const representations = (source: FhirR6DosageInstruction) => [
+    source, JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[], importCanonicalCourse(source),
+  ];
+
+  it.each(["elapsed boundary", "civil boundary", "member duration"] as const)(
+    "keeps the repeated window owned by its %s", owner => {
+      const source: FhirR6DosageInstruction = { step: [{
+        count: 3,
+        ...(owner === "member duration" ? {} : { end: { contextCode,
+          offsetDuration: owner === "elapsed boundary" ? { value: 23, unit: "h" } : { value: 1, unit: "d" } } }),
+        component: [{ doseAndRate: [amount()], timing: { repeat: {
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:30:00"],
+          boundsDuration: { value: 1, unit: "d" },
+        } } }],
+      }] };
+      const original = JSON.stringify(source);
+      const query = { orderedAt: "2026-03-07T09:00:00-05:00", from: "2026-03-07T09:00:00-05:00",
+        timeZone: "America/New_York", limit: 5, durationValue: 4, durationUnit: FhirPeriodUnit.Day };
+      // The explicit 23h windows end Mar8 09:00, Mar9 08:00 and Mar10 07:00.
+      // A civil-day boundary or member-owned duration instead ends Mar10 09:00.
+      const expected = ["2026-03-08T08:30:00-04:00", "2026-03-09T08:30:00-04:00",
+        ...(owner === "elapsed boundary" ? [] : ["2026-03-10T08:30:00-04:00"])];
+      for (const dosage of representations(source)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({
+          totalUnits: owner === "elapsed boundary" ? 2 : 3, unit: "tab",
+        });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+      expect(JSON.stringify(source)).toBe(original);
+    });
+
+  it.each([[0.25, FhirPeriodUnit.Day], [1 / 28, FhirPeriodUnit.Week], [6, FhirPeriodUnit.Hour]] as const)(
+    "seeks the remaining occurrence after long %s %s history", (period, periodUnit) => {
+      const row: FhirDosage = { doseAndRate: [amount()], timing: { repeat: {
+        count: 1093, frequency: 1, period, periodUnit,
+      } } };
+      const original = JSON.stringify(row);
+      const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-10-01T00:00:00Z",
+        timeZone: "UTC", limit: 2, priorCount: 1092, durationValue: 6, durationUnit: FhirPeriodUnit.Hour };
+      // 273 days give 1092 six-hour slots before the query; one authored use remains.
+      for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse(row)]) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(["2026-10-01T00:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: 1, unit: "tab" });
+        expect(nextDueDoses(dosage, { ...query, priorCount: 1093 })).toEqual([]);
+        expect(calculateTotalUnits({ dosage, ...query, priorCount: 1093 }).totalUnits).toBe(0);
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(original);
+    });
+
+  it("retains uncapped elapsed supply after a long fractional-day history", () => {
+    const row: FhirDosage = { doseAndRate: [amount()], timing: {
+      repeat: { frequency: 1, period: 0.25, periodUnit: FhirPeriodUnit.Day },
+    } };
+    const original = JSON.stringify(row);
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-10-01T00:00:00Z",
+      timeZone: "UTC", limit: 1, durationValue: 6, durationUnit: FhirPeriodUnit.Hour };
+    for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse(row)]) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-10-01T00:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(JSON.stringify(row)).toBe(original);
+  });
+
+  it.each([[1, FhirPeriodUnit.Day], [1 / 7, FhirPeriodUnit.Week]] as const)(
+    "keeps normalized whole-civil %s %s clocks through a long history and fall DST", (period, periodUnit) => {
+      const row: FhirDosage = { doseAndRate: [amount()], timing: { repeat: {
+        frequency: 1, period, periodUnit, timeOfDay: ["08:00:00"],
+      } } };
+      const original = JSON.stringify(row);
+      const query = { orderedAt: "2023-01-01T08:00:00-05:00", from: "2026-10-31T00:00:00-04:00",
+        timeZone: "America/New_York", limit: 3, durationValue: 3, durationUnit: FhirPeriodUnit.Day };
+      for (const dosage of [row, toDosageDetails([row]), importCanonicalCourse(row)]) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-10-31T08:00:00-04:00", "2026-11-01T08:00:00-05:00", "2026-11-02T08:00:00-05:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: 3, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(original);
+    });
+});
