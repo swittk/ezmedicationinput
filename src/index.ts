@@ -129,7 +129,7 @@ import {
 import { formatCanonicalClause } from "./format";
 import { canonicalFromFhir, canonicalToFhir, clinicalCarrierQuantityFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
-import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
+import { canFormatConditionInPrimary, resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
 import {
   applyPrnReasonCoding,
@@ -1186,7 +1186,7 @@ export function formatSig(
     const clause = canonicalFromFhir(dosage, options);
     const localization = resolveSigLocalization(options?.locale, options?.i18n);
     let displayed = provisionalFhirDisplay(dosage, clause, style, localization, options, false);
-    if (displayCondition) {
+    if (displayCondition && (style !== "long" || !canFormatConditionInPrimary(localization))) {
       displayed = appendMedicationConditionText(displayed, displayCondition, options);
     }
     if (displayExcludedDates.length) {
@@ -1218,7 +1218,7 @@ export function formatSig(
   markOriginalGraphSource(dosage,clause,options);
   const localization = resolveSigLocalization(options?.locale, options?.i18n);
   const rendered = formatCanonicalClause(clause, style, localization, options);
-  let displayed = displayCondition
+  let displayed = displayCondition && (style !== "long" || !canFormatConditionInPrimary(localization))
     ? appendMedicationConditionText(rendered, displayCondition, options)
     : rendered;
   if (displayExcludedDates.length) {
@@ -1464,7 +1464,8 @@ function fromFhirDosageInternal(
     const excludedWeekdays = getDosageExcludedWeekdays(dosage);
     if (condition) {
       shortText = appendMedicationConditionText(shortText, condition, options);
-      computedLong = appendMedicationConditionText(computedLong, condition, options);
+      if (!canFormatConditionInPrimary(localization))
+        computedLong = appendMedicationConditionText(computedLong, condition, options);
     }
     if (exclusions.length) {
       shortText = appendMedicationExcludedDatesText(shortText, exclusions, options);
@@ -1724,7 +1725,8 @@ function buildParseResult(
     const condition = clause.clinicalAdjuncts.condition;
     if (condition && !guardRenderedByInstruction) {
       shortText = appendMedicationConditionText(shortText, condition, options);
-      longText = appendMedicationConditionText(longText, condition, options);
+      if (useOriginalText || !canFormatConditionInPrimary(localization))
+        longText = appendMedicationConditionText(longText, condition, options);
     }
     const excludedDates = clause.clinicalAdjuncts.excludedDates ?? [];
     if (excludedDates.length) {

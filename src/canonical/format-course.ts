@@ -23,6 +23,8 @@ import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
   resolveCourseLanguage,
+  appendClinicalConditionText,
+  canFormatConditionInPrimary,
   type SigLocalization,
   type SigDoseScope,
   type CourseLanguage,
@@ -49,38 +51,6 @@ export function joinGeneratedClauses(clauses: readonly string[], separator = "; 
     result += index < clauses.length - 1 ? clauses[index].replace(/\.\s*$/u, "") : clauses[index];
   }
   return result;
-}
-function medicationConditionBody(condition: MedicationCondition, words: CourseLanguage): string {
-  switch (condition.kind) {
-    case "measurement": {
-      // Live typed predicate values own the generated instruction. Its
-      // authored text remains source data and may describe an older value.
-      const operator = { gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!=" }[condition.operation];
-      return (
-        words.measurementName(condition.name) + " " + operator + " " + condition.value + (condition.unit ? " " + condition.unit : "")
-      );
-    }
-    case "state": {
-      return condition.expected ? condition.name : words.notPrefix + condition.name;
-    }
-    case "text":
-      return condition.text;
-    case "not":
-      return words.notPrefix + "(" + medicationConditionBody(condition.condition, words) + ")";
-    case "all":
-    case "any": {
-      let result = "";
-      const separator = condition.kind === "all" ? words.allSeparator : words.anySeparator;
-      for (const value of condition.conditions) {
-        const body = medicationConditionBody(value, words);
-        // Preserve Boolean grouping. Only the outer NOT licenses 'unless'.
-        const grouped = (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind;
-        if (result) result += separator;
-        result += grouped ? "(" + body + ")" : body;
-      }
-      return result;
-    }
-  }
 }
 export function appendMedicationExcludedDatesText(
   text: string,
@@ -120,10 +90,7 @@ export function appendMedicationConditionText(
   environment?: CourseFormatEnvironment
 ): string {
   const words = (environment ?? courseEnvironment(options)).words;
-  const negated = condition.kind === "not";
-  const body = medicationConditionBody(negated ? condition.condition : condition, words);
-  const trimmed = text.trim().replace(/[.!?]+$/u, "");
-  return (trimmed ? trimmed + " " : "") + (negated ? words.unless : words.onlyIf) + " " + body + ".";
+  return appendClinicalConditionText(text, condition, words);
 }
 
 /** Resolve exact day/week quantities without converting clock-time units to calendar days.
@@ -664,7 +631,8 @@ function formatCanonicalBase(
   if (a.text?.trim() && source.schedule && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
-  if (a.predicate) rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
+  if (a.predicate && (style !== "long" || !canFormatConditionInPrimary(env.localization)))
+    rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   // The clause's calendar view needs a complete civil date. Partial FHIR

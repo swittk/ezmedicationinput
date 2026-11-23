@@ -10,7 +10,7 @@ import {
   type LocalizedTimingGrammar
 } from "./localized-timing";
 import { ParserState } from "./parser-state";
-import { isBuiltinSigFormatter, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
+import { isBuiltinSigFormatter, appendClinicalConditionText, canFormatConditionInPrimary, type SigLocalization, type SigLongContext, type SigShortContext, type SigDoseScope } from "./i18n";
 import { getLocalizedCanonicalPrnReasonText, getPreferredCanonicalPrnReasonText } from "./prn";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { composedCodedWarningActionSources } from "./advice";
@@ -57,7 +57,8 @@ import {
   CanonicalSigClause,
   EventTiming,
   FhirPeriodUnit,
-  RouteCode
+  RouteCode,
+  type MedicationCondition
 } from "./types";
 import {
   getMealTimingGroup,
@@ -1370,7 +1371,7 @@ function applyEnglishAdministrationModality(verb: string, clause: CanonicalSigCl
 }
 
 function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | undefined, words: CourseLanguage,
-  resolvedMethod?: SigLongContext["resolvedMethod"]): string {
+  resolvedMethod?: SigLongContext["resolvedMethod"], condition?: MedicationCondition): string {
   const hasCanonicalAdministration = canonicalClauseHasAdministrationSemantics(clause);
   const schedule = scheduleOf(clause);
   const grammar = resolveRouteGrammar(clause);
@@ -1801,7 +1802,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
     roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
-    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
+    clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
+    (!condition || clause.sourceProjectionVerified !== false)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
@@ -1825,7 +1827,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })) continue;
       parts.push(value);
     }
-    return parts.join(" ").trim() || `${verb}.`;
+    const text = parts.join(" ").trim() || `${verb}.`;
+    return condition ? appendClinicalConditionText(text, condition, words) : text;
   }
   const leadingInstructionText = preFlowsIntoAdministration
     ? undefined
@@ -1850,7 +1853,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     clause.instructionGraph?.actions.length &&
     !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
   );
-  if (graphCanStandAlone) return trailingInstructionText as string;
+  if (graphCanStandAlone) return condition
+    ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
+    : trailingInstructionText as string;
   const primarySourceSentence = primaryGraphAction && !needsCurrentPrimary
     ? formatPatientInstructionSentence(primaryGraphAction.sourceText)
     : undefined;
@@ -1876,6 +1881,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const sequenceSurface = localizeAdviceRelation(sequenceRelation, "en") ?? sequenceRelation;
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
+    if (condition) effectiveBase = appendClinicalConditionText(effectiveBase, condition, words);
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
@@ -1899,7 +1905,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
-    if (!trailingInstructionText && !leadingInstructionText) return `${verb}.`;
+    if (!trailingInstructionText && !leadingInstructionText)
+      return condition ? appendClinicalConditionText(`${verb}.`, condition, words) : `${verb}.`;
     return hasExplicitMethod ? compose(`${verb}.`) : compose("");
   }
   return compose(`${verb} ${body}.`);
@@ -2086,7 +2093,9 @@ export function formatCanonicalClause(
         return shortDefault;
       case "long":
         if (longDefault === undefined) {
-          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod);
+          longDefault = formatLong(clause, options, localization?.course ?? ENGLISH_COURSE, resolvedMethod,
+            clause.clinicalAdjuncts?.condition && canFormatConditionInPrimary(localization)
+              ? clause.clinicalAdjuncts.condition : undefined);
         }
         return longDefault;
     }

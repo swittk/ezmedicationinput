@@ -8,12 +8,12 @@ import conditionLogicProfile from "../fhir/r6/medication-r6-condition-logic.json
 import r6SnapshotContract from "../fhir/r6/official-snapshot1-20261113-contract.json";
 import {
   parseSig, parseSigAsync, fromFhir, fromFhirDosage, formatSig, formatSigBatch, formatParseBatch,
-  importCanonicalCourse,
+  importCanonicalCourse, formatCanonicalCourse,
   nextDueDoses, calculateTotalUnits, getEmaQuantityComparator,
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM,
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
-  type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
+  type FormatOptions, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
   EventTiming, FhirPeriodUnit
 } from "../src/index";
 import {
@@ -6941,5 +6941,69 @@ describe("round43 repeating course language receiver", () => {
       }
     }
     expect(JSON.stringify(course)).toBe(before);
+  });
+});
+
+
+describe("round49 primary administration condition placement", () => {
+  const source = "Take 1 tablet BID only if BP >160, otherwise hold";
+  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const generated = (locale: "en" | "th", mode: "normalized" | "roundtrip", value = 160) =>
+    locale === "en"
+      ? "Take 1 tablet orally twice daily only if BP > " + value + ". Otherwise hold."
+      : (mode === "normalized" ? "รับประทานครั้งละ" : "รับประทาน") +
+        " 1 เม็ด วันละ 2 ครั้ง เฉพาะเมื่อ BP > " + value + ". otherwise hold.";
+
+  it.each([
+    ["en", "normalized"], ["en", "roundtrip"], ["th", "normalized"], ["th", "roundtrip"],
+  ] as const)("binds the typed condition to its primary before independent advice (%s, %s)", (locale, realizationMode) => {
+    const parsed = parseSig(source), options = { locale, realizationMode };
+    const native = importCanonicalCourse(parsed.fhirNext);
+    const short = locale === "en" ? "1 tab PO BID only if BP > 160."
+      : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.";
+    expect(formatCanonicalCourse(native, "long", options)).toBe(generated(locale, realizationMode));
+    expect(formatCanonicalCourse(native, "short", options)).toBe(short);
+    const forms = [
+      { kind: "fresh", input: parsed.fhir },
+      { kind: "r6", input: parsed.fhirNext },
+      { kind: "cold", input: copy(toFhirR5Dosages(parsed.fhirNext)) },
+    ];
+    for (const { kind, input } of forms) {
+      const before = copy(input), replay = kind === "fresh" && realizationMode === "roundtrip";
+      expect(formatSig(input, "long", options)).toBe(replay ? source : generated(locale, realizationMode));
+      expect(formatSig(input, "short", options)).toBe(replay ? source : short);
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each(["en", "th"] as const)("keeps the current condition value on the primary after a cold R5 edit (%s)", locale => {
+    const rows = copy(toFhirR5Dosages(parseSig(source).fhirNext));
+    setDosageCondition(rows[0], { kind: "measurement", name: "bp", operation: "gt", value: 180,
+      text: "BP >160" });
+    const original = copy(rows);
+    for (const input of [rows, toDosageDetails(rows)]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toBe(generated(locale, "normalized", 180));
+      expect(text).not.toContain("160");
+    }
+    expect(rows).toEqual(original);
+  });
+
+  it.each([
+    ["en", "literal"], ["en", "default"], ["th", "literal"], ["th", "default"],
+  ] as const)("preserves custom formatter predicate visibility without duplicating it (%s, %s)", (locale, mode) => {
+    const native = importCanonicalCourse(parseSig(source).fhirNext);
+    const options: FormatOptions = { locale, realizationMode: "normalized", i18n: {
+      inherit: locale,
+      formatLong: context => mode === "literal" ? "Clinic-selected administration." : context.defaultText,
+    } };
+    const text = formatCanonicalCourse(native, "long", options);
+    const guard = locale === "en" ? "only if BP > 160" : "เฉพาะเมื่อ BP > 160";
+    expect(text.split(guard)).toHaveLength(2);
+    expect(text.endsWith(guard + ".")).toBe(true);
+    if (mode === "literal") expect(text).toBe("Clinic-selected administration " + guard + ".");
+    else expect(text).toContain("Otherwise hold");
+    expect(formatCanonicalCourse(native, "short", options)).toBe(
+      locale === "en" ? "1 tab PO BID only if BP > 160." : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.");
   });
 });

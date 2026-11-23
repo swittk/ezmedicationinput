@@ -77,6 +77,7 @@ import {
   CanonicalScheduleExpr,
   CanonicalSigClause,
   type MedicationInstructionActionDefinition,
+  type MedicationCondition,
   EventTiming,
   FhirPeriodUnit,
   RouteCode
@@ -87,6 +88,51 @@ import {
   type MealTimingGroup,
   type TimingSummaryOptions
 } from "./timing-summary";
+
+function medicationConditionBody(condition: MedicationCondition, words: CourseLanguage): string {
+  switch (condition.kind) {
+    case "measurement": {
+      // Live typed predicate values own the generated instruction. Its
+      // authored text remains source data and may describe an older value.
+      const operator = { gt: ">", ge: ">=", lt: "<", le: "<=", eq: "=", ne: "!=" }[condition.operation];
+      return (
+        words.measurementName(condition.name) + " " + operator + " " + condition.value + (condition.unit ? " " + condition.unit : "")
+      );
+    }
+    case "state": {
+      return condition.expected ? condition.name : words.notPrefix + condition.name;
+    }
+    case "text":
+      return condition.text;
+    case "not":
+      return words.notPrefix + "(" + medicationConditionBody(condition.condition, words) + ")";
+    case "all":
+    case "any": {
+      let result = "";
+      const separator = condition.kind === "all" ? words.allSeparator : words.anySeparator;
+      for (const value of condition.conditions) {
+        const body = medicationConditionBody(value, words);
+        // Preserve Boolean grouping. Only the outer NOT licenses 'unless'.
+        const grouped = (value.kind === "all" || value.kind === "any") && value.kind !== condition.kind;
+        if (result) result += separator;
+        result += grouped ? "(" + body + ")" : body;
+      }
+      return result;
+    }
+  }
+}
+/** Compose the existing typed guard with its selected administration text. */
+export function appendClinicalConditionText(text: string, condition: MedicationCondition, words: CourseLanguage): string {
+  const negated = condition.kind === "not";
+  const body = medicationConditionBody(negated ? condition.condition : condition, words);
+  const trimmed = text.trim().replace(/[.!?]+$/u, "");
+  return (trimmed ? trimmed + " " : "") + (negated ? words.unless : words.onlyIf) + " " + body + ".";
+}
+
+/** Custom callbacks retain the existing outer guard fallback. */
+export function canFormatConditionInPrimary(localization?: SigLocalization): boolean {
+  return !localization?.formatLong || isBuiltinSigFormatter(localization.formatLong);
+}
 
 export interface SigFormatContext {
   readonly style: "short" | "long";
@@ -2248,7 +2294,8 @@ function formatLongThai(
   if (
     options?.realizationMode === "roundtrip" &&
     clause.instructionGraph?.sourceLocale?.toLowerCase().startsWith("th") &&
-    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options)
+    clause.instructionGraph.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&
+    (!clause.clinicalAdjuncts?.condition || clause.sourceProjectionVerified !== false)
   ) {
     return clause.instructionGraph.sourceText.trim();
   }
@@ -2665,7 +2712,9 @@ function formatLongThai(
       })) continue;
       parts.push(value);
     }
-    return parts.join(" ").trim() || `${verb}.`;
+    const text = parts.join(" ").trim() || `${verb}.`;
+    return clause.clinicalAdjuncts?.condition
+      ? appendClinicalConditionText(text, clause.clinicalAdjuncts.condition, words) : text;
   }
 
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
@@ -2697,12 +2746,17 @@ function formatLongThai(
     !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
   );
   if (graphCanStandAlone) {
-    return [directInstruction, graphInstructionText, fallbackPatientInstruction]
+    const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]
       .filter(Boolean).join(" ").trim();
+    return clause.clinicalAdjuncts?.condition
+      ? appendClinicalConditionText(text, clause.clinicalAdjuncts.condition, words) : text;
   }
 
   let administrationText = richGraphAdministrationText ??
     joinThaiVerbAndBody(verb, body, Boolean(qualifierSuffix));
+  if (clause.clinicalAdjuncts?.condition)
+    administrationText = appendClinicalConditionText(administrationText, clause.clinicalAdjuncts.condition, words)
+      .replace(/[.!?]+$/u, "");
   if (preFlowsIntoAdministration && preGraphInstruction) {
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;
   }
