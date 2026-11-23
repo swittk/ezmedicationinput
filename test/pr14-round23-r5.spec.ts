@@ -8480,4 +8480,57 @@ describe("round52 interop current annotation and boundary ownership", () => {
     cloned.relationCoding!._code!.extension![0].valueString = "changed only on requested clone";
     expect(input).toEqual(before);
   });
+  it("preserves extra relation Coding data and detaches FHIR annotations", () => {
+    const codings = [
+      { code: "66459002" },
+      { system: "http://snomed.info/sct", code: "66459002", version: "20261101", display: "Around" },
+      { system: undefined, code: "66459002", display: undefined,
+        clinicNote: { labels: ["authored", "independent"] },
+        _system: { id: "system-note", extension: [{ url: "urn:clinic:source", valueString: "authored" }] },
+        _version: { id: "version-note" }, _display: { id: "display-note" },
+        _userSelected: { id: "selection-note" }, i18n: { th: "รอบ" } },
+      { code: "66459002", version: undefined, extraNote: undefined },
+      { id: "relation-annotation-only", _code: { id: "pending-code",
+        extension: [{ url: "urn:clinic:code-note", valueString: "retained" }] } },
+    ];
+    for (const coding of codings) {
+      const relation = { relationText: "around", relationCoding: coding, targetText: "left eye",
+        targetCoding: { system: "http://snomed.info/sct", code: "129004000",
+          display: "Left eye", i18n: { th: "ตาซ้าย" } }, sourceText: "around left eye" };
+      const before = persist(relation);
+      const originalKeys = Object.keys(coding);
+      const cloned = cloneBodySiteSpatialRelation(relation)!;
+      expect(cloned.relationCoding).toEqual(coding);
+      expect(cloned.relationCoding).not.toBe(coding);
+      for (const key of originalKeys) {
+        expect(Object.prototype.hasOwnProperty.call(cloned.relationCoding, key)).toBe(true);
+      }
+      expect(cloned.targetCoding).toEqual(relation.targetCoding);
+      expect(cloned.targetCoding).not.toBe(relation.targetCoding);
+      expect(cloned.targetCoding!.i18n).not.toBe(relation.targetCoding.i18n);
+      cloned.targetCoding!.i18n!.th = "changed only on clone";
+      if (coding._system) {
+        const copied = cloned.relationCoding as typeof coding;
+        expect(copied._system).not.toBe(coding._system);
+        expect(copied._system!.extension).not.toBe(coding._system.extension);
+        expect(copied._version).not.toBe(coding._version);
+        expect(copied._display).not.toBe(coding._display);
+        expect(copied._userSelected).not.toBe(coding._userSelected);
+        expect(copied.i18n).not.toBe(coding.i18n);
+        copied._system!.extension[0].valueString = "clone only";
+        copied.i18n!.th = "clone only";
+      }
+      if (coding._code) {
+        expect(cloned.relationCoding!._code).not.toBe(coding._code);
+        cloned.relationCoding!._code!.extension![0].valueString = "clone only";
+      }
+      expect(persist(relation)).toEqual(before);
+      expect(Object.keys(coding)).toEqual(originalKeys);
+    }
+    const target = { code: "129004000", display: undefined, i18n: undefined };
+    const clonedTarget = cloneBodySiteSpatialRelation({ relationText: "around", targetCoding: target })!.targetCoding!;
+    expect(clonedTarget).toEqual(target);
+    expect(Object.prototype.hasOwnProperty.call(clonedTarget, "display")).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(clonedTarget, "i18n")).toBe(true);
+  });
 });

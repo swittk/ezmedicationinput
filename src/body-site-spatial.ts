@@ -19,11 +19,27 @@ const TARGET_URL = "target";
 const TARGET_TEXT_URL = "targetText";
 const SOURCE_TEXT_URL = "sourceText";
 
-function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  if (!coding?.code) {
-    return undefined;
+/** Copy additional authored fields without recursively detaching opaque
+ * metadata. Standard FHIR annotations retain their existing clone contract. */
+function copyAdditionalCodingField(target: FhirCoding, source: FhirCoding, key: string): void {
+  const fields = target as Record<string, unknown>;
+  const value = (source as Record<string, unknown>)[key];
+  switch (key) {
+    case "extension":
+    case "_system":
+    case "_version":
+    case "_code":
+    case "_display":
+    case "_userSelected":
+    case "i18n":
+      fields[key] = cloneStructuredValue(value);
+      break;
+    case "__proto__":
+      Object.defineProperty(fields, key, { value, enumerable: true, configurable: true, writable: true });
+      break;
+    default:
+      fields[key] = value;
   }
-  return cloneStructuredValue(coding);
 }
 
 /** Shared immutable-by-contract Coding fields for ordinary projection and
@@ -33,18 +49,6 @@ function sharedCodingFields(coding:FhirCoding|undefined):FhirCoding|undefined {
   // identity (including source annotations) rather than allocating a second
   // coding shell solely to protect a caller from mutating its result.
   return coding?.code ? coding : undefined;
-}
-
-function cloneBodySiteCoding(coding: BodySiteCode | undefined): BodySiteCode | undefined {
-  if (!coding?.code) {
-    return undefined;
-  }
-  return {
-    system: coding.system,
-    code: coding.code,
-    display: coding.display,
-    i18n: cloneI18nRecord(coding.i18n)
-  };
 }
 
 function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | undefined {
@@ -68,13 +72,33 @@ export function cloneBodySiteSpatialRelation(
   if (!relation) {
     return undefined;
   }
-  return {
+  const coding = relation.relationCoding;
+  const target = relation.targetCoding;
+  // Allocate the ordinary relation and Coding shells together. Additional
+  // supplied Coding fields are copied into that shell in the same traversal;
+  // only standard child annotations need detachment.
+  const cloned: BodySiteSpatialRelation = {
     relationText: relation.relationText,
-    relationCoding: cloneCoding(relation.relationCoding),
+    relationCoding: coding
+      ? { system: coding.system, code: coding.code, display: coding.display }
+      : undefined,
     targetText: relation.targetText,
-    targetCoding: cloneBodySiteCoding(relation.targetCoding),
+    targetCoding: target
+      ? !("display" in target) && !("i18n" in target)
+        ? { system: target.system, code: target.code }
+        : { system: target.system, code: target.code, display: target.display,
+          i18n: cloneI18nRecord(target.i18n) }
+      : undefined,
     sourceText: relation.sourceText
   };
+  if (cloned.relationCoding) {
+    for (const key in coding) {
+      if (key !== "system" && key !== "code" && key !== "display") {
+        copyAdditionalCodingField(cloned.relationCoding, coding!, key);
+      }
+    }
+  }
+  return cloned;
 }
 
 export function buildBodySiteSpatialRelationExtension(
