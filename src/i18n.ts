@@ -62,7 +62,9 @@ import {
   instructionGraphSingleActionRepresentsText,
   instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
-  realizeInstructionGraph
+  realizeInstructionGraph,
+  attachInstructionGraphPrimaryConditions,
+  type InstructionGraphPrimaryCondition
 } from "./instruction-graph";
 import {
   AdviceArgumentRole,
@@ -2584,7 +2586,10 @@ function formatLongThai(
     }
   }
   const graphRealizationOmissions = [...additionalSemanticSourceTexts, ...codedWarningSources];
+  const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
+    positionedGraph && clause.instructionGraph?.relations?.length ? [] : undefined;
   const graphRealizationOptions = {
+    primaryConditions,
     includeWarnings: true,
     omitCanonicalAdministration: clause,
     instructionActionMap: options?.instructionActionMap,
@@ -2743,7 +2748,7 @@ function formatLongThai(
   );
   const graphCanStandAlone = Boolean(
     !richPrimaryGraphAction && !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&
-    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
+    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
   );
   if (graphCanStandAlone) {
     const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]
@@ -2757,6 +2762,8 @@ function formatLongThai(
   if (clause.clinicalAdjuncts?.condition)
     administrationText = appendClinicalConditionText(administrationText, clause.clinicalAdjuncts.condition, words)
       .replace(/[.!?]+$/u, "");
+  if (primaryConditions?.length)
+    administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th");
   if (preFlowsIntoAdministration && preGraphInstruction) {
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;
   }

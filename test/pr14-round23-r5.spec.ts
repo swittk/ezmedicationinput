@@ -7775,7 +7775,7 @@ describe("round49 current interop ownership", () => {
     }
   );
 
-  it.each(["unchanged", "dose", "dates", "weekdays", "date-annotation", "weekday-annotation"] as const)(
+  it.each(["unchanged", "dose", "dates", "weekdays", "date-annotation", "weekday-annotation", "date-order", "weekday-order"] as const)(
     "keeps completion ownership after an administration exclusion %s edit", edit => {
       const dates: FhirExtension = { id: "original-dates", url: DOSAGE_EXCLUDED_DATES_R5_URL, extension: [
         { id: "original-date", url: "date", valueDate: "2026-01-03" },
@@ -7785,6 +7785,8 @@ describe("round49 current interop ownership", () => {
         { url: "day", valueCode: "sat", _valueCode: { id: "original-weekday" } },
         { url: "urn:clinic:weekday-note", valueString: "preserve weekday metadata" },
       ] };
+      if (edit === "date-order") dates.extension!.push({ url: "date", valueDate: "2026-01-06" });
+      if (edit === "weekday-order") weekdays.extension!.push({ url: "day", valueCode: "sun" });
       let wire = toDosageDetails([
         { sequence: 1, id: "initial", doseAndRate: [{ doseQuantity: q(1) }],
           timing: { repeat: { ...daily, count: 2 } }, modifierExtension: [dates], extension: [weekdays] },
@@ -7802,11 +7804,15 @@ describe("round49 current interop ownership", () => {
       if (edit === "weekdays") setDosageExcludedWeekdays(member as FhirDosage, [FhirDayOfWeek.Friday, FhirDayOfWeek.Saturday]);
       if (edit === "date-annotation") member.modifierExtension!.find(item => item.url === DOSAGE_EXCLUDED_DATES_R5_URL)!.extension![0].id = "current-date-note";
       if (edit === "weekday-annotation") member.extension!.find(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)!.extension![0]._valueCode = { id: "current-weekday-note" };
+      if (edit === "date-order") member.modifierExtension!.find(item => item.url === DOSAGE_EXCLUDED_DATES_R5_URL)!.extension!.reverse();
+      if (edit === "weekday-order") member.extension!.find(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)!.extension!.reverse();
       const completionChanged = edit === "dates" || edit === "weekdays";
       for (let save = 0; save < 3; save++) {
         const before = persist(wire), view = fromDosageDetails(wire);
         expect(view.course.step?.map(step => step.id)).toEqual(
           completionChanged ? ["induction", "resume"] : ["induction", "pause", "resume"]);
+        if (!completionChanged) expect(view.course.step?.find(step => step.id === "pause")?.extension)
+          .toEqual([{ id: "pause-note", url: "urn:clinic:pause-note", valueString: "original pause" }]);
         expect(wire.step![1].start).toEqual(liveStart);
         expect(nextDueDoses(wire, options)).toEqual(completionChanged ? [
           // The initial 1-tablet dose and resumed 2-tablet dose are two

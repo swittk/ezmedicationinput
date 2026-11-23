@@ -36,6 +36,8 @@ import {
   instructionGraphTextParticipatesInRelation,
   realizeInstructionAction,
   realizeInstructionGraph,
+  attachInstructionGraphPrimaryConditions,
+  type InstructionGraphPrimaryCondition,
   instructionGraphPostAdministrationDiscourseConnector
 } from "./instruction-graph";
 import { resolveBodySitePhrase, realizeBodySiteRestriction } from "./body-site-grammar";
@@ -1713,6 +1715,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const representedInstructionTexts = additionalForDirectRendering
     .map((instruction) => instruction.text)
     .filter((text): text is string => Boolean(text));
+  const primaryConditions: InstructionGraphPrimaryCondition[] | undefined =
+    positionedGraph && clause.instructionGraph?.relations?.length ? [] : undefined;
   const preGraphInstruction = positionedGraph && clause.instructionGraph
     ? realizeInstructionGraph(clause.instructionGraph, "en", {
         includeWarnings: true,
@@ -1722,7 +1726,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         roundtripSafe: roundTrip,
         omitSourceTexts: additionalSemanticSourceTexts,
         omitRenderedAction: primaryGraphAction ?? richPrimaryGraphAction,
-        position: "pre"
+        position: "pre",
+        primaryConditions
       })
     : undefined;
   const graphPrimaryForOmission = primaryGraphAction ?? richPrimaryGraphAction;
@@ -1735,7 +1740,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
         roundtripSafe: roundTrip,
         omitSourceTexts: additionalSemanticSourceTexts,
         omitRenderedAction: graphPrimaryForOmission,
-        position: "post"
+        position: "post",
+        primaryConditions
       })
     : undefined;
   const graphInstruction = graphWholeInstruction ?? postGraphInstruction ?? (
@@ -1851,7 +1857,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const graphCanStandAlone = Boolean(
     !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
     clause.instructionGraph?.actions.length &&
-    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose
+    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
   );
   if (graphCanStandAlone) return condition
     ? appendClinicalConditionText(trailingInstructionText as string, condition, words)
@@ -1882,6 +1888,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
     if (condition) effectiveBase = appendClinicalConditionText(effectiveBase, condition, words);
+    if (primaryConditions?.length)
+      effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en");
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");
       const pre = rawPre ? rawPre.charAt(0).toUpperCase() + rawPre.slice(1) : rawPre;
@@ -1905,7 +1913,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     return [leadingInstructionText, effectiveBase, effectiveTrailing].filter(Boolean).join(" ").trim();
   };
   if (!body) {
-    if (!trailingInstructionText && !leadingInstructionText)
+    if (!trailingInstructionText && !leadingInstructionText && !primaryConditions?.length)
       return condition ? appendClinicalConditionText(`${verb}.`, condition, words) : `${verb}.`;
     return hasExplicitMethod ? compose(`${verb}.`) : compose("");
   }

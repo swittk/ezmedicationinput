@@ -137,11 +137,12 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       // completion retires only the outgoing pause, not its unchanged start.
       if (!prior.end && index <= lastDraftPredecessor) {
         const before = prior.component[member], after = current.component[member];
+        // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
             !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
               getDosageExcludedDates({ modifierExtension: after.modifierExtension })) ||
-            !equalStructuredValues(getDosageExcludedWeekdays({ extension: before.extension }),
-              getDosageExcludedWeekdays({ extension: after.extension })))
+            !equalStructuredValues(getDosageExcludedWeekdays({ extension: before.extension }).sort(),
+              getDosageExcludedWeekdays({ extension: after.extension }).sort()))
           changedCompletions.add(index);
       }
     }

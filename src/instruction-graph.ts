@@ -3756,10 +3756,12 @@ const DEFAULT_ACTION_REALIZER = (
   text = appendLocale(text, c.manner);
 
   if (locativeRelation && c.site) {
-    // The site is already part of `object`; rebuild from the label so the relation
-    // controls attachment rather than duplicating the site.
-    text = appendQuantity(c.label, amount);
-    text = appendLocale(text, c.manner);
+    // Rebuild only when the selected object is the site itself. A separate
+    // medication Theme/Object keeps its quantity and name before the site.
+    if (objectArg?.role === AdviceArgumentRole.Site) {
+      text = appendQuantity(c.label, amount);
+      text = appendLocale(text, c.manner);
+    }
     text = appendLocale(text, joinLocalizedTokens(c.locale, [locativeRelation, c.site]));
   }
 
@@ -4620,10 +4622,12 @@ function primaryDoseAmountOwner(
   let earlier:AdviceFrame|undefined,earlierCount=0;
   for(const action of graph.actions) {
     if(action.polarity===AdvicePolarity.Negate)continue;
-    let hasAmount=false;
-    for(const arg of action.args)
-      if(arg.role===AdviceArgumentRole.Amount&&arg.quantity){hasAmount=true;break;}
-    if(!hasAmount)continue;
+    let amount: AdviceArgument | undefined, theme: AdviceArgument | undefined;
+    for (const arg of action.args) {
+      if (!amount && arg.role === AdviceArgumentRole.Amount && arg.quantity) amount = arg;
+      if (!theme && (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) theme = arg;
+    }
+    if (!amount) continue;
     const definition = getMedicationInstructionAction(action.predicate.lemma, options);
     // A registered device preparation carries its own count. It cannot
     // acquire the administration's dose merely by appearing first.
@@ -4632,7 +4636,13 @@ function primaryDoseAmountOwner(
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
     if(!primary || action.span.end<=primary.start) {
-      if(definition?.definesDose) {
+      // A separate quantified material is not the medication amount merely
+      // because it is the sole preparation. Saved dose-owning nominals retain
+      // their original Amount constituent even after a live value/unit edit.
+      const ownsAmount = !primary || !theme || quantityCoveredByDose(theme, amount.quantity) &&
+        (!theme.span || !amount.span ||
+          theme.span.start <= amount.span.start && amount.span.end <= theme.span.end);
+      if (definition?.definesDose && ownsAmount) {
         earlierCount++;earlier=action;
       }
     }
@@ -4889,6 +4899,40 @@ function localizeConditionRelationText(
   return targetAdapter.joinConditionLead(lead, body);
 }
 
+/** A graph condition whose primary action is rendered by the clause formatter. */
+export interface InstructionGraphPrimaryCondition {
+  text: string;
+  position: "pre" | "post";
+  start: number;
+  imperative: boolean;
+}
+
+/** Attach only conditions owned by that primary, before independent graph
+ * actions/advice are composed. Ordinary clauses do not allocate this report. */
+export function attachInstructionGraphPrimaryConditions(
+  text: string,
+  conditions: InstructionGraphPrimaryCondition[] | undefined,
+  locale: string
+): string {
+  if (!text || !conditions?.length) return text;
+  const adapter = getInstructionActionLocaleAdapter(locale);
+  const ending = text.match(/[.!?]+$/u)?.[0] ?? "";
+  let body = ending ? text.slice(0, -ending.length) : text;
+  if (conditions.length > 1) conditions.sort((a, b) => a.start - b.start);
+  for (const condition of conditions) if (condition.position === "post") {
+    const continuation = adapter.postposedCondition(condition.text);
+    body += /^\s/u.test(continuation) ? continuation : " " + continuation;
+  }
+  for (let index = conditions.length - 1; index >= 0; index -= 1) {
+    const condition = conditions[index];
+    if (condition.position === "pre") {
+      const continuation = adapter.conditionalContinuation(body, condition.imperative);
+      body = condition.text + (/^[\s,;:]/u.test(continuation) ? "" : " ") + continuation;
+    }
+  }
+  return body.charAt(0).toUpperCase() + body.slice(1) + ending;
+}
+
 export function realizeInstructionGraph(
   graph: CanonicalInstructionGraph,
   locale = graph.sourceLocale ?? "en",
@@ -4899,6 +4943,8 @@ export function realizeInstructionGraph(
     /** The selected primary action already realized with its full arguments.
      * Identity remains valid even when imported source wording is absent. */
     omitRenderedAction?: AdviceFrame;
+    /** Report conditions attached to the covered primary during this walk. */
+    primaryConditions?: InstructionGraphPrimaryCondition[];
     /** Prefer each understood action's exact source wording when source and target locales match. */
     preferSourceText?: boolean;
     /** Source phrases already rendered through another semantic channel. */
@@ -4952,11 +4998,15 @@ export function realizeInstructionGraph(
   };
   const frames: number[] = [];
   const conditionTargets = new Map<number | undefined, AdviceFrame>();
+  let coveredPrimaryAction: number | undefined;
   let displayedAmountOwner = amountOwner;
   for (let actionIndex = 0; actionIndex < graph.actions.length; actionIndex += 1) {
     const sourceFrame = graph.actions[actionIndex];
     if (sourceFrame === options?.omitRenderedAction) {
-      if (!options?.onlyWarnings) conditionTargets.set(actionIndex, sourceFrame);
+      if (!options?.onlyWarnings) {
+        conditionTargets.set(actionIndex, sourceFrame);
+        if (actionIndex === primaryAction) coveredPrimaryAction = actionIndex;
+      }
       continue;
     }
     const ownsPrimary = primaryAction >= 0
@@ -4988,8 +5038,10 @@ export function realizeInstructionGraph(
       // The administration sentence covers this action, not its graph-only
       // conditional relation. Keep the target without emitting the action twice.
       if (!options?.onlyWarnings &&
-          !(options?.includeWarnings === false && frame.polarity === AdvicePolarity.Negate))
+          !(options?.includeWarnings === false && frame.polarity === AdvicePolarity.Negate)) {
         conditionTargets.set(actionIndex, frame);
+        if (ownsPrimary) coveredPrimaryAction = actionIndex;
+      }
       continue;
     }
     if (!inPosition) continue;
@@ -5084,6 +5136,16 @@ export function realizeInstructionGraph(
       locale
     );
     if (relationText) {
+      if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
+          relationHasGrammarFeature(relation.kind, "conditionScope")) {
+        options.primaryConditions.push({
+          text: relationText,
+          position: relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post",
+          start: relation.span.start,
+          imperative: !target.modality && target.polarity !== AdvicePolarity.Negate
+        });
+        continue;
+      }
       nodes.push({
         start: relation.span.start,
         end: relation.span.end,

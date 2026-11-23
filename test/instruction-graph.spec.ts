@@ -4299,7 +4299,10 @@ describe("round39 independent graph arguments and current conditions", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text.match(/if able to swallow/giu)).toHaveLength(1);
-        expect(text.match(locale === "en" ? /Swallow 1 tablet/gu : /กลืน 1 เม็ด/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /swallow 1 tablet/giu : /กลืน 1 เม็ด/gu)).toHaveLength(1);
+        if (locale === "en") expect(text).toMatch(postposed
+          ? /^Swallow 1 tablet[^.!?]* if able to swallow\.$/u
+          : /^If able to swallow, swallow 1 tablet/u);
         expect(text).toContain(locale === "en" ? "200 mL water" : "200 มิลลิลิตรน้ำ");
       }
     expect(JSON.stringify(row)).toBe(original);
@@ -4309,7 +4312,7 @@ describe("round39 independent graph arguments and current conditions", () => {
     ["Mix the tablet with water", "Mix tablet with water", "ผสมยาเม็ดกับน้ำ"],
     ["Mix the tablet with 100 mL water", "Mix tablet with 100 mL water", "ผสมยาเม็ดกับน้ำ 100 มิลลิลิตร"],
     ["Mix the tablet with milk", "Mix tablet with milk", "ผสมยาเม็ดกับmilk"],
-    ["Mix with the tablet", "Mix with tablet", "ผสมยาเม็ด"],
+    ["Mix with the tablet", "Mix with tablet", "ผสมด้วยยาเม็ด"],
     ["Dissolve 1 tablet in water", "Dissolve 1 tablet in water", "ละลาย1 เม็ดในน้ำ"]
   ])("keeps the head object and its companion distinct: %s", (source, english, thai) => {
     const parsed = parsePublicSig(source);
@@ -4526,7 +4529,10 @@ describe("round41 supported graph and clinical preview facts", () => {
       for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         expect(text.match(/if able to swallow/giu)).toHaveLength(1);
-        expect(text.match(locale === "en" ? /Swallow 1 tablet/gu : /1 เม็ด/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /swallow 1 tablet/giu : /1 เม็ด/gu)).toHaveLength(1);
+        if (locale === "en") expect(text).toMatch(postposed
+          ? /^Swallow 1 tablet[^.!?]* if able to swallow\.$/u
+          : /^If able to swallow, swallow 1 tablet/u);
       }
     expect(realizeInstructionGraph(graph, "en", { onlyWarnings: true })).toBeUndefined();
     expect(JSON.stringify(row)).toBe(original);
@@ -5286,10 +5292,15 @@ describe("round47 public saved graph conditions and partial quantities", () => {
       expect(realizeInstructionGraph(graph, "en")).toBe(direct);
     const r6 = toDosageDetails([row]);
     for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
-      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(english).toBe(postposed ? "Swallow 1 tablet. If able to swallow." : "If able to swallow. Swallow 1 tablet.");
-      expect(thai).toBe(postposed ? "รับประทานครั้งละ 1 เม็ด. If able to swallow." : "If able to swallow. รับประทานครั้งละ 1 เม็ด.");
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const english = formatSig(input, "long", { locale: "en", realizationMode });
+        const thai = formatSig(input, "long", { locale: "th", realizationMode });
+        expect(english).toBe(postposed ? "Swallow 1 tablet if able to swallow." : "If able to swallow, swallow 1 tablet.");
+        const administration = realizationMode === "roundtrip" ? "รับประทาน 1 เม็ด" : "รับประทานครั้งละ 1 เม็ด";
+        expect(thai).toBe(postposed ? `${administration} if able to swallow.` : `If able to swallow ให้${administration}.`);
+      }
+      expect(JSON.stringify(input)).toBe(before);
     }
     expect(JSON.stringify(row)).toBe(original);
   });
@@ -5621,4 +5632,105 @@ describe("round48 saved preparation quantities", () => {
     }
     expect(JSON.stringify(legacy)).toBe(before);
   });
+});
+
+
+describe("round 49 saved instruction ownership", () => {
+  // Complete saved inputs are frozen independently of the current parser.
+  const mixing: { source: string; wire: FhirDosage[]; thai: string }[] = JSON.parse("[{\"source\":\"Mix with a household spoon\",\"wire\":[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Mix with a household spoon\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421463005\",\"display\":\"With - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"mix\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Mix\"},{\"url\":\"semanticClass\",\"valueString\":\"prepare\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ผสม\"}]},{\"url\":\"predicateRealizer\",\"valueCode\":\"mix-substance\"},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421826007\",\"display\":\"Mix\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":26},{\"url\":\"sourceText\",\"valueString\":\"Mix with a household spoon\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"material\"},{\"url\":\"text\",\"valueString\":\"a household spoon\"},{\"url\":\"normalized\",\"valueString\":\"a household spoon\"},{\"url\":\"spanStart\",\"valueInteger\":9},{\"url\":\"spanEnd\",\"valueInteger\":26}]}]},{\"url\":\"coverage\",\"extension\":[{\"url\":\"understoodCharacters\",\"valueInteger\":26},{\"url\":\"opaqueCharacters\",\"valueInteger\":0},{\"url\":\"ratio\",\"valueDecimal\":1},{\"url\":\"complete\",\"valueBoolean\":true}]}]},{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Mix with a household spoon\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"755ab910a97fa391\"},{\"url\":\"textFingerprint\",\"valueString\":\"637eec5945f4701d\"}]}]}],\"text\":\"Mix with a household spoon.\",\"patientInstruction\":\"Mix with a household spoon\"}],\"thai\":\"ผสมด้วยa household spoon.\"},{\"source\":\"Mix with household spoon\",\"wire\":[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Mix with household spoon\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421463005\",\"display\":\"With - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"mix\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Mix\"},{\"url\":\"semanticClass\",\"valueString\":\"prepare\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ผสม\"}]},{\"url\":\"predicateRealizer\",\"valueCode\":\"mix-substance\"},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421826007\",\"display\":\"Mix\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":24},{\"url\":\"sourceText\",\"valueString\":\"Mix with household spoon\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"object\"},{\"url\":\"text\",\"valueString\":\"household spoon\"},{\"url\":\"normalized\",\"valueString\":\"household spoon\"},{\"url\":\"conceptId\",\"valueString\":\"household-spoon\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"303514007\",\"display\":\"Spoon\"}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"303514007\",\"display\":\"Spoon\"}},{\"url\":\"spanStart\",\"valueInteger\":9},{\"url\":\"spanEnd\",\"valueInteger\":24},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"household spoon\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ช้อนกินข้าว\"}]}]}]},{\"url\":\"coverage\",\"extension\":[{\"url\":\"understoodCharacters\",\"valueInteger\":24},{\"url\":\"opaqueCharacters\",\"valueInteger\":0},{\"url\":\"ratio\",\"valueDecimal\":1},{\"url\":\"complete\",\"valueBoolean\":true}]}]},{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Mix with household spoon\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"804ea8f8c2800b4f\"},{\"url\":\"textFingerprint\",\"valueString\":\"6c1690c82d30fb50\"}]}]}],\"text\":\"Mix with household spoon.\",\"patientInstruction\":\"Mix with household spoon\"}],\"thai\":\"ผสมด้วยช้อนกินข้าว.\"},{\"source\":\"Mix with bottle\",\"wire\":[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Mix with bottle\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421463005\",\"display\":\"With - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"mix\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Mix\"},{\"url\":\"semanticClass\",\"valueString\":\"prepare\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ผสม\"}]},{\"url\":\"predicateRealizer\",\"valueCode\":\"mix-substance\"},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421826007\",\"display\":\"Mix\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":15},{\"url\":\"sourceText\",\"valueString\":\"Mix with bottle\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"container\"},{\"url\":\"text\",\"valueString\":\"bottle\"},{\"url\":\"normalized\",\"valueString\":\"bottle\"},{\"url\":\"conceptId\",\"valueString\":\"bottle\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"68276009\",\"display\":\"Bottle\"}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"68276009\",\"display\":\"Bottle\"}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://standardterms.edqm.eu\",\"code\":\"30008000\",\"display\":\"Bottle\"}},{\"url\":\"spanStart\",\"valueInteger\":9},{\"url\":\"spanEnd\",\"valueInteger\":15},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"bottle\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ขวด\"}]}]}]},{\"url\":\"coverage\",\"extension\":[{\"url\":\"understoodCharacters\",\"valueInteger\":15},{\"url\":\"opaqueCharacters\",\"valueInteger\":0},{\"url\":\"ratio\",\"valueDecimal\":1},{\"url\":\"complete\",\"valueBoolean\":true}]}]},{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Mix with bottle\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"adfd6b811a8bf2d1\"},{\"url\":\"textFingerprint\",\"valueString\":\"45c8fff0ebd7df19\"}]}]}],\"text\":\"Mix with bottle.\",\"patientInstruction\":\"Mix with bottle\"}],\"thai\":\"ผสมด้วยขวด.\"}]");
+  it.each(mixing)("retains the vehicle relation in saved $source", ({ source, wire, thai }) => {
+    const original = JSON.stringify(wire), r6 = toDosageDetails(wire);
+    for (const input of [wire, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode }).replace(/\.$/u, "")).toBe(source);
+        expect(formatSig(input, "long", { locale: "th", realizationMode })).toBe(thai);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(wire)).toBe(original);
+  });
+
+  const savedWarning: FhirDosage[] = JSON.parse("[{\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Do not apply 1 g hydrocortisone cream to broken skin\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"warning\"},{\"url\":\"polarity\",\"valueCode\":\"negate\"},{\"url\":\"relationCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421035004\",\"display\":\"To - dosing instruction fragment\"}},{\"url\":\"predicateLemma\",\"valueString\":\"apply\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Apply\"},{\"url\":\"semanticClass\",\"valueString\":\"administration\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ทา\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"738991002\",\"display\":\"Apply\"}},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"417924000\",\"display\":\"Apply - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":52},{\"url\":\"sourceText\",\"valueString\":\"\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"theme\"},{\"url\":\"text\",\"valueString\":\"hydrocortisone cream\"},{\"url\":\"normalized\",\"valueString\":\"hydrocortisone cream\"},{\"url\":\"spanStart\",\"valueInteger\":17},{\"url\":\"spanEnd\",\"valueInteger\":37}]},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"site\"},{\"url\":\"text\",\"valueString\":\"broken skin\"},{\"url\":\"normalized\",\"valueString\":\"broken skin\"},{\"url\":\"conceptId\",\"valueString\":\"broken-skin\"},{\"url\":\"component\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"head\"},{\"url\":\"text\",\"valueString\":\"broken skin\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"247442005\",\"display\":\"Broken skin (disorder)\"}}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"broken skin\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ผิวหนังที่มีแผล\"}]}]},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"amount\"},{\"url\":\"text\",\"valueString\":\"1 g\"},{\"url\":\"normalized\",\"valueString\":\"g\"},{\"url\":\"spanStart\",\"valueInteger\":13},{\"url\":\"spanEnd\",\"valueInteger\":16},{\"url\":\"quantity\",\"extension\":[{\"url\":\"value\",\"valueDecimal\":1},{\"url\":\"unit\",\"valueString\":\"g\"}]}]}]}]}]}]");
+  it.each([true, false].flatMap(negated => [true, false].map(quantified => ({ negated, quantified }))))(
+    "retains medication Theme and Site together (negated=$negated, quantified=$quantified)",
+    ({ negated, quantified }) => {
+      let wire: FhirDosage[] = JSON.parse(JSON.stringify(savedWarning));
+      if (!negated || !quantified) {
+        const source = `${negated ? "Do not apply" : "Apply"} ${quantified ? "1 g " : ""}hydrocortisone cream to broken skin`;
+        const frame = parseInstructionActions(source)[0];
+        const object = frame.args.find(arg => arg.role === AdviceArgumentRole.Object)!;
+        frame.args[frame.args.indexOf(object)] = { role: AdviceArgumentRole.Theme,
+          text: "hydrocortisone cream", normalized: "hydrocortisone cream",
+          span: { start: source.indexOf("hydrocortisone"), end: source.indexOf(" to ") } };
+        frame.sourceText = "";
+        wire = [{ extension: [buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!] }];
+      }
+      const original = JSON.stringify(wire), r6 = toDosageDetails(wire);
+      for (const input of [wire, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+        const before = JSON.stringify(input);
+        for (const realizationMode of ["normalized", "roundtrip"] as const) for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text).toContain("hydrocortisone cream");
+          expect(text.match(/hydrocortisone cream/gu)).toHaveLength(1);
+          expect(text).toContain(locale === "en" ? "to broken skin" : "ผิวหนังที่มีแผล");
+          expect(text.includes("1 g")).toBe(quantified);
+          expect(locale === "en" ? /^Do not /u.test(text) : /^ห้าม/u.test(text)).toBe(negated);
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(wire)).toBe(original);
+    }
+  );
+
+  const savedPreparation: FhirDosage[] = JSON.parse("[{\"method\":{\"text\":\"Swallow\"},\"doseAndRate\":[{\"doseQuantity\":{\"value\":1,\"unit\":\"tab\"}}],\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-instruction-graph\",\"extension\":[{\"url\":\"sourceText\",\"valueString\":\"Measure 100 mL of water; swallow whole\"},{\"url\":\"sourceLocale\",\"valueCode\":\"en\"},{\"url\":\"primaryAdministrationStart\",\"valueInteger\":25},{\"url\":\"primaryAdministrationEnd\",\"valueInteger\":38},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":0},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"predicateLemma\",\"valueString\":\"measure\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Measure\"},{\"url\":\"semanticClass\",\"valueString\":\"measure\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ตวง\"}]},{\"url\":\"predicateRealizer\",\"valueCode\":\"object-amount-material\"},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"129266000\",\"display\":\"Measurement - action\"}},{\"url\":\"spanStart\",\"valueInteger\":0},{\"url\":\"spanEnd\",\"valueInteger\":23},{\"url\":\"sourceText\",\"valueString\":\"Measure 100 mL of water\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"theme\"},{\"url\":\"text\",\"valueString\":\"water\"},{\"url\":\"normalized\",\"valueString\":\"water\"},{\"url\":\"conceptId\",\"valueString\":\"water\"},{\"url\":\"spanStart\",\"valueInteger\":18},{\"url\":\"spanEnd\",\"valueInteger\":23},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"water\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"น้ำ\"}]}]},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"amount\"},{\"url\":\"text\",\"valueString\":\"100 mL\"},{\"url\":\"normalized\",\"valueString\":\"mL\"},{\"url\":\"spanStart\",\"valueInteger\":8},{\"url\":\"spanEnd\",\"valueInteger\":14},{\"url\":\"quantity\",\"extension\":[{\"url\":\"value\",\"valueDecimal\":100},{\"url\":\"unit\",\"valueString\":\"mL\"}]}]}]},{\"url\":\"action\",\"extension\":[{\"url\":\"sequenceIndex\",\"valueInteger\":1},{\"url\":\"force\",\"valueCode\":\"sequence\"},{\"url\":\"predicateLemma\",\"valueString\":\"swallow\"},{\"url\":\"predicateDisplay\",\"valueString\":\"Swallow\"},{\"url\":\"semanticClass\",\"valueString\":\"ingest\"},{\"url\":\"predicateTranslation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"กลืน\"}]},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"738995006\",\"display\":\"Swallow\"}},{\"url\":\"predicateCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"421521009\",\"display\":\"Swallow - dosing instruction imperative\"}},{\"url\":\"spanStart\",\"valueInteger\":25},{\"url\":\"spanEnd\",\"valueInteger\":38},{\"url\":\"sourceText\",\"valueString\":\"swallow whole\"},{\"url\":\"argument\",\"extension\":[{\"url\":\"role\",\"valueCode\":\"manner\"},{\"url\":\"text\",\"valueString\":\"whole\"},{\"url\":\"normalized\",\"valueString\":\"whole\"},{\"url\":\"conceptId\",\"valueString\":\"whole\"},{\"url\":\"coding\",\"valueCoding\":{\"system\":\"urn:ezmedicationinput:CodeSystem:medication-instruction-concept\",\"code\":\"whole\",\"display\":\"whole\",\"_display\":{\"extension\":[{\"url\":\"http://hl7.org/fhir/StructureDefinition/translation\",\"extension\":[{\"url\":\"lang\",\"valueCode\":\"th\"},{\"url\":\"content\",\"valueString\":\"ทั้งเม็ด\"}]}]}}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"urn:ezmedicationinput:CodeSystem:medication-instruction-concept\",\"code\":\"whole\",\"display\":\"whole\",\"_display\":{\"extension\":[{\"url\":\"http://hl7.org/fhir/StructureDefinition/translation\",\"extension\":[{\"url\":\"lang\",\"valueCode\":\"th\"},{\"url\":\"content\",\"valueString\":\"ทั้งเม็ด\"}]}]}}},{\"url\":\"argumentCoding\",\"valueCoding\":{\"system\":\"http://snomed.info/sct\",\"code\":\"255503000\",\"display\":\"Entire (qualifier value)\"}},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"en\"},{\"url\":\"text\",\"valueString\":\"whole\"}]},{\"url\":\"translation\",\"extension\":[{\"url\":\"locale\",\"valueCode\":\"th\"},{\"url\":\"text\",\"valueString\":\"ทั้งเม็ด\"}]}]}]}]}]}]");
+  it.each([1, 2])("keeps independent water quantity before Swallow %s tablets", value => {
+    const wire: FhirDosage[] = JSON.parse(JSON.stringify(savedPreparation));
+    wire[0].doseAndRate![0].doseQuantity!.value = value;
+    const original = JSON.stringify(wire), r6 = toDosageDetails(wire);
+    for (const input of [wire, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode }))
+          .toBe(`${realizationMode === "roundtrip" ? "Measure 100 mL of water" : "Measure water 100 mL"}. Swallow ${value} tablet${value === 1 ? "" : "s"} whole.`);
+        expect(formatSig(input, "long", { locale: "th", realizationMode }))
+          .toBe(`ตวงน้ำ 100 มิลลิลิตร. กลืน ${value} เม็ดทั้งเม็ด.`);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(wire)).toBe(original);
+  });
+
+  it.each([
+    "Dissolve 2 tablets in water, then drink slowly",
+    "Disperse 2 tablets in water, then swallow slowly with water",
+    "Measure 5 mL of medication; swallow",
+    "Draw up 2 mL, then inject"
+  ].flatMap(source => ["tab", "mg"].map(unit => ({ source, unit })) ))(
+    "keeps an actual preparation dose owner after an external edit: $source / $unit",
+    ({ source, unit }) => {
+      // Disperse is the existing institution-configured procedure control.
+      const options: ParseOptions = source.startsWith("Disperse") ? { instructionActionMap: {
+        disperse: { code: "disperse", display: "Disperse", semanticClass: "procedure", procedural: true,
+          acceptsAmount: true, definesDose: true, argumentParser: "amount-material-destination",
+          realizer: "amount-material-destination" }
+      } } : {};
+      const r6 = JSON.parse(JSON.stringify(parsePublicSig(source, options).fhirNext)) as FhirR6DosageInstruction;
+      expect(r6.step).toHaveLength(1);
+      expect(r6.step![0].component).toHaveLength(1);
+      r6.step![0].component[0].doseAndRate![0].doseQuantity!.value = 3;
+      r6.step![0].component[0].doseAndRate![0].doseQuantity!.unit = unit;
+      const original = JSON.stringify(r6), r5 = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+      for (const input of [r6, r5, toDosageDetails(r5)]) {
+        const before = JSON.stringify(input);
+        for (const realizationMode of ["normalized", "roundtrip"] as const) {
+          const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
+          expect(text.match(unit === "tab" ? /3 tablets/gu : /3 mg/gu)).toHaveLength(1);
+          expect(text).toMatch(new RegExp("^" + source.split(" ")[0]));
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(r6)).toBe(original);
+    }
+  );
 });

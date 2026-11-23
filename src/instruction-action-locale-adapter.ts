@@ -161,11 +161,18 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     substanceArg = unmarkedSubstance;
     // Saved graphs can attach WITH to the frame while their distinct
     // instrument/container keeps its original nominal lexical role.
-    if (!substanceArg && unmarkedNominal && c.frame.relation &&
+    if (!substanceArg && c.frame.relation &&
         (relationHasGrammarFeature(c.frame.relation, "accompanimentComplement") ||
           relationHasSemanticClass(c.frame.relation, "accompaniment") ||
-          relationHasSemanticClass(c.frame.relation, "locative")))
-      substanceArg = unmarkedNominal;
+          relationHasSemanticClass(c.frame.relation, "locative"))) {
+      const legacyVehicle = unmarkedNominal ?? (themeArg &&
+        (themeArg.role === AdviceArgumentRole.Object || themeArg.role === AdviceArgumentRole.Container)
+        ? themeArg : undefined);
+      if (legacyVehicle) {
+        substanceArg = legacyVehicle;
+        if (themeArg === legacyVehicle) themeArg = undefined;
+      }
+    }
   }
   const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
   // A quantity-only daughter carries its unit as normalized identity; it has
@@ -409,7 +416,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         ? "โดยไม่ใช้"
         : vehicleRelation && relationHasSemanticClass(vehicleRelation, "locative")
           ? localizeAdviceRelation(vehicleRelation, c.locale) ?? vehicleRelation
-          : themeText ? "กับ" : "";
+          : themeText ? "กับ" : vehicleRelation === AdviceRelation.With ? "ด้วย" : "";
       const substanceText = substance || substanceAmount
         ? `${materialRelation}${substance ?? ""}${substanceAmount ? (substance ? amountSeparator : "") + substanceAmount : ""}` : "";
       const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
