@@ -332,6 +332,17 @@ function timingAnnotations(
   if (event) out.eventWindow = getTimingEventWindow({ extension: [event] });
   return out;
 }
+/** Metadata-only weekday positions stay on the wire, not in recurrence facts. */
+function timingWeekdays(source: NonNullable<FhirTiming["repeat"]>["dayOfWeek"]) {
+  if (!source) return undefined;
+  let weekdays: typeof source | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const day = source[index];
+    if (day === null) weekdays ??= source.slice(0, index);
+    else if (weekdays) weekdays.push(day);
+  }
+  return weekdays ?? source;
+}
 function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): CanonicalTiming | undefined {
   if (!t) return undefined;
   const out: CanonicalTiming = { code: t.code, explicitEvents: getTimingEvents(t), provenance: record(t) };
@@ -359,7 +370,7 @@ function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): Canonical
       calendarWindow: r.boundsPeriod,
       clocks: r.timeOfDay !== undefined ? getTimingClocks(r) : annotations?.clocks,
       anchors: r.when,
-      dayOfWeek: r.dayOfWeek,
+      dayOfWeek: timingWeekdays(r.dayOfWeek),
       offset: annotations?.offset ?? r.offset,
       offsetMin: annotations?.offsetMin,
       offsetMax: annotations?.offsetMax,
@@ -1031,6 +1042,9 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       unresolvedMarkerDuration ? prior?.durationUnit : r.occurrenceDurationUnit;
     const offset = r.offset !== undefined && r.offset >= 0 && Number.isInteger(r.offset)
       ? r.offset : undefined;
+    // Imported native facts are immutable; retain the original primitive slots
+    // and their annotations just as the event projection does below.
+    const dayOfWeek = prior?.dayOfWeek ?? r.dayOfWeek;
     if (
       prior &&
       prior.count === r.count &&
@@ -1040,7 +1054,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       prior.period === r.period &&
       prior.periodMax === r.periodMax &&
       prior.periodUnit === r.periodUnit &&
-      prior.dayOfWeek === r.dayOfWeek &&
+      prior.dayOfWeek === dayOfWeek &&
       prior.offset === offset &&
       prior.duration === occurrenceDuration &&
       prior.durationMax === occurrenceDurationMax &&
@@ -1063,7 +1077,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       assign(value, "period", r.period);
       assign(value, "periodMax", r.periodMax);
       assign(value, "periodUnit", r.periodUnit);
-      assign(value, "dayOfWeek", r.dayOfWeek);
+      assign(value, "dayOfWeek", dayOfWeek);
       assign(value, "offset", offset);
       assign(value, "duration", occurrenceDuration);
       assign(value, "durationMax", occurrenceDurationMax);

@@ -8050,3 +8050,202 @@ describe("round50 explicit interchange scope and primitive ownership", () => {
     }
   });
 });
+
+
+describe("round51 retained phase boundaries and primitive positions", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] };
+  const boundary = (value: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value, unit: "d" } });
+  const options = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z",
+    timeZone: "UTC", limit: 40 };
+  const dates = (days: number[]) => days.map(day => "2026-01-" + ("0" + day).slice(-2) + "T09:00:00+00:00");
+
+  it.each(["unchanged", "id", "boundary", "start-only", "annotation"] as const)(
+    "retains historical phase fields beneath a partial public %s edit", edit => {
+      const originalNote = { id: "stage-note", url: "urn:clinic:phase-note",
+        valueString: "preserve historical phase annotation" };
+      const originalStep: FhirR6DosageStep = { id: "old-maintenance", start: boundary(7), end: boundary(14),
+        extension: [originalNote], component: [{ id: "historical-dose", doseAndRate: [{ doseQuantity: q(2) }],
+          timing: { repeat: daily } }] };
+      const marker: FhirExtension = { id: "historical-full-course", url: DOSAGE_DETAILS_R5_URL, extension: [{
+        url: "dosageDetails", extension: [
+          encodeR6SourceMetadata("step", { id: "historical-first", component: [] }, "step"),
+          encodeR6SourceMetadata("step", originalStep, "step"),
+        ],
+      }] };
+      const compact = toFhirR5Dosages({ step: [{ id: "loading", end: boundary(7), component: [{
+        id: "compact-dose", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      }] }] })[0];
+      compact.modifierExtension!.find(item => item.url === DOSAGE_DETAILS_R5_URL)!
+        .extension!.find(item => item.url === "stepCount")!.valueInteger = 2;
+      const rows: EzDosage[] = JSON.parse(JSON.stringify([compact,
+        { ...originalStep.component[0], sequence: 2, modifierExtension: [marker] }]));
+      const currentNote = { url: "urn:clinic:edited-note", valueString: "current note" };
+      const editing: EzCourseMetadata | undefined = edit === "unchanged" ? undefined : { step: [{
+        sequence: 2, ...(edit === "id" ? { id: "maintenance" } :
+          edit === "boundary" ? { start: boundary(9), end: boundary(16) } :
+          edit === "start-only" ? { start: boundary(9) } : { extension: [currentNote] }),
+      }] };
+      const before = persist({ rows, editing });
+      let wire = toDosageDetails(rows, undefined, editing);
+      expect(persist({ rows, editing })).toEqual(before);
+      const startDay = edit === "boundary" || edit === "start-only" ? 10 : 8;
+      const endDay = edit === "boundary" ? 16 : 14;
+      const maintenanceDays = Array.from({ length: endDay - startDay + 1 }, (_, index) => startDay + index);
+      for (let save = 0; save < 3; save++) {
+        const beforeWire = persist(wire), step = wire.step![1];
+        expect(step.id).toBe(edit === "id" ? "maintenance" : "old-maintenance");
+        expect(step.start).toEqual(boundary(startDay - 1));
+        expect(step.end).toEqual(boundary(endDay));
+        expect(step.extension).toEqual(edit === "annotation" ? [currentNote] : [originalNote]);
+        expect(step.component[0]).toMatchObject({ id: "historical-dose", doseAndRate: [{ doseQuantity: q(2) }] });
+        expect(nextDueDoses(wire, options)).toEqual(dates([1, 2, 3, 4, 5, 6, 7, ...maintenanceDays]));
+        expect(calculateTotalUnits({ dosage: wire, ...options, durationValue: 20, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: edit === "start-only" ? 17 : 21, unit: "tab" });
+        const coldRows = persist(toFhirR5Dosages(wire));
+        expect(wire).toEqual(beforeWire);
+        wire = toDosageDetails(coldRows);
+        expect(JSON.stringify(wire)).toContain("preserve historical phase annotation");
+      }
+    });
+
+  function dependentPause(extra = false, independentStart = false, fixedEnd = false): FhirR6DosageInstruction {
+    const pauseSequence = extra ? 4 : 3;
+    return toDosageDetails([
+      { sequence: 1, id: "a-dose", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } },
+      { sequence: 2, id: "b-dose", doseAndRate: [{ doseQuantity: q(2) }],
+        timing: { repeat: { ...daily, boundsDuration: { value: 1, unit: "d" } } } },
+      ...(extra ? [{ sequence: 3, id: "c-dose", doseAndRate: [{ doseQuantity: q(2) }],
+        timing: { repeat: { ...daily, boundsDuration: { value: 1, unit: "d" } } } }] : []),
+      { sequence: pauseSequence + 1, id: "maintenance-dose", doseAndRate: [{ doseQuantity: q(3) }],
+        timing: { repeat: { ...daily, count: 2 } } },
+    ], undefined, { step: [
+      { sequence: 1, id: "phase-a", end: boundary(1) },
+      { sequence: 2, id: "phase-b", ...(independentStart ? { start: boundary(2) } : {}),
+        ...(fixedEnd ? { end: boundary(3) } : {}) },
+      ...(extra ? [{ sequence: 3, id: "phase-c" }] : []),
+      { sequence: pauseSequence, id: "pause", end: boundary(extra || independentStart || fixedEnd ? 4 : 3),
+        extension: [{ id: "saved-pause-note", url: "urn:clinic:pause-note", valueString: "original pause retained" }] },
+      { sequence: pauseSequence + 1, id: "maintenance" },
+    ] });
+  }
+
+  it.each(["unchanged", "earlier-end", "dose", "annotation", "two-implicit", "independent-start", "fixed-end"] as const)(
+    "keeps only independently owned pauses after a transitive %s edit", edit => {
+      let wire = persist(dependentPause(edit === "two-implicit", edit === "independent-start", edit === "fixed-end"));
+      const originalDraft = persist(wire.extension!.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL)!);
+      const currentStart = persist(wire.step![wire.step!.length - 1].start);
+      if (edit === "earlier-end" || edit === "two-implicit" || edit === "independent-start" || edit === "fixed-end")
+        wire.step![0].end = boundary(2);
+      if (edit === "dose") wire.step![0].component[0].doseAndRate![0].doseQuantity!.value = 4;
+      if (edit === "annotation") wire.step![0].end!.id = "current-boundary-note";
+      const retired = edit === "earlier-end" || edit === "two-implicit";
+      const phaseIds = ["phase-a", "phase-b", ...(edit === "two-implicit" ? ["phase-c"] : []),
+        ...(!retired ? ["pause"] : []), "maintenance"];
+      const expectedDays = edit === "two-implicit" ? [1, 2, 3, 4, 5, 6] :
+        edit === "earlier-end" ? [1, 2, 3, 4, 5] :
+        edit === "independent-start" || edit === "fixed-end" ? [1, 2, 3, 5, 6] : [1, 2, 4, 5];
+      const total = edit === "dose" || edit === "two-implicit" ? 12 :
+        edit === "earlier-end" || edit === "independent-start" || edit === "fixed-end" ? 10 : 9;
+      for (let save = 0; save < 3; save++) {
+        const before = persist(wire);
+        expect(fromDosageDetails(wire).course.step?.map(step => step.id)).toEqual(phaseIds);
+        expect(wire.step![wire.step!.length - 1].start).toEqual(currentStart);
+        expect(nextDueDoses(wire, options)).toEqual(dates(expectedDays));
+        expect(calculateTotalUnits({ dosage: wire, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: total, unit: "tab" });
+        expect(wire).toEqual(before);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+        expect(JSON.stringify(wire)).toContain("original pause retained");
+        expect(JSON.stringify(wire)).toContain("saved-pause-note");
+        if (retired) expect(wire.extension?.some(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL &&
+          item.extension?.some(source => JSON.stringify(source) === JSON.stringify(originalDraft)))).toBe(true);
+      }
+    });
+
+  function anchoredPause(): FhirR6DosageInstruction {
+    return toDosageDetails([
+      { sequence: 1, id: "induction-dose", doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { repeat: { ...daily, boundsPeriod: { start: "2026-01-01T00:00:00Z" } } },
+        modifierExtension: [{ id: "duration-policy", url: ANCHORED_COURSE_DURATION_EXTENSION_URL,
+          valueQuantity: { id: "authored-length", value: 1, unit: "d", _unit: { id: "length-unit" },
+            extension: [{ url: "urn:clinic:duration-note", valueString: "original duration annotation" }] } }] },
+      { sequence: 3, id: "maintenance-dose", doseAndRate: [{ doseQuantity: q(2) }],
+        timing: { repeat: { ...daily, count: 2 } } },
+    ], undefined, { step: [
+      { sequence: 1, id: "induction" },
+      { sequence: 2, id: "pause", end: boundary(2),
+        extension: [{ url: "urn:clinic:pause-note", valueString: "anchored pause retained" }] },
+      { sequence: 3, id: "maintenance" },
+    ] });
+  }
+
+  it.each(["unchanged", "length", "dose", "marker-annotation", "quantity-annotation"] as const)(
+    "compares the effective anchored length after a public %s edit", edit => {
+      let wire = persist(anchoredPause());
+      const originalDraft = persist(wire.extension!.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL)!);
+      const member = wire.step![0].component[0];
+      const length = member.modifierExtension!.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)!;
+      if (edit === "length") length.valueQuantity!.value = 2;
+      if (edit === "dose") member.doseAndRate![0].doseQuantity!.value = 3;
+      if (edit === "marker-annotation") length.id = "current-policy-note";
+      if (edit === "quantity-annotation") length.valueQuantity!.id = "current-length-note";
+      const authoredLength = persist(length);
+      for (let save = 0; save < 3; save++) {
+        const before = persist(wire);
+        expect(fromDosageDetails(wire).course.step?.map(step => step.id)).toEqual(edit === "length"
+          ? ["induction", "maintenance"] : ["induction", "pause", "maintenance"]);
+        expect(wire.step![0].component[0].modifierExtension!
+          .find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL)).toEqual(authoredLength);
+        expect(nextDueDoses(wire, options)).toEqual(dates(edit === "length" ? [1, 2, 3, 4] : [1, 3, 4]));
+        expect(calculateTotalUnits({ dosage: wire, ...options, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+          .toMatchObject({ totalUnits: edit === "length" ? 6 : edit === "dose" ? 7 : 5, unit: "tab" });
+        expect(wire).toEqual(before);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+        expect(JSON.stringify(wire)).toContain("anchored pause retained");
+        if (edit === "length") expect(wire.extension?.some(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL &&
+          item.extension?.some(source => JSON.stringify(source) === JSON.stringify(originalDraft)))).toBe(true);
+      }
+    });
+
+  it.each([
+    ["tail", "r5"], ["tail", "r6"], ["head", "r5"], ["head", "r6"],
+    ["only", "r5"], ["only", "r6"], ["valued", "r5"], ["valued", "r6"],
+  ] as const)("keeps %s weekday primitive positions on %s while scheduling only real weekdays", (position, kind) => {
+    const values = position === "tail" ? [FhirDayOfWeek.Monday, null] :
+      position === "head" ? [null, FhirDayOfWeek.Monday] : position === "only" ? [null] : [FhirDayOfWeek.Monday];
+    const note = { id: "weekday-placeholder", extension: [{
+      url: "urn:clinic:weekday-note", valueString: "unvalued calendar annotation",
+    }] };
+    const annotations = position === "tail" ? [null, note] : position === "head" ? [note, null] :
+      position === "only" ? [note] : [{ id: "monday-note" }];
+    // JSON is a public external FHIR boundary, including nullable primitive slots.
+    const rows: EzDosage[] = JSON.parse(JSON.stringify([{ id: "weekday-dose", doseAndRate: [{ doseQuantity: q(1) }],
+      timing: { repeat: { ...daily, dayOfWeek: values, _dayOfWeek: annotations } } }]));
+    const input: EzDosage[] | FhirR6DosageInstruction = kind === "r5" ? rows :
+      JSON.parse(JSON.stringify({ step: [{ component: rows }] }));
+    const beforeInput = persist(input);
+    const native = importCanonicalCourse(input);
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.dayOfWeek)
+      .toEqual(position === "only" ? [] : [FhirDayOfWeek.Monday]);
+    let wire = projectCanonicalCourse(native).fhirNext;
+    expect(input).toEqual(beforeInput);
+    const query = { ...options, from: "2026-01-04T00:00:00Z", orderedAt: "2026-01-04T00:00:00Z", limit: 2 };
+    for (let save = 0; save < 3; save++) {
+      const before = persist(wire), repeat = wire.step![0].component[0].timing!.repeat!;
+      expect(repeat.dayOfWeek).toEqual(values);
+      expect(repeat).toMatchObject({ _dayOfWeek: annotations });
+      expect(nextDueDoses(wire, query)).toEqual(dates(position === "only" ? [4, 5] : [5, 12]));
+      expect(calculateTotalUnits({ dosage: wire, ...query, durationValue: 7, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: position === "only" ? 7 : 1, unit: "tab" });
+      for (const locale of ["en", "th"] as const)
+        expect(() => fromFhir(wire, { locale })).not.toThrow();
+      const coldRows = persist(toFhirR5Dosages(wire));
+      expect(coldRows[0].timing!.repeat!.dayOfWeek).toEqual(values);
+      expect(coldRows[0].timing!.repeat!).toMatchObject({ _dayOfWeek: annotations });
+      expect(wire).toEqual(before);
+      wire = toDosageDetails(coldRows);
+    }
+  });
+});

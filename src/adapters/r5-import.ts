@@ -836,9 +836,13 @@ function reconcileNativeCompactCourse(
     }
     editedSequences.add(sequence);
     const previous = metadata.get(sequence);
+    // A partial edit also inherits the already restored historical stage when
+    // no compact row owns this sequence. Supplied fields remain authoritative.
+    const previousFields = previous?.step ??
+      historicalStages?.get(sequence)?.provenance as Omit<FhirR6DosageStep, "component"> | undefined;
     // Compact rows keep R6 wrappers; edit fields are R5. Split their owners
     // before merging so clearing native extensions does not clear modifiers.
-    const merged = r6StepMetadata({ ...r5StepMetadata(previous?.step ?? {}), ...fields });
+    const merged = r6StepMetadata({ ...r5StepMetadata(previousFields ?? {}), ...fields });
     // An explicit course count or complete modifier clear owns course scope;
     // a simultaneously supplied phase count must stay on that phase.
     if (legacyCycleCount !== undefined && sequence === 1 &&
@@ -849,7 +853,7 @@ function reconcileNativeCompactCourse(
       legacyCycleCount = fields.count;
       delete merged.count;
     }
-    if (!equivalentProjection(previous?.step ?? {}, merged)) {
+    if (!equivalentProjection(previousFields ?? {}, merged)) {
       metadataEdited = true;
       if (previous?.marker) sources.push(localReconciliationSource(previous.marker));
     }

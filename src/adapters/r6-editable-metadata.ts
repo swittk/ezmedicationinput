@@ -7,9 +7,10 @@
 import type {
   FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio, FhirR6Timing,
+  FhirR6Dosage, FhirR6Quantity, FhirR6RelativeTime, FhirRange,
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
-import { getAdministrationOffsetMinutes } from "../fhir";
+import { getAdministrationOffsetMinutes, getAnchoredCourseDuration } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
 
@@ -88,6 +89,26 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
   }
   return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };
 }
+/** Compare existing clinical quantity choices without treating Element IDs or
+ * primitive annotations as a new completion. Original quantities stay untouched. */
+function draftCompletionQuantity(quantity: FhirR6Quantity | undefined): object | undefined {
+  return quantity ? { value: quantity.value, unit: quantity.unit, code: quantity.code,
+    system: quantity.system, comparator: getQuantityComparator(quantity) } : undefined;
+}
+function draftCompletionRange(range: FhirRange | undefined): object | undefined {
+  return range ? { low: draftCompletionQuantity(range.low), high: draftCompletionQuantity(range.high) } : undefined;
+}
+function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): object | undefined {
+  if (!boundary) return undefined;
+  const { id: _id, offsetDuration, offsetRange, ...fields } = boundary;
+  return { ...fields, offsetDuration: draftCompletionQuantity(offsetDuration),
+    offsetRange: draftCompletionRange(offsetRange) };
+}
+function draftAnchoredLength(dosage: FhirR6Dosage): object | undefined {
+  const length = getAnchoredCourseDuration(dosage);
+  return length ? { quantity: draftCompletionQuantity(length.valueQuantity),
+    range: draftCompletionRange(length.valueRange) } : undefined;
+}
 function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageStep[],
   drafts: readonly { index: number }[]): boolean | Set<number> {
   if (!Array.isArray(saved)) return false;
@@ -116,14 +137,27 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
     const needsMembers = index <= lastDraftPredecessor || prior.id === undefined;
     if (identity !== undefined) identities.set(identity, (identities.get(identity) ?? 0) + 1);
     if (index > lastDraftOwner) continue;
+    // An implicit phase inherits its predecessor's completion. Carry the
+    // existing ownership invalidation forward; do not resolve dates here.
+    // An authored start or end owns the boundary independently of that chain.
+    if (index > 0 && changedCompletions.has(index - 1) && current && !current.start && !current.end)
+      changedCompletions.add(index);
     if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) {
       validOwners.add(index);
       continue;
     }
+    if (!current || prior.count !== current.count ||
+        !equalStructuredValues(draftCompletionBoundary(prior.end), draftCompletionBoundary(current.end)) ||
+        !prior.end && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
+      changedCompletions.add(index);
     if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||
         !equalStructuredValues(prior.end, current.end) ||
-        needsMembers && prior.component.length !== current.component.length) continue;
+        needsMembers && prior.component.length !== current.component.length) {
+      if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
+        changedCompletions.add(index);
+      continue;
+    }
     // A phase can finish through its member timing (count, duration or bounds)
     // without an explicit step.end. Dose edits leave that declared completion.
     // A uniquely identified successor owns its boundary independently of
@@ -132,6 +166,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
     for (let member = 0; needsMembers && member < prior.component.length; member++) {
       if (prior.component[member].id !== current.component[member].id) {
         membersMatch = false;
+        if (!prior.end) changedCompletions.add(index);
         break;
       }
       // A middle phase can receive one pause and precede another. Its changed
@@ -140,6 +175,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         const before = prior.component[member], after = current.component[member];
         // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+            !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
             (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==
               (getAdministrationOffsetMinutes({ modifierExtension: after.modifierExtension }) ?? 0) ||
             !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
