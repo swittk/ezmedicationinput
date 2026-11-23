@@ -3596,6 +3596,14 @@ describe("round38: authored boundaries, elapsed clocks, and recorded occurrence 
     for (const dosage of representations(course)) {
       expect(nextDueDoses(dosage, later)).toEqual(["2024-01-02T08:00:00+00:00"]);
       expect(calculateTotalUnits({ ...later, dosage, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+      const sameDay = { ...later, from: "2024-01-01T12:00:00Z", priorCount: 1, limit: 1 };
+      expect(nextDueDoses(dosage, sameDay)).toEqual(["2024-01-02T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...sameDay, dosage,
+        durationValue: 12, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(0);
+      const withoutRecordedTime = { ...sameDay, priorDoseTimes: undefined };
+      expect(nextDueDoses(dosage, withoutRecordedTime)).toEqual(["2024-01-01T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...withoutRecordedTime, dosage,
+        durationValue: 12, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(2);
       expect(nextDueDoses(dosage, opts)).toEqual([
         "2024-01-01T08:00:00+00:00", "2024-01-02T08:00:00+00:00"
       ]);
@@ -4152,4 +4160,247 @@ describe("round40: inherited selectors and finite-use history", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
+});
+
+describe("round50: explicit event quota and interval query ownership", () => {
+  const quantity = { doseQuantity: { value: 1, unit: "tab" } };
+  const origin = "2026-01-01T00:00:00Z";
+  const explicitForms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, [row], r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[],
+      importCanonicalCourse(r6)];
+  };
+
+  it.each([
+    ["remaining month", ["2026-11-20T08:00:00Z", "2026-12"], 2,
+      "2026-11-01T00:00:00Z", 61, undefined, undefined, ["2026-11-20T08:00:00+00:00"]],
+    ["remaining year", ["2026", "2026-11-20T08:00:00Z"], 2,
+      "2026-11-01T00:00:00Z", 61, undefined, undefined, ["2026-11-20T08:00:00+00:00"]],
+    ["uncapped remaining month", ["2026-11-20T08:00:00Z", "2026-12"], undefined,
+      "2026-11-01T00:00:00Z", 61, undefined, undefined, ["2026-11-20T08:00:00+00:00"]],
+    ["exact event fills count", ["2026-11-20T08:00:00Z", "2026-12"], 1,
+      "2026-11-01T00:00:00Z", 61, undefined, 1, ["2026-11-20T08:00:00+00:00"]],
+    ["partial month outside query", ["2026-11-20T08:00:00Z", "2026-12"], 2,
+      "2026-11-01T00:00:00Z", 30, undefined, 1, ["2026-11-20T08:00:00+00:00"]],
+    ["exact future fills remaining history", ["2026-11", "2026-11-20T08:00:00Z", "2026-11-22T08:00:00Z"], 2,
+      "2026-11-21T00:00:00Z", 2, undefined, 1, ["2026-11-22T08:00:00+00:00"]],
+    ["explicit count exhausted", ["2026-11-20T08:00:00Z", "2026-12"], 2,
+      "2026-11-01T00:00:00Z", 61, 2, 0, []],
+  ] as const)("retains exact candidates without hiding an unresolved supply slot: %s",
+    (_name, events, count, from, durationValue, priorCount, totalUnits, expectedDue) => {
+      const row: FhirDosage = {
+        id: "round50-explicit-events",
+        extension: [{ url: "urn:round50:note", valueString: "retain event precision" }],
+        doseAndRate: [quantity],
+        timing: { event: [...events], ...(count === undefined ? {} : { repeat: { count } }) }
+      };
+      const query = { orderedAt: origin, from, timeZone: "UTC", limit: 3,
+        ...(priorCount === undefined ? {} : { priorCount }) };
+      for (const dosage of explicitForms(row)) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(expectedDue);
+        const calculate = () => calculateTotalUnits({ dosage, ...query,
+          durationValue, durationUnit: FhirPeriodUnit.Day });
+        if (totalUnits === undefined) expect(calculate).toThrowError(
+          expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+      expect(toDosageDetails([row]).step![0].component[0].timing?.event).toEqual(events);
+    });
+
+  it.each([
+    [0.5, FhirPeriodUnit.Week], [3.5, FhirPeriodUnit.Day], [84, FhirPeriodUnit.Hour]
+  ] as const)("keeps a weekday-filtered %s %s interval on the same elapsed grid", (period, periodUnit) => {
+    const row: FhirDosage = { doseAndRate: [quantity], timing: { repeat: {
+      frequency: 1, period, periodUnit, dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday]
+    } } };
+    const query = { orderedAt: origin, from: "2026-01-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of explicitForms(row)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-01-08T00:00:00+00:00", "2026-01-15T00:00:00+00:00", "2026-01-22T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query,
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(0);
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-01-08T00:00:00Z",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    expect(toDosageDetails([row]).step![0].component[0].timing?.repeat).toMatchObject({ period, periodUnit });
+  });
+
+  it("retains whole-week selected weekday positions", () => {
+    const row: FhirDosage = { doseAndRate: [quantity], timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Week,
+      dayOfWeek: [FhirDayOfWeek.Monday, FhirDayOfWeek.Thursday]
+    } } };
+    const query = { orderedAt: origin, from: "2026-01-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of explicitForms(row)) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-01-05T00:00:00+00:00", "2026-01-08T00:00:00+00:00", "2026-01-12T00:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...query,
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+    }
+  });
+
+  const ranged: FhirDosage = {
+    doseAndRate: [{ doseRange: { low: { value: 1, unit: "tab" }, high: { value: 2, unit: "tab" } } }],
+    timing: { event: ["2026-11"], repeat: { count: 2 } },
+    maxDosePerPeriod: [{ numerator: { value: 3, unit: "tab" },
+      denominator: { value: 24, unit: "h", code: "h", system: "http://unitsofmeasure.org" } }]
+  };
+
+  it.each([1, 2])("distinguishes a remaining ranged slot from an exhausted quota: priorCount %s", priorCount => {
+    const query = { orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC", priorCount };
+    for (const dosage of explicitForms(ranged)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual([]);
+      const calculate = () => calculateTotalUnits({ dosage, ...query,
+        durationValue: 30, durationUnit: FhirPeriodUnit.Day });
+      if (priorCount === 2) expect(calculate()).toMatchObject({ totalUnits: 0, unit: "tab" });
+      else expect(calculate).toThrowError(expect.objectContaining({ code: "timing-required" }));
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("exhausts ranged quota from recorded uses before checking unknown event dates", () => {
+    const query = { orderedAt: origin, from: "2026-11-03T00:00:00Z", timeZone: "UTC",
+      priorDoseTimes: ["2026-11-01T08:00:00Z", "2026-11-02T08:00:00Z"] };
+    for (const dosage of explicitForms(ranged)) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ dosage, ...query,
+        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 0, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("retains the scalar exhausted-count zero control", () => {
+    const row: FhirDosage = { ...ranged, doseAndRate: [quantity] };
+    for (const dosage of explicitForms(row)) expect(calculateTotalUnits({
+      dosage, orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC", priorCount: 2,
+      durationValue: 30, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 0, unit: "tab" });
+  });
+
+
+  it.each([
+    ["unfilled quota", undefined, undefined],
+    ["one remaining accepted dose", 1, 2],
+    ["exhausted quota", 2, 0],
+  ] as const)("retains the range acceptor's quota when explicit events are partial: %s",
+    (_name, priorCount, totalUnits) => {
+      const row: FhirDosage = { ...ranged,
+        timing: { event: ["2026-11-20T08:00:00Z", "2026-12"], repeat: { count: 2 } } };
+      for (const dosage of explicitForms(row)) {
+        const before = JSON.stringify(dosage);
+        const query = { orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC", priorCount };
+        expect(nextDueDoses(dosage, { ...query, limit: 2 })).toEqual(
+          priorCount === 2 ? [] : ["2026-11-20T08:00:00+00:00"]);
+        const calculate = () => calculateTotalUnits({ dosage, ...query,
+          durationValue: 61, durationUnit: FhirPeriodUnit.Day });
+        if (totalUnits === undefined) expect(calculate).toThrowError(
+          expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+
+  it.each([undefined, 1, 2])("keeps filtered scalar quota ownership with a partial event: priorCount %s", priorCount => {
+    const row: FhirDosage = { ...ranged, doseAndRate: [quantity],
+      timing: { event: ["2026-11-20T08:00:00Z", "2026-12"], repeat: { count: 2 } } };
+    const query = { orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC", priorCount, limit: 2 };
+    for (const dosage of explicitForms(row)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(priorCount === 2 ? [] : ["2026-11-20T08:00:00+00:00"]);
+      const calculate = () => calculateTotalUnits({ dosage, ...query,
+        durationValue: 61, durationUnit: FhirPeriodUnit.Day });
+      if (priorCount === undefined) expect(calculate).toThrowError(expect.objectContaining({ code: "timing-required" }));
+      else expect(calculate()).toMatchObject({ totalUnits: priorCount === 1 ? 1 : 0, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it("keeps ranged history replay's partial date outside the actual supply query", () => {
+    const row: FhirDosage = { ...ranged,
+      timing: { event: ["2026-11-20T08:00:00Z", "2026-11"], repeat: { count: 2 } } };
+    for (const dosage of explicitForms(row)) expect(calculateTotalUnits({
+      dosage, orderedAt: origin, from: "2026-12-01T00:00:00Z", timeZone: "UTC",
+      durationValue: 2, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 0, unit: "tab" });
+  });
+
+  it("retains two exact ranged doses that fill the count beside a partial event", () => {
+    const row: FhirDosage = { ...ranged, timing: {
+      event: ["2026-11-20T08:00:00Z", "2026-12-20T08:00:00Z", "2026-12"], repeat: { count: 2 }
+    } };
+    for (const dosage of explicitForms(row)) expect(calculateTotalUnits({
+      dosage, orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC",
+      durationValue: 61, durationUnit: FhirPeriodUnit.Day
+    })).toMatchObject({ totalUnits: 4, unit: "tab" });
+  });
+
+  it.each([
+    ["unresolved second event", 2, undefined, undefined],
+    ["unbounded event list", undefined, undefined, undefined],
+    ["exact event fills count", 1, undefined, 1],
+    ["caller count exhausted", 2, 2, 0],
+  ] as const)("does not truncate a partial event through explicit stage completion: %s",
+    (_name, count, priorCount, totalUnits) => {
+      const course: FhirR6DosageInstruction = { step: [{
+        start: { contextCode: { coding: [{
+          system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+        }] }, offsetDuration: { value: 0, code: "d" } },
+        component: [{ doseAndRate: [quantity], timing: {
+          event: ["2026-11-20T08:00:00Z", "2026-12"],
+          ...(count === undefined ? {} : { repeat: { count } })
+        } }]
+      }] };
+      const query = { orderedAt: origin, from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 2, priorCount };
+      for (const dosage of [course, importCanonicalCourse(course),
+        JSON.parse(JSON.stringify(toFhirR5Dosages(course))) as FhirDosage[]]) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(priorCount === 2 ? [] : ["2026-11-20T08:00:00+00:00"]);
+        const calculate = () => calculateTotalUnits({ dosage, ...query,
+          durationValue: 61, durationUnit: FhirPeriodUnit.Day });
+        if (totalUnits === undefined) expect(calculate).toThrowError(
+          expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+    });
+
+  it.each([
+    ["past month", "2026-11", undefined, "2026-12-01T00:00:00Z", 0],
+    ["counted past month", "2026-11", 2, "2026-12-01T00:00:00Z", 0],
+    ["counted past year", "2025", 2, "2026-12-01T00:00:00Z", 0],
+    ["future month", "2027-01", undefined, "2026-12-01T00:00:00Z", 0],
+    ["overlapping month", "2026-11", undefined, "2026-11-01T00:00:00Z", undefined],
+    ["counted overlapping month", "2026-11", 2, "2026-11-01T00:00:00Z", undefined],
+    ["exact event", "2026-12-02T08:00:00Z", undefined, "2026-12-01T00:00:00Z", 1],
+  ] as const)("limits a course timing diagnostic to the actual supply window: %s",
+    (_name, event, count, from, totalUnits) => {
+      const course: FhirR6DosageInstruction = { step: [{
+        start: { contextCode: { coding: [{
+          system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+        }] }, offsetDuration: { value: 0, code: "d" } },
+        component: [{ doseAndRate: [quantity],
+          timing: { event: [event], ...(count === undefined ? {} : { repeat: { count } }) } }]
+      }] };
+      const query = { orderedAt: "2025-01-01T00:00:00Z", from, timeZone: "UTC", limit: 2 };
+      for (const dosage of [course, importCanonicalCourse(course),
+        JSON.parse(JSON.stringify(toFhirR5Dosages(course))) as FhirDosage[]]) {
+        const before = JSON.stringify(dosage);
+        expect(nextDueDoses(dosage, query)).toEqual(totalUnits === 1 ? ["2026-12-02T08:00:00+00:00"] : []);
+        const calculate = () => calculateTotalUnits({ dosage, ...query,
+          durationValue: 2, durationUnit: FhirPeriodUnit.Day });
+        if (totalUnits === undefined) expect(calculate).toThrowError(
+          expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits, unit: "tab" });
+        expect(JSON.stringify(dosage)).toBe(before);
+      }
+      expect(toDosageDetails(toFhirR5Dosages(course)).step![0].component[0].timing?.event).toEqual([event]);
+    });
 });

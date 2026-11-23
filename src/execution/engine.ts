@@ -842,6 +842,12 @@ function inferWhenFallbackEntries(whenCodes: string[], repeat: CanonicalRecurren
     return a.time.localeCompare(b.time);
   });
 }
+/** Deferred callers retain their own quota and actual supply window. */
+type ExplicitEventStatus = { possible: boolean; from?: Date };
+function unresolvedExplicitEventSupply(): never {
+  throw new MedicationQuantityCalculationError("timing-required",
+    "The remaining explicit events have only year or month precision; supply calculation requires a resolved administration date.");
+}
 function exactTimingEventOccurrences(
   timing: CanonicalTiming,
   repeat: CanonicalRecurrence | undefined,
@@ -853,7 +859,8 @@ function exactTimingEventOccurrences(
   limit: number,
   priorCount: number,
   derivePriorCount: boolean,
-  quantityEstimation = false
+  quantityEstimation = false,
+  eventStatus?: ExplicitEventStatus
 ): string[] | undefined {
   if (!timing.explicitEvents?.length) return undefined;
   const whenCodes = repeat?.anchors ?? [];
@@ -874,7 +881,7 @@ function exactTimingEventOccurrences(
     // FHIR dateTime permits year/month precision. It names no exact dose
     // instant and must not spend an occurrence slot or become midnight.
     if (/^\d{4}(?:-\d{2})?$/u.test(value)) {
-      if (quantityEstimation && !partialEvent) {
+      if ((quantityEstimation || eventStatus) && !partialEvent) {
         const year = Number(value.slice(0, 4));
         const wholeYear = value.length === 4;
         const month = wholeYear ? 1 : Number(value.slice(5));
@@ -883,7 +890,8 @@ function exactTimingEventOccurrences(
         const end = calendarBoundaryDate(timeZone,
           wholeYear || month === 12 ? year + 1 : year,
           wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
-        const begin = orderedAt && orderedAt > from ? orderedAt : from;
+        const queryFrom = eventStatus?.from ?? from;
+        const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
         partialEvent = !start || !end || end > begin &&
           (!courseEnd || start < courseEnd && begin < courseEnd);
       }
@@ -941,9 +949,8 @@ function exactTimingEventOccurrences(
   const effectivePriorCount = derivePriorCount ? historicalCount : priorCount;
   const remaining =
     countCap === undefined ? limit : Math.max(0, Math.min(limit, countCap - effectivePriorCount));
-  if (quantityEstimation && partialEvent && !unique.length && remaining > 0)
-    throw new MedicationQuantityCalculationError("timing-required",
-      "The remaining explicit events have only year or month precision; supply calculation requires a resolved administration date.");
+  if (eventStatus) eventStatus.possible = eventStatus.possible || partialEvent;
+  else if (quantityEstimation && partialEvent && remaining > unique.length) unresolvedExplicitEventSupply();
   return unique.slice(0, remaining).map((candidate) => formatZonedIso(candidate, timeZone));
 }
 function mergeFrequencyDefaults(
@@ -4031,6 +4038,8 @@ type PhaseCountOptions = NextDueDoseOptions & {
   countedActualTimes?: ReadonlySet<number>;
   /** Numeric supply has an explanation field for retained unevaluated caps. */
   quantityEstimation?: true;
+  /** Completion/range callers decide completeness after their own count admission. */
+  explicitEventStatus?: ExplicitEventStatus;
 };
 /** Nonoverlapping cycle replay has at most one opportunity per member at
  * an instant. Reuse the scalar pre-admission filter; overlapping cycles keep
@@ -4166,8 +4175,12 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
         },
       },
     };
+    const eventStatus: ExplicitEventStatus | undefined = one.schedule?.explicitEvents?.length &&
+      (options as PhaseCountOptions).quantityEstimation && !(options as PhaseCountOptions).explicitEventStatus
+      ? { possible: false, from: requestedFrom } : undefined;
     const candidates = nextDueDoses(uncapped, {
       ...options,
+      ...(eventStatus ? { explicitEventStatus: eventStatus } : undefined),
       countEligibilityStart: undefined,
       countedActualTimes,
       priorCount: undefined,
@@ -4183,6 +4196,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
         "schedule-horizon-too-dense",
         "A counted successor exceeds 10,000 eligible administrations; shorten the clinically verified window."
       );
+    if (eventStatus?.possible && candidates.length < available) unresolvedExplicitEventSupply();
     return candidates
       .filter((iso) => Date.parse(iso) >= requestedFrom.getTime())
       .slice(0, Math.floor(requestedLimit));
@@ -4603,7 +4617,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       Math.floor(limit),
       priorCount,
       priorCountInput === undefined && !dosage.asNeeded,
-      (options as PhaseCountOptions).quantityEstimation === true
+      (options as PhaseCountOptions).quantityEstimation === true,
+      (options as PhaseCountOptions).explicitEventStatus
     );
     if (exactEvents !== undefined) {
       return exactEvents;
@@ -5517,7 +5532,8 @@ function isDayFilteredIntervalSupported(repeat: CanonicalRecurrence, enforceDayF
     repeat.periodUnit === "s" ||
     repeat.periodUnit === "min" ||
     repeat.periodUnit === "h" ||
-    repeat.periodUnit === "d"
+    repeat.periodUnit === "d" ||
+    (repeat.periodUnit === "wk" && repeat.period !== undefined && !Number.isInteger(repeat.period * 7))
   );
 }
 type DayFilteredPeriodSeriesOptions = {
@@ -6044,6 +6060,7 @@ function measureRangedSchedule(
   }
   const quota: CycleEventQuota = { remaining: totalCount === undefined ? undefined :
     Math.max(0, totalCount - used) };
+  if (quota.remaining === 0) return { count: 0, quantity: 0, times: [] };
   if (prior.length > 1) prior.sort((a, b) => a - b);
   const accept = chronologicalCapAcceptor(prior, zone, options.context);
   const begin = totalCount !== undefined && !dosage.asNeeded && options.priorCount === undefined && !countedActual?.size
@@ -6057,8 +6074,11 @@ function measureRangedSchedule(
       calendarWindow: { ...repeat?.calendarWindow, end: new Date(end.getTime() - (getAdministrationOffsetMinutes(dosage) ?? 0) * 60000 - 1).toISOString() },
     } },
   };
+  const eventStatus: ExplicitEventStatus | undefined = dosage.schedule?.explicitEvents?.length
+    ? { possible: false, from } : undefined;
   const candidates = nextDueDoses(execution, {
     ...options, from: begin, orderedAt: origin, priorCount: undefined,
+    explicitEventStatus: eventStatus,
     priorDoseTimes: undefined, limit: 10000, quantityEstimation: true,
     evaluateCondition: options.evaluateCondition ?? (() => true),
   } as PhaseCountOptions);
@@ -6073,6 +6093,7 @@ function measureRangedSchedule(
     if (accept(event)) accepted.push(event);
   }
   const selected = accept.finish(accepted, from.getTime());
+  if (eventStatus?.possible && quota.remaining !== 0) unresolvedExplicitEventSupply();
   let quantity = 0;
   const times: string[] = [];
   for (const event of selected) {
@@ -7739,8 +7760,12 @@ function explicitAdministrationCompletion(
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
   });
+  const eventStatus: ExplicitEventStatus = { possible: false };
   const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
-    priorCount: undefined, priorDoseTimes: undefined, limit: 10000 });
+    quantityEstimation: undefined, explicitEventStatus: eventStatus,
+    priorCount: undefined, priorDoseTimes: undefined, limit: 10000 } as PhaseCountOptions);
+  const count = repeat ? repeatOccurrenceCap(repeat) : undefined;
+  if (eventStatus.possible && (count === undefined || due.length < count)) return undefined;
   return due.length ? completionAfterAcceptedAdministration(dosage, new Date(due[due.length - 1]), zone) : undefined;
 }
 function finiteAdministrationCompletion(
@@ -7789,6 +7814,7 @@ function finiteAdministrationCompletion(
   } : local;
   const due = nextDueDoses(probe, {
     ...options,
+    quantityEstimation: undefined,
     from: future && queryFrom > eligibleFrom ? queryFrom : eligibleFrom,
     orderedAt: start,
     priorCount: undefined,
