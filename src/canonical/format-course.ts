@@ -628,7 +628,7 @@ function formatCanonicalBase(
   // Timing alone cannot replace the only authored dose/manner directions.
   // Label retained source separately from the current cadence: those words
   // may contain an older timing, and are not a second active instruction.
-  if (a.text?.trim() && source.schedule && !administrationHasAmountFacts(source) && !source.method &&
+  if (a.text?.trim() && (source.schedule || source.route) && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
   if (a.predicate && (style !== "long" || !canFormatConditionInPrimary(env.localization)))

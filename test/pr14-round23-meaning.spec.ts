@@ -2994,6 +2994,10 @@ describe("round36 clock positions and retained source directions", () => {
       const reopened = importCanonicalCourse(saved);
       const preview = formatSig(reopened, "long", { locale: "en", realizationMode: "roundtrip" });
       expect((preview + JSON.stringify(projectCanonicalCourse(reopened))).toLowerCase()).toContain("before breakfast");
+      expect(reopened.stages[0].administrations[0].additionalInstructions).toContainEqual(
+        expect.objectContaining({ text: "before breakfast" }));
+      expect(formatSig(reopened, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
+        .toContain("before breakfast");
       expect(nextDueDoses(reopened, { ...clockOptions, limit: 2 })).toEqual(["2026-11-22T07:00:00+00:00"]);
       expect(calculateTotalUnits({ ...clockOptions, dosage: reopened, durationValue: 3, durationUnit: "d" }).totalUnits).toBe(1);
       expect(JSON.stringify(saved)).toBe(before);

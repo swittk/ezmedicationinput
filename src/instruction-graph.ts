@@ -3843,6 +3843,13 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
       materialArgument ??= arg;
     }
   }
+  // Older dilution frames kept TO on the head and its final volume as an
+  // unmarked Object. That complement is the destination, not the material.
+  if (!targetArgument && c.frame.relation === AdviceRelation.To &&
+      !c.destination && !c.substance && materialArgument?.role === AdviceArgumentRole.Object) {
+    targetArgument = materialArgument;
+    materialArgument = undefined;
+  }
   // The parser owns the relation daughter independently from lexical noun
   // roles. Retain the role-based fallback for older structured frames.
   const relationTarget = targetArgument

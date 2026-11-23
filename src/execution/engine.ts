@@ -2384,7 +2384,8 @@ function resolveAdministrationWindow(
     : successorIntervalStart(administration, implicitPredecessor?.point ?? predecessorPoint,
         implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start, timeZone);
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
-  const cadence = recurrence?.calendarWindow && !administration.phaseStart
+  const cadence = recurrence?.calendarWindow && !administration.phaseStart &&
+      (!administration.phaseOrigin || absoluteStart)
     ? { origin: absoluteStart ?? anchor, capClock, hasPhaseOrigin: false }
     : parallelComponentCadence(
         administration,

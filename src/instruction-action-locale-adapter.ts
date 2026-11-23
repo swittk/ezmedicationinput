@@ -327,7 +327,10 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         : c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
           ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
       if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
-      return c.label + (object ? " " + object : "") + (c.time ? " " + (relation ? relation + " " : "") + c.time : "");
+      const amount = c.amount ? (c.theme ? " (" + c.amount + ")" : " " + c.amount) : "";
+      const site = c.theme && c.site ? " to " + c.site : "";
+      return c.label + (object ? " " + object : "") + amount + site +
+        (c.time ? " " + (relation ? relation + " " : "") + c.time : "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;
@@ -480,7 +483,9 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
         ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
       if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
-      return c.label + (object ?? "") + (c.time ? (relation ?? "") + c.time : "");
+      const amount = c.amount ? " " + c.amount : "";
+      const site = c.theme && c.site ? "บริเวณ" + c.site : "";
+      return c.label + (object ?? "") + amount + site + (c.time ? (relation ?? "") + c.time : "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;

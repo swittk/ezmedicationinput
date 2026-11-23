@@ -2721,7 +2721,7 @@ describe("round 41 execution corrections", () => {
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } },
       ...(maximum === undefined ? {} : { maxDosePerLifetime: { value: maximum, unit: "tab" } })
     };
-    const course = courseFromAdministrations([inputToCanonical(raw) as CanonicalAdministration]);
+    const course = courseFromAdministrations([inputToCanonical(raw) as CanonicalAdministration], "");
     for (const dosage of [raw, [raw], ...projections(course)]) {
       expect(calculateTotalUnits({ dosage, ...context, roundToMultiple: 5,
         durationValue: 7, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(maximum ?? 10);
@@ -3121,5 +3121,65 @@ describe("round50 upper-only periods with native offsets", () => {
     expect(reopened.repeat!.period).toBe(exact ? 6 : undefined);
     expect(reopened.repeat!.periodMax).toBe(exact ? undefined : 6);
     expect(JSON.stringify(wire)).toBe(original);
+  });
+});
+
+
+describe("round51 relative phase cutoffs and route-only source", () => {
+  const context = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC" };
+  const right = "Instill 1 drop OD daily at 08:00 for 7 days, then instill 2 drops OD daily at 08:00 for 2 days, then instill 3 drops OD daily at 08:00";
+  it.each([
+    right + " from 2026-12-10; instill 1 drop OS BID",
+    "Instill 1 drop OS BID; " + right + " from 2026-12-10",
+    right + "; instill 1 drop OS BID"
+  ])("keeps each relative phase on its own days beside a dated cutoff: %s", text => {
+    const parsed = parseSig(text, { datePolicy: { referenceDate: "2026-12-01" } });
+    for (const dosage of [parsed, parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+        JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(dosage);
+      expect(calculateTotalUnits({ ...context, dosage, durationValue: 12, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(44);
+      // The same total can hide two early 2-drop doses and an omitted middle phase.
+      for (const [day, expected] of [[1, 3], [7, 3], [8, 4], [9, 4], [10, 5]] as const) {
+        const from = "2026-12-" + (day < 10 ? "0" : "") + day + "T00:00:00Z";
+        expect(calculateTotalUnits({ ...context, from, dosage,
+          durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(expected);
+      }
+      // Both eyes have an independent administration at 08:00.
+      expect(nextDueDoses(dosage, { ...context, from: "2026-12-08T00:00:00Z", limit: 6 })).toEqual([
+        "2026-12-08T08:00:00+00:00", "2026-12-08T08:00:00+00:00", "2026-12-08T20:00:00+00:00",
+        "2026-12-09T08:00:00+00:00", "2026-12-09T08:00:00+00:00", "2026-12-09T20:00:00+00:00"
+      ]);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["en", "th"])("retains the only dose, manner and cadence beside an imported route: %s", locale => {
+    const text = "Swallow 1 tablet whole every morning";
+    const route = parseSig("Take 1 tablet PO").fhir[0].route!;
+    const raw: FhirR6DosageInstruction = {
+      renderedInstruction: text, step: [{ component: [{ text, route }] }]
+    };
+    const plainR5: FhirDosage[] = [{ text, route }];
+    for (const input of [raw, toFhirR5Dosages(raw), plainR5, toDosageDetails(plainR5)]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const)
+        expect(formatSig(input, "long", { locale, realizationMode })).toContain(text);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const edited: FhirR6DosageInstruction = { step: [{ component: [{
+      text, route, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }]
+    }] }] };
+    for (const input of [edited, toFhirR5Dosages(edited)]) {
+      const rendered = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(rendered).toMatch(locale === "en" ? /2 tablets/u : /2 เม็ด/u);
+      expect(rendered).not.toContain(text);
+    }
+    const timingOnly: FhirR6DosageInstruction = { step: [{ component: [{
+      text, timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+    }] }] };
+    const rendered = formatSig(timingOnly, "long", { locale, realizationMode: "normalized" });
+    expect(rendered).toContain(text);
+    expect(rendered).toContain(locale === "en" ? "Current:" : "ปัจจุบัน:");
+    expect(rendered).toContain(locale === "en" ? "twice daily" : "วันละ 2 ครั้ง");
   });
 });

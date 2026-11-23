@@ -5788,3 +5788,92 @@ describe("round50 saved frame-level accompaniment ownership", () => {
     expect(JSON.stringify(row)).toBe(original);
   });
 });
+
+
+describe("round51 saved dilution and patch facts", () => {
+  it.each([
+    [true, AdviceRelation.To, 10, "Do not dilute to 10 mL"],
+    [false, AdviceRelation.To, 10, "Dilute to 10 mL"],
+    [false, undefined, 1, "Dilute 1 mL"]
+  ] as const)("retains the legacy head relation on its unmarked volume: %s / %s", (negated, relation, value, source) => {
+    // Actual legacy shape: the relation is on the frame and the volume is Object.
+    const frame = {
+      force: negated ? AdviceForce.Warning : AdviceForce.Sequence,
+      ...(negated ? { polarity: AdvicePolarity.Negate } : {}),
+      predicate: { lemma: "dilute", semanticClass: "prepare", display: "Dilute",
+        i18n: { th: "เจือจาง" }, codings: [{ system: "http://snomed.info/sct",
+          code: "421399004", display: "Dilute - dosing instruction imperative" }] },
+      relation, args: [{ role: AdviceArgumentRole.Object, text: value + " mL", normalized: value + " ml" }],
+      span: { start: 0, end: source.length }, sourceText: source, sequenceIndex: 0
+    };
+    const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
+    const raw: FhirDosage = { extension: [extension] };
+    const before = JSON.stringify(raw), r6 = toDosageDetails([raw]);
+    expect(realizeInstructionAction(frame, "en")).toBe(source);
+    for (const input of [raw, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode });
+        const th = formatSig(input, "long", { locale: "th", realizationMode });
+        expect(en).toContain(source);
+        expect(th).toContain(value + " มิลลิลิตร");
+        if (relation) expect(th).toContain("ไปยัง");
+        else expect(th).not.toContain("ไปยัง");
+        if (negated) expect(th).toContain("ห้าม");
+      }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(r6)[0].extension?.find(e => e.url === extension.url)).toEqual(extension);
+  });
+
+  it.each([
+    [undefined, undefined], [undefined, "right forearm"],
+    [2, undefined], [2, "right forearm"]
+  ] as const)("renders current patch quantity and site once while retaining the saved frame: %s / %s", (dose, site) => {
+    const source = "Apply a new patch before breakfast";
+    const frame = parseInstructionActions("Apply patch before breakfast")[0];
+    frame.predicate.display = "Apply"; frame.sourceText = source;
+    frame.span = { start: 0, end: source.length };
+    frame.args = [
+      { role: AdviceArgumentRole.Object, text: "a new patch", normalized: "a new patch", i18n: { th: "แผ่นแปะใหม่" } },
+      ...(dose === undefined ? [] : [{ role: AdviceArgumentRole.Amount, text: "1 patch", quantity: { value: 1, unit: "patch" } }]),
+      ...(site === undefined ? [] : [{ role: AdviceArgumentRole.Site, text: "left forearm", normalized: "left forearm" }]),
+      { role: AdviceArgumentRole.Time, text: "breakfast", normalized: EventTiming.Breakfast,
+        relation: AdviceRelation.Before, i18n: { th: "อาหารเช้า" } }
+    ];
+    const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: 5 }, actions: [frame] })!;
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      method: { coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] },
+      route: { coding: [{ system: "http://snomed.info/sct", code: "45890007", display: "Transdermal route" }] },
+      timing: { repeat: { when: [EventTiming["Before Breakfast"]] } },
+      ...(dose === undefined ? {} : { doseAndRate: [{ doseQuantity: { value: dose, unit: "patch" } }] }),
+      ...(site === undefined ? {} : { site: { concept: { text: site } } }),
+      extension: [extension]
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw)))])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode });
+        const th = formatSig(input, "long", { locale: "th", realizationMode });
+        expect(en).toContain("a new patch"); expect(th).toContain("แผ่นแปะใหม่");
+        expect(en.match(/before breakfast/gu)).toHaveLength(1);
+        expect(th.match(/ก่อนอาหารเช้า/gu)).toHaveLength(1);
+        if (dose !== undefined) {
+          expect(en.match(/(?:^|[^0-9.])2 patch(?:es)?(?=[^a-z]|$)/gu)).toHaveLength(1);
+          expect(th.match(/(?:^|[^0-9.])2 patch(?=[^a-z]|$)/gu)).toHaveLength(1);
+          expect(en).not.toMatch(/(?:^|[^0-9.])1 patch/u);
+          expect(th).not.toMatch(/(?:^|[^0-9.])1 patch/u);
+        } else {
+          expect(en).not.toMatch(/(?:^|[^0-9.])[12] patch/u);
+          expect(th).not.toMatch(/(?:^|[^0-9.])[12] patch/u);
+        }
+        if (site) {
+          expect(en.match(/right forearm/gu)).toHaveLength(1);
+          expect(th.match(/ปลายแขนขวา/gu)).toHaveLength(1);
+          expect(en).not.toContain("left forearm");
+          expect(th).not.toContain("ปลายแขนซ้าย");
+        }
+      }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(raw)[0].extension?.find(e => e.url === extension.url)).toEqual(extension);
+  });
+});
