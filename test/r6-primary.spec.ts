@@ -7003,19 +7003,47 @@ describe("round49 primary administration condition placement", () => {
 
   it.each([
     ["en", "literal"], ["en", "default"], ["th", "literal"], ["th", "default"],
+    ["en", "formatDefault"], ["th", "formatDefault"],
   ] as const)("preserves custom formatter predicate visibility without duplicating it (%s, %s)", (locale, mode) => {
-    const native = importCanonicalCourse(parseSig(source).fhirNext);
+    const parsed = parseSig(source);
+    const native = importCanonicalCourse(parsed.fhirNext);
+    const defaults: string[] = [];
     const options: FormatOptions = { locale, realizationMode: "normalized", i18n: {
       inherit: locale,
-      formatLong: context => mode === "literal" ? "Clinic-selected administration." : context.defaultText,
+      formatLong: context => {
+        defaults.push(context.defaultText);
+        expect(context.formatDefault("long")).toBe(context.defaultText);
+        return mode === "literal" ? "Clinic-selected administration." :
+          mode === "formatDefault" ? context.formatDefault("long") : context.defaultText;
+      },
     } };
     const text = formatCanonicalCourse(native, "long", options);
     const guard = locale === "en" ? "only if BP > 160" : "เฉพาะเมื่อ BP > 160";
+    const expected = mode === "literal" ? "Clinic-selected administration " + guard + "." :
+      "Take 1 tablet orally twice daily " + guard + ". Otherwise hold.";
     expect(text.split(guard)).toHaveLength(2);
-    expect(text.endsWith(guard + ".")).toBe(true);
-    if (mode === "literal") expect(text).toBe("Clinic-selected administration " + guard + ".");
+    // A literal sentence owns its complete guard. Returning the known default
+    // instead keeps the condition on the dose before the independent hold.
+    if (mode === "literal") expect(text.endsWith(guard + ".")).toBe(true);
     else expect(text).toContain("Otherwise hold");
+    expect(text).toBe(expected);
+    expect(defaults).toEqual(["Take 1 tablet orally twice daily. Otherwise hold."]);
     expect(formatCanonicalCourse(native, "short", options)).toBe(
       locale === "en" ? "1 tab PO BID only if BP > 160." : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.");
+
+    const saved = JSON.stringify([parsed.fhir, parsed.fhirNext, native]);
+    for (const input of [parsed.fhir[0], parsed.fhir, parsed.fhirNext, native])
+      expect(formatSig(input, "long", options)).toBe(expected);
+    expect(fromFhirDosage(parsed.fhir[0], options).longText).toBe(expected);
+    expect(fromFhir(parsed.fhirNext, options).longText).toBe(expected);
+    expect(fromFhir(parsed.fhirNext, options).items[0].longText).toBe(expected);
+    const roundtrip = { ...options, realizationMode: "roundtrip" as const };
+    for (const input of [parsed.fhir[0], parsed.fhir])
+      expect(formatSig(input, "long", roundtrip)).toBe(source);
+    expect(fromFhirDosage(parsed.fhir[0], roundtrip).longText).toBe(source);
+    for (const input of [parsed.fhirNext, native])
+      expect(formatSig(input, "long", roundtrip)).toBe(expected);
+    expect(fromFhir(parsed.fhirNext, roundtrip).longText).toBe(expected);
+    expect(JSON.stringify([parsed.fhir, parsed.fhirNext, native])).toBe(saved);
   });
 });

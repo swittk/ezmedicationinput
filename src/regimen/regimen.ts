@@ -341,7 +341,8 @@ export function scopeSequentialPhaseSemantics(
       const followingClock = precedingClock && singleClockWithoutRecurrence(followingSchedule);
       const followingEvent = !followingSchedule?.timeOfDay?.length &&
         followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
-      if (precedingClock && (followingEvent || followingClock && precedingClock > followingClock)) {
+      if (precedingClock && states[prior[0]].primaryClause.prn?.enabled !== true &&
+          (followingEvent || followingClock && precedingClock > followingClock)) {
         // The existing clock-order construction kept these daughters sequential.
         // Complete its initial point; native phase completion owns the next
         // eligible clock or caller-resolved event without adding an event clock.
@@ -623,19 +624,20 @@ export function scopeSequentialPhaseSemantics(
         // recurrence, not the preceding phase's duration, count or dates.
         // The onset-only construction has one complete cadence antecedent.
         // Explicit local cadence/anchors remain local.
+        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.activityTiming?.length);
         const recurrence = {
           frequency: shared.frequency, frequencyMax: shared.frequencyMax,
           period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
           timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
           dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
-          when: schedule.clockWindow ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
-          timeOfDay: schedule.clockWindow ? undefined : shared.timeOfDay,
-          clockWindow: shared.clockWindow,
-          eventWindow: schedule.clockWindow ? undefined : shared.eventWindow,
-          activityTiming: schedule.clockWindow ? undefined : shared.activityTiming,
-          offset: schedule.clockWindow ? undefined : shared.offset,
-          offsetMin: schedule.clockWindow ? undefined : shared.offsetMin,
-          offsetMax: schedule.clockWindow ? undefined : shared.offsetMax
+          when: hasLocalAnchor ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
+          timeOfDay: hasLocalAnchor ? undefined : shared.timeOfDay,
+          clockWindow: hasLocalAnchor ? undefined : shared.clockWindow,
+          eventWindow: hasLocalAnchor ? undefined : shared.eventWindow,
+          activityTiming: hasLocalAnchor ? undefined : shared.activityTiming,
+          offset: hasLocalAnchor ? undefined : shared.offset,
+          offsetMin: hasLocalAnchor ? undefined : shared.offsetMin,
+          offsetMax: hasLocalAnchor ? undefined : shared.offsetMax
         };
         // ParserState setters may create own keys with an undefined value;
         // only an actually defined local value can override inherited recurrence.
@@ -679,9 +681,10 @@ export function scopeSequentialPhaseSemantics(
         fields.push('boundsStart');
         materializeAnchoredScheduleWindow(schedule);
       }
-      // An explicit local meal/event or clock anchor owns the whole anchor
-      // group, so inherited anchors can never create a mixed local/donor pair.
-      if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow && sharedAnchors) {
+      // An explicit local meal/event, activity or clock anchor owns the whole
+      // anchor group, so inherited anchors cannot create a mixed local/donor pair.
+      if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow &&
+          !schedule.activityTiming?.length && sharedAnchors) {
         // A point event belongs to its administration. A successor may
         // inherit recurring meal/day anchors, never the predecessor's "now".
         const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);

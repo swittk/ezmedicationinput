@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatParseBatch, formatSig, formatSigBatch, fromFhir, lintSig,
-  parseSig as parsePublicSig, toFhirR5Dosages, importCanonicalCourse, nextDueDoses } from "../src/index";
+  parseSig as parsePublicSig, toFhirR5Dosages, importCanonicalCourse, nextDueDoses, calculateTotalUnits } from "../src/index";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
@@ -643,6 +643,8 @@ describe("round48 clinical quantity and delayed PRN ownership", () => {
       const administration = reopened.stages[0].administrations[0];
       expect(administration.delayMinutes).toBeUndefined();
       expect(administration.schedule?.recurrence?.count).toBe(count);
+      if (prn) expect(administration.asNeeded).toBe(true);
+      else expect(administration.asNeeded).not.toBe(true);
       expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
       expect(JSON.stringify(input)).toBe(before);
     }
@@ -735,6 +737,118 @@ describe("round50 selected monthly mornings and local continuation windows", () 
       }
       if (activity) expect(prior.activityTiming![0]).toMatchObject({ relation: "before", offset: 30 });
       else expect(prior.eventWindow).toEqual({ start: "WAKE", end: "HS" });
+    }
+  });
+});
+
+describe("round52 authored PRN and local activity scope", () => {
+  const clock = {
+    orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", eventClock: { HS: "22:00", MORN: "08:00", EVE: "20:00" }
+  };
+
+  it.each([
+    ["Take 1 tablet at bedtime, then 2 in the morning", 1, 9,
+      ["2026-12-01T08:00:00+00:00", "2026-12-01T22:00:00+00:00", "2026-12-02T08:00:00+00:00"]],
+    ["Take 1 tablet once at bedtime, then 2 in the morning", 2, 5,
+      ["2026-12-01T22:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"]]
+  ] as const)("preserves the pure-event same-day policy and explicit completion: %s", (source, stages, units, due) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.course!.instruction).toBe(source);
+    expect(parsed.meta.canonical.course!.stages).toHaveLength(stages);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...clock, limit: 3 })).toEqual(due);
+      expect(calculateTotalUnits({ ...clock, dosage: input, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: units, unit: "tab", quantityKind: "scheduled" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([
+    ["Take 1 tablet at 22:00 as needed for pain, then 2 tablets in the morning", undefined, true, 3,
+      ["2026-12-01T22:00:00+00:00", "2026-12-02T22:00:00+00:00", "2026-12-03T22:00:00+00:00"]],
+    ["Take 1 tablet at 22:00, then 2 tablets in the morning", 1, false, 5,
+      ["2026-12-01T22:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"]],
+    ["Take 1 tablet once at 22:00 as needed for pain, then 2 tablets in the morning", 1, true, 5,
+      ["2026-12-01T22:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00"]]
+  ] as const)("does not invent completion for an independently authored PRN predecessor: %s",
+    (source, count, prn, units, due) => {
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.course!.instruction).toBe(source);
+      expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(count);
+      expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["22:00:00"]);
+      if (prn) {
+        expect(parsed.meta.canonical.clauses[0].prn?.enabled).toBe(true);
+        expect(parsed.meta.canonical.clauses[0].prn?.reason?.text).toBe("pain");
+        expect(parsed.fhir[0].asNeededFor).toContainEqual(expect.objectContaining({ text: "pain" }));
+      } else expect(parsed.meta.canonical.clauses[0].prn?.enabled).not.toBe(true);
+      const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+      expect(cold[0].timing?.repeat?.count).toBe(count);
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext)), cold]) {
+        const before = JSON.stringify(input);
+        const course = importCanonicalCourse(input);
+        expect(course.stages).toHaveLength(2);
+        const first = course.stages[0].administrations[0];
+        expect(first.schedule?.recurrence?.count).toBe(count);
+        expect(first.schedule?.recurrence?.clocks).toEqual(["22:00:00"]);
+        if (prn) expect(first.asNeeded).toBe(true);
+        else expect(first.asNeeded).not.toBe(true);
+        expect(first.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        const successor = course.stages[1].administrations[0];
+        expect(successor.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+        expect(successor.schedule?.recurrence?.anchors).toEqual(["MORN"]);
+        expect(nextDueDoses(input, { ...clock, limit: 3 })).toEqual(due);
+        expect(calculateTotalUnits({ ...clock, dosage: input, durationValue: 3, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: units, unit: "tab", quantityKind: prn ? "maximum" : "scheduled" });
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+  it.each([
+    ["Take 1 tablet daily at 08:00 for 7 days, then from day 8 take 2 tablets 45 minutes before exercise", "activity"],
+    ["Take 1 tablet daily at 08:00 for 7 days, then from day 8 take 2 tablets", "clock"],
+    ["Take 1 tablet daily at 08:00 for 7 days, then from day 8 take 2 tablets in the evening", "event"],
+    ["Take 1 tablet daily 45 minutes before exercise for 7 days, then from day 8 take 2 tablets", "activity"]
+  ] as const)("keeps a local activity anchor independent of a donor clock: %s", (source, anchor) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.course!.instruction).toBe(source);
+    const clause = parsed.meta.canonical.clauses[1];
+    expect(clause.schedule?.treatmentStartOffsetDays).toBe(7);
+    if (anchor !== "event") expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    if (anchor === "activity") {
+      expect(clause.schedule?.activityTiming).toEqual([expect.objectContaining({
+        relation: "before", offset: 45, activity: expect.objectContaining({ text: "exercise" })
+      })]);
+      expect(clause.schedule?.timeOfDay).toBeUndefined();
+      expect(clause.schedule?.when).toBeUndefined();
+    } else if (anchor === "clock") expect(clause.schedule?.timeOfDay).toEqual(["08:00:00"]);
+    else {
+      expect(clause.schedule?.when).toEqual(["EVE"]);
+      expect(clause.schedule?.timeOfDay).toBeUndefined();
+    }
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const before = JSON.stringify(input);
+      const course = importCanonicalCourse(input);
+      const successor = course.stages[1].administrations[0];
+      expect(successor.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(course.stages[1].start).toMatchObject({ anchor: "treatment-day-start", displacement: { value: 7, unit: "d" } });
+      const preview = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (anchor === "activity") {
+        expect(successor.schedule?.recurrence?.clocks).toBeUndefined();
+        expect(preview).toContain("From day 8 onward: Take 2 tablets orally once daily 45 minutes before exercise.");
+        expect(preview).not.toContain("2 tablets orally once daily at 8:00 am");
+      } else if (anchor === "clock") {
+        expect(successor.schedule?.recurrence?.clocks).toEqual(["08:00:00"]);
+        expect(preview).toContain("From day 8 onward: Take 2 tablets orally once daily at 8:00 am.");
+      } else {
+        expect(successor.schedule?.recurrence?.anchors).toEqual(["EVE"]);
+        expect(successor.schedule?.recurrence?.clocks).toBeUndefined();
+      }
+      expect(JSON.stringify(input)).toBe(before);
     }
   });
 });

@@ -24,7 +24,6 @@ import {
   resolveSigLocalization,
   resolveCourseLanguage,
   appendClinicalConditionText,
-  canFormatConditionInPrimary,
   type SigLocalization,
   type SigDoseScope,
   type CourseLanguage,
@@ -635,7 +634,7 @@ function formatCanonicalBase(
   if (a.text?.trim() && (source.schedule || source.route || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
-  if (a.predicate && (style !== "long" || !canFormatConditionInPrimary(env.localization)))
+  if (a.predicate && style !== "long")
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);

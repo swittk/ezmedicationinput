@@ -22,7 +22,7 @@ import {
   resolveSigLocalization, type SigFormatContext, registerSigLocalization
 } from "../src/i18n";
 import {
-  parseInstructionActions, realizeInstructionAction, realizeRichPrimaryWithCanonicalDose,
+  parseInstructionActions, realizeInstructionAction, realizeInstructionGraph, realizeRichPrimaryWithCanonicalDose,
   instructionGraphSourceConflictsWithDose
 } from "../src/instruction-graph";
 import { resolveMedicationInstructionActionByMethod } from "../src/instruction-action-terminology";
@@ -2993,7 +2993,8 @@ describe("round36 clock positions and retained source directions", () => {
       const before = JSON.stringify(saved);
       const reopened = importCanonicalCourse(saved);
       const preview = formatSig(reopened, "long", { locale: "en", realizationMode: "roundtrip" });
-      expect((preview + JSON.stringify(projectCanonicalCourse(reopened))).toLowerCase()).toContain("before breakfast");
+      expect(preview.toLowerCase()).toContain("before breakfast");
+      expect(JSON.stringify(projectCanonicalCourse(reopened)).toLowerCase()).toContain("before breakfast");
       expect(reopened.stages[0].administrations[0].additionalInstructions).toContainEqual(
         expect.objectContaining({ text: "before breakfast" }));
       expect(formatSig(reopened, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase())
@@ -4360,4 +4361,101 @@ describe("round48 saved sequence and locale ownership", () => {
     expect(inferMedicationLocale("__round48_locale_b__")).toBe("round48ownb");
     expect(inferMedicationLocale("ordinary English")).toBe("en");
   });
+});
+
+describe("round52 independent preparation and explicit accompaniment owners", () => {
+  it.each([false, true])("retains independently measured water beside a live tablet dose (primary span: %s)", explicitPrimary => {
+    const action = parseInstructionActions("Measure 100 mL of water")[0];
+    action.args.push({ role: AdviceArgumentRole.Theme, text: "water", normalized: "water",
+      span: { start: 18, end: 23 } });
+    const graph: CanonicalInstructionGraph = {
+      actions: [action], sourceLocale: "en", sourceText: explicitPrimary
+        ? "Measure 100 mL of water then swallow 1 tablet" : "Measure 100 mL of water",
+      ...(explicitPrimary ? { primaryAdministrationSpan: { start: 29, end: 45 } } : {})
+    };
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig("Swallow 1 tablet").fhir[0]));
+    const annotation = { url: "urn:round52:unrelated", valueString: "preserve" };
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL),
+      buildInstructionGraphExtension(graph)!, annotation];
+    const before = JSON.stringify(row), graphBefore = JSON.stringify(graph);
+    const r6 = toDosageDetails([row]);
+    const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [[row], r6, cold]) {
+      const saved = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale: "en", realizationMode });
+        expect(text).toContain("100 mL");
+        expect(text.toLowerCase()).toContain("water");
+        expect(text.toLowerCase()).toContain("swallow 1 tablet");
+        expect(text.match(/100 mL/gu)).toHaveLength(1);
+        expect(text.match(/1 tablet/gu)).toHaveLength(1);
+      }
+      const first = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(first.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(saved);
+    }
+    expect(cold[0].extension).toContainEqual(annotation);
+    expect(parseInstructionGraphExtension(cold[0].extension)?.actions[0].args.find(
+      arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 100, unit: "mL" });
+    expect(JSON.stringify(row)).toBe(before);
+    expect(JSON.stringify(graph)).toBe(graphBefore);
+  });
+
+  it("keeps the sole spanless medication amount under the current structured dose", () => {
+    const graph: CanonicalInstructionGraph = {
+      actions: parseInstructionActions("Measure 100 mL"), sourceText: "Measure 100 mL", sourceLocale: "en"
+    };
+    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig("Measure 100 mL").fhir[0]));
+    row.doseAndRate![0].doseQuantity!.value = 150;
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL),
+      buildInstructionGraphExtension(graph)!];
+    const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
+    for (const input of [[row], toDosageDetails([row])])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale: "en", realizationMode });
+        expect(text.match(/150 mL/gu)).toHaveLength(1);
+        expect(text).not.toContain("100 mL");
+        expect(text).toContain("Measure");
+      }
+    expect(JSON.stringify(row)).toBe(saved);
+    expect(JSON.stringify(graph)).toBe(graphSaved);
+  });
+
+  it.each(["site-before-with", "with-before-site", "locative-only"] as const)(
+    "retains the typed application site independently of explicit accompaniment (%s)", order => {
+      const source = order === "locative-only" ? "Apply cream to the skin" : "Apply cream to the skin with a cotton swab";
+      const parsed = parseInstructionActions("Apply cream to the skin")[0];
+      const theme = { role: AdviceArgumentRole.Theme, text: "cream", normalized: "cream" };
+      const site = { ...parsed.args.find(arg => arg.role === AdviceArgumentRole.Site)!, relation: AdviceRelation.To };
+      const object = { role: AdviceArgumentRole.Object, text: "a cotton swab", normalized: "cotton swab",
+        relation: AdviceRelation.With };
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, sourceText: source, span: { start: 0, end: source.length },
+        args: order === "locative-only" ? [theme, site] :
+          order === "site-before-with" ? [theme, site, object] : [theme, object, site]
+      }] };
+      const annotation = { url: "urn:round52:unrelated", valueString: "preserve" };
+      const row: FhirDosage = { method: { coding: [{
+        system: "http://snomed.info/sct", code: "738991002", display: "Apply"
+      }] }, extension: [buildInstructionGraphExtension(graph)!, annotation] };
+      const expected = "Apply cream to the skin" + (order === "locative-only" ? "" : " with cotton swab");
+      expect(realizeInstructionGraph(graph, "en")).toBe(expected);
+      const before = JSON.stringify(row), graphBefore = JSON.stringify(graph);
+      const r6 = toDosageDetails([row]);
+      const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+      for (const input of [[row], r6, cold]) {
+        const saved = JSON.stringify(input);
+        const normalized = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(normalized).toContain(expected);
+        expect(normalized).toContain("cream to the skin");
+        if (order !== "locative-only") expect(normalized.match(/with cotton swab/gu)).toHaveLength(1);
+        else expect(normalized).not.toContain("with");
+        const roundtrip = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
+        expect(roundtrip).toContain(source);
+        expect(JSON.stringify(input)).toBe(saved);
+      }
+      expect(cold[0].extension).toContainEqual(annotation);
+      expect(JSON.stringify(row)).toBe(before);
+      expect(JSON.stringify(graph)).toBe(graphBefore);
+    });
 });

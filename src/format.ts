@@ -2148,7 +2148,17 @@ export function formatCanonicalClause(
       resolvedMethod: resolvedMethod && !isBuiltinSigFormatter(localization.formatLong)
         ? cloneMedicationInstructionActionDefinition(resolvedMethod) : resolvedMethod
     };
-    return localization.formatLong(context);
+    const rendered = localization.formatLong(context);
+    const condition = clause.clinicalAdjuncts?.condition;
+    if (condition && !canFormatConditionInPrimary(localization)) {
+      // The cached default has known typed sentence boundaries. Put the guard
+      // on its primary dose before independent advice; a custom sentence keeps
+      // the existing whole-sentence fallback without inspecting its wording.
+      return rendered === context.defaultText
+        ? formatLong(clause, options, localization.course ?? ENGLISH_COURSE, resolvedMethod, condition)
+        : appendClinicalConditionText(rendered, condition, localization.course ?? ENGLISH_COURSE);
+    }
+    return rendered;
   }
 
   return formatDefault(style);

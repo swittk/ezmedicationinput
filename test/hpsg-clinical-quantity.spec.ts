@@ -2812,6 +2812,10 @@ describe("round38 independent occurrence duration endpoints", () => {
         const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
         if (lowText) expect(en).toContain(lowText);
         if (highText) expect(en).toContain(highText);
+        if (low && "comparator" in low && low.comparator === ">=")
+          expect(en).toContain("at least " + lowText);
+        if (high && "comparator" in high && high.comparator === "<")
+          expect(en).toContain("less than " + highText);
         if (lowThai) expect(th).toContain(lowThai);
         if (highThai) expect(th).toContain(highThai);
         if (lowThai && highThai) expect(th.indexOf(lowThai)).toBeLessThan(th.indexOf(highThai));

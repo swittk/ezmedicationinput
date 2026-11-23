@@ -3672,18 +3672,18 @@ type ActionRealizationContext = InstructionActionRealizationInput;
 
 type ActionRealizer = (context: ActionRealizationContext) => string;
 function defaultActionArguments(frame: AdviceFrame) {
-  let explicitAccompaniment = false, unmarkedSubstances = 0;
+  let explicitAccompaniment: AdviceArgument | undefined, unmarkedSubstances = 0;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
     if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
         arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) &&
         relationHasSemanticClass(arg.relation, "accompaniment")) {
-      explicitAccompaniment = true;
+      explicitAccompaniment = arg;
       break;
     }
   }
   let objectArg: AdviceArgument | undefined;
-  let relationTargetArg: AdviceArgument | undefined;
+  let relationTargetArg = explicitAccompaniment;
   let amountArg: AdviceArgument | undefined;
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
@@ -4643,19 +4643,18 @@ function primaryDoseAmountOwner(
     }
     if (!amount) continue;
     const definition = getMedicationInstructionAction(action.predicate.lemma, options);
-    // A registered device preparation carries its own count. It cannot
-    // acquire the administration's dose merely by appearing first.
-    if ((!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
-        (!earliest || action.span.start < earliest.span.start)) earliest = action;
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
     if(!primary || action.span.end<=primary.start) {
       // A separate quantified material is not the medication amount merely
-      // because it is the sole preparation. Saved dose-owning nominals retain
-      // their original Amount constituent even after a live value/unit edit.
-      const ownsAmount = !primary || !theme || quantityCoveredByDose(theme, amount.quantity) &&
+      // because it is the sole preparation, including saved spanless graphs.
+      // Dose-owning nominals retain their original Amount constituent after edits.
+      const ownsAmount = !theme || quantityCoveredByDose(theme, amount.quantity) &&
         (!theme.span || !amount.span ||
           theme.span.start <= amount.span.start && amount.span.end <= theme.span.end);
+      // Both spanless fallbacks respect that same independent-material evidence.
+      if (ownsAmount && (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+          (!earliest || action.span.start < earliest.span.start)) earliest = action;
       if (definition?.definesDose && ownsAmount) {
         earlierCount++;earlier=action;
       }
