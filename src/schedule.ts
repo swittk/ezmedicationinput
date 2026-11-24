@@ -19,6 +19,7 @@ export function nextDueDoses(
     ParseBatchResult | CanonicalScheduleInput,
   options: NextDueDoseOptions
 ): string[] {
+  if (Array.isArray(input) && input.length === 0) return [];
   if (options.limit !== undefined && options.limit <= 0) return [];
   // Capture declared options once; recursive capped scheduling must keep
   // prototype-backed getters as well as ordinary own properties.

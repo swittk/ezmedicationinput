@@ -4454,3 +4454,177 @@ describe("round49 partial-event supply windows and external inputs", () => {
     expect(JSON.stringify(batch)).toBe(original);
   });
 });
+
+
+describe("round53 supported execution and grammar regressions", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const forms = (course: CanonicalCourse) => [course, persist(courseToR5(course)), persist(courseToR6(course))];
+
+  it.each([
+    [2, Unit.Day, ["2026-01-01T08:00:00+00:00", "2026-01-03T08:00:00+00:00", "2026-01-05T08:00:00+00:00"], 3, 2],
+    [1, Unit.Week, ["2026-01-01T08:00:00+00:00", "2026-01-08T08:00:00+00:00", "2026-01-15T08:00:00+00:00"], 14, 2],
+  ] as const)("opens clock windows only on eligible calendar dates (%s %s)", (period, periodUnit, expected, days, units) => {
+    const parsed = parseSig(`Take 1 tablet every ${period} ${periodUnit === Unit.Week ? "week" : "days"} between 08:00 and 10:00`);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual(expected);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: days, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: units, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("restarts a subday interval in each daily clock window", () => {
+    const parsed = parseSig("Take 1 tablet every 2 hours between 08:00 and 10:00");
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T10:00:00+00:00",
+        "2026-01-02T08:00:00+00:00", "2026-01-02T10:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    }
+  });
+
+  it.each([
+    [120, 82, 5, "2026-01-04T10:00:00Z", "2026-01-04T11:00:00+00:00", "2026-01-05T11:00:00+00:00", false],
+    [-120, 80, 6, "2026-01-04T08:00:00Z", "2026-01-05T07:00:00+00:00", "2026-01-06T07:00:00+00:00", false],
+    [120, 82, 5, "2026-01-04T10:00:00Z", "2026-01-04T11:00:00+00:00", "2026-01-05T11:00:00+00:00", true],
+    [-120, 80, 6, "2026-01-04T08:00:00Z", "2026-01-05T07:00:00+00:00", "2026-01-06T07:00:00+00:00", true],
+  ] as const)("counts eligible delayed doses on the same grid as scheduling (%s minutes, start %s, end %s, %s, %s, %s, cap %s)",
+    (delayMinutes, startHours, endDays, from, first, second, civilCap) => {
+      const member = dose();
+      member.delayMinutes = delayMinutes;
+      member.phaseStart = relative(0);
+      member.schedule!.recurrence!.count = 2;
+      if (civilCap) member.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
+      const course: CanonicalCourse = { kind: "course", stages: [{ start: relative(startHours, "h"),
+        end: relative(endDays), administrations: [member] }] };
+      const query = { ...options, from, limit: 4 };
+      for (const input of forms(course)) {
+        const before = JSON.stringify(input);
+        expect(nextDueDoses(input, query)).toEqual([first, second]);
+        expect(calculateTotalUnits({ ...query, dosage: input, durationValue: endDays * 24 - startHours, durationUnit: Unit.Hour }))
+          .toMatchObject({ totalUnits: 2, unit: "tab" });
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+  it.each([
+    ["2026-12", EventTiming["Before Sleep"], { HS: "00:30" }, "2026-11-30T23:00:00Z", undefined],
+    ["2026-11", EventTiming["After Dinner"], { CV: "23:30" }, "2026-12-01T00:00:00Z", undefined],
+    ["2027", EventTiming["Before Sleep"], { HS: "00:30" }, "2026-12-31T23:00:00Z", undefined],
+    ["2026-12", EventTiming["Before Sleep"], { HS: "00:30" }, "2026-11-29T23:00:00Z", 0],
+    ["2026-11", EventTiming["After Dinner"], { CV: "23:30" }, "2026-12-02T00:00:00Z", 0],
+  ] as const)("keeps shifted partial events unresolved only when their possible dates overlap (%s %s %j %s)",
+    (event, when, eventClock, from, units) => {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { event: [event], repeat: { when: [when], offset: 60 } },
+        extension: [{ url: "urn:round53:partial-source", valueString: "authored partial date" }] };
+      const r6 = toDosageDetails([row]);
+      const query = { ...options, from, eventClock, limit: 2, durationValue: 1, durationUnit: Unit.Hour };
+      for (const input of [row, persist(r6), persist(toFhirR5Dosages(r6))]) {
+        const before = JSON.stringify(input);
+        expect(nextDueDoses(input, query)).toEqual([]);
+        const calculate = () => calculateTotalUnits({ ...query, dosage: input });
+        if (units === undefined) expect(calculate).toThrow(expect.objectContaining({ code: "timing-required" }));
+        else expect(calculate()).toMatchObject({ totalUnits: 0, unit: "tab" });
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(r6.step![0].component[0].timing?.event).toEqual([event]);
+      expect(toFhirR5Dosages(r6)[0].extension).toContainEqual(row.extension![0]);
+    });
+
+  it.each([
+    ["2026-12-01", EventTiming["Before Sleep"], { HS: "00:30" }, "2026-11-30T23:00:00Z", "2026-11-30T23:30:00+00:00"],
+    ["2026-11-30", EventTiming["After Dinner"], { CV: "23:30" }, "2026-12-01T00:00:00Z", "2026-12-01T00:30:00+00:00"],
+  ] as const)("retains exact shifted date occurrences (%s)", (event, when, eventClock, from, expected) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { event: [event], repeat: { when: [when], offset: 60 } } };
+    const query = { ...options, from, eventClock, limit: 2, durationValue: 1, durationUnit: Unit.Hour };
+    expect(nextDueDoses(row, query)).toEqual([expected]);
+    expect(calculateTotalUnits({ ...query, dosage: row })).toMatchObject({ totalUnits: 1, unit: "tab" });
+  });
+
+  it("returns an empty schedule for an empty dosage list without a time zone", () => {
+    expect(nextDueDoses([], { from: origin })).toEqual([]);
+    expect(() => nextDueDoses({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day } } }, { from: origin })).toThrow(/timeZone/);
+  });
+
+  it.each([
+    ["30", "60", false], ["30", "30", true],
+    ["at least 30", "at least 60", false], ["at least 30", "at least 30", true],
+    ["at most 30", "at most 60", false], ["at most 30", "at most 30", true],
+  ] as const)("resolves same-time references only when predecessor offsets agree (%s and %s)", (left, right, shared) => {
+    const source = `Take 1 tablet ${left} minutes before breakfast and 2 tablets ${right} minutes before breakfast for 2 days then take 3 tablets at the same time`;
+    const parsed = parseSig(source);
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(3);
+    const schedule = clauses[2].schedule;
+    expect(clauses[2].dose).toMatchObject({ value: 3, unit: "tab" });
+    if (shared) {
+      expect(schedule?.timingReference).toBeUndefined();
+      expect(schedule?.when).toEqual([EventTiming["Before Breakfast"]]);
+      const field = left.startsWith("at least") ? "offsetMin" : left.startsWith("at most") ? "offsetMax" : "offset";
+      expect(schedule?.[field]).toBe(30);
+    } else {
+      expect(schedule?.timingReference).toBe("previous");
+      expect(schedule?.when).toBeUndefined();
+      expect(schedule?.timeOfDay).toBeUndefined();
+      expect(schedule?.offset).toBeUndefined();
+      expect(schedule?.offsetMin).toBeUndefined();
+      expect(schedule?.offsetMax).toBeUndefined();
+      expect(clauses[2].additionalInstructions?.some(item => item.text === "at the same time")).toBe(true);
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+  });
+
+  it("keeps a successor waking interval independent of the predecessor clock", () => {
+    const source = "Take 1 tablet daily at 09:00 for 2 days then take 2 tablets every 4 hours while awake";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[1].schedule).toMatchObject({
+      period: 4, periodUnit: Unit.Hour, eventWindow: { start: "WAKE", end: "HS" } });
+    expect(parsed.meta.canonical.clauses[1].schedule?.timeOfDay).toBeUndefined();
+    const query = { ...options, from: "2026-01-03T00:00:00Z", eventClock: { WAKE: "08:00", HS: "20:00" }, limit: 3 };
+    for (const input of [parsed, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-03T08:00:00+00:00", "2026-01-03T12:00:00+00:00", "2026-01-03T16:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 6, unit: "tab" });
+    }
+  });
+
+  it.each(["16:00", "09:00"])("qualifies an authored morning clock without adding an administration (%s second clock)", second => {
+    const source = `Take 1 tablet every morning at 08:00 and ${second}`;
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["08:00:00", second + ":00"]);
+    const query = { ...options, eventClock: { MORN: "07:00" }, limit: 4 };
+    for (const input of [parsed, persist(parsed.fhir), persist(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-01T08:00:00+00:00", `2026-01-01T${second}:00+00:00`,
+        "2026-01-02T08:00:00+00:00", `2026-01-02T${second}:00+00:00`,
+      ]);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00", second + ":00"]);
+    expect(parsed.fhirNext.step![0].component[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00", second + ":00"]);
+  });
+
+  it.each(["8am", "8 AM", "8pm", "8 PM"])("already preserves a qualified successor dose before a compact or spaced clock (%s)", clock => {
+    const parsed = parseSig(`Take 1 tablet daily for 2 days then about 2 at ${clock}`);
+    expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({ value: 2, unit: "tab", comparator: "~" });
+    const expectedClock = clock.toLowerCase().includes("pm") ? "20:00:00" : "08:00:00";
+    for (const row of [parsed.fhir[1], parsed.fhirNext.step![1].component[0], toFhirR5Dosages(parsed.fhirNext)[1]]) {
+      expect(row.timing?.repeat?.timeOfDay).toEqual([expectedClock]);
+      expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(row.doseAndRate![0].doseQuantity?.extension).toContainEqual({
+        url: "http://ema.europa.eu/fhir/extension/comparator",
+        valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000055" },
+      });
+    }
+  });
+});

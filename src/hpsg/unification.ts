@@ -1043,7 +1043,9 @@ function fixedClockEventAdjunctSynsem(
   const daypartQualification = meal.offset === undefined && meal.offsetMin === undefined &&
     meal.offsetMax === undefined && meal.when.every(event => {
       const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
-      return range && clock.timeOfDay!.every(value => {
+      // Other authored clocks remain independent; one matching clock owns
+      // this daypart qualifier without adding a configured event occurrence.
+      return range && clock.timeOfDay!.some(value => {
         const hour = Number(value.slice(0, 2));
         return hour >= range.startHour && hour < range.endHour;
       });

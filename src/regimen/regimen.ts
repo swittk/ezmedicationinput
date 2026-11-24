@@ -566,7 +566,10 @@ export function scopeSequentialPhaseSemantics(
       sameSet(schedule?.timeOfDay, shared?.timeOfDay) &&
       equalStructuredValues(schedule?.clockWindow, shared?.clockWindow) &&
       equalStructuredValues(schedule?.eventWindow, shared?.eventWindow) &&
-      equalStructuredValues(schedule?.activityTiming, shared?.activityTiming)
+      equalStructuredValues(schedule?.activityTiming, shared?.activityTiming) &&
+      schedule?.offset === shared?.offset &&
+      schedule?.offsetMin === shared?.offsetMin &&
+      schedule?.offsetMax === shared?.offsetMax
     );
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
@@ -684,7 +687,7 @@ export function scopeSequentialPhaseSemantics(
       // An explicit local meal/event, activity or clock anchor owns the whole
       // anchor group, so inherited anchors cannot create a mixed local/donor pair.
       if (!schedule.when?.length && !schedule.timeOfDay?.length && !schedule.clockWindow &&
-          !schedule.activityTiming?.length && sharedAnchors) {
+          !schedule.eventWindow && !schedule.activityTiming?.length && sharedAnchors) {
         // A point event belongs to its administration. A successor may
         // inherit recurring meal/day anchors, never the predecessor's "now".
         const recurringAnchors = shared?.when?.filter(event => event !== SequenceEventTiming.Immediate);

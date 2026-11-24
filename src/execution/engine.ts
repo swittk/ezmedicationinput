@@ -886,10 +886,19 @@ function exactTimingEventOccurrences(
         const wholeYear = value.length === 4;
         const month = wholeYear ? 1 : Number(value.slice(5));
         // These bound the possible date range; they are never dose instants.
-        const start = calendarBoundaryDate(timeZone, year, month, 1, 0, 0, 0);
-        const end = calendarBoundaryDate(timeZone,
+        let start = calendarBoundaryDate(timeZone, year, month, 1, 0, 0, 0);
+        let end = calendarBoundaryDate(timeZone,
           wholeYear || month === 12 ? year + 1 : year,
           wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
+        if (start && end && expanded.length) {
+          let firstShift = expanded[0].dayShift, lastShift = firstShift;
+          for (const entry of expanded) {
+            if (entry.dayShift < firstShift) firstShift = entry.dayShift;
+            if (entry.dayShift > lastShift) lastShift = entry.dayShift;
+          }
+          if (firstShift) start = addLocalDays(start, firstShift, timeZone);
+          if (lastShift) end = addLocalDays(end, lastShift, timeZone);
+        }
         const queryFrom = eventStatus?.from ?? from;
         const queryEnd = earlierDate(courseEnd, eventStatus?.end ?? null);
         const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
@@ -3925,7 +3934,9 @@ function selectedAlternativeCourse(course: CanonicalCourse, options: NextDueDose
               : component
           ),
       }))
-      .filter((step) => step.administrations.length > 0),
+      // Authored empty stages retain their timed pause. Only selection itself
+      // can remove a formerly populated stage from the chosen branch.
+      .filter((step, index) => step.administrations.length > 0 || course.stages[index].administrations.length === 0),
   };
 }
 /**
@@ -4440,6 +4451,8 @@ function generateWakingHoursIntervalSeries(
   // Anchor weekday rules to the wake date, not to the spillover date.
   const overnight = sleepClock < wakeClock;
   const firstTreatmentDay = overnight && orderedAt ? startOfLocalDay(orderedAt, timeZone) : null;
+  const calendarCadence = normalizedCalendarInterval(repeat.period, repeat.periodUnit);
+  const cadenceAnchor = calendarCadence ? resolveRepeatBoundsStart(repeat, timeZone) ?? orderedAt ?? from : undefined;
   const results: string[] = [];
   let currentDay = startOfLocalDay(from, timeZone);
   if (overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
@@ -4448,7 +4461,8 @@ function generateWakingHoursIntervalSeries(
   while (results.length < limit && dayIterations < maxDays && (!courseEnd || currentDay < courseEnd)) {
     if (
       (!firstTreatmentDay || currentDay >= firstTreatmentDay) &&
-      matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone)
+      matchesCalendarDay(currentDay, dayFilter, enforceDayFilter, calendarDays, timeZone) &&
+      (!cadenceAnchor || clockCadenceEligible(currentDay, cadenceAnchor, repeat, timeZone, enforceDayFilter))
     ) {
       const wake = makeZonedDateFromDay(currentDay, timeZone, wakeClock);
       const sleepDay = overnight ? addLocalDays(currentDay, 1, timeZone) : currentDay;
@@ -6602,6 +6616,7 @@ function calculateTotalUnitsSingle(
     const end = calculationHorizon(options, timeZone);
     const localAccounting = supplyAccounting?.acceptedTimes
       ? { ...supplyAccounting, acceptedTimes: [] as string[] } : supplyAccounting;
+    const eligibility = (options as PhaseCountOptions).countEligibilityStart;
     const result = calculateTotalUnitsSingle({
       ...options,
       dosage: {
@@ -6609,6 +6624,7 @@ function calculateTotalUnitsSingle(
         delayMinutes: undefined,
       },
       from: shift(from, -delta),
+      ...(eligibility ? { countEligibilityStart: shift(eligibility, -delta) } : {}),
       durationValue: (end.getTime() - from.getTime()) / 1000,
       durationUnit: DurationUnit.Second,
       priorDoseTimes: options.priorDoseTimes?.map((value) => shift(value, -delta)),
