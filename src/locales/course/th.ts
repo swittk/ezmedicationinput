@@ -1,7 +1,7 @@
 /** Thai course wording. Keep locale realization separate from shared
  * interval/count/condition semantics; this is a facet of SigLocalization. */
 import type { CourseLanguage } from "./types";
-import { THAI_DAY_NAMES, joinLocalizedList } from "./weekday-vocabulary";
+import { THAI_DAY_NAMES, joinLocalizedList } from "./types";
 const UNITS: Readonly<Record<string, string>> = {
   s: "วินาที",
   min: "นาที",

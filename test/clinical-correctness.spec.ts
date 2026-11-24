@@ -434,15 +434,15 @@ describe("clinical SIG correctness and boundary promotion", () => {
 
   it("preserves already understood count caps without blocking the schedule", () => {
     const parsed = parseSig("1 tab sl q5min prn chest pain max 3 doses");
-    expect(parsed.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
+    expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
   });
 
   it("treats 'up to 3 doses' as a total administration cap without absorbing the PRN reason", () => {
     const parsed = parseSig("1 tab SL q5min PRN chest pain up to 3 doses");
-    expect(parsed.fhir.timing?.repeat).toMatchObject({
-      count: 1,
-      countMax: 3,
+    expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3,
       period: 5,
       periodUnit: "min"
     });
@@ -1473,7 +1473,8 @@ describe("HPSG count cardinal semantics", () => {
       text: site,
       coding: [{ system: "http://snomed.info/sct", code }]
     });
-    expect(parsed.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
+    expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(parsed.meta.canonical.clauses[0]?.site?.text).toBe(site);
     expect(parsed.meta.leftoverText).toBeUndefined();
   });
@@ -1484,9 +1485,8 @@ describe("HPSG count cardinal semantics", () => {
       const parsed = parseSig(`1 tab q4h prn pain ${lead} three times`);
       expect(parsed.fhir.asNeeded).toBe(true);
       expect(parsed.fhir.asNeededFor?.[0]?.text).toBe("pain");
-      expect(parsed.fhir.timing?.repeat).toMatchObject({
-        count: 1,
-        countMax: 3,
+      expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+      expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3,
         period: 4,
         periodUnit: "h"
       });
@@ -1512,7 +1512,8 @@ describe("HPSG count cardinal semantics", () => {
 
   it("preserves spelled maximum and periodic occurrence caps", () => {
     const total = parseSig("1 tab q6h max three doses");
-    expect(total.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
+    expect(total.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(total.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(total.meta.leftoverText).toBeUndefined();
 
     const daily = parseSig("1 tab q4h prn pain max three doses daily");
@@ -3418,7 +3419,10 @@ describe("round52 live site and partial-direction previews", () => {
         expect(en).toContain(order === "local-only" ? "SITE-OD" : "right eye");
         if (order !== "local-only") {
           expect(en).not.toContain("SITE-OD");
-          expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ตาขวา");
+          expect(en).not.toContain("left eye");
+          const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+          expect(th).toContain("ตาขวา");
+          expect(th).not.toContain("ตาซ้าย");
         }
         expect(input).toEqual(before);
       }
@@ -3447,7 +3451,8 @@ describe("round52 live site and partial-direction previews", () => {
   it.each([false, true])("keeps the condition and authored directions with live dose=%s", (liveDose) => {
     const authored = "Swallow 1 tablet whole";
     const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" } as const;
-    const row: Parameters<typeof setDosageCondition>[0] = { text: authored };
+    const sourceNote = { url: "urn:round54:B17-source-note", valueString: "retain authored annotation" };
+    const row: Parameters<typeof setDosageCondition>[0] = { text: authored, extension: [sourceNote] };
     setDosageCondition(row, condition);
     if (liveDose) row.doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
     const expected = JSON.parse(JSON.stringify(row));
@@ -3461,6 +3466,7 @@ describe("round52 live site and partial-direction previews", () => {
         if (liveDose) {
           expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
           expect(preview).not.toContain("1 tablet");
+          expect(preview).not.toContain("1 เม็ด");
         } else expect(preview).toContain(authored);
       }
       expect(input).toEqual(before);
@@ -3468,6 +3474,51 @@ describe("round52 live site and partial-direction previews", () => {
     expect(getDosageCondition(reopened[0])).toEqual(condition);
     expect(JSON.stringify(r6)).toContain(authored);
     expect(row).toEqual(expected);
+    expect(r6.step?.[0].component?.[0].text).toBe(authored);
+    expect(reopened[0].text).toBe(authored);
+    expect(r6.step?.[0].component?.[0].extension).toEqual(expect.arrayContaining([sourceNote]));
+    expect(reopened[0].extension).toEqual(expect.arrayContaining([sourceNote]));
+
+    if (liveDose) {
+      // An independently typed manner remains active beside the updated dose.
+      // Conflicting unparsed source text above stays exact as source provenance.
+      const typed: Parameters<typeof setDosageCondition>[0] = JSON.parse(JSON.stringify(
+        toFhirR5Dosages(parseSig(authored).fhirNext)[0]
+      ));
+      setDosageCondition(typed, condition);
+      typed.doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+      typed.extension = [...(typed.extension ?? []), structuredClone(sourceNote)];
+      const typedExpected = structuredClone(typed);
+      const graph = structuredClone(typed.extension.find(extension =>
+        extension.url === "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph"));
+      expect(graph).toBeDefined();
+      const typedR6 = toDosageDetails([typed]);
+      const typedReopened = JSON.parse(JSON.stringify(toFhirR5Dosages(typedR6)));
+      for (const input of [[typed], typedR6, typedReopened]) {
+        const before = structuredClone(input);
+        for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
+          const preview = formatSig(input, "long", { locale, realizationMode: mode });
+          expect(preview).toContain("SBP > 160");
+          expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          expect(preview).not.toContain("1 tablet");
+          expect(preview).not.toContain("1 เม็ด");
+          expect(preview).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
+        }
+        expect(input).toEqual(before);
+      }
+      expect(typed).toEqual(typedExpected);
+      expect(typedR6.step?.[0].component?.[0].extension).toEqual(expect.arrayContaining([graph, sourceNote]));
+      const savedSource = typedR6.extension?.find(extension =>
+        extension.url === "urn:ezmedicationinput:StructureDefinition:medication-course-reconciliation-source");
+      expect(savedSource).toBeDefined();
+      const savedComponent = savedSource?.extension?.find(extension =>
+        extension.url === "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details")
+        ?.extension?.find(extension => extension.url === "component");
+      expect(savedComponent?.extension).toContainEqual({ url: "text", valueString: typedExpected.text });
+      expect(toDosageDetails(typedReopened).extension).toEqual(expect.arrayContaining([savedSource]));
+      expect(typedReopened[0].extension).toEqual(expect.arrayContaining([graph, sourceNote]));
+      expect(getDosageCondition(typedReopened[0])).toEqual(condition);
+    }
   });
 });
 

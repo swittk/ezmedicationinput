@@ -278,10 +278,11 @@ describe("concurrent independent treatment sequences", () => {
     const projectedComponent = regimen.stages[0].components.find(component =>
       component.clause.site?.text === "left eye");
     expect(projectedComponent?.clause.schedule).toMatchObject({
-      boundsEnd: "2026-10-31",
+      boundsEnd: "2026-11-15",
       duration: 7,
       durationUnit: "d"
     });
+    expect(projectedComponent?.effectiveBoundsEnd).toBe("2026-10-31");
     const partialSource = input.replace("OD QID x7d", "OD QID");
     const partial = parseSig(partialSource);
     const partialLeft = partial.meta.canonical.course!.stages[0].administrations
@@ -1615,7 +1616,17 @@ describe("round48 parallel duration display boundaries", () => {
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(current)));
     for (const input of [importCanonicalCourse(current), current, cold]) {
       const before = JSON.stringify(input);
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(expected);
+      const preview = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const stages = preview.trim().split(/ (?=From )/u);
+      expect(stages).toHaveLength(3);
+      const heading = stage === 0
+        ? "From treatment start until 7 days after treatment start"
+        : "From 7 days after treatment start until 1 month after treatment start";
+      expect(stages[stage].startsWith(heading + ": ")).toBe(true);
+      const instructions = stages[stage].slice(heading.length + 2).replace(/\.$/u, "").split("; ");
+      const cadence = stage === 0 && member === 0 ? "every 2 hours" : "four times daily";
+      expect(instructions[member]).toBe("Instill 1 drop " + cadence + " " + expected +
+        " in the " + (member === 0 ? "right" : "left") + " eye");
       expect(JSON.stringify(input)).toBe(before);
     }
   });

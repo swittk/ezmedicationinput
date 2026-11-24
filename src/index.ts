@@ -1102,11 +1102,18 @@ function appendSourceLessRateRanges(
     : displayed;
 }
 
-/** Compact clauses cannot carry independent phase origins or qualified ranges. */
+/** Compact clauses cannot carry independent phase origins, references or qualified ranges. */
 function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolean {
+  const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
+  if (missingSite && dosage.siteReference?.display) return true;
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||
       extension.url === DOSAGE_DETAILS_R5_URL &&
-      extension.extension?.some(child => child.url === "timingOffsets")))
+      extension.extension?.some(child => child.url === "timingOffsets" || missingSite &&
+        // Compact rows expose the retained reference directly. Historical
+        // full-course rows use the existing native owner reconciliation.
+        (child.url === "dosageDetails" || child.url === "component" &&
+          child.extension?.some(field => field.url === "site" &&
+            field.valueCodeableReference?.reference?.display)))))
     return true;
   const primary = dosage.doseAndRate?.[0];
   // With no structured dose or method, authored text may be the only

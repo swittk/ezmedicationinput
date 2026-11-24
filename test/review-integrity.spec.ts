@@ -289,9 +289,10 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
 
   it("executes live dosage edits rather than a stale saved R6 snapshot", () => {
     const original = parseSig(parallel);
-    const edited = JSON.parse(JSON.stringify(original.fhir)) as FhirDosage[];
+    let edited = JSON.parse(JSON.stringify(original.fhir)) as FhirDosage[];
     const initial = calculateTotalUnits({ ...supply, dosage: edited });
     expect(initial.totalUnits).toBe(296);
+    edited = structuredClone(edited);
     edited[3].timing!.repeat!.frequency = 3;
     // Both external facts remain recoverable, but QID and a live TID repeat
     // conflict. Execution requires resolving that contradiction explicitly.
@@ -307,6 +308,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     expect(() => nextDueDoses(edited, {
       ...scheduler, from: "2026-10-27T08:00:00+07:00"
     })).toThrow("The timing code conflicts with the complete repeat recurrence");
+    edited = structuredClone(edited);
     delete edited[3].timing!.code;
     edited[3].text = "1 drop OS TID after day 7";
     const updated = toDosageDetails(edited);
@@ -342,11 +344,12 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     });
     expect(configured.map(v => v.slice(11, 19)))
       .toEqual(["06:00:00", "10:00:00", "14:00:00", "18:00:00"]);
-    const edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
+    let edited = JSON.parse(JSON.stringify(base)) as FhirDosage;
     edited.timing!.repeat!.frequency = 3;
     expect(() => nextDueDoses(edited, options))
       .toThrow("The timing code conflicts with the complete repeat recurrence");
     expect(edited.timing?.code?.coding?.[0]?.code).toBe("QID");
+    edited = structuredClone(edited);
     delete edited.timing!.code;
     const changed = nextDueDoses(edited, options);
     expect(changed).toHaveLength(8);
@@ -1250,7 +1253,7 @@ it("retains unfamiliar children on recognized course and edit markers even witho
   expect(source?.extension).toContainEqual(course);
   const savedDisplay = restored.extension?.find(value => value.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL);
   expect(savedDisplay?.extension).toContainEqual({ url: "externalSigner", valueString: "retained author" });
-  const expectedSteps = parseSig(parallel).fhirNext.step;
+  const expectedSteps = structuredClone(parseSig(parallel).fhirNext.step);
   expectedSteps[0].component[0].extension = [{
     url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [display]
   }];

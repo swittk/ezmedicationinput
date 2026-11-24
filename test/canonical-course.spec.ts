@@ -35,7 +35,7 @@ import { registerMedicationLocaleDetector, inferMedicationLocale } from "../src/
 import { registerSigLocalization, resolveSigLocalization, DAY_NAMES_THAI, joinWithAndThai } from "../src/i18n";
 import { formatCanonicalClause, DAY_NAMES, joinWithAnd } from "../src/format";
 import { instructionGraphSourceConflictsWithDose } from "../src/instruction-graph";
-import { ENGLISH_DAY_NAMES, THAI_DAY_NAMES, joinLocalizedList } from "../src/locales/course/weekday-vocabulary";
+import { ENGLISH_DAY_NAMES, THAI_DAY_NAMES, joinLocalizedList } from "../src/locales/course/types";
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM } from "../src/fhir-quantity-operator";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type FhirDosage, type FhirR6Dosage, type FhirR6DosageInstruction, type FhirR6DoseLimit } from "../src/types";
@@ -987,12 +987,15 @@ describe("review 26 external display ownership", () => {
         valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" }
       }] }
     } }] };
+    const expectedDoseAndRate = structuredClone(row.doseAndRate);
     const text = formatSig(row, "long", { locale });
     expect(text).toContain("<5");
+    expect(row.doseAndRate).toEqual(expectedDoseAndRate);
     const reopened = fromFhirDosage(row, { locale });
     expect(reopened.longText).toBe(text);
     expect(reopened.shortText).toContain("<5");
-    expect(reopened.fhir.doseAndRate).toEqual(row.doseAndRate);
+    expect(row.doseAndRate).toEqual(expectedDoseAndRate);
+    expect(reopened.fhir.doseAndRate).toEqual(expectedDoseAndRate);
   });
 
   it("binds partial regional callbacks to the registration that owns their private state", () => {
@@ -2189,7 +2192,7 @@ describe("dependency-free course vocabulary", () => {
     for (const name of ["en", "th"]) {
       const moduleText = readFileSync(new URL("../src/locales/course/" + name + ".ts", import.meta.url), "utf8");
       expect(moduleText).not.toMatch(/from\s+["']\.\.\/\.\.\/(?:i18n|format)["']/u);
-      expect(moduleText).toContain('from "./weekday-vocabulary"');
+      expect(moduleText).toContain('from "./types"');
     }
   });
   it("retains original 0/1/2/3+ list join behavior without slicing arrays", () => {

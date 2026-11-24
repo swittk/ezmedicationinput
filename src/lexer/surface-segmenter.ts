@@ -23,7 +23,10 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
   const prototype = Object.getPrototypeOf(segmenter);
   if (prototype !== Object.prototype && prototype !== null) {
     normalized.locale = segmenter.locale;
-    normalized.segment = segmenter.segment.bind(segmenter);
+    // Enumerable own callbacks keep the normalized script through `this`.
+    // Inherited/non-enumerable methods retain their original private receiver.
+    if (!Object.prototype.propertyIsEnumerable.call(segmenter, "segment"))
+      normalized.segment = segmenter.segment.bind(segmenter);
   }
   const locale = normalized.locale;
   const existing=SEGMENTER_INDEX.get(locale);

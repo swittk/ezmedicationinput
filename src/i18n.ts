@@ -1,4 +1,4 @@
-import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
+import { THAI_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import type { CourseLanguage } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import { THAI_COURSE } from "./locales/course/th";
@@ -1147,7 +1147,7 @@ function formatDoseThaiPerTarget(dose: CanonicalDoseExpr | undefined): string | 
 }
 
 function perTargetSiteThai(clause: CanonicalSigClause): string | undefined {
-  if (!doseUnitUsesTargetScope(clause.dose?.unit)) return undefined;
+  if (!doseUnitUsesTargetScope(clause.dose?.unitIdentity ?? clause.dose?.unit)) return undefined;
   const text = clause.site?.text?.trim() || clause.site?.coding?.display?.trim();
   if (!text) return undefined;
   return resolveBodySitePhrase(text)?.definition?.perTargetI18n?.th;
@@ -2015,7 +2015,8 @@ function describeAdministrationDurationThai(
       return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "th")) +
         (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
     };
-    const low = range.low && endpoint(range.low), high = range.high && endpoint(range.high);
+    const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
+    const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
     if (low && high) return short ? "นาน" + low + "-" + high : prefix + " " + low + " ถึง " + high;
     if (high) return short ? "นาน" + (range.high?.comparator ? "" : "<=") + high : prefix + " " + (range.high?.comparator ? "" : "ไม่เกิน ") + high;
     if (low) return short ? "นาน" + (range.low?.comparator ? "" : ">=") + low : prefix + " " + (range.low?.comparator ? "" : "อย่างน้อย ") + low;
@@ -2212,7 +2213,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     parts.push(`ถึง${schedule.boundsEnd}`);
   }
   if (schedule.countMax !== undefined) {
-    parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
+    parts.push(schedule.count === undefined ? `x<=${stripTrailingZero(schedule.countMax)}`
+      : `x${stripTrailingZero(schedule.count)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
@@ -2486,7 +2488,7 @@ function formatLongThai(
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "th", options, richPrimaryCoverage)
     : undefined;
   const richPrimaryHasSite = Boolean(
-    !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
+    !clause.site?.spatialRelation && !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const richPrimaryDefinition = richPrimaryGraphAction

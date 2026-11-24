@@ -140,7 +140,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
 function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
   const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
-    isConditionalAdviceFrame(context, frame) ||
+    isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true ||
     medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
   return !(
     (!definition?.procedural && !scopedDirective) ||

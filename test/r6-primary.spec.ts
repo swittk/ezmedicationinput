@@ -4378,13 +4378,14 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(getEmaQuantityComparator(original[0].doseAndRate?.[0].doseQuantity)).toBe("~");
     // An external editor supplies the current legal SimpleQuantity coding.
     // The import/projection boundary owns preservation, not the editing UI.
-    course.step[0].component[0].doseAndRate![0].doseQuantity = {
+    const editedCourse: FhirR6DosageInstruction = JSON.parse(JSON.stringify(course));
+    editedCourse.step[0].component[0].doseAndRate![0].doseQuantity = {
       value: 5, unit: "mg", extension: [{
         ...prior, valueCoding: { ...prior.valueCoding, code: "100000000052",
           display: "less than or equal to" }
       }, { url: "https://example.org/measurement", valueBoolean: false }]
     };
-    const rows = toFhirR5Dosages(course);
+    const rows = toFhirR5Dosages(editedCourse);
     const quantity = rows[0].doseAndRate?.[0].doseQuantity;
     const comparatorExtensions = quantity?.extension?.filter(item =>
       item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL);
@@ -4646,9 +4647,10 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         expect(imported.fhir[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
         expect(imported.fhir[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
         expect(toDosageDetails(toFhirR5Dosages(source))).toEqual(source);
-        source.step[0].component[0].text = "Clinician's own component wording";
-        expect(fromFhir(source).items[0].longText).toContain(expected);
-        expect(fromFhir(source).fhirNext.step[0].component[0].text).toBe("Clinician's own component wording");
+        const editedSource: FhirR6DosageInstruction = JSON.parse(JSON.stringify(source));
+        editedSource.step[0].component[0].text = "Clinician's own component wording";
+        expect(fromFhir(editedSource).items[0].longText).toContain(expected);
+        expect(fromFhir(editedSource).fhirNext.step[0].component[0].text).toBe("Clinician's own component wording");
       }
     }
   });
@@ -4728,25 +4730,27 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(text).not.toContain("No doses from 3 days after each cycle start until 7 days after each cycle start");
       expect(text).not.toContain("every 7 days");
     }
-    source.step[0].start = { ...relative(2), offsetDuration: {
+    const editedStart: FhirR6DosageInstruction = JSON.parse(JSON.stringify(source));
+    editedStart.step[0].start = { ...relative(2), offsetDuration: {
       ...relative(2).offsetDuration, extension: coding("100000000055")
     } };
-    const text = formatSig(source, "long", { locale: "en" });
+    const text = formatSig(editedStart, "long", { locale: "en" });
     expect(text).toContain("~2 days after each cycle start");
     expect(text).not.toContain("From 2 days after each cycle start until 3 days after each cycle start");
     expect(text).not.toContain("No doses");
-    expect(formatSig(source, "long", { locale: "th" })).toContain("~2 วัน");
-    expect(fromFhir(source).fhirNext).toEqual(source);
+    expect(formatSig(editedStart, "long", { locale: "th" })).toContain("~2 วัน");
+    expect(fromFhir(editedStart).fhirNext).toEqual(editedStart);
     // The current native edit wins over retained EMA metadata; a nominal
     // approximate repeat remains executable, just as a native ~ quantity.
-    source.step[0].start = relative(0);
-    source.repeatCycle!.comparator = "~";
-    expect(formatSig(source, "long", { locale: "en" })).toContain("~7 days");
+    const editedRepeat: FhirR6DosageInstruction = JSON.parse(JSON.stringify(editedStart));
+    editedRepeat.step[0].start = relative(0);
+    editedRepeat.repeatCycle!.comparator = "~";
+    expect(formatSig(editedRepeat, "long", { locale: "en" })).toContain("~7 days");
     const opts = { from: "2026-11-02T00:00:00+07:00",
       orderedAt: "2026-11-02T00:00:00+07:00", timeZone: "Asia/Bangkok",
       durationValue: 14, durationUnit: FhirPeriodUnit.Day };
-    expect(calculateTotalUnits({ dosage: source, ...opts }).totalUnits).toBe(6);
-    expect(calculateTotalUnits({ dosage: toFhirR5Dosages(source), ...opts }).totalUnits).toBe(6);
+    expect(calculateTotalUnits({ dosage: editedRepeat, ...opts }).totalUnits).toBe(6);
+    expect(calculateTotalUnits({ dosage: toFhirR5Dosages(editedRepeat), ...opts }).totalUnits).toBe(6);
   });
 
   it("shows known phase repeats with qualified, unknown-unit and exact course intervals", () => {
@@ -5679,10 +5683,11 @@ describe("review 17: course history, imported rate ranges and civil-clock caps",
     expect(formatSig(r5, "long", { locale })).toContain(expected);
     expect(fromFhirDosage(r5, { locale }).longText).toContain(expected);
     expect(toDosageDetails([r5])).toEqual(source);
-    source.step[0].component[0].text = "Infuse using the written rate plan";
-    expect(fromFhir(source, { locale }).items[0].longText).toContain(expected);
-    expect(fromFhir(source, { locale }).items[0].longText).toContain("500");
-    expect(fromFhir(source, { locale }).fhirNext.step[0].component[0].text)
+    const editedSource: FhirR6DosageInstruction = JSON.parse(JSON.stringify(source));
+    editedSource.step[0].component[0].text = "Infuse using the written rate plan";
+    expect(fromFhir(editedSource, { locale }).items[0].longText).toContain(expected);
+    expect(fromFhir(editedSource, { locale }).items[0].longText).toContain("500");
+    expect(fromFhir(editedSource, { locale }).fhirNext.step[0].component[0].text)
       .toBe("Infuse using the written rate plan");
   });
 
@@ -6582,8 +6587,9 @@ describe("review 26 scoped safety and cycle controls", () => {
       .toMatchObject({ value: 2, unit: "tab", comparator });
     expect(fromFhir(saved).fhirNext.safety?.doseLimit?.[0].valueQuantity?._comparator)
       .toEqual(source.step![0].safety!.doseLimit![0].valueQuantity!._comparator);
-    saved.safety.doseLimit[0].valueQuantity.value = 3;
-    const edited = importCanonicalCourse(saved);
+    const editedSaved = JSON.parse(JSON.stringify(saved));
+    editedSaved.safety.doseLimit[0].valueQuantity.value = 3;
+    const edited = importCanonicalCourse(editedSaved);
     expect(edited.stages[0].safety?.limits).toBeUndefined();
     expect(edited.safety?.limits?.[0].amount?.value).toBe(3);
   });
@@ -6894,8 +6900,10 @@ describe("round42 supported course preview boundaries", () => {
       expect(text).not.toContain("90 minutes");
     }
     expect(JSON.stringify(raw)).toBe(before);
-    range.high.code = "clinic-window"; range.high.unit = "authored windows";
-    expect(formatSig(raw, "long", { i18n, realizationMode: "normalized" }))
+    const editedRaw: FhirR6DosageInstruction = JSON.parse(JSON.stringify(raw));
+    const editedRange = editedRaw.step[0].component[0].timing!.repeat!.extension![0].valueRange!;
+    editedRange.high!.code = "clinic-window"; editedRange.high!.unit = "authored windows";
+    expect(formatSig(editedRaw, "long", { i18n, realizationMode: "normalized" }))
       .toContain("90 pack-time-min to 2 authored windows");
   });
 

@@ -768,7 +768,10 @@ export function reconcileR5SafetyEdits(
   const indexKeys = (items: readonly FhirR6DoseLimit[], keys: Map<string, number>,
     allowed?: readonly boolean[]) => {
     items.forEach((limit, index) => {
-      if (allowed && !allowed[index]) return;
+      // Completing a projected partial Ratio keeps its unique Element.id
+      // owner even though its previous numeric limit was incomplete.
+      if (allowed && !allowed[index] && !(limit.scope === "period" &&
+          limit.id !== undefined && limit.valueQuantity && limit.period)) return;
       const key = signature(limit);
       if (limit.scope === "period" && keys.has(key)) repeatedPeriodIdentity = true;
       keys.set(key, keys.has(key) ? -1 : index);
@@ -895,7 +898,7 @@ export function reconcileR5SafetyEdits(
   const hiddenByScope = new Map<string, FhirR6DoseLimit[]>();
   const remainingHidden: FhirR6DoseLimit[] = [];
   oldLimits.forEach((limit, index) => {
-    if (representable[index]) return;
+    if (representable[index] || usedOld.has(index)) return;
     if (limit.scope === "administration" || limit.scope === "lifetime") {
       const hidden = hiddenByScope.get(limit.scope) ?? [];
       hidden.push(limit); hiddenByScope.set(limit.scope, hidden);

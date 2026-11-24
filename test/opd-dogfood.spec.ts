@@ -25,12 +25,13 @@ describe("OPD clinician dogfood grammar", () => {
     const parsed = parseSig("1 tab sl q5min prn chest pain max 3 doses");
     expect(parsed.meta.leftoverText).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0]?.prn?.reason?.text).toBe("chest pain");
-    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1, countMax: 3 });
-    expect(parsed.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3 });
+    expect(parsed.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3 });
+    expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(parsed.longText).toContain("for up to 3 doses");
-    expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule).toMatchObject({
-      count: 1,
-      countMax: 3
+    expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3
     });
   });
 

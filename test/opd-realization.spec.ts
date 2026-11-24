@@ -239,7 +239,8 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       .toEqual({ max: 3, period: 1, periodUnit: "d" });
 
     const total = parseSig("take 1 tab q5min prn chest pain max 3 doses");
-    expect(total.fhir.timing?.repeat).toMatchObject({ count: 1, countMax: 3, period: 5, periodUnit: "min" });
+    expect(total.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(total.fhir.timing?.repeat).toMatchObject({ countMax: 3, period: 5, periodUnit: "min" });
     expect(total.meta.canonical.clauses[0]?.schedule?.occurrenceCap).toBeUndefined();
   });
 
@@ -450,7 +451,8 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       "take 1 tab at onset of migraine repeat after 2h if needed max 2 doses"
     );
     expect(english.meta.leftoverText).toBeUndefined();
-    expect(english.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1, countMax: 2 });
+    expect(english.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(english.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
     expect(english.meta.canonical.clauses[0]?.instructionGraph?.actions[0]).toMatchObject({
       predicate: { lemma: "repeat" },
       relation: "after",
@@ -468,7 +470,8 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     expect(thai.meta.canonical.clauses[0]?.prn?.reason).toMatchObject({
       triggerPhase: "onset", coding: { code: "37796009" }
     });
-    expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({ count: 1, countMax: 2 });
+    expect(thai.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(thai.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 2 });
     expect(formatSig(thai.fhir, "long", { locale: "en" }))
       .toContain("repeat after 2 hours if needed");
   });

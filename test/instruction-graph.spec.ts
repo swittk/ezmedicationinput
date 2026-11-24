@@ -2595,15 +2595,19 @@ describe("indexed instruction metadata import",()=>{
     ];
     expect(originalArguments).toMatchObject(authored);
     expect(parseInstructionGraphExtension([wire])!.actions[0].args).toMatchObject(authored);
-    first.extension!.push({url:"predicateLemma",valueString:"not-the-owner"});
-    first.extension!.push({url:"__proto__",valueString:"ordinary unknown metadata"});
-    expect(parseInstructionGraphExtension([wire])?.actions.map(action=>action.predicate.lemma))
+    const duplicateWire=structuredClone(wire);
+    const duplicateFirst=duplicateWire.extension!.find(item=>item.url==="action")!;
+    duplicateFirst.extension!.push({url:"predicateLemma",valueString:"not-the-owner"});
+    duplicateFirst.extension!.push({url:"__proto__",valueString:"ordinary unknown metadata"});
+    expect(parseInstructionGraphExtension([duplicateWire])?.actions.map(action=>action.predicate.lemma))
       .toEqual(actions.map(action=>action.predicate.lemma));
-    // A later external input edit is not hidden by any persisted identity index.
-    lemma.valueString="edited-source-action";
-    expect(parseInstructionGraphExtension([wire])?.actions[0].predicate.lemma).toBe("edited-source-action");
+    // Each external edit is an independent submitted value.
+    const editedWire=structuredClone(duplicateWire);
+    const editedFirst=editedWire.extension!.find(item=>item.url==="action")!;
+    editedFirst.extension!.find(item=>item.url==="predicateLemma")!.valueString="edited-source-action";
+    expect(parseInstructionGraphExtension([editedWire])?.actions[0].predicate.lemma).toBe("edited-source-action");
     expect(original).toBe("dissolve");
-    expect(parseInstructionGraphExtension([wire])?.actions[0].args).toMatchObject(authored);
+    expect(parseInstructionGraphExtension([editedWire])?.actions[0].args).toMatchObject(authored);
   });
 });
 
@@ -3479,7 +3483,7 @@ describe("round34 live method realization", () => {
     for (const input of [saved, toDosageDetails([saved])]) {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       expect(text).toMatch(method === "Apply" ? /^Apply\b/u : /^Rub\b/u);
-      expect(text.match(/(?:^|\D)1 g\b/gu)).toHaveLength(1);
+      expect(text.match(/(?:^|[^\d.+/-])\+?1(?:\.0+)?\s+g\b/gu)).toHaveLength(1);
       expect(text).toContain("skin");
       expect(text).toContain("gently");
       expect(text).toContain("foam");
@@ -3555,7 +3559,7 @@ describe("round35 action realization ownership", () => {
     const saved = JSON.stringify(frame);
     for (const locale of ["en", "th"]) {
       const text = realizeInstructionAction(frame, locale);
-      expect(text.match(/1 g\b/gu)).toHaveLength(1);
+      expect(text.match(/(?:^|[^\d.+/-])\+?1(?:\.0+)?\s+g\b/gu)).toHaveLength(1);
       for (const word of locale === "en" ? ["Rub", "skin", "gently", "foam"] : ["ถู", "ผิวหนัง", "เบาๆ", "ฟอง"])
         expect(text).toContain(word);
     }

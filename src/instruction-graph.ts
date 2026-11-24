@@ -3730,10 +3730,10 @@ const DEFAULT_ACTION_REALIZER = (
   const materialArgument = relationTargetArg && (
     relationTargetArg.role === AdviceArgumentRole.Substance ||
     relationTargetArg.role === AdviceArgumentRole.Material ||
-    // An uncoded but source-backed second Object remains the accompaniment
-    // of WITH (e.g. wipe excess with clean tissue). Treat its existing
-    // semantic relation as the licence; do not silently discard it.
-    (relationTargetArg.role === AdviceArgumentRole.Object &&
+    // An explicitly attached nominal remains the accompaniment of WITH,
+    // whether its lexical role is Object or Theme. The selected semantic
+    // relation licenses the complement independently of the medication object.
+    ((relationTargetArg.role === AdviceArgumentRole.Object || relationTargetArg.role === AdviceArgumentRole.Theme) &&
       relationHasSemanticClass(targetRelation, "accompaniment"))
   );
   const withTarget = materialArgument && targetRelation &&
@@ -3832,8 +3832,9 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
   let targetArgument: AdviceArgument | undefined;
-  let materialArgument: AdviceArgument | undefined;
+  let materialArgument: AdviceArgument | undefined, nextMaterialArgument: AdviceArgument | undefined;
   let unmarkedMaterial: AdviceArgument | undefined, unmarkedSubstance: AdviceArgument | undefined;
+  let unmarkedDestination: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
     if (arg.role === AdviceArgumentRole.Time) continue;
     if (arg.relation && arg.relation === c.frame.relation) {
@@ -3841,9 +3842,11 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
     } else if (!arg.relation && arg.role !== AdviceArgumentRole.Amount &&
         arg.role !== AdviceArgumentRole.Duration &&
         arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
-      materialArgument ??= arg;
+      if (!materialArgument) materialArgument = arg;
+      else nextMaterialArgument ??= arg;
       if (arg.role === AdviceArgumentRole.Material) unmarkedMaterial ??= arg;
       else if (arg.role === AdviceArgumentRole.Substance) unmarkedSubstance ??= arg;
+      else if (arg.role === AdviceArgumentRole.Destination) unmarkedDestination ??= arg;
     }
   }
   // Older dilution frames kept TO on the head and its final volume as an
@@ -3853,10 +3856,13 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
     targetArgument = materialArgument;
     materialArgument = undefined;
   }
-  // The parser owns the relation daughter independently from lexical noun
-  // roles. Retain the role-based fallback for older structured frames.
-  const relationTarget = targetArgument
-    ? translatedArgument(targetArgument, c.locale) : c.destination ?? c.substance;
+  // A legacy frame-level relation can own only an unmarked daughter. A
+  // destination already attached by TO cannot also become the WITH vehicle.
+  if (!targetArgument && c.frame.relation) {
+    targetArgument = unmarkedDestination ?? unmarkedSubstance;
+    if (targetArgument === materialArgument) materialArgument = nextMaterialArgument;
+  }
+  const relationTarget = targetArgument ? translatedArgument(targetArgument, c.locale) : undefined;
   const relation = relationTarget && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
     : undefined;
@@ -4450,11 +4456,11 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
         continue;
       }
     }
-    // The graph's plain Site argument cannot express live restrictions.
-    // Let the canonical site phrase own this primary display; other actions
-    // and the saved graph keep their authored sites.
+    // The graph's plain Site argument cannot express live spatial relations
+    // or restrictions. The canonical site phrase owns this primary display;
+    // other actions and the saved graph keep their authored sites.
     if (arg.role === AdviceArgumentRole.Site &&
-        (site?.restrictions?.length || !site && clause.sourceHasStructuredSite === true)) {
+        (site?.spatialRelation || site?.restrictions?.length || !site && clause.sourceHasStructuredSite === true)) {
       changed = true;
       continue;
     }

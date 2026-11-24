@@ -1,6 +1,6 @@
 import { TIMING_ABBREVIATIONS } from "./maps";
 import { getDoseUnitKind } from "./unit-lexicon";
-import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/weekday-vocabulary";
+import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import type { CourseLanguage } from "./locales/course/types";
 import { buildCanonicalSigClauses, canonicalClauseHasAdministrationSemantics } from "./ir";
@@ -976,7 +976,7 @@ function formatSite(
   if (isVaginalRoute && (lower === "vagina" || lower === "vaginal")) {
     return undefined;
   }
-  const perTargetNoun = doseUnitUsesTargetScope(clause.dose?.unit)
+  const perTargetNoun = doseUnitUsesTargetScope(clause.dose?.unitIdentity ?? clause.dose?.unit)
     ? resolvedSite?.definition?.perTargetText : undefined;
   let noun = perTargetNoun ?? resolvedSite?.englishObjectText ?? `the ${normalizedText}`;
   const count = clause.site?.administrationTargetCount;
@@ -1132,7 +1132,8 @@ function describeAdministrationDuration(
       return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "en")) +
         (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
     };
-    const low = range.low && endpoint(range.low), high = range.high && endpoint(range.high);
+    const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
+    const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
     if (low && high) return short ? "over" + low + "-" + high : "over " + low + " to " + high;
     if (high) return short ? "over" + (range.high?.comparator ? "" : "<=") + high : "over " + (range.high?.comparator ? "" : "up to ") + high;
     if (low) return short ? "over" + (range.low?.comparator ? "" : ">=") + low : "over " + (range.low?.comparator ? "" : "at least ") + low;
@@ -1321,7 +1322,8 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(`thru${schedule.boundsEnd}`);
   }
   if (schedule.countMax !== undefined) {
-    parts.push(`x${stripTrailingZero(schedule.count ?? 1)}-${stripTrailingZero(schedule.countMax)}`);
+    parts.push(schedule.count === undefined ? `x<=${stripTrailingZero(schedule.countMax)}`
+      : `x${stripTrailingZero(schedule.count)}-${stripTrailingZero(schedule.countMax)}`);
   } else if (schedule.count !== undefined) {
     parts.push(`x${stripTrailingZero(schedule.count)}`);
   }
@@ -1542,7 +1544,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     ? realizeRichPrimaryWithCanonicalDose(richPrimaryGraphAction, clause, "en", options, richPrimaryCoverage)
     : undefined;
   const richPrimaryHasSite = Boolean(
-    !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
+    !clause.site?.spatialRelation && !clause.site?.restrictions?.length && richPrimaryGraphAction?.args.some((arg) => arg.role === AdviceArgumentRole.Site)
   );
   const richPrimaryCoversSingleEvent = richPrimaryCoverage?.singleScheduledEvent === true;
   const graphRegimenTail: string[] = [];

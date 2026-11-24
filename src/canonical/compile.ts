@@ -119,7 +119,7 @@ export function administrationFromClause(
       s.durationMax !== undefined && (s.durationMax !== s.duration || s.durationMaxComparator !== undefined ||
         s.durationMaxUnit !== undefined && s.durationMaxUnit !== s.durationUnit);
     recurrence = {
-      count: s.count ?? (s.countMax !== undefined ? 1 : undefined),
+      count: s.count,
       countMax: s.countMax,
       frequency: s.frequency,
       frequencyMax: s.frequencyMax,
@@ -272,6 +272,17 @@ export function courseFromParallel(
     const administrations: CanonicalAdministration[] = [];
     for (const item of stage.components) {
       const a = administrationFromClause(item.clause, clauseTexts[item.member], stage.sequence);
+      // Preserve the authored clause in syntax; the track owns only this
+      // earlier execution cut, just as in an unresolved parallel course.
+      if (item.effectiveBoundsEnd) {
+        const recurrence = (a.schedule ??= {}).recurrence ??= {};
+        (recurrence.calendarWindow ??= {}).end = item.effectiveBoundsEnd;
+        if (recurrence.courseLength || recurrence.courseLengthRange) {
+          a.anchoredLength = { quantity: recurrence.courseLength, range: recurrence.courseLengthRange };
+          recurrence.courseLength = undefined;
+          recurrence.courseLengthRange = undefined;
+        }
+      }
       a.sourceMember = item.member;
       if (item.phaseOrigin) a.phaseOrigin = clinicalBoundary(item.phaseOrigin).displacement;
       administrations.push(a);
@@ -507,7 +518,9 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
   // amounts remain complete; presentation labels these independent entries.
   const value=a.amounts?.length===1 && !hasAmountRole(a.amounts[0].role) ? a.amounts[0] : undefined;
   if(value?.quantity){
-    result.dose={value:value.quantity.value,unit:value.quantity.unit ?? (getDoseQuantityUnit(value.quantity) || undefined)};
+    const unitIdentity = a.target || a.siteReference || value.quantity.unit == null
+      ? getDoseQuantityUnit(value.quantity) || undefined : undefined;
+    result.dose={value:value.quantity.value,unit:value.quantity.unit ?? unitIdentity,unitIdentity};
     if (base?.dose?.defaulted) {
       result.dose.defaulted = true;
       result.dose.defaultedUnit = base.dose.defaultedUnit;

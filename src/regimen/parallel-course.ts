@@ -134,13 +134,6 @@ function advance(start: RegimenPosition, duration: RegimenPosition): RegimenPosi
 }
 
 
-function withCalendarEnd(clause: CanonicalSigClause, boundsEnd: string): CanonicalSigClause {
-  return {
-    ...clause,
-    schedule: { ...clause.schedule, boundsEnd }
-  };
-}
-
 /** A source date list supplies a known calendar onset without replacing its
  * explicit events. An authored start bound retains its existing ownership. */
 function calendarPhaseStart(clause: CanonicalSigClause): string | undefined {
@@ -373,10 +366,7 @@ export function buildCanonicalParallelRegimen(
       const projectedCalendar: CanonicalParallelComponent[] = [];
       for (const phase of phases) {
         for (const item of phase.members) {
-          projectedCalendar.push(item.effectiveBoundsEnd ? {
-            ...item,
-            clause: withCalendarEnd(item.clause, item.effectiveBoundsEnd)
-          } : item);
+          projectedCalendar.push(item);
         }
       }
       calendarComponents.push(projectedCalendar);

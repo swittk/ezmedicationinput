@@ -648,12 +648,27 @@ function completeThaiPreparedDrink(output) {
 function completeStagedBatch(output) {
   if (typeof output !== "string") return false;
   const stages = output.trim().replace(/\s+/gu, " ").split(" then ");
+  const finalDose = /^([+]?(?:\d+(?:\.\d+)?|\.\d+))(?:\/([+]?(?:\d+(?:\.\d+)?|\.\d+)))? tab PO on monday-friday$/u.exec(stages[2] ?? "");
+  const finalAmount = finalDose
+    ? Number(finalDose[1]) / (finalDose[2] === undefined ? 1 : Number(finalDose[2])) : NaN;
   return stages.length === 3 &&
     stages[0] === "2 tabs morning, 1 tab evening for 1 week" &&
     stages[1] === "2 tabs morning for 1 month" &&
-    stages[2] === "1/2 tab PO on monday-friday";
+    finalAmount === 0.5;
+}
+const scalarScheduleControl = [
+  "2026-11-18T08:00:00+07:00", "2026-11-18T20:00:00+07:00",
+  "2026-11-19T08:00:00+07:00", "2026-11-19T20:00:00+07:00",
+  "2026-11-20T08:00:00+07:00", "2026-11-20T20:00:00+07:00",
+];
+const scalarScheduleInstants = scalarScheduleControl.map(value => Date.parse(value));
+function completeScalarSchedule(output) {
+  return Array.isArray(output) && output.length === scalarScheduleInstants.length &&
+    scalarScheduleInstants.every((instant, index) => typeof output[index] === "string" &&
+      Date.parse(output[index]) === instant);
 }
 const equivalenceOracles = new Map([
+  ["nextDueDoses/scalar", completeScalarSchedule],
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
   ["formatSig/R5-roundtrip-added-dose-thai", completeThaiPreparedDrink],
   ["formatParseBatch/staged-own-batch", completeStagedBatch],
@@ -768,15 +783,32 @@ const stagedBatchControl =
 if (!completeStagedBatch(stagedBatchControl) ||
     !completeStagedBatch(stagedBatchControl.replaceAll(" then ", "\nthen  ")))
   throw new Error("Staged-batch oracle rejected the complete three-stage preview");
+for (const amount of ["0.5", ".5", "0.50", "2/4"])
+  if (!completeStagedBatch(stagedBatchControl.replace("1/2 tab", amount + " tab")))
+    throw new Error("Staged-batch oracle rejected an equal half-tablet amount");
 for (const changed of [
   stagedBatchControl.replace("2 tabs morning,", "1 tab morning,"),
   stagedBatchControl.replace("2 tabs morning for 1 month", "2 tabs evening for 1 month"),
   stagedBatchControl.replace("for 1 week", "for 2 weeks"),
   stagedBatchControl.replace("monday-friday", "monday"),
+  ...["0.1", "1/20", "1.5", "-0.5", "1/0"].map(amount =>
+    stagedBatchControl.replace("1/2 tab", amount + " tab")),
   stagedBatchControl.split(" then ").slice(0, 2).join(" then "),
 ])
   if (completeStagedBatch(changed))
     throw new Error("Staged-batch oracle accepted a changed or missing stage");
+if (!completeScalarSchedule(scalarScheduleControl) ||
+    !completeScalarSchedule(scalarScheduleControl.map(value => new Date(value).toISOString())))
+  throw new Error("Scalar schedule oracle rejected the six expected BID administrations");
+for (const changed of [
+  [], Array(6), scalarScheduleControl.slice(0, -1),
+  [...scalarScheduleControl, scalarScheduleControl[5]],
+  [scalarScheduleControl[1], scalarScheduleControl[0], ...scalarScheduleControl.slice(2)],
+  [scalarScheduleControl[0], scalarScheduleControl[0], ...scalarScheduleControl.slice(2)],
+  ["2026-11-18T08:01:00+07:00", ...scalarScheduleControl.slice(1)],
+])
+  if (completeScalarSchedule(changed))
+    throw new Error("Scalar schedule oracle accepted a missing, extra, duplicated, unordered or shifted administration");
 const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
@@ -802,6 +834,8 @@ for (const test of cases) {
     const oracle = equivalenceOracles.get(test.name);
     if (oracle && !oracle(right)) throw new Error("Candidate failed the independent clinical preview oracle");
     const equivalentWork = !oracle || oracle(left);
+    if (test.name === "nextDueDoses/scalar" && !equivalentWork)
+      throw new Error("Baseline failed the independent scalar schedule oracle");
     const equivalence = { equivalentWork, ...(equivalentWork ? {} : {
       ...(equivalenceDetails.get(test.name) ?? {
         classification: "different-clinical-output",

@@ -15,8 +15,9 @@ import type { CanonicalCourse, CanonicalBoundary } from "../src/canonical/course
 import {
   canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_EVENT_WINDOW_EXTENSION_URL,
   TIMING_FREQUENCY_MIN_EXTENSION_URL, ADMINISTRATION_OFFSET_EXTENSION_URL,
-  CYCLE_DAY_ELIGIBILITY_EXTENSION_URL
+  CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL
 } from "../src/fhir";
+import { buildBodySiteSpatialRelationExtension } from "../src/body-site-spatial";
 import { getQuantityComparator, simpleQuantityForR5 } from "../src/fhir-quantity-operator";
 import {
   resolveSigLocalization, type SigFormatContext, registerSigLocalization
@@ -4560,6 +4561,11 @@ describe("round 53: saved graph and calendar realization ownership", () => {
           if (mode === "current-threshold") expect(text).not.toContain("160");
           expect(text).toContain(locale === "en" ? "if dizzy" : "ถ้าเวียนศีรษะ");
           expect(text).toContain("Call clinic");
+          const threshold = mode === "current-threshold" ? "140" : "160";
+          expect(text).toContain(locale === "en"
+            ? `Take 1 tablet orally once daily ${mode === "current-threshold" ? "only if" : "if"} SBP > ${threshold}.`
+            : `รับประทานครั้งละ 1 เม็ด วันละครั้ง ${mode === "current-threshold" ? "เฉพาะเมื่อ" : "if"} SBP > ${threshold}.`);
+          expect(text).toContain(locale === "en" ? "Call clinic if dizzy." : "Call clinicถ้าเวียนศีรษะ.");
         }
         const exported = toFhirR5Dosages(input);
         expect(exported[0].extension).toContainEqual(annotation);
@@ -4685,5 +4691,281 @@ describe("round 53: saved graph and calendar realization ownership", () => {
         expect(exported.extension).toContainEqual(annotation);
         expect(JSON.stringify(input)).toBe(before);
       }
+    });
+});
+
+
+describe("round54: current unit identity and graph argument ownership", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const annotation = { url: "urn:round54:independent-note", valueString: "keep authored note" };
+  const graphNote = { url: "urn:round54:graph-note", valueString: "keep graph annotation" };
+  const rowForGraph = (graph: CanonicalInstructionGraph): FhirDosage => {
+    const wire = persist(buildInstructionGraphExtension(graph)!);
+    wire.extension!.push(graphNote);
+    return { extension: [wire, annotation] };
+  };
+  const graphViews = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [[row], r6, persist(toFhirR5Dosages(r6))];
+  };
+  const checkSavedGraph = (input: FhirDosage[] | FhirR6DosageInstruction, expected: CanonicalInstructionGraph) => {
+    const exported = toFhirR5Dosages(input)[0];
+    expect(exported.extension).toContainEqual(annotation);
+    const wire = exported.extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!;
+    expect(wire.extension).toContainEqual(graphNote);
+    expect(persist(parseInstructionGraphExtension(exported.extension)!)).toEqual(expected);
+  };
+
+  it.each(["authored-spray-label", "code-only-spray", "metric-total"] as const)(
+    "uses coded dose identity for paired targets without changing authored quantities (%s)", kind => {
+      const quantity = kind === "metric-total"
+        ? { value: 1, unit: "mL", system: "http://unitsofmeasure.org", code: "mL", id: "authored-dose", extension: [annotation] }
+        : { value: 1, ...(kind === "authored-spray-label" ? { unit: "metered spray" } : {}),
+          system: "http://spor.ema.europa.eu/v1/lists/200000000014", code: "200000016451", id: "authored-dose", extension: [annotation] };
+      const r6: FhirR6DosageInstruction = { step: [{ component: [{
+        site: { concept: { text: "both nostrils", extension: [annotation] } },
+        doseAndRate: [{ doseQuantity: quantity }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }, extension: [annotation]
+      }] }] };
+      const saved = JSON.stringify(r6);
+      for (const input of [r6, persist(toFhirR5Dosages(r6))]) {
+        const before = JSON.stringify(input);
+        const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        if (kind === "metric-total") {
+          expect(english).toContain("1 mL");
+          expect(english).toContain("both nostrils");
+          expect(english).not.toContain("each nostril");
+          expect(thai).toContain("1 มิลลิลิตร");
+          expect(thai).not.toContain("ข้างละ");
+        } else {
+          expect(english).toContain("each nostril");
+          expect(thai).toContain("ข้างละ");
+          if (kind === "authored-spray-label") {
+            expect(english).toContain("1 metered spray");
+            expect(thai).toContain("1 metered spray");
+          }
+        }
+        expect(calculateTotalUnits({ dosage: input, durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+          orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" }))
+          .toMatchObject({ totalUnits: kind === "metric-total" ? 1 : 2, unit: kind === "metric-total" ? "mL" : "spray" });
+        const projected = projectCanonicalCourse(importCanonicalCourse(input));
+        expect(projected.fhirNext.step![0].component[0].doseAndRate![0].doseQuantity).toEqual(quantity);
+        const savedR5 = toFhirR5Dosages(input)[0];
+        expect(savedR5.doseAndRate![0].doseQuantity).toEqual(quantity);
+        expect(savedR5.extension).toContainEqual(annotation);
+        expect(savedR5.site?.extension).toContainEqual(annotation);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(r6)).toBe(saved);
+    });
+
+  it.each(["theme-with", "substance-with", "unmarked-theme"] as const)(
+    "retains an explicit accompaniment independently of its nominal role (%s)", kind => {
+      const parsed = parseInstructionActions("Swallow 1 tablet")[0];
+      const source = kind === "unmarked-theme" ? "Swallow medicine 1 tablet" : "Swallow 1 tablet with applesauce";
+      const object = { role: kind === "substance-with" ? AdviceArgumentRole.Substance : AdviceArgumentRole.Theme,
+        text: kind === "unmarked-theme" ? "medicine" : "applesauce",
+        normalized: kind === "unmarked-theme" ? "medicine" : "applesauce",
+        i18n: { th: kind === "unmarked-theme" ? "ยา" : "แอปเปิลบด" },
+        ...(kind !== "unmarked-theme" ? { relation: AdviceRelation.With } : {}) };
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, sourceText: source, span: { start: 0, end: source.length },
+        args: [parsed.args.find(arg => arg.role === AdviceArgumentRole.Amount)!, object]
+      }] };
+      const row = rowForGraph(graph), expected = persist(parseInstructionGraphExtension(row.extension)!);
+      const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
+      const thai = kind === "unmarked-theme" ? "กลืนยา 1 เม็ด." : "กลืน 1 เม็ดร่วมกับแอปเปิลบด.";
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(source + ".");
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(thai);
+        checkSavedGraph(input, expected);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(saved);
+      expect(JSON.stringify(graph)).toBe(graphSaved);
+    });
+
+  it.each(["legacy-with", "fully-explicit"] as const)(
+    "keeps an explicit dilution destination out of the legacy accompaniment slot (%s)", kind => {
+      const source = "Dilute 1 mL with saline to 10 mL", parsed = parseInstructionActions(source)[0];
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, relation: AdviceRelation.With, args: [
+          parsed.args.find(arg => arg.role === AdviceArgumentRole.Amount)!,
+          { role: AdviceArgumentRole.Substance, text: "saline", normalized: "saline", i18n: { th: "น้ำเกลือ" },
+            ...(kind === "fully-explicit" ? { relation: AdviceRelation.With } : {}) },
+          { role: AdviceArgumentRole.Destination, text: "10 mL", normalized: "mL",
+            quantity: { value: 10, unit: "mL" }, relation: AdviceRelation.To }
+        ]
+      }] };
+      const row = rowForGraph(graph), expected = persist(parseInstructionGraphExtension(row.extension)!);
+      const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(source + ".");
+        expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+          .toBe("เจือจาง 1 มิลลิลิตรพร้อมน้ำเกลือไปยัง10 มิลลิลิตร.");
+        checkSavedGraph(input, expected);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(saved);
+      expect(JSON.stringify(graph)).toBe(graphSaved);
+    });
+
+  it.each(["below", "above", "plain-ear"] as const)(
+    "gives the current spatial site ownership after a fresh dose submission (%s)", relation => {
+      const source = "Apply 1 g above the ear gently", parsed = parseInstructionActions("Apply 1 g")[0];
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en",
+        primaryAdministrationSpan: { start: 0, end: source.length }, actions: [{ ...parsed,
+          sourceText: source, span: { start: 0, end: source.length }, args: [
+            parsed.args.find(arg => arg.role === AdviceArgumentRole.Amount)!,
+            { role: AdviceArgumentRole.Site, text: "above the ear", normalized: "above the ear", i18n: { th: "เหนือหู" } },
+            { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { th: "เบาๆ" } }
+          ]
+        }] };
+      const row: FhirDosage = { ...persist(toFhirR5Dosages(parseSig("Apply 1 g above the ear").fhirNext)[0]),
+        ...rowForGraph(graph), doseAndRate: [{ doseQuantity: { value: 2, unit: "g", system: "http://unitsofmeasure.org", code: "g" } }],
+        site: { text: "ear", extension: [annotation, ...(relation === "plain-ear" ? [] : [
+          buildBodySiteSpatialRelationExtension({ relationText: relation, targetText: "ear" })!
+        ])] }
+      };
+      const expected = persist(parseInstructionGraphExtension(row.extension)!);
+      const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text.match(/2 g/gu)).toHaveLength(1);
+          expect(text).not.toContain("1 g");
+          expect(text.match(locale === "en" ? /gently/gu : /เบาๆ/gu)).toHaveLength(1);
+          if (relation === "plain-ear") {
+            expect(text).toContain("ear");
+            expect(text).not.toMatch(/above|below|เหนือหู|ใต้หู/u);
+          } else {
+            expect(text.match(locale === "en" ? new RegExp(relation + " the ear", "gu")
+              : new RegExp(relation === "below" ? "ใต้หู" : "เหนือหู", "gu"))).toHaveLength(1);
+            expect(text).not.toContain(locale === "en" ? (relation === "below" ? "above the ear" : "below the ear")
+              : relation === "below" ? "เหนือหู" : "ใต้หู");
+          }
+        }
+        checkSavedGraph(input, expected);
+        expect(toFhirR5Dosages(input)[0].site).toEqual(row.site);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(saved);
+      expect(JSON.stringify(graph)).toBe(graphSaved);
+    });
+});
+
+
+describe("round54: configured safety targets and duration endpoints", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const annotation = { url: "urn:round54:duration-note", valueString: "keep authored metadata" };
+  const options: ParseOptions = { instructionActionMap: { "sit down": {
+    code: "clinic-seat", display: "Sit down", i18n: { th: "นั่งลง" }, semanticClass: "procedure",
+    procedural: false, safetyScopeTarget: true
+  } } };
+
+  it.each(["Sit down", "Sit down if dizzy", "If dizzy, sit down"])(
+    "retains a registered safety-only action and its exact condition scope: %s", source => {
+      const parsed = parseSig(source, options), clause = parsed.meta.canonical.clauses[0];
+      expect(clause.evidence.some(item => item.rule === "hpsg.lex.patientInstruction.procedure")).toBe(true);
+      expect(clause.leftovers).toEqual([]);
+      if (source === "Sit down") expect(clause.patientInstruction).toBe(source);
+      else {
+        expect(clause.additionalInstructions).toHaveLength(1);
+        expect(clause.additionalInstructions![0].frames).toHaveLength(1);
+        expect(clause.additionalInstructions![0].frames![0].predicate.lemma).toBe("clinic-seat");
+        expect(clause.instructionGraph?.relations).toHaveLength(1);
+        expect(clause.instructionGraph?.relations![0]).toMatchObject({
+          kind: AdviceRelation.If, toActionIndex: 0, text: source.startsWith("If") ? "If dizzy," : "if dizzy"
+        });
+      }
+      expect(clause.prn?.enabled).not.toBe(true);
+      const saved = JSON.stringify(parsed.fhirNext);
+      for (const input of [parsed.fhirNext, persist(toFhirR5Dosages(parsed.fhirNext))]) {
+        const before = JSON.stringify(input);
+        const english = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+        const thai = formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" });
+        expect(english).toBe(source + ".");
+        if (source === "Sit down") expect(thai).toBe("นั่งลง.");
+        else {
+          expect(thai.startsWith(source.startsWith("If")
+            ? "ถ้าเวียนศีรษะให้นั่งลง." : "นั่งลงถ้าเวียนศีรษะ.")).toBe(true);
+          expect(clause.additionalInstructions![0].text.toLowerCase()).toBe(source.toLowerCase());
+        }
+        const graph = parseInstructionGraphExtension(toFhirR5Dosages(input)[0].extension)!;
+        expect(graph.actions[0].predicate.lemma).toBe("clinic-seat");
+        expect(graph.sourceText).toBe(source);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(parsed.fhirNext)).toBe(saved);
+    });
+
+  it.each(["clinic-seat", "clinic-seat if dizzy"])(
+    "does not register a saved action code as a new input phrase: %s", source => {
+      const parsed = parseSig(source, options);
+      expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions).toEqual([]);
+      expect(parsed.meta.canonical.clauses[0].additionalInstructions?.some(instruction =>
+        instruction.frames?.some(frame => frame.predicate.lemma === "clinic-seat"))).not.toBe(true);
+      expect(parsed.input).toBe(source);
+    });
+
+  it.each(["metadata-low", "metadata-high", "two-valued", "metadata-both", "zero-low", "independent-units"] as const)(
+    "renders only valued administration-duration endpoints while preserving both quantities (%s)", kind => {
+      const low = kind === "metadata-low" || kind === "metadata-both"
+        ? { id: "saved-low", extension: [annotation] }
+        : { value: kind === "zero-low" ? 0 : 1, unit: kind === "independent-units" ? "min" : "h",
+          system: "http://unitsofmeasure.org", code: kind === "independent-units" ? "min" : "h", id: "saved-low", extension: [annotation] };
+      const high = kind === "metadata-high" || kind === "metadata-both"
+        ? { id: "saved-high", extension: [annotation] }
+        : { value: 2, unit: "h", system: "http://unitsofmeasure.org", code: "h", id: "saved-high", extension: [annotation] };
+      const range = { low, high }, marker = { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueRange: range };
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }],
+        timing: { repeat: { extension: [marker] } }, extension: [annotation] };
+      const saved = JSON.stringify(row), r6 = toDosageDetails([row]);
+      const phrases = {
+        "metadata-low": ["over up to 2 hours", "โดยให้ยานาน ไม่เกิน 2 ชั่วโมง"],
+        "metadata-high": ["over at least 1 hour", "โดยให้ยานาน อย่างน้อย 1 ชั่วโมง"],
+        "two-valued": ["over 1 hour to 2 hours", "โดยให้ยานาน 1 ชั่วโมง ถึง 2 ชั่วโมง"],
+        "zero-low": ["over 0 hours to 2 hours", "โดยให้ยานาน 0 ชั่วโมง ถึง 2 ชั่วโมง"],
+        "independent-units": ["over 1 minute to 2 hours", "โดยให้ยานาน 1 นาที ถึง 2 ชั่วโมง"],
+        "metadata-both": [undefined, undefined]
+      }[kind];
+      for (const input of [[row], r6, persist(toFhirR5Dosages(r6))]) {
+        const before = JSON.stringify(input);
+        for (const [index, locale] of ["en", "th"].entries()) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          if (phrases[index]) expect(text).toContain(phrases[index]);
+          else expect(text).not.toContain(locale === "en" ? "over" : "โดยให้ยานาน");
+          expect(text).not.toContain(locale === "en" ? "over to" : "โดยให้ยานาน ถึง");
+        }
+        const exported = toFhirR5Dosages(input)[0];
+        expect(exported.timing?.repeat?.extension).toContainEqual(marker);
+        expect(exported.extension).toContainEqual(annotation);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(row)).toBe(saved);
+    });
+});
+
+
+describe("round54: compact administration count boundaries", () => {
+  it.each(["ceiling-only", "authored-equal-range", "authored-distinct-range"] as const)(
+    "does not fabricate a compact lower count for %s", kind => {
+      const parsed = parseSig("Take 1 tablet daily").meta.canonical.clauses[0];
+      const clause = { ...parsed, schedule: { ...parsed.schedule,
+        count: kind === "ceiling-only" ? undefined : 1,
+        countMax: kind === "authored-distinct-range" ? 3 : 1
+      } };
+      const before = JSON.stringify(clause);
+      const count = kind === "ceiling-only" ? "x<=1" : kind === "authored-equal-range" ? "x1-1" : "x1-3";
+      for (const locale of ["en", "th"]) {
+        const text = formatCanonicalClause(clause, "short", resolveSigLocalization(locale));
+        expect(text).toContain(count);
+        if (kind === "ceiling-only") expect(text).not.toContain("x1-");
+      }
+      expect(JSON.stringify(clause)).toBe(before);
     });
 });

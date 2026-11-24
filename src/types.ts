@@ -412,9 +412,15 @@ export interface FhirTimingRepeat extends FhirElement {
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
-export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration"> {
+export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "dayOfWeek" | "when"> {
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
+  dayOfWeek?: Array<FhirDayOfWeek | null>;
+  /** Primitive metadata corresponding positionally to dayOfWeek. */
+  _dayOfWeek?: Array<FhirPrimitiveElement | null>;
+  when?: Array<EventTiming | null>;
+  /** Primitive metadata corresponding positionally to when. */
+  _when?: Array<FhirPrimitiveElement | null>;
   startOffset?: FhirSimpleQuantity;
   endOffset?: FhirSimpleQuantity;
 }
@@ -1644,6 +1650,9 @@ export interface CanonicalDoseExpr {
   value?: number;
   range?: CanonicalDoseRange;
   unit?: string;
+  /** Resolved Quantity unit identity for clinical scope in the compact display
+   * view. The authored unit label and complete native quantity stay unchanged. */
+  unitIdentity?: string;
   /** Exact authored Quantity comparator; R5 uses the EMA extension, R6 native. */
   comparator?: FhirR6Quantity["comparator"];
   evidence?: CanonicalEvidence[];

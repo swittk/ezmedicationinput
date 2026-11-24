@@ -71,7 +71,6 @@ import type {
   NextDueDoseOptions,
   TotalUnitsResult,
 } from "../types";
-import { ChronologicalQueue, type ChronologicalEvent } from "./chronological-queue";
 import { arrayIncludes } from "../utils/array";
 import { convertValue, getBaseUnitFactor, getUnitCategory } from "../utils/units";
 import { parseStrengthIntoRatio } from "../utils/strength";
@@ -83,6 +82,73 @@ import {
   FHIR_GTS_TIMING_SYSTEM as GTS_TIMING_SYSTEM,
   FHIR_GTS_TIMING_CODES as GTS_TIMING_CODES,
 } from "../timing-summary";
+
+/**
+ * A small time-ordered queue for genuinely overlapping treatment cycles.
+ *
+ * It intentionally owns only timestamp ordering. The clinical recurrence,
+ * counting, rolling dose caps and supply decisions stay with execution/engine.
+ * A future cycle cannot emit before its own start, so engine.ts drains every
+ * event earlier than the next cycle start. This avoids both speculative
+ * accepted future doses and repeatedly sorting whole historical arrays.
+ */
+interface ChronologicalEvent {
+  at: number;
+  iso: string;
+  /** Stable insertion order for simultaneous administrations. */
+  serial: number;
+}
+
+class ChronologicalQueue<T extends ChronologicalEvent> {
+  private readonly items: T[] = [];
+
+  get length(): number {
+    return this.items.length;
+  }
+
+  private earlier(a: T, b: T): boolean {
+    return a.at < b.at || (a.at === b.at && a.serial < b.serial);
+  }
+
+  first(): T | undefined {
+    return this.items[0];
+  }
+
+  push(item: T): void {
+    const heap = this.items;
+    let index = heap.length;
+    heap.push(item);
+    while (index > 0) {
+      const parent = (index - 1) >>> 1;
+      const previous = heap[parent];
+      if (!this.earlier(item, previous)) break;
+      heap[index] = previous;
+      index = parent;
+    }
+    heap[index] = item;
+  }
+
+  pop(): T | undefined {
+    const heap = this.items;
+    const top = heap[0];
+    if (top === undefined) return undefined;
+    const last = heap.pop()!;
+    if (heap.length) {
+      let index = 0;
+      while (true) {
+        const left = index * 2 + 1;
+        if (left >= heap.length) break;
+        const right = left + 1;
+        const child = right < heap.length && this.earlier(heap[right], heap[left]) ? right : left;
+        if (!this.earlier(heap[child], last)) break;
+        heap[index] = heap[child];
+        index = child;
+      }
+      heap[index] = last;
+    }
+    return top;
+  }
+}
 
 /** A canonical stage array already owns order; only the compatibility array
  * input needs grouping. No retained wire metadata is read by these helpers. */
@@ -4613,8 +4679,15 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       countedActualTimes = new Set<number>();
       for (const at of recorded) countedActualTimes.add(at - delta);
     }
-    return nextDueDoses(base, {
+    const eventStatus = (options as PhaseCountOptions).explicitEventStatus;
+    const nominalStatus: ExplicitEventStatus | undefined = eventStatus ? {
+      possible: eventStatus.possible,
+      from: eventStatus.from && new Date(eventStatus.from.getTime() - delta),
+      end: eventStatus.end && new Date(eventStatus.end.getTime() - delta),
+    } : undefined;
+    const result = nextDueDoses(base, {
       ...options,
+      explicitEventStatus: nominalStatus,
       from: shifted(options.from, -delta),
       priorDoseTimes: options.priorDoseTimes?.map((value) => shifted(value, -delta)),
       countedActualTimes,
@@ -4622,6 +4695,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         ? (condition, at) => options.evaluateCondition!(condition, shifted(at, delta))
         : undefined,
     } as PhaseCountOptions).map((value) => shifted(value, delta));
+    if (eventStatus && nominalStatus) eventStatus.possible ||= nominalStatus.possible;
+    return result;
   }
   const eventClock: EventClockMap = {
     ...(providedConfig?.eventClock ?? {}),
@@ -4806,7 +4881,9 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
               orderedAt,
               courseEnd,
               expanded,
-              calendarDays
+              calendarDays,
+              false,
+              enforceDayFilter ? dayFilter : undefined
             )
           )
           .slice(0, effectiveLimit);
@@ -4924,7 +5001,8 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         courseEnd,
         clocks,
         calendarDays,
-        clockOwner?.configured
+        clockOwner?.configured,
+        enforceDayFilter ? dayFilter : undefined
       );
     }
     if (clocks.length === 0) return [];
@@ -5065,7 +5143,9 @@ function derivePriorCountFromHistory(
             orderedAt,
             from,
             expanded,
-            calendarDays
+            calendarDays,
+            false,
+            enforceDayFilter ? dayFilter : undefined
           ).length
         );
       }
@@ -5159,7 +5239,8 @@ function derivePriorCountFromHistory(
           from,
           clocks,
           calendarDays,
-          clockOwner?.configured
+          clockOwner?.configured,
+          enforceDayFilter ? dayFilter : undefined
         ).length
       );
     }
@@ -5355,7 +5436,8 @@ function generateFrequencyPerPeriodSeries(
   upperBound?: Date | null,
   clocks: readonly (string | ClockEntry)[] = [],
   calendarDays?: CalendarDaySelection,
-  configuredClock = false
+  configuredClock = false,
+  dayFilter?: Set<string>
 ): string[] {
   const frequency = positiveInteger(repeat.frequency);
   const period = positiveNumber(repeat.period);
@@ -5506,6 +5588,7 @@ function generateFrequencyPerPeriodSeries(
         (!shiftedClock && (candidate < cycleStart || candidate >= cycleEnd)) ||
         (orderedAt && candidate < orderedAt) ||
         (upperBound && candidate >= upperBound) ||
+        (dayFilter && !dayFilter.has(getLocalWeekday(candidate, timeZone))) ||
         !matchesCalendarDaySelection(candidate, calendarDays, timeZone)
       )
         continue;
@@ -5820,7 +5903,9 @@ function countScheduleEvents(
             orderedAt,
             to,
             expanded,
-            calendarDays
+            calendarDays,
+            false,
+            enforceDayFilter ? dayFilter : undefined
           ).length
         );
       }
@@ -5912,7 +5997,8 @@ function countScheduleEvents(
           to,
           clocks,
           calendarDays,
-          clockOwner?.configured
+          clockOwner?.configured,
+          enforceDayFilter ? dayFilter : undefined
         ).length
       );
     }
@@ -6903,7 +6989,7 @@ function calculateTotalUnitsSingle(
         ...(dosage.schedule.recurrence.calendarWindow?.start
           ? { start: dosage.schedule.recurrence.calendarWindow.start }
           : {}),
-        end: new Date(endDay.getTime() - 1).toISOString(),
+        end: new Date(endDay.getTime() - admissionDisplacement - 1).toISOString(),
       },
     };
     const maximumDosage: CanonicalAdministration = {
@@ -7804,6 +7890,7 @@ function successorIntervalStart(
     !repeat.anchors?.length &&
     !repeat.clocks?.length &&
     !repeat.dayOfWeek?.length &&
+    !isWakingHoursInterval(repeat) &&
     !dosage.schedule?.code?.coding?.length
   ) {
     return (

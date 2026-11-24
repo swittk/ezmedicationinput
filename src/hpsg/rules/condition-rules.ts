@@ -690,9 +690,8 @@ function isSafetyTarget(context: HpsgClauseContext, frame: ReturnType<typeof get
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
   const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
   return Boolean(
-    frame.polarity === AdvicePolarity.Negate ||
     definition?.procedural || isConditionalAdviceFrame(context, frame) ||
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options)
+    isSafetyTarget(context, frame)
   );
 }
 

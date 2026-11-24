@@ -70,6 +70,7 @@ import {
   FhirRange,
   FhirTiming,
   FhirTimingRepeat,
+  FhirR6TimingRepeat,
   RouteCode,
   SNOMEDCTRouteCodes
 } from "./types";
@@ -348,7 +349,7 @@ export function getTimingClocks(
 /** Independent event and clock opportunities share one wire recurrence.
  * The original wire repeat distinguishes a bridge read from a current core edit;
  * no administration/count/cap is split, and retired carriers cannot revive. */
-export function projectTimingClocks<T extends Pick<FhirTimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
+export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
   repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">, target: "r5" | "r6" = "r5"
 ): T {
   let clocks = repeat.timeOfDay;
@@ -1713,7 +1714,6 @@ export function serializeCanonicalSchedule(
     hasRepeat = true;
   }
   if (schedule?.countMax !== undefined) {
-    repeat.count = repeat.count ?? 1;
     repeat.countMax = schedule.countMax;
     hasRepeat = true;
   }
@@ -2309,9 +2309,12 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
     }
   } else if (doseAndRate?.doseQuantity?.value !== undefined) {
     const comparator = getQuantityComparator(doseAndRate.doseQuantity);
+    const unitIdentity = clause.site || doseAndRate.doseQuantity.unit == null
+      ? getDoseQuantityUnit(doseAndRate.doseQuantity) || undefined : undefined;
     clause.dose = {
       value: doseAndRate.doseQuantity.value,
-      unit: doseAndRate.doseQuantity.unit ?? (getDoseQuantityUnit(doseAndRate.doseQuantity) || undefined),
+      unit: doseAndRate.doseQuantity.unit ?? unitIdentity,
+      unitIdentity,
       ...(comparator ? { comparator } : {})
     };
   }

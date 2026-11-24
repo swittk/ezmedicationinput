@@ -3501,10 +3501,11 @@ describe("round 33 complete timing-code evidence", () => {
         repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } } };
     expect(nextDueDoses(row, query)).toEqual(["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"]);
     expect(calculateTotalUnits({ dosage: row, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
-    row.timing = { code: { coding: [{ system: gts, code: "Q4H" }] },
+    const q4h = structuredClone(row);
+    q4h.timing = { code: { coding: [{ system: gts, code: "Q4H" }] },
       repeat: { frequency: 1, period: 4, periodMax: 7, periodUnit: FhirPeriodUnit.Hour } };
-    expect(nextDueDoses(row, query)).toEqual(["2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00"]);
-    expect(calculateTotalUnits({ dosage: row, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(2);
+    expect(nextDueDoses(q4h, query)).toEqual(["2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage: q4h, ...query, durationValue: 8, durationUnit: FhirPeriodUnit.Hour }).totalUnits).toBe(2);
   });
 });
 
@@ -3635,10 +3636,11 @@ describe("round38: authored boundaries, elapsed clocks, and recorded occurrence 
         .totalUnits).toBe(84);
     }
     expect(JSON.stringify(course)).toBe(original);
-    course.step[0].component[0].condition = [{ code: { coding: [{
+    const conditionalCourse = structuredClone(course);
+    conditionalCourse.step[0].component[0].condition = [{ code: { coding: [{
       system: "urn:ezmedicationinput:CodeSystem:medication-condition", code: "measurement"
     }], text: "blood glucose" }, operation: "gt", valueQuantity: { value: 180, unit: "mg/dL" } }];
-    for (const dosage of representations(course)) {
+    for (const dosage of representations(conditionalCourse)) {
       const evaluated: string[] = [];
       const times = nextDueDoses(dosage, { ...configured, limit: 84,
         evaluateCondition: (_condition, stamp) => { evaluated.push(stamp); return true; } });
@@ -3816,9 +3818,10 @@ describe("round38: independent infusion-duration endpoints", () => {
     for (const dosage of representations(course))
       expect(() => calculateTotalUnits({ ...options, dosage }))
         .toThrowError(expect.objectContaining({ code: "ranged-capacity-open-maximum" }));
-    course.step[0].component[0].safety = { doseLimit: [{ scope: "administration",
+    const cappedCourse = structuredClone(course);
+    cappedCourse.step[0].component[0].safety = { doseLimit: [{ scope: "administration",
       valueQuantity: { value: 35, unit: "mL" } }] };
-    for (const dosage of representations(course))
+    for (const dosage of representations(cappedCourse))
       expect(calculateTotalUnits({ ...options, dosage }).totalUnits).toBe(35);
   });
   it.each([
@@ -3998,9 +4001,11 @@ describe("round39: calendar gaps, treatment eligibility, and authored count comp
         .totalUnits).toBe(4);
     }
     expect(JSON.stringify(source)).toBe(original);
-    loading.timing!.repeat!.count = 2;
-    delete loading.timing!.repeat!.countMax;
-    for (const dosage of representations(source)) {
+    const exact = structuredClone(source);
+    const exactLoading = exact.step[0].component[0];
+    exactLoading.timing!.repeat!.count = 2;
+    delete exactLoading.timing!.repeat!.countMax;
+    for (const dosage of representations(exact)) {
       expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([
         "2024-01-01T08:00:00+00:00", "2024-01-02T08:00:00+00:00", "2024-01-02T12:00:00+00:00"
       ]);

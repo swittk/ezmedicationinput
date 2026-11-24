@@ -333,15 +333,15 @@ function timingAnnotations(
   return out;
 }
 /** Metadata-only primitive positions stay on the wire, not in recurrence facts. */
-function timingPrimitiveValues<T>(source: T[] | undefined): T[] | undefined {
+function timingPrimitiveValues<T>(source: Array<T | null> | undefined): T[] | undefined {
   if (!source) return undefined;
   let values: T[] | undefined;
   for (let index = 0; index < source.length; index++) {
     const value = source[index];
-    if (value === null) values ??= source.slice(0, index);
+    if (value === null) values ??= source.slice(0, index) as T[];
     else if (values) values.push(value);
   }
-  return values ?? source;
+  return values ?? source as T[];
 }
 function timing(t: FhirTiming | FhirR6Timing | undefined, r5 = false): CanonicalTiming | undefined {
   if (!t) return undefined;

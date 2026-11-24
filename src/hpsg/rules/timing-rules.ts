@@ -3230,7 +3230,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
           rule: "hpsg.lex.schedule.count.maximum",
           tokens: matched,
           synsem: {
-            head: { schedule: { count: 1, countMax: countValue,
+            head: { schedule: { countMax: countValue,
               sourceRanges: [{ start: matched[0].sourceStart, end: matched[matched.length - 1].sourceEnd }] } },
             valence: {},
             cont: { clauseKind: "administration" }

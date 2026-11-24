@@ -140,8 +140,10 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
     if (index > lastDraftOwner) continue;
     // Implicit and previous-phase-next-day starts inherit predecessor
     // completion. Reuse the boundary decoder only on this changed-owner path;
-    // independent authored starts and fixed ends still stop the chain.
-    if (index > 0 && changedCompletions.has(index - 1) && current && !current.end &&
+    // independent authored starts and single-occurrence fixed ends stop the
+    // chain. A repeated phase's final completion still depends on its start.
+    if (index > 0 && changedCompletions.has(index - 1) && current &&
+        (!current.end || (current.count ?? 1) > 1) &&
         (!current.start || boundaryFromR6(current.start)?.anchor === "previous-phase-next-day"))
       changedCompletions.add(index);
     if (index < firstChanged || index > firstChanged && equalStructuredValues(prior, current)) {

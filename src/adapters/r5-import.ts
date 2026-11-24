@@ -1640,7 +1640,10 @@ function reconcileNativeRetainedCourse(
         }
       if (!clinicallyEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
         structuredChanged = true;
-      if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual) {
+      // A clinical match can ignore Coding annotations; a supplied current
+      // condition still owns those fields when reusing historical source.
+      if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual &&
+          (expanded.condition === undefined || equalStructuredValues(old.condition, expanded.condition))) {
         components.push(sourceMember(old, sequence).native);
         continue;
       }

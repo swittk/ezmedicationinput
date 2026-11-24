@@ -403,7 +403,8 @@ export function scopeSequentialPhaseSemantics(
         // tomorrow after a late order, owns the following local day.
         const onceDaily = preceding?.frequency === 1 && preceding.period === 1 &&
           preceding.periodUnit === FhirPeriodUnit.Day;
-        if (preceding?.timeOfDay?.length === 1 && preceding.count === undefined &&
+        if (preceding?.timeOfDay?.length === 1 && states[prior[0]].primaryClause.prn?.enabled !== true &&
+            preceding.count === undefined &&
             preceding.countMax === undefined && preceding.duration === undefined &&
             preceding.durationMax === undefined && preceding.durationUnit === undefined &&
             (onceDaily || preceding.frequency === undefined && preceding.period === undefined) &&

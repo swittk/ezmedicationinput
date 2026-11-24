@@ -727,11 +727,11 @@ describe('HPSG coordination cadence scope', () => {
   ])('keeps recurrence and its total cap atomic: %s', input => {
     const parsed = parseSig(input);
     for (const item of parsed.items) {
-      expect(item.meta.canonical.clauses[0].schedule).toMatchObject({
-        count: 1, countMax: 3, period: 5, periodUnit: 'min'
+      expect(item.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+      expect(item.meta.canonical.clauses[0].schedule).toMatchObject({ countMax: 3, period: 5, periodUnit: 'min'
       });
-      expect(item.fhir.timing?.repeat).toMatchObject({
-        count: 1, countMax: 3, period: 5, periodUnit: 'min'
+      expect(item.fhir.timing?.repeat?.count).toBeUndefined();
+      expect(item.fhir.timing?.repeat).toMatchObject({ countMax: 3, period: 5, periodUnit: 'min'
       });
       expect(item.longText).toContain('for up to 3 doses');
       expect(nextDueDoses(item.fhir, {
@@ -855,7 +855,7 @@ describe('HPSG coordination cadence scope', () => {
         timeZone: 'Asia/Bangkok', limit: 4
       }).every(instant => instant >= '2026-11-01')).toBe(true);
     } else {
-      expect(fhir.timing?.repeat?.count).toBe(1);
+      expect(fhir.timing?.repeat?.count).toBeUndefined();
       expect(fhir.timing?.repeat?.countMax).toBe(expected);
     }
   });
