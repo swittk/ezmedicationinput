@@ -3423,6 +3423,9 @@ export function isScheduleLead(context: HpsgClauseContext, index: number): boole
   }
   const lower = normalizeTokenLower(token);
   if (monthlyOrdinalWeekdaySign(context, index)) return true;
+  // A licensed IN + measured interval locates the omitted-unit dose.
+  // The existing timing sign still excludes procedure-owned durations.
+  if (lower === AdviceRelation.In && relativeAdministrationIntervalSign(context, index, token, lower)) return true;
   // Reuse the same typed duration constituent as the clause chart. Generic
   // administration advice must not consume its FOR + amount prefix and leave
   // only the unit behind, while procedure-owned durations stay procedural.

@@ -36,6 +36,7 @@ export interface FhirExtension {
   valueBoolean?: boolean;
   valueInteger?: number;
   valueDecimal?: number;
+  _valueDecimal?: FhirPrimitiveElement;
   valueQuantity?: FhirQuantity;
   valueCoding?: FhirCoding;
   valueCodeableConcept?: FhirCodeableConcept;
@@ -628,7 +629,7 @@ export interface FhirCodeableReference extends FhirElement {
 
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,
-  "sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
+  "sequence" | "_sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
   "maxDosePerLifetime" | "doseAndRate" | "timing"> {
   timing?: FhirR6Timing;
   condition?: FhirR6DosageCondition[];
@@ -651,6 +652,7 @@ export interface FhirR6DosageStep extends FhirElement {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
+  _count?: FhirPrimitiveElement;
   component: FhirR6Dosage[];
   safety?: FhirR6DosageSafety;
 }
@@ -670,6 +672,7 @@ export type FhirR6DosageInstructionInput = FhirR6DosageInstruction;
 export interface FhirDosage extends FhirBackboneElement {
   /** FHIR R5 ordering: equal sequences are concurrent, increasing sequences are sequential. */
   sequence?: number;
+  _sequence?: FhirPrimitiveElement;
   text?: string;
   /** Primitive metadata belongs to the authored narrative, not a new dose. */
   _text?: FhirPrimitiveElement;
@@ -716,11 +719,13 @@ export interface EzCourseStep extends FhirBackboneElement {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
+  _count?: FhirPrimitiveElement;
   safety?: FhirR6DosageSafety;
 }
 
 export interface EzCourseMetadata extends FhirBackboneElement {
   renderedInstruction?: string;
+  _renderedInstruction?: FhirPrimitiveElement;
   repeatCycle?: FhirR6Quantity;
   safety?: FhirR6DosageSafety;
   step?: EzCourseStep[];

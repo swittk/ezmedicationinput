@@ -1439,11 +1439,13 @@ function fromFhirDosageInternal(
   const replacementText = typeof edit === "string" && options?.realizationMode !== "normalized" ? edit : undefined;
   const unverified = replacementText === undefined &&
     (getDosageSourceTextAgreement(dosage, false) === false || edit !== false);
-  const native = unverified || needsNativeR5Preview(dosage, options)
-    ? courseFromR5([dosage], undefined, undefined, undefined, true).stages
-        .find(stage => stage.administrations.length)?.administrations[0]
+  const nativeCourse = unverified || needsNativeR5Preview(dosage, options)
+    ? courseFromR5([dosage], undefined, undefined, undefined, true)
     : undefined;
+  const native = nativeCourse?.stages.find(stage => stage.administrations.length)?.administrations[0];
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
+  if (unverified && nativeCourse && !native)
+    (nativeCourse.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
   const maximumDoseSource = !unverified && hasMaximumDose &&
       typeof dosage.text === "string" && dosage.text.trim().length > 0
@@ -1461,13 +1463,15 @@ function fromFhirDosageInternal(
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0;
   const exactSource = replacementText ?? maximumDoseSource ?? (!unverified && guarded && dosage.text ? dosage.text : undefined);
-  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled) : suppressMaximumDisplay
+  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled)
+    : nativeCourse ? formatCanonicalCourse(nativeCourse, "short", options) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options));
-  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled) : suppressMaximumDisplay
+  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled)
+    : nativeCourse ? formatCanonicalCourse(nativeCourse, "long", options) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options));
-  if (!exactSource && !native) {
+  if (!exactSource && !nativeCourse) {
     const condition = getDosageCondition(dosage);
     const exclusions = getDosageExcludedDates(dosage);
     const excludedWeekdays = getDosageExcludedWeekdays(dosage);
@@ -1498,7 +1502,7 @@ function fromFhirDosageInternal(
       normalized: buildNormalizedMetaFromClause(clause, dosage, options),
       canonical: {
         clauses: [clause],
-        ...(native ? { administration: native } : {})
+        ...(native ? { administration: native } : nativeCourse ? { course: nativeCourse } : {})
       }
     }
   };

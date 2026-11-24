@@ -700,8 +700,8 @@ function formatCanonicalBase(
       if (text) {
         let dose: CanonicalDoseExpr | string = text;
         if (targetScope && !doseRangeNeedsEndpointPreview(amount.range)) {
-          const unit = amount.range.low?.unit || getDoseQuantityUnit(amount.range.low) ||
-            amount.range.high?.unit || getDoseQuantityUnit(amount.range.high) || undefined;
+          const valuedEndpoint = amount.range.low?.value !== undefined ? amount.range.low : amount.range.high;
+          const unit = valuedEndpoint?.unit ?? getDoseQuantityUnit(valuedEndpoint) ?? undefined;
           dose = { range: { low: amount.range.low?.value, high: amount.range.high?.value }, unit };
         }
         ranges.push(amountLabel(amount, "dose", words) + (targetScope ? formatDose.call(env.localization, dose, style, scope) ?? text : text));

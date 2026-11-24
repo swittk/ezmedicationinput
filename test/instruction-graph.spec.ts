@@ -2083,7 +2083,7 @@ describe("qualified quantities keep their meaning in action graph realization", 
     { value: 2 }, { unit: "g" }, { range: { low: 1, high: 2 } }
   ])("does not replay a stale graph quantity over the canonical edit %j", (edit) => {
     const parsed = parsePublicSig("squeeze 1 cm ribbon cream onto each spot");
-    const clause = parsed.meta.canonical.clauses[0];
+    const clause = structuredClone(parsed.meta.canonical.clauses[0]);
     const graph = clause.instructionGraph!;
     // A structured saved graph may declare its primary span. Both selectors
     // must honor canonical editing, regardless of which display mode is used.
@@ -2091,13 +2091,13 @@ describe("qualified quantities keep their meaning in action graph realization", 
     expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
     expect(instructionGraphRoundTripPrimaryAction(clause)).toBeDefined();
     const source = JSON.stringify(graph);
-    Object.assign(clause.dose!, edit);
+    const edited = { ...clause, dose: { ...clause.dose!, ...edit } };
     // Raw source replay is disallowed, but the selected rich event still owns
     // its material and target when its display copy uses the edited quantity.
-    const rich = instructionGraphRichPrimaryAction(clause)!;
+    const rich = instructionGraphRichPrimaryAction(edited)!;
     expect(rich).toBe(graph.actions[0]);
-    expect(instructionGraphRoundTripPrimaryAction(clause)).toBeUndefined();
-    const current = realizeRichPrimaryWithCanonicalDose(rich, clause, "en");
+    expect(instructionGraphRoundTripPrimaryAction(edited)).toBeUndefined();
+    const current = realizeRichPrimaryWithCanonicalDose(rich, edited, "en");
     expect(current).toContain("cream");
     expect(current).toContain("each spot");
     if ("value" in edit) expect(current).toMatch(/^Squeeze 2 cm /u);
@@ -2105,14 +2105,14 @@ describe("qualified quantities keep their meaning in action graph realization", 
     if ("range" in edit) expect(current).toMatch(/^Squeeze 1-2 cm /u);
     expect(JSON.stringify(graph)).toBe(source);
     if ("comparator" in edit) {
-      const roundtrip = formatCanonicalClause(clause, "long", { locale: "en" }, {
+      const roundtrip = formatCanonicalClause(edited, "long", { locale: "en" }, {
         realizationMode: "roundtrip"
       });
       expect(roundtrip).toContain(edit.comparator === "~" ? "approximately 1" : "at most 1");
       expect(roundtrip).toContain("cream");
       expect(roundtrip).toContain("each spot");
       expect(roundtrip).not.toContain("Squeeze 1 cm ribbon");
-      const thai = formatCanonicalClause(clause, "long", resolveSigLocalization("th"), {
+      const thai = formatCanonicalClause(edited, "long", resolveSigLocalization("th"), {
         realizationMode: "roundtrip"
       });
       expect(thai).toContain(edit.comparator === "~" ? "ประมาณ 1" : "ไม่เกิน 1");
@@ -2120,7 +2120,7 @@ describe("qualified quantities keep their meaning in action graph realization", 
       expect(thai).not.toContain("บีบครีม 1 ซม.");
       expect(JSON.stringify(graph)).toBe(source);
     }
-    // The old graph remains editable. It is simply not the current dose.
+    // The retained graph still owns its original source dose.
     expect(graph.actions[0].args.find(value =>
       value.role === AdviceArgumentRole.Amount)?.quantity?.value).toBe(1);
   });
@@ -2780,8 +2780,9 @@ describe("round29 action scope and external graph preservation", () => {
       const graph = { sourceText: source, actions: [frame] };
       const reopened = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
       expect(realizeInstructionAction(reopened.actions[0], "en")).toBe(expected);
-      delete reopened.actions[0].relation;
-      expect(realizeInstructionAction(reopened.actions[0], "en")).toBe(expected);
+      const withoutRelation = { ...reopened.actions[0] };
+      delete withoutRelation.relation;
+      expect(realizeInstructionAction(withoutRelation, "en")).toBe(expected);
     });
 
   it("keeps a partial mixing amount as source text in both locale realizers", () => {
@@ -2882,7 +2883,7 @@ describe("round29 action scope and external graph preservation", () => {
   });
 
   it("preserves declared coding annotations through graph import and projection", () => {
-    const frame = parseInstructionActions("Swallow 1 tablet")[0];
+    const frame = structuredClone(parseInstructionActions("Swallow 1 tablet")[0]);
     const coding = frame.predicate.codings![0];
     coding.userSelected = true;
     coding._userSelected = { id: "chosen" };
@@ -6124,7 +6125,10 @@ describe("round55: current clinical facts and independent graph meaning", () => 
       expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z",
         durationValue: 1, durationUnit: "d", timeZone: "UTC" }).totalUnits).toBe(expected);
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-      if (code === "1290032005") expect(text).toContain("right eye");
+      if (code === "1290032005") {
+        expect(text).toContain("right eye");
+        expect(text).not.toContain("both eyes");
+      }
       if (expected === 1) expect(text).not.toContain("across 2 sites");
     }
     expect(JSON.stringify(raw)).toBe(before);
@@ -6224,7 +6228,9 @@ describe("round56: authored administration and independent advice", () => {
           expect(text.match(/systolic BP > 160/gu)).toHaveLength(1);
           const condition = locale === "en" ? "only if systolic BP > 160" : "เฉพาะเมื่อ systolic BP > 160";
           if (!structured) expect(text).toContain("Swallow 1 tablet whole " + condition + ".");
-          else expect(text).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          else expect(text).toMatch(locale === "en"
+            ? /(?:^|\.\s*)Use 2 tablets only if systolic BP > 160\.(?=\s|$)/u
+            : /(?:^|\.\s*)ใช้(?:ครั้งละ)? 2 เม็ด เฉพาะเมื่อ systolic BP > 160\.(?=\s|$)/u);
           if (hold) {
             expect(text).toContain("Otherwise hold.");
             expect(text).not.toContain("Otherwise hold " + condition);
@@ -6300,5 +6306,137 @@ describe("round56: authored administration and independent advice", () => {
       expect(toFhirR5Dosages(input)[0].extension).toContainEqual(extension);
       expect(JSON.stringify(input)).toBe(before);
     }
+  });
+});
+
+
+describe("round57 independent graph and calendar meaning", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [row, r6, fresh(toFhirR5Dosages(r6))];
+  };
+  it.each([
+    { name: "none", bounds: undefined, en: "Do not crush.", th: "ห้ามบด." },
+    { name: "end", bounds: { end: "2026-12-10" }, en: "Use the medication through 10 Dec 2026. Do not crush.", th: "ใช้ยา ถึงวันที่ 10/12/2569. ห้ามบด." },
+    { name: "start", bounds: { start: "2026-12-03" }, en: "Use the medication starting 3 Dec 2026. Do not crush.", th: "ใช้ยา ตั้งแต่วันที่ 3/12/2569. ห้ามบด." },
+    { name: "both", bounds: { start: "2026-12-03", end: "2026-12-10" }, en: "Use the medication from 3 Dec 2026 through 10 Dec 2026. Do not crush.", th: "ใช้ยา ตั้งแต่วันที่ 3/12/2569 ถึงวันที่ 10/12/2569. ห้ามบด." }
+  ])("keeps $name calendar bounds beside independent graph advice", ({ bounds, en, th }) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      ...(bounds ? { timing: { repeat: { boundsPeriod: bounds } } } : {}),
+      extension: [buildInstructionGraphExtension({ sourceText: "Do not crush", sourceLocale: "en",
+        actions: parseInstructionActions("Do not crush") })!]
+    }] }] };
+    const before = fresh(source), rows = fresh(toFhirR5Dosages(source));
+    for (const input of [source, rows]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(en);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(th);
+    }
+    expect(toDosageDetails(rows).step[0].component[0].timing?.repeat?.boundsPeriod).toEqual(bounds);
+    expect(source).toEqual(before);
+  });
+
+  it.each(["Dilute 1 mL at 08:00", "Dilute 1 mL at 08:00 if the solution is too thick",
+    "Dilute 1 mL with water at 08:00 if the solution is too thick"])("keeps the bounded clock daughter: %s", text => {
+    const parsed = parsePublicSig(text), before = fresh(parsed.fhirNext);
+    const conditional = text.includes(" if ");
+    for (const rows of [fresh(parsed.fhir), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      const graph = parseInstructionGraphExtension(rows[0].extension)!;
+      const frame = graph.actions[0], time = frame.args.find(arg => arg.role === AdviceArgumentRole.Time);
+      expect(time).toMatchObject({ text: "08:00", normalized: "08:00:00" });
+      expect(frame.args.some(arg => arg.role === AdviceArgumentRole.Destination && arg.text === "08:00")).toBe(false);
+      expect(text.slice(time!.span!.start, time!.span!.end)).toBe("08:00");
+      if (conditional) {
+        expect(graph.relations).toContainEqual(expect.objectContaining({ kind: "if", text: "if the solution is too thick" }));
+        expect(frame.span.end).toBeLessThan(text.indexOf("if the solution"));
+      }
+    }
+    expect(parsed.longText).toContain("at 08:00:00");
+    if (conditional) expect(parsed.longText).toContain("if the solution is too thick");
+    expect(parsed.fhirNext).toEqual(before);
+  });
+  it("keeps a dilution quantity as a destination beside its condition", () => {
+    const text = "Dilute 1 mL to 10 mL if the solution is too thick";
+    const frame = parseInstructionActions(text)[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Destination)?.quantity).toMatchObject({ value: 10, unit: "mL" });
+    expect(frame.args.some(arg => arg.role === AdviceArgumentRole.Time)).toBe(false);
+    expect(parsePublicSig(text).longText).toBe(text + ".");
+  });
+
+  it.each([AdviceRelation.After, AdviceRelation.Before])("retains an Activity's own relation: %s", relation => {
+    const frame = fresh(parseInstructionActions("Swallow before bedtime")[0]);
+    frame.sourceText = ""; frame.relation = AdviceRelation.Before;
+    frame.args = [
+      { role: AdviceArgumentRole.Time, text: "bedtime", normalized: "HS", relation: AdviceRelation.Before, i18n: { th: "ก่อนนอน" } },
+      { role: AdviceArgumentRole.Activity, text: "eating", normalized: "eating", relation, i18n: { th: "รับประทานอาหาร" } }
+    ];
+    const before = fresh(frame), marker = buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
+    const reopened = parseInstructionGraphExtension([fresh(marker)])!.actions[0];
+    for (const input of [frame, reopened]) {
+      expect(realizeInstructionAction(input, "en")).toBe("Swallow before sleep " + (relation === AdviceRelation.After ? "after" : "before") + " eating");
+      expect(realizeInstructionAction(input, "th")).toBe("กลืนก่อนนอน" + (relation === AdviceRelation.After ? "หลัง" : "ก่อน") + "รับประทานอาหาร");
+    }
+    expect(frame).toEqual(before);
+  });
+
+  it.each([false, true])("keeps the edited patch dose on Amount with independentObject=%s", independent => {
+    const text = "Apply 1 patch of estradiol at bedtime";
+    const frame = fresh(parseInstructionActions("Apply patch at bedtime")[0]);
+    frame.sourceText = text; frame.span = { start: 0, end: text.length };
+    frame.args = [
+      { role: AdviceArgumentRole.Object, text: independent ? "estradiol" : "1 patch of estradiol",
+        normalized: independent ? "estradiol" : "1 patch of estradiol",
+        quantity: independent ? { value: 20, unit: "mg" } : { value: 1, unit: "patch" },
+        span: { start: 6, end: text.indexOf(" at ") } },
+      { role: AdviceArgumentRole.Amount, text: "1 patch", quantity: { value: 1, unit: "patch" }, span: { start: 6, end: 13 } },
+      { role: AdviceArgumentRole.Time, text: "bedtime", normalized: "HS", relation: AdviceRelation.On, i18n: { th: "ก่อนนอน" } }
+    ];
+    const row: FhirDosage = { method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 2, unit: "patch" } }],
+      extension: [buildInstructionGraphExtension({ sourceText: text, sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame] })!] };
+    const before = fresh(row);
+    for (const input of views(row)) for (const locale of ["en", "th"]) {
+      const preview = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(preview.match(/\b2 patch\b/gu)).toHaveLength(1);
+      expect(preview).not.toMatch(/\b1 patch\b/u);
+      expect(preview).toContain("estradiol");
+      if (independent) expect(preview).toContain("20 mg");
+    }
+    expect(row).toEqual(before);
+    expect(parseInstructionGraphExtension(row.extension)?.actions[0]).toMatchObject(frame);
+  });
+
+  it("keeps equal priming and administration amounts as separate events", () => {
+    const frame = fresh(parseInstructionActions("Prime with 2 sprays")[0]); frame.sourceText = "";
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 2, unit: "spray" } }], route: { text: "intranasal" },
+      extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    const before = fresh(row);
+    for (const input of views(row)) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Use 2 sprays via nasal route. Prime with 2 sprays.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("พ่นครั้งละ 2 พ่น ทางจมูก. เตรียมอุปกรณ์พ่น 2 พ่น.");
+    }
+    expect(row).toEqual(before);
+  });
+  it("still selects a dose-defining missing head from a spanless graph", () => {
+    const frame = fresh(parseInstructionActions("Swallow 2 tablets before bedtime")[0]); frame.sourceText = "";
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+      extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    const result = fromFhirDosage(fresh(row), { locale: "en", realizationMode: "normalized" });
+    expect(instructionGraphRichPrimaryAction(result.meta.canonical.clauses[0])?.predicate.lemma).toBe("swallow");
+    expect(result.longText).toMatch(/^Swallow\b/u);
+    expect(result.longText).not.toContain("Use");
+  });
+
+  it.each(["where the surface feels rough", ""])("retains an untranslated authored site restriction: %s", sourceText => {
+    const row: FhirDosage = { method: { text: "Apply" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "skin", extension: [{ url: "urn:ezmedicationinput:StructureDefinition:medication-body-site-restriction", extension: [
+        { url: "relation", valueCode: "where" }, { url: "sourceText", valueString: sourceText },
+        { url: "predicateText", valueString: "rough" }, { url: "predicateForm", valueCode: "state" }
+      ] }] } };
+    const before = fresh(row);
+    for (const input of views(row)) expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+      .toBe("ทาครั้งละ 1 g ที่ผิวหนัง (" + (sourceText || "where rough") + ").");
+    expect(row).toEqual(before);
   });
 });

@@ -1186,9 +1186,15 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
     // The first complement can already be a complete clock daughter.
-    if (relationHasGrammarFeature(targetRelation, "timeComplement") &&
-        clockArgumentFromParts(parts, targetIndex + 1, segmentEnd, input)) {
-      tailRelationIndex = targetIndex;
+    const clock = relationHasGrammarFeature(targetRelation, "timeComplement")
+      ? clockArgumentFromParts(parts, targetIndex + 1, targetEnd, input) : undefined;
+    if (clock) {
+      const bounds = semanticArgumentBounds(parts, targetIndex + 1, targetEnd);
+      const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
+      pushArgument(args, { ...clock, relation: targetRelation,
+        ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {}) });
+      // The clock is complete; a following condition retains its own boundary.
+      tailRelationIndex = targetEnd < segmentEnd ? targetEnd : undefined;
       break;
     }
     const nominal = argumentFromParts(
@@ -3928,8 +3934,8 @@ function realizeAction(
   let temporalAdjuncts: AdviceArgument[] | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
-    if ((independentTemporal || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time) &&
-        arg.relation !== frame.relation) &&
+    if ((independentTemporal || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
+        arg.role === AdviceArgumentRole.Activity) && arg.relation !== frame.relation) &&
         arg.relation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
@@ -4621,18 +4627,18 @@ function frameWithReconciledAmount(
           ? (text.slice(0, labelOffset) + " " +
               text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
           : text;
-        if (!remaining && !replacement) continue;
         const quantity = sourceAmount.quantity;
         const sharesSupersededQuantity = quantity && arg.quantity &&
           quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
           quantity.comparator === arg.quantity.comparator &&
           quantity.range?.low === arg.quantity.range?.low &&
           quantity.range?.high === arg.quantity.range?.high;
+        if (!remaining && (!arg.quantity || sharesSupersededQuantity)) continue;
+        // Amount owns the current dose. This Object keeps its remaining drug
+        // description and any independent quantity, never a second dose copy.
         args.push({ ...arg,
-          ...(replacement ? { quantity: replacement } :
-            sharesSupersededQuantity ? { quantity: undefined } : {}),
-          text: replacement ? arg.text : remaining,
-          normalized: remaining || replacement?.unit, i18n: undefined });
+          ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
+          text: remaining, normalized: remaining || undefined, i18n: undefined });
         continue;
       }
     }
@@ -4782,7 +4788,9 @@ export function instructionGraphRichPrimaryAction(
     // method or dose edit. Its renderer applies current facts to a display copy
     // and preserves independent adjuncts; another action cannot inherit it.
     if (overlapsPrimary) return rich || suppliesMissingHead;
-    return !primaryActionAmountConflicts(action, dose,
+    const definition = getMedicationInstructionAction(action.predicate.lemma);
+    return (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+      !primaryActionAmountConflicts(action, dose,
       !dose && clause.sourceProjectionVerified === false) &&
       (rich || suppliesMissingHead) && (!dose || matchesDose(action));
   });

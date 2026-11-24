@@ -3450,6 +3450,9 @@ describe("round52 live site and partial-direction previews", () => {
 
   it.each([false, true])("keeps the condition and authored directions with live dose=%s", (liveDose) => {
     const authored = "Swallow 1 tablet whole";
+    const completeThreshold = /\bSBP > 160(?!\d|\.\d)/u;
+    for (const changed of ["SBP > 1600", "SBP > 160.5"])
+      expect(changed).not.toMatch(completeThreshold);
     const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" } as const;
     const sourceNote = { url: "urn:round54:B17-source-note", valueString: "retain authored annotation" };
     const row: Parameters<typeof setDosageCondition>[0] = { text: authored, extension: [sourceNote] };
@@ -3462,7 +3465,7 @@ describe("round52 live site and partial-direction previews", () => {
       const before = JSON.parse(JSON.stringify(input));
       for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
         const preview = formatSig(input, "long", { locale, realizationMode: mode });
-        expect(preview).toContain("SBP > 160");
+        expect(preview).toMatch(completeThreshold);
         if (liveDose) {
           expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
           expect(preview).not.toContain("1 tablet");
@@ -3498,7 +3501,7 @@ describe("round52 live site and partial-direction previews", () => {
         const before = structuredClone(input);
         for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
           const preview = formatSig(input, "long", { locale, realizationMode: mode });
-          expect(preview).toContain("SBP > 160");
+          expect(preview).toMatch(completeThreshold);
           expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
           expect(preview).not.toContain("1 tablet");
           expect(preview).not.toContain("1 เม็ด");

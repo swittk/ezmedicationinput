@@ -421,9 +421,9 @@ function resolveRepeatBoundsStart(
 ): Date | null {
   const value = repeat?.calendarWindow?.start;
   if (!value) return null;
-  const dateOnly = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  const dateOnly = value.match(/^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/u);
   if (dateOnly) {
-    return calendarBoundaryDate(timeZone, Number(dateOnly[1]), Number(dateOnly[2]), Number(dateOnly[3]), 0, 0, 0);
+    return calendarBoundaryDate(timeZone, Number(dateOnly[1]), Number(dateOnly[2] ?? 1), Number(dateOnly[3] ?? 1), 0, 0, 0);
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -447,8 +447,12 @@ function resolveRepeatBoundsEndExclusive(
     );
     if (!endDay) return null;
     // A reduced-precision inclusive end contains every matching civil date.
-    return dateOnly[3] ? addLocalDays(endDay, 1, timeZone)
-      : addCalendarMonths(endDay, dateOnly[2] ? 1 : 12, timeZone);
+    if (dateOnly[3]) return addLocalDays(endDay, 1, timeZone);
+    // Resolve the next civil midnight independently: the opening midnight
+    // may have moved forward across a zone gap, which is not an end clock.
+    const nextMonth = dateOnly[2] ? Number(dateOnly[2]) + 1 : 13;
+    return calendarBoundaryDate(timeZone, Number(dateOnly[1]) + (nextMonth > 12 ? 1 : 0),
+      nextMonth > 12 ? 1 : nextMonth, 1, 0, 0, 0);
   }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -594,7 +598,7 @@ function resolveDayFilteredSeriesRepeat(
   repeat: CanonicalRecurrence,
   enforceDayFilter: boolean
 ): CanonicalRecurrence | undefined {
-  if (!enforceDayFilter && !(repeat.monthDays?.length && usesIntervalCadence(repeat))) {
+  if (!enforceDayFilter && !repeat.monthDays?.length) {
     return undefined;
   }
   if ((repeat.anchors?.length ?? 0) > 0 || (repeat.clocks?.length ?? 0) > 0) {
@@ -2480,7 +2484,7 @@ function resolveAdministrationWindow(
         ownPredecessor?.end ?? (index > 0 ? previousEnd : undefined)
       );
   const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
-    ? absoluteStart ?? start : implicitStart;
+    ? absoluteStart ?? implicitStart : implicitStart;
   let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
   if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
   if (successorFloor && successorFloor > eligibleFrom &&
@@ -7952,14 +7956,18 @@ function explicitAdministrationCompletion(
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
   });
-  const eventStatus: ExplicitEventStatus = { possible: false };
+  const eventStatus: ExplicitEventStatus = { possible: false, end: cycleEnd };
   const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
     quantityEstimation: undefined, explicitEventStatus: eventStatus,
     priorCount: undefined, priorDoseTimes: undefined, limit: 10000 } as PhaseCountOptions);
   const count = repeat ? repeatOccurrenceCap(repeat) : undefined;
-  if (eventStatus.possible && (count === undefined || due.length < count)) return undefined;
-  const last = due.length ? new Date(due[due.length - 1]) : undefined;
-  return last && (!cycleEnd || last < cycleEnd) ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
+  // The sorted probe can include later absolute events. Only this cycle's
+  // opportunities determine its completion; a final finite tail has no fence.
+  let ownedCount = due.length;
+  if (cycleEnd) while (ownedCount && new Date(due[ownedCount - 1]) >= cycleEnd) ownedCount--;
+  if (eventStatus.possible && (count === undefined || ownedCount < count)) return undefined;
+  const last = ownedCount ? new Date(due[ownedCount - 1]) : undefined;
+  return last ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
 }
 function finiteAdministrationCompletion(
   dosage: CanonicalAdministration,

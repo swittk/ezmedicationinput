@@ -83,10 +83,12 @@ import {
   HpsgClauseContext,
   sourceRangeOverlapsContextDate,
   isClockLikeLower,
+  isAmPmLower,
   isPunctuation,
   joinTokenText,
   lexicalRule,
   normalizeTokenLower,
+  parseClockToken,
   rangeFromTokens,
   tokensAvailable
 } from "../rule-context";
@@ -1109,7 +1111,8 @@ function comparativeDoseAt(
   // ordinary typed timing or route lead must license the omitted dose unit.
   if (!compactUnit && !unit) {
     const next = context.tokens[numericIndex + 1];
-    if (!next || mapIntervalUnit(normalizeTokenLower(next))) return undefined;
+    if (!next || mapIntervalUnit(normalizeTokenLower(next)) ||
+        isAmPmLower(normalizeTokenLower(next))) return undefined;
     // Either typed timing or an explicit route licenses an omitted dose unit.
     // The ordinary route matcher owns multi-word and institution vocabulary;
     // an opaque suffix after a recognized route cannot erase the qualifier.
@@ -1526,7 +1529,12 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 
 function isClockDoseContext(context: HpsgClauseContext, start: number, lower: string): boolean {
   if (!isClockLikeLower(lower)) {
-    return false;
+    // A comparative clock cannot re-enter the chart as a plain numeric dose
+    // after its comparative-dose candidate correctly defers to timing.
+    const lead = context.tokens[start - 1], meridiem = context.tokens[start + 1];
+    return Boolean(lead && DOSE_COMPARATOR_PREFIXES.has(normalizeTokenLower(lead)) &&
+      meridiem && isAmPmLower(normalizeTokenLower(meridiem)) &&
+      parseClockToken(context.tokens[start], meridiem));
   }
   const previous = context.tokens[start - 1];
   const previousLower = previous ? normalizeTokenLower(previous) : "";

@@ -80,8 +80,8 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
     "_period", "_periodMax", "_periodUnit", "_duration", "_durationMax",
     "_durationUnit", "_dayOfWeek", "_when", "_offset"])
     delete (repeat as Record<string, unknown>)[field];
-  if (repeat.boundsDuration?.id !== undefined) {
-    const { id: _durationId, ...duration } = repeat.boundsDuration;
+  if (repeat.boundsDuration) {
+    const { id: _durationId, _value, _unit, _code, _system, _comparator, ...duration } = repeat.boundsDuration;
     repeat.boundsDuration = duration;
   }
   if (repeat.boundsPeriod?.id !== undefined) {

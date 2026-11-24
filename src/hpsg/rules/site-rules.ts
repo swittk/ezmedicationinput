@@ -36,6 +36,8 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   BODY_SITE_FEATURE_SCORE_BONUS,
   DURATION_LEAD_TOKENS,
+  DOSE_COMPARATOR_PREFIXES,
+  doseComparatorNumberAt,
   EVENT_ARTICLE_TOKENS,
   EXTERNAL_SITE_LOCATIVE_PREFIXES,
   EYE_SITE_ABBREVIATIONS,
@@ -563,6 +565,16 @@ export function siteLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     // are also locative heads, not stray leftovers outside site grammar.
     if (!SITE_ANCHORS.has(lower) && !SITE_SELF_DISPLAY_ANCHORS.has(lower)) {
       return signs;
+    }
+    // A recognized quantity owns an overlapping word such as AROUND.
+    // Anatomical complements still use the ordinary locative rule below.
+    if (DOSE_COMPARATOR_PREFIXES.has(lower)) {
+      const amount = doseComparatorNumberAt(context.tokens, start, context.limit, lower);
+      const unitToken = amount && context.tokens[amount.numericIndex + 1];
+      const unit = amount?.rawUnit ?? (unitToken && !context.state.consumed.has(unitToken.index)
+        ? normalizeTokenLower(unitToken) : undefined);
+      if (amount && unit && normalizeUnit(unit, context.options) &&
+          tokensAvailable(context, start, amount.numericIndex + 1 - start)) return signs;
     }
     const firstAfterAnchor = context.tokens[start + 1];
     let ordinalCursor = start + 1;

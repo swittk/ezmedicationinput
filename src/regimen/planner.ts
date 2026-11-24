@@ -1199,7 +1199,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             // An infusion's volume and rate can be comma-separated arguments
             // of one administration. The existing complete HPSG probe owns
             // that interpretation and is reused for the resulting segment.
-            const suffix = prefix.method && (prefix.clause.dose?.value !== undefined || prefix.clause.dose?.range)
+            const suffix = (prefix.method || prefix.clause.route) && (prefix.clause.dose?.value !== undefined || prefix.clause.dose?.range)
               ? evidence.probe(right.sourceStart, end) : undefined;
             const full = suffix && !suffix.clause.dose && !suffix.method && !suffix.prn
               ? evidence.probe(start, end) : undefined;

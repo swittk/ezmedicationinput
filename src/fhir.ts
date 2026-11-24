@@ -134,9 +134,12 @@ export function cycleDayConstraintExtension(
   const children: FhirExtension[] = [];
   let changed = false;
   for (const child of previous.extension ?? []) {
-    // The reader consumes numerical day values only. Annotation-only children
-    // must not take the positional ownership of a later authored day.
-    if (child.url === "day" && typeof child.valueInteger !== "number") {
+    // Annotation-only primitive children have no generated clinical value.
+    // Preserve their metadata without claiming a later valued child's position.
+    if (child.url === "day" && typeof child.valueInteger !== "number" ||
+        (child.url === "periodDays" || child.url === "cycles") && child.valueInteger === undefined ||
+        (child.url === "anchor" || child.url === "source") && child.valueString === undefined ||
+        child.url === "reason" && child.valueCode === undefined) {
       children.push(child); continue;
     }
     if (child.url !== "day" && child.url !== "periodDays" && child.url !== "cycles" &&

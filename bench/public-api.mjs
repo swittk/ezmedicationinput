@@ -766,6 +766,7 @@ function completeComplexRows(output) {
     if (part("rowIndex")?.valueInteger !== index || part("sequence")?.valueInteger !== expected[0] ||
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
+    if (repeat?.count !== undefined || repeat?.countMax !== undefined) return false;
     const origin = row.modifierExtension?.find(part =>
       part.url === "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin");
     return JSON.stringify([row.sequence, expected[1], repeat?.frequency ?? 1,
@@ -796,6 +797,13 @@ for (const locale of ["en", "th"]) {
   if (!currentComplexPreview(exact.replaceAll(". ", ";\n  "), locale))
     throw new Error("Complex preview oracle rejected nonsemantic separators");
 }
+// A historical preview exclusion requires the exact authored source replay.
+// Missing or unrelated output is an error, not evidence of different work.
+function verifiedPreviewOrSource(output, current, savedSource) {
+  if (current) return true;
+  if (output === savedSource) return false;
+  throw new Error("Preview is neither the independent current preview nor the saved-source fixture");
+}
 const equivalenceDetails = new Map();
 const sourcePreviewDifference = {
   classification: "different-preview-work",
@@ -804,19 +812,20 @@ const sourcePreviewDifference = {
 for (const locale of ["en", "th"]) {
   const formatName = `formatSig/R6-complex/${locale}`;
   const importName = `fromFhir/complex/${locale}`;
-  equivalenceOracles.set(formatName, output => currentComplexPreview(output, locale));
+  equivalenceOracles.set(formatName, output =>
+    verifiedPreviewOrSource(output, currentComplexPreview(output, locale), S.eye));
   equivalenceOracles.set(importName, output => {
     // Missing or wrong conversion work is an error for either build, even if
     // that build already differs in the historical source-preview behavior.
     if (!completeComplexRows(output))
       throw new Error("fromFhir failed the independent six-row R5 taper oracle");
-    return currentComplexPreview(output?.longText, locale);
+    return verifiedPreviewOrSource(output?.longText, currentComplexPreview(output?.longText, locale), S.eye);
   });
   equivalenceDetails.set(formatName, sourcePreviewDifference);
   equivalenceDetails.set(importName, sourcePreviewDifference);
 }
 equivalenceOracles.set("formatSig/R6-author-source", output =>
-  output === "Take 1 tablet orally twice daily for 3 days.");
+  verifiedPreviewOrSource(output, output === "Take 1 tablet orally twice daily for 3 days.", S.routine));
 equivalenceDetails.set("formatSig/R6-author-source", sourcePreviewDifference);
 
 // Check the independent amount oracle outside the measured loops. A suffix

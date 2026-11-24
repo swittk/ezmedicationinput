@@ -3375,7 +3375,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         endOffset: { value: 5, code: "d", unit: "d" } } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }] };
-    const rows = toFhirR5Dosages(course);
+    const rows = structuredClone(toFhirR5Dosages(course));
     rows[0].timing!.repeat!.timeOfDay = ["08:00:00"];
     const restored = toDosageDetails(rows);
     expect(restored.step[0].component[0].timing?.repeat).toEqual({
@@ -5299,16 +5299,19 @@ describe("cross-pass preservation and execution family audit", () => {
   ];
 
   it.each(courses)("keeps %s stable through strict R5, imported R5, and repeated saves", (_name, source) => {
+    const before = structuredClone(source);
     const rows = toFhirR5Dosages(source);
     const recovered = toDosageDetails(JSON.parse(JSON.stringify(rows)));
-    expect(recovered).toEqual(source);
-    expect(toDosageDetails(JSON.parse(JSON.stringify(fromFhir(source).fhir)))).toEqual(source);
+    expect(recovered).toEqual(before);
+    expect(toDosageDetails(JSON.parse(JSON.stringify(fromFhir(source).fhir)))).toEqual(before);
+    expect(source).toEqual(before);
     let saved = rows;
     for (let count = 0; count < 3; count++) {
       saved = toFhirR5Dosages(toDosageDetails(JSON.parse(JSON.stringify(saved))));
       expect(saved).toEqual(rows);
       expect(JSON.stringify(saved).length).toBe(JSON.stringify(rows).length);
     }
+    expect(source).toEqual(before);
   });
 
   it.each([
@@ -7061,5 +7064,74 @@ describe("round49 primary administration condition placement", () => {
       expect(formatSig(input, "long", roundtrip)).toBe(expected);
     expect(fromFhir(parsed.fhirNext, roundtrip).longText).toBe(expected);
     expect(JSON.stringify([parsed.fhir, parsed.fhirNext, native])).toBe(saved);
+  });
+});
+
+
+describe("round57 retained range and standalone carrier previews", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each(["upper", "lower", "drops"] as const)("uses the valued ordered-range endpoint: %s", kind => {
+    const range = kind === "upper"
+      ? { low: { unit: "uL", _value: { id: "unvalued-low" } }, high: { value: 2, unit: "mL" } }
+      : kind === "lower"
+        ? { low: { value: 2, unit: "mL" }, high: { unit: "uL", _value: { id: "unvalued-high" } } }
+        : { low: { value: 1, unit: "drop" }, high: { value: 2, unit: "drop" } };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text: kind === "drops" ? "both eyes" : "both nostrils" } },
+      doseAndRate: [{ type: { text: "ordered" }, doseRange: range }]
+    }] }] };
+    const before = fresh(source), rows = fresh(toFhirR5Dosages(source));
+    for (const input of [source, rows]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      if (kind === "drops") {
+        expect(en).toContain("1 to 2 drops (per administration target)");
+        expect(th).toContain("แต่ละจุด 1 ถึง 2 หยด");
+      } else {
+        expect(en).toContain(kind === "upper" ? "up to 2 mL" : "at least 2 mL");
+        expect(th).toContain(kind === "upper" ? "ไม่เกิน 2 มิลลิลิตร" : "อย่างน้อย 2 มิลลิลิตร");
+        expect(en).not.toMatch(/uL|µL|per administration target/);
+        expect(th).not.toContain("แต่ละจุด");
+      }
+    }
+    expect(toDosageDetails(rows).step[0].component[0].doseAndRate?.[0].doseRange).toEqual(range);
+    expect(source).toEqual(before);
+  });
+
+  it.each([false, true])("reopens a standalone administration-free carrier with cap=%s", capped => {
+    const source: FhirR6DosageInstruction = {
+      id: "r57-header", renderedInstruction: "Call clinic for dose",
+      extension: [{ url: "urn:r57:retained-header", valueBoolean: false }],
+      ...(capped ? { safety: { doseLimit: [{ scope: "administration" as const,
+        valueQuantity: { value: 5, unit: "mg", comparator: "~" as const } }] } } : {})
+    };
+    const before = fresh(source), rows = fresh(toFhirR5Dosages(source)), rowBefore = fresh(rows[0]);
+    for (const locale of ["en", "th"]) {
+      const result = fromFhirDosage(fresh(rows[0]), { locale, realizationMode: "normalized" });
+      const expected = !capped ? "Call clinic for dose" : locale === "en"
+        ? "Current: Across this course: max per administration: ~5 mg; original directions: Call clinic for dose"
+        : "ปัจจุบัน: ตลอดแผนการใช้ยานี้: max per administration: ~5 mg; ข้อความเดิม: Call clinic for dose";
+      expect(result.shortText).toBe(expected);
+      expect(result.longText).toBe(expected);
+      expect(result.meta.canonical.administration).toBeUndefined();
+      expect(result.meta.canonical.course?.stages).toEqual([]);
+      expect(result.fhir).toEqual(rowBefore);
+      expect(toDosageDetails([result.fhir])).toEqual(source);
+    }
+    expect(rows[0]).toEqual(rowBefore);
+    expect(source).toEqual(before);
+  });
+
+  it("keeps a standalone administered row limited to its selected component", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [
+      { id: "first", doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] },
+      { id: "second", doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } }
+    ] }] };
+    const row = fresh(toFhirR5Dosages(source)[1]);
+    const result = fromFhirDosage(row, { locale: "en", realizationMode: "normalized" });
+    expect(result.longText).toBe("Use 2 tablets once daily.");
+    expect(result.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
+    expect(result.meta.canonical.course).toBeUndefined();
   });
 });

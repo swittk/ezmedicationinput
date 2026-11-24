@@ -2327,7 +2327,7 @@
     "dose",
     "doses"
   ],
-  "relativeTimeEndLeads": ["until", "through", "till", "before"],
+  "relativeTimeEndLeads": ["until", "through", "till", "before", "by"],
   "nextDayModifiers": ["next", "following"],
   "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
   "treatmentPeriodStartLeads": [

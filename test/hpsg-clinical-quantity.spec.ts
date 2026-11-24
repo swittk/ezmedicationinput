@@ -3480,6 +3480,11 @@ describe("round56: explicit division and occurrence bounds", () => {
       expect(row.timing?.repeat?.count).toBe(2);
       expect(row.doseAndRate?.[0]).toMatchObject({ doseQuantity: { value: 50, unit: "mL" },
         rateQuantity: { value: 30, unit: "mL/h" } });
+      const imported = importCanonicalCourse(JSON.parse(JSON.stringify(input)));
+      if (source.includes("next day")) expect(imported.stages[0].start).toMatchObject({
+        anchor: "treatment-day-start", displacement: { value: 1, unit: "d" }
+      });
+      else expect(imported.stages[0].start).toBeUndefined();
     }
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
     expect(JSON.stringify(parsed)).toBe(before);
@@ -3532,5 +3537,41 @@ describe("round56: explicit division and occurrence bounds", () => {
       rateQuantity: { value: 0.1, unit: "mg/kg/h" } });
     expect(independent.fhir[0].timing?.repeat?.count).toBe(2);
     expect(independent.fhir[0].timing?.repeat?.period).toBeUndefined();
+  });
+});
+
+
+describe("round57 route-owned infusion boundaries", () => {
+  it.each(["100 mL/hr IV over 30 minutes", "Infuse 100 mL/hr IV over 30 minutes", "100 mL/hr, IV over 30 minutes", "100 mL/hr IV"])(
+    "retains the existing IV route in %s", text => {
+      const parsed = parsePublicSig(text), duration = text.includes("over");
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.route?.code).toBe("47625008");
+      expect(clause.clinicalQuantity).toMatchObject({ representation: "rate-quantity",
+        numerator: { value: 100, unit: "mL" }, denominators: [{ value: 1, unit: "h" }] });
+      expect(clause.clinicalQuantity?.administrationDuration).toEqual(duration ? { value: 30, unit: "min" } : undefined);
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.route?.coding?.some(coding => coding.code === "47625008")).toBe(true);
+        expect(canonicalFromFhir(row).route?.code).toBe("47625008");
+      }
+    });
+  it("joins a route-only infusion volume and comma-separated rate", () => {
+    const parsed = parsePublicSig("500 mL IV, 100 mL/hr");
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0]).toMatchObject({ dose: { value: 500, unit: "mL" },
+      route: { code: "47625008" }, clinicalQuantity: { representation: "rate-quantity",
+        numerator: { value: 100, unit: "mL" }, denominators: [{ value: 1, unit: "h" }] } });
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100 });
+    }
+  });
+  it("keeps separately timed IV doses as separate administrations", () => {
+    const parsed = parsePublicSig("Give 5 mg IV in the morning, 10 mg IV at night");
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([5, 10]);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.when)).toEqual([[EventTiming.Morning], [EventTiming.Night]]);
+    expect(parsed.fhir).toHaveLength(2);
+    expect(parsed.fhir.map(row => row.doseAndRate?.[0].doseQuantity?.value)).toEqual([5, 10]);
   });
 });

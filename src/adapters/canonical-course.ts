@@ -1404,19 +1404,28 @@ function administrationToWire(
     a.provenance?.format === "r6"
       ? (a.provenance.data as FhirR6Dosage)
       : a.provenance?.retained ?? (a.provenance?.data as EzDosage | undefined);
-  // Keep the authored R5 sequence when grouping uses a one-based ordinal.
-  // A live row edit supersedes its prior sequence carrier.
+  // R6 has no sequence primitive. Preserve its R5 annotation on the existing
+  // typed source carrier, alongside values normalized by one-based grouping.
+  // A fresh live row owns a replacement or removed companion.
   if (a.provenance?.format === "r5") {
-    const sequence = (a.provenance.data as FhirDosage).sequence;
+    const { sequence, _sequence: primitive } = a.provenance.data as FhirDosage;
     const normalized = sequence !== undefined && (!Number.isInteger(sequence) || sequence < 1);
+    const retain = normalized || primitive !== undefined;
     const extensions = output.extension as FhirExtension[] | undefined;
     const retained = extensions?.find(item => item.url === DOSAGE_RETAINED_R5_SEQUENCE_URL);
-    if (normalized ? retained?.valueDecimal !== sequence : retained !== undefined) {
+    if (retain ? retained?.valueDecimal !== sequence ||
+        !equalStructuredValues(retained?._valueDecimal, primitive) : retained !== undefined) {
       const next = extensions?.filter(item => item !== retained) ?? [];
       if (retained) next.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [retained] });
-      if (normalized) next.push({ ...retained, url: DOSAGE_RETAINED_R5_SEQUENCE_URL, valueDecimal: sequence });
+      if (retain) {
+        const { valueDecimal: _oldValue, _valueDecimal: _oldPrimitive, ...metadata } = retained ?? {};
+        next.push({ ...metadata, url: DOSAGE_RETAINED_R5_SEQUENCE_URL,
+          ...(sequence !== undefined ? { valueDecimal: sequence } : {}),
+          ...(primitive !== undefined ? { _valueDecimal: primitive } : {}) });
+      }
       assign(output, "extension", next.length ? next : undefined);
     }
+    if (target === "r6") delete output._sequence;
   }
   delete output.sequence;
   let wireTiming = timingToWire(a.schedule, target);

@@ -1620,9 +1620,8 @@ function appendSiteRestrictionsThai(
   let result = sitePhrase;
   for (const restriction of restrictions) {
     const local = realizeBodySiteRestriction(restriction, "th");
-    const retained = local ? undefined : restriction.predicate.text.trim()
-      ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en")
-      : restriction.sourceText.trim();
+    const retained = local ? undefined : restriction.sourceText.trim() || (restriction.predicate.text.trim()
+      ? realizeBodySiteRestriction({ ...restriction, sourceText: "" }, "en") : undefined);
     const phrase = local ?? (retained ? ` (${retained})` : undefined);
     if (phrase && !result.includes(phrase)) result += phrase;
   }
@@ -2742,6 +2741,7 @@ function formatLongThai(
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
+    schedule.boundsStart !== undefined || schedule.boundsEnd !== undefined ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||

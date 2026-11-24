@@ -1692,8 +1692,10 @@ describe("round49 qualified clocks and partial parallel members", () => {
       if (!scheduled) expect(rows[0].timing).toBeUndefined();
     }
     expect(parsed.fhirNext.step[0].component).toHaveLength(3);
-    expect(formatSig(native, "long", { locale: "en" })).toContain("Instill 1 drop");
-    expect(formatSig(native, "long", { locale: "en" })).toContain("left eye");
+    const preview = formatSig(native, "long", { locale: "en", realizationMode: "normalized" });
+    expect(preview).toContain("Instill 1 drop" +
+      (scheduled ? " once daily through 4 Dec 2026" : "") + " in the right eye;");
+    expect(preview).toContain("Instill 1 drop twice daily in the left eye.");
   });
 });
 

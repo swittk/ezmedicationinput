@@ -9415,3 +9415,297 @@ describe("round56 interop current ownership", () => {
       }
     });
 });
+
+describe("round57 interop annotation and historical ownership", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] };
+  const boundary = (value: number) => ({ contextCode: { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+  }] }, offsetDuration: { value, unit: "d" } });
+  const historicalMarker = (step: FhirR6DosageStep): FhirExtension => ({
+    url: DOSAGE_DETAILS_R5_URL, extension: [{ url: "dosageDetails",
+      extension: [encodeR6SourceMetadata("step", step, "step")] }],
+  });
+
+  const expressionInput = (slot: "dose" | "rate", identity: string) => {
+    const expressions = ["first retained expression", identity === "same expression"
+      ? "first retained expression" : "surviving retained expression"].map(expression => ({
+      language: "text/cql", expression,
+    }));
+    const values = [5, identity === "distinct projection" ? 7 : 5];
+    const components: FhirR6Dosage[] = expressions.map((expression, index) => ({
+      ...(identity === "identified" ? { id: index ? "survivor" : "removed" } : {}),
+      timing: { repeat: daily },
+      doseAndRate: [slot === "dose"
+        ? { doseExpression: expression, rateQuantity: { value: values[index], unit: "mL/h" } }
+        : { doseQuantity: q(values[index]), rateExpression: expression }],
+    }));
+    const rows: FhirDosage[] = [{
+      sequence: 1, ...(identity === "identified" ? { id: "survivor" } : {}),
+      timing: { repeat: daily },
+      doseAndRate: [slot === "dose" ? { rateQuantity: { value: values[1], unit: "mL/h" } }
+        : { doseQuantity: q(values[1]) }],
+      modifierExtension: [historicalMarker({ component: components })],
+    }];
+    return { rows, expressions, value: values[1] };
+  };
+
+  it.each([
+    ["dose", "anonymous"], ["dose", "identified"], ["dose", "distinct projection"], ["dose", "same expression"],
+    ["rate", "anonymous"], ["rate", "identified"], ["rate", "distinct projection"], ["rate", "same expression"],
+  ] as const)("restores only the owned historical %s expression after deletion (%s)", (slot, identity) => {
+    const { rows, expressions, value } = expressionInput(slot, identity), before = persist(rows);
+    let wire = toDosageDetails(rows);
+    for (let save = 0; save < 2; save++) {
+      expect(wire.step![0].component).toHaveLength(1);
+      const amount = wire.step![0].component[0].doseAndRate![0];
+      expect(slot === "dose" ? amount.rateQuantity : amount.doseQuantity)
+        .toEqual(slot === "dose" ? { value, unit: "mL/h" } : q(value));
+      expect(slot === "dose" ? amount.doseExpression : amount.rateExpression)
+        .toEqual(identity === "anonymous" ? undefined : expressions[1]);
+      if (identity === "anonymous") for (const expression of expressions)
+        expect(JSON.stringify(wire.extension)).toContain(expression.expression);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+    expect(rows).toEqual(before);
+  });
+
+  const safetyInput = (variant: string) => {
+    const safety = { doseLimit: [{ scope: "administration" as const, valueQuantity: q(2) }],
+      extension: [{ url: "urn:clinic:policy-code", valueCodeableConcept: {
+        coding: [{ system: "urn:clinic:policy", code: "dose-policy",
+          extension: [{ url: "urn:clinic:policy-note", valueString: "retain the policy coding annotation" }] }],
+      } }],
+    };
+    const step: FhirR6DosageStep = { component: [{
+      id: "policy-dose", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily }, safety,
+    }] };
+    const rows: EzDosage[] = persist(toFhirR5Dosages({ step: [step] }));
+    rows[0].modifierExtension = [
+      ...(rows[0].modifierExtension ?? []).filter(item => item.url !== DOSAGE_DETAILS_R5_URL), historicalMarker(step),
+    ];
+    const current: NonNullable<EzDosage["safety"]> = persist(safety);
+    if (variant.startsWith("version")) {
+      current.extension![0].valueCodeableConcept!.coding![0].version = "2026-11";
+      if (variant === "version and dose")
+        current.extension![0].valueCodeableConcept!.coding![0]._version = { id: "current-policy-edition" };
+    }
+    if (variant !== "omitted") rows[0].safety = current;
+    if (variant === "version and dose") rows[0].doseAndRate![0].doseQuantity!.value = 2;
+    return { rows, safety, current };
+  };
+
+  it.each(["omitted", "unchanged", "version", "version and dose"] as const)(
+    "keeps supplied historical safety Coding metadata (%s)", variant => {
+      const { rows, safety, current } = safetyInput(variant), before = persist(rows);
+      let wire = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        expect(wire.step![0].component[0].safety).toEqual(variant === "omitted" ? safety : current);
+        expect(wire.step![0].component[0].doseAndRate![0].doseQuantity)
+          .toEqual(q(variant === "version and dose" ? 2 : 1));
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+      expect(rows).toEqual(before);
+    });
+
+  const durationInput = (variant: string): FhirR6DosageInstruction => {
+    const saved = toDosageDetails([
+      { sequence: 1, id: "induction-dose", doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { repeat: { ...daily, boundsDuration: { value: 1, unit: "d" } } } },
+      { sequence: 3, id: "maintenance-dose", doseAndRate: [{ doseQuantity: q(2) }],
+        timing: { repeat: { ...daily, count: 1 } } },
+    ], undefined, { step: [
+      { sequence: 1, id: "induction" },
+      { sequence: 2, id: "pause", end: boundary(3),
+        extension: [{ url: "urn:clinic:pause", valueString: "retain the prescribed pause" }] },
+      { sequence: 3, id: "maintenance" },
+    ] });
+    const input = persist(saved), duration = input.step![0].component[0].timing!.repeat!.boundsDuration!;
+    if (variant === "annotation") duration._value = { id: "current-duration-note",
+      extension: [{ url: "urn:clinic:duration-note", valueString: "one-day annotation only" }] };
+    if (variant === "value") duration.value = 2;
+    if (variant === "unit") duration.unit = "wk";
+    if (variant === "qualifier") duration.comparator = ">";
+    return input;
+  };
+
+  it.each(["unchanged", "annotation", "value", "unit", "qualifier"] as const)(
+    "keeps the editable pause only for unchanged duration meaning (%s)", variant => {
+      const input = durationInput(variant), before = persist(input), editable = fromDosageDetails(input);
+      const unchanged = variant === "unchanged" || variant === "annotation";
+      expect(editable.course.step!.map(step => step.id))
+        .toEqual(["induction", ...(unchanged ? ["pause"] : []), "maintenance"]);
+      const duration = input.step![0].component[0].timing!.repeat!.boundsDuration;
+      expect(editable.dosages[0].timing!.repeat!.boundsDuration).toEqual(duration);
+      const reopened = toDosageDetails(persist(editable.dosages), undefined, persist(editable.course));
+      expect(fromDosageDetails(reopened).course.step!.map(step => step.id))
+        .toEqual(["induction", ...(unchanged ? ["pause"] : []), "maintenance"]);
+      expect(JSON.stringify(reopened)).toContain("retain the prescribed pause");
+      expect(input).toEqual(before);
+    });
+
+  const cycleInput = (variant: string) => {
+    const url = variant === "period annotation" ? "periodDays" : variant === "cycles annotation" ? "cycles" : "anchor";
+    const child: FhirExtension & { _valueString?: FhirElement; _valueInteger?: FhirElement } = {
+      url, id: "authored-cycle-child",
+      ...(variant === "valued anchor" ? { valueString: "2026-01-01" } :
+        url === "anchor" ? { _valueString: { id: "cycle-anchor",
+          extension: [{ url: "urn:clinic:cycle-note", valueString: "retain the unvalued anchor" }] } } :
+        { _valueInteger: { id: "cycle-integer-note" } }),
+    };
+    const marker: FhirExtension = { url: CYCLE_DAY_ELIGIBILITY_EXTENSION_URL, id: "authored-cycle-marker",
+      extension: [{ url: "day", valueInteger: 1 }, child,
+        { url: "reason", valueCode: "unresolved-cycle-eligibility" },
+        { url: "source", valueString: "authored cycle constraint" },
+        { url: "urn:clinic:cycle-unknown", valueString: "retain this child" }],
+    };
+    const rows: FhirDosage[] = [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      modifierExtension: [marker] }];
+    return { rows, marker };
+  };
+
+  it.each(["anchor annotation", "period annotation", "cycles annotation", "valued anchor"] as const)(
+    "preserves the complete cycle marker on an unchanged save (%s)", variant => {
+      const { rows, marker } = cycleInput(variant), before = persist(rows);
+      let wire = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        expect(wire.step![0].component[0].modifierExtension)
+          .toContainEqual(marker);
+        expect(toFhirR5Dosages(persist(wire))[0].modifierExtension).toContainEqual(marker);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+      expect(rows).toEqual(before);
+    });
+
+  const sequenceInput = (variant: string) => {
+    const original = { id: "original-sequence-note",
+      extension: [{ url: "urn:clinic:sequence-note", valueString: "retain the authored ordering annotation" }] };
+    const current = { id: "current-sequence-note",
+      extension: [{ url: "urn:clinic:current-sequence-note", valueString: "replacement ordering annotation" }] };
+    let rows: Array<FhirDosage & { _sequence?: FhirElement }> = [{
+      sequence: 1, _sequence: original, doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+    }];
+    if (variant !== "unchanged") {
+      rows = persist(toFhirR5Dosages(toDosageDetails(rows)));
+      if (variant === "replacement") rows[0]._sequence = current;
+      else delete rows[0]._sequence;
+    }
+    return { rows, expected: variant === "removed" ? undefined : variant === "replacement" ? current : original };
+  };
+
+  it.each(["unchanged", "replacement", "removed"] as const)(
+    "retains the current R5 sequence annotation as typed R6 source (%s)", variant => {
+      const { rows, expected } = sequenceInput(variant), before = persist(rows);
+      let wire = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        const component = wire.step![0].component[0];
+        expect(component).not.toHaveProperty("sequence");
+        expect(component).not.toHaveProperty("_sequence");
+        const reopened = persist(toFhirR5Dosages(wire)) as Array<FhirDosage & { _sequence?: FhirElement }>;
+        expect(reopened[0].sequence).toBe(1);
+        expect(reopened[0]._sequence).toEqual(expected);
+        expect(reopened[0].doseAndRate).toEqual([{ doseQuantity: q(1) }]);
+        if (expected) expect(JSON.stringify(component.extension)).toContain(expected.id);
+        wire = toDosageDetails(reopened);
+      }
+      expect(rows).toEqual(before);
+    });
+
+  const countInput = (variant: string): FhirR6DosageInstruction => ({ step: [{
+    id: "annotated-phase", ...(variant === "numeric count" ? { count: 2 } : {}),
+    _count: { id: "phase-count-note",
+      extension: [{ url: "urn:clinic:count-note", valueString: "retain the phase count annotation" }] },
+    component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: { ...daily, count: 1 } } }],
+  }] });
+
+  it.each(["annotation only", "numeric count"] as const)(
+    "exposes the typed step count companion without inventing a value (%s)", variant => {
+      const input = countInput(variant), before = persist(input), editable = fromDosageDetails(input);
+      const companion: FhirElement | undefined = editable.course.step![0]._count;
+      expect(companion).toEqual(input.step![0]._count);
+      expect(editable.course.step![0].count).toBe(variant === "numeric count" ? 2 : undefined);
+      const wire = toDosageDetails(persist(editable.dosages), undefined, persist(editable.course));
+      expect(wire.step![0]._count).toEqual(input.step![0]._count);
+      expect(wire.step![0].count).toBe(variant === "numeric count" ? 2 : undefined);
+      expect(input).toEqual(before);
+    });
+
+  const instructionInput = (variant: string) => {
+    const input: FhirR6DosageInstruction = { renderedInstruction: "Take one tablet daily",
+      _renderedInstruction: { id: "original-instruction-note" },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } }] }],
+    };
+    const editable = fromDosageDetails(persist(input));
+    const original: FhirElement | undefined = editable.course._renderedInstruction;
+    const current: EzCourseMetadata = { ...editable.course,
+      renderedInstruction: variant === "replacement" ? "Current prescribed daily instruction" : input.renderedInstruction,
+      _renderedInstruction: { id: "current-instruction-note",
+        extension: [{ url: "urn:clinic:instruction-note", valueString: "retain current instruction metadata" }] },
+    };
+    return { input, editable, original, current };
+  };
+
+  it.each(["companion only", "replacement"] as const)(
+    "accepts typed editable instruction primitive metadata (%s)", variant => {
+      const { input, editable, original, current } = instructionInput(variant), before = persist(editable);
+      expect(original).toEqual(input._renderedInstruction);
+      const wire = toDosageDetails(editable.dosages, current.renderedInstruction, current);
+      expect(wire.renderedInstruction).toBe(current.renderedInstruction);
+      expect(wire._renderedInstruction).toEqual(current._renderedInstruction);
+      expect(fromDosageDetails(persist(wire)).course._renderedInstruction).toEqual(current._renderedInstruction);
+      expect(editable).toEqual(before);
+    });
+
+  const limitsInput = (variant: string) => {
+    const limits: FhirR6DoseLimit[] = [
+      { scope: "period", valueQuantity: q(4), period: { value: 1, unit: "d" }, text: "first authored daily maximum" },
+      { scope: "period", valueQuantity: q(4), period: { value: 1, unit: "d" }, text: "second authored daily maximum" },
+      { scope: "period", valueQuantity: { unit: "tab" }, period: { value: 1, unit: "wk" },
+        text: "authored partial weekly maximum" },
+    ];
+    const rows = persist(toFhirR5Dosages(course({ timing: { repeat: daily }, safety: { doseLimit: limits } })));
+    if (variant === "dose edit") rows[0].doseAndRate![0].doseQuantity!.value = 2;
+    if (variant === "partial change") rows[0].maxDosePerPeriod![2].numerator!.value = 6;
+    if (variant === "partial deletion") rows[0].maxDosePerPeriod!.pop();
+    return { rows, limits };
+  };
+
+  it.each(["unchanged", "dose edit", "partial change", "partial deletion"] as const)(
+    "keeps authored duplicate limit text only for an unchanged complete R5 projection (%s)", variant => {
+      const { rows, limits } = limitsInput(variant), before = persist(rows);
+      let wire = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        const actual = wire.step![0].component[0].safety!.doseLimit!;
+        expect(actual.filter(limit => limit.period?.unit === "d").map(limit => limit.valueQuantity)).toEqual([q(4), q(4)]);
+        if (variant === "unchanged" || variant === "dose edit") expect(actual).toEqual(limits);
+        else {
+          expect(actual.filter(limit => limit.period?.unit === "wk"))
+            .toEqual(variant === "partial deletion" ? [] : [{ ...limits[2], valueQuantity: q(6) }]);
+          for (const limit of limits) expect(JSON.stringify(wire)).toContain(limit.text!);
+        }
+        expect(wire.step![0].component[0].doseAndRate![0].doseQuantity).toEqual(q(variant === "dose edit" ? 2 : 1));
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+      expect(rows).toEqual(before);
+    });
+
+  it("preserves an unknown sequence companion supplied on a fresh R6 component", () => {
+    const primitive = { id: "future-R6-source-field", extension: [{
+      url: "urn:clinic:future-sequence-annotation", valueString: "keep the supplied unknown R6 metadata",
+    }] };
+    const input = persist({ step: [{ component: [{
+      _sequence: primitive, doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      extension: [{ url: "urn:clinic:unrelated-source", valueString: "keep the unrelated R6 field" }],
+    }] }] });
+    const before = persist(input);
+    let wire = projectCanonicalCourse(importCanonicalCourse(input)).fhirNext;
+    for (let save = 0; save < 2; save++) {
+      expect(wire.step![0].component[0]).toMatchObject({ _sequence: primitive });
+      expect(wire.step![0].component[0].extension).toContainEqual({
+        url: "urn:clinic:unrelated-source", valueString: "keep the unrelated R6 field",
+      });
+      expect(wire.step![0].component[0].doseAndRate).toEqual([{ doseQuantity: q(1) }]);
+      wire = projectCanonicalCourse(importCanonicalCourse(persist(wire))).fhirNext;
+    }
+    expect(input).toEqual(before);
+  });
+});

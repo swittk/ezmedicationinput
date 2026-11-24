@@ -952,9 +952,22 @@ export function reconcileR5SafetySnapshot(
     limit.valueQuantity && limit.period &&
     (limit.valueQuantity.value === undefined || limit.period.value === undefined));
   const projected = partialPeriods ? toR6Safety(row, true) : r5SafetyBaseline(row);
-  // Historical baselines omitted partial Ratios. Observe their current live
-  // presence instead of allowing the old empty fingerprint to restore a deletion.
-  if (!partialPeriods && baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
+  // Historical fingerprints omitted partial Ratios. Compare their complete
+  // saved wire projection before resolving individual owners: unchanged
+  // duplicate Ratios still own their distinct authored R6 texts in order.
+  if (partialPeriods) {
+    const saved: FhirDosage = {}, limits = retained.doseLimit!;
+    for (const index of r5ProjectedSafetyLimitIndices(limits, baseline)) {
+      const limit = limits[index];
+      if (limit.scope === "period")
+        (saved.maxDosePerPeriod ??= []).push(periodMaximumToR5(limit.valueQuantity!, limit.period!, limit));
+      else if (limit.scope === "administration")
+        saved.maxDosePerAdministration = simpleQuantityForR5(limit.valueQuantity);
+      else if (limit.scope === "lifetime")
+        saved.maxDosePerLifetime = simpleQuantityForR5(limit.valueQuantity);
+    }
+    if (equalStructuredValues(projected, toR6Safety(saved, true))) return row.safety ?? retained;
+  } else if (baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
   return reconcileR5SafetyEdits(retained, projected, baseline);
 }
 

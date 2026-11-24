@@ -1499,7 +1499,7 @@ function reconcileNativeRetainedCourse(
     const ambiguousSources = new Set<number>(), ambiguousLive = new Set<number>();
     if (componentCountChanged) {
       // After stable identities are assigned, equal strict R5 projections
-      // cannot identify which distinct retained reference survived a deletion.
+      // cannot identify which distinct retained reference/expression survived a deletion.
       // Group once; equal duplicates never cause a repeated full-array scan.
       const projectionGroups = new Map<string, Array<{ indices: number[]; ambiguous: boolean }>>();
       for (let index = 0; index < originalProjections.length; index++) {
@@ -1511,8 +1511,17 @@ function reconcileNativeRetainedCourse(
           equivalentProjection(originalProjections[item.indices[0]], originalProjections[index]));
         if (!group) groups.push({ indices: [index], ambiguous: false });
         else {
-          if (!equivalentProjection(step.component[group.indices[0]].site?.reference,
-              step.component[index].site?.reference)) group.ambiguous = true;
+          const previous = step.component[group.indices[0]], current = step.component[index];
+          if (!equivalentProjection(previous.site?.reference, current.site?.reference)) group.ambiguous = true;
+          // Expressions have no ordinary R5 choice. Equal visible projections
+          // cannot establish which hidden expression belongs to a survivor.
+          const before = previous.doseAndRate, after = current.doseAndRate;
+          for (let slot = 0; slot < Math.max(before?.length ?? 0, after?.length ?? 0); slot++)
+            if (!equalStructuredValues(before?.[slot]?.doseExpression, after?.[slot]?.doseExpression) ||
+                !equalStructuredValues(before?.[slot]?.rateExpression, after?.[slot]?.rateExpression)) {
+              group.ambiguous = true;
+              break;
+            }
           group.indices.push(index);
         }
       }
@@ -1643,9 +1652,10 @@ function reconcileNativeRetainedCourse(
       if (!clinicallyEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
         structuredChanged = true;
       // A clinical match can ignore Coding annotations; supplied current
-      // conditions and site references still own those fields on reuse.
+      // conditions, safety and site references still own those fields on reuse.
       if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual &&
           (expanded.condition === undefined || equalStructuredValues(old.condition, expanded.condition)) &&
+          (expanded.safety === undefined || equalStructuredValues(old.safety, expanded.safety)) &&
           (!siteReferenceSpecified || equalStructuredValues(old.site?.reference, expanded.siteReference))) {
         components.push(sourceMember(old, sequence).native);
         continue;

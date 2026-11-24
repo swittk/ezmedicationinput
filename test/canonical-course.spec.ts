@@ -112,9 +112,23 @@ describe("canonical course architecture", () => {
       'export * from "../adapters/r5-import";'
     ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
     expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
-    const wireModifierAccess = /(?:\?\.|\.)\s*modifierExtension\b/u;
-    expect("const modifiers = row.modifierExtension ?? [];").toMatch(wireModifierAccess);
-    expect("const modifiers = row?.modifierExtension ?? [];").toMatch(wireModifierAccess);
+    const wireModifierAccess = (text: string) => {
+      const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const accesses: string[] = [];
+      const visit = (node: ts.Node) => {
+        if ((ts.isPropertyAccessExpression(node) && node.name.text === "modifierExtension") ||
+            (ts.isElementAccessExpression(node) && node.argumentExpression &&
+             ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "modifierExtension"))
+          accesses.push(node.getText(source));
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      return accesses;
+    };
+    for (const access of ["row.modifierExtension", "row?.modifierExtension",
+      'row["modifierExtension"]', 'row?.["modifierExtension"]'])
+      expect(wireModifierAccess("const modifiers = " + access + " ?? [];")).toEqual([access]);
+    expect(wireModifierAccess('const text = "row.modifierExtension";')).toEqual([]);
     for (const name of [
       "../src/execution/engine.ts",
       "../src/canonical/compile.ts",
@@ -125,7 +139,7 @@ describe("canonical course architecture", () => {
       expect(text).not.toMatch(
         /\b(?:toFhirR5Dosages|fromR6Dosage|toDosageDetails)\s*\(/u
       );
-      expect(text).not.toMatch(wireModifierAccess);
+      expect(wireModifierAccess(text)).toEqual([]);
     }
   });
   it("R5 import/export are independent native adapters, never complete R6 intermediate workflows",()=>{
@@ -523,12 +537,16 @@ describe("round 24: live projection and course boundaries", () => {
     expect(clauseForAdministration(member).site).toEqual({
       text: "left eye", administrationTargetCount: undefined,
     });
+    const oneDrop = /(?:^|\s)1 drop(?=\s|[.;,]|$)/u;
+    for (const changed of ["Instill 11 drops into the left eye twice daily",
+      "Instill 0.1 drop into the left eye twice daily"])
+      expect(changed).not.toMatch(oneDrop);
     for (const preview of [
       formatSig(wire, "long", { locale: "en" }),
       fromFhir(wire, { locale: "en" }).longText,
       formatCanonicalCourse(course, "long", { locale: "en" }),
     ]) {
-      expect(preview).toContain("1 drop");
+      expect(preview).toMatch(oneDrop);
       expect(preview).toContain("left eye");
       expect(preview).not.toContain("right eye");
     }

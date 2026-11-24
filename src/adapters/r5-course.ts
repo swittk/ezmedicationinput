@@ -346,9 +346,11 @@ export function projectNativeR5Course(
         administrationToR5(a, stageIndex + 1, options, freshlyCompiled ? a.syntax : undefined);
       const retainedSequence = strict.extension?.find(
         (e) => e.url === DOSAGE_RETAINED_R5_SEQUENCE_URL
-      )?.valueDecimal;
-      if (retainedSequence !== undefined && Number.isFinite(retainedSequence))
-        strict.sequence = retainedSequence;
+      );
+      if (retainedSequence?.valueDecimal !== undefined && Number.isFinite(retainedSequence.valueDecimal))
+        strict.sequence = retainedSequence.valueDecimal;
+      if (retainedSequence?._valueDecimal !== undefined && strict._sequence === undefined)
+        strict._sequence = retainedSequence._valueDecimal;
       let hasExpressions = false;
       // Only dual strict/editable previews need this classification. A
       // requested single R5 output must not scan amounts for an unused flag.
