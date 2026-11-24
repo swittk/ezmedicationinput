@@ -3838,17 +3838,32 @@ describe("round33 complete native amount and cadence previews", () => {
       } }]
     }] }] };
     const before = JSON.stringify(raw);
-    // A single known endpoint supplies the compact range's unit without
-    // filling in or changing the retained source endpoint.
-    for (const input of [raw, toFhirR5Dosages(raw)]) {
+    // The ordered label does not supply a missing endpoint unit. A shared
+    // localized unit remains valid only when both valued bounds have it.
+    const range = raw.step![0].component[0].doseAndRate![0].doseRange!;
+    const rows = toFhirR5Dosages(raw);
+    for (const input of [raw, rows]) {
       const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
-      expect(english).toContain("Ordered dose: 1 to 2 mg");
+      if (knownLow) {
+        expect(english).toContain("Ordered dose: 1 to 2 mg");
+        expect(thai).toContain("ขนาดยาที่สั่ง: ครั้งละ 1 ถึง 2 มิลลิกรัม");
+      } else {
+        expect(english).toContain("Ordered dose: 1 – 2 mg");
+        expect(english).not.toContain("1 to 2 mg");
+        expect(thai).toContain("ขนาดยาที่สั่ง:");
+        expect(thai).toContain("1 – 2 mg");
+        expect(thai).not.toContain("1 ถึง 2 มิลลิกรัม");
+      }
       expect(english).not.toContain("each nostril");
-      expect(thai).toContain("ขนาดยาที่สั่ง: ครั้งละ 1 ถึง 2 มิลลิกรัม");
       expect(thai).not.toContain("ข้างละ");
+      expect(importCanonicalCourse(input).stages[0].administrations[0].amounts![0].range).toEqual(range);
     }
-    expect(fromFhir(raw).meta.canonical.clauses[0].dose).toBeUndefined();
+    const imported = fromFhir(raw);
+    expect(imported.meta.canonical.clauses[0].dose).toBeUndefined();
+    if (!knownLow) expect(imported.meta.normalized.unit).toBeUndefined();
+    expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
+    expect(toDosageDetails(JSON.parse(JSON.stringify(rows))).step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
     expect(JSON.stringify(raw)).toBe(before);
   });
   it("labels a single calculated dose and leaves the simple untyped dose unchanged", () => {

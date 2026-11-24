@@ -2168,7 +2168,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     if (site) parts.push(site);
   }
   const timing = describeFrequencyThai(schedule, words);
-  const timingText = independentTimingText(schedule.timingCode);
+  const timingText = independentTimingText(schedule.timingCode, schedule);
   if (timing) {
     parts.push(timing);
   } else if (schedule.timingCode && !timingText && timingCodeMatchesRecurrence(schedule)) {
@@ -2366,7 +2366,7 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
-  const timingText = independentTimingText(schedule.timingCode);
+  const timingText = independentTimingText(schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowThai(schedule, words);
   let clockPart: string | undefined;

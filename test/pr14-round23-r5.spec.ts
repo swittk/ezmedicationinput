@@ -5973,8 +5973,21 @@ describe("round33 adjacent range metadata", () => {
     const row: FhirDosage = { doseAndRate: [{ doseRange: range }] };
     const source = JSON.stringify(row);
     const parsed = fromFhirDosage(row);
-    expect(parsed.meta.canonical.clauses[0].dose?.unit).toBe("mg");
-    expect(parsed.meta.normalized.unit).toBe("mg");
+    if (range.low.value !== undefined) {
+      // A single shared unit cannot describe both independently authored
+      // valued endpoints. The complete rich range remains the suggestion.
+      expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+      expect(parsed.meta.normalized.unit).toBeUndefined();
+      for (const locale of ["en", "th"])
+        expect(formatSig(row, "long", { locale, realizationMode: "normalized" })).toContain("2 – 5 mg");
+    } else {
+      expect(parsed.meta.canonical.clauses[0].dose?.unit).toBe("mg");
+      expect(parsed.meta.normalized.unit).toBe("mg");
+    }
+    expect(importCanonicalCourse(row).stages[0].administrations[0].amounts![0].range).toEqual(range);
+    const reopened = toDosageDetails(persist([row]));
+    expect(reopened.step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
+    expect(toFhirR5Dosages(reopened)[0].doseAndRate![0].doseRange).toEqual(range);
     expect(JSON.stringify(row)).toBe(source);
   });
 });
@@ -6011,11 +6024,30 @@ describe("round34 compact range and maximum ownership", () => {
     const raw: FhirR6DosageInstruction = { step: [{ component: [persist(row)] }] };
     const before = JSON.stringify([row, raw]);
     for (const result of [fromFhirDosage(row), fromFhir(raw)]) {
-      expect(result.meta.canonical.clauses[0].dose).toEqual({ range: { low: 2, high: 5 }, unit: "mg" });
-      expect(result.meta.normalized.unit).toBe("mg");
+      if (known === "both") {
+        expect(result.meta.canonical.clauses[0].dose).toEqual({ range: { low: 2, high: 5 }, unit: "mg" });
+        expect(result.meta.normalized.unit).toBe("mg");
+      } else {
+        expect(result.meta.canonical.clauses[0].dose).toBeUndefined();
+        expect(result.meta.normalized.unit).toBeUndefined();
+      }
     }
-    for (const input of [row, raw])
+    for (const input of [row, raw]) {
       expect(importCanonicalCourse(input).stages[0].administrations[0].amounts![0].range).toEqual(range);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        if (known === "both")
+          expect(text).toContain(locale === "en" ? "2 to 5 mg" : "2 ถึง 5 มิลลิกรัม");
+        else {
+          expect(text).toContain(known === "low" ? "2 mg – 5" : "2 – 5 mg");
+          expect(text).not.toContain("2 to 5 mg");
+          expect(text).not.toContain("2 ถึง 5 มิลลิกรัม");
+        }
+      }
+    }
+    const rows = toFhirR5Dosages(raw), reopened = toDosageDetails(persist(rows));
+    expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
+    expect(reopened.step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
     expect(JSON.stringify([row, raw])).toBe(before);
   });
 

@@ -1108,7 +1108,7 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   // The native schedule owns independent Timing.code text. Keep that label
   // visible without promoting arbitrary prose into the compact lexical code.
   const timingLabel = dosage.timing?.code?.text;
-  if (timingLabel && independentTimingText(timingLabel) &&
+  if (timingLabel && independentTimingText(timingLabel, dosage.timing?.repeat) &&
       !preferredTimingCoding(dosage.timing!)?.code) return true;
   const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
   if (missingSite && dosage.siteReference?.display) return true;

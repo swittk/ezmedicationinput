@@ -1,4 +1,4 @@
-import { TIMING_ABBREVIATIONS } from "./maps";
+import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
 import { getDoseUnitKind } from "./unit-lexicon";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
@@ -1190,11 +1190,18 @@ function shouldSuppressRoutePhrase(
   }
 }
 
-/** A timing abbreviation is shorthand only while its typed recurrence agrees. */
-/** A free timing label is independent of any structured recurrence. */
-export function independentTimingText(code: string | undefined): string | undefined {
-  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
-      TIMING_ABBREVIATIONS[code.toLowerCase()]) return undefined;
+/** Preserve free labels; recognized cadence prose yields to a typed recurrence. */
+export function independentTimingText(
+  code: string | undefined,
+  recurrence?: Pick<CanonicalScheduleExpr, "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit">
+): string | undefined {
+  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return undefined;
+  const lower = code.toLowerCase();
+  if (TIMING_ABBREVIATIONS[lower]) return undefined;
+  if (WORD_FREQUENCIES[lower] && recurrence &&
+      (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
+       recurrence.period !== undefined || recurrence.periodMax !== undefined ||
+       recurrence.periodUnit !== undefined)) return undefined;
   // The existing compact interval family is cadence shorthand too, even
   // when a particular numeric interval has no static abbreviation entry.
   const interval = /^q[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?([a-z]+)$/iu.exec(code);
@@ -1232,7 +1239,7 @@ export function timingCodeMatchesRecurrence(
 
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
-  const timingText = independentTimingText(schedule.timingCode);
+  const timingText = independentTimingText(schedule.timingCode, schedule);
   const parts: string[] = [];
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
@@ -1431,7 +1438,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
-  const timingText = independentTimingText(schedule.timingCode);
+  const timingText = independentTimingText(schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowEnglish(schedule, words);
   let clockPart: string | undefined;

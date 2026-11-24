@@ -6606,3 +6606,52 @@ describe("round58 graph fidelity and current typed arguments", () => {
       expect(JSON.stringify(row)).toBe(before);
     });
 });
+
+
+describe("round58 cadence prose ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["three times daily", 1], ["twice daily", 2], ["Twice Daily", 1]
+  ] as const)("keeps cadence prose %s subordinate to the current %s-per-day facts", (text, frequency) => {
+    const code = { id: "authored-cadence-label", text,
+      extension: [{ url: "https://example.test/timing-label-note", valueString: "retain authored label" }] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code, repeat: { frequency, period: 1, periodUnit: "d" } } };
+    const native: FhirR6DosageInstruction = { step: [{ component: [fresh(row)] }] };
+    const before = fresh({ row, native });
+    const saved = fresh(toFhirR5Dosages(native));
+    const reopened = fresh(toDosageDetails(saved));
+    for (const input of [row, native, saved, reopened]) {
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const rendered = formatSig(input, style, { locale, realizationMode: "normalized" });
+        const cadence = locale === "th" ? frequency === 1 ? "วันละครั้ง" : "วันละ 2 ครั้ง"
+          : style === "short" ? `${frequency}x/d` : frequency === 1 ? "once daily" : "twice daily";
+        expect(rendered.split(cadence)).toHaveLength(2);
+        if (locale === "en" && style === "long" && frequency === 2)
+          expect(rendered.match(/twice daily/gu)).toHaveLength(1);
+        else expect(rendered).not.toContain(text);
+      }
+    }
+    expect(saved[0].timing?.code).toEqual(code);
+    expect(reopened.step![0].component[0].timing?.code).toEqual(code);
+    expect(toDosageDetails([fresh(row)]).step![0].component[0].timing?.code).toEqual(code);
+    expect({ row, native }).toEqual(before);
+  });
+
+  it("retains recognized cadence prose when there is no typed recurrence to replace it", () => {
+    const code = { text: "twice daily", id: "label-without-repeat" };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { code } };
+    const native: FhirR6DosageInstruction = { step: [{ component: [fresh(row)] }] };
+    const before = fresh({ row, native });
+    const saved = fresh(toFhirR5Dosages(native));
+    const reopened = fresh(toDosageDetails(saved));
+    for (const input of [row, native, saved, reopened]) {
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
+        expect(formatSig(input, style, { locale, realizationMode: "normalized" }).match(/twice daily/gu)).toHaveLength(1);
+    }
+    expect(saved[0].timing).toEqual({ code });
+    expect(reopened.step![0].component[0].timing).toEqual({ code });
+    expect(toDosageDetails([fresh(row)]).step![0].component[0].timing).toEqual({ code });
+    expect({ row, native }).toEqual(before);
+  });
+});
