@@ -4568,6 +4568,8 @@ describe("round53 supported execution and grammar regressions", () => {
       expect(schedule?.when).toEqual([EventTiming["Before Breakfast"]]);
       const field = left.startsWith("at least") ? "offsetMin" : left.startsWith("at most") ? "offsetMax" : "offset";
       expect(schedule?.[field]).toBe(30);
+      expect(parsed.fhir[2].additionalInstruction).toBeUndefined();
+      expect(parsed.fhirNext.step![1].component[0].additionalInstruction).toBeUndefined();
     } else {
       expect(schedule?.timingReference).toBe("previous");
       expect(schedule?.when).toBeUndefined();

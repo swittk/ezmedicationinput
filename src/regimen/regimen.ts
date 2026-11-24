@@ -659,6 +659,7 @@ export function scopeSequentialPhaseSemantics(
             clause.additionalInstructions = clause.additionalInstructions.filter(instruction =>
               !instruction.evidence?.some(item =>
                 (item.scheduleFields?.indexOf('timingReference') ?? -1) >= 0));
+            if (!clause.additionalInstructions.length) delete clause.additionalInstructions;
           }
           fields.push('timingReference');
         } else fields.push('recurrence');
