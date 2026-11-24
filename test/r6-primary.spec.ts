@@ -7178,7 +7178,7 @@ describe("round58 partial facts and independent timing text", () => {
         for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
           const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
           expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
-          if (kind !== "structured dose") expect(rendered).toContain("Apply a thin layer");
+          if (kind === "site only") expect(rendered).toContain("Apply a thin layer");
           else expect(rendered).not.toContain("Apply a thin layer");
           if (kind === "structured dose") expect(rendered).toContain("2");
         }

@@ -2350,6 +2350,30 @@ describe("course locale boundary", () => {
         i18n: { inherit: "course-test", locale: "course-derived" },
       })
     ).toContain("Jours 1–3");
+    // Typed method/cadence ownership also works for registered and inherited
+    // packs, without comparing their wording with built-in language output.
+    const methodRow: FhirDosage = {
+      text: "Dose locale.", method: { text: "Apply" },
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      extension: [{ url: "urn:round59:locale-source", valueString: "retain complete input" }]
+    };
+    const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+    const methodR6 = fresh(toDosageDetails([fresh(methodRow)]));
+    for (const options of [
+      { locale: "course-test", realizationMode: "normalized" as const },
+      { i18n: { inherit: "course-test", locale: "course-derived" }, realizationMode: "normalized" as const }
+    ]) {
+      for (const input of [fresh(methodRow), fresh(methodR6), fresh(toFhirR5Dosages(methodR6))]) {
+        const before = fresh(input);
+        expect(formatSig(input, "long", options)).toBe("Dose locale.");
+        expect(input).toEqual(before);
+      }
+      expect(formatCanonicalAdministration({
+        kind: "administration", text: methodRow.text, method: methodRow.method,
+        schedule: { recurrence: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
+      }, "long", options)).toBe("Dose locale.");
+    }
+    expect(toDosageDetails(fresh(toFhirR5Dosages(methodR6)))).toEqual(methodR6);
   });
   it("applies per-call inheritance to public R5 choices and standalone course wording", () => {
     const inherited = {

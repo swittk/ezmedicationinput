@@ -5002,13 +5002,11 @@ describe("topical product forms and workflow", () => {
       }
     };
     const fromFhir = fromFhirDosage(dosage, { locale: "th" });
-    expect(fromFhir.longText).toBe(
-      "ปัจจุบัน: ทาซ้ำทุก 2 ชั่วโมง; ข้อความเดิม: Reapply sunscreen topically every 2 hours."
-    );
+    expect(fromFhir.longText).toBe("ทาซ้ำทุก 2 ชั่วโมง.");
     expect(fromFhir.fhir).toEqual(dosage);
     expect(fromFhir.meta.canonical.clauses[0].rawText).toBe(dosage.text);
-    // The current method still overrides the generic coded translation.
-    // Its text alone cannot erase the independently supplied product wording.
+    // The current method owns the localized preview. The complete original
+    // product wording remains source data; no reverse rendering infers it.
     const currentOnly = fromFhirDosage({ ...dosage, text: undefined }, { locale: "th" });
     expect(currentOnly.longText).toBe("ทาซ้ำทุก 2 ชั่วโมง.");
   });

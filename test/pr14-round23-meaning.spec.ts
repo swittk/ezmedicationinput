@@ -5037,9 +5037,27 @@ describe("round59 partial facts and complete authored directions", () => {
       for (const value of [row, ...views(input)]) for (const locale of ["en", "th"])
         for (const style of ["short", "long"] as const) {
           const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
-          expect(rendered).toContain("Apply a thin layer");
+          // Owner decision1377 defers inferring this untyped qualifier beside
+          // a bare method. Keep the original fixture and text in wire/source.
+          expect(rendered).not.toContain("Apply a thin layer");
           if (hasSite) expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
         }
+      expect(input.step![0].component[0].text).toBe(row.text);
+      expect(fromFhirDosage(fresh(row)).fhir).toEqual(row);
+      expect(fromFhirDosage(fresh(row)).meta.canonical.clauses[0].rawText).toBe(row.text);
+      // Source-only qualitative directions still own the visible instruction.
+      const sourceOnly = fresh(row);
+      delete sourceOnly.method;
+      for (const value of [sourceOnly, ...views(fresh(toDosageDetails([sourceOnly])))])
+        for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
+          expect(formatSig(value, style, { locale, realizationMode: "normalized" })).toContain(row.text!);
+      // Existing HPSG interpretation owns the qualifier when it is structured.
+      const typed = parseSig("apply a thin layer twice daily").items[0].fhir;
+      expect(typed.additionalInstruction?.some(instruction =>
+        instruction.coding?.some(coding => coding.code === "420162004"))).toBe(true);
+      for (const value of [fresh(typed), ...views(fresh(toDosageDetails([fresh(typed)])))])
+        expect(formatSig(value, "long", { realizationMode: "normalized" }))
+          .toBe("Apply a thin layer topically twice daily.");
       expect(input.step![0].component[0].doseAndRate).toBeUndefined();
       expect(input.step![0].component[0].route).toEqual(row.route);
       expect(row).toEqual(before);
