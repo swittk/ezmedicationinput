@@ -8418,7 +8418,7 @@ describe("round52 interop current annotation and boundary ownership", () => {
       };
       const quantity = (wire: FhirExtension) => wire.extension!.find(item => item.url === "action")!
         .extension!.find(item => item.url === "argument")!.extension!.find(item => item.url === "quantity")!;
-      let wire = buildInstructionGraphExtension(graph)!;
+      let wire = persist(buildInstructionGraphExtension(graph)!);
       const operator = quantity(wire).extension!.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)!;
       if (edit !== "unannotated-clear") {
         operator.id = "authored-operator-carrier";
@@ -8433,7 +8433,7 @@ describe("round52 interop current annotation and boundary ownership", () => {
         valueString: "keep alongside current exact amount" };
       quantity(wire).extension!.push(independent);
       for (let save = 0; save < 3; save++) {
-        const before = persist(wire), parsed = parseInstructionGraphExtension([wire])!;
+        const before = persist(wire), parsed = persist(parseInstructionGraphExtension([wire])!);
         if (!save) {
           if (edit === "clear" || edit === "unannotated-clear") delete parsed.actions[0].args[0].quantity!.comparator;
           if (edit === "replace") parsed.actions[0].args[0].quantity!.comparator = ">=";
