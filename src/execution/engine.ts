@@ -210,7 +210,8 @@ function measuredStrengthRatio(
 ): { numerator: { value: number; unit: string }; denominator: { value: number; unit: string } } | undefined {
   const ratio = resolveContextStrengthRatio(context);
   const numerator = ratio?.numerator, denominator = ratio?.denominator;
-  if (numerator?.value === undefined || denominator?.value === undefined) return undefined;
+  if (numerator?.value === undefined || denominator?.value === undefined ||
+      getQuantityComparator(numerator)) return undefined;
   const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
   return numeratorUnit && denominatorUnit
     ? { numerator: { value: numerator.value, unit: numeratorUnit },
@@ -227,7 +228,8 @@ function estimateIngredientQuantity(
   const strength = resolveContextStrengthRatio(context);
   const numerator = strength?.numerator;
   const denominator = strength?.denominator;
-  if (numerator?.value === undefined || denominator?.value === undefined) return undefined;
+  if (numerator?.value === undefined || denominator?.value === undefined ||
+      getQuantityComparator(numerator)) return undefined;
   const numeratorUnit = getDoseQuantityUnit(numerator), denominatorUnit = getDoseQuantityUnit(denominator);
   if (!numeratorUnit || !denominatorUnit) return undefined;
   // An uncoded recognized label remains the existing estimate's display.

@@ -148,13 +148,15 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       validOwners.add(index);
       continue;
     }
+    const endMatches = current !== undefined &&
+      equalStructuredValues(draftCompletionBoundary(prior.end), draftCompletionBoundary(current.end));
     if (!current || prior.count !== current.count ||
-        !equalStructuredValues(draftCompletionBoundary(prior.end), draftCompletionBoundary(current.end)) ||
+        !endMatches ||
         !prior.end && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
       changedCompletions.add(index);
     if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||
-        !equalStructuredValues(prior.end, current.end) ||
+        !endMatches ||
         needsMembers && prior.component.length !== current.component.length) {
       if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
         changedCompletions.add(index);

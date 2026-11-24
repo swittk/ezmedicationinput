@@ -937,9 +937,9 @@ function reconcileNativeCompactCourse(
     else allTextsWereEdited = false;
     if (!projectionMatches) structuredWasEdited = true;
     if ((!projectionMatches && textMatches) || !dosage.text) allTexts = false;
-    if (!projectionMatches && textMatches && dosage.text !== undefined)
+    if (!projectionMatches && textMatches && (dosage.text !== undefined || dosage._text !== undefined))
       sources.push(retainedRowTextSource(dosage, sourceIndex));
-    return !projectionMatches && textMatches ? { ...dosage, text: undefined } : dosage;
+    return !projectionMatches && textMatches ? retireRowText(dosage) : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
   if (historicalHeader && header?.course) {
@@ -1151,9 +1151,22 @@ function reconcileNativeCompactCourse(
 /** A stale row instruction is independent of the course header. Retire the
  * exact text before clearing its active slot, using the existing typed source
  * codec; fingerprints alone cannot recover the author's wording. */
+function retireRowText(row: FhirDosage): FhirDosage {
+  const current = { ...row, text: undefined };
+  if (!row._text?.extension?.some(item => item.url === FHIR_TRANSLATION_EXTENSION_URL)) return current;
+  // A translation belongs to the retired wording; independent Element
+  // annotations remain attached to the current text slot.
+  const { extension, ...annotations } = row._text;
+  const kept = extension!.filter(item => item.url !== FHIR_TRANSLATION_EXTENSION_URL);
+  if (kept.length) current._text = { ...annotations, extension: kept };
+  else if (Object.keys(annotations).length) current._text = annotations;
+  else delete current._text;
+  return current;
+}
+
 function retainedRowTextSource(row: FhirDosage, rowIndex: number): FhirExtension {
   return { url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({
-    rowIndex, sequence: row.sequence ?? 1, component: { text: row.text },
+    rowIndex, sequence: row.sequence ?? 1, component: { text: row.text, _text: row._text },
   }) };
 }
 
@@ -1162,10 +1175,12 @@ function retainedRowTextSource(row: FhirDosage, rowIndex: number): FhirExtension
  * Equal duplicates advance a cursor instead of rescanning used prefixes. */
 function indexedProjectionMatcher(
   originals: readonly object[],
-  used: Set<number>
+  used: Set<number>,
+  excluded?: ReadonlySet<number>
 ): (current: object) => number {
   const buckets = new Map<string, { indices: number[]; cursor: number }>();
   for (let i = 0; i < originals.length; i++) {
+    if (excluded?.has(i)) continue;
     const key = matchingProjectionFingerprint(originals[i]);
     let bucket = buckets.get(key);
     if (!bucket) buckets.set(key, (bucket = { indices: [], cursor: 0 }));
@@ -1414,7 +1429,6 @@ function reconcileNativeRetainedCourse(
         originalProjections.push(liveDosageProjection(sourceMember(component, sequence).row));
     }
     const usedOriginalIndices = new Set<number>();
-    const matchProjection = indexedProjectionMatcher(originalProjections, usedOriginalIndices);
     const assigned: number[] = new Array(live.length).fill(-1);
     const originalIds = new Map<string, number>();
     const liveIdCounts = new Map<string, number>();
@@ -1480,6 +1494,31 @@ function reconcileNativeRetainedCourse(
         }
       }
     }
+    const ambiguousSources = new Set<number>(), ambiguousLive = new Set<number>();
+    if (componentCountChanged) {
+      // After stable identities are assigned, equal strict R5 projections
+      // cannot identify which distinct retained reference survived a deletion.
+      // Group once; equal duplicates never cause a repeated full-array scan.
+      const projectionGroups = new Map<string, Array<{ indices: number[]; ambiguous: boolean }>>();
+      for (let index = 0; index < originalProjections.length; index++) {
+        if (usedOriginalIndices.has(index)) continue;
+        const key = matchingProjectionFingerprint(originalProjections[index]);
+        let groups = projectionGroups.get(key);
+        if (!groups) projectionGroups.set(key, (groups = []));
+        const group = groups.find(item =>
+          equivalentProjection(originalProjections[item.indices[0]], originalProjections[index]));
+        if (!group) groups.push({ indices: [index], ambiguous: false });
+        else {
+          if (!equivalentProjection(step.component[group.indices[0]].site?.reference,
+              step.component[index].site?.reference)) group.ambiguous = true;
+          group.indices.push(index);
+        }
+      }
+      for (const groups of projectionGroups.values())
+        for (const group of groups) if (group.ambiguous)
+          for (const index of group.indices) ambiguousSources.add(index);
+    }
+    const matchProjection = indexedProjectionMatcher(originalProjections, usedOriginalIndices, ambiguousSources);
     for (let j = 0; j < live.length; j++) {
       if (assigned[j] >= 0) continue;
       const current = liveProjection(live[j]);
@@ -1490,7 +1529,6 @@ function reconcileNativeRetainedCourse(
       }
     }
     const siteGroups = new Map<string, Set<number>>();
-    const ambiguousSources = new Set<number>(), ambiguousLive = new Set<number>();
     for (let i = 0; i < step.component.length; i++)
       if (!usedOriginalIndices.has(i)) {
         const site = step.component[i].site?.concept;
@@ -1833,9 +1871,10 @@ export function courseFromR5(
       if (!projectionMatches) structuredWasEdited = true;
       if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
       if (!projectionMatches && textMatches) {
-        if (dosage.text !== undefined) reconciliationSources.push(retainedRowTextSource(dosage, index));
+        if (dosage.text !== undefined || dosage._text !== undefined)
+          reconciliationSources.push(retainedRowTextSource(dosage, index));
         if (effectiveDosages === dosages) effectiveDosages = dosages.slice();
-        (effectiveDosages as (FhirDosage | EzDosage)[])[index] = { ...dosage, text: undefined };
+        (effectiveDosages as (FhirDosage | EzDosage)[])[index] = retireRowText(dosage);
         allTexts = false;
       }
     }

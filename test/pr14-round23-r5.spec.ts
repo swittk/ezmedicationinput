@@ -8576,3 +8576,166 @@ describe("round52 interop current annotation and boundary ownership", () => {
     expect(Object.prototype.hasOwnProperty.call(clonedTarget, "i18n")).toBe(true);
   });
 });
+
+
+describe("round53 import/data correctness", () => {
+  const translationUrl = "http://hl7.org/fhir/StructureDefinition/translation";
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const boundary = (value: number) => ({
+    contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+    offsetDuration: { value, unit: "d", code: "d", system: "http://unitsofmeasure.org" },
+  });
+  const options = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC" };
+
+  it.each(["compact changed", "compact unchanged", "row-baseline changed", "row-baseline unchanged"])(
+    "retires only stale active row translations on fresh %s input", variant => {
+      const wording = "Take one tablet daily";
+      const opaque = { url: "urn:clinic:row-text-note", valueString: "keep independent annotation" };
+      const companion: FhirElement = { id: "row-text-id", extension: [opaque, {
+        url: translationUrl, extension: [
+          { url: "lang", valueCode: "th" }, { url: "content", valueString: "รับประทานหนึ่งเม็ดทุกวัน" },
+        ],
+      }] };
+      const source: FhirR6DosageInstruction = { renderedInstruction: wording, step: [{ component: [{
+        text: wording, _text: companion, doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      }] }] };
+      const rows = persist(toFhirR5Dosages(source));
+      if (variant.startsWith("row-baseline"))
+        rows[0].modifierExtension = rows[0].modifierExtension?.filter(item => item.url !== DOSAGE_DETAILS_R5_URL);
+      const changed = variant.endsWith(" changed");
+      if (changed) rows[0].doseAndRate![0].doseQuantity!.value = 2;
+      const before = persist(rows);
+      let actual = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        const member = actual.step![0].component[0];
+        expect(member.doseAndRate![0].doseQuantity!.value).toBe(changed ? 2 : 1);
+        expect(member._text).toEqual(changed ? { id: "row-text-id", extension: [opaque] } : companion);
+        if (changed) {
+          expect(member.text).toBeUndefined();
+          const retiredRows: ReturnType<typeof decodeR5RetainedFields>[] = [];
+          for (const item of actual.extension ?? []) if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+            for (const old of item.extension ?? []) if (old.url === DOSAGE_DETAILS_R5_URL)
+              retiredRows.push(decodeR5RetainedFields(old));
+          expect(retiredRows).toContainEqual({
+            rowIndex: 0, sequence: 1, component: { text: wording, _text: companion },
+          });
+        }
+        actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+      }
+      expect(rows).toEqual(before);
+    });
+
+  it.each(["anonymous", "identified", "distinct projection", "same reference"])(
+    "retains the correct reference owner after a fresh surviving row (%s)", identity => {
+      const rightReference = "BodyStructure/right-eye";
+      const leftReference = identity === "same reference" ? rightReference : "BodyStructure/left-eye";
+      const components = [
+        { id: "right", value: 1, reference: rightReference },
+        { id: "left", value: identity === "distinct projection" ? 2 : 1, reference: leftReference },
+      ];
+      const marker: FhirExtension = { url: DOSAGE_DETAILS_R5_URL, extension: [
+        { url: "dosageDetails", extension: [{ url: "step", extension: components.map(item => ({
+          url: "component", extension: [
+            ...(identity === "identified" ? [{ url: "id", valueString: item.id }] : []),
+            { url: "site", valueCodeableReference: { reference: { reference: item.reference },
+              extension: [{ url: "urn:clinic:reference-note", valueString: item.id + " original site" }] } },
+            { url: "doseAndRate", extension: [{ url: "doseQuantity", valueQuantity: q(item.value) }] },
+          ],
+        })) }] },
+      ] };
+      const rows: FhirDosage[] = [{
+        sequence: 1, ...(identity === "identified" ? { id: "left" } : {}),
+        doseAndRate: [{ doseQuantity: q(components[1].value) }], modifierExtension: [marker],
+      }];
+      const before = persist(rows);
+      let actual = toDosageDetails(rows);
+      for (let save = 0; save < 2; save++) {
+        expect(actual.step![0].component).toHaveLength(1);
+        const member = actual.step![0].component[0];
+        expect(member.doseAndRate![0].doseQuantity!.value).toBe(components[1].value);
+        expect(member.site?.reference?.reference).toBe(identity === "anonymous" ? undefined : leftReference);
+        if (identity === "anonymous") {
+          expect(JSON.stringify(actual.extension)).toContain(rightReference);
+          expect(JSON.stringify(actual.extension)).toContain(leftReference);
+          expect(JSON.stringify(actual.extension)).toContain("left original site");
+        }
+        actual = toDosageDetails(persist(toFhirR5Dosages(actual)));
+      }
+      expect(rows).toEqual(before);
+    });
+
+  it.each([0, 1])("previews the submitted phase offsets after %i preceding draft stages", phase => {
+    const active: FhirR6Dosage = { id: "active-dose", doseAndRate: [{ doseQuantity: q(2) }],
+      timing: { repeat: { frequency: 21, period: 28, periodUnit: FhirPeriodUnit.Day,
+        startOffset: { value: 2, unit: "d", code: "d" }, endOffset: { value: 5, unit: "d", code: "d" },
+      } } };
+    const source: FhirR6DosageInstruction = { step: [
+      ...(phase ? [{ id: "induction", component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } }] }] : []),
+      { id: "active-phase", start: boundary(6), component: [active] },
+    ] };
+    const rows = persist(toFhirR5Dosages(source));
+    const row = rows[phase];
+    const before = persist(row);
+    const preview = fromFhirDosage(row, { locale: "en", realizationMode: "normalized" });
+    expect(preview.longText).toContain("Dosing starts 2 days after the period begins");
+    expect(preview.longText).toContain("No doses during the final 5 days of each period");
+    const formatted = formatSig(row, "long", { locale: "en", realizationMode: "normalized" });
+    expect(formatted).toContain("Dosing starts 2 days after the period begins");
+    expect(formatted).toContain("No doses during the final 5 days of each period");
+    const native = importCanonicalCourse(persist([row]));
+    expect(native.stages.filter(stage => stage.administrations.length)).toHaveLength(1);
+    expect(native.stages[phase].administrations[0].amounts?.[0].quantity?.value).toBe(2);
+    if (phase) expect(native.stages[0].administrations).toEqual([]);
+    expect(row).toEqual(before);
+  });
+
+  it.each(["unchanged", "end Element ID", "end displacement"])(
+    "keeps only owned editable pauses after a fresh %s change", variant => {
+      const saved = toDosageDetails([
+        { sequence: 1, id: "induction-dose", doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } },
+        { sequence: 3, id: "maintenance-dose", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } },
+      ], undefined, { step: [
+        { sequence: 1, id: "induction", end: boundary(1) },
+        { sequence: 2, id: "pause", end: boundary(3),
+          extension: [{ url: "urn:clinic:pause-note", valueString: "keep authored pause" }] },
+        { sequence: 3, id: "maintenance" },
+      ] });
+      const input = persist(saved);
+      if (variant === "end Element ID") input.step![0].end!.id = "current-end-annotation";
+      if (variant === "end displacement") input.step![0].end!.offsetDuration!.value = 2;
+      const before = persist(input);
+      const editable = fromDosageDetails(input);
+      expect(editable.course.step!.map(step => step.id)).toEqual(
+        variant === "end displacement" ? ["induction", "maintenance"] : ["induction", "pause", "maintenance"]);
+      expect(editable.course.step![0].end).toEqual(input.step![0].end);
+      const reopened = toDosageDetails(persist(editable.dosages), undefined, persist(editable.course));
+      expect(fromDosageDetails(reopened).course.step!.map(step => step.id)).toEqual(
+        variant === "end displacement" ? ["induction", "maintenance"] : ["induction", "pause", "maintenance"]);
+      expect(JSON.stringify(reopened)).toContain("keep authored pause");
+      expect(input).toEqual(before);
+    });
+
+  it.each(["exact", "numerator", "lower-bounded numerator"])(
+    "does not invent exact ingredient or container totals from %s strength", qualified => {
+      const strengthRatio: FhirRatio = {
+        numerator: { value: 5, unit: "mg", ...(qualified === "numerator" ? { comparator: "<" as const } :
+          qualified === "lower-bounded numerator" ? { comparator: ">=" as const } : {}) },
+        denominator: { value: 1, unit: "mL" },
+      };
+      const before = persist(strengthRatio);
+      const drops: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 20, unit: "drop" } }], timing: { repeat: daily } };
+      const approximate = calculateTotalUnits({ dosage: drops, ...options, durationValue: 1,
+        durationUnit: FhirPeriodUnit.Day, context: { dosageForm: "eye drops", strengthRatio } });
+      expect(approximate.totalUnits).toBe(20);
+      expect(approximate.totalApproximateQuantity).toMatchObject({ value: 1, unit: "mL" });
+      if (qualified === "exact")
+        expect(approximate.totalApproximateIngredientQuantity).toMatchObject({ value: 5, unit: "mg" });
+      else expect(approximate.totalApproximateIngredientQuantity).toBeUndefined();
+      const mass: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 10, unit: "mg" } }], timing: { repeat: daily } };
+      const converted = calculateTotalUnits({ dosage: mass, ...options, durationValue: 1,
+        durationUnit: FhirPeriodUnit.Day, context: { strengthRatio, containerValue: 1, containerUnit: "mL" } });
+      expect(converted).toMatchObject({ totalUnits: 10, unit: "mg" });
+      expect(converted.totalContainers).toBe(qualified === "exact" ? 2 : undefined);
+      expect(strengthRatio).toEqual(before);
+    });
+});
