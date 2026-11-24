@@ -180,13 +180,28 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
         modifierExtension: [modifier]
       };
       const unchanged = JSON.parse(JSON.stringify(original));
-      const imported = fromFhirDosage(original);
+      const imported = fromFhirDosage(original, { realizationMode: "roundtrip" });
       expect(original.modifierExtension).toEqual(unchanged.modifierExtension);
       expect(imported.fhir.doseAndRate).toEqual(original.doseAndRate);
       expect(imported.fhir.timing).toEqual(original.timing);
       expect(imported.fhir.modifierExtension).toEqual([modifier]);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
       expect(imported.longText).toBe(text);
+      for (const value of [1, 2]) {
+        const current = JSON.parse(JSON.stringify(original)) as FhirDosage;
+        current.doseAndRate![0].doseQuantity!.value = value;
+        const expected = JSON.parse(JSON.stringify(current));
+        for (const mode of [undefined, "normalized"] as const) {
+          const submitted = JSON.parse(JSON.stringify(current)) as FhirDosage;
+          const normalized = fromFhirDosage(submitted,
+            mode === undefined ? undefined : { realizationMode: mode });
+          expect(normalized.longText).toBe(value === 1
+            ? "Use 1 tablet twice daily." : "Use 2 tablets twice daily.");
+          expect(submitted).toEqual(expected);
+          expect(normalized.fhir).toEqual(expected);
+          expect(normalized.meta.canonical.clauses[0].rawText).toBe(text);
+        }
+      }
       const course: FhirR6DosageInstruction = {
         step: [{ component: [{ ...original }] }]
       };

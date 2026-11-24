@@ -592,6 +592,25 @@ function amountLabel(amount: CanonicalAmount, kind: "dose" | "rate" | "rateRange
 
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
+/** Exact generated wording can be covered without interpreting the source text.
+ * Clear raw replay evidence in this display-only comparison; unmatched text
+ * remains authored directions beside the current structured method. */
+export function methodDirectionsNeedSource(
+  administration: CanonicalAdministration,
+  compiled?: CanonicalSigClause
+): boolean {
+  const text = administration.text?.trim();
+  if (!text) return false;
+  const original = compiled ?? clauseForAdministration(administration);
+  const clause = Object.assign({}, original, {
+    rawText: "", raw: Object.assign({}, original.raw, { text: "" }),
+    sourceProjectionVerified: false
+  });
+  const options = { realizationMode: "normalized" as const };
+  return text !== formatCanonicalClause(clause, "long", undefined, options) &&
+    text !== formatCanonicalClause(clause, "long", resolveSigLocalization("th"), options);
+}
+
 function formatCanonicalBase(
   a: CanonicalAdministration,
   style: "short" | "long",
@@ -647,7 +666,7 @@ function formatCanonicalBase(
   // authored amount/manner. Keep source separate from the current facts;
   // a live structured amount still supersedes conflicting source wording.
   if (!authoredQualifiers && a.text?.trim() && (source.schedule || source.route || source.target || source.siteReference || source.predicate || source.method) && !administrationHasAmountFacts(source) &&
-      !clause.instructionGraph?.actions.length)
+      !clause.instructionGraph?.actions.length && (!source.method || methodDirectionsNeedSource(a, clause)))
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""),
       a.predicate && style === "long" ? appendMedicationConditionText(a.text, a.predicate, options, env) : a.text);
   if (a.predicate && style !== "long" && !authoredQualifiers)

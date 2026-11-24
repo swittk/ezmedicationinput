@@ -4,7 +4,7 @@ import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
-  rateRangePreview, formatCourseChoices } from "./canonical/format-course";
+  rateRangePreview, formatCourseChoices, methodDirectionsNeedSource } from "./canonical/format-course";
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel, clauseForAdministration } from "./canonical/compile";
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
@@ -1126,12 +1126,19 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
             field.valueCodeableReference?.reference?.display)))))
     return true;
   const primary = dosage.doseAndRate?.[0];
-  // With no structured amount, authored text may be the only dose/manner
-  // directions even when a method is known. Preserve the graph realizer when
-  // that owner exists; the native fallback keeps source beside partial facts.
-  if (!primary && dosage.text?.trim() &&
-      (dosage.route || !dosage.extension?.some(extension =>
-        extension.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))) return true;
+  // A method does not replace an unmodeled amount or manner. Preserve the
+  // existing parser/graph realizer and exact generated directions; plain
+  // partial source still needs the native authored-directions fallback.
+  if (!primary && dosage.text?.trim()) {
+    const hasGraph = dosage.extension?.some(extension =>
+      extension.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL);
+    if (!dosage.method && (dosage.route || !hasGraph)) return true;
+    if (dosage.method && !getFreshDoseSource(dosage) && !hasGraph) {
+      const course = courseFromR5([dosage], undefined, undefined, undefined, true);
+      const administration = course.stages.find(stage => stage.administrations.length)?.administrations[0];
+      if (!administration || methodDirectionsNeedSource(administration)) return true;
+    }
+  }
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;

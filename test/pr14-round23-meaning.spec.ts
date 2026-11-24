@@ -5029,17 +5029,21 @@ describe("round59 partial facts and complete authored directions", () => {
   });
 
   it.each([false, true])("retains the qualitative amount beside a method with site=%s", hasSite => {
-    const row: FhirDosage = { text: "Apply a thin layer", method: { text: "Apply" }, extension: [fresh(note)],
-      ...(hasSite ? { site: { coding: [{ system: "http://snomed.info/sct", code: "66480008", display: "Left forearm" }] } } : {}) };
-    const before = fresh(row), input = fresh(toDosageDetails([row]));
-    for (const value of [row, ...views(input)]) for (const locale of ["en", "th"])
-      for (const style of ["short", "long"] as const) {
-        const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
-        expect(rendered).toContain("Apply a thin layer");
-        if (hasSite) expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
-      }
-    expect(input.step![0].component[0].doseAndRate).toBeUndefined();
-    expect(row).toEqual(before);
+    for (const hasRoute of [false, true]) {
+      const row: FhirDosage = { text: "Apply a thin layer", method: { text: "Apply" }, extension: [fresh(note)],
+        ...(hasRoute ? { route: { text: "topical", coding: [{ system: "http://snomed.info/sct", code: "6064005", display: "Topical route" }] } } : {}),
+        ...(hasSite ? { site: { coding: [{ system: "http://snomed.info/sct", code: "66480008", display: "Left forearm" }] } } : {}) };
+      const before = fresh(row), input = fresh(toDosageDetails([row]));
+      for (const value of [row, ...views(input)]) for (const locale of ["en", "th"])
+        for (const style of ["short", "long"] as const) {
+          const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
+          expect(rendered).toContain("Apply a thin layer");
+          if (hasSite) expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
+        }
+      expect(input.step![0].component[0].doseAndRate).toBeUndefined();
+      expect(input.step![0].component[0].route).toEqual(row.route);
+      expect(row).toEqual(before);
+    }
   });
 
   it.each(["after dialysis", "BID", "twice daily"])("retains only independent offset timing text %s", text => {
