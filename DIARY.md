@@ -15797,3 +15797,13 @@ distribution tests, historical plus new complete storage records, and the
 unchanged 177 equivalent performance scenarios individually within 4%.
 The same fixed seven exclusions and exactly one prescribed confirmation pass
 apply. No merge, publication, or deployment is authorized by this checkpoint.
+
+Round-60 integrated source run: strict types passed; 7,755 of 7,772 assertions
+passed, with 17 failures confined to inherited display-mode and fingerprint
+format oracles. Build, storage, and timing did not run. The complete failed
+attempt is retained. The 12 exact-source controls now explicitly request
+roundtrip and also assert normalized active dose/rate/cap facts; the five
+projection-token controls require the exact clinical-v2 tag on every row.
+All 17 focused cases pass, every original identity and substantive post-edit
+assertion remains, and production source bytes are unchanged. A separate full
+attempt will validate this test-only child; no acceptance is inferred here.

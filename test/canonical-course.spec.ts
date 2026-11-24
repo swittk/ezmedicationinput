@@ -1030,7 +1030,10 @@ describe("review 26 external display ownership", () => {
       text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
       maxDosePerAdministration: { value: 10, unit: "mL" }
     }], source)[0])) as FhirDosage;
-    expect(formatSig(structuredClone(row), "long")).toBe(source);
+    expect(formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" })).toBe(source);
+    const unchanged = formatSig(structuredClone(row), "long");
+    expect(unchanged).toContain("Rate: 5 mL/h");
+    expect(unchanged).toContain("max per administration: 10 mL");
     delete row.doseAndRate![0].rateQuantity;
     for (const text of [formatSig(structuredClone(row), "long"), fromFhirDosage(structuredClone(row)).longText]) {
       expect(text).not.toContain("5 mL/h");

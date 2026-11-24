@@ -1494,8 +1494,9 @@ describe("round28 live interchange authority and retained clinical identity", ()
     setDosageCondition(raw, compound ? { kind: "all", conditions: [predicate,
       { kind: "state", name: "dizziness", expected: false, text: "no dizziness" }] } : predicate);
     let row = persist(withDosageEditProvenance([raw], text)[0]);
-    expect(formatSig(row)).toBe(text);
-    expect(formatSig(row)).toBe(text);
+    expect(formatSig(row, "short", { realizationMode: "roundtrip" })).toBe(text);
+    expect(formatSig(row)).toContain("SBP > 160 mmHg");
+    expect(formatSig(row)).toContain("max per administration: 2 tab");
     row = persist(row);
     const root = row.modifierExtension!.find(item => item.url === DOSAGE_CONDITION_R5_URL)!.extension![0];
     const leaf = compound ? root.extension!.find(item => item.url === "conditions")! : root;
@@ -1512,7 +1513,9 @@ describe("round28 live interchange authority and retained clinical identity", ()
     const raw: FhirDosage = { text, doseAndRate: [{ doseQuantity: q(1) }], maxDosePerAdministration: q(2) };
     setDosageCondition(raw, { kind: "state", name: "dizziness", expected: true, text: "dizziness" });
     let row = persist(withDosageEditProvenance([raw], text)[0]);
-    expect(formatSig(row)).toBe(text);
+    expect(formatSig(row, "short", { realizationMode: "roundtrip" })).toBe(text);
+    expect(formatSig(row)).toContain("only if dizziness");
+    expect(formatSig(row)).toContain("max per administration: 2 tab");
     row = persist(row);
     const leaf = row.modifierExtension!.find(item => item.url === DOSAGE_CONDITION_R5_URL)!.extension![0];
     leaf.extension!.find(item => item.url === "expected")!.valueBoolean = false;
@@ -1530,7 +1533,9 @@ describe("round28 live interchange authority and retained clinical identity", ()
         maxDosePerAdministration: { value: 10, unit: "mL" } },
     ];
     let rows = persist(toFhirR5Dosages(withDosageEditProvenance(input, "Initial dose, then maintenance")));
-    expect(formatSig(rows[1])).toBe(text);
+    expect(formatSig(rows[1], "short", { realizationMode: "roundtrip" })).toBe(text);
+    expect(formatSig(rows[1])).toContain("Rate: 5 mL/h");
+    expect(formatSig(rows[1])).toContain("max per administration: 10 mL");
     rows = persist(rows);
     rows[1].doseAndRate![0].rateQuantity!.value = 6;
     const preview = formatSig(rows[1]);
@@ -4373,7 +4378,12 @@ describe("round37 interchange phase, limit and source ownership", () => {
     }
     row = persist(row);
     row.text = "Authored infusion instructions";
-    expect(formatSig(row, "long")).toBe("Authored infusion instructions");
+    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe("Authored infusion instructions");
+    for (const displayed of [formatSig(row, "long"), fromFhirDosage(row).longText]) {
+      expect(displayed).toContain("100 mL / 2 h");
+      if (dose) expect(displayed).toMatch(/1 (?:tab|tablet)/);
+    }
+    expect(row.text).toBe("Authored infusion instructions");
   });
 });
 
@@ -5798,7 +5808,8 @@ describe("round 25 live rate and wire boundary regressions", () => {
     const source = "Infuse at 5 mL/h";
     const fresh = parseSig(source).fhir[0];
     let row = persisted ? persist(fresh) : fresh;
-    expect(formatSig(row, "long", { locale: "en" })).toBe(source);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+    expect(formatSig(row, "long", { locale: "en" })).toContain("Rate: 5 mL/h");
     row = persist(row);
     row.doseAndRate![0].rateQuantity!.value = 10;
     for (const text of [formatSig(row, "long", { locale: "en" }),
@@ -5816,7 +5827,8 @@ describe("round 25 live rate and wire boundary regressions", () => {
     const source = "Infuse 120 mL over 2 hours";
     const fresh = parseSig(source).fhir[0];
     let row = persisted ? persist(fresh) : fresh;
-    expect(formatSig(row, "long", { locale: "en" })).toBe(source);
+    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+    expect(formatSig(row, "long", { locale: "en" })).toContain("Rate: 120 mL / 2 h");
     row = persist(row);
     row.doseAndRate![0].rateRatio!.denominator!.value = 4;
     for (const text of [formatSig(row, "long", { locale: "en" }),

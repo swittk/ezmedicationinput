@@ -451,9 +451,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const textIdentities = rows.map(row => row.extension?.find(child => child.url === "textFingerprint")?.valueString);
     expect(projectionIdentities).toHaveLength(parsed.fhir.length);
     expect(textIdentities).toHaveLength(parsed.fhir.length);
-    expect(projectionIdentities).toEqual(
-      expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{16}$/)])
-    );
+    for (const identity of projectionIdentities) {
+      expect(identity).toMatch(/^clinical-v2:[0-9a-f]{16}$/);
+    }
     expect(textIdentities).toEqual(
       expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{16}$/)])
     );

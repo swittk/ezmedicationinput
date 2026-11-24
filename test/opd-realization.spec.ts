@@ -51,10 +51,10 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
 
     for (const { maximum, source } of cases) {
       const dosage: FhirDosage = { ...base, ...maximum, text: source };
-      expect(formatSig(dosage, "short", { locale: "th" })).toBe(source);
-      expect(formatSig(dosage, "long", { locale: "th" })).toBe(source);
+      expect(formatSig(dosage, "short", { locale: "th", realizationMode: "roundtrip" })).toBe(source);
+      expect(formatSig(dosage, "long", { locale: "th", realizationMode: "roundtrip" })).toBe(source);
 
-      const imported = fromFhirDosage({ ...dosage }, { locale: "th" });
+      const imported = fromFhirDosage({ ...dosage }, { locale: "th", realizationMode: "roundtrip" });
       expect(imported.shortText).toBe(source);
       expect(imported.longText).toBe(source);
       expect(imported.fhir.text).toBe(source);
@@ -62,6 +62,11 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
       const withoutSource: FhirDosage = { ...base, ...maximum };
       const maximumText = maximum.maxDosePerAdministration
         ? "max per administration: 1 tab" : "max lifetime: 10 tab";
+      const normalized = fromFhirDosage({ ...dosage });
+      expect(normalized.shortText).toBe(`1 tab 2x/d; ${maximumText}`);
+      expect(normalized.longText).toBe(`Use 1 tablet twice daily; ${maximumText}`);
+      expect(normalized.fhir.text).toBe(source);
+      expect(formatSig(dosage, "long")).toBe(`Use 1 tablet twice daily; ${maximumText}`);
       expect(formatSig(withoutSource, "long")).toBe(
         `Use 1 tablet twice daily; ${maximumText}`
       );
