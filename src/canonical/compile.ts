@@ -561,7 +561,9 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
         periodUnit:(limit.period.code??limit.period.unit) as NonNullable<typeof schedule.periodUnit>,periodComparator:limit.period.comparator});
     }
     schedule.maxDosePerPeriod=limits;
-    schedule.timingCode=a.schedule.code?.coding?.[0]?.code??a.schedule.code?.text;
+    const timingCode = a.schedule.code?.coding?.[0]?.code ||
+      a.schedule.code?.coding?.find(coding => coding.code)?.code;
+    schedule.timingCode=timingCode??a.schedule.code?.text;
     result.schedule=schedule;
   }else result.schedule=undefined;
   result.clinicalAdjuncts=Object.assign({},base?.clinicalAdjuncts,{condition:a.predicate,

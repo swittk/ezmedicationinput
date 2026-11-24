@@ -111,6 +111,7 @@ import {
   CanonicalSourceSpan,
   EventTiming,
   FhirCoding,
+  MedicationCondition,
   MedicationInstructionActionArgumentParser,
   MedicationInstructionActionDefinition,
   MedicationInstructionActionRealizer,
@@ -1179,7 +1180,7 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   if (materialStart < materialEnd) pushArgument(args, argumentFromParts(
     parts, materialStart, materialEnd, input, AdviceArgumentRole.Material, options
   ));
-  let targetIndex = relIndex;
+  let targetIndex = c.conditionalTail ? -1 : relIndex;
   let targetEnd = relationTargetEnd;
   let targetRelation = relation;
   let tailRelationIndex: number | undefined;
@@ -3970,7 +3971,8 @@ function realizeAction(
       ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)
       : genericRealizer(input)
     : undefined;
-  const realized = negated ? adapter.renderNegated(input, genericText)
+  const realized = negated ? adapter.renderNegated(input, genericText ??
+      (realizerKey === "mix-substance" ? adapter.render(realizerKey, input) : undefined))
     : genericText ?? adapter.render(realizerKey, input) ?? DEFAULT_ACTION_REALIZER(input);
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
@@ -4894,6 +4896,23 @@ function conditionRelationBody(text: string, kind: AdviceRelation): string | und
   return body || undefined;
 }
 
+/** Retained predicate text identifies its source mirror without parsing the
+ * graph again. An alternative only owns an atom when every allowed path does. */
+function primaryConditionOwnsSource(
+  condition: MedicationCondition, source: string, negative: boolean, negated = false
+): boolean {
+  if (condition.kind === "not")
+    return primaryConditionOwnsSource(condition.condition, source, negative, !negated);
+  if ("conditions" in condition) {
+    if (!condition.conditions.length) return false;
+    const owns = (child: MedicationCondition) => primaryConditionOwnsSource(child, source, negative, negated);
+    return (condition.kind === "any") !== negated
+      ? condition.conditions.every(owns) : condition.conditions.some(owns);
+  }
+  const negativeLeaf = negated !== (condition.kind === "state" && !condition.expected);
+  return negative === negativeLeaf && normalizedInstructionSurface(condition.text) === source;
+}
+
 function localizeConditionRelationText(
   relation: CanonicalInstructionRelation,
   sourceLocale: string,
@@ -5161,6 +5180,13 @@ export function realizeInstructionGraph(
       );
     });
     if (representedByTarget) continue;
+    const currentCondition = options?.omitCanonicalAdministration?.clinicalAdjuncts?.condition;
+    if (currentCondition && relation.toActionIndex === coveredPrimaryAction &&
+        relationHasSemanticClass(relation.kind, "conditional")) {
+      const sourceBody = conditionRelationBody(relation.text, relation.kind);
+      if (sourceBody && primaryConditionOwnsSource(currentCondition,
+          normalizedInstructionSurface(sourceBody), relation.kind === AdviceRelation.Unless)) continue;
+    }
     const relationText = localizeConditionRelationText(
       relation,
       graph.sourceLocale ?? "en",

@@ -154,7 +154,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       equalStructuredValues(draftCompletionBoundary(prior.end), draftCompletionBoundary(current.end));
     if (!current || prior.count !== current.count ||
         !endMatches ||
-        !prior.end && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
+        (!prior.end || (prior.count ?? 1) > 1) && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
       changedCompletions.add(index);
     if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
         !equalStructuredValues(prior.start, current.start) ||

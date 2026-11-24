@@ -1,5 +1,7 @@
 import { resolveBodySitePhrase } from "./body-site-grammar";
 import { getBodySiteText } from "./body-site-lookup";
+import { DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey } from "./maps";
+import { SNOMED_SYSTEM } from "./snomed";
 import {
   BodySiteCode,
   BodySiteDefinition,
@@ -32,7 +34,7 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
     ? Math.trunc(value) : undefined;
 }
 
-function siteTextFromLike(
+export function resolveBodySiteTargetText(
   site: string | SiteLike | FhirCodeableConcept | undefined,
   options?: BodySiteTargetCountOptions
 ): string | undefined {
@@ -42,24 +44,37 @@ function siteTextFromLike(
   if (typeof site === "string") {
     return site;
   }
-  if ("text" in site && site.text) {
-    return site.text;
+  const codings = "coding" in site ? site.coding : undefined;
+  const coding = Array.isArray(codings)
+    ? codings.find(candidate => candidate?.code && candidate.system === SNOMED_SYSTEM) ??
+      codings.find(candidate => candidate?.code)
+    : codings;
+  const text = "text" in site ? site.text : undefined;
+  if (text) {
+    // Match the native preview's exact-known-label conflict rule. A coarser
+    // code does not supersede authored spatial qualifiers or unfamiliar text.
+    const textCode = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)]?.coding;
+    const staleText = textCode?.code && coding?.code && textCode.code !== coding.code &&
+      (textCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM);
+    if (!staleText) return text;
   }
-  const coding = "coding" in site
-    ? Array.isArray(site.coding)
-      ? site.coding.find((candidate) => candidate?.code)
-      : site.coding
-    : undefined;
-  return coding?.code
-    ? getBodySiteText(
-        {
-          system: coding.system,
-          code: coding.code,
-          display: coding.display
-        },
-        { siteCodeMap: options?.siteCodeMap }
-      )
-    : undefined;
+  if (coding?.code) {
+    // Cache only stable default vocabulary lookups, never mutable fields.
+    const cacheKey = options?.siteCodeMap ? undefined :
+      (coding.system ?? SNOMED_SYSTEM) + "\0" + coding.code;
+    let resolved: string | undefined;
+    if (cacheKey !== undefined && defaultCodedSiteTexts.has(cacheKey)) {
+      resolved = defaultCodedSiteTexts.get(cacheKey);
+    } else {
+      resolved = getBodySiteText(coding, { siteCodeMap: options?.siteCodeMap });
+      if (cacheKey !== undefined) {
+        if (defaultCodedSiteTexts.size >= TARGET_COUNT_CACHE_LIMIT) defaultCodedSiteTexts.clear();
+        defaultCodedSiteTexts.set(cacheKey, resolved);
+      }
+    }
+    if (resolved) return resolved;
+  }
+  return text;
 }
 
 export function buildBodySiteAdministrationTargetCountExtension(
@@ -97,6 +112,7 @@ export function parseBodySiteAdministrationTargetCountExtension(
  * and changing an imported object's text creates a different key (no stale
  * object-identity memoization). Limit memory to a small bounded vocabulary. */
 const defaultTargetCounts=new Map<string,number>();
+const defaultCodedSiteTexts = new Map<string, string | undefined>();
 const TARGET_COUNT_CACHE_LIMIT=2048;
 export function getBodySiteAdministrationTargetCount(
   site: string | SiteLike | FhirCodeableConcept | undefined,
@@ -141,7 +157,7 @@ export function getBodySiteAdministrationTargetCount(
 function inferredBodySiteTargetCount(
   site:string|SiteLike|FhirCodeableConcept,options?:BodySiteTargetCountOptions
 ):number|undefined {
-  const text = siteTextFromLike(site, options);
+  const text = resolveBodySiteTargetText(site, options);
   if (!text) {
     return undefined;
   }

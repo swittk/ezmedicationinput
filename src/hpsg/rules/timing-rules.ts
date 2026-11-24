@@ -3572,10 +3572,9 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
       NEXT_DAY_HEADS.has(normalizeTokenLower(head))) {
     let endIndex = next + 2;
     const trailingLead = context.tokens[endIndex];
-    if (trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead))) {
-      const trailingClock = parseClockToken(context.tokens[endIndex + 1], context.tokens[endIndex + 2]);
-      if (trailingClock) endIndex += 1 + trailingClock.tokens.length;
-    }
+    const clockLeadLength = trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead)) ? 1 : 0;
+    const trailingClock = parseClockToken(context.tokens[endIndex + clockLeadLength], context.tokens[endIndex + clockLeadLength + 1]);
+    if (trailingClock) endIndex += clockLeadLength + trailingClock.tokens.length;
     const tokens = tokensAvailable(context, start, endIndex - start);
     if (tokens) {
       const end = tokens[tokens.length - 1].sourceEnd;

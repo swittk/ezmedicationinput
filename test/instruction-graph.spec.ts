@@ -5,7 +5,7 @@ import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventT
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
-import { withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
+import { setDosageCondition, withDosageEditProvenance, getDosageSourceOwnership, DOSAGE_RENDERED_INSTRUCTION_R5_URL } from "../src/dosage-course";
 import { realizeInstructionAction, instructionGraphRichPrimaryAction,
   instructionGraphRoundTripPrimaryAction, instructionGraphSourceConflictsWithDose, realizeRichPrimaryWithCanonicalDose
 } from "../src/instruction-graph";
@@ -16,7 +16,7 @@ import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionC
 import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
-import { parseSig as parsePublicSig, nextDueDoses } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits } from "../src/index";
 
 describe("procedural instruction graph", () => {
   it.each([
@@ -5739,6 +5739,7 @@ describe("round 49 saved instruction ownership", () => {
           expect(preparation).toContain(amount);
           expect(administration).toMatch(action);
           expect(administration).not.toContain(amount);
+          expect(text).not.toMatch(/(?:^|[^0-9.])2 tablets?(?![a-z])/u);
         }
         expect(JSON.stringify(input)).toBe(before);
       }
@@ -5885,5 +5886,278 @@ describe("round51 saved dilution and patch facts", () => {
       }
     expect(JSON.stringify(raw)).toBe(before);
     expect(toFhirR5Dosages(raw)[0].extension?.find(e => e.url === extension.url)).toEqual(extension);
+  });
+});
+
+
+describe("round55: current clinical facts and independent graph meaning", () => {
+  const persisted = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (row: FhirDosage) => {
+    const r6 = toDosageDetails(persisted([row]));
+    return [row, r6, persisted(toFhirR5Dosages(r6))];
+  };
+
+  it.each(["clock", "code-only", "bedtime"] as const)(
+    "uses live timing without reintroducing a QHS anchor: %s", variant => {
+      const row: FhirDosage = {
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QHS" }] },
+          ...(variant === "code-only" ? {} : { repeat: { frequency: 1, period: 1, periodUnit: "d" as const,
+            ...(variant === "clock" ? { timeOfDay: ["08:00:00"] } : { when: [EventTiming["Before Sleep"]] }) } }) }
+      };
+      const before = JSON.stringify(row);
+      for (const input of views(row)) {
+        const preview = formatSig(input, "short", { locale: "en", realizationMode: "normalized" });
+        if (variant === "clock") {
+          expect(preview).toContain("08:00");
+          expect(preview).not.toMatch(/QHS|bedtime/iu);
+        } else expect(preview).toMatch(/QHS|bedtime/iu);
+      }
+      expect(row.timing?.code?.coding).toEqual([{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "QHS" }]);
+      expect(JSON.stringify(row)).toBe(before);
+    });
+
+  it.each([false, true])("keeps a dilution condition separate from material complements: %s", withDestination => {
+    const source = withDestination
+      ? "Dilute 1 mL with saline to 10 mL if the solution is too thick"
+      : "Dilute 1 mL if the solution is too thick";
+    const parsed = parsePublicSig(source);
+    const frame = parseInstructionActions(source)[0];
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Destination).map(arg => arg.text))
+      .toEqual(withDestination ? ["saline", "10 mL"] : []);
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity).toMatchObject({ value: 1, unit: "mL" });
+    for (const input of [parsed.fhirNext, persisted(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text.match(/if the solution is too thick/gu)).toHaveLength(1);
+        if (locale === "en") expect(text).toBe(source + ".");
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([false, true].flatMap(negated => [false, true].map(temporal => ({ negated, temporal }))))(
+    "retains a Mix vehicle and independent event: $negated / $temporal", ({ negated, temporal }) => {
+      const frame = persisted(parseInstructionActions(negated ? "Do not mix with milk" : "Mix with milk")[0]);
+      frame.polarity = negated ? AdvicePolarity.Negate : AdvicePolarity.Affirm;
+      delete frame.relation;
+      frame.args = [{ role: AdviceArgumentRole.Substance, text: "milk", normalized: "milk",
+        relation: AdviceRelation.With, i18n: { th: "นม" } },
+        ...(temporal ? [{ role: AdviceArgumentRole.Activity, text: "each dose", normalized: "each dose",
+          relation: AdviceRelation.Before, i18n: { th: "ยาแต่ละครั้ง" } }] : [])];
+      const graph = { sourceText: (negated ? "Do not mix" : "Mix") + " with milk" + (temporal ? " before each dose" : ""),
+        sourceLocale: "en", actions: [frame] };
+      const extension = buildInstructionGraphExtension(graph)!;
+      const row: FhirDosage = { extension: [extension] };
+      const before = JSON.stringify(row);
+      for (const input of views(row)) {
+        const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(text).toMatch(negated ? /^Do not mix with milk/u : /^Mix with milk/u);
+        expect(text.match(/with milk/gu)).toHaveLength(1);
+        expect(text.match(/before each dose/gu) ?? []).toHaveLength(temporal ? 1 : 0);
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(th).toContain("ด้วยนม");
+        if (negated) expect(th).toContain("ห้าม");
+        expect(th.match(/ก่อนยาแต่ละครั้ง/gu) ?? []).toHaveLength(temporal ? 1 : 0);
+      }
+      expect(JSON.stringify(row)).toBe(before);
+      expect(parseInstructionGraphExtension(row.extension)?.actions[0].args).toMatchObject(frame.args);
+      expect(parseInstructionGraphExtension(row.extension)?.actions[0].args).toHaveLength(frame.args.length);
+    });
+
+  it.each([false, true].flatMap(guard => [false, true].map(preposed => ({ guard, preposed }))))(
+    "keeps an independent primary condition beside a current guard: $guard / $preposed", ({ guard, preposed }) => {
+      const actionText = "Swallow 1 tablet", conditionText = "if able to swallow";
+      const frame = persisted(parseInstructionActions(actionText)[0]);
+      const start = preposed ? conditionText.length + 2 : 0;
+      frame.span = { start, end: start + actionText.length };
+      const source = preposed ? conditionText + ", " + actionText : actionText + " " + conditionText;
+      const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+        primaryAdministrationSpan: frame.span, actions: [frame],
+        relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: conditionText,
+          span: preposed ? { start: 0, end: conditionText.length } : { start: actionText.length + 1, end: source.length } }] })!;
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        method: { coding: [{ system: "http://snomed.info/sct", code: "421521009", display: "Swallow" }] }, extension: [extension] };
+      if (guard) setDosageCondition(row, { kind: "measurement", name: "systolic BP", operation: "gt", value: 160,
+        text: "systolic BP > 160" });
+      const before = JSON.stringify(row);
+      for (const input of views(row)) for (const locale of ["en", "th"])
+        for (const realizationMode of ["normalized", "roundtrip"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text.match(/if able to swallow/giu)).toHaveLength(1);
+          expect(text.match(/systolic BP > 160/gu) ?? []).toHaveLength(guard ? 1 : 0);
+        }
+      expect(JSON.stringify(row)).toBe(before);
+      expect(parseInstructionGraphExtension(row.extension)?.relations?.[0].text).toBe(conditionText);
+    });
+
+  it.each(["all", "any", "not", "opposite unless", "negative state"] as const)(
+    "distinguishes a retained condition owner from an independent constraint: %s", variant => {
+      const atom: MedicationCondition = { kind: "measurement", name: "systolic BP", operation: "gt",
+        value: 140, text: "systolic BP > 160" };
+      const awake: MedicationCondition = { kind: "state", name: "awake", expected: true, text: "awake" };
+      const negative = variant === "not" || variant === "opposite unless" || variant === "negative state";
+      const relationText = variant === "negative state" ? "unless nausea"
+        : (negative ? "unless " : "if ") + "systolic BP > 160";
+      const frame = persisted(parseInstructionActions("Swallow 1 tablet")[0]);
+      const source = frame.sourceText + " " + relationText;
+      const extension = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+        primaryAdministrationSpan: frame.span, actions: [frame], relations: [{
+          kind: negative ? AdviceRelation.Unless : AdviceRelation.If, toActionIndex: 0, text: relationText,
+          span: { start: frame.sourceText.length + 1, end: source.length }
+        }] })!;
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        method: { coding: [{ system: "http://snomed.info/sct", code: "421521009", display: "Swallow" }] },
+        extension: [extension] };
+      const condition: MedicationCondition = variant === "all" || variant === "any"
+        ? { kind: variant, conditions: [atom, awake] } : variant === "not"
+        ? { kind: "not", condition: atom } : variant === "negative state"
+        ? { kind: "state", name: "nausea", text: "nausea", expected: false } : atom;
+      setDosageCondition(row, condition);
+      const before = JSON.stringify(row);
+      for (const input of views(row)) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        if (variant === "negative state") {
+          expect(text.match(/nausea/giu)).toHaveLength(1);
+        } else {
+          expect(text.match(/140/gu)).toHaveLength(1);
+          expect(text.match(/160/gu) ?? []).toHaveLength(variant === "any" || variant === "opposite unless" ? 1 : 0);
+        }
+      }
+      expect(JSON.stringify(row)).toBe(before);
+      expect(parseInstructionGraphExtension(row.extension)?.relations?.[0].text).toBe(relationText);
+    });
+
+  it.each(["existential", "state"] as const)("uses current restriction text over a retained inferred lemma: %s", form => {
+    const row = persisted(parsePublicSig("Apply 1 g to skin where there is rash daily").fhir[0]);
+    const marker = row.site!.extension!.find(item => item.url.endsWith("medication-body-site-restriction"))!;
+    marker.extension!.find(item => item.url === "predicateText")!.valueString = "skin is itchy";
+    marker.extension!.find(item => item.url === "predicateForm")!.valueCode = form;
+    marker.extension!.push({ url: "urn:round55:restriction-note", valueString: "retain source annotation" });
+    const original = persisted(marker), before = JSON.stringify(row);
+    for (const input of views(row)) for (const locale of ["en", "th"])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode });
+        expect(text.match(/skin is itchy/gu)).toHaveLength(1);
+        expect(text).not.toMatch(/rash|ผื่น/u);
+      }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(toFhirR5Dosages(toDosageDetails(persisted([row])))[0].site?.extension).toContainEqual(original);
+  });
+
+  it.each(["system", "version", "both"] as const)("preserves graph Coding primitive companions: %s", variant => {
+    const coding = { system: "urn:round55:vehicle", version: "edition-1", code: "milk",
+      ...(variant !== "version" ? { _system: { id: "system-source", extension: [{ url: "urn:round55:note", valueString: "system" }] } } : {}),
+      ...(variant !== "system" ? { _version: { id: "edition-source" } } : {}),
+      _code: { id: "code-source" } };
+    const frame = persisted(parseInstructionActions("Mix with milk")[0]);
+    frame.args = [{ role: AdviceArgumentRole.Substance, text: "milk", relation: AdviceRelation.With,
+      coding, codings: [coding], i18n: { th: "นม" } }];
+    const graph = { sourceText: "Mix with milk", sourceLocale: "en", actions: [frame] };
+    const extension = buildInstructionGraphExtension(graph)!;
+    const row: FhirDosage = { extension: [extension] };
+    const before = JSON.stringify(graph);
+    const decoded = parseInstructionGraphExtension(row.extension)!;
+    expect(decoded.actions[0].args[0].coding).toEqual(coding);
+    expect(decoded.actions[0].args[0].codings).toEqual([coding]);
+    for (const input of views(row)) {
+      const r5 = Array.isArray(input) ? input : "step" in input ? toFhirR5Dosages(input) : [input];
+      const restored = parseInstructionGraphExtension(r5[0].extension)!;
+      expect(restored.actions[0].args[0].coding).toEqual(coding);
+      expect(restored.actions[0].args[0].codings).toEqual([coding]);
+    }
+    expect(JSON.stringify(graph)).toBe(before);
+  });
+
+  it.each([undefined, AdviceRelation.To])("renders an unmarked object-time daughter once: %s", relation => {
+    const frame = persisted(parseInstructionActions("Apply patch in the morning")[0]);
+    frame.relation = relation;
+    frame.args = [
+      { role: AdviceArgumentRole.Object, text: "patch", normalized: "patch", i18n: { th: "แผ่นแปะ" } },
+      { role: AdviceArgumentRole.Time, text: "morning", normalized: "MORN", i18n: { th: "ตอนเช้า" } }
+    ];
+    const extension = buildInstructionGraphExtension({ sourceText: "Apply patch in the morning", sourceLocale: "en",
+      primaryAdministrationSpan: frame.span, actions: [frame] })!;
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      method: { coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "patch" } }],
+      timing: { repeat: { when: [EventTiming.Morning] } }, extension: [extension]
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, persisted(toFhirR5Dosages(raw))])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode }).match(/morning/gu)).toHaveLength(1);
+        expect(formatSig(input, "long", { locale: "th", realizationMode }).match(/(?:ตอน)?เช้า/gu)).toHaveLength(1);
+      }
+    expect(JSON.stringify(raw)).toBe(before);
+  });
+
+  it.each([
+    { name: "right coding", code: "1290032005", text: "both eyes", count: undefined, expected: 1 },
+    { name: "matching bilateral", code: undefined, text: "both eyes", count: undefined, expected: 2 },
+    { name: "independent count", code: "1290032005", text: "both eyes", count: 2, expected: 2 },
+    { name: "unknown code", code: "clinic-eyes", text: "both eyes", count: undefined, expected: 2 }
+  ])("uses the resolved site for inferred discrete supply: $name", ({ code, text, count, expected }) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text, ...(code ? { coding: [{ system: code === "clinic-eyes" ? "urn:clinic:site" : "http://snomed.info/sct", code }] } : {}),
+        ...(count ? { extension: [{ url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL, valueInteger: count }] } : {}) } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: "d" } }
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, persisted(toFhirR5Dosages(raw))]) {
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z",
+        durationValue: 1, durationUnit: "d", timeZone: "UTC" }).totalUnits).toBe(expected);
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (code === "1290032005") expect(text).toContain("right eye");
+      if (expected === 1) expect(text).not.toContain("across 2 sites");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(raw)[0].site?.text).toBe(text);
+  });
+
+  it.each([
+    { text: "upper outer right arm", code: "302538001" },
+    { text: "right arm where irritated", code: "368209003" }
+  ])("preserves a qualified site with a coarser coding: $text", ({ text, code }) => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text, coding: [{ system: "http://snomed.info/sct", code }] } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "patch" } }]
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, persisted(toFhirR5Dosages(raw))])
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain(text);
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(raw)[0].site?.text).toBe(text);
+  });
+
+  it("prefers the same known clinical site with an independent coding first", () => {
+    const codings = [{ system: "urn:round55:clinic-site", code: "local-eye" },
+      { system: "http://snomed.info/sct", code: "1290032005" }];
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      site: { concept: { text: "both eyes", coding: codings } },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: "d" } }
+    }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, persisted(toFhirR5Dosages(raw))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("right eye");
+      expect(calculateTotalUnits({ dosage: input, orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z",
+        durationValue: 1, durationUnit: "d", timeZone: "UTC" }).totalUnits).toBe(1);
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(raw)[0].site?.coding).toEqual(codings);
+  });
+
+  it.each(["en", "th"] as const)("renders a maximum-only administration in the long %s preview", locale => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat: { countMax: 3 } } }] }] };
+    const before = JSON.stringify(raw);
+    for (const input of [raw, persisted(toFhirR5Dosages(raw))]) {
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" }))
+        .toBe(locale === "en" ? "Use the medication for up to 3 doses." : "ใช้ยา ไม่เกิน 3 ครั้ง.");
+    }
+    expect(JSON.stringify(raw)).toBe(before);
+    expect(toFhirR5Dosages(raw)[0].timing?.repeat?.count).toBeUndefined();
   });
 });

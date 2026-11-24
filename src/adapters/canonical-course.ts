@@ -58,6 +58,7 @@ import {
   hasUnrecognizedEditMetadata,
   retainField,
   readRetainedField,
+  withR5CountMinimum,
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
@@ -164,7 +165,9 @@ function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6
     if (target === "r5" && sourceMaximumToR5(maximum)) {
       (maxima ??= []).push(maximum);
       extensions ??= original!.slice(0, index);
-      if (Object.keys(marker).some(key => key !== "url" && key !== "extension" && key !== "valueRatio"))
+      if (!equalStructuredValues(marker, marker.valueRatio
+          ? { url: R5_SOURCE_ONLY_MAXIMUM_URL, valueRatio: maximum }
+          : retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum)))
         extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] });
     } else if (marker.valueRatio) {
       // Accept older source markers, but never re-emit a one-ended valueRatio.
@@ -1086,6 +1089,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
       repeat = value;
     }
   }
+  if (target === "r5" && repeat?.countMax !== undefined) repeat = withR5CountMinimum(repeat);
   // Import has already separated executable values from metadata-only wire
   // positions. The immutable native timing keeps its imported event projection.
   const events = original?.event ?? t.explicitEvents;

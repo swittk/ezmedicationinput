@@ -696,7 +696,7 @@ function formatCanonicalBase(
     const text = amount.rateRange && rateRangePreview(amount.rateRange);
     if (text) ranges.push(amountLabel(amount, "rateRange", words) + text);
   }
-  return ranges.length ? joinGeneratedClauses([rendered, ...ranges]) : rendered;
+  return ranges.length ? joinGeneratedClauses(rendered ? [rendered, ...ranges] : ranges) : rendered;
 }
 export function formatCanonicalAdministration(
   a: CanonicalAdministration,

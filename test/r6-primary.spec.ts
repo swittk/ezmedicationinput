@@ -3386,8 +3386,9 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       value.url.includes("medication-course-reconciliation-warning"))).not.toBe(true);
     // Editing the cadence itself is different: stale offsets must not
     // silently become executable under a new period.
-    rows[0].timing!.repeat!.period = 21;
-    const changedPeriod = toDosageDetails(rows);
+    const changedRows = structuredClone(rows);
+    changedRows[0].timing!.repeat!.period = 21;
+    const changedPeriod = toDosageDetails(changedRows);
     expect(changedPeriod.step[0].component[0].timing?.repeat?.startOffset).toBeUndefined();
     expect(changedPeriod.extension?.some(value =>
       value.url.includes("medication-course-reconciliation-source"))).toBe(true);
@@ -3689,8 +3690,9 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       url: "https://example.org/independent", valueString: "keep"
     });
     expect(fromDosageDetails(edited).course.step![0].modifierExtension).toEqual([modifier("B")]);
-    course.step![0].modifierExtension = [];
-    const cleared = toDosageDetails(rows, undefined, course);
+    const clearedCourse = structuredClone(course);
+    clearedCourse.step![0].modifierExtension = [];
+    const cleared = toDosageDetails(rows, undefined, clearedCourse);
     expect(cleared.step[0].extension?.some(ext => ext.url === wrapUrl)).toBe(false);
     expect(cleared.step[0].extension).toContainEqual({
       url: "https://example.org/independent", valueString: "keep"
@@ -4926,10 +4928,11 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       }] }] };
       const row = toFhirR5Dosages(source)[0];
       expect(toDosageDetails([row])).toEqual(source);
-      if (scope === "administration") delete row.maxDosePerAdministration;
-      else if (scope === "lifetime") delete row.maxDosePerLifetime;
-      else delete row.maxDosePerPeriod;
-      const edited = toDosageDetails([row]);
+      const deletedRow = structuredClone(row);
+      if (scope === "administration") delete deletedRow.maxDosePerAdministration;
+      else if (scope === "lifetime") delete deletedRow.maxDosePerLifetime;
+      else delete deletedRow.maxDosePerPeriod;
+      const edited = toDosageDetails([deletedRow]);
       expect(edited.step[0].component[0].safety?.doseLimit
         ?.some(limit => limit.scope === scope)).not.toBe(true);
       expect(JSON.stringify(edited.extension)).toContain("retained-limit");
@@ -6842,7 +6845,7 @@ describe("round29 typed course display scope", () => {
   });
 
   it("keeps the administration condition before the independent limit response", () => {
-    const source = parseSig("1 tab only if SBP > 160").fhirNext;
+    const source = structuredClone(parseSig("1 tab only if SBP > 160").fhirNext);
     source.step![0].component[0].safety = {
       doseLimit: [{ scope: "administration", valueQuantity: { value: 2, unit: "tab" } }],
       ifExceeded: "Call the clinic"

@@ -584,11 +584,14 @@ describe("round 24: live projection and course boundaries", () => {
     expect(row.doseAndRate).toBeUndefined();
     expect(formatSig(structuredClone(row), "long", options)).toContain("08:00");
     row.timing!.repeat!.timeOfDay = ["10:00:00"];
-    const preview = formatSig(structuredClone(row), "long", options);
+    const submitted = structuredClone(row);
+    const preview = formatSig(submitted, "long", options);
     expect(preview).toContain("10:00");
     expect(preview).not.toContain("08:00");
     expect(preview).toContain("slowly");
     expect(preview).toContain("water");
+    expect(submitted.text).toBe(authoredText);
+    expect(JSON.stringify(submitted.extension)).toBe(original);
     expect(row.text).toBe(authoredText);
     expect(JSON.stringify(row.extension)).toBe(original);
   });

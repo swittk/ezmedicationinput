@@ -75,7 +75,9 @@ function wireCoding(value: FhirCoding): FhirCoding {
   const result:FhirCoding={};
   if(value.id!==undefined)result.id=value.id;
   if(value.system!==undefined)result.system=value.system;
+  if(value._system!==undefined)result._system=value._system;
   if(value.version!==undefined)result.version=value.version;
+  if(value._version!==undefined)result._version=value._version;
   if(value.code!==undefined)result.code=value.code;
   if(value._code!==undefined)result._code=value._code;
   if(value.display!==undefined)result.display=value.display;

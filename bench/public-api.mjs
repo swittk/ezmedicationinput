@@ -648,13 +648,13 @@ function completeThaiPreparedDrink(output) {
 function completeStagedBatch(output) {
   if (typeof output !== "string") return false;
   const stages = output.trim().replace(/\s+/gu, " ").split(" then ");
-  const finalDose = /^([+]?(?:\d+(?:\.\d+)?|\.\d+))(?:\/([+]?(?:\d+(?:\.\d+)?|\.\d+)))? tab PO on monday-friday$/u.exec(stages[2] ?? "");
+  const finalDose = /^([+]?(?:\d+(?:\.\d+)?|\.\d+))(?:\/([+]?(?:\d+(?:\.\d+)?|\.\d+)))? tab PO on ([A-Za-z]+-[A-Za-z]+)$/u.exec(stages[2] ?? "");
   const finalAmount = finalDose
     ? Number(finalDose[1]) / (finalDose[2] === undefined ? 1 : Number(finalDose[2])) : NaN;
   return stages.length === 3 &&
     stages[0] === "2 tabs morning, 1 tab evening for 1 week" &&
     stages[1] === "2 tabs morning for 1 month" &&
-    finalAmount === 0.5;
+    finalAmount === 0.5 && finalDose[3].toLowerCase() === "monday-friday";
 }
 const scalarScheduleControl = [
   "2026-11-18T08:00:00+07:00", "2026-11-18T20:00:00+07:00",
@@ -706,6 +706,52 @@ function currentComplexPreview(output, locale) {
   return typeof output === "string" &&
     normalizeClinicalPreview(output) === expectedComplexPreview[locale];
 }
+// Independent R5 output facts for the two-eye taper. These are not read back
+// through either build's importer, and remain outside every timed invocation.
+const complexRowFacts = [
+  [1, "1290032005", 1, 2, "h", "Q2H", [0, "d"], null, [7, "d"]],
+  [1, "1290031003", 4, 1, "d", "QID", [0, "d"], null, [7, "d"]],
+  [2, "1290032005", 4, 1, "d", "QID", [7, "d"], [7, "d"], [1, "mo"]],
+  [2, "1290031003", 4, 1, "d", "QID", [0, "d"], [7, "d"], [1, "mo"]],
+  [3, "1290032005", 4, 1, "d", "QID", [7, "d"], [1, "mo"], null],
+  [3, "1290031003", 2, 1, "d", "BID", [1, "mo"], [1, "mo"], null],
+];
+function completeComplexRows(output) {
+  const rows = output?.fhir;
+  if (!Array.isArray(rows) || rows.length !== complexRowFacts.length) return false;
+  const oneCode = (concept, system, code) => concept?.coding?.length === 1 &&
+    concept.coding[0].system === system && concept.coding[0].code === code;
+  const quantity = value => value?.system === "http://unitsofmeasure.org" &&
+    value.unit === value.code ? [value.value, value.code] : false;
+  const boundary = (step, name) => {
+    const value = step?.extension?.find(part => part.url === name);
+    if (!value) return null;
+    const context = value.extension?.find(part => part.url === "contextCode")?.valueCodeableConcept;
+    return oneCode(context, "http://hl7.org/fhir/evidence-variable-event", "treatment-start")
+      ? quantity(value.extension?.find(part => part.url === "offsetDuration")?.valueQuantity) : false;
+  };
+  // Iterate the required positions: a sparse six-slot array is not six rows.
+  return complexRowFacts.every((expected, index) => {
+    const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
+    if (!row || row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
+        amount.system !== "http://standardterms.edqm.eu" || amount.code !== "15022000" ||
+        !oneCode(row.route, "http://snomed.info/sct", "54485002") ||
+        !oneCode(row.site, "http://snomed.info/sct", expected[1]) ||
+        !oneCode(row.timing?.code, "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", expected[5]))
+      return false;
+    const details = row.modifierExtension?.find(part =>
+      part.url === "urn:ezmedicationinput:StructureDefinition:medication-r6-course-details");
+    const part = name => details?.extension?.find(value => value.url === name);
+    if (part("rowIndex")?.valueInteger !== index || part("sequence")?.valueInteger !== expected[0] ||
+        part("stepCount")?.valueInteger !== 3) return false;
+    const repeat = row.timing?.repeat, step = part("step");
+    const origin = row.modifierExtension?.find(part =>
+      part.url === "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin");
+    return JSON.stringify([row.sequence, expected[1], repeat?.frequency ?? 1,
+      repeat?.period, repeat?.periodUnit, expected[5], quantity(origin?.valueQuantity),
+      boundary(step, "start"), boundary(step, "end")]) === JSON.stringify(expected);
+  });
+}
 for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
   if (!currentComplexPreview(exact, locale))
@@ -738,7 +784,13 @@ for (const locale of ["en", "th"]) {
   const formatName = `formatSig/R6-complex/${locale}`;
   const importName = `fromFhir/complex/${locale}`;
   equivalenceOracles.set(formatName, output => currentComplexPreview(output, locale));
-  equivalenceOracles.set(importName, output => currentComplexPreview(output?.longText, locale));
+  equivalenceOracles.set(importName, output => {
+    // Missing or wrong conversion work is an error for either build, even if
+    // that build already differs in the historical source-preview behavior.
+    if (!completeComplexRows(output))
+      throw new Error("fromFhir failed the independent six-row R5 taper oracle");
+    return currentComplexPreview(output?.longText, locale);
+  });
   equivalenceDetails.set(formatName, sourcePreviewDifference);
   equivalenceDetails.set(importName, sourcePreviewDifference);
 }
@@ -783,6 +835,9 @@ const stagedBatchControl =
 if (!completeStagedBatch(stagedBatchControl) ||
     !completeStagedBatch(stagedBatchControl.replaceAll(" then ", "\nthen  ")))
   throw new Error("Staged-batch oracle rejected the complete three-stage preview");
+for (const spelling of ["Monday-Friday", "MONDAY-FRIDAY", "Monday-friday"])
+  if (!completeStagedBatch(stagedBatchControl.replace("monday-friday", spelling)))
+    throw new Error("Staged-batch oracle rejected equivalent weekday capitalization");
 for (const amount of ["0.5", ".5", "0.50", "2/4"])
   if (!completeStagedBatch(stagedBatchControl.replace("1/2 tab", amount + " tab")))
     throw new Error("Staged-batch oracle rejected an equal half-tablet amount");

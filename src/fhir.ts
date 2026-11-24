@@ -1,10 +1,11 @@
+import { resolveBodySiteRestrictionPredicate } from "./body-site-grammar";
 import { resolveMedicationInstructionActionForMethod, selectMedicationInstructionMethodCoding } from "./instruction-action-terminology";
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL
+  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum
 } from "./dosage-course";
-import type { ParseOptions } from "./types";
+import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
@@ -12,7 +13,7 @@ import {
 } from "./advice";
 import {
   buildBodySiteAdministrationTargetCountExtension,
-  getBodySiteAdministrationTargetCount
+  getBodySiteAdministrationTargetCount, resolveBodySiteTargetText
 } from "./body-site-target";
 import {
   buildBodySiteSpatialRelationExtensions,
@@ -759,7 +760,13 @@ function parseBodySiteRestrictionExtensions(
     const relation = restrictionExtensionChild(extension, "relation")?.valueCode;
     const predicateText = restrictionExtensionChild(extension, "predicateText")?.valueString?.trim();
     if (relation !== "where" || !predicateText) continue;
-    const rawForm = restrictionExtensionChild(extension, "predicateForm")?.valueCode;
+    const storedLemma = restrictionExtensionChild(extension, "predicateLemma")?.valueString?.trim() || undefined;
+    // A fresh wire submission can replace the live predicate text while
+    // retaining a formerly inferred lexical identity. Reconcile once at the
+    // import boundary; the complete source extension remains unchanged.
+    const changedPredicate = storedLemma !== undefined &&
+      resolveBodySiteRestrictionPredicate(predicateText).lemma !== storedLemma;
+    const rawForm = changedPredicate ? "raw" : restrictionExtensionChild(extension, "predicateForm")?.valueCode;
     const form = rawForm === "state" || rawForm === "existential" || rawForm === "raw"
       ? rawForm
       : "raw";
@@ -771,9 +778,10 @@ function parseBodySiteRestrictionExtensions(
       markerRange: restrictionRangeFromExtension(extension, "marker"),
       predicate: {
         text: predicateText,
-        lemma: restrictionExtensionChild(extension, "predicateLemma")?.valueString?.trim() || undefined,
+        lemma: changedPredicate ? undefined : storedLemma,
         form,
-        focusText: restrictionExtensionChild(extension, "predicateFocusText")?.valueString?.trim() || undefined,
+        focusText: changedPredicate ? undefined :
+          restrictionExtensionChild(extension, "predicateFocusText")?.valueString?.trim() || undefined,
         range: restrictionRangeFromExtension(extension, "predicate")
       }
     });
@@ -1041,17 +1049,7 @@ function buildSiteCodingArray(
 }
 
 function getFallbackSiteText(site: FhirCodeableConcept | undefined): string | undefined {
-  if (site?.text) {
-    return site.text;
-  }
-  const siteCoding = selectPreferredSiteCoding(site);
-  return siteCoding?.code
-    ? getBodySiteText({
-      system: siteCoding.system,
-      code: siteCoding.code,
-      display: siteCoding.display
-    })
-    : undefined;
+  return resolveBodySiteTargetText(site);
 }
 
 function codeableConceptTranslationI18n(
@@ -1919,6 +1917,8 @@ export function canonicalToFhir(
   };
   const schedule = clause.schedule;
   Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity));
+  if (schedule?.countMax !== undefined && dosage.timing?.repeat)
+    dosage.timing.repeat = withR5CountMinimum(dosage.timing.repeat);
   if (schedule?.maxDosePerPeriod?.length) {
     dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
       const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);
@@ -2286,9 +2286,9 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       eventWindow,
       occurrenceCap,
       maxDosePerPeriod,
-      dayOfWeek: repeat?.dayOfWeek ? [...repeat.dayOfWeek] : undefined,
+      dayOfWeek: repeat?.dayOfWeek?.filter((day): day is FhirDayOfWeek => day !== null),
       dayOfMonth,
-      when: repeat?.when ? [...repeat.when] : undefined,
+      when: repeat?.when?.filter((event): event is EventTiming => event !== null),
       timeOfDay: clocks ? [...clocks] : undefined,
       calendarEvents: dosage.timing?.event
         ?.map((value, index) => calendarEventFromFhir(value, dosage.timing?._event?.[index]))
@@ -2471,7 +2471,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   }
 
   if (dosage.timing?.repeat?.dayOfWeek) {
-    state.dayOfWeek.push(...dosage.timing.repeat.dayOfWeek);
+    state.dayOfWeek.push(...dosage.timing.repeat.dayOfWeek.filter((day): day is FhirDayOfWeek => day !== null));
   }
   if (dosage.timing?.repeat?.when) {
     const whenValues = dosage.timing.repeat.when.filter((value): value is EventTiming =>

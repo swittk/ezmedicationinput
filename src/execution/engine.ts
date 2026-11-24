@@ -588,7 +588,7 @@ function resolveDayFilteredSeriesRepeat(
   repeat: CanonicalRecurrence,
   enforceDayFilter: boolean
 ): CanonicalRecurrence | undefined {
-  if (!enforceDayFilter) {
+  if (!enforceDayFilter && !(repeat.monthDays?.length && usesIntervalCadence(repeat))) {
     return undefined;
   }
   if ((repeat.anchors?.length ?? 0) > 0 || (repeat.clocks?.length ?? 0) > 0) {
@@ -4187,7 +4187,8 @@ function scalarCourseAdministration(course: CanonicalCourse): CanonicalAdministr
       stage.start || stage.end) return undefined;
   const single = stage.administrations[0];
   return single.phaseOrigin || single.phaseStart || single.phaseEnd || single.phaseOriginIssue ||
-    single.phasePredecessors?.length || single.schedule?.recurrence?.startOffset || single.schedule?.recurrence?.endOffset
+    single.phasePredecessors?.length || single.schedule?.recurrence?.startOffset || single.schedule?.recurrence?.endOffset ||
+    hasAlternativeChoice(single)
     ? undefined : single;
 }
 export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDoseOptions): string[] {
@@ -4461,14 +4462,14 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
   if (
     !repeat ||
     (repeat.clocks?.length ?? 0) !== 0 ||
-    !usesIntervalCadence(repeat) ||
-    (repeat.periodUnit !== DurationUnit.Second &&
-      repeat.periodUnit !== DurationUnit.Minute &&
-      repeat.periodUnit !== DurationUnit.Hour)
+    !usesIntervalCadence(repeat)
   )
     return undefined;
   const typed = getTimingEventWindow(repeat);
-  if (typed) return typed;
+  if (typed) return normalizedCalendarInterval(repeat.period, repeat.periodUnit) ? undefined : typed;
+  // The legacy WAKE-plus-interval shorthand remains limited to subday units.
+  if (repeat.periodUnit !== DurationUnit.Second && repeat.periodUnit !== DurationUnit.Minute &&
+      repeat.periodUnit !== DurationUnit.Hour) return undefined;
   const when = repeat.anchors;
   return when?.length === 1 && when[0] === TimingEvent.Wake
     ? { start: TimingEvent.Wake, end: TimingEvent["Before Sleep"] }
@@ -5672,6 +5673,9 @@ function createIntervalStepper(
  * @returns `true` when interval stepping should be used directly; otherwise fallback logic is required.
  */
 function isDayFilteredIntervalSupported(repeat: CanonicalRecurrence, enforceDayFilter: boolean): boolean {
+  // An explicit month-day chooses the date inside each eligible month. Stepping
+  // from the order's day-of-month can miss every selected date.
+  if (repeat.monthDays?.length && (repeat.periodUnit === DurationUnit.Month || repeat.periodUnit === DurationUnit.Year)) return false;
   if (!enforceDayFilter) {
     return true;
   }
@@ -5740,8 +5744,8 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
     : limit * 366;
   const maxIterations = Math.max(limit * 366, estimatedDays + 31);
   while (results.length < limit && iterations < maxIterations && (!to || currentDay < to)) {
-    const inPeriodCycle = isDateAlignedToPeriodCycle(currentDay, anchorDay, repeat, timeZone);
-    if (inPeriodCycle && matchesCalendarDay(currentDay, dayFilter, true, calendarDays, timeZone)) {
+    const inPeriodCycle = clockCadenceEligible(currentDay, anchorDay, repeat, timeZone, dayFilter.size > 0);
+    if (inPeriodCycle && matchesCalendarDay(currentDay, dayFilter, dayFilter.size > 0, calendarDays, timeZone)) {
       for (const clock of clocks) {
         const zoned = makeZonedDateFromDay(currentDay, timeZone, clock);
         if (!zoned) {
@@ -7891,6 +7895,7 @@ function successorIntervalStart(
     !repeat.clocks?.length &&
     !repeat.dayOfWeek?.length &&
     !isWakingHoursInterval(repeat) &&
+    !dosage.schedule?.explicitEvents?.length &&
     !dosage.schedule?.code?.coding?.length
   ) {
     return (

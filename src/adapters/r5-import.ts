@@ -8,6 +8,7 @@ import { R5_EXPRESSION_SLOT_SOURCE_URL } from "../dosage-course";
  */
 import type {
   FhirDosage,
+  FhirRatio,
   EzDosage,
   EzCourseMetadata,
   FhirExtension,
@@ -24,6 +25,8 @@ import {
   safetyFromWire,
   measureFromWire,
   administrationToR5,
+  R5_SOURCE_ONLY_MAXIMUM_URL,
+  periodMaximumToR5,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
@@ -60,7 +63,7 @@ import {
   getDosageCondition,
   conditionToR6,
   decodeCourseDetails,
-  sourceWithoutNestedHistory, retainField,
+  sourceWithoutNestedHistory, retainField, readRetainedField,
   liveDosageProjection,
   getDosageAlternativeChoice,
   getDosageExcludedDates,
@@ -308,6 +311,32 @@ function restoreComponentDelta(
       provenance: limit,
     }));
     if (safety) retained.safety = safety;
+    // The generic R5 reader retains incomplete Ratios as source-only markers.
+    // A reconciled native partial limit already owns that same live Ratio;
+    // remove only its newly generated mirror, never an authored marker or an
+    // unmatched maximum. Match one occurrence at a time to retain multiplicity.
+    let partialMaxima: FhirRatio[] | undefined;
+    for (const limit of safety?.doseLimit ?? [])
+      if (limit.scope === "period" && limit.valueQuantity && limit.period &&
+          (limit.valueQuantity.value === undefined || limit.period.value === undefined))
+        (partialMaxima ??= []).push(periodMaximumToR5(limit.valueQuantity, limit.period, limit));
+    if (partialMaxima?.length && fresh.provenance) {
+      const data = fresh.provenance.data as EzDosage;
+      const extensions = data.extension?.filter(marker => {
+        if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || (row.extension?.indexOf(marker) ?? -1) >= 0) return true;
+        const maximum = readRetainedField(marker);
+        const owner = partialMaxima!.findIndex(value => equalStructuredValues(value, maximum));
+        if (owner < 0) return true;
+        partialMaxima!.splice(owner, 1);
+        return false;
+      });
+      if (extensions && extensions.length !== data.extension?.length) {
+        const current = { ...data };
+        if (extensions.length) current.extension = extensions;
+        else delete current.extension;
+        fresh.provenance.data = current;
+      }
+    }
     if (!equalStructuredValues(safety, delta.safety)) {
       superseded = true;
       addWarning(
@@ -1067,7 +1096,7 @@ function reconcileNativeCompactCourse(
     if (missingPredecessor && step.administrations.length &&
         (step.start?.anchor === "previous-phase-next-day" ||
           step.administrations.some(a => a.phaseStart?.anchor === "previous-phase-next-day" ||
-            !step.start && (a.phaseStart !== undefined || !a.schedule?.recurrence?.calendarWindow?.start))))
+            !step.start && a.phaseStart === undefined && !a.schedule?.recurrence?.calendarWindow?.start)))
       missing.add("predecessor");
     if (step.start || step.end || step.administrations.length) missingPredecessor = false;
   }
@@ -1704,22 +1733,26 @@ function reconcileNativeRetainedCourse(
   }
   const { renderedInstruction: retainedInstruction, step: _retainedSteps, ...retainedFields } = retained;
   const unchangedInstruction = retainedInstruction ?? baselineInstruction;
-  const result = courseFromFields(
-    {
-      ...retainedFields,
-      ...(course?.id !== undefined ? { id: course.id } : {}),
-      ...(course?.extension !== undefined ? { extension: course.extension } : {}),
-      ...(course?.modifierExtension !== undefined ? { modifierExtension: course.modifierExtension } : {}),
-      ...(course?.repeatCycle !== undefined ? { repeatCycle: course.repeatCycle } : {}),
-      ...(course?.safety !== undefined ? { safety: course.safety } : {}),
-      ...(editedInstruction !== undefined
-        ? { renderedInstruction: editedInstruction }
-        : !structuredChanged && unchangedInstruction !== undefined
-        ? { renderedInstruction: unchangedInstruction }
-        : {}),
-    },
-    steps, editedInstruction !== undefined ? true : undefined
-  );
+  const replacementPrimitive = (course as Omit<FhirR6DosageInstruction, "step"> | undefined)?._renderedInstruction;
+  const primitiveChanged = replacementPrimitive !== undefined &&
+    !equalStructuredValues(replacementPrimitive, retained._renderedInstruction);
+  const currentHeader: Omit<FhirR6DosageInstruction, "step"> = {
+    ...retainedFields,
+    ...(course?.id !== undefined ? { id: course.id } : {}),
+    ...(course?.extension !== undefined ? { extension: course.extension } : {}),
+    ...(course?.modifierExtension !== undefined ? { modifierExtension: course.modifierExtension } : {}),
+    ...(course?.repeatCycle !== undefined ? { repeatCycle: course.repeatCycle } : {}),
+    ...(course?.safety !== undefined ? { safety: course.safety } : {}),
+    ...(replacementPrimitive !== undefined ? { _renderedInstruction: replacementPrimitive } : {}),
+    ...(editedInstruction !== undefined
+      ? { renderedInstruction: editedInstruction }
+      : !structuredChanged && unchangedInstruction !== undefined
+      ? { renderedInstruction: unchangedInstruction }
+      : {}),
+  };
+  if (unchangedInstruction !== undefined && currentHeader.renderedInstruction !== unchangedInstruction && !primitiveChanged)
+    removeInstructionTranslations(currentHeader);
+  const result = courseFromFields(currentHeader, steps, editedInstruction !== undefined ? true : undefined);
   if (structuredChanged && editedInstruction === undefined && unchangedInstruction !== undefined) {
     addWarning(
       warnings,
@@ -1732,7 +1765,7 @@ function reconcileNativeRetainedCourse(
     for (const extension of retained.extension ?? [])
       if (extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)
         sourceFragments.push(...(extension.extension ?? []));
-  if ((structuredChanged || preserveRetainedMarkers ||
+  if ((structuredChanged || preserveRetainedMarkers || primitiveChanged ||
       editedInstruction !== undefined && editedInstruction !== unchangedInstruction) && retainedSource)
     sourceFragments.unshift(sourceWithoutNestedHistory(retainedSource));
   return withReconciliationSources(withReconciliationWarnings(result, warnings), sourceFragments);

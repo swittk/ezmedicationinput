@@ -7,7 +7,16 @@ import {projectNativeR5Course} from "./adapters/r5-course";
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import { getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "./fhir-quantity-operator";
-import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
+import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, FhirTimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
+
+/** R5 tim-8 requires the lower-count Element beside countMax, not a numeric
+ * minimum. Preserve authored companions; an absent minimum remains unknown. */
+export function withR5CountMinimum<T extends Pick<FhirTimingRepeat, "count" | "countMax" | "_count">>(repeat: T): T {
+  if (repeat.countMax === undefined || repeat.count !== undefined || repeat._count !== undefined) return repeat;
+  return { ...repeat, _count: { extension: [{
+    url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+  }] } };
+}
 
 /** Modifier extensions: ignoring either can change whether a dose may be given. */
 export const DOSAGE_CONDITION_R5_URL =
@@ -653,10 +662,11 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
   return { kind: "text", text: value.text ?? name ?? "Unresolved condition" };
 }
 
-function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
+function toR6Safety(dosage: FhirDosage, includePartialPeriods = false): FhirR6DosageSafety | undefined {
   const doseLimit: NonNullable<FhirR6DosageSafety["doseLimit"]> = [];
   for (const maximum of dosage.maxDosePerPeriod ?? []) {
-    if (maximum.numerator?.value === undefined || maximum.denominator?.value === undefined) continue;
+    if (!maximum.numerator || !maximum.denominator || !includePartialPeriods &&
+        (maximum.numerator.value === undefined || maximum.denominator.value === undefined)) continue;
     const { numerator, denominator, ...metadata } = maximum;
     doseLimit.push({
       ...metadata, scope: "period", valueQuantity: quantityFromR5(numerator)!,
@@ -677,10 +687,10 @@ function toR6Safety(dosage: FhirDosage): FhirR6DosageSafety | undefined {
 function isR5RepresentableSafetyLimit(limit: FhirR6DoseLimit): boolean {
   const quantity = limit.valueQuantity;
   if (!quantity) return false;
-  // Match the clinical R5 safety baseline. A partial Ratio is retained R6
-  // information, not a missing numeric limit when an unrelated maximum changes.
-  if (limit.scope === "period")
-    return quantity.value !== undefined && limit.period?.value !== undefined;
+  // Both Quantity objects are exposed in an R5 Ratio even when an authored
+  // endpoint has no numeric value. Presence and deletion still belong to that
+  // editable Ratio; incomplete values never create a numeric ceiling.
+  if (limit.scope === "period") return limit.period !== undefined;
   return limit.scope === "administration" || limit.scope === "lifetime";
 }
 
@@ -938,8 +948,13 @@ export function reconcileR5SafetySnapshot(
   baseline: string | undefined
 ): FhirR6DosageSafety | undefined {
   if (row.safety !== undefined && !equalStructuredValues(row.safety, retained)) return row.safety;
-  const projected = r5SafetyBaseline(row);
-  if (baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
+  const partialPeriods = retained.doseLimit?.some(limit => limit.scope === "period" &&
+    limit.valueQuantity && limit.period &&
+    (limit.valueQuantity.value === undefined || limit.period.value === undefined));
+  const projected = partialPeriods ? toR6Safety(row, true) : r5SafetyBaseline(row);
+  // Historical baselines omitted partial Ratios. Observe their current live
+  // presence instead of allowing the old empty fingerprint to restore a deletion.
+  if (!partialPeriods && baseline === compactProjectionFingerprint(projected)) return row.safety ?? retained;
   return reconcileR5SafetyEdits(retained, projected, baseline);
 }
 

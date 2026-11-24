@@ -3,8 +3,10 @@ import type { SigTranslationConfig } from "./i18n";
 export interface FhirCoding {
   id?: string;
   system?: string;
+  _system?: FhirPrimitiveElement;
   /** Terminology edition used to define this code. */
   version?: string;
+  _version?: FhirPrimitiveElement;
   code?: string;
   _code?: FhirPrimitiveElement;
   display?: string;
@@ -388,6 +390,8 @@ export interface FhirPeriod extends FhirElement {
 
 export interface FhirTimingRepeat extends FhirElement {
   count?: number;
+  /** Primitive metadata may represent an unspecified lower count without inventing a value. */
+  _count?: FhirPrimitiveElement;
   countMax?: number;
   boundsDuration?: FhirQuantity;
   boundsPeriod?: FhirPeriod;
@@ -401,26 +405,24 @@ export interface FhirTimingRepeat extends FhirElement {
   period?: number;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
-  dayOfWeek?: FhirDayOfWeek[];
+  dayOfWeek?: Array<FhirDayOfWeek | null>;
+  /** Primitive metadata corresponding positionally to dayOfWeek. */
+  _dayOfWeek?: Array<FhirPrimitiveElement | null>;
   timeOfDay?: Array<string | null>;
   /** Primitive metadata corresponding positionally to timeOfDay. */
   _timeOfDay?: Array<FhirPrimitiveElement | null>;
-  when?: EventTiming[];
+  when?: Array<EventTiming | null>;
+  /** Primitive metadata corresponding positionally to when. */
+  _when?: Array<FhirPrimitiveElement | null>;
   /** Exact event offset in minutes. */
   offset?: number;
 }
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
-export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "dayOfWeek" | "when"> {
+export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration"> {
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
-  dayOfWeek?: Array<FhirDayOfWeek | null>;
-  /** Primitive metadata corresponding positionally to dayOfWeek. */
-  _dayOfWeek?: Array<FhirPrimitiveElement | null>;
-  when?: Array<EventTiming | null>;
-  /** Primitive metadata corresponding positionally to when. */
-  _when?: Array<FhirPrimitiveElement | null>;
   startOffset?: FhirSimpleQuantity;
   endOffset?: FhirSimpleQuantity;
 }

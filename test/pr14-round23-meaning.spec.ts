@@ -1307,8 +1307,8 @@ describe("round 27: next day follows finite administration count completion", ()
     const parsed = parseSig("Take 1 tablet daily for 1 month then take 2 tablets at 06:00 the next morning");
     expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 1, durationUnit: "mo" });
     expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBeUndefined();
-    expect(nextDueDoses(parsed, { orderedAt: "2026-11-21T00:00:00Z", from: "2026-12-20T00:00:00Z", timeZone: "UTC", limit: 2 }))
-      .toEqual(["2026-12-20T09:00:00+00:00", "2026-12-21T06:00:00+00:00"]);
+    expect(nextDueDoses(parsed, { orderedAt: "2026-10-21T00:00:00Z", from: "2026-11-20T00:00:00Z", timeZone: "UTC", limit: 2 }))
+      .toEqual(["2026-11-20T09:00:00+00:00", "2026-11-21T06:00:00+00:00"]);
   });
 });
 
@@ -4831,6 +4831,10 @@ describe("round54: current unit identity and graph argument ownership", () => {
         ])] }
       };
       const expected = persist(parseInstructionGraphExtension(row.extension)!);
+      expect(expected.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Site)).toEqual([
+        expect.objectContaining({ role: AdviceArgumentRole.Site, text: "above the ear",
+          normalized: "above the ear", i18n: { th: "เหนือหู" } })
+      ]);
       const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
       for (const input of graphViews(row)) {
         const before = JSON.stringify(input);

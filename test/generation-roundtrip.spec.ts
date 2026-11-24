@@ -557,7 +557,7 @@ describe("round49 endpoint units and normalized conditions", () => {
     }, short: ["1-2 mg", "1-2 มก."], long: ["Use 1 to 2 mg.", "ใช้ครั้งละ 1 ถึง 2 มิลลิกรัม."] },
     { name: "independently valued endpoints", range: {
       low: { value: 1, unit: "mg" }, high: { value: 1, unit: "g" }
-    }, short: ["; Dose: 1 mg – 1 g", "; ขนาดยาต่อครั้ง: 1 mg – 1 g"],
+    }, short: ["Dose: 1 mg – 1 g", "ขนาดยาต่อครั้ง: 1 mg – 1 g"],
       long: ["Use; Dose: 1 mg – 1 g", "ใช้; ขนาดยาต่อครั้ง: 1 mg – 1 g"] }
   ];
 

@@ -29,6 +29,9 @@ describe("OPD clinician dogfood grammar", () => {
     expect(parsed.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3 });
     expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
     expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
+    expect(parsed.fhir.timing?.repeat?._count).toEqual({ extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] });
     expect(parsed.longText).toContain("for up to 3 doses");
     expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
     expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3

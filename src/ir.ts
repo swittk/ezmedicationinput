@@ -214,6 +214,7 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     schedule.occurrenceCap !== undefined ||
     Boolean(schedule.maxDosePerPeriod?.length) ||
     schedule.count !== undefined ||
+    schedule.countMax !== undefined ||
     schedule.timingCode ||
     schedule.dayOfWeek?.length ||
     schedule.eventWindow || schedule.when?.length ||

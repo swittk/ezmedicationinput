@@ -1191,16 +1191,17 @@ function shouldSuppressRoutePhrase(
 
 /** A timing abbreviation is shorthand only while its typed recurrence agrees. */
 export function timingCodeMatchesRecurrence(
-  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit" | "when">,
+  schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit" | "when" | "timeOfDay">,
   code = schedule.timingCode
 ): boolean {
   if (!code) return true;
   const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
-  const interval = daily === undefined || schedule.when?.length
+  const interval = daily === undefined || schedule.when?.length || schedule.timeOfDay?.length
     ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
-  if (interval?.when?.length && schedule.when?.length &&
-      (interval.when.length !== schedule.when.length ||
-       schedule.when.some((event, index) => event !== interval.when![index]))) return false;
+  if (interval?.when?.length && (schedule.when?.length
+      ? interval.when.length !== schedule.when.length ||
+        schedule.when.some((event, index) => event !== interval.when![index])
+      : Boolean(schedule.timeOfDay?.length))) return false;
   if (daily === undefined && !interval) {
     // Free text is not a recurrence abbreviation. Typed cadence owns the
     // preview while the authored label stays on the source timing.
@@ -1890,9 +1891,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
     if (condition) effectiveBase = appendClinicalConditionText(effectiveBase, condition, words);
-    // The live primary condition owns this dose; independent graph actions
-    // retain their own conditional relations in the graph realization.
-    if (!condition && primaryConditions?.length)
+    // Independent graph conditions remain attached to this administration
+    // alongside its current structured clinical guard.
+    if (primaryConditions?.length)
       effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en");
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");

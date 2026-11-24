@@ -2766,8 +2766,8 @@ function formatLongThai(
   if (clause.clinicalAdjuncts?.condition)
     administrationText = appendClinicalConditionText(administrationText, clause.clinicalAdjuncts.condition, words)
       .replace(/[.!?]+$/u, "");
-  // A current clinical condition replaces the retained primary relation.
-  if (!clause.clinicalAdjuncts?.condition && primaryConditions?.length)
+  // Independent graph conditions remain alongside the structured guard.
+  if (primaryConditions?.length)
     administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th");
   if (preFlowsIntoAdministration && preGraphInstruction) {
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;

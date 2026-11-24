@@ -335,7 +335,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relation = c.time && !timeRelation ? "in"
         : c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
           ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
-      if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
+      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       const amount = c.amount ? (c.theme ? " (" + c.amount + ")" : " " + c.amount) : "";
       const site = c.theme && c.site ? " to " + c.site : "";
       return c.label + (object ? " " + object : "") + amount + site +
@@ -491,7 +491,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const timeRelation = c.timeRelation ?? c.frame.relation;
       const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
         ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
-      if (c.timeWasRendered !== undefined && c.time && (!timeRelation || relation)) c.timeWasRendered = true;
+      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
       const amount = c.amount ? " " + c.amount : "";
       const site = c.theme && c.site ? "บริเวณ" + c.site : "";
       return c.label + (object ?? "") + amount + site + (c.time ? (relation ?? "") + c.time : "");
