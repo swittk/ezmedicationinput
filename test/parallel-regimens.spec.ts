@@ -1220,7 +1220,7 @@ describe("round42 relative points and inherited cadence origins", () => {
     expect(successor.dose).toMatchObject({ value: 2, unit: "tab" });
     expect(successor.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", clockWindow: window });
     expect(successor.schedule?.timingReference).toBeUndefined();
-    expect(successor.additionalInstructions).toEqual([]);
+    expect(successor.additionalInstructions).toBeUndefined();
     for (const wire of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
       expect(importCanonicalCourse(wire).stages[1].administrations[0].schedule?.recurrence?.clockWindow).toEqual(window);
     const unresolved = parseSig("Take 1 tablet daily for 7 days, then take 2 tablets at the same time");
