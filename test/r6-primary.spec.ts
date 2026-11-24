@@ -6512,8 +6512,10 @@ describe("review 2026-11-16 19h: rateRange surface provenance", () => {
     for (const text of [imported.shortText, imported.longText])
       expect(text.match(/Rate range: ([^.;]+)(?:[.;]|$)/u)?.[1]).toBe(expected);
     expect(imported.fhir).toEqual(dosage);
-    // An explicit format request may deliberately return the authored source.
-    expect(formatSig(dosage, "long")).toBe("Infuse as instructed.");
+    // Omitted mode is normalized; explicit roundtrip still replays the source.
+    expect(formatSig(dosage, "long")).toBe(formatSig(dosage, "long", { realizationMode: "normalized" }));
+    expect(formatSig(dosage, "long")).toContain(expected);
+    expect(formatSig(dosage, "long", { realizationMode: "roundtrip" })).toBe("Infuse as instructed.");
   });
 });
 

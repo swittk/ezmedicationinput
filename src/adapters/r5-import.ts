@@ -12,6 +12,7 @@ import type {
   EzCourseMetadata,
   EzCourseStep,
   FhirExtension,
+  FhirR6Extension,
   FhirR6Dosage,
   FhirR6DosageInstruction,
   FhirR6DoseLimit,
@@ -45,7 +46,7 @@ import {
   matchingProjectionFingerprint,
   offsetCadenceFingerprint,
   matchesOffsetCadence,
-  dosageProjectionFingerprint,
+  matchesDosageProjectionFingerprint,
   dosageTextFingerprint,
   isRenderedInstructionMarker,
   hasUnrecognizedEditMetadata,
@@ -133,10 +134,10 @@ function courseFromFields(
   if(sourceTextVerified!==undefined)course.provenance!.sourceTextVerified=sourceTextVerified;
   return course;
 }
-function extensionFields(course: CanonicalCourse): FhirExtension[] {
-  return (course.provenance?.data.extension as FhirExtension[] | undefined) ?? [];
+function extensionFields(course: CanonicalCourse): FhirR6Extension[] {
+  return (course.provenance?.data.extension as FhirR6Extension[] | undefined) ?? [];
 }
-function withExtensions(course: CanonicalCourse, extension: FhirExtension[]): CanonicalCourse {
+function withExtensions(course: CanonicalCourse, extension: FhirR6Extension[]): CanonicalCourse {
   return {
     ...course,
     provenance: {
@@ -152,7 +153,7 @@ function withReconciliationWarnings(course: CanonicalCourse, warnings: readonly 
     known = new Set<string>();
   for (const e of original)
     if (e.url === DOSAGE_RECONCILIATION_WARNING_URL && e.valueString) known.add(e.valueString);
-  let next: FhirExtension[] | undefined;
+  let next: FhirR6Extension[] | undefined;
   for (const text of warnings)
     if (!known.has(text)) {
       known.add(text);
@@ -174,11 +175,11 @@ function withPreservedSourceExtension(
  * for each row; hash collisions never authorize discarding distinct data. */
 function withReconciliationSources(
   course: CanonicalCourse,
-  sources: readonly FhirExtension[]
+  sources: readonly FhirR6Extension[]
 ): CanonicalCourse {
   if (!sources.length) return course;
   const existing = extensionFields(course);
-  const buckets = new Map<number, FhirExtension[]>();
+  const buckets = new Map<number, FhirR6Extension[]>();
   for (const marker of existing) {
     if (marker.url !== DOSAGE_RECONCILIATION_SOURCE_URL || marker.extension?.length !== 1) continue;
     const source = marker.extension[0],
@@ -187,7 +188,7 @@ function withReconciliationSources(
     if (!bucket) buckets.set(key, (bucket = []));
     bucket.push(source);
   }
-  let next: FhirExtension[] | undefined;
+  let next: FhirR6Extension[] | undefined;
   for (const source of sources) {
     const key = hashStructuredValue(source);
     let bucket = buckets.get(key),
@@ -386,7 +387,7 @@ function restoreComponentDelta(
       const unchangedRate = !!(
         baseline?.rate !== undefined &&
         (old.rateExpression ||
-          old.rateQuantity?.comparator ||
+          old.rateQuantity?.comparator || old.rateRange ||
           old.rateRatio?.numerator?.comparator === "~") &&
         baseline.rate ===
           compactProjectionFingerprint({
@@ -439,7 +440,8 @@ function restoreComponentDelta(
       // A changed live Range owns its current endpoints. Its complete
       // original metadata remains inactive source, even when only an
       // annotation-only endpoint was removed.
-      if (old.doseRange && !unchangedDose && !equalStructuredValues(live?.doseRange, old.doseRange))
+      if (old.doseRange && !unchangedDose && !equalStructuredValues(live?.doseRange, old.doseRange) ||
+          old.rateRange && !unchangedRate && !equalStructuredValues(live?.rateRange, old.rateRange))
         supersededQuantity = true;
       if (old.rateExpression) {
         if (unchangedRate && baseline?.rateExpression === undefined &&
@@ -503,7 +505,7 @@ function restoreComponentDelta(
         if (old.doseExpression || old.rateExpression) supersededExpression = true;
         if (
           old.doseQuantity?.comparator || old.doseRange ||
-          old.rateQuantity?.comparator ||
+          old.rateQuantity?.comparator || old.rateRange ||
           old.rateRatio?.numerator?.comparator === "~"
         )
           supersededQuantity = true;
@@ -519,7 +521,7 @@ function restoreComponentDelta(
       superseded = true;
       addWarning(
         warnings,
-        "Retained R6 dose/rate Quantity comparators or dose ranges superseded by edited R5 fields were preserved only as inert source provenance."
+        "Retained R6 dose/rate Quantity comparators or dose/rate ranges superseded by edited R5 fields were preserved only as inert source provenance."
       );
     }
   }
@@ -582,7 +584,7 @@ function reconcileNativeCompactCourse(
 ): CanonicalCourse {
   const warnings: string[] = [];
   const resolvedSequences = new Set(resolvedPhaseSequences ?? []);
-  const sources: FhirExtension[] = [];
+  const sources: FhirR6Extension[] = [];
   const headers = new Map<string, CompactCourseRow>();
   const conflictingContexts = new Set<string>();
   const conflictingPhases = new Set<number>();
@@ -936,7 +938,7 @@ function reconcileNativeCompactCourse(
     );
     const projectionMatches =
       !nativeCleared &&
-      (expectedProjection === undefined || expectedProjection === dosageProjectionFingerprint(dosage));
+      (expectedProjection === undefined || matchesDosageProjectionFingerprint(dosage, expectedProjection));
     const textMatches = expectedText === undefined || expectedText === dosageTextFingerprint(dosage);
     if (!projectionMatches || !textMatches || used.has(sourceIndex) || !baseline) instructionMatches = false;
     used.add(sourceIndex);
@@ -972,7 +974,7 @@ function reconcileNativeCompactCourse(
       // metadata, even when no renderedInstruction baseline was ever stored.
       // Never recursively embed already-flat reconciliation history.
       const priorExtensions = header.course.extension;
-      let envelopes: FhirExtension[] | undefined;
+      let envelopes: FhirR6Extension[] | undefined;
       if (priorExtensions) {
         envelopes = [];
         for (const item of priorExtensions) {
@@ -1216,7 +1218,7 @@ function reconcileNativeRetainedCourse(
   preserveRetainedMarkers = false,
   initialWarnings: readonly string[] = [],
   retainedSource?: FhirExtension,
-  additionalSources: readonly FhirExtension[] = [],
+  additionalSources: readonly FhirR6Extension[] = [],
   sourceContext = false,
   baselineInstruction?: string,
   sourceCarrierIndices?: ReadonlySet<number>
@@ -1779,7 +1781,7 @@ function isSourceOnlyCarrier(carrier: FhirDosage | EzDosage): boolean {
   return carrier.modifierExtension?.length === 1 &&
     carrier.modifierExtension[0].url === DOSAGE_DETAILS_R5_URL &&
     Object.keys(carrier).every(key => {
-      if (key === "text" || key === "_text" || key === "modifierExtension" || key === "id") return true;
+      if (key === "text" || key === "_text" || key === "_sequence" || key === "modifierExtension" || key === "id") return true;
       if (key === "extension") return !carrier.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
       if (key === "sequence") return carrier.sequence === undefined || carrier.sequence === 1;
       const value = (carrier as Record<string, unknown>)[key];
@@ -1810,7 +1812,7 @@ export function courseFromR5(
   let original: FhirExtension | undefined;
   let retained: FhirR6DosageInstruction | undefined;
   let retainedSource: FhirExtension | undefined;
-  const reconciliationSources: FhirExtension[] = [];
+  const reconciliationSources: FhirR6Extension[] = [];
   let preserveRetainedMarkers = false, retainedHasNoMembers = false;
   // A mixed-codec caller reuses this classification to align real members;
   // source carriers must consume no slot in its historical-member cursor.
@@ -1889,7 +1891,7 @@ export function courseFromR5(
     for (let index = 0; index < dosages.length; index++) {
       const dosage = dosages[index],
         before = snapshot.rows[index];
-      const projectionMatches = before?.projection === dosageProjectionFingerprint(dosage);
+      const projectionMatches = matchesDosageProjectionFingerprint(dosage, before?.projection);
       const textMatches = before?.text === dosageTextFingerprint(dosage);
       if (!projectionMatches || !textMatches) instructionStillMatches = false;
       if (!textMatches) textWasEdited = true;
@@ -1942,10 +1944,11 @@ export function courseFromR5(
       carrier
     ) {
       const instruction = currentInstruction ?? carrier.text;
-      if (carrier.id !== undefined || carrier._text !== undefined || carrier.extension?.length)
+      if (carrier.id !== undefined || carrier._text !== undefined || carrier._sequence !== undefined || carrier.extension?.length)
         reconciliationSources.push(retainField("r5SourceCarrier", {
           ...(carrier.id !== undefined ? { id: carrier.id } : {}),
           ...(carrier._text !== undefined ? { _text: carrier._text } : {}),
+          ...(carrier._sequence !== undefined ? { _sequence: carrier._sequence } : {}),
           ...(carrier.extension?.length ? { extension: carrier.extension } : {}),
         }));
       // Even an incomplete clinician-authored stage is live editable data.
@@ -2011,7 +2014,7 @@ export function courseFromR5(
       // Historical reconciliation sources are not active annotations:
       // preserve their existing flat children exactly once BEFORE replacing
       // the active extension array and flattening the latest source marker.
-      const oldSources: FhirExtension[] = [];
+      const oldSources: FhirR6Extension[] = [];
       if (course?.extension !== undefined)
         for (const extension of retained.extension ?? []) {
           if (extension.url === DOSAGE_RECONCILIATION_SOURCE_URL)

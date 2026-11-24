@@ -288,6 +288,7 @@ export function buildInstructionGraphExtension(
     }
     nested.push({ url: "opaque", extension: opaqueNested });
   }
+  if (graph.sourceExtensions) for (const field of graph.sourceExtensions) nested.push(field);
   return { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
 }
 
@@ -506,7 +507,7 @@ export function parseInstructionGraphExtension(extensions:FhirExtension[]|undefi
   if(!graph)return undefined;
   const actions:AdviceFrame[]=[],relations:CanonicalInstructionRelation[]=[],opaque:CanonicalSourceSpan[]=[];
   let coverage:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
-    source:FhirExtension|undefined,locale:FhirExtension|undefined;
+    source:FhirExtension|undefined,locale:FhirExtension|undefined,sourceExtensions:FhirExtension[]|undefined;
   for(const field of graph.extension??[])switch(field.url){
     case "action":{const action=parseActionExtension(field);if(action)actions.push(action);break;}
     case "graphRelation":{const relation=parseGraphRelation(field);if(relation)relations.push(relation);break;}
@@ -515,9 +516,11 @@ export function parseInstructionGraphExtension(extensions:FhirExtension[]|undefi
     case "primaryAdministrationStart":if(!start)start=field;break;
     case "primaryAdministrationEnd":if(!end)end=field;break;
     case "sourceText":if(!source)source=field;break;case "sourceLocale":if(!locale)locale=field;break;
+    default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;
-  return {actions,primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
+  return {actions,...(sourceExtensions ? {sourceExtensions} : {}),
+    primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
     ?{start:start.valueInteger,end:end.valueInteger}:undefined,
     relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,
     coverage:coverage?parseGraphCoverage(coverage):undefined,sourceText:source?.valueString??"",sourceLocale:locale?.valueCode};

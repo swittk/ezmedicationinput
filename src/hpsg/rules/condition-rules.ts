@@ -1,5 +1,6 @@
 import { medicationGuardLeadLexeme, CIRCUMSTANTIAL_CONDITION_HEADS } from "../../medication-condition";
 import { registeredActivityDayAt } from "./instruction-rules";
+import { frameActionDefinition } from "../../instruction-graph";
 import { AdviceArgumentRole, AdviceFrame, AdvicePolarity, AdviceRelation, EventTiming, FhirDayOfWeek, MedicationCondition, ParseOptions } from "../../types";
 import {
   findMedicationDateListSpans,
@@ -292,7 +293,7 @@ function withholdsMedicationAdministration(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): boolean {
-  const action = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const action = frameActionDefinition(frame, context.options);
   const prohibitedAdministration = frame.polarity === AdvicePolarity.Negate &&
     (action?.primaryAdministrationHead || action?.definesDose && action.administrationMethod);
   const effect = prohibitedAdministration ? "withhold" : action?.argumentParserConfig?.medicationConditionEffect;
@@ -688,7 +689,7 @@ function isSafetyTarget(context: HpsgClauseContext, frame: ReturnType<typeof get
 }
 
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
-  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = frameActionDefinition(frame, context.options);
   return Boolean(
     definition?.procedural || isConditionalAdviceFrame(context, frame) ||
     isSafetyTarget(context, frame)

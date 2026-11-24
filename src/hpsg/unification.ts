@@ -417,6 +417,7 @@ function mergeDose(
   if (!clinicalQuantity && left.clinicalQuantity && right.clinicalQuantity) return undefined;
   let value = mergeOptionalScalar(left.value, right.value);
   let unit = mergeOptionalScalar(left.unit, right.unit);
+  let range = mergeOptionalScalar(left.range, right.range);
   const divisionCount = mergeOptionalScalar(left.divisionCount, right.divisionCount);
   if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
       clinicalQuantity.status !== "unsupported" &&
@@ -458,6 +459,14 @@ function mergeDose(
             ? { comparator: activeDose.comparator } : {})
         }
       };
+    } else if (independentRate && range && unit) {
+      // A separately authored total range divides just like a scalar amount;
+      // the independent infusion rate keeps its original numerator and period.
+      range = {
+        low: range.low === undefined ? undefined : range.low / divisionCount,
+        high: range.high === undefined ? undefined : range.high / divisionCount,
+      };
+      clinicalQuantity = { ...clinicalQuantity, dividedDoseCount: divisionCount };
     }
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
     // Independently supplied volume and rate are compatible arguments of one
@@ -470,7 +479,7 @@ function mergeDose(
   return {
     attachmentClass: mergedClass,
     value,
-    range: mergeOptionalScalar(left.range, right.range),
+    range,
     unit,
     comparator: mergeOptionalScalar(left.comparator, right.comparator),
     clinicalQuantity,

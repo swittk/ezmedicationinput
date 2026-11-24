@@ -547,7 +547,7 @@ function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
 }
 function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true): boolean {
   if (administrationHasAmountFacts(a)) return true;
-  if (a.asNeeded !== undefined || a.target || a.targetCount !== undefined || a.siteReference ||
+  if (a.asNeeded === true || a.target || a.targetCount !== undefined || a.siteReference ||
       a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
       a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
       (includeSafety && (a.limits?.length || safetyHasClinicalFacts(a.safety))) || a.choice || a.phaseOrigin ||

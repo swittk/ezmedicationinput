@@ -5,7 +5,7 @@
  * its original scope so an unchanged export can be reopened for editing.
  */
 import type {
-  FhirExtension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
+  FhirExtension, FhirR6Extension, FhirR6DosageInstruction, FhirR6DosageInstructionInput,
   FhirR6DosageSafety, FhirR6DosageStep, FhirR6DoseLimit, FhirR6Ratio, FhirR6Timing,
   FhirR6Dosage, FhirR6Quantity, FhirR6RelativeTime, FhirRange,
 } from "../types";
@@ -13,13 +13,13 @@ import { equalStructuredValues, hashStructuredValue } from "../stable-structure"
 import { boundaryFromR6 } from "./canonical-course";
 import { getAdministrationOffsetMinutes, getAnchoredCourseDuration } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
-import { encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
+import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
 export const R6_SCOPED_SAFETY_MODIFIER_URL = "urn:ezmedicationinput:r6-scoped-safety-policy";
 
-function replaceSource(owner: { extension?: FhirExtension[] }, url: string, value: object | undefined): void {
+function replaceSource(owner: { extension?: FhirR6Extension[] }, url: string, value: object | undefined): void {
   const extensions = owner.extension?.filter(item => item.url !== url) ?? [];
   const prior = owner.extension?.filter(item => item.url === url) ?? [];
   if (value !== undefined) {
@@ -45,7 +45,7 @@ function replaceSource(owner: { extension?: FhirExtension[] }, url: string, valu
 
 /** Retired external source remains inert and recoverable. It must no longer
  * supply hidden timing/safety after a live wire edit, but must not disappear. */
-function retireSource(owner: { extension?: FhirExtension[] }, url: string): void {
+function retireSource(owner: { extension?: FhirR6Extension[] }, url: string): void {
   const markers = owner.extension?.filter(item => item.url === url);
   if (!markers?.length) return;
   const kept = owner.extension!.filter(item => item.url !== url);
@@ -104,6 +104,12 @@ function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): obje
   const { id: _id, offsetDuration, offsetRange, ...fields } = boundary;
   return { ...fields, offsetDuration: draftCompletionQuantity(offsetDuration),
     offsetRange: draftCompletionRange(offsetRange) };
+}
+/** The member's typed phase end owns completion independently of timing. */
+function draftMemberPhaseEnd(value: FhirR6Dosage): object | undefined {
+  const marker = value.modifierExtension?.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
+  if (!marker || marker.valueQuantity) return undefined;
+  return draftCompletionBoundary(decodeR6SourceMetadata(marker, "step")?.end as FhirR6RelativeTime | undefined);
 }
 function draftAnchoredLength(dosage: FhirR6Dosage): object | undefined {
   const length = getAnchoredCourseDuration(dosage);
@@ -177,6 +183,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
+            !equalStructuredValues(draftMemberPhaseEnd(before), draftMemberPhaseEnd(after)) ||
             (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==
               (getAdministrationOffsetMinutes({ modifierExtension: after.modifierExtension }) ?? 0) ||
             !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),
@@ -260,7 +267,7 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
 }
 
 /** Indices from the current external draft source, for R5 membership edits. */
-export function retainedDraftStepIndices(input: { extension?: FhirExtension[] }): readonly number[] | undefined {
+export function retainedDraftStepIndices(input: { extension?: FhirR6Extension[] }): readonly number[] | undefined {
   const marker = input.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
   if (!marker) return undefined;
   let saved: Record<string, unknown> | undefined;

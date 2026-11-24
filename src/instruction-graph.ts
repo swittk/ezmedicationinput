@@ -1681,6 +1681,12 @@ function buildActionFrame(
     : undefined;
   const relationTargetEnd = nextRelationIndex >= 0 ? nextRelationIndex : segmentEnd;
   const secondaryConditionalTail = relationHasGrammarFeature(nextRelation, "conditionalTail");
+  // A clock after a material complement ends before its conditional daughter.
+  // Reuse the existing relation grammar, only on this time-complement path.
+  const clockTailIndex = nextRelationIndex >= 0 && relationHasGrammarFeature(nextRelation, "timeComplement")
+    ? relationIndex(parts, nextRelationIndex + 1, segmentEnd) : -1;
+  const clockConditionalTail = clockTailIndex >= 0 && relationHasGrammarFeature(
+    actionArgumentRelation(key(parts[clockTailIndex])), "conditionalTail");
   const relation = conditionalTail ? undefined : rawRelation;
   const secondaryActivityTarget = nextRelationIndex >= 0
     ? resolveMedicationInstructionAction(key(parts[nextRelationIndex + 1]), options)
@@ -1694,7 +1700,7 @@ function buildActionFrame(
     ? relIndex
     : secondaryConditionalTail && nextRelationIndex >= 0
       ? nextRelationIndex
-      : segmentEnd;
+      : clockConditionalTail ? clockTailIndex : segmentEnd;
   // A conditional daughter owns its own measurements and observation window.
   // They are not the preceding administration's amount or course duration.
   // Material/destination complements own their quantities independently of
@@ -1723,7 +1729,9 @@ function buildActionFrame(
   const argumentParser = ACTION_ARGUMENT_PARSERS[definition.argumentParser ?? "default"] ??
     DEFAULT_ACTION_ARGUMENT_PARSER;
   const parsed = argumentParser({
-    definition, parts, actionIndex, argumentStart, segmentEnd, input, offset, options,
+    definition, parts, actionIndex, argumentStart,
+    segmentEnd: definition.argumentParser === "mix-substance" ? semanticEnd : segmentEnd,
+    input, offset, options,
     relation, relIndex, relationTargetEnd, conditionalTail, relationTime, amount, duration,
     separableParticleIndex: actionMatch.separableParticleIndex
   });
@@ -1750,9 +1758,9 @@ function buildActionFrame(
   // The shared clock grammar also licenses a complete time daughter after
   // a material complement, e.g. dissolve in water at 08:00.
   const nextTime = temporalIndex >= 0 && relationHasGrammarFeature(temporalRelation, "timeComplement")
-    ? clockArgumentFromParts(parts, temporalIndex + 1, segmentEnd, input) : undefined;
+    ? clockArgumentFromParts(parts, temporalIndex + 1, semanticEnd, input) : undefined;
   if (nextTime) {
-    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, segmentEnd);
+    const bounds = semanticArgumentBounds(parts, temporalIndex + 1, semanticEnd);
     const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
     pushArgument(args, { ...nextTime, relation: temporalRelation,
       ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {})
@@ -3703,7 +3711,8 @@ function defaultActionArguments(frame: AdviceFrame) {
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Substance && !arg.relation) unmarkedSubstances++;
     if ((arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) &&
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Material) &&
         relationHasSemanticClass(arg.relation, "accompaniment")) {
       explicitAccompaniment = arg;
       break;
@@ -3715,7 +3724,8 @@ function defaultActionArguments(frame: AdviceFrame) {
   for (const arg of frame.args) {
     if (arg.role === AdviceArgumentRole.Amount) amountArg ??= arg;
     else if (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object ||
-        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance) {
+        arg.role === AdviceArgumentRole.Site || arg.role === AdviceArgumentRole.Substance ||
+        arg.role === AdviceArgumentRole.Material && relationHasSemanticClass(arg.relation, "accompaniment")) {
       // A WITH daughter remains an accompaniment when the medication object
       // is implicit. A bare substance without that relation can be the object.
       if (arg.relation && relationHasSemanticClass(arg.relation, "accompaniment") ||
@@ -4791,8 +4801,9 @@ export function instructionGraphRichPrimaryAction(
       arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, dose)
     )
   );
-  return graph.actions.find((action) => {
-    if (action.polarity === AdvicePolarity.Negate) return false;
+  let fallback: AdviceFrame | undefined;
+  for (const action of graph.actions) {
+    if (action.polarity === AdvicePolarity.Negate) continue;
     const overlapsPrimary = Boolean(
       primary && action.span.start < primary.end && primary.start < action.span.end
     );
@@ -4806,11 +4817,11 @@ export function instructionGraphRichPrimaryAction(
       )
     );
     if (hasCanonicalAdministration && primaryActionCoveredByCanonicalClause(action, graph.actions, clause)) {
-      return false;
+      continue;
     }
-    if (!hasCanonicalAdministration) return false;
+    if (!hasCanonicalAdministration) return undefined;
     const suppliesMissingHead = Boolean(!clause.method && dose && matchesDose(action));
-    if (!overlapsPrimary && !suppliesMissingHead) return false;
+    if (!overlapsPrimary && !suppliesMissingHead) continue;
     const rich = Boolean(
       action.relation || action.args.some((arg) =>
         [
@@ -4823,13 +4834,17 @@ export function instructionGraphRichPrimaryAction(
     // The selected source span continues to identify the SAME event after a
     // method or dose edit. Its renderer applies current facts to a display copy
     // and preserves independent adjuncts; another action cannot inherit it.
-    if (overlapsPrimary) return rich || suppliesMissingHead;
+    if (overlapsPrimary) {
+      if (rich || suppliesMissingHead) return action;
+      continue;
+    }
     const definition = getMedicationInstructionAction(action.predicate.lemma);
-    return (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+    if (!fallback && (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
       !primaryActionAmountConflicts(action, dose,
       !dose && clause.sourceProjectionVerified === false) &&
-      (rich || suppliesMissingHead) && (!dose || matchesDose(action));
-  });
+      (rich || suppliesMissingHead) && (!dose || matchesDose(action))) fallback = action;
+  }
+  return fallback;
 }
 
 export function instructionGraphRoundTripPrimaryAction(

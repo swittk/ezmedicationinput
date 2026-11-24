@@ -540,7 +540,7 @@ function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number):
   const clock = tokens[before - 1];
   if (previous && MERIDIEM_TOKENS.has(previous.canonical ?? previous.lower) &&
       clock && (clock.kind === LexKind.Number || clock.kind === LexKind.TimeLike)) before -= 2;
-  else if (previous?.kind === LexKind.TimeLike) before--;
+  else if (previous?.kind === LexKind.TimeLike || previous?.kind === LexKind.Number) before--;
   const governor = tokens[before];
   return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
 }

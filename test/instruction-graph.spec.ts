@@ -5740,6 +5740,12 @@ describe("round 49 saved instruction ownership", () => {
           expect(administration).toMatch(action);
           expect(administration).not.toContain(amount);
           expect(text).not.toMatch(/(?:^|[^0-9.])2 tablets?(?![a-z])/u);
+          if (source.startsWith("Measure")) {
+            expect(text).not.toMatch(/(?:^|[^0-9.])5 mL(?![a-z])/iu);
+          }
+          if (source.startsWith("Draw up")) {
+            expect(text).not.toMatch(/(?:^|[^0-9.])2 mL(?![a-z])/iu);
+          }
         }
         expect(JSON.stringify(input)).toBe(before);
       }
@@ -6729,8 +6735,10 @@ describe("round59 graph argument fidelity and current action coverage", () => {
       .toMatchObject({ value, unit: "tab", comparator });
     for (const graph of [{ sourceText: source, sourceLocale: "en", actions: [frame] },
       parseInstructionGraphExtension([fresh(marker)])!]) {
-      expect(realizeInstructionGraph(graph, "en")).toMatch(/^Do not swallow /u);
-      expect(realizeInstructionGraph(graph, "th")).toMatch(/^ห้าม/u);
+      expect(realizeInstructionGraph(graph, "en")).toBe(source);
+      expect(realizeInstructionGraph(graph, "th")).toBe(comparator === ">"
+        ? "ห้ามกลืน มากกว่า 0.5 เม็ด"
+        : "ห้ามกลืน ไม่เกิน 0.25 เม็ด");
     }
   });
 
@@ -6754,6 +6762,9 @@ describe("round59 graph argument fidelity and current action coverage", () => {
         for (const locale of ["en", "th"]) {
           const rendered = formatSig(input, "long", { locale, realizationMode: "normalized" });
           expect(rendered).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          expect(rendered.match(locale === "en"
+            ? /(?:^|[^0-9.])2 tablets(?![A-Za-z0-9])/gu
+            : /(?:^|[^0-9.])2 เม็ด/gu)).toHaveLength(1);
           expect(rendered).not.toContain(locale === "en" ? "1 tablet" : "1 เม็ด");
           expect(rendered).not.toMatch(locale === "en" ? /[.]\s*Take[.]/u : /[.]\s*รับประทาน[.]/u);
           if (source.includes("slowly")) expect(rendered).toContain("slowly");

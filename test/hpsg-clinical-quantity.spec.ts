@@ -3637,6 +3637,35 @@ describe("round59 glued qualified fraction words", () => {
     }
     const reopened = importCanonicalCourse(saved);
     const administration = reopened.stages[0].administrations[0];
-    expect(administration.amounts?.[0].rate).toBeDefined();
+    expect(administration.amounts?.[0].rate).toMatchObject({ value, unit: "mL/h", comparator });
+  });
+});
+
+
+describe("round60 divided ranges beside independent infusion rates", () => {
+  it("divides the authored daily volume range while retaining the independent flow rate", () => {
+    const source = "Infuse 100–200 mL daily in 2 divided doses at 30 mL/hr";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ range: { low: 50, high: 100 }, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", numerator: { value: 30, unit: "mL" },
+      dividedDoseCount: 2, denominators: [{ value: 1, unit: "h" }],
+    });
+    const values = [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhirNext)),
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))];
+    for (const input of values) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
+      expect(member.amounts).toMatchObject([{ range: { low: { value: 50, unit: "mL" }, high: { value: 100, unit: "mL" } },
+        rate: { value: 30, unit: "mL/h" } }]);
+      expect(member.schedule!.recurrence).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      const query = { from: "2026-01-01T00:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 2 };
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 200, unit: "mL", quantityKind: "maximum" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const scalar = parsePublicSig("Infuse 100 mL daily in 2 divided doses at 30 mL/hr");
+    expect(scalar.meta.canonical.course!.stages[0].administrations[0].amounts)
+      .toMatchObject([{ quantity: { value: 50, unit: "mL" }, rate: { value: 30, unit: "mL/h" } }]);
   });
 });

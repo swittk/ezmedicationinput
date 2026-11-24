@@ -1135,9 +1135,9 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;
-  // Explicit normalization uses the existing rich native realizer; source
-  // replay must not hide a retained infusion qualifier or requested locale.
-  if (options?.realizationMode === "normalized" &&
+  // Normalization is the default, including when no mode is supplied.
+  // Explicit source replay keeps its separate authored-text behavior.
+  if (options?.realizationMode !== "roundtrip" &&
       (primary?.rateQuantity || primary?.rateRatio || primary?.rateRange ||
        primary?.doseExpression || primary?.rateExpression || dosage.maxDosePerPeriod?.length ||
        dosage.maxDosePerAdministration || dosage.maxDosePerLifetime || dosage.safety ||
@@ -1155,6 +1155,7 @@ export function formatSig(
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
+  if (options?.realizationMode === undefined) options = { ...options, realizationMode: "normalized" };
   if (Array.isArray(input)) {
     return formatSigBatch(input as EzDosage[], style, options);
   }
@@ -1445,6 +1446,7 @@ function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
 ): ParseResult {
+  if (options?.realizationMode === undefined) options = { ...options, realizationMode: "normalized" };
   const edit = sourceDisplayEdit(dosage);
   const replacementText = typeof edit === "string" && options?.realizationMode === "roundtrip" ? edit : undefined;
   const unverified = replacementText === undefined &&

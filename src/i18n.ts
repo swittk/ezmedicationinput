@@ -1957,10 +1957,10 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
     const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (schedule.durationMaxUnit ?? "");
     return `x${low} – ${high}`;
   }
-  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit;
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit ?? "";
   if (schedule.duration === undefined)
     return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
@@ -1972,7 +1972,7 @@ function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | unde
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
-  return `x${lowerBound}${base}${schedule.durationUnit}`;
+  return `x${lowerBound}${base}${schedule.durationUnit ?? ""}`;
 }
 
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1995,24 +1995,24 @@ function describeDurationThai(schedule: CanonicalScheduleExpr | undefined, words
       (comparator ?? "") + stripTrailingZero(value) + (unit ? " " + (words.timeUnit(unit, value) ?? unit) : "");
     return `เป็นเวลา ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxComparator)}`;
   }
-  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const unit = schedule.durationUnit;
+  const unit = schedule.durationUnit ?? "";
   const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (value: number | undefined, endpointUnit = unit): string => words.timeUnit(endpointUnit, value) ?? endpointUnit;
+  const label = (value: number | undefined, endpointUnit = unit): string => endpointUnit ? words.timeUnit(endpointUnit, value) ?? endpointUnit : "";
   if (schedule.duration === undefined)
-    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit)}`;
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit)}`.trim();
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
-    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
+    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`.trim();
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";
-  return `เป็นเวลา ${lowerBound}${lower} ${label(schedule.duration)}`;
+  return `เป็นเวลา ${lowerBound}${lower} ${label(schedule.duration)}`.trim();
 }
 
 function describeAdministrationDurationThai(
@@ -2528,7 +2528,8 @@ function formatLongThai(
   const graphRegimenTail: string[] = [];
   if (richPrimaryGraphText) {
     if (richRoutePart) graphRegimenTail.push(richRoutePart);
-    if (timing.frequency) graphRegimenTail.push(timing.frequency);
+    const graphFrequency = richPrimaryCoversSingleEvent ? frequencyPart : timing.frequency;
+    if (graphFrequency) graphRegimenTail.push(graphFrequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     else {
       if (timingText) graphRegimenTail.push(timingText);

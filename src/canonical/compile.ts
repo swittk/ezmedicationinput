@@ -351,7 +351,11 @@ export function courseFromPartialParallel(
                 repeat?.courseLength?.value !== undefined &&
                   !repeat.courseLength.comparator ||
                 repeat?.count !== undefined &&
-                  (repeat.countMax === undefined || repeat.countMax === repeat.count));
+                  (repeat.countMax === undefined || repeat.countMax === repeat.count) ||
+                repeat?.count === undefined && repeat?.anchors?.length === 1 && repeat.anchors[0] === "IMD" &&
+                  !repeat.clocks?.length && repeat.frequency === undefined && repeat.frequencyMax === undefined &&
+                  repeat.period === undefined && repeat.periodMax === undefined && repeat.periodUnit === undefined &&
+                  (repeat.countMax === undefined || repeat.countMax === 1));
             }
           }
           if (finitePredecessors) dependsOnPrevious = true;
@@ -666,7 +670,9 @@ export function courseFromAdministrations(
           // An independently stated origin owns the member delay. Promoting
           // it here would consume it before the contextual boundary replaces it.
           a.onsetDays === undefined && !a.onsetReference &&
-          !a.schedule?.recurrence?.calendarWindow?.start &&
+          // Even an end-only calendar window keeps its own recurrence origin.
+          // Leave the elapsed delay on that member so its grid moves with it.
+          !a.schedule?.recurrence?.calendarWindow &&
           !a.schedule?.recurrence?.clocks?.length &&
           !a.schedule?.recurrence?.anchors?.length
       )

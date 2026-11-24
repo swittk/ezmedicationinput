@@ -55,6 +55,19 @@ export interface FhirExtension {
   valueTiming?: FhirTiming;
 }
 
+/** R6 Extension Quantity values include the native approximate comparator. */
+export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity"> {
+  extension?: FhirR6Extension[];
+  valueQuantity?: FhirR6Quantity;
+}
+
+export interface FhirR6Element extends Omit<FhirElement, "extension"> {
+  extension?: FhirR6Extension[];
+}
+export interface FhirR6BackboneElement extends FhirR6Element {
+  modifierExtension?: FhirR6Extension[];
+}
+
 export interface FhirElement {
   id?: string;
   extension?: FhirExtension[];
@@ -401,6 +414,8 @@ export interface FhirTimingRepeat extends FhirElement {
   frequencyMax?: number;
   /** Duration of each administration occurrence. */
   duration?: number;
+  /** Primitive annotation for a stated or unspecified lower duration. */
+  _duration?: FhirPrimitiveElement;
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
   period?: number;
@@ -658,7 +673,7 @@ export interface FhirR6DosageStep extends FhirElement {
 }
 
 /** Official FHIR R6 Snapshot 1 DosageInstruction course container. */
-export interface FhirR6DosageInstruction extends FhirBackboneElement {
+export interface FhirR6DosageInstruction extends FhirR6BackboneElement {
   renderedInstruction?: string;
   _renderedInstruction?: FhirPrimitiveElement;
   repeatCycle?: FhirR6Quantity;
@@ -723,7 +738,7 @@ export interface EzCourseStep extends FhirBackboneElement {
   safety?: FhirR6DosageSafety;
 }
 
-export interface EzCourseMetadata extends FhirBackboneElement {
+export interface EzCourseMetadata extends FhirR6BackboneElement {
   renderedInstruction?: string;
   _renderedInstruction?: FhirPrimitiveElement;
   repeatCycle?: FhirR6Quantity;
@@ -1914,6 +1929,8 @@ export interface CanonicalInstructionGraph {
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];
   coverage?: CanonicalInstructionCoverage;
+  /** Unrecognized graph children retained at their original FHIR owner. */
+  sourceExtensions?: FhirExtension[];
   /** Exact original source represented by this graph. */
   sourceText: string;
   /** Source language when it can be determined without guessing. */

@@ -1075,10 +1075,10 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
     const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (schedule.durationMaxUnit ?? "");
     return `x${low} – ${high}`;
   }
-  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit;
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit ?? "";
   if (schedule.duration === undefined)
     return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
@@ -1090,7 +1090,7 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
-  return `x${lowerBound}${base}${schedule.durationUnit}`;
+  return `x${lowerBound}${base}${schedule.durationUnit ?? ""}`;
 }
 
 function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1113,24 +1113,24 @@ function describeDuration(schedule: CanonicalScheduleExpr | undefined, words: Co
       (comparator ?? "") + stripTrailingZero(value) + (unit ? " " + (words.timeUnit(unit, value) ?? unit) : "");
     return `for ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxComparator)}`;
   }
-  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const unit = schedule.durationUnit;
+  const unit = schedule.durationUnit ?? "";
   const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (value: number, endpointUnit = unit): string => words.timeUnit(endpointUnit, value) ?? endpointUnit;
+  const label = (value: number, endpointUnit = unit): string => endpointUnit ? words.timeUnit(endpointUnit, value) ?? endpointUnit : "";
   if (schedule.duration === undefined)
-    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit)}`;
+    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit)}`.trim();
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
-    return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`;
+    return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`.trim();
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? "at least " : "";
-  return `for ${lowerBound}${lower} ${label(schedule.duration)}`;
+  return `for ${lowerBound}${lower} ${label(schedule.duration)}`.trim();
 }
 
 function describeAdministrationDuration(
@@ -1585,7 +1585,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const graphRegimenTail: string[] = [];
   if (richPrimaryGraphText) {
     if (routePart) graphRegimenTail.push(routePart);
-    if (timing.frequency) graphRegimenTail.push(timing.frequency);
+    const graphFrequency = richPrimaryCoversSingleEvent ? frequencyPart : timing.frequency;
+    if (graphFrequency) graphRegimenTail.push(graphFrequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
     else {
       if (timingText) graphRegimenTail.push(timingText);

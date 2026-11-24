@@ -58,7 +58,7 @@ import {
   hasUnrecognizedEditMetadata,
   retainField,
   readRetainedField,
-  withR5CountMinimum,
+  withR5CountMinimum, withR5DurationMinimum,
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
@@ -1123,6 +1123,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
     }
   }
   if (target === "r5" && repeat?.countMax !== undefined) repeat = withR5CountMinimum(repeat);
+  if (target === "r5" && repeat?.durationMax !== undefined) repeat = withR5DurationMinimum(repeat);
   // Import has already separated executable values from metadata-only wire
   // positions. The immutable native timing keeps its imported event projection.
   const events = original?.event ?? t.explicitEvents;

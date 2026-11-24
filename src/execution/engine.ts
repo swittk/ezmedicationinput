@@ -1914,7 +1914,8 @@ function measuredRateQuantity(
   ) {
     const numerator = amount.rateRatio.numerator;
     const denominator = amount.rateRatio.denominator;
-    const per = INFUSION_TIME_SECONDS[(denominator.code ?? denominator.unit ?? "").toLowerCase()];
+    const denominatorUnit = getQuantityDurationUnit(denominator);
+    const per = denominatorUnit ? INFUSION_TIME_SECONDS[denominatorUnit] : undefined;
     if (per && denominator.value! > 0) {
       value = (numerator.value! / denominator.value!) * duration * seconds / per;
       unit = numerator.unit ?? numerator.code;
@@ -6169,6 +6170,10 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
     positiveNumber(repeat.period ?? repeat.periodMax) &&
     repeat.periodUnit
   ) {
+    // A zero/absent lower frequency has no concrete plan unless clocks or a
+    // timing code supply one. Use the executable upper recurrence directly.
+    if (!frequency && !repeat.clocks?.length && !repeat.anchors?.length && !dosage.schedule?.code)
+      preserveCadence = false;
     if (!preserveCadence) nextRepeat = {
       ...nextRepeat,
       frequency: frequencyMax,
@@ -6186,7 +6191,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
     periodMinimum = true;
   }
   const first = dosage.amounts?.length === 1 ? dosage.amounts[0] : undefined;
-  const isRateDose = !!first && !first.quantity && !!(first.rate || first.rateRatio);
+  const isRateDose = !!first && !first.quantity && !first.range && !!(first.rate || first.rateRatio);
   if (isRateDose && repeat.occurrenceDurationRange) {
     // Endpoint units remain authored. prepareMeasuredDose multiplies each
     // duration independently, then uses the existing ranged quantity planner.
@@ -6441,7 +6446,7 @@ function prepareMeasuredDose(
     // >= or ~. Its original comparator remains in the caller's FHIR data.
     return dosage;
   let range = first.range;
-  if (!quantity && (first.rate || first.rateRatio)) {
+  if (!quantity && !range && (first.rate || first.rateRatio)) {
     const repeat = dosage.schedule?.recurrence;
     const durationRange = repeat?.occurrenceDurationRange;
     if (durationRange) {
@@ -7883,6 +7888,7 @@ function hasDistributedClockFrequency(
 ): boolean {
   if (
     dayFiltered ||
+    (repeat.monthDays?.length && (repeat.periodUnit === DurationUnit.Month || repeat.periodUnit === DurationUnit.Year)) ||
     !entries.length ||
     !positiveInteger(repeat.frequency) ||
     repeat.frequency! <= entries.length ||
@@ -8067,9 +8073,14 @@ function completionAfterAcceptedAdministration(
     const lowUnit = getQuantityDurationUnit(low), highUnit = getQuantityDurationUnit(high);
     if (!low?.value || !high?.value || getQuantityComparator(low) || getQuantityComparator(high) ||
         !lowUnit || !highUnit) return undefined;
+    // Match createIntervalStepper: whole days/weeks are civil intervals,
+    // while fractional day counts and seconds/minutes/hours are elapsed.
+    const lowElapsed = lowUnit === "s" || lowUnit === "min" || lowUnit === "h" ||
+      (lowUnit === "d" || lowUnit === "wk") && !Number.isInteger(low.value * (lowUnit === "wk" ? 7 : 1));
+    const highElapsed = highUnit === "s" || highUnit === "min" || highUnit === "h" ||
+      (highUnit === "d" || highUnit === "wk") && !Number.isInteger(high.value * (highUnit === "wk" ? 7 : 1));
     const sameDuration = lowUnit === highUnit ? low.value === high.value :
-      (lowUnit === "s" || lowUnit === "min" || lowUnit === "h") &&
-      (highUnit === "s" || highUnit === "min" || highUnit === "h") &&
+      lowElapsed && highElapsed &&
       low.value * INFUSION_TIME_SECONDS[lowUnit] === high.value * INFUSION_TIME_SECONDS[highUnit];
     // A variable duration cannot supply an exact completion point for an
     // implicit successor. Equivalent exact endpoints can.

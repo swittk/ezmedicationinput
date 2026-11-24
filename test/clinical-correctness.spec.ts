@@ -3415,7 +3415,7 @@ describe("round52 live site and partial-direction previews", () => {
       for (const input of [r6, cold]) {
         const before = JSON.parse(JSON.stringify(input));
         const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
-        expect(en).toContain("1 drop");
+        expect(en).toMatch(/(?:^|[^0-9.])1 drop\b/u);
         expect(en).toContain(order === "local-only" ? "SITE-OD" : "right eye");
         if (order !== "local-only") {
           expect(en).not.toContain("SITE-OD");

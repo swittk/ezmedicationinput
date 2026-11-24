@@ -86,7 +86,7 @@ export function singleClockWithoutRecurrence(schedule: CanonicalSigClause['sched
   if (schedule?.timeOfDay?.length !== 1 || schedule.when?.length ||
       schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
       schedule.period !== undefined || schedule.periodMax !== undefined || schedule.periodUnit !== undefined ||
-      schedule.timingCode || schedule.count !== undefined || schedule.countMax !== undefined ||
+      schedule.timingCode || (schedule.count !== undefined && schedule.count !== 1) || schedule.countMax !== undefined ||
       schedule.duration !== undefined || schedule.durationMax !== undefined || schedule.durationUnit !== undefined ||
       schedule.boundsStart || schedule.boundsEnd || schedule.calendarEvents?.length ||
       schedule.dayOfWeek?.length || schedule.dayOfMonth?.length || schedule.weekdayOrdinal !== undefined ||

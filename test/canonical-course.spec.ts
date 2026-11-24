@@ -99,7 +99,9 @@ describe("canonical course architecture", () => {
         } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
             node.moduleReference.expression && ts.isStringLiteralLike(node.moduleReference.expression)) {
           modules.push(node.moduleReference.expression.text);
-        } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        } else if (ts.isCallExpression(node) &&
+                   (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+                    ts.isIdentifier(node.expression) && node.expression.text === "require") &&
                    node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
           modules.push(node.arguments[0].text);
         }
@@ -113,9 +115,11 @@ describe("canonical course architecture", () => {
       'import "../adapters/r5-import";',
       'const adapter = import("../adapters/r5-import");',
       'export * from "../adapters/r5-import";',
-      'import adapter = require("../adapters/r5-import");'
+      'import adapter = require("../adapters/r5-import");',
+      'const adapter = require("../adapters/r5-import");'
     ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
     expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
+    expect(forbiddenModuleSpecifiers(`const text = 'require("../adapters/r5-import")';`)).toEqual([]);
     const wireModifierAccess = (text: string) => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const accesses: string[] = [];
@@ -1719,6 +1723,14 @@ describe("round37 upper-only timing and stage origins", () => {
       expect(repeat.duration).toBe(minimum);
       expect(repeat.durationMax).toBe(30);
       expect(repeat.durationUnit).toBe(FhirPeriodUnit.Minute);
+      const r5Repeat = toFhirR5Dosages(saved)[0].timing!.repeat!;
+      expect(r5Repeat.duration).toBe(minimum);
+      expect(r5Repeat.durationMax).toBe(30);
+      expect(r5Repeat.durationUnit).toBe(FhirPeriodUnit.Minute);
+      if (minimum === undefined) expect(r5Repeat._duration).toEqual({ extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+      }] });
+      else expect(r5Repeat._duration).toBeUndefined();
       saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));
     }
     expect(JSON.stringify(row)).toBe(before);

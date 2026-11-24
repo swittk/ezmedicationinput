@@ -3,7 +3,7 @@ import { resolveMedicationInstructionActionForMethod, selectMedicationInstructio
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum
+  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum, withR5DurationMinimum
 } from "./dosage-course";
 import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
@@ -709,7 +709,9 @@ export function clinicalCarrierQuantityFromFhir(
  * @param repeat Editable FHIR timing currently being lowered.
  */
 function normalizeClockFrequency(repeat: FhirTimingRepeat): void {
-  if (repeat.frequency !== undefined || !repeat.period || !repeat.periodUnit ||
+  if (repeat.frequency !== undefined ||
+      repeat.extension?.find(item => item.url === TIMING_FREQUENCY_MIN_EXTENSION_URL)?.valueInteger !== undefined ||
+      !repeat.period || !repeat.periodUnit ||
       (repeat.timeOfDay?.length ?? 0) < 2 || repeat.when?.length) return;
   const clocks = new Set(repeat.timeOfDay).size;
   if (repeat.periodUnit === 'd') {
@@ -1959,6 +1961,8 @@ export function canonicalToFhir(
   Object.assign(dosage, serializeCanonicalSchedule(schedule, options, clause.clinicalQuantity));
   if (schedule?.countMax !== undefined && dosage.timing?.repeat)
     dosage.timing.repeat = withR5CountMinimum(dosage.timing.repeat);
+  if (schedule?.administrationDurationMax !== undefined && dosage.timing?.repeat)
+    dosage.timing.repeat = withR5DurationMinimum(dosage.timing.repeat);
   if (schedule?.maxDosePerPeriod?.length) {
     dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
       const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);

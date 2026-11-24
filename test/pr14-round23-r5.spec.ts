@@ -3,7 +3,7 @@ import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCo
 import { describe, expect, it } from "vitest";
 import {
   fromDosageDetails, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages, parseSig, formatSig, importCanonicalCourse, projectCanonicalCourse,
-  type EzDosage, type FhirDosage, type FhirExtension, type FhirElement, type FhirRatio, type FhirR6Dosage,
+  type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirRatio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6DosageInstructionInput,
   type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep,
@@ -22,7 +22,7 @@ import {
   PARALLEL_COMPONENT_PHASE_ORIGIN_URL, DOSAGE_ALTERNATIVE_CHOICE_URL, setDosageAlternativeChoice,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   setDosageExcludedDates, getDosageExcludedDates, setDosageExcludedWeekdays, R5_RATE_MODIFIERS_R6_URL,
-  dosageMatchesSavedProjection, R5_EXPRESSION_SLOT_SOURCE_URL, fromR6Dosage,
+  dosageMatchesSavedProjection, dosageProjectionFingerprint, R5_EXPRESSION_SLOT_SOURCE_URL, fromR6Dosage,
 } from "../src/dosage-course";
 import {
   EMA_QUANTITY_COMPARATOR_EXTENSION_URL, EMA_QUANTITY_OPERATOR_SYSTEM, QUANTITY_OPERATOR_SOURCE_URL,
@@ -1308,7 +1308,7 @@ it.each(["limit", "action"] as const)("round27 reconciles a live lifted safety %
       expect(scoped.step).toEqual(stepSafety);
     }
     const retired: unknown[] = [];
-    const collect = (extensions: readonly FhirExtension[] | undefined): void => {
+    const collect = (extensions: readonly FhirR6Extension[] | undefined): void => {
       for (const item of extensions ?? []) {
         if (item.url === R6_SCOPED_SAFETY_MODIFIER_URL) retired.push(decodeR6SourceMetadata(item, "safety"));
         collect(item.extension);
@@ -3740,7 +3740,7 @@ describe("round35 interchange field ownership", () => {
     let output = toDosageDetails(rows);
     for (let save = 0; save <= 3; save++) {
       const intervals: FhirR6Quantity[] = output.repeatCycle ? [output.repeatCycle] : [];
-      const collect = (markers: readonly FhirExtension[] | undefined): void => {
+      const collect = (markers: readonly FhirR6Extension[] | undefined): void => {
         for (const marker of markers ?? []) {
           if (marker.url === "course" || marker.url === "dosageDetails") {
             const decoded = decodeR5RetainedFields({ url: DOSAGE_DETAILS_R5_URL,
@@ -4718,7 +4718,7 @@ describe("review round 21: persisted R5 ownership and retention", () => {
     expect(componentSafety(changed)).toBeUndefined();
     const sources = changed.extension?.filter(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL);
     expect(sources?.length).toBeGreaterThan(0);
-    const sourceExtensions: FhirExtension[] = [];
+    const sourceExtensions: FhirR6Extension[] = [];
     for (const item of sources!) sourceExtensions.push(...(item.extension ?? []));
     const source = sourceExtensions.find(item =>
       decodeR5RetainedFields(item).component?.safety?.doseLimit?.[0].valueQuantity?.value === 2);
@@ -10297,5 +10297,242 @@ describe("round59 interop live wire ownership", () => {
     expect(dosageMatchesSavedProjection(empty[0])).toBe(true);
     expect(formatSig(empty[0], "long", { locale: "en", realizationMode: "roundtrip" }))
       .toBe(unchanged[0].text);
+  });
+});
+
+
+describe("round60 interoperability ownership", () => {
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] };
+  const note = { url: "urn:clinic:round60-note", valueString: "Preserve the complete authored annotation" };
+  const boundary = (value: number) => ({
+    contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+    offsetDuration: { value, unit: "d" },
+  });
+  const originalRange = {
+    id: "authored-rate-range", extension: [note],
+    low: { value: 5, unit: "mL/h", extension: [{
+      url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000053" },
+    }] },
+    high: { value: 10, unit: "mL/h", _value: { id: "authored-rate-high" } },
+  };
+  const retiredSources = (wire: FhirR6DosageInstruction): FhirR6Extension[] => {
+    const sources: FhirR6Extension[] = [];
+    for (const item of wire.extension ?? [])
+      if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL) sources.push(...(item.extension ?? []));
+    return sources;
+  };
+  const retiredAmounts = (wire: FhirR6DosageInstruction) => {
+    const amounts: NonNullable<FhirR6Dosage["doseAndRate"]> = [];
+    for (const item of retiredSources(wire))
+      if (item.url === DOSAGE_DETAILS_R5_URL) amounts.push(...(decodeR5RetainedFields(item).component?.doseAndRate ?? []));
+    return amounts;
+  };
+
+  it.each(["unchanged", "replace", "remove", "remove rate entry"] as const)(
+    "keeps the independent dose and complete inactive rate Range after %s", edit => {
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        timing: { repeat: daily },
+        doseAndRate: edit === "remove rate entry"
+          ? [{ id: "dose", doseQuantity: { value: 100, unit: "mL" } },
+            { id: "rate", rateRange: persist(originalRange) }]
+          : [{ id: "amount", doseQuantity: { value: 100, unit: "mL" }, rateRange: persist(originalRange) }],
+      }] }] };
+      const sourceBefore = persist(source);
+      let rows = persist(toFhirR5Dosages(source));
+      if (edit === "remove rate entry") rows[0].doseAndRate = [rows[0].doseAndRate![0]];
+      else if (edit !== "unchanged") {
+        delete rows[0].doseAndRate![0].rateRange;
+        if (edit === "replace") rows[0].doseAndRate![0].rateQuantity = { value: 8, unit: "mL/h" };
+      }
+      for (let save = 0; save < 2; save++) {
+        const before = persist(rows), actual = toDosageDetails(rows);
+        const amounts = actual.step![0].component[0].doseAndRate!;
+        expect(amounts[0].doseQuantity).toEqual({ value: 100, unit: "mL" });
+        if (edit === "unchanged") expect(amounts[0].rateRange).toEqual(originalRange);
+        else {
+          expect(amounts.some(item => item.rateRange)).toBe(false);
+          expect(amounts[0].rateQuantity).toEqual(edit === "replace" ? { value: 8, unit: "mL/h" } : undefined);
+          expect(retiredAmounts(actual).map(item => item.rateRange)).toContainEqual(originalRange);
+        }
+        expect(rows).toEqual(before);
+        rows = persist(toFhirR5Dosages(actual));
+      }
+      expect(source).toEqual(sourceBefore);
+    });
+
+  it.each(["annotation", "dose", "timing"] as const)(
+    "distinguishes an annotated empty-course carrier from an active %s row", edit => {
+      const source: FhirR6DosageInstruction = {
+        id: "round60-empty-course", renderedInstruction: "Clinician source-only instruction", extension: [note],
+      };
+      const annotation = { id: "source-sequence", extension: [note] };
+      let rows = persist(toFhirR5Dosages(source));
+      rows[0]._sequence = annotation;
+      if (edit === "dose") rows[0].doseAndRate = [{ doseQuantity: q(1) }];
+      if (edit === "timing") rows[0].timing = { repeat: daily };
+      for (let save = 0; save < 2; save++) {
+        const before = persist(rows), actual = toDosageDetails(rows);
+        expect(actual.extension).toContainEqual(note);
+        if (edit === "annotation") {
+          expect(actual.step).toBeUndefined();
+          expect(actual.renderedInstruction).toBe(source.renderedInstruction);
+          const sources = retiredSources(actual).filter(item => item.url === "r5SourceCarrier");
+          expect(sources.map(readRetainedField))
+            .toContainEqual({ _sequence: annotation });
+        } else {
+          expect(actual.step).toHaveLength(1);
+          const member = actual.step![0].component[0];
+          expect(member.extension).toContainEqual({
+            url: DOSAGE_RETAINED_R5_SEQUENCE_URL, ...(save ? { valueDecimal: 1 } : {}), _valueDecimal: annotation,
+          });
+          if (edit === "dose") expect(member.doseAndRate).toEqual([{ doseQuantity: q(1) }]);
+          else expect(member.timing).toEqual({ repeat: daily });
+        }
+        expect(rows).toEqual(before);
+        rows = persist(toFhirR5Dosages(actual));
+      }
+    });
+
+  it.each(["unchanged", "annotation", "phase end"] as const)(
+    "keeps an implicit pause only with its unchanged member completion (%s)", edit => {
+      const source: FhirR6DosageInstruction = { step: [
+        { id: "induction", component: [{ id: "initial", doseAndRate: [{ doseQuantity: q(1) }],
+          timing: { repeat: daily }, modifierExtension: [encodeR6SourceMetadata(
+            PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { end: boundary(1) }, "step")] }] },
+        { id: "pause", end: boundary(2), component: [] },
+        { id: "resume", component: [{ id: "later", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }] },
+      ] };
+      const baseline = persist(r6Save(source));
+      let wire = persist(baseline);
+      if (edit === "phase end") wire.step![0].component[0].modifierExtension = [
+        encodeR6SourceMetadata(PARALLEL_COMPONENT_PHASE_ORIGIN_URL, { end: boundary(2) }, "step")];
+      if (edit === "annotation") wire.step![0].component[0].modifierExtension![0].id = "authored-phase";
+      for (let save = 0; save < 2; save++) {
+        const before = persist(wire), actual = r6Save(wire);
+        expect(fromDosageDetails(actual).course.step?.map(step => step.id)).toEqual(edit === "phase end"
+          ? ["induction", "resume"] : ["induction", "pause", "resume"]);
+        expect(importCanonicalCourse(actual).stages[0].administrations[0].phaseEnd?.displacement?.value)
+          .toBe(edit === "phase end" ? 2 : 1);
+        expect(nextDueDoses(actual, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+          timeZone: "UTC", limit: 3 })).toEqual(edit === "phase end"
+          ? ["2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00"]
+          : ["2026-01-01T08:00:00+00:00", "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
+        if (edit === "phase end") {
+          const retired = retiredSources(actual).find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL)!;
+          const savedDraft = decodeR6SourceMetadata(retired, "drafts")!;
+          expect(savedDraft.drafts).toEqual([{ index: 1, step: { id: "pause", end: boundary(2) } }]);
+          expect(savedDraft.synthesizedStarts).toEqual([1]);
+          expect(savedDraft.projected).toEqual(baseline.step);
+        }
+        expect(wire).toEqual(before);
+        wire = toDosageDetails(persist(toFhirR5Dosages(actual)));
+      }
+    });
+
+  it.each([0, undefined, 1] as const)(
+    "preserves stated frequency minimum %s beside independently authored clocks", minimum => {
+      const clause = canonicalFromFhir({
+        doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { repeat: {
+          ...(minimum === 0 ? { extension: [{ url: TIMING_FREQUENCY_MIN_EXTENSION_URL, valueInteger: 0 }] }
+            : minimum !== undefined ? { frequency: minimum } : {}),
+          frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"],
+        } },
+      });
+      const before = persist(clause), row = canonicalToFhir(clause);
+      expect(row.timing!.repeat!.frequency).toBe(minimum === 0 ? undefined : minimum ?? 2);
+      expect(canonicalFromFhir(row).schedule?.frequency).toBe(minimum ?? 2);
+      expect(row.timing!.repeat!.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+      let wire = toDosageDetails(persist([row]));
+      for (let save = 0; save < 2; save++) {
+        const recurrence = importCanonicalCourse(wire).stages[0].administrations[0].schedule!.recurrence!;
+        expect(recurrence.frequency).toBe(minimum ?? 2);
+        expect(recurrence.frequencyMax).toBe(2);
+        expect(recurrence.clocks).toEqual(["08:00:00", "20:00:00"]);
+        wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      }
+      expect(persist(clause)).toEqual(before);
+    });
+
+  it.each(["id", "translation", "dose", "dose and id"] as const)(
+    "separates current narrative annotations from clinical edits (%s)", edit => {
+      const wording = "Take one tablet daily";
+      const translation = { url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "รับประทานหนึ่งเม็ดทุกวัน" },
+      ] };
+      const source: FhirR6DosageInstruction = { renderedInstruction: wording, step: [{ component: [{
+        text: wording, _text: { extension: [translation, note] },
+        doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
+      }] }] };
+      let rows = persist(toFhirR5Dosages(source));
+      if (edit.includes("id")) rows[0]._text!.id = "current-text-id";
+      if (edit === "translation") rows[0]._text!.extension![0].extension![1].valueString = "ข้อความแปลฉบับปัจจุบัน";
+      if (edit.startsWith("dose")) rows[0].doseAndRate![0].doseQuantity!.value = 2;
+      const currentCompanion = persist(rows[0]._text!);
+      for (let save = 0; save < 2; save++) {
+        const before = persist(rows), actual = toDosageDetails(rows), member = actual.step![0].component[0];
+        expect(member.doseAndRate).toEqual([{ doseQuantity: q(edit.startsWith("dose") ? 2 : 1) }]);
+        if (edit.startsWith("dose")) {
+          expect(member.text).toBeUndefined();
+          expect(member._text).toEqual({ ...(edit.includes("id") ? { id: "current-text-id" } : {}), extension: [note] });
+          const sources = retiredSources(actual).filter(item => item.url === DOSAGE_DETAILS_R5_URL);
+          expect(sources.map(item => decodeR5RetainedFields(item).component))
+            .toContainEqual({ text: wording, _text: currentCompanion });
+        } else {
+          expect(member.text).toBe(wording);
+          expect(member._text).toEqual(currentCompanion);
+          expect(actual.renderedInstruction).toBe(wording);
+        }
+        expect(rows).toEqual(before);
+        rows = persist(toFhirR5Dosages(actual));
+      }
+    });
+
+  it.each([false, true])("reads the saved untagged narrative fingerprint without rewriting its meaning (dose edit=%s)", changed => {
+    const wording = "Take one tablet daily";
+    const companion = { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "รับประทานหนึ่งเม็ดทุกวัน" },
+      ],
+    }] };
+    // Literal persisted output captured from accepted 0c57, before clinical-v2 agreement.
+    const legacy: FhirDosage = {
+      text: wording, _text: companion, doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily }, sequence: 1,
+      extension: [{ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: [
+        { url: "instruction", valueString: wording }, { url: "sourceAgreement", valueBoolean: false },
+        { url: "textFingerprint", valueString: "1dae8fd876985d78" },
+        { url: "row", extension: [
+          { url: "projectionFingerprint", valueString: "b6532ed6b1e44f91" },
+          { url: "textFingerprint", valueString: "1dae8fd876985d78" },
+        ] },
+      ] }],
+    };
+    expect(dosageProjectionFingerprint(legacy)).toBe("b6532ed6b1e44f91");
+    const submitted = persist(legacy);
+    if (changed) submitted.doseAndRate![0].doseQuantity!.value = 2;
+    const before = persist(submitted), actual = toDosageDetails([submitted]);
+    const member = actual.step![0].component[0];
+    expect(member.doseAndRate).toEqual([{ doseQuantity: q(changed ? 2 : 1) }]);
+    expect(member.text).toBe(changed ? undefined : wording);
+    expect(member._text).toEqual(changed ? undefined : companion);
+    if (changed) expect(retiredSources(actual).filter(item => item.url === DOSAGE_DETAILS_R5_URL)
+      .map(item => decodeR5RetainedFields(item).component)).toContainEqual({ text: wording, _text: companion });
+    expect(submitted).toEqual(before);
+  });
+
+  it("types and preserves nested R6 extension quantities without allowing approximate R5 quantities", () => {
+    const opaque: FhirR6DosageInstruction = { extension: [{ url: "urn:clinic:r6-quantity", extension: [
+      { url: "duration", valueQuantity: { value: 30, unit: "min", comparator: "~", _value: { id: "duration-value" } } },
+    ] }], step: [{ component: [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } }] }] };
+    const invalidR5: FhirExtension = {
+      url: "urn:clinic:r5-quantity",
+      // @ts-expect-error R5 general Quantity has no approximate comparator.
+      valueQuantity: { value: 30, unit: "min", comparator: "~" },
+    };
+    void invalidR5;
+    const before = persist(opaque), actual = r6Save(opaque);
+    expect(actual.extension).toEqual(opaque.extension);
+    expect(opaque).toEqual(before);
   });
 });

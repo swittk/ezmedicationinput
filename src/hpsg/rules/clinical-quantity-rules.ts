@@ -291,7 +291,15 @@ function activeDoseInCarrierOverTime(
     ? attachedNumberUnitAt(carrierValueToken.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
   const carrierNumber = qualifiedCarrier?.value ??
     (carrierValueToken.kind === LexKind.Number ? carrierValueToken.value : attachedCarrier?.value);
-  const carrierUnitStart = (qualifiedCarrier?.numericIndex ?? carrierStart) + 1;
+  let carrierUnitStart = (qualifiedCarrier?.numericIndex ?? carrierStart) + 1;
+  // The same fractional numeric daughter owns "a"/"of a" before its unit,
+  // whether it is the active amount or the independently qualified carrier.
+  if (qualifiedCarrier && !qualifiedCarrier.rawUnit &&
+      (qualifiedCarrier.value < 1 || DOSE_FRACTION_DENOMINATOR_WORDS.has(
+        normalizeTokenLower(context.tokens[qualifiedCarrier.numericIndex])))) {
+    while (available(context, carrierUnitStart) &&
+        DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[carrierUnitStart]))) carrierUnitStart++;
+  }
   const carrierUnitToken = context.tokens[carrierUnitStart];
   const carrierUnit = qualifiedCarrier?.rawUnit ?? attachedCarrier?.rawUnit ??
     (carrierUnitToken && available(context, carrierUnitStart) ? normalizeTokenLower(carrierUnitToken) : undefined);

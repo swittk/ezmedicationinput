@@ -543,7 +543,13 @@ const newApis = new Set([...covered].filter(api =>
 const missing = Object.keys(candidate).filter(
   (key) => typeof candidate[key] === "function" && !covered.has(key)
 );
-if (missing.length) throw new Error("Uncovered public APIs: " + missing.join(", "));
+if (missing.length) {
+  const error = new Error("Uncovered public APIs: " + missing.join(", "));
+  report.phase = "setup-error";
+  report.errors.push({ name: "setup", error: String(error.stack ?? error) });
+  checkpoint();
+  throw error;
+}
 if (counted) for (const module of [baseline, candidate]) {
   const decode = module.parseBodySiteAdministrationTargetCountExtension;
   if (typeof decode === "function" && decode(counted) !== 2)
@@ -625,7 +631,7 @@ function completeThaiDose(output, action, unit, expected, requiredSite) {
   // These two fixtures retain their authored preparation before the dose.
   // Accept that complete prefix, never an arbitrary substring after a negator.
   const preparation = action === "หยอด" ? "ล้างมือก่อนหยอดตา" : "ผสมน้ำ";
-  const lead = "^\\s*(?:" + preparation + "\\s*(?:[.;,]\\s*|จากนั้น\\s*|แล้ว\\s*)?)?";
+  const lead = "^\\s*(?:" + preparation + "\\s*(?:[.;,]\\s*)?(?:(?:จากนั้น|แล้ว)\\s*)?)?";
   const siteAfter = action === "หยอด" ? "(?:\\s*(?:ที่)?ตาขวา)?" : "";
   const phrase = new RegExp(lead + verb + "\\s*(?:ครั้งละ\\s*)?" +
     number + "\\s*" + unit + siteAfter + "(?=$|[\\s.;,])", "u").exec(output);
@@ -767,12 +773,28 @@ function completeComplexRows(output) {
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
     if (repeat?.count !== undefined || repeat?.countMax !== undefined) return false;
+    // The final left-eye BID phase is ongoing. A standard repeat bound must
+    // not silently shorten it while the retained step still looks open-ended.
+    if (index === 5 && (repeat?.boundsDuration !== undefined || repeat?.boundsRange !== undefined ||
+        repeat?.boundsPeriod !== undefined)) return false;
     const origin = row.modifierExtension?.find(part =>
       part.url === "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin");
     return JSON.stringify([row.sequence, expected[1], repeat?.frequency ?? 1,
       repeat?.period, repeat?.periodUnit, expected[5], quantity(origin?.valueQuantity),
       boundary(step, "start"), boundary(step, "end")]) === JSON.stringify(expected);
   });
+}
+// Clinical oracle controls stay outside every measured invocation.
+const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
+if (!completeComplexRows(ongoingBidControl))
+  throw new Error("Six-row oracle rejected the complete unbounded BID control");
+for (const bound of [{ boundsDuration: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
+  { boundsRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
+  { boundsPeriod: { end: "2026-12-01T00:00:00Z" } }]) {
+  const shortened = structuredClone(ongoingBidControl);
+  Object.assign(shortened.fhir[5].timing.repeat, bound);
+  if (completeComplexRows(shortened))
+    throw new Error("Six-row oracle accepted a bounded ongoing BID phase");
 }
 for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
@@ -843,12 +865,15 @@ for (const [action, unit] of [["หยอด", "หยด"], ["ดื่ม", "�
 }
 for (const text of ["ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วหลับตา.",
   "ล้างมือก่อนหยอดตา หยอด 2 หยด ตาขวา แล้วหลับตา.",
-  "ล้างมือก่อนหยอดตา จากนั้นหยอดตาขวา ครั้งละ 2 หยด จากนั้นหลับตา."])
+  "ล้างมือก่อนหยอดตา จากนั้นหยอดตาขวา ครั้งละ 2 หยด จากนั้นหลับตา.",
+  "ล้างมือก่อนหยอดตา. จากนั้นหยอดตาขวา 2 หยด แล้วหลับตา.",
+  "ล้างมือก่อนหยอดตา; แล้วหยอดตาขวา 2 หยด แล้วหลับตา."])
   if (!completeThaiRightEyeDose(text))
     throw new Error("Complete-dose oracle rejected the authored site placement");
 for (const text of ["หยอดตาขวา 2 หยด.", "หยอดตาขวา 2 หยด แล้วหลับตา.",
   "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หลับตา ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด.", "หยอด 2 หยด.", "หยอด 2 หยด แล้วหลับตาขวา.", "หยอด 2 หยด ตาซ้าย.", "หยอดตาขวา 2 หยด แล้วหยอดตาซ้าย 2 หยด.", "ห้ามหยอดตาขวา 2 หยด.", "ไม่หยอด 2 หยด ตาขวา.",
   "ล้างมือก่อนหยอดตา จากนั้นห้ามหยอดตาขวา 2 หยด.", "ล้างมือก่อนหยอดตา ไม่หยอด 2 หยด ตาขวา.",
+  "ล้างมือก่อนหยอดตา. จากนั้นห้ามหยอดตาขวา 2 หยด แล้วหลับตา.",
   "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วไม่ต้องหลับตา.",
   "ล้างมือก่อนหยอดตา หยอดตาขวา 2 หยด แล้วห้ามหลับตา."])
   if (completeThaiRightEyeDose(text))

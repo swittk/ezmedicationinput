@@ -15734,3 +15734,66 @@ This verified entry is appended as a DIARY-only immediate child of the validated
 | `/tmp/ezmed14-round53-master-confirm.json` | `e8f7e8e5d948ee4203b78a55068bb225a6670d5336f7c3415f5844e45dfffe85` |
 
 Attempt1 archive SHA-256: 6f2618d221a0d7b907be487c1a80dcae8e9bdd1f59dcd109ca05d02cd6a04238. Attempt2 archive SHA-256: 5a8256fb4194c2e989929ccbd2f411c13af0b278db89e216f5ba59c947875510. Both complete archives remain under their round53 attempt directories.
+
+
+## 2026-11-25 — PR #14 round 60: resumed existing lanes from accepted 0c57a38
+
+Resumed the unfinished full-review round from the accepted round-59 head without
+resetting the main tree or recreating completed work. The two captured review
+publications contain 39 distinct findings: 19 inline and 20 in review bodies.
+All findings retain their original reply routes. The engineering dispositions
+are 28 fixes, 10 test/oracle corrections, and one scope rejection.
+
+The existing execution commit, interoperability patch, and test-oracle commit
+were recovered with their original validation records. The meaning lane was
+completed and integrated alongside them. Existing source-test identities remain;
+the combined candidate adds 93 cases to the accepted 7,679. The PR stays within
+its existing 100 paths.
+
+### Supported corrections
+
+- Typed HPSG ownership now preserves fractional carrier complements, built-in
+  action identity under custom code collisions, divided infusion ranges, and
+  explicit next-day/end-clock scope.
+- Native execution keeps delayed recurrence grids, immediate predecessor
+  completion, authored monthly days, zero-minimum upper supply plans, and
+  elapsed-unit infusion completion consistent with their existing contracts.
+- R5/current-R6 interchange retains superseded rate ranges as inert source,
+  annotation-only course carriers, unknown instruction-graph children, current
+  narrative annotations, member phase-end ownership, and authored frequency
+  zero. Current R6 course extensions accept their own quantity comparator.
+- Normalized rich R5 previews use their documented default in both formatting
+  and import. Explicit source replay remains explicit. Existing graph ownership
+  chooses the primary administration before a matching preparation, retains
+  material/clock/condition roles, and emits a graph-owned bedtime only once.
+- Source-only directions remain visible when false PRN is the only field;
+  live dose facts remain authoritative. An authored one-sided duration bound
+  remains visible without inventing a missing unit.
+
+### Scope and evidence discipline
+
+Owner decisions #1377 and #1443–1444 remain controlling: no reverse-render
+comparison, second NLP pass, understructured-input repair obligation, caller
+mutation defense, or public native editor. Round-59 B25 is out of scope,
+not deferred work. Unknown FHIR remains recoverable and inert.
+
+Round-60 I13 is rejected as a new library-wide text-cache lifetime policy.
+The private normalizer does retain up to 4,096 short string keys/results;
+no clinical, data-loss, or cross-user output defect was demonstrated. The
+quoted advice comment concerns local word-array reuse. The unfinished broader
+no-cache patch was preserved separately and omitted, rather than claiming it
+established a library-wide retention guarantee.
+
+An accidental alteration of an inherited Thai translation assertion in the
+unfinished meaning lane was restored exactly; both locale cases pass. The
+new uncoded-adjunct control separately preserves its original wording without
+inventing a translation. The first fixture generator's comparison error
+(undefined in-memory fields versus a JSON copy) was preserved and corrected
+in the temporary generator only.
+
+Full integrated acceptance is recorded separately after freezing this candidate.
+It requires configured strict types, all source tests, complete build inventory,
+distribution tests, historical plus new complete storage records, and the
+unchanged 177 equivalent performance scenarios individually within 4%.
+The same fixed seven exclusions and exactly one prescribed confirmation pass
+apply. No merge, publication, or deployment is authorized by this checkpoint.

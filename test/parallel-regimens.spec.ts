@@ -1762,6 +1762,10 @@ describe("round50 counted implicit successors in independent tracks", () => {
       const before = JSON.stringify(input);
       expect(nextDueDoses(input, { ...context, limit: 8 })).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 2, durationUnit: "d" }).totalUnits).toBe(9);
+      expect(calculateTotalUnits({ dosage: input, ...context, from: "2026-01-02T00:00:00Z",
+        durationValue: 12, durationUnit: "h" }).totalUnits).toBe(2);
+      expect(calculateTotalUnits({ dosage: input, ...context, from: "2026-01-02T12:00:00Z",
+        durationValue: 12, durationUnit: "h" }).totalUnits).toBe(3);
       expect(JSON.stringify(input)).toBe(before);
     }
   });

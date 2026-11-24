@@ -7,13 +7,21 @@ import {projectNativeR5Course} from "./adapters/r5-course";
  * course, condition and edit metadata remain structured and independently editable. */
 import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
 import { getEmaQuantityComparator, quantityFromR5, quantityForR6, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "./fhir-quantity-operator";
-import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, FhirTimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
+import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirR6Extension, FhirQuantity, FhirRatio, FhirR6Dosage, FhirR6DosageCondition, FhirR6DosageInstruction, FhirR6DosageStep, FhirR6DosageInstructionInput, FhirR6DosageSafety, FhirR6DoseLimit, FhirR6Quantity, FhirR6TimingRepeat, FhirTimingRepeat, MedicationCondition, EzDosage, EzCourseMetadata, EzCourseStep } from "./types";
 
 /** R5 tim-8 requires the lower-count Element beside countMax, not a numeric
  * minimum. Preserve authored companions; an absent minimum remains unknown. */
 export function withR5CountMinimum<T extends Pick<FhirTimingRepeat, "count" | "countMax" | "_count">>(repeat: T): T {
   if (repeat.countMax === undefined || repeat.count !== undefined || repeat._count !== undefined) return repeat;
   return { ...repeat, _count: { extension: [{
+    url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+  }] } };
+}
+
+/** R5 tim-7 requires a lower-duration Element, without inventing a numeric bound. */
+export function withR5DurationMinimum<T extends Pick<FhirTimingRepeat, "duration" | "durationMax" | "_duration">>(repeat: T): T {
+  if (repeat.durationMax === undefined || repeat.duration !== undefined || repeat._duration !== undefined) return repeat;
+  return { ...repeat, _duration: { extension: [{
     url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
   }] } };
 }
@@ -1340,12 +1348,27 @@ const LIVE_COURSE_ROW_KEYS=new Set(["sequence","stepCount","step","component","c
  * The exact token order is identical to compactProjectionFingerprint so
  * existing persisted edit identities require no migration. */
 export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
+  return dosageProjectionHash(dosage, false);
+}
+
+/** New agreement excludes narrative annotations; legacy untagged hashes keep
+ * their exact saved algorithm. An old hash alone cannot recover prior metadata. */
+export function dosageClinicalProjectionFingerprint(dosage: FhirDosage | EzDosage): string {
+  return "clinical-v2:" + dosageProjectionHash(dosage, true);
+}
+
+export function matchesDosageProjectionFingerprint(dosage: FhirDosage | EzDosage, expected: string | undefined): boolean {
+  return expected === (expected?.startsWith("clinical-v2:")
+    ? dosageClinicalProjectionFingerprint(dosage) : dosageProjectionFingerprint(dosage));
+}
+
+function dosageProjectionHash(dosage: FhirDosage | EzDosage, clinical: boolean): string {
   const state:ProjectionFingerprintState={first:0x811c9dc5,second:0x9e3779b9};
   const record=dosage as Record<string,unknown>;
   const keys=Object.keys(dosage).sort();
   updateProjectionFingerprint(state,"{");
   for(const key of keys){
-    if(key==="text")continue;
+    if(key==="text"||clinical&&key==="_text")continue;
     const part=record[key];
     if(part===undefined)continue;
     if(Array.isArray(part)&&!part.length){
@@ -1521,14 +1544,14 @@ export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boo
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
     for (const row of marker.extension ?? []) {
       if (row.url === "projectionFingerprint") {
-        const matches = row.valueString === dosageProjectionFingerprint(dosage);
+        const matches = matchesDosageProjectionFingerprint(dosage, row.valueString);
         SAVED_PROJECTION_MATCHES.set(dosage, matches);
         return matches;
       }
       if (row.url !== "row") continue;
       for (const field of row.extension ?? [])
         if (field.url === "projectionFingerprint") {
-          const matches = field.valueString === dosageProjectionFingerprint(dosage);
+          const matches = matchesDosageProjectionFingerprint(dosage, field.valueString);
           SAVED_PROJECTION_MATCHES.set(dosage, matches);
           return matches;
         }
@@ -1663,7 +1686,7 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
         if (field.url === "sourceHasStructuredClocks" || field.url === "sourceHasStructuredEvents" ||
             field.url === "sourceHasStructuredSite") localFields.push(field);
     result[index] = row;
-    const projection = instruction !== undefined || localReplay ? dosageProjectionFingerprint(row) : undefined;
+    const projection = instruction !== undefined || localReplay ? dosageClinicalProjectionFingerprint(row) : undefined;
     if (instruction !== undefined) {
       if (index === 0 && !rowAgreement) children.push({ url: "textFingerprint", valueString: sourceText });
       baseline.unshift({ url: "projectionFingerprint", valueString: projection });
@@ -1895,7 +1918,7 @@ export const r5ConditionBaseline = parseDosageCondition;
 export const r5SafetyBaseline = toR6Safety;
 
 /** Decode only retained R5 profile fields, not a synthetic external course. */
-export function decodeR5RetainedFields(marker:FhirExtension):Partial<CompactCourseRow> {
+export function decodeR5RetainedFields(marker:FhirR6Extension):Partial<CompactCourseRow> {
   return decodeFields(marker.extension??[],COMPACT_ROW);
 }
 export function encodeR5RetainedFields(value:Partial<CompactCourseRow>):FhirExtension[] {
@@ -2299,7 +2322,7 @@ export function encodeR6SourceMetadata(
 }
 
 export function decodeR6SourceMetadata(
-  marker: FhirExtension, kind: "drafts" | "safety" | "step"
+  marker: FhirR6Extension, kind: "drafts" | "safety" | "step"
 ): Record<string, unknown> | undefined {
   if (!marker.extension || marker.valueString !== undefined) return undefined;
   // Source snapshots are compared with live R6 wire objects. Every Quantity
@@ -2346,7 +2369,7 @@ export function retainField(url: string, value: unknown): FhirExtension {
 /** Read retained fields without evaluating them or reparsing serialized text.
  * @param node One preserved field extension.
  */
-export function readRetainedField(node: FhirExtension): unknown {
+export function readRetainedField(node: FhirR6Extension): unknown {
   if (node.valueString !== undefined) return node.valueString;
   if (node.valueBoolean !== undefined) return node.valueBoolean;
   if (node.valueDecimal !== undefined) return node.valueDecimal;
@@ -2423,7 +2446,7 @@ function encodeFields(
  * @param shape Declared semantic fields for this backbone.
  */
 function decodeFields(
-  children: readonly FhirExtension[], shape: BridgeShape, preserveQuantityWire: boolean | "simple" = false
+  children: readonly FhirR6Extension[], shape: BridgeShape, preserveQuantityWire: boolean | "simple" = false
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const child of children) {
@@ -2442,7 +2465,7 @@ function decodeFields(
     const field = Object.prototype.hasOwnProperty.call(shape, child.url) ? shape[child.url] : undefined;
     if (!field) {
       // Unknown bridge children retain their original context as provenance.
-      const extensions = (result.extension ??= []) as FhirExtension[];
+      const extensions = (result.extension ??= []) as FhirR6Extension[];
       extensions.push({ url: "urn:ezmedicationinput:StructureDefinition:medication-unrecognized-bridge-field",
         extension: [cloneStructuredValue(child)] });
       continue;
