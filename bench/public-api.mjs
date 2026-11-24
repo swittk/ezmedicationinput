@@ -667,8 +667,26 @@ function completeScalarSchedule(output) {
     scalarScheduleInstants.every((instant, index) => typeof output[index] === "string" &&
       Date.parse(output[index]) === instant);
 }
+// The first ten administrations in the two-eye fixture: right Q2H from
+// midnight, left QID at 08/12/16/20. Each eye keeps its own occurrence.
+const parallelScheduleControl = [
+  "2026-11-18T00:00:00+07:00", "2026-11-18T02:00:00+07:00",
+  "2026-11-18T04:00:00+07:00", "2026-11-18T06:00:00+07:00",
+  "2026-11-18T08:00:00+07:00", "2026-11-18T08:00:00+07:00",
+  "2026-11-18T10:00:00+07:00", "2026-11-18T12:00:00+07:00",
+  "2026-11-18T12:00:00+07:00", "2026-11-18T14:00:00+07:00",
+];
+const parallelScheduleInstants = parallelScheduleControl.map(value => Date.parse(value));
+function requireParallelSchedule(output) {
+  if (!Array.isArray(output) || output.length !== parallelScheduleInstants.length ||
+      !parallelScheduleInstants.every((instant, index) => typeof output[index] === "string" &&
+        Date.parse(output[index]) === instant))
+    throw new Error("Parallel schedule failed the independent ten-administration oracle");
+  return true;
+}
 const equivalenceOracles = new Map([
   ["nextDueDoses/scalar", completeScalarSchedule],
+  ["nextDueDoses/parallel-array", requireParallelSchedule],
   ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
   ["formatSig/R5-roundtrip-added-dose-thai", completeThaiPreparedDrink],
   ["formatParseBatch/staged-own-batch", completeStagedBatch],
@@ -864,6 +882,24 @@ for (const changed of [
 ])
   if (completeScalarSchedule(changed))
     throw new Error("Scalar schedule oracle accepted a missing, extra, duplicated, unordered or shifted administration");
+// The exact parallel oracle accepts both authored simultaneous doses.
+requireParallelSchedule(parallelScheduleControl);
+requireParallelSchedule(parallelScheduleControl.map(value => new Date(value).toISOString()));
+for (const changed of [
+  undefined, [], Array(10), parallelScheduleControl.slice(0, -1),
+  [...parallelScheduleControl, parallelScheduleControl[9]],
+  [...new Set(parallelScheduleControl)],
+  [...parallelScheduleControl.slice(0, 5), parallelScheduleControl[6], ...parallelScheduleControl.slice(6)],
+  [...parallelScheduleControl.slice(0, 9), parallelScheduleControl[8]],
+  [parallelScheduleControl[1], parallelScheduleControl[0], ...parallelScheduleControl.slice(2)],
+  ["2026-11-18T00:01:00+07:00", ...parallelScheduleControl.slice(1)],
+  parallelScheduleControl.slice(0, 5).concat(Array(1), parallelScheduleControl.slice(6)),
+  parallelScheduleInstants,
+]) {
+  let rejected = false;
+  try { requireParallelSchedule(changed); } catch { rejected = true; }
+  if (!rejected) throw new Error("Parallel schedule oracle accepted wrong count, multiplicity, order or instants");
+}
 const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
