@@ -840,6 +840,38 @@ export function administrationFromR6(raw: FhirR6Dosage, sourceContext = false): 
   }
   return result;
 }
+/** Remove only generated source mirrors already owned by a lifted partial
+ * limit. Authored markers and unmatched Ratios keep their exact multiplicity. */
+export function removeLiftedPartialMaximumMirrors(
+  fresh: CanonicalAdministration, row: FhirDosage, safety: FhirR6DosageSafety | undefined
+): void {
+  // The generic R5 reader retains incomplete Ratios as source-only markers.
+  // A reconciled native partial limit already owns that same live Ratio;
+  // remove only its newly generated mirror, never an authored marker or an
+  // unmatched maximum. Match one occurrence at a time to retain multiplicity.
+  let partialMaxima: FhirRatio[] | undefined;
+  for (const limit of safety?.doseLimit ?? [])
+    if (limit.scope === "period" && limit.valueQuantity && limit.period &&
+        (limit.valueQuantity.value === undefined || limit.period.value === undefined))
+      (partialMaxima ??= []).push(periodMaximumToR5(limit.valueQuantity, limit.period, limit));
+  if (partialMaxima?.length && fresh.provenance) {
+    const data = fresh.provenance.data as EzDosage;
+    const extensions = data.extension?.filter(marker => {
+      if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || (row.extension?.indexOf(marker) ?? -1) >= 0) return true;
+      const maximum = readRetainedField(marker);
+      const owner = partialMaxima!.findIndex(value => equalStructuredValues(value, maximum));
+      if (owner < 0) return true;
+      partialMaxima!.splice(owner, 1);
+      return false;
+    });
+    if (extensions && extensions.length !== data.extension?.length) {
+      const current = { ...data };
+      if (extensions.length) current.extension = extensions;
+      else delete current.extension;
+      fresh.provenance.data = current;
+    }
+  }
+}
 export function administrationFromR5(
   raw: FhirDosage | EzDosage,
   sourceContext = false
@@ -859,6 +891,7 @@ export function administrationFromR5(
       text: limit.text,
       provenance: limit,
     }));
+    removeLiftedPartialMaximumMirrors(result, raw, safety);
   }
   return result;
 }
@@ -918,7 +951,7 @@ export function isR6DosageInstruction(input: object): input is FhirR6DosageInstr
       "route" in input || "site" in input || "method" in input || "condition" in input ||
       "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
       "patientInstruction" in input || "maxDosePerPeriod" in input ||
-      "maxDosePerAdministration" in input || "maxDosePerLifetime" in input) return false;
+      "maxDosePerAdministration" in input || "maxDosePerLifetime" in input || "excludedDates" in input) return false;
   if ("safety" in input || getCourseCycleCount(input as FhirR6DosageInstruction) !== undefined) return true;
   for (const marker of (input as FhirR6DosageInstruction).extension ?? []) {
     if (marker.url === R6_DRAFT_STEPS_SOURCE_URL || marker.url === R6_SINGLE_STEP_SAFETY_SOURCE_URL) return true;

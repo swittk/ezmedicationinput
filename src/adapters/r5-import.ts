@@ -8,7 +8,6 @@ import { R5_EXPRESSION_SLOT_SOURCE_URL } from "../dosage-course";
  */
 import type {
   FhirDosage,
-  FhirRatio,
   EzDosage,
   EzCourseMetadata,
   FhirExtension,
@@ -25,8 +24,7 @@ import {
   safetyFromWire,
   measureFromWire,
   administrationToR5,
-  R5_SOURCE_ONLY_MAXIMUM_URL,
-  periodMaximumToR5,
+  removeLiftedPartialMaximumMirrors,
 } from "./canonical-course";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
@@ -63,7 +61,7 @@ import {
   getDosageCondition,
   conditionToR6,
   decodeCourseDetails,
-  sourceWithoutNestedHistory, retainField, readRetainedField,
+  sourceWithoutNestedHistory, retainField,
   liveDosageProjection,
   getDosageAlternativeChoice,
   getDosageExcludedDates,
@@ -311,32 +309,7 @@ function restoreComponentDelta(
       provenance: limit,
     }));
     if (safety) retained.safety = safety;
-    // The generic R5 reader retains incomplete Ratios as source-only markers.
-    // A reconciled native partial limit already owns that same live Ratio;
-    // remove only its newly generated mirror, never an authored marker or an
-    // unmatched maximum. Match one occurrence at a time to retain multiplicity.
-    let partialMaxima: FhirRatio[] | undefined;
-    for (const limit of safety?.doseLimit ?? [])
-      if (limit.scope === "period" && limit.valueQuantity && limit.period &&
-          (limit.valueQuantity.value === undefined || limit.period.value === undefined))
-        (partialMaxima ??= []).push(periodMaximumToR5(limit.valueQuantity, limit.period, limit));
-    if (partialMaxima?.length && fresh.provenance) {
-      const data = fresh.provenance.data as EzDosage;
-      const extensions = data.extension?.filter(marker => {
-        if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || (row.extension?.indexOf(marker) ?? -1) >= 0) return true;
-        const maximum = readRetainedField(marker);
-        const owner = partialMaxima!.findIndex(value => equalStructuredValues(value, maximum));
-        if (owner < 0) return true;
-        partialMaxima!.splice(owner, 1);
-        return false;
-      });
-      if (extensions && extensions.length !== data.extension?.length) {
-        const current = { ...data };
-        if (extensions.length) current.extension = extensions;
-        else delete current.extension;
-        fresh.provenance.data = current;
-      }
-    }
+    removeLiftedPartialMaximumMirrors(fresh, row, safety);
     if (!equalStructuredValues(safety, delta.safety)) {
       superseded = true;
       addWarning(
@@ -1669,10 +1642,11 @@ function reconcileNativeRetainedCourse(
         }
       if (!clinicallyEqual || !datesEqual || !conditionsEqual || !safetyEqual || !referenceEqual || !expressionsEqual)
         structuredChanged = true;
-      // A clinical match can ignore Coding annotations; a supplied current
-      // condition still owns those fields when reusing historical source.
+      // A clinical match can ignore Coding annotations; supplied current
+      // conditions and site references still own those fields on reuse.
       if (old && rawEqual && datesEqual && conditionsEqual && safetyEqual && referenceEqual && expressionsEqual &&
-          (expanded.condition === undefined || equalStructuredValues(old.condition, expanded.condition))) {
+          (expanded.condition === undefined || equalStructuredValues(old.condition, expanded.condition)) &&
+          (!siteReferenceSpecified || equalStructuredValues(old.site?.reference, expanded.siteReference))) {
         components.push(sourceMember(old, sequence).native);
         continue;
       }

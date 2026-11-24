@@ -17,6 +17,7 @@ import type {
 } from "./course";
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
+import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
@@ -628,14 +629,27 @@ function formatCanonicalBase(
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
   // of reconstructing the same dose/timing from native fields five times.
   const clause = compiled ?? clauseForAdministration(a, options);
-  let rendered = formatCanonicalClause(clause, style, env.localization, options);
+  // With no structured administration, the live guard qualifies the supplied
+  // directions. Independent advice (for example, "Otherwise hold") is not
+  // the administration and must not acquire that guard. Do not parse the text.
+  const authoredCondition = a.predicate && a.text?.trim() &&
+    !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
+  const displayClause = authoredCondition
+    ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
+    : clause;
+  let rendered = formatCanonicalClause(displayClause, style, env.localization, options);
+  if (authoredCondition) {
+    const directions = appendMedicationConditionText(a.text!, a.predicate!, options, env);
+    rendered = a.additionalInstructions?.length || a.patientInstruction
+      ? directions + " " + rendered : directions;
+  }
   // A route, timing or condition alone cannot replace the only authored
   // dose/manner directions. Label retained source separately from current
   // structured facts; it cannot override a live structured dose or method.
-  if (a.text?.trim() && (source.schedule || source.route || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
+  if (!authoredCondition && a.text?.trim() && (source.schedule || source.route || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
-  if (a.predicate && style !== "long")
+  if (a.predicate && style !== "long" && !authoredCondition)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);

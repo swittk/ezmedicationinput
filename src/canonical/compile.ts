@@ -16,15 +16,14 @@ import type {
 } from "./course";
 import { hasAmountRole } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
-import { getBodySiteAdministrationTargetCount } from "../body-site-target";
+import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
 import {
   ROUTE_BY_SNOMED, ROUTE_SNOMED, getDoseQuantityUnit,
-  DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey,
-  DEFAULT_BODY_SITE_SNOMED, normalizeBodySiteKey
+  DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM } from "../timing-summary";
+import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredTimingCoding } from "../timing-summary";
 import type { RouteCode } from "../types";
 
 const quantity = (
@@ -561,8 +560,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
         periodUnit:(limit.period.code??limit.period.unit) as NonNullable<typeof schedule.periodUnit>,periodComparator:limit.period.comparator});
     }
     schedule.maxDosePerPeriod=limits;
-    const timingCode = a.schedule.code?.coding?.[0]?.code ||
-      a.schedule.code?.coding?.find(coding => coding.code)?.code;
+    const timingCode = preferredTimingCoding(a.schedule)?.code;
     schedule.timingCode=timingCode??a.schedule.code?.text;
     result.schedule=schedule;
   }else result.schedule=undefined;
@@ -609,14 +607,11 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     const changedCode=base?.site?.coding?.code!==targetCode?.code ||
       (base?.site?.coding?.system??SNOMED_SYSTEM)!==(targetCode?.system??SNOMED_SYSTEM);
     // A failed whole-row source proof does not invalidate a live site's
-    // qualified text. Only an unchanged old site label or an exact known
-    // contradictory site label licenses replacing it with the coded label.
-    const textCode = a.provenance?.sourceTextVerified === false && a.target.text
-      ? DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(a.target.text)]?.coding : undefined;
-    const staleText = textCode?.code && targetCode?.code && textCode.code !== targetCode.code &&
-      (textCode.system ?? SNOMED_SYSTEM) === (targetCode.system ?? SNOMED_SYSTEM);
-    const text=targetCode?.code && (!a.target.text || staleText ||
-      changedCode && a.target.text===base?.site?.text)
+    // qualified text. Only an exact known contradictory label licenses
+    // replacing it; a coarse code keeps the authored lateralized anatomy.
+    const staleText = a.provenance?.sourceTextVerified === false && a.target.text &&
+      bodySiteTextConflictsWithCoding(a.target.text, targetCode);
+    const text=targetCode?.code && (!a.target.text || staleText)
       ? getBodySiteText(targetCode) ?? a.target.text : a.target.text;
     // A decoded restriction belongs to the live site, independently of
     // whether its optional text was supplied or derived from that code.

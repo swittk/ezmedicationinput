@@ -2,6 +2,7 @@
  * These cases exercise canonical edits, not only adapter self-roundtrips. */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
+import * as ts from "typescript";
 import { courseFromR6, courseToR6, courseToR5, inputToCanonical } from "../src/adapters/canonical-course";
 import { calculateTotalUnits as nativeSupply } from "../src/execution/engine";
 import {
@@ -88,6 +89,29 @@ const options = {
 
 describe("canonical course architecture", () => {
   it("the execution kernel and clinical compiler do not import FHIR adapters or inspect wire markers", () => {
+    const forbiddenModuleSpecifiers = (text: string) => {
+      const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const modules: string[] = [];
+      const visit = (node: ts.Node) => {
+        if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+            node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
+          modules.push(node.moduleSpecifier.text);
+        } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+                   node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
+          modules.push(node.arguments[0].text);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      return modules.filter(module => /(?:dosage-course|adapters\/|\/fhir(?:$|\.))/u.test(module));
+    };
+    for (const source of [
+      'import { administrationFromR5 } from "../adapters/r5-import";',
+      'import "../adapters/r5-import";',
+      'const adapter = import("../adapters/r5-import");',
+      'export * from "../adapters/r5-import";'
+    ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
+    expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
     const wireModifierAccess = /(?:\?\.|\.)\s*modifierExtension\b/u;
     expect("const modifiers = row.modifierExtension ?? [];").toMatch(wireModifierAccess);
     expect("const modifiers = row?.modifierExtension ?? [];").toMatch(wireModifierAccess);
@@ -97,7 +121,7 @@ describe("canonical course architecture", () => {
       "../src/canonical/format-course.ts",
     ]) {
       const text = readFileSync(new URL(name, import.meta.url), "utf8");
-      expect(text).not.toMatch(/(?:from\s+|import\s*\(\s*)["'][^"']*(?:dosage-course|adapters\/|\/fhir(?:["']|\.))/u);
+      expect(forbiddenModuleSpecifiers(text)).toEqual([]);
       expect(text).not.toMatch(
         /\b(?:toFhirR5Dosages|fromR6Dosage|toDosageDetails)\s*\(/u
       );

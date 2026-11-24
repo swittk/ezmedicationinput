@@ -1848,7 +1848,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
-    schedule.timeOfDay?.length ||
+    schedule.timeOfDay?.length || schedule.calendarEvents?.length ||
     schedule.count !== undefined || schedule.countMax !== undefined || schedule.timingCode ||
     schedule.duration !== undefined || schedule.durationMax !== undefined ||
     schedule.durationUnit !== undefined || schedule.administrationDuration !== undefined ||

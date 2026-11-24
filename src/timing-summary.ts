@@ -9,6 +9,21 @@ export const FHIR_GTS_TIMING_CODES = new Set([
   "BED", "WK", "MO"
 ]);
 
+/** Prefer an understood cadence over a local translation without changing
+ * either coding or its authored order. Local-only concepts keep their first code. */
+export function preferredTimingCoding<T extends { system?: string; code?: string }>(
+  timing: { code?: { coding?: readonly T[] } }
+): T | undefined {
+  let fallback: T | undefined;
+  for (const coding of timing.code?.coding ?? []) {
+    const code = coding.code?.toUpperCase();
+    if (!code) continue;
+    if ((!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) && FHIR_GTS_TIMING_CODES.has(code)) return coding;
+    if (fallback === undefined) fallback = coding;
+  }
+  return fallback;
+}
+
 /** Recognized daily cadence, independent of configured clock realization. */
 export const TIMING_CODE_DAILY_FREQUENCIES: Readonly<Record<string, number>> = {
   QD: 1, QOD: 0.5, AM: 1, PM: 1, BID: 2, TID: 3, QID: 4

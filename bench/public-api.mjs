@@ -278,7 +278,8 @@ add("nextDueDoses", "nextDueDoses/varied-calendars", (m, i) => {
 // A separate fresh workload advances the same ordinal in each build through
 // probes, warmup, calibration and measured rounds. Millisecond offsets retain
 // the existing 2026-27 calendar range instead of extending weeks indefinitely.
-const freshCalendarBases = variedDates.map(date => new Date(date).getTime());
+// The warm varied case must not seed the first fresh-calendar input instants.
+const freshCalendarBases = variedDates.map(date => new Date(date).getTime() + 1);
 const freshCalendarState = new Map([baseline, candidate].map(m =>
   [m, { nextOrdinal: 0, blocks: [] }]));
 function freshCalendarDate(ordinal) {
@@ -302,11 +303,12 @@ add("nextDueDoses", "nextDueDoses/fresh-calendars", m => prepareFreshCalendars(m
 cases[cases.length - 1].prepare = prepareFreshCalendars;
 // Check the first wrap explicitly, outside timing and without advancing either
 // build's execution sequence or touching the production calendar cache.
-if (freshCalendarDate(0) !== "2026-01-01T01:00:00.000Z" ||
-    freshCalendarDate(97) !== "2026-01-01T01:00:00.001Z" ||
-    freshCalendarDate(194) !== "2026-01-01T01:00:00.002Z" ||
-    new Set(Array.from({ length: 195 }, (_, i) => freshCalendarDate(i))).size !== 195)
-  throw new Error("Fresh-calendar fixture must retain distinct valid query instants");
+const freshCalendarCheck = Array.from({ length: 195 }, (_, i) => freshCalendarDate(i));
+if (freshCalendarDate(0) !== "2026-01-01T01:00:00.001Z" ||
+    freshCalendarDate(97) !== "2026-01-01T01:00:00.002Z" ||
+    freshCalendarDate(194) !== "2026-01-01T01:00:00.003Z" ||
+    new Set(freshCalendarCheck).size !== 195 || freshCalendarCheck.some(date => variedDates.includes(date)))
+  throw new Error("Fresh-calendar fixture must retain distinct valid query instants disjoint from the varied case");
 for (const [name, input] of [
   ["simple", rows],
   ["complex", parsed.eye.fhir],
@@ -751,7 +753,8 @@ function completeComplexRows(output) {
   // Iterate the required positions: a sparse six-slot array is not six rows.
   return complexRowFacts.every((expected, index) => {
     const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
-    if (!row || row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
+    if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) ||
+        row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
         amount.system !== "http://standardterms.edqm.eu" || amount.code !== "15022000" ||
         !oneCode(row.route, "http://snomed.info/sct", "54485002") ||
         !oneCode(row.site, "http://snomed.info/sct", expected[1]) ||

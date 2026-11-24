@@ -991,7 +991,7 @@ export function toEzDosages(dosages:readonly(FhirDosage|EzDosage)[]):EzDosage[] 
     const needsSafety=!input.safety&&Boolean(input.maxDosePerPeriod?.length||input.maxDosePerAdministration||input.maxDosePerLifetime);
     if(!needsCondition&&!needsDates&&!needsSafety){if(result)result.push(input);continue;}
     const predicate=needsCondition?parseDosageCondition(input):undefined;
-    const safety=needsSafety?toR6Safety(input):undefined;
+    const safety=needsSafety?toR6Safety(input,true):undefined;
     const dates=needsDates?getDosageExcludedDates(input):undefined;
     if(!result)result=dosages.slice(0,index);
     const row:EzDosage=Object.assign({},input);

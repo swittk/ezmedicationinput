@@ -4627,6 +4627,8 @@ describe("round52 explicit-event admission and configured clock ownership", () =
         "2026-01-01T09:00:00" + fraction + "+00:00", "2026-01-02T09:00:00" + fraction + "+00:00",
       ]);
       expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 32400.062 }))
+        .toMatchObject({ totalUnits: clock === "09:00" ? 1 : 0, unit: "tab" });
       expect(JSON.stringify(dosage)).toBe(before);
     }
   });

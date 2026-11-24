@@ -3460,3 +3460,77 @@ describe("round51 divided infusion and relative-end ownership", () => {
     expect(parsed.fhirNext.renderedInstruction).toBe(source);
   });
 });
+
+
+describe("round56: explicit division and occurrence bounds", () => {
+  it.each([
+    "Infuse 100 mL at 30 mL/hr in 2 divided doses the next day",
+    "Infuse 100 mL the next day in 2 divided doses at 30 mL/hr",
+    "Infuse 100 mL at 30 mL/hr in 2 divided doses"
+  ])("retains two explicit administrations independently of onset: %s", source => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(clause.dose).toEqual({ value: 50, unit: "mL" });
+    expect(clause.clinicalQuantity).toMatchObject({ dividedDoseCount: 2, numerator: { value: 30, unit: "mL" } });
+    expect(clause.schedule?.count).toBe(2);
+    expect(clause.schedule?.treatmentStartOffsetDays).toBe(source.includes("next day") ? 1 : undefined);
+    for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const row = toFhirR5Dosages(input)[0];
+      expect(row.timing?.repeat?.count).toBe(2);
+      expect(row.doseAndRate?.[0]).toMatchObject({ doseQuantity: { value: 50, unit: "mL" },
+        rateQuantity: { value: 30, unit: "mL/h" } });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([false, true])("keeps a sole infusion ceiling independent of the one-infusion default: %s", capped => {
+    const source = "Infuse 100 mL over 30 minutes" + (capped ? ", up to 3 doses" : "");
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      administrationDuration: 30, administrationDurationUnit: "min" });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.timing?.repeat?.count).toBe(capped ? undefined : 1);
+      expect(row.timing?.repeat?.countMax).toBe(capped ? 3 : undefined);
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it.each([
+    ["Give 10 mg/kg/12h PO divided into 2 doses", 12, "h"],
+    ["Give 10 mg/kg/12h in 2 divided doses PO", 12, "h"],
+    ["Give 10 mg/kg/24h PO divided into 2 doses", 1, "d"]
+  ] as const)("divides the authored weight-based total over its original period: %s", (source, period, periodUnit) => {
+    const parsed = parsePublicSig(source), before = JSON.stringify(parsed);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0]).toMatchObject({ dose: { value: 5, unit: "mg/kg" },
+      schedule: { frequency: 2, period, periodUnit }, clinicalQuantity: { representation: "dose",
+        numerator: { value: 10, unit: "mg" }, dividedDoseCount: 2, requiresPatientWeight: true,
+        denominators: [{ value: 1, unit: "kg", dimension: "patient-mass" },
+          { value: period, unit: periodUnit, dimension: "time" }] } });
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 5, unit: "mg/kg" });
+      expect(row.doseAndRate![0].rateQuantity).toBeUndefined();
+      expect(row.timing?.repeat).toMatchObject({ frequency: 2, period, periodUnit });
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+
+  it("leaves a bare weight rate dose-free and keeps an independent infusion amount separate", () => {
+    const bare = parsePublicSig("Give 10 mg/kg/12h PO");
+    expect(bare.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(bare.meta.canonical.clauses[0].clinicalQuantity?.representation).toBe("rate-quantity");
+    expect(bare.fhir[0].doseAndRate?.[0].doseQuantity).toBeUndefined();
+    expect(bare.fhir[0].timing?.repeat?.frequency).toBeUndefined();
+    const independent = parsePublicSig("Infuse 20 mg at 0.1 mg/kg/hr in 2 divided doses");
+    expect(independent.meta.canonical.clauses[0].dose).toEqual({ value: 10, unit: "mg" });
+    expect(independent.fhir[0].doseAndRate?.[0]).toMatchObject({ doseQuantity: { value: 10, unit: "mg" },
+      rateQuantity: { value: 0.1, unit: "mg/kg/h" } });
+    expect(independent.fhir[0].timing?.repeat?.count).toBe(2);
+    expect(independent.fhir[0].timing?.repeat?.period).toBeUndefined();
+  });
+});

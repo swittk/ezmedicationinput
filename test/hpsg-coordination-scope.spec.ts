@@ -726,6 +726,16 @@ describe('HPSG coordination cadence scope', () => {
     'instill 1 drop in left eye and 2 drops in right eye and 1 drop in both eyes every 5 minutes up to 3 doses'
   ])('keeps recurrence and its total cap atomic: %s', input => {
     const parsed = parseSig(input);
+    const expected = [
+      { site: 'left eye', dose: 1, unit: 'drop' },
+      { site: 'right eye', dose: 2, unit: 'drop' },
+      ...(input.includes('both eyes') ? [{ site: 'both eyes', dose: 1, unit: 'drop' }] : [])
+    ];
+    expect(parsed.items.map(item => ({
+      site: item.fhir.site?.text,
+      dose: item.fhir.doseAndRate?.[0].doseQuantity?.value,
+      unit: item.fhir.doseAndRate?.[0].doseQuantity?.unit
+    }))).toEqual(expected);
     for (const item of parsed.items) {
       expect(item.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
       expect(item.meta.canonical.clauses[0].schedule).toMatchObject({ countMax: 3, period: 5, periodUnit: 'min'

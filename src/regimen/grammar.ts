@@ -52,11 +52,13 @@ const conjunctionOrSequence = constraint('connector.conjunction-or-sequence', f 
   f.site.kind === 'sequence' || f.connectorKind !== 'disjunction');
 const usableLeft = constraint('left.head-or-inherited-complete-schedule', f => f.left.hasHead ||
   f.inheritedAdministration && f.left.complete && f.left.hasSchedule);
-const scheduleRight = [
+const scheduledRight = [
   constraint('right.not-procedural', f => !f.rightHasProcedure),
   constraint('right.complete', f => f.right.complete),
-  constraint('right.hasSchedule', f => f.right.hasSchedule),
-  constraint('right.omitsHead', f => !f.right.hasHead)
+  constraint('right.hasSchedule', f => f.right.hasSchedule)
+];
+const scheduleRight = [
+  ...scheduledRight, constraint('right.omitsHead', f => !f.right.hasHead)
 ];
 const targetSetsDiffer = (left: readonly string[], right: readonly string[]) =>
   left.length !== right.length || left.some(value => right.indexOf(value) < 0);
@@ -101,8 +103,8 @@ export function singleClockWithoutRecurrence(schedule: CanonicalSigClause['sched
  * The ordinary coordinator keeps same-day lists intact unless the right
  * daughter carries this explicit next-day origin. Existing sequence completion
  * supplies the predecessor's occupied day; no event clock is inferred here. */
-function conjunctiveNextPoint(f: BoundaryFacts): boolean {
-  if (f.site.kind !== "coordination" || f.connectorKind !== "conjunction" ||
+function typedNextPoint(f: BoundaryFacts): boolean {
+  if (!(f.site.kind === "sequence" || f.site.kind === "coordination" && f.connectorKind === "conjunction") ||
       !f.left.complete || !f.left.hasDose || f.left.prn || f.right.prn ||
       singleClockWithoutRecurrence(f.left.clause.schedule) === undefined) return false;
   const schedule = f.right.clause.schedule;
@@ -525,7 +527,9 @@ export const CONSTRUCTIONS: readonly Construction[] = [
     preserveRelationAtSequenceSurface: true, semanticLicense: 'dose-continuation', constraints: [...SAME_DAY_DOSE_CONSTRAINTS
   ] },
   { id: 'regimen.sequence', priority: 750, relation: 'sequence', constraints: [
-    constraint('connector.sequence-or-typed-next-point', f => f.site.kind === 'sequence' || conjunctiveNextPoint(f)), ...scheduleRight, usableLeft
+    constraint('connector.sequence-or-typed-next-point', f => f.site.kind === 'sequence' || typedNextPoint(f)),
+    ...scheduledRight,
+    constraint('right.omitsHead-or-typed-next-point', f => !f.right.hasHead || typedNextPoint(f)), usableLeft
   ] },
   { id: 'regimen.target-phase-transition', priority: 770, relation: 'sequence',
     semanticLicense: 'target-transition', constraints: [

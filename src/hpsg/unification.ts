@@ -421,10 +421,15 @@ function mergeDose(
   if (clinicalQuantity && divisionCount !== undefined && clinicalQuantity.dividedDoseCount !== divisionCount &&
       clinicalQuantity.status !== "unsupported" &&
       clinicalQuantity.denominators.some(term => term.dimension === "time")) {
-    // A fixed rate owns no total dose. Its separately merged amount may
-    // arrive before or after the division daughter; never divide the rate.
+    // An explicit division turns a standalone weight/time total into doses
+    // over its authored period. A separately authored amount keeps an
+    // independent infusion rate unchanged, whichever daughter arrives first.
+    const dividedWeightTotal = clinicalQuantity.representation === "rate-quantity" &&
+      clinicalQuantity.requiresPatientWeight && !clinicalQuantity.projectedDose && value === undefined &&
+      !clinicalQuantity.administrationDuration;
+    const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedWeightTotal;
     const activeDose = clinicalQuantity.projectedDose ??
-      (clinicalQuantity.representation === "rate-quantity"
+      (independentRate
         ? value !== undefined && unit ? {
             value, unit, comparator: mergeOptionalScalar(left.comparator, right.comparator)
           } : undefined
@@ -433,7 +438,7 @@ function mergeDose(
       let doseUnit = activeDose.unit;
       // A separate authored dose already owns its unit; patient-mass
       // denominators on an independent infusion rate cannot qualify it.
-      if (!clinicalQuantity.projectedDose && clinicalQuantity.representation !== "rate-quantity") {
+      if (!clinicalQuantity.projectedDose && !independentRate) {
         for (const term of clinicalQuantity.denominators)
           if (term.dimension !== "time") doseUnit += "/" + term.unit;
       }
@@ -441,6 +446,7 @@ function mergeDose(
       unit = doseUnit;
       clinicalQuantity = {
         ...clinicalQuantity, status: "resolved", reviewReason: undefined,
+        ...(dividedWeightTotal ? { representation: "dose" as const } : {}),
         // A carrier preparation also divides its separate administered volume.
         // Its original total stays in numerator; an independent fixed flow-rate
         // numerator stays unchanged.
@@ -797,9 +803,11 @@ export function unifySynsem(
     } };
     schedule = { ...schedule, frequency: dose.divisionCount, timingCode: undefined };
   }
-  // Only a daily total supplies a repeated period. A rate denominator belongs
-  // to the administration duration and cannot create an hourly recurrence.
-  if (dose?.clinicalQuantity?.dailyTotal && dose.clinicalQuantity.dividedDoseCount !== undefined) {
+  // A divided total supplies its authored period. An independent rate
+  // denominator belongs to the infusion and cannot create a recurrence.
+  if (dose?.clinicalQuantity && dose.clinicalQuantity.dividedDoseCount !== undefined &&
+      (dose.clinicalQuantity.dailyTotal || dose.clinicalQuantity.representation === "dose" &&
+        dose.clinicalQuantity.requiresPatientWeight)) {
     const period = dose.clinicalQuantity.denominators.find(term => term.dimension === "time");
     if (period) {
       const dividedSchedule = {

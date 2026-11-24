@@ -1648,7 +1648,8 @@ describe("round49 qualified clocks and partial parallel members", () => {
     expect(schedule?.count).toBeUndefined();
     expect(schedule?.treatmentStartOffsetDays).toBe(onset ? 1 : undefined);
     if (onset) expect(schedule).toMatchObject({ period: 1, periodUnit: "d" });
-    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-02T00:00:00Z",
+    const query = { orderedAt: "2026-12-01T00:00:00Z",
+      from: onset ? "2026-12-01T00:00:00Z" : "2026-12-02T00:00:00Z",
       timeZone: "UTC", eventClock: { MORN: "08:00", EVE: "18:00" }, limit: 4 };
     const expected = evening ? [
       "2026-12-02T10:00:00+00:00", "2026-12-02T18:00:00+00:00",
@@ -1660,8 +1661,10 @@ describe("round49 qualified clocks and partial parallel members", () => {
     for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
       JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(nextDueDoses(input, query)).toEqual(expected);
-      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 1, durationUnit: "d" }).totalUnits)
-        .toBe(evening ? 2 : 1);
+      expect(calculateTotalUnits({ ...query, from: "2026-12-02T00:00:00Z",
+        dosage: input, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(evening ? 2 : 1);
+      if (onset) expect(calculateTotalUnits({ ...query, dosage: input,
+        durationValue: 1, durationUnit: "d" }).totalUnits).toBe(0);
     }
   });
 
@@ -1778,5 +1781,38 @@ describe("round50 counted implicit successors in independent tracks", () => {
         durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
       expect(JSON.stringify(input)).toBe(before);
     }
+  });
+});
+
+
+describe("round56: explicit NEXT daughter with its own dose", () => {
+  it.each(["and take 2 tablets", "then take 2 tablets", "and"])(
+    "owns the next civil day after the predecessor occurrence: %s", daughter => {
+      const parsed = parseSig("Take 1 tablet at 22:00 " + daughter + " the next morning");
+      const secondDose = daughter === "and" ? 1 : 2;
+      expect(parsed.meta.canonical.clauses.map(c => c.dose?.value)).toEqual([1, secondDose]);
+      expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+      expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBe("previous-phase-next-day");
+      for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext,
+        JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+        const before = JSON.stringify(input);
+        const context = { orderedAt: "2026-12-01T23:00:00Z", from: "2026-12-01T23:00:00Z",
+          timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 5 };
+        expect(nextDueDoses(input, context)).toEqual([
+          "2026-12-02T22:00:00+00:00", "2026-12-03T08:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...context, durationValue: 3, durationUnit: "d" }).totalUnits)
+          .toBe(1 + secondDose);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+  });
+
+  it("keeps ordinary coordination without typed NEXT on its own daily schedule", () => {
+    const parsed = parseSig("Take 1 tablet at 22:00 and take 2 tablets in the morning");
+    expect(parsed.meta.canonical.clauses[1].schedule?.phaseStartReference).toBeUndefined();
+    expect(nextDueDoses(parsed, { orderedAt: "2026-12-01T23:00:00Z", from: "2026-12-01T23:00:00Z",
+      timeZone: "UTC", eventClock: { MORN: "08:00" }, limit: 3 })).toEqual([
+      "2026-12-02T08:00:00+00:00", "2026-12-02T22:00:00+00:00", "2026-12-03T08:00:00+00:00"
+    ]);
   });
 });

@@ -156,20 +156,15 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         !endMatches ||
         (!prior.end || (prior.count ?? 1) > 1) && !equalStructuredValues(draftCompletionBoundary(prior.start), draftCompletionBoundary(current.start)))
       changedCompletions.add(index);
-    if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
-        !equalStructuredValues(prior.start, current.start) ||
-        !endMatches ||
-        needsMembers && prior.component.length !== current.component.length) {
-      if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
-        changedCompletions.add(index);
-      continue;
-    }
     // A phase can finish through its member timing (count, duration or bounds)
     // without an explicit step.end. Dose edits leave that declared completion.
     // A uniquely identified successor owns its boundary independently of
     // newly added concurrent doses. Earlier/anonymous owners still need members.
     let membersMatch = true;
-    for (let member = 0; needsMembers && member < prior.component.length; member++) {
+    // Current completion still governs downstream implicit phases when this
+    // draft owner's ID was replaced. Ownership only decides draft reuse.
+    if (current && needsMembers && prior.component.length === current.component.length)
+    for (let member = 0; member < prior.component.length; member++) {
       if (prior.component[member].id !== current.component[member].id) {
         membersMatch = false;
         if (!prior.end) changedCompletions.add(index);
@@ -190,6 +185,14 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
               getDosageExcludedWeekdays({ extension: after.extension }).sort()))
           changedCompletions.add(index);
       }
+    }
+    if (!current || identity === undefined || prior.id !== current.id || prior.count !== current.count ||
+        !equalStructuredValues(prior.start, current.start) ||
+        !endMatches ||
+        needsMembers && prior.component.length !== current.component.length) {
+      if (!prior.end && needsMembers && prior.component.length !== current?.component.length)
+        changedCompletions.add(index);
+      continue;
     }
     if (!membersMatch) continue;
     validOwners.add(index);
@@ -351,8 +354,13 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       // A surviving phase qualifier is a policy even without a numeric
       // limit. Decide scope only after current modifiers have been reconciled.
       const independentStepModifiers = !saved.step.doseLimit?.length && Boolean(step.modifierExtension?.length);
-      if (!reconciled.stepLimits.size && !independentStepAction && !independentStepModifiers)
-        return undefined;
+      const retiredStepPolicy = !reconciled.stepLimits.size && !independentStepAction && !independentStepModifiers;
+      if (retiredStepPolicy && (!sameAction || current.ifExceeded === action ||
+          (current.doseLimit?.length ?? 0) !== (reconciled.course?.doseLimit?.length ?? 0))) return undefined;
+      // Reconciliation claims each live limit once. When only the course's
+      // limits remain, its action owns the unchanged joined header. A changed
+      // or newly supplied header limit still retains direct header authority,
+      // including its existing scoped modifier annotations.
       course = {
         ...(saved.course ? metadata : {}),
         ...(limits?.length ? { doseLimit: limits } : {}),
@@ -360,6 +368,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
         ...(modifiers?.length ? { modifierExtension: modifiers } : {}),
       };
       if (!Object.keys(course).length) course = undefined;
+      if (retiredStepPolicy) return { ...saved, course, step: {}, owner: undefined };
     } else if (course) {
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       course = { ...metadata,

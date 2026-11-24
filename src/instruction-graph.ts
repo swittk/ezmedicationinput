@@ -3571,7 +3571,10 @@ function translatedQuantity(
   // text, rather than producing 'at most mg' without a number.
   if (quantity.value === undefined && quantity.range?.low === undefined &&
       quantity.range?.high === undefined) return "";
-  const singular = quantity.value === 1 && !quantity.range;
+  const singular = quantity.range
+    ? quantity.range.low === undefined && quantity.range.high === 1 ||
+      quantity.range.high === undefined && quantity.range.low === 1
+    : quantity.value === 1;
   const labels = quantity.unit ? INSTRUCTION_QUANTITY_UNIT_LABELS.get(quantity.unit) : undefined;
   const localizedLabels = labels ? localizedConfig(labels.locales, locale, "en") : undefined;
   const unit = localizedLabels
@@ -3579,7 +3582,12 @@ function translatedQuantity(
     : (quantity.unit ?? "");
   const qualifier = quantityComparatorText(quantity.comparator, locale);
   if (quantity.range) {
-    return `${qualifier}${quantity.range.low ?? ""}-${quantity.range.high ?? ""} ${unit}`.trim();
+    const { low, high } = quantity.range;
+    if (low === undefined || high === undefined) {
+      const bound = quantityComparatorText(low === undefined ? "<=" : ">=", locale);
+      return `${qualifier}${bound}${low ?? high} ${unit}`.trim();
+    }
+    return `${qualifier}${low}-${high} ${unit}`.trim();
   }
   return `${qualifier}${quantity.value ?? ""} ${unit}`.trim();
 }
@@ -3920,7 +3928,8 @@ function realizeAction(
   let temporalAdjuncts: AdviceArgument[] | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
-    if ((independentTemporal || arg.role === AdviceArgumentRole.Result && arg.relation !== frame.relation) &&
+    if ((independentTemporal || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time) &&
+        arg.relation !== frame.relation) &&
         arg.relation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&

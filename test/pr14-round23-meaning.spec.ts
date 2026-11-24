@@ -909,14 +909,15 @@ describe("round 25: duration endpoints and course preview boundaries", () => {
     ] }] };
     const ordinary = formatCanonicalCourse(course, "long", { locale: "en", separator: "\n" });
     expect(ordinary).toBe("Use 1 tablet\nUse 2 tablets.");
-    course.stages[0].administrations[0].choice = { groupId: "choices", branchId: "pair" };
-    course.stages[0].administrations[1].choice = { groupId: "choices", branchId: "pair" };
-    course.stages[0].administrations.push(
+    const groupedCourse: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    groupedCourse.stages[0].administrations[0].choice = { groupId: "choices", branchId: "pair" };
+    groupedCourse.stages[0].administrations[1].choice = { groupId: "choices", branchId: "pair" };
+    groupedCourse.stages[0].administrations.push(
       { kind: "administration", amounts: [{ quantity: { value: 3, unit: "tab" } }],
         choice: { groupId: "choices", branchId: "single" } },
       { kind: "administration", amounts: [{ quantity: { value: 4, unit: "tab" } }] }
     );
-    const grouped = formatCanonicalCourse(course, "long", { locale: "en", separator: "\n" });
+    const grouped = formatCanonicalCourse(groupedCourse, "long", { locale: "en", separator: "\n" });
     expect(grouped).toBe("Choose one: (Use 1 tablet\nUse 2 tablets) or Use 3 tablets\nUse 4 tablets.");
     expect(grouped).not.toContain(".\n");
   });
@@ -4967,7 +4968,7 @@ describe("round54: compact administration count boundaries", () => {
       const count = kind === "ceiling-only" ? "x<=1" : kind === "authored-equal-range" ? "x1-1" : "x1-3";
       for (const locale of ["en", "th"]) {
         const text = formatCanonicalClause(clause, "short", resolveSigLocalization(locale));
-        expect(text).toContain(count);
+        expect(text.match(/x(?:<=)?\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?/gu)).toEqual([count]);
         if (kind === "ceiling-only") expect(text).not.toContain("x1-");
       }
       expect(JSON.stringify(clause)).toBe(before);

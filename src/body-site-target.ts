@@ -7,6 +7,7 @@ import {
   BodySiteDefinition,
   CanonicalSiteExpr,
   FhirCodeableConcept,
+  FhirCoding,
   FhirExtension
 } from "./types";
 
@@ -34,6 +35,23 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
     ? Math.trunc(value) : undefined;
 }
 
+/** Compare exact stock site labels only. A lateralized label can refine its
+ * registered unqualified anatomy; a different code alone is not a conflict. */
+export function bodySiteTextConflictsWithCoding(text: string, coding: FhirCoding | undefined): boolean {
+  const definition = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)];
+  const textCode = definition?.coding;
+  if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
+      (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
+  const canonical = definition.text;
+  const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
+  if (unqualified && unqualified !== canonical) {
+    const baseCode = DEFAULT_BODY_SITE_SNOMED[unqualified]?.coding;
+    if (baseCode?.code === coding.code &&
+        (baseCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM)) return false;
+  }
+  return true;
+}
+
 export function resolveBodySiteTargetText(
   site: string | SiteLike | FhirCodeableConcept | undefined,
   options?: BodySiteTargetCountOptions
@@ -53,9 +71,7 @@ export function resolveBodySiteTargetText(
   if (text) {
     // Match the native preview's exact-known-label conflict rule. A coarser
     // code does not supersede authored spatial qualifiers or unfamiliar text.
-    const textCode = DEFAULT_BODY_SITE_SNOMED[normalizeBodySiteKey(text)]?.coding;
-    const staleText = textCode?.code && coding?.code && textCode.code !== coding.code &&
-      (textCode.system ?? SNOMED_SYSTEM) === (coding.system ?? SNOMED_SYSTEM);
+    const staleText = bodySiteTextConflictsWithCoding(text, coding);
     if (!staleText) return text;
   }
   if (coding?.code) {

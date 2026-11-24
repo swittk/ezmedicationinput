@@ -615,6 +615,9 @@ export function projectHpsgSignToState(
     }
   }
 
+  const dividedCount = dose?.attachmentClass !== "procedure"
+    ? dose?.clinicalQuantity?.dividedDoseCount : undefined;
+
   // NEXT day/daypart locates the composed administration positions once.
   // An independently stated cadence or course keeps its own recurrence; the onset supplies
   // neither a daily repetition nor an invented event clock.
@@ -629,14 +632,12 @@ export function projectHpsgSignToState(
       !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
     // A PRN onset locates eligibility; it does not prescribe one lifetime use.
     if (!state.asNeeded)
-      state.count = Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+      state.count = dividedCount ?? Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
   }
 
   const clinicalDuration = dose?.attachmentClass !== "procedure"
     ? dose?.clinicalQuantity?.administrationDuration
     : undefined;
-  const dividedCount = dose?.attachmentClass !== "procedure"
-    ? dose?.clinicalQuantity?.dividedDoseCount : undefined;
   if (clinicalDuration || dividedCount !== undefined) {
     const target = state.primaryClause.schedule ?? (state.primaryClause.schedule = {});
     if (clinicalDuration) {
@@ -669,7 +670,7 @@ export function projectHpsgSignToState(
     }
     if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
-        target.count === undefined) target.count = dividedCount ?? 1;
+        target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;
   }
 
   const rejectedClinicalRanges = sign.synsem.cont.clinicalAdjunct
