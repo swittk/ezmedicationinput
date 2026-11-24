@@ -6027,8 +6027,9 @@ describe("review 19: live site coding and elapsed repeat-cycle clock ownership",
   }] }] };
 
   it("preserves validator-added Coding.version while restoring the R6 site wrapper and reference", () => {
+    const sourceBefore = JSON.stringify(sourceSite);
     for (const version of ["2026.11", "2028.05", "2024-legacy"]) {
-      const rows = toFhirR5Dosages(sourceSite);
+      const rows: FhirDosage[] = JSON.parse(JSON.stringify(toFhirR5Dosages(sourceSite)));
       rows[0].site!.coding![0].version = version;
       const before = JSON.stringify(rows);
       const restored = toDosageDetails(rows);
@@ -6039,6 +6040,7 @@ describe("review 19: live site coding and elapsed repeat-cycle clock ownership",
       expect(site.concept?.coding?.[0].version).toBe(version);
       expect(site.concept?.text).toBe("right eye");
       expect(JSON.stringify(rows)).toBe(before);
+      expect(JSON.stringify(sourceSite)).toBe(sourceBefore);
       const reopened = toDosageDetails(toFhirR5Dosages(restored));
       expect(reopened.step[0].component[0].site).toEqual(site);
       expect(reopened.step[0].component[0].doseAndRate?.[0].doseQuantity?.value).toBe(1);
@@ -6053,7 +6055,8 @@ describe("review 19: live site coding and elapsed repeat-cycle clock ownership",
         method: { coding: [{ system: "https://example.org/method", code: "instill" }] }
       }] }]
     };
-    const rows = toFhirR5Dosages(original);
+    const originalBefore = JSON.stringify(original);
+    const rows: FhirDosage[] = JSON.parse(JSON.stringify(toFhirR5Dosages(original)));
     rows[0].site!.coding![0].version = "site-new";
     rows[0].route!.coding![0].version = "route-new";
     rows[0].method!.coding![0].version = "method-new";
@@ -6062,6 +6065,7 @@ describe("review 19: live site coding and elapsed repeat-cycle clock ownership",
     expect(out.route?.coding?.[0].version).toBe("route-new");
     expect(out.method?.coding?.[0].version).toBe("method-new");
     expect(out.site?.id).toBe("original-site");
+    expect(JSON.stringify(original)).toBe(originalBefore);
     expect(toDosageDetails(toFhirR5Dosages({ step: [{ component: [out] }] }))
       .step[0].component[0]).toEqual(out);
   });
@@ -7133,5 +7137,165 @@ describe("round57 retained range and standalone carrier previews", () => {
     expect(result.longText).toBe("Use 2 tablets once daily.");
     expect(result.meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
     expect(result.meta.canonical.course).toBeUndefined();
+  });
+});
+
+
+describe("round58 partial facts and independent timing text", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const inputFor = (dose: FhirR6Dosage): FhirR6DosageInstruction => ({
+    id: "round58-root", extension: [{ url: "urn:r58:opaque", valueString: "retain me" }],
+    step: [{ component: [dose] }]
+  });
+  it.each(["upper unit", "lower unit", "matching units"] as const)(
+    "preserves independently authored range endpoints with %s", kind => {
+      const range = { low: { value: 250, ...(kind !== "upper unit" ? { unit: "mg" } : {}) },
+        high: { value: 500, ...(kind !== "lower unit" ? { unit: "mg" } : {}) } };
+      const input = inputFor({ doseAndRate: [{ doseRange: range }] }), before = fresh(input);
+      const rows = fresh(toFhirR5Dosages(input)), reopened = fresh(toDosageDetails(rows));
+      for (const value of [input, rows, reopened]) for (const locale of ["en", "th"]) {
+        const options = { locale, realizationMode: "normalized" as const };
+        if (kind === "matching units") {
+          expect(formatSig(value, "short", options)).toBe(locale === "en" ? "250-500 mg" : "250-500 มก.");
+          expect(formatSig(value, "long", options)).toContain(locale === "en" ? "250 to 500 mg" : "250 ถึง 500 มิลลิกรัม");
+        } else for (const style of ["short", "long"] as const) {
+          const rendered = formatSig(value, style, options);
+          expect(rendered).toContain(kind === "upper unit" ? "250 – 500 mg" : "250 mg – 500");
+          expect(rendered).not.toContain("250-500 mg");
+        }
+      }
+      expect(reopened.step![0].component[0].doseAndRate?.[0].doseRange).toEqual(range);
+      expect(input).toEqual(before);
+    });
+  it.each(["site only", "structured dose", "structured method"] as const)(
+    "retains the appropriate source owner for %s directions", kind => {
+      const input = inputFor({ text: "Apply a thin layer",
+        site: { concept: { coding: [{ system: "http://snomed.info/sct", code: "66480008", display: "Left forearm" }] } },
+        ...(kind === "structured dose" ? { doseAndRate: [{ doseQuantity: { value: 2, unit: "g" } }] } : {}),
+        ...(kind === "structured method" ? { method: { text: "Apply" } } : {}) });
+      const before = fresh(input), rows = fresh(toFhirR5Dosages(input));
+      for (const value of [input, rows, fresh(toDosageDetails(rows))])
+        for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+          const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
+          expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
+          if (kind === "site only") expect(rendered).toContain("Apply a thin layer");
+          else expect(rendered).not.toContain("Apply a thin layer");
+          if (kind === "structured dose") expect(rendered).toContain("2");
+        }
+      expect(input).toEqual(before);
+      expect(toDosageDetails(rows)).toEqual(input);
+    });
+  it.each([false, true])("uses only valued endpoints for per-eye scope, mixed units=%s", mixed => {
+    const range = { low: mixed ? { value: 1, unit: "mL" } : { id: "retained-low-note" },
+      high: { value: 2, unit: "drop", extension: [{ url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000050" } }] } };
+    const input = inputFor({ site: { concept: { text: "both eyes" } },
+      doseAndRate: [{ type: { text: "ordered" }, doseRange: range }] });
+    const rows = fresh(toFhirR5Dosages(input)), reopened = fresh(toDosageDetails(rows));
+    for (const value of [input, rows, reopened])
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
+        expect(rendered).toContain("<2 drop");
+        const scope = locale === "en" ? "per administration target" : "แต่ละจุด";
+        if (mixed) { expect(rendered).toContain("1 mL"); expect(rendered).not.toContain(scope); }
+        else expect(rendered).toContain(scope);
+      }
+    expect(reopened.step![0].component[0].doseAndRate?.[0].doseRange).toEqual(range);
+  });
+  it.each(["free label", "free label only", "stale abbreviation", "matching abbreviation"] as const)(
+    "keeps independent timing text distinct from %s", kind => {
+      const timing = { code: { text: kind.startsWith("free") ? "after dialysis" : "BID" },
+        ...(kind === "free label only" ? {} : { repeat: {
+          frequency: kind === "matching abbreviation" ? 2 : 3, period: 1,
+          periodUnit: kind === "matching abbreviation" ? FhirPeriodUnit.Day : FhirPeriodUnit.Week } }) };
+      const input = inputFor({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing });
+      const rows = fresh(toFhirR5Dosages(input)), reopened = fresh(toDosageDetails(rows));
+      for (const value of [input, rows, reopened])
+        for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+          const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
+          if (kind.startsWith("free")) expect(rendered.match(/after dialysis/gu)).toHaveLength(1);
+          if (kind === "free label" || kind === "stale abbreviation") {
+            expect(rendered).toContain(locale === "th" ? "สัปดาห์ละ 3 ครั้ง" : style === "short" ? "3x/1wk" : "3 times weekly");
+            expect(rendered).not.toContain("BID");
+          }
+          if (kind === "matching abbreviation")
+            expect(rendered).toContain(locale === "th" ? "วันละ 2 ครั้ง" : style === "short" ? "BID" : "twice daily");
+        }
+      expect(reopened.step![0].component[0].timing).toEqual(timing);
+    });
+  it.each([false, true])("classifies a fresh safety-only header with R5 site reference=%s", hasSite => {
+    const safety = { doseLimit: [{ scope: "administration" as const, valueQuantity: { value: 2, unit: "drop" } }] };
+    const input: EzDosage | FhirR6DosageInstruction = hasSite
+      ? { siteReference: { display: "left eye" }, safety } : { safety };
+    const before = fresh(input);
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      const rendered = formatSig(input, style, { locale, realizationMode: "normalized" });
+      expect(rendered).toContain("max per administration: 2 drop");
+      const courseLabel = locale === "en" ? "Across this course" : "ตลอดแผนการใช้ยานี้";
+      if (hasSite) {
+        expect(rendered).toContain(locale === "en" ? "left eye" : "ตาซ้าย");
+        expect(rendered).not.toContain(courseLabel);
+      } else expect(rendered).toContain(courseLabel);
+    }
+    expect(input).toEqual(before);
+  });
+  it("inherits both next-day clocks without an inferred lifetime count", () => {
+    const parsed = parseSig("Take 1 tablet at 8 AM and 8 PM for 3 days, then take 2 tablets the next day at the same times");
+    expect(parsed.meta.canonical.clauses[1].schedule?.count).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[1].schedule?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    const options = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+    const expected = [1, 2, 3, 4].flatMap(day =>
+      ["08", "20"].map(hour => `2026-11-0${day}T${hour}:00:00+00:00`));
+    for (const input of [parsed, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      expect(nextDueDoses(input, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 10, unit: "tab", quantityKind: "scheduled" });
+    }
+  });
+  it("retains the one-dose count for a standalone next-day fixed clock", () => {
+    const parsed = parseSig("Take 2 tablets the next day at 8 AM");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+    for (const input of [parsed, fresh(parsed.fhir), fresh(parsed.fhirNext)])
+      expect(nextDueDoses(input, { orderedAt: "2026-11-01T00:00:00Z",
+        from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 5 }))
+        .toEqual(["2026-11-02T08:00:00+00:00"]);
+  });
+});
+
+
+describe("round58 standalone R5 timing labels", () => {
+  it.each(["after dialysis", "BID"])("keeps the correct independent-label decision for %s", text => {
+    const input: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { text }, repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Week } } };
+    const before = JSON.stringify(input);
+    for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+      const rendered = formatSig(input, style, { locale, realizationMode: "normalized" });
+      if (text === "after dialysis") expect(rendered.match(/after dialysis/gu)).toHaveLength(1);
+      else expect(rendered).not.toContain("BID");
+      expect(rendered).toContain(locale === "th" ? "สัปดาห์ละ 3 ครั้ง" : style === "short" ? "3x/1wk" : "3 times weekly");
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+});
+
+
+describe("round58 compact timing-code cadence controls", () => {
+  it.each([
+    ["Q36H", 12], ["Q36H", 36], ["Q1.5H", 12], ["Q36-48H", 12]
+  ] as const)("keeps %s shorthand separate from the current %s-hour cadence", (code, hours) => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { text: code }, repeat: { period: hours, periodUnit: FhirPeriodUnit.Hour } } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    const before = JSON.stringify(r6);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const actual = formatSig(input, style, { locale, realizationMode: "normalized" });
+        const cadence = locale === "th" ? `ทุก ${hours} ชั่วโมง`
+          : style === "short" ? `Q${hours}H` : `every ${hours} hours`;
+        expect(actual.split(cadence)).toHaveLength(2);
+        if (code !== cadence) expect(actual).not.toContain(code);
+      }
+    expect(JSON.stringify(r6)).toBe(before);
+    expect(toDosageDetails(toFhirR5Dosages(r6)).step![0].component[0].timing?.code?.text).toBe(code);
   });
 });

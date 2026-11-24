@@ -948,7 +948,7 @@ export function isR6DosageInstruction(input: object): input is FhirR6DosageInstr
   // Header-only R6 instructions may carry just safety or known R6 source.
   // An extended R5 dosage still owns its explicit dosage fields.
   if ("text" in input || "sequence" in input || "doseAndRate" in input || "timing" in input ||
-      "route" in input || "site" in input || "method" in input || "condition" in input ||
+      "route" in input || "site" in input || "siteReference" in input || "method" in input || "condition" in input ||
       "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
       "patientInstruction" in input || "maxDosePerPeriod" in input ||
       "maxDosePerAdministration" in input || "maxDosePerLifetime" in input || "excludedDates" in input) return false;

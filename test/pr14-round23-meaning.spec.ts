@@ -4745,6 +4745,9 @@ describe("round54: current unit identity and graph argument ownership", () => {
           if (kind === "authored-spray-label") {
             expect(english).toContain("1 metered spray");
             expect(thai).toContain("1 metered spray");
+          } else {
+            expect(english).toContain("1 spray");
+            expect(thai).toContain("1 ครั้ง");
           }
         }
         expect(calculateTotalUnits({ dosage: input, durationValue: 1, durationUnit: FhirPeriodUnit.Day,

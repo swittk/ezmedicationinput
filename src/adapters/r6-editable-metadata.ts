@@ -263,7 +263,9 @@ export function editableCourseSteps(input: FhirR6DosageInstructionInput): FhirR6
 export function retainedDraftStepIndices(input: { extension?: FhirExtension[] }): readonly number[] | undefined {
   const marker = input.extension?.find(item => item.url === R6_DRAFT_STEPS_SOURCE_URL);
   if (!marker) return undefined;
-  const saved = decodeR6SourceMetadata(marker, "drafts");
+  let saved: Record<string, unknown> | undefined;
+  try { saved = decodeR6SourceMetadata(marker, "drafts"); }
+  catch { return undefined; }
   return Array.isArray(saved?.drafts)
     ? (saved.drafts as Array<{ index: number }>).map(draft => draft.index) : undefined;
 }
@@ -308,7 +310,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
       step = reconciled.step ?? {};
       const { doseLimit: _limits, ifExceeded: _action, modifierExtension: _modifiers, ...metadata } = current;
       if (!saved.course) step = { ...step, ...metadata };
-      const limits = current.doseLimit?.filter(limit => !reconciled.stepLimits.has(limit));
+      const limits = current.doseLimit?.filter((_, index) => !reconciled.stepLimits.has(index));
       const action = sameAction || current.ifExceeded === reconciled.step?.ifExceeded
         ? reconciled.course?.ifExceeded : current.ifExceeded;
       let modifiers = reconciled.course?.modifierExtension;
@@ -402,7 +404,7 @@ function reconcileSafetyScopes(
   safety: FhirR6DosageSafety,
   saved: { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety },
   unchangedStepOnly = false
-): { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety; stepLimits: Set<FhirR6DoseLimit> } {
+): { course?: FhirR6DosageSafety; step?: FhirR6DosageSafety; stepLimits: Set<number> } {
   const current = safety.doseLimit ?? [];
   const courseAction = saved.course?.ifExceeded, stepAction = saved.step?.ifExceeded;
   const combinedAction = stepAction && stepAction !== courseAction
@@ -423,21 +425,24 @@ function reconcileSafetyScopes(
     getQuantityComparator(left.valueQuantity) === getQuantityComparator(right.valueQuantity) &&
     left.valueInteger === right.valueInteger &&
     equalStructuredValues(left.valueExpression, right.valueExpression);
-  const claimed = new Set<FhirR6DoseLimit>();
-  const stepLimits = new Set<FhirR6DoseLimit>();
-  const matches = new Map<FhirR6DoseLimit, FhirR6DoseLimit>();
-  const shapeMatch = (limit: FhirR6DoseLimit, unchangedValue = false): FhirR6DoseLimit | undefined => {
+  // Equal immutable objects may occupy separate authored array occurrences.
+  const claimed = new Set<number>();
+  const stepLimits = new Set<number>();
+  const matches = new Map<FhirR6DoseLimit, number>();
+  const shapeMatch = (limit: FhirR6DoseLimit, unchangedValue = false): number | undefined => {
     // Only unmatched anonymous edits need this short clinical comparison.
     // No object serialization or opaque metadata participates in identity.
-    let replacement: FhirR6DoseLimit | undefined;
-    for (const item of current) if (!claimed.has(item) && sameShape(limit, item) &&
-        (!unchangedValue || sameClinicalValue(limit, item)) &&
-        (!item.id || !sourceIds.has(item.id) &&
-          sameClinicalValue(item, limit))) {
-      if (replacement) return undefined;
-      replacement = item;
+    let replacement: number | undefined;
+    for (let index = 0; index < current.length; index++) {
+      const item = current[index];
+      if (!claimed.has(index) && sameShape(limit, item) &&
+          (!unchangedValue || sameClinicalValue(limit, item)) &&
+          (!item.id || !sourceIds.has(item.id) && sameClinicalValue(item, limit))) {
+        if (replacement !== undefined) return undefined;
+        replacement = index;
+      }
     }
-    if (!replacement) return undefined;
+    if (replacement === undefined) return undefined;
     let sourceCount = 0;
     for (const item of sourceGroups.keys())
       if (sameShape(limit, item) && (!unchangedValue || sameClinicalValue(limit, item)) &&
@@ -448,7 +453,7 @@ function reconcileSafetyScopes(
   // Count each equality bucket once on both sides before assigning it;
   // one surviving copy cannot inherit two independent policy qualifiers.
   type ExactLimits = { sample: FhirR6DoseLimit; sourceCount: number;
-    live: FhirR6DoseLimit[]; cursor: number };
+    live: number[]; cursor: number };
   const exactBuckets = new Map<number, ExactLimits[]>();
   const sourceGroups = new Map<FhirR6DoseLimit, ExactLimits>();
   const exactGroup = (limit: FhirR6DoseLimit): ExactLimits => {
@@ -460,11 +465,12 @@ function reconcileSafetyScopes(
     bucket.push(group);
     return group;
   };
-  const liveIds = new Map<string, FhirR6DoseLimit | undefined>();
+  const liveIds = new Map<string, number | undefined>();
   const sourceIds = new Map<string, number>();
-  for (const limit of current) {
-    exactGroup(limit).live.push(limit);
-    if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : limit);
+  for (let index = 0; index < current.length; index++) {
+    const limit = current[index];
+    exactGroup(limit).live.push(index);
+    if (limit.id) liveIds.set(limit.id, liveIds.has(limit.id) ? undefined : index);
   }
   for (const policy of [saved.course, saved.step])
     for (const limit of policy?.doseLimit ?? []) {
@@ -479,7 +485,7 @@ function reconcileSafetyScopes(
     const exact = group.sourceCount === group.live.length ? group.live[group.cursor++] : undefined;
     const replacement = exact ?? (group.live.length === 0 && limit.id && sourceIds.get(limit.id) === 1
       ? liveIds.get(limit.id) : undefined);
-    if (replacement && !claimed.has(replacement)) {
+    if (replacement !== undefined && !claimed.has(replacement)) {
       matches.set(limit, replacement);
       claimed.add(replacement);
     }
@@ -491,9 +497,9 @@ function reconcileSafetyScopes(
     for (const limit of policy.doseLimit ?? []) {
       const group = sourceGroups.get(limit)!;
       const assigned = matches.get(limit);
-      if (assigned && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length ||
-          limit.id !== undefined && sameShape(limit, assigned) && sameClinicalValue(limit, assigned))) {
-        limits.push(assigned);
+      if (assigned !== undefined && (!phase || !unchangedStepOnly || group.sourceCount === group.live.length ||
+          limit.id !== undefined && sameShape(limit, current[assigned]) && sameClinicalValue(limit, current[assigned]))) {
+        limits.push(current[assigned]);
         if (phase) stepLimits.add(assigned);
         if (group.sourceCount !== group.live.length) changed = true;
         continue;
@@ -505,8 +511,8 @@ function reconcileSafetyScopes(
       // A unique anonymous annotation edit keeps its clinical value and phase
       // owner. A changed amount still belongs to the edited header authority.
       const replacement = shapeMatch(limit, phase && unchangedStepOnly);
-      if (replacement) {
-        limits.push(replacement);
+      if (replacement !== undefined) {
+        limits.push(current[replacement]);
         if (phase) stepLimits.add(replacement);
         matches.set(limit, replacement);
         claimed.add(replacement);

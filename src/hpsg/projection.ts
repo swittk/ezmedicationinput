@@ -625,7 +625,7 @@ export function projectHpsgSignToState(
       schedule.count === undefined && schedule.countMax === undefined &&
       schedule.frequency === undefined && schedule.frequencyMax === undefined &&
       schedule.period === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
-      !schedule.timingCode && !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
+      !schedule.timingCode && !schedule.timingReference && !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
       !schedule.calendarEvents?.length && schedule.weekdayOrdinal === undefined &&
       !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
       schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&

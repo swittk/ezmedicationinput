@@ -19,7 +19,7 @@ import {
 } from "../src/index";
 import { formatCanonicalCourse, formatCanonicalAdministration,
   appendMedicationConditionText, appendMedicationExcludedWeekdaysText } from "../src/canonical/format-course";
-import { clauseForAdministration, courseFromAdministrations } from "../src/canonical/compile";
+import { clauseForAdministration, courseFromAdministrations, administrationFromClause } from "../src/canonical/compile";
 import {
   TIMING_DAY_OF_MONTH_EXTENSION_URL,
   TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
@@ -96,6 +96,9 @@ describe("canonical course architecture", () => {
         if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
             node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) {
           modules.push(node.moduleSpecifier.text);
+        } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference) &&
+            node.moduleReference.expression && ts.isStringLiteralLike(node.moduleReference.expression)) {
+          modules.push(node.moduleReference.expression.text);
         } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
                    node.arguments[0] && ts.isStringLiteralLike(node.arguments[0])) {
           modules.push(node.arguments[0].text);
@@ -109,7 +112,8 @@ describe("canonical course architecture", () => {
       'import { administrationFromR5 } from "../adapters/r5-import";',
       'import "../adapters/r5-import";',
       'const adapter = import("../adapters/r5-import");',
-      'export * from "../adapters/r5-import";'
+      'export * from "../adapters/r5-import";',
+      'import adapter = require("../adapters/r5-import");'
     ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
     expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
     const wireModifierAccess = (text: string) => {
@@ -3275,5 +3279,30 @@ describe("round51 relative phase cutoffs and route-only source", () => {
     expect(rendered).toContain(text);
     expect(rendered).toContain(locale === "en" ? "Current:" : "ปัจจุบัน:");
     expect(rendered).toContain(locale === "en" ? "twice daily" : "วันละ 2 ครั้ง");
+  });
+});
+
+
+describe("round58 direct activity projection", () => {
+  it.each([false, true])("omits absent marker properties and retains supplied coding/translation=%s", annotated => {
+    const activity = { text: "exercise", ...(annotated ? {
+      coding: { system: "urn:r58:activity", code: "exercise", display: "Exercise" },
+      i18n: { th: "ออกกำลังกาย" } } : {}) };
+    const administration = administrationFromClause({ dose: { value: 1, unit: "tab" },
+      schedule: { activityTiming: [{ relation: "before", activity, offset: 30 }] } });
+    const course = courseFromAdministrations([administration], "");
+    const projected = projectCanonicalCourse(course, annotated ? { locale: "en" } : undefined);
+    const marker = projected.fhir[0].timing?.repeat?.extension
+      ?.find(extension => extension.url.endsWith("medication-timing-activity-window"))
+      ?.extension?.find(extension => extension.url === "activity")?.valueCodeableConcept;
+    expect(marker?.text).toBe("exercise");
+    if (annotated) {
+      expect(marker?.coding).toEqual([{ system: "urn:r58:activity", code: "exercise", display: "Exercise" }]);
+      expect(JSON.stringify(marker?._text)).toContain("ออกกำลังกาย");
+    } else {
+      expect(marker).not.toHaveProperty("coding");
+      expect(marker).not.toHaveProperty("_text");
+    }
+    expect(JSON.parse(JSON.stringify(projected.fhir[0]))).toEqual(projected.fhir[0]);
   });
 });

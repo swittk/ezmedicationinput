@@ -485,7 +485,7 @@ export function doseRangeNeedsEndpointPreview(range: CanonicalRange): boolean {
   if (low?.value === undefined || high?.value === undefined) return false;
   const lowUnit = low.unit || getDoseQuantityUnit(low);
   const highUnit = high.unit || getDoseQuantityUnit(high);
-  return Boolean(lowUnit && highUnit && lowUnit !== highUnit);
+  return lowUnit !== highUnit;
 }
 
 /** Project native live facts back into the existing grammar realization view.

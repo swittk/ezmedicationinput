@@ -557,18 +557,25 @@ export function resolveMedicationInstructionActionByMethod(
   const customMap = options?.instructionActionMap;
   if (customMap) {
     const display = coding.display ? normalizeActionSurface(coding.display) : undefined;
-    let fallback: string | undefined;
-    // Prefer the existing matching display among equal identities, then the
-    // first exact code match. One configured-vocabulary walk serves both.
+    let fallback: string | undefined, external: string | undefined, externalFallback: string | undefined;
+    // An explicit method keeps precedence over an external mapping. Within
+    // each group prefer a matching display, then the first exact code match.
     for (const surface of Object.keys(customMap)) {
       const input = customMap[surface];
-      if (!sameMethodCoding(input.administrationMethod, coding)) continue;
-      if (!display || input.display && normalizeActionSurface(input.display) === display ||
-          customDefinitionMatchesSurface(surface, input, display))
-        return normalizeCustomDefinition(surface, input);
-      fallback ??= surface;
+      const method = sameMethodCoding(input.administrationMethod, coding);
+      if (!method && !input.externalCodings?.some(item => sameMethodCoding(item, coding))) continue;
+      const matchesDisplay = !display || input.display && normalizeActionSurface(input.display) === display ||
+        customDefinitionMatchesSurface(surface, input, display);
+      if (method) {
+        if (matchesDisplay) return normalizeCustomDefinition(surface, input);
+        fallback ??= surface;
+      } else {
+        if (matchesDisplay) external ??= surface;
+        externalFallback ??= surface;
+      }
     }
-    if (fallback !== undefined) return normalizeCustomDefinition(fallback, customMap[fallback]);
+    const selected = fallback ?? external ?? externalFallback;
+    if (selected !== undefined) return normalizeCustomDefinition(selected, customMap[selected]);
   }
   return DEFAULT_BY_METHOD.get(coding.system ?? SNOMED_SYSTEM)?.get(coding.code);
 }

@@ -119,7 +119,8 @@ import {
   administrationTargetProjections,
   projectAdministrationTargetClauses
 } from "./hpsg/projection";
-import { formatCanonicalClause } from "./format";
+import { formatCanonicalClause, independentTimingText } from "./format";
+import { preferredTimingCoding } from "./timing-summary";
 import { canonicalFromFhir, canonicalToFhir, clinicalCarrierQuantityFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
@@ -1104,6 +1105,11 @@ function appendSourceLessRateRanges(
 
 /** Compact clauses cannot carry independent phase origins, references or qualified ranges. */
 function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolean {
+  // The native schedule owns independent Timing.code text. Keep that label
+  // visible without promoting arbitrary prose into the compact lexical code.
+  const timingLabel = dosage.timing?.code?.text;
+  if (timingLabel && independentTimingText(timingLabel) &&
+      !preferredTimingCoding(dosage.timing!)?.code) return true;
   const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
   if (missingSite && dosage.siteReference?.display) return true;
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||

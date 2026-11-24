@@ -318,8 +318,9 @@ describe("round23 execution families", () => {
         "2026-01-02T00:15:00+00:00", "2026-01-02T00:30:00+00:00",
         "2026-01-03T00:15:00+00:00", "2026-01-03T00:30:00+00:00",
       ]);
-      member.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
-      expect(nextDueDoses(member, { ...opts, limit: 2 })).toEqual([
+      const capped: CanonicalAdministration = JSON.parse(JSON.stringify(member));
+      capped.schedule!.recurrence!.occurrenceCap = { max: 1, period: 1, periodUnit: Unit.Day };
+      expect(nextDueDoses(capped, { ...opts, limit: 2 })).toEqual([
         "2026-01-02T00:15:00+00:00", "2026-01-03T00:15:00+00:00",
       ]);
     });
@@ -1216,21 +1217,24 @@ describe("round27 execution identity and measurement oracles", () => {
     }
     // No institution clock list exists for 42/21d: the source-clock
     // distributor must retain the same fraction on both daily slots.
-    member.schedule!.recurrence = { frequency: 42, period: 21, periodUnit: Unit.Day };
-    expect(nextDueDoses(member, query)).toEqual([
+    const dense = dose();
+    dense.schedule!.recurrence = { frequency: 42, period: 21, periodUnit: Unit.Day };
+    expect(nextDueDoses(dense, query)).toEqual([
       "2026-01-01T08:00:00.500+00:00", "2026-01-01T20:00:00.500+00:00",
       "2026-01-02T08:00:00.500+00:00", "2026-01-02T20:00:00.500+00:00",
     ]);
-    expect(calculateTotalUnits({ ...query, dosage: member, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
+    expect(calculateTotalUnits({ ...query, dosage: dense, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(4);
     // A fractional civil unit uses elapsed distribution. Twelve hours
     // divided by seven produces 6171428 ms and 12342857 ms offsets after flooring.
-    member.schedule!.recurrence = { frequency: 7, period: 0.5, periodUnit: Unit.Day };
-    expect(nextDueDoses(member, { ...query, limit: 3 })).toEqual([
+    const fractional = dose();
+    fractional.schedule!.recurrence = { frequency: 7, period: 0.5, periodUnit: Unit.Day };
+    expect(nextDueDoses(fractional, { ...query, limit: 3 })).toEqual([
       "2026-01-01T08:00:00.500+00:00", "2026-01-01T09:42:51.928+00:00",
       "2026-01-01T11:25:43.357+00:00",
     ]);
-    member.schedule!.recurrence = { frequency: 2, period: 2, periodUnit: Unit.Day, clocks: ["08:00:00"] };
-    expect(nextDueDoses(member, { ...query, limit: 2 })).toEqual([
+    const clocked = dose();
+    clocked.schedule!.recurrence = { frequency: 2, period: 2, periodUnit: Unit.Day, clocks: ["08:00:00"] };
+    expect(nextDueDoses(clocked, { ...query, limit: 2 })).toEqual([
       "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00",
     ]);
   });
@@ -1580,14 +1584,16 @@ describe("round28 execution ownership", () => {
       stages: [{ start: relative(20, "h"), administrations: [member] }] };
     const query = { orderedAt: "2026-01-01T08:00:00Z", from: "2026-01-01T08:00:00Z", timeZone: "UTC", limit: 4 };
     for (const origin of [{ value: 1, unit: "d" }, { value: 24, unit: "h" }]) {
-      member.phaseOrigin = origin;
-      const input = wire(course, version), source = JSON.stringify(input);
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      variant.stages[0].administrations[0].phaseOrigin = origin;
+      const input = wire(variant, version), source = JSON.stringify(input);
       expect(nextDueDoses(input, query)).toEqual(["2026-01-03T06:00:00+00:00"]);
       expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(1);
       expect(JSON.stringify(input)).toBe(source);
     }
-    member.phaseOrigin = undefined;
-    expect(nextDueDoses(wire(course, version), query)).toEqual(["2026-01-02T06:00:00+00:00"]);
+    const unshifted: CanonicalCourse = JSON.parse(JSON.stringify(course));
+    unshifted.stages[0].administrations[0].phaseOrigin = undefined;
+    expect(nextDueDoses(wire(unshifted, version), query)).toEqual(["2026-01-02T06:00:00+00:00"]);
   });
 
   it.each(versions)("uses actual history, not past PRN opportunities, for disjoint-cycle caps (%s)", version => {
@@ -1681,9 +1687,10 @@ describe("round28 execution ownership", () => {
     expect(calculateTotalUnits({ ...query, dosage: wire(course, version) }).totalUnits).toBe(2);
     for (const location of ["course", "stage"] as const) {
       const shared = { limits: [{ scope: "period" as const, amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }] };
-      course.safety = location === "course" ? shared : undefined;
-      course.stages[0].safety = location === "stage" ? shared : undefined;
-      const input = wire(course, version), source = JSON.stringify(input);
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      variant.safety = location === "course" ? shared : undefined;
+      variant.stages[0].safety = location === "stage" ? shared : undefined;
+      const input = wire(variant, version), source = JSON.stringify(input);
       expect(calculateTotalUnits({ ...query, dosage: input }).totalUnits).toBe(1);
       expect(JSON.stringify(input)).toBe(source);
     }
@@ -2616,9 +2623,11 @@ describe("round34 execution boundary regressions", () => {
     const days = ["2026-02-28", "2026-03-07", "2026-03-14", "2026-03-21", "2026-03-28",
       "2026-04-04", "2026-04-11", "2026-04-18", "2026-04-25"];
     for (const cutoff of ["none", "calendar", "phase"] as const) {
-      member.schedule!.recurrence!.calendarWindow = cutoff === "calendar" ? { end: "2026-04-13T00:00:00Z" } : undefined;
-      member.phaseEnd = cutoff === "phase" ? relative(2, "mo") : undefined;
-      const input = wire(course, version), original = JSON.stringify(input);
+      const variant: CanonicalCourse = JSON.parse(JSON.stringify(course));
+      const limited = variant.stages[0].administrations[0];
+      limited.schedule!.recurrence!.calendarWindow = cutoff === "calendar" ? { end: "2026-04-13T00:00:00Z" } : undefined;
+      limited.phaseEnd = cutoff === "phase" ? relative(2, "mo") : undefined;
+      const input = wire(variant, version), original = JSON.stringify(input);
       const count = cutoff === "phase" ? 5 : cutoff === "calendar" ? 7 : 9;
       const expected = days.slice(0, count).map(day => day + "T09:00:00+00:00");
       expect(nextDueDoses(input, { ...query, limit: 20 })).toEqual(expected);
@@ -5366,6 +5375,16 @@ describe("round57 typed timing and civil boundaries", () => {
     const input = r6Wire(deadline.fhirNext, version), before = JSON.stringify(input);
     expect(reopened(input).renderedInstruction).toBe(text);
     expect(JSON.stringify(reopened(input))).toContain("by the next morning");
+    const savedDeadline = reopened(input);
+    const savedMember = importCanonicalCourse(savedDeadline).stages[0].administrations[0];
+    expect(savedMember.phaseStart).toBeUndefined();
+    expect(savedMember.phaseOrigin).toBeUndefined();
+    expect(savedMember.phaseEnd).toMatchObject({ anchor: "unresolved", description: "by the next morning" });
+    expect(savedMember.schedule!.recurrence!.anchors ?? []).not.toContain(EventTiming.Morning);
+    expect(savedDeadline.step![0].component[0].timing?.repeat).toMatchObject({ count: 1 });
+    expect(formatSig(savedDeadline, "long", { locale: "en", realizationMode: "normalized" })).toContain("by the next morning");
+    expect(() => nextDueDoses(savedDeadline, { ...options, limit: 2 }))
+      .toThrow(/Unsupported R6 step RelativeTime: requires a treatment-start offset/u);
     const positive = r6Wire(onset.fhirNext, version);
     expect(nextDueDoses(positive, { ...options, limit: 2 })).toEqual(["2026-01-02T08:00:00+00:00"]);
     expect(JSON.stringify(input)).toBe(before);
@@ -5418,10 +5437,11 @@ describe("round57 typed timing and civil boundaries", () => {
       } } };
       // November's first day is still daylight time at midnight in New York.
       const dayOffset = data.zone === "America/New_York" && start === "2026-11" ? "-04:00" : data.offset;
-      const query = { from: day + "T00:00:00" + dayOffset, orderedAt: day + "T00:00:00" + dayOffset, timeZone: data.zone, limit: 1 };
+      const precedingDay = start === "2026-11" ? "2026-10-31" : "2025-12-31";
+      const query = { from: precedingDay + "T00:00:00" + dayOffset, orderedAt: precedingDay + "T00:00:00" + dayOffset, timeZone: data.zone, limit: 1 };
       const input = r5Wire(row, data.version), before = JSON.stringify(input);
       expect(nextDueDoses(input, query)).toEqual([day + "T02:00:00" + data.offset]);
-      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(1);
       expect(reopened(input).step![0].component[0].timing?.repeat?.boundsPeriod).toEqual(boundsPeriod);
       expect(JSON.stringify(input)).toBe(before);
     }
@@ -5523,4 +5543,292 @@ describe("round57 typed timing and civil boundaries", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
   });
+});
+
+describe("round58 execution phase ownership and local clocks", () => {
+  const versions = ["native", "r5", "r6"] as const;
+  const persist = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const wire = (course: CanonicalCourse, version: typeof versions[number]) =>
+    version === "native" ? course : version === "r5" ? persist(courseToR5(course)) : persist(courseToR6(course));
+  const note = { url: "urn:clinic:round58-execution-note", valueString: "retain the independent source annotation" };
+  const freshWire = (course: CanonicalCourse, version: typeof versions[number]) => {
+    const input = wire(course, version);
+    if (version !== "native") {
+      const rows = Array.isArray(input) ? input : (input as FhirR6DosageInstruction).step!.flatMap(step => step.component);
+      rows[0].extension = [...(rows[0].extension ?? []), note];
+    }
+    return input;
+  };
+  const allMembers = (input: Parameters<typeof importCanonicalCourse>[0]) =>
+    importCanonicalCourse(input).stages.flatMap(stage => stage.administrations);
+  const save = (input: ReturnType<typeof wire>) => persist(toDosageDetails(persist(
+    Array.isArray(input) ? input : "kind" in input ? courseToR5(input) : toFhirR5Dosages(input)
+  )));
+  const immediateOptions = { from: "2026-01-01T12:00:00Z", orderedAt: "2026-01-01T12:00:00Z",
+    timeZone: "UTC", eventClock: { NIGHT: "22:00" }, limit: 12 };
+
+  it.each(versions)("keeps a recurring nightly phase after its immediate administration (%s)", version => {
+    const text = "Take 1 tablet now and nightly for 3 days then take 2 tablets nightly for 2 days";
+    const parsed = parseSig(text);
+    const input = freshWire(parsed.meta.canonical.course!, version), before = JSON.stringify(input);
+    expect(nextDueDoses(input, immediateOptions)).toEqual([
+      "2026-01-01T12:00:00+00:00", "2026-01-01T22:00:00+00:00", "2026-01-02T22:00:00+00:00",
+      "2026-01-03T22:00:00+00:00", "2026-01-04T22:00:00+00:00", "2026-01-05T22:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(8);
+    expect(allMembers(input)[0].schedule!.recurrence).toMatchObject({
+      anchors: [EventTiming.Immediate, EventTiming.Night],
+      courseLength: { value: 3, ...(version === "native" ? { unit: "d" } : { unit: "days", code: "d" }) },
+    });
+    const reopened = save(input);
+    expect(allMembers(reopened)[0].schedule!.recurrence!.anchors).toEqual([EventTiming.Immediate, EventTiming.Night]);
+    if (version !== "native") expect(reopened.step![0].component[0].extension).toContainEqual(note);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("does not infer one completion from an immediate anchor beside an explicit clock (%s)", version => {
+    const first = dose();
+    first.schedule!.recurrence = { anchors: [EventTiming.Immediate], clocks: ["22:00:00"],
+      courseLength: { value: 3, unit: "d" } };
+    const second = dose(2);
+    second.schedule!.recurrence = { anchors: [EventTiming.Night], courseLength: { value: 2, unit: "d" } };
+    const input = freshWire({ kind: "course", stages: [{ administrations: [first] }, { administrations: [second] }] }, version);
+    const before = JSON.stringify(input);
+    expect(nextDueDoses(input, immediateOptions)).toEqual([
+      "2026-01-01T12:00:00+00:00", "2026-01-01T22:00:00+00:00", "2026-01-02T22:00:00+00:00",
+      "2026-01-03T22:00:00+00:00", "2026-01-04T22:00:00+00:00", "2026-01-05T22:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(8);
+    expect(allMembers(save(input))[0].schedule!.recurrence!.clocks).toEqual(["22:00:00"]);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("retains immediate-only and explicitly counted phase completion (%s)", version => {
+    const immediate = freshWire(parseSig("Take 1 tablet now then take 2 tablets nightly for 2 days").meta.canonical.course!, version);
+    expect(nextDueDoses(immediate, immediateOptions)).toEqual([
+      "2026-01-01T12:00:00+00:00", "2026-01-01T22:00:00+00:00", "2026-01-02T22:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: immediate, ...immediateOptions, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(5);
+    const first = dose();
+    first.schedule!.recurrence = { count: 2, anchors: [EventTiming.Immediate, EventTiming.Night],
+      courseLength: { value: 3, unit: "d" } };
+    const second = dose(2);
+    second.schedule!.recurrence = { clocks: ["09:00:00"], courseLength: { value: 2, unit: "d" } };
+    const counted = freshWire({ kind: "course", stages: [{ administrations: [first] }, { administrations: [second] }] }, version);
+    const before = JSON.stringify(counted);
+    expect(nextDueDoses(counted, immediateOptions)).toEqual([
+      "2026-01-01T12:00:00+00:00", "2026-01-01T22:00:00+00:00", "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage: counted, ...immediateOptions, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(6);
+    expect(allMembers(save(counted))[0].schedule!.recurrence!.count).toBe(2);
+    expect(JSON.stringify(counted)).toBe(before);
+  });
+
+  const parallelAt = (onset: number) => {
+    // Existing typed compiler input: parse fresh clauses, then construct a new
+    // independent elapsed-onset value before its first compiler submission.
+    const text = "1 drop OD QID for 28 days then 1 drop OD BID for 7 days; 1 drop OS QID for 28 days";
+    const plan = createBoundaryPlan(text), states = plan.segments.map(segment => parseClauseState(segment.text));
+    const graph = buildRegimenGraph(plan, plan.segments);
+    scopeSequentialPhaseSemantics(states, plan.segments, graph, text);
+    const clauses = persist(states.map(state => state.primaryClause));
+    clauses[1].schedule!.treatmentStartOffsetDays = onset;
+    const parallel = buildCanonicalParallelRegimen(clauses, plan.segments, plan, graph);
+    const projected = projectParallelRegimen(parallel, plan.segments.map(segment => segment.text), text);
+    const course = projected.kind === "resolved" ? projected.canonical
+      : parallel.kind === "unresolved" ? courseFromPartialParallel(parallel, plan.segments.map(segment => segment.text), text)
+        : undefined;
+    if (!course) throw new Error("Expected the independent typed parallel tracks");
+    return { parallel, course };
+  };
+  it("retains both phases as partial when same-track onsets cannot establish a forward replacement", () => {
+    const { parallel, course } = parallelAt(0);
+    expect(parallel.kind).toBe("unresolved");
+    const rows = course.stages.flatMap(stage => stage.administrations);
+    expect(rows.filter(member => member.target?.text === "right eye").map(member => ({
+      frequency: member.schedule?.recurrence?.frequency,
+      duration: member.schedule?.recurrence?.courseLength?.value,
+    }))).toEqual([{ frequency: 4, duration: 28 }, { frequency: 2, duration: 7 }]);
+    expect(courseToR6(course).step!.flatMap(step => step.component).filter(component =>
+      component.site?.concept?.text === "right eye")).toHaveLength(2);
+  });
+
+  it.each(versions.flatMap(version => [14, 35].map(onset => ({ version, onset }))))(
+    "retains the same-track successor at day $onset with the other eye independent ($version)", ({ version, onset }) => {
+      const { parallel, course } = parallelAt(onset);
+      if (onset === 14) expect(parallel.kind).toBe("resolved");
+      const input = freshWire(course, version), before = JSON.stringify(input);
+      const query = { ...options, from: "2026-01-15T00:00:00Z", limit: 6 };
+      if (onset === 14) expect(nextDueDoses(input, query)).toEqual([
+        "2026-01-15T08:00:00+00:00", "2026-01-15T08:00:00+00:00", "2026-01-15T12:00:00+00:00",
+        "2026-01-15T16:00:00+00:00", "2026-01-15T20:00:00+00:00", "2026-01-15T20:00:00+00:00",
+      ]);
+      else expect(nextDueDoses(input, { ...query, from: "2026-01-29T00:00:00Z", limit: 2 })).toEqual([
+        "2026-02-05T08:00:00+00:00", "2026-02-05T20:00:00+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 42, durationUnit: Unit.Day }).totalUnits)
+        .toBe(onset === 14 ? 182 : 238);
+      if (onset === 35)
+        expect(calculateTotalUnits({ dosage: input, ...options, from: "2026-01-29T00:00:00Z",
+          durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      const members = allMembers(save(input));
+      const old = members.find(member => member.target?.text === "right eye" && member.schedule?.recurrence?.frequency === 4);
+      const successor = members.find(member => member.target?.text === "right eye" && member.schedule?.recurrence?.frequency === 2);
+      expect(old?.schedule?.recurrence?.courseLength).toMatchObject({ value: 28, code: "d" });
+      expect(successor?.schedule?.recurrence?.courseLength).toMatchObject({ value: 7, code: "d" });
+      expect(successor?.phaseOrigin).toMatchObject({ value: onset, unit: "d" });
+      expect(JSON.stringify(input)).toBe(before);
+    });
+
+  const clockCases = ["calendar-end", "elapsed-origin", "elapsed-end", "day-start"] as const;
+  it.each(versions.flatMap(version => clockCases.map(kind => ({ version, kind }))))(
+    "uses the logical or elapsed phase clock across a spring gap ($kind/$version)", ({ version, kind }) => {
+      const first = dose(); first.schedule!.recurrence!.clocks = ["12:00:00"];
+      first.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+      const second = dose(2); second.schedule!.recurrence = {
+        frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["01:00:00", "03:00:00"], courseLength: { value: 1, unit: "d" },
+      };
+      const course: CanonicalCourse = { kind: "course", stages: [
+        { ...(kind === "elapsed-origin" ? { start: relative(2, "h") }
+          : { end: kind === "day-start" ? { anchor: "treatment-day-start" as const, displacement: { value: 1, unit: "d" } }
+            : relative(kind === "elapsed-end" ? 24 : 1, kind === "elapsed-end" ? "h" : "d") }),
+          administrations: [first] },
+        { administrations: [second] },
+      ] };
+      const anchor = kind === "elapsed-origin" ? "2026-03-07T00:30:00-05:00" : "2026-03-07T02:30:00-05:00";
+      const query = { from: anchor, orderedAt: anchor, timeZone: "America/New_York", limit: 12 };
+      const input = freshWire(course, version), before = JSON.stringify(input);
+      const expected = kind === "day-start" ? [
+        "2026-03-07T12:00:00-05:00", "2026-03-08T01:00:00-05:00", "2026-03-08T03:00:00-04:00",
+      ] : kind === "elapsed-end" ? [
+        "2026-03-07T12:00:00-05:00", "2026-03-09T01:00:00-04:00", "2026-03-09T03:00:00-04:00",
+      ] : ["2026-03-07T12:00:00-05:00", "2026-03-09T01:00:00-04:00"];
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits)
+        .toBe(kind === "day-start" || kind === "elapsed-end" ? 5 : 3);
+      expect(nextDueDoses(save(input), query)).toEqual(expected);
+      expect(JSON.stringify(input)).toBe(before);
+    });
+
+  it.each(versions.flatMap(version => ["clock", "meal-offset"].map(anchor => ({ version, anchor }))))(
+    "inherits cadence without another phase's anchor inside a local event window ($anchor/$version)", ({ version, anchor }) => {
+      const timing = anchor === "clock" ? "daily at 16:00" : "daily 30 minutes before breakfast";
+      const text = `Take 1 tablet ${timing} for 2 days then take 2 tablets from day 4 while awake`;
+      const parsed = parseSig(text), schedule = parsed.meta.canonical.clauses[1].schedule!;
+      expect(schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: Unit.Day,
+        treatmentStartOffsetDays: 3, eventWindow: { start: "WAKE", end: "HS" } });
+      expect(schedule.timeOfDay).toBeUndefined(); expect(schedule.when).toBeUndefined();
+      expect(schedule.offset).toBeUndefined(); expect(schedule.offsetMin).toBeUndefined(); expect(schedule.offsetMax).toBeUndefined();
+      const input = freshWire(parsed.meta.canonical.course!, version), before = JSON.stringify(input);
+      const query = { ...options, from: "2026-01-04T00:00:00Z", eventClock: { WAKE: "08:00", HS: "20:00", CM: "09:30" }, limit: 1 };
+      expect(nextDueDoses(input, query)).toEqual(["2026-01-04T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(2);
+      const reopened = allMembers(save(input))[1].schedule!.recurrence!;
+      expect(reopened.eventWindow).toEqual({ start: "WAKE", end: "HS" });
+      expect(reopened.clocks).toBeUndefined(); expect(reopened.anchors).toBeUndefined(); expect(reopened.offset).toBeUndefined();
+      const noLocalWindow = parseSig(`Take 1 tablet ${timing} for 2 days then take 2 tablets from day 4`);
+      const inherited = noLocalWindow.meta.canonical.clauses[1].schedule!;
+      if (anchor === "clock") expect(inherited.timeOfDay).toEqual(["16:00:00"]);
+      else expect(inherited).toMatchObject({ when: [EventTiming["Before Breakfast"]], offset: 30 });
+      expect(JSON.stringify(input)).toBe(before);
+    });
+
+  it("reports unavailable Intl wall-clock parts instead of returning a wrong-zone dose", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00"] } }, extension: [note] };
+    const before = JSON.stringify(row), descriptor = Object.getOwnPropertyDescriptor(Intl.DateTimeFormat.prototype, "formatToParts")!;
+    Object.defineProperty(Intl.DateTimeFormat.prototype, "formatToParts", { ...descriptor, value: undefined });
+    try {
+      expect(() => nextDueDoses([row], { from: "2044-02-06T00:00:00Z", orderedAt: "2044-02-06T00:00:00Z",
+        timeZone: "Asia/Bangkok", limit: 1 })).toThrow(/Intl.DateTimeFormat.*formatToParts/u);
+      expect(() => calculateTotalUnits({ dosage: [row], from: "2044-02-07T00:00:00Z", orderedAt: "2044-02-07T00:00:00Z",
+        timeZone: "Asia/Bangkok", durationValue: 1, durationUnit: Unit.Day })).toThrow(/Intl.DateTimeFormat.*formatToParts/u);
+    } finally {
+      Object.defineProperty(Intl.DateTimeFormat.prototype, "formatToParts", descriptor);
+    }
+    expect(nextDueDoses([row], { from: "2044-02-08T00:00:00Z", orderedAt: "2044-02-08T00:00:00Z",
+      timeZone: "Asia/Bangkok", limit: 1 })).toEqual(["2044-02-08T08:00:00+07:00"]);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  const intervalDue = [
+    "2026-01-01T12:00:00+00:00", "2026-01-01T20:00:00+00:00",
+    "2026-01-02T04:00:00+00:00", "2026-01-02T12:00:00+00:00", "2026-01-02T20:00:00+00:00",
+    "2026-01-03T04:00:00+00:00", "2026-01-03T12:00:00+00:00", "2026-01-03T20:00:00+00:00",
+    "2026-01-04T04:00:00+00:00",
+  ];
+  it.each(versions)("executes an immediate start on the existing eight-hour cadence without double counting (%s)", version => {
+    const input = freshWire(parseSig("Take 1 tablet now and every 8 hours for 3 days").meta.canonical.course!, version);
+    const before = JSON.stringify(input);
+    expect(nextDueDoses(input, immediateOptions)).toEqual(intervalDue);
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 72, durationUnit: Unit.Hour }).totalUnits).toBe(9);
+    const later = { ...immediateOptions, from: "2026-01-02T00:00:00Z" };
+    expect(nextDueDoses(input, later)).toEqual(intervalDue.slice(2));
+    expect(calculateTotalUnits({ dosage: input, ...later, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(6);
+    expect(allMembers(input)[0].schedule!.recurrence).toMatchObject({
+      anchors: [EventTiming.Immediate], period: 8, periodUnit: Unit.Hour,
+    });
+    const reopened = save(input);
+    expect(nextDueDoses(reopened, immediateOptions)).toEqual(intervalDue);
+    expect(calculateTotalUnits({ dosage: reopened, ...later, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(6);
+    if (version !== "native") expect(reopened.step![0].component[0].extension).toContainEqual(note);
+    const ordinary = freshWire(parseSig("Take 1 tablet every 8 hours for 3 days").meta.canonical.course!, version);
+    expect(nextDueDoses(ordinary, immediateOptions)).toEqual(intervalDue);
+    expect(calculateTotalUnits({ dosage: ordinary, ...immediateOptions, durationValue: 72, durationUnit: Unit.Hour }).totalUnits).toBe(9);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("counts prior interval administrations before a bounded immediate cadence (%s)", version => {
+    const first = dose();
+    first.schedule!.recurrence = { anchors: [EventTiming.Immediate], period: 8, periodUnit: Unit.Hour,
+      count: 4, courseLength: { value: 3, unit: "d" } };
+    const input = freshWire({ kind: "course", stages: [{ administrations: [first] }] }, version), before = JSON.stringify(input);
+    expect(nextDueDoses(input, immediateOptions)).toEqual(intervalDue.slice(0, 4));
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 72, durationUnit: Unit.Hour }).totalUnits).toBe(4);
+    const later = { ...immediateOptions, from: "2026-01-02T00:00:00Z" };
+    expect(nextDueDoses(input, later)).toEqual(intervalDue.slice(2, 4));
+    expect(calculateTotalUnits({ dosage: input, ...later, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(2);
+    const exhausted = { ...immediateOptions, from: "2026-01-02T13:00:00Z" };
+    expect(nextDueDoses(input, exhausted)).toEqual([]);
+    expect(calculateTotalUnits({ dosage: input, ...exhausted, durationValue: 48, durationUnit: Unit.Hour }).totalUnits).toBe(0);
+    const reopened = save(input);
+    expect(allMembers(reopened)[0].schedule!.recurrence!.count).toBe(4);
+    expect(nextDueDoses(reopened, later)).toEqual(intervalDue.slice(2, 4));
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions)("retains the authored following phase after an immediate interval course (%s)", version => {
+    const text = "Take 1 tablet now and every 8 hours for 3 days then take 2 tablets daily for 2 days";
+    const input = freshWire(parseSig(text).meta.canonical.course!, version), before = JSON.stringify(input);
+    const expected = [...intervalDue, "2026-01-05T09:00:00+00:00", "2026-01-06T09:00:00+00:00"];
+    expect(nextDueDoses(input, immediateOptions)).toEqual(expected);
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 72, durationUnit: Unit.Hour }).totalUnits).toBe(9);
+    expect(calculateTotalUnits({ dosage: input, ...immediateOptions, durationValue: 6, durationUnit: Unit.Day }).totalUnits).toBe(13);
+    expect(nextDueDoses(save(input), immediateOptions)).toEqual(expected);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(versions.flatMap(version => ["start", "predecessor-end"].map(kind => ({ version, kind }))))(
+    "uses an explicit treatment calendar boundary after an elapsed predecessor ($kind/$version)", ({ version, kind }) => {
+      const first = dose(); first.schedule!.recurrence!.clocks = ["12:00:00"];
+      first.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+      const second = dose(2); second.schedule!.recurrence = {
+        frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["01:00:00", "03:00:00"], courseLength: { value: 1, unit: "d" },
+      };
+      const course: CanonicalCourse = { kind: "course", stages: [
+        { start: relative(2, "h"), ...(kind === "predecessor-end" ? { end: relative(2) } : {}), administrations: [first] },
+        { ...(kind === "start" ? { start: relative(2) } : {}), administrations: [second] },
+      ] };
+      const query = { from: "2026-03-07T02:30:00-05:00", orderedAt: "2026-03-07T02:30:00-05:00",
+        timeZone: "America/New_York", limit: 12 };
+      const expected = ["2026-03-07T12:00:00-05:00", "2026-03-09T03:00:00-04:00", "2026-03-10T01:00:00-04:00"];
+      const input = freshWire(course, version), before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 4, durationUnit: Unit.Day }).totalUnits).toBe(5);
+      const reopened = save(input);
+      expect(nextDueDoses(reopened, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: reopened, ...query, durationValue: 4, durationUnit: Unit.Day }).totalUnits).toBe(5);
+      if (version !== "native") expect(reopened.step![0].component[0].extension).toContainEqual(note);
+      expect(JSON.stringify(input)).toBe(before);
+    });
 });

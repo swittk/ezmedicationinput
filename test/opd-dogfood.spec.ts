@@ -33,9 +33,13 @@ describe("OPD clinician dogfood grammar", () => {
       url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
     }] });
     expect(parsed.longText).toContain("for up to 3 doses");
-    expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
-    expect(fromFhirDosage(parsed.fhir).meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3
-    });
+    const reopened = fromFhirDosage(parsed.fhir);
+    expect(reopened.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
+    expect(reopened.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3 });
+    expect(reopened.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(reopened.fhir.timing?.repeat?._count).toEqual({ extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] });
   });
 
   it("uses countMax as the operational schedule cap", () => {

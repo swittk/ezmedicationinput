@@ -646,7 +646,7 @@ function formatCanonicalBase(
   // A route, timing or condition alone cannot replace the only authored
   // dose/manner directions. Label retained source separately from current
   // structured facts; it cannot override a live structured dose or method.
-  if (!authoredCondition && a.text?.trim() && (source.schedule || source.route || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
+  if (!authoredCondition && a.text?.trim() && (source.schedule || source.route || source.target || source.siteReference || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
       !clause.instructionGraph?.actions.length)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
   if (a.predicate && style !== "long" && !authoredCondition)
@@ -682,8 +682,8 @@ function formatCanonicalBase(
   for (let index = 0; index < (a.amounts?.length ?? 0); index++) {
     const amount = a.amounts![index];
     const scope = targetScope && (amount.quantity ? usesTargetScope(amount.quantity) :
-      amount.range && (!amount.range.low || usesTargetScope(amount.range.low)) &&
-        (!amount.range.high || usesTargetScope(amount.range.high))) ? targetScope : undefined;
+      amount.range && (amount.range.low?.value === undefined || usesTargetScope(amount.range.low)) &&
+        (amount.range.high?.value === undefined || usesTargetScope(amount.range.high))) ? targetScope : undefined;
     // A compact clause represents one untyped dose. Multiple entries and
     // explicit roles remain complete, labelled amounts in the native preview.
     if (labelled && amount.quantity) {

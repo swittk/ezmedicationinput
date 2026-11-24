@@ -1,7 +1,7 @@
 import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 import { deserializeCanonicalContext, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, TIMING_EVENT_WINDOW_EXTENSION_URL } from "../src/fhir";
 import { courseFromR6 } from "../src/adapters/canonical-course";
-import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
+import { AdviceArgumentRole, AdviceForce, AdvicePolarity, AdviceRelation, EventTiming, type AdviceFrame, type FhirExtension, type MedicationCondition, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions } from "../src/types";
 import { describe, expect, it } from "vitest";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import adviceRulesSource from "../src/advice-rules.json";
@@ -13,10 +13,10 @@ import { formatCanonicalClause } from "../src/format";
 import { getQuantityComparator } from "../src/fhir-quantity-operator";
 import { resolveSigLocalization } from "../src/i18n";
 import { buildMedicationInstructionActionCodeSystem, buildMedicationInstructionConceptCodeSystem, formatSig, fromFhirDosage, getMedicationInstructionAction, getMedicationInstructionConcept, listMedicationInstructionActions, listMedicationInstructionConcepts, resolveMedicationInstructionAction as resolvePublicAction, resolveMedicationInstructionSequenceAction, resolveMedicationInstructionConcept as resolvePublicConcept, parseInstructionActions, realizeInstructionGraph, getDosageCondition, toDosageDetails, toFhirR5Dosages } from "../src/index";
-import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod } from "../src/instruction-action-terminology";
+import { medicationInstructionActionCodings, resolveMedicationInstructionAction, resolveMedicationInstructionActionForMethod, resolveMedicationInstructionActionByMethod } from "../src/instruction-action-terminology";
 import { medicationInstructionConceptCodings, getMedicationInstructionConcept as getInternalInstructionConcept } from "../src/instruction-concept-terminology";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
-import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits } from "../src/index";
+import { parseSig as parsePublicSig, nextDueDoses, calculateTotalUnits, importCanonicalCourse, projectCanonicalCourse } from "../src/index";
 
 describe("procedural instruction graph", () => {
   it.each([
@@ -2193,9 +2193,9 @@ describe("source-owned action amounts remain editable across the whole graph", (
     const last = actions[1];
     graph.actions = actions;
     const targeted = { ...graph, primaryAdministrationSpan: { ...last.span } };
-    clause.dose = { value: 3, unit: "tab" };
+    const editedClause = { ...clause, dose: { value: 3, unit: "tab" } };
     const selected = realizeInstructionGraph(targeted, "en", {
-      omitCanonicalAdministration: clause
+      omitCanonicalAdministration: editedClause
     })!;
     expect(selected).toContain("Take 1 tablet");
     expect(selected).not.toMatch(/take 2 tablets/iu);
@@ -6020,6 +6020,8 @@ describe("round55: current clinical facts and independent graph meaning", () => 
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
         if (variant === "negative state") {
           expect(text.match(/nausea/giu)).toHaveLength(1);
+          expect(text).toContain(locale === "en" ? "only if not nausea" : "เฉพาะเมื่อ ไม่ nausea");
+          expect(text).not.toMatch(locale === "en" ? /only if\s+nausea/iu : /เฉพาะเมื่อ\s*nausea/u);
         } else {
           expect(text.match(/140/gu)).toHaveLength(1);
           expect(text.match(/160/gu) ?? []).toHaveLength(variant === "any" || variant === "opposite unless" ? 1 : 0);
@@ -6439,4 +6441,168 @@ describe("round57 independent graph and calendar meaning", () => {
       .toBe("ทาครั้งละ 1 g ที่ผิวหนัง (" + (sourceText || "where rough") + ").");
     expect(row).toEqual(before);
   });
+});
+
+
+describe("round58 graph fidelity and current typed arguments", () => {
+  const fresh = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+  const marker = (frame: AdviceFrame) => buildInstructionGraphExtension({
+    sourceText: "", sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame]
+  })!;
+  const graphChild = (extensions: FhirExtension[] | undefined) => extensions!
+    .find(item => item.url.endsWith("medication-instruction-graph"))!
+    .extension!.find(item => item.url === "action")!;
+  const views = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    return [[row], r6, fresh(toFhirR5Dosages(r6))] as const;
+  };
+  const preparation = (): AdviceFrame => ({
+    ...fresh(parseInstructionActions("Dilute with water")[0]), sourceText: ""
+  });
+  const material = () => ({
+    role: AdviceArgumentRole.Material, relation: AdviceRelation.With,
+    text: "100 mL sterile water", normalized: "sterile water",
+    i18n: { th: "น้ำปราศจากเชื้อ" }, quantity: { value: 100, unit: "mL" }
+  });
+
+  it.each(["r5", "r6"] as const)("retains opaque action children through the public graph codec and fresh %s projections", kind => {
+    const action = fresh(parseInstructionActions("Swallow 1 tablet before bedtime")[0]);
+    const known = marker(action);
+    const unknown: FhirExtension = { url: "urn:round58:opaque-action", id: "kept-child", extension: [
+      { url: "note", valueString: "preserve supplied action note" },
+      { url: "nested", extension: [{ url: "zero", valueInteger: 0 }, { url: "flag", valueBoolean: false }] }
+    ] };
+    const supplied = fresh(known);
+    graphChild([supplied]).extension!.push(unknown);
+    const row = { method: { text: "Swallow" },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [supplied] } satisfies FhirDosage;
+    const input = kind === "r5" ? [row] : { step: [{ component: [row] }] };
+    const before = JSON.stringify(input);
+    const parsed = parseInstructionGraphExtension(row.extension)!;
+    const rebuilt = buildInstructionGraphExtension(parsed)!;
+    expect(graphChild([rebuilt]).extension).toContainEqual(unknown);
+    expect(graphChild([rebuilt]).extension!.find(child => child.url === unknown.url)).toBe(unknown);
+    expect(graphChild([rebuilt]).extension!.filter(child => child.url !== unknown.url))
+      .toEqual(graphChild([known]).extension);
+    expect(buildInstructionGraphExtension(parseInstructionGraphExtension([known]))).toEqual(known);
+    const rebuiltRow = { ...row, extension: [rebuilt] };
+    const rebuiltInput = kind === "r5" ? [rebuiltRow] : { step: [{ component: [rebuiltRow] }] };
+    for (const submitted of [input, rebuiltInput]) {
+      const projected = projectCanonicalCourse(importCanonicalCourse(submitted));
+      const savedR5 = fresh(toFhirR5Dosages(fresh(projected.fhirNext)));
+      for (const extensions of [projected.fhir[0].extension,
+        projected.fhirNext.step![0].component[0].extension, savedR5[0].extension]) {
+        expect(graphChild(extensions).extension).toContainEqual(unknown);
+      }
+      for (const wire of [projected.fhir, projected.fhirNext, savedR5]) {
+        expect(formatSig(wire, "long", { locale: "en", realizationMode: "normalized" }))
+          .toContain("1 tablet before sleep");
+        expect(formatSig(wire, "long", { locale: "th", realizationMode: "normalized" }))
+          .toContain("1 เม็ดก่อนนอน");
+      }
+    }
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
+  it.each(["measured material", "unit-only destination"] as const)(
+    "retains the preparation target without duplicating its quantity: %s", variant => {
+      const frame: AdviceFrame = { ...preparation(),
+        relation: variant === "measured material" ? AdviceRelation.With : AdviceRelation.To,
+        args: variant === "measured material" ? [material()] : [{
+          role: AdviceArgumentRole.Destination, relation: AdviceRelation.To,
+          text: "100 mL", normalized: "mL", quantity: { value: 100, unit: "mL" }
+        }] };
+      const row: FhirDosage = { extension: [marker(frame)] };
+      const before = JSON.stringify(row);
+      for (const input of views(row)) {
+        const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(en).toBe(variant === "measured material"
+          ? "Dilute with 100 mL sterile water." : "Dilute to 100 mL.");
+        expect(th).toContain("100 มิลลิลิตร");
+        if (variant === "measured material") expect(th).toContain("น้ำปราศจากเชื้อ");
+        expect(en.match(/100 mL/gu)).toHaveLength(1);
+        expect(th.match(/100 มิลลิลิตร/gu)).toHaveLength(1);
+      }
+      expect(JSON.stringify(row)).toBe(before);
+    });
+
+  it.each([
+    [AdviceRelation.Before, true], [AdviceRelation.Before, false],
+    [AdviceRelation.After, true], [AdviceRelation.After, false]
+  ] as const)("retains the temporal relation once for %s 08:00 (inline=%s)", (relation, inline) => {
+    const frame: AdviceFrame = { ...preparation(), relation: inline ? relation : undefined,
+      args: [{ ...material(), text: "sterile water", quantity: undefined },
+        { role: AdviceArgumentRole.Time, relation, text: "08:00", normalized: "08:00" }] };
+    const row: FhirDosage = { extension: [marker(frame)] };
+    const before = JSON.stringify(row);
+    const enExpected = "Dilute with sterile water " + relation + " 08:00";
+    const thRelation = relation === AdviceRelation.Before ? "ก่อน" : "หลัง";
+    expect(realizeInstructionAction(frame, "en")).toBe(enExpected);
+    expect(realizeInstructionAction(frame, "th")).toContain(thRelation + "08:00");
+    for (const input of views(row)) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(enExpected + ".");
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th).toContain("น้ำปราศจากเชื้อ");
+      expect(th.match(new RegExp(thRelation + "08:00", "gu"))).toHaveLength(1);
+      expect(th.match(new RegExp(thRelation, "gu"))).toHaveLength(1);
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each([
+    ["external only", undefined, false], ["external matching display", "Sip gently", false],
+    ["explicit method priority", undefined, true], ["explicit method despite external display", "Sip gently", true]
+  ] as const)("resolves a code-only configured action while preserving method precedence: %s", (_name, display, explicit) => {
+    const coding = { system: "http://snomed.info/sct", code: "421521009", ...(display ? { display } : {}) };
+    const instructionActionMap: NonNullable<ParseOptions["instructionActionMap"]> = {
+      "sip gently": { code: "sip-gently", display: "Sip gently", i18n: { th: "จิบเบา ๆ" },
+        externalCodings: [{ system: coding.system, code: coding.code }] },
+      ...(explicit ? { "swallow carefully": { code: "swallow-carefully", display: "Swallow carefully",
+        i18n: { th: "กลืนอย่างระมัดระวัง" }, administrationMethod: { system: coding.system, code: coding.code } } } : {})
+    };
+    const options = { instructionActionMap };
+    const row: FhirDosage = { method: { coding: [coding] }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+    const before = JSON.stringify(row);
+    expect(resolveMedicationInstructionActionByMethod(coding, options)?.code)
+      .toBe(explicit ? "swallow-carefully" : "sip-gently");
+    expect(fromFhirDosage(row, { ...options, locale: "en", realizationMode: "normalized" }).longText)
+      .toBe((explicit ? "Swallow carefully" : "Sip gently") + " 1 tablet.");
+    expect(fromFhirDosage(row, { ...options, locale: "th", realizationMode: "normalized" }).longText)
+      .toContain(explicit ? "กลืนอย่างระมัดระวัง" : "จิบเบา ๆ");
+    expect(projectCanonicalCourse(importCanonicalCourse(row)).fhir[0].method?.coding).toEqual([coding]);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each(["changed", "unchanged", "removed"] as const)(
+    "uses the current Site translation in a fresh rich primary: %s", variant => {
+      const siteCoding = { system: "http://snomed.info/sct", code: "39937001", display: "Skin" };
+      const frame: AdviceFrame = { ...fresh(parseInstructionActions("Apply 1 g thinly to skin")[0]),
+        sourceText: "" };
+      frame.args = frame.args.map(arg => arg.role === AdviceArgumentRole.Site ? {
+        ...arg, text: "skin", normalized: "skin", coding: siteCoding, codings: [siteCoding],
+        i18n: { th: "ผิวหนังเดิม" }
+      } : arg);
+      const text = variant === "changed" ? "ผิวหนังใหม่" : "ผิวหนังเดิม";
+      const row: FhirDosage = { method: { text: "Apply" },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+        site: { text: "skin", coding: [siteCoding], ...(variant !== "removed" ? {
+          _text: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/translation", extension: [
+            { url: "lang", valueCode: "th" }, { url: "content", valueString: text }
+          ] }] }
+        } : {}) }, extension: [marker(frame)] };
+      const before = JSON.stringify(row);
+      for (const input of views(row)) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+          .toBe("Apply 1 g thinly to skin.");
+        const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(th).toContain("1 g");
+        expect(th).toContain("บางๆ");
+        expect(th).toContain(variant === "removed" ? "ผิวหนัง" : text);
+        if (variant !== "unchanged") expect(th).not.toContain("ผิวหนังเดิม");
+        expect(parseInstructionGraphExtension(toFhirR5Dosages(input)[0].extension)!
+          .actions[0].args.find(arg => arg.role === AdviceArgumentRole.Site)?.i18n?.th).toBe("ผิวหนังเดิม");
+      }
+      expect(JSON.stringify(row)).toBe(before);
+    });
 });

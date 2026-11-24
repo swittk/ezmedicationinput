@@ -686,9 +686,10 @@ export function clinicalQuantityLexicalRule(): HpsgLexicalRule<HpsgClauseContext
 function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgSign[] {
   const token = context.tokens[start];
   if (!token || !available(context, start)) return [];
-  // The complete numeric daughter owns its suffix. Its fraction cannot start
-  // another competing rate after the full expression was licensed.
-  if (context.clinicalCache.rateTokenIndices?.has(token.index)) return [];
+  // A complete numeric or qualified daughter owns its suffix, including an
+  // unlicensed rate phrase. Its bare value must not become a competing rate.
+  if (context.clinicalCache.rateTokenIndices?.has(token.index) ||
+      context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) return [];
   const division = dividedDoseCountSign(context, start);
   if (division) return [division];
   let phraseStart = start;

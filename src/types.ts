@@ -1018,6 +1018,8 @@ export interface AdviceFrame {
   origin?: "grammar" | "semantic-resolver";
   confidence?: number;
   coding?: FhirCoding;
+  /** Unrecognized imported action children, retained as non-executable FHIR data. */
+  sourceExtensions?: FhirExtension[];
 }
 
 export interface TextRange {

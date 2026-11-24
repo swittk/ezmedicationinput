@@ -231,6 +231,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueInteger("spanEnd", frame.span.end));
   add(nested, valueString("sourceText", frame.sourceText));
   for (const argument of frame.args) nested.push(buildArgumentExtension(argument));
+  if (frame.sourceExtensions) for (const field of frame.sourceExtensions) nested.push(field);
   return { url: "action", extension: nested };
 }
 
@@ -410,6 +411,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
   const semanticComponents:NonNullable<AdviceFrame["predicate"]["semanticComponents"]>=[];
   let translations:Record<string,string>|undefined;
   let locales:NonNullable<AdviceFrame["predicate"]["realizerConfig"]>["locales"]|undefined;
+  let sourceExtensions:FhirExtension[]|undefined;
   for(const field of extension.extension??[])switch(field.url){
     case "predicateLemma":if(!lemma)lemma=field;break;
     case "spanStart":if(!start)start=field;break;case "spanEnd":if(!end)end=field;break;
@@ -436,13 +438,14 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
         semanticComponents.push({role:value,coding:code});
       break;
     }
+    default:(sourceExtensions??=[]).push(field);break;
   }
   if(!lemma?.valueString||start?.valueInteger===undefined||end?.valueInteger===undefined||source?.valueString===undefined||!force?.valueCode)return undefined;
   if(legacyFallback?.valueString||legacyActivities.length){
     locales??={};locales.th={...locales.th,fallbackObject:legacyFallback?.valueString??locales.th?.fallbackObject,
       suppressActivityConcepts:legacyActivities.length?legacyActivities:locales.th?.suppressActivityConcepts};
   }
-  return {force:force.valueCode as AdviceForce,origin:origin?.valueCode as AdviceFrame["origin"],
+  const frame:AdviceFrame = {force:force.valueCode as AdviceForce,origin:origin?.valueCode as AdviceFrame["origin"],
     confidence:confidence?.valueDecimal,polarity:polarity?.valueCode as AdvicePolarity,
     polaritySource:polaritySource?.valueCode==="shared"?"shared":undefined,
     modality:modality?.valueCode as AdviceModality,relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
@@ -450,6 +453,8 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
       realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
     args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString,sequenceIndex:sequence?.valueInteger};
+  if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
+  return frame;
 }
 
 function parseGraphRelation(extension:FhirExtension):CanonicalInstructionRelation|undefined {

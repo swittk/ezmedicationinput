@@ -461,7 +461,7 @@ function appendThaiQuantityToken(result: LexToken[], token: LexToken, input: str
   if (result[end - 2]?.original === ".") start = end - 3;
   else if ((result[end - 3]?.original === "/" ||
       result[end - 2]?.original.startsWith("/") || result[end - 3]?.original.endsWith("/")) &&
-      isClinicalNumericUnit(token.canonical ?? canonicalLocaleLexeme(token.lower) ?? token.lower)) {
+      isClinicalNumericUnit(DEFAULT_UNIT_SYNONYMS[token.lower] ?? token.canonical ?? canonicalLocaleLexeme(token.lower) ?? token.lower)) {
     if (result[end - 3]?.original === "/") start = end - 4;
     else if (result[end - 2]?.original.startsWith("/") ||
         result[end - 3]?.original.endsWith("/")) start = end - 3;

@@ -10,6 +10,7 @@ import type {
   FhirDosage,
   EzDosage,
   EzCourseMetadata,
+  EzCourseStep,
   FhirExtension,
   FhirR6Dosage,
   FhirR6DosageInstruction,
@@ -375,7 +376,7 @@ function restoreComponentDelta(
       const live = row.doseAndRate?.[i];
       const unchangedDose = !!(
         baseline?.dose !== undefined &&
-        (old.doseExpression || old.doseQuantity?.comparator) &&
+        (old.doseExpression || old.doseQuantity?.comparator || old.doseRange) &&
         baseline.dose ===
           compactProjectionFingerprint({
             doseQuantity: simpleQuantityForR5(live?.doseQuantity),
@@ -435,6 +436,11 @@ function restoreComponentDelta(
           if (!equalStructuredValues(entry.quantity, old.doseQuantity)) supersededQuantity = true;
         }
       }
+      // A changed live Range owns its current endpoints. Its complete
+      // original metadata remains inactive source, even when only an
+      // annotation-only endpoint was removed.
+      if (old.doseRange && !unchangedDose && !equalStructuredValues(live?.doseRange, old.doseRange))
+        supersededQuantity = true;
       if (old.rateExpression) {
         if (unchangedRate && baseline?.rateExpression === undefined &&
             !Object.prototype.hasOwnProperty.call(live, "rateExpression"))
@@ -496,7 +502,7 @@ function restoreComponentDelta(
         const old = delta.doseAndRate[i];
         if (old.doseExpression || old.rateExpression) supersededExpression = true;
         if (
-          old.doseQuantity?.comparator ||
+          old.doseQuantity?.comparator || old.doseRange ||
           old.rateQuantity?.comparator ||
           old.rateRatio?.numerator?.comparator === "~"
         )
@@ -513,7 +519,7 @@ function restoreComponentDelta(
       superseded = true;
       addWarning(
         warnings,
-        "Retained R6 dose/rate Quantity comparators superseded by edited R5 fields were preserved only as inert source provenance."
+        "Retained R6 dose/rate Quantity comparators or dose ranges superseded by edited R5 fields were preserved only as inert source provenance."
       );
     }
   }
@@ -1395,7 +1401,7 @@ function reconcileNativeRetainedCourse(
     // modifiers have independent owners; clearing one must not erase the other.
     const editedR6Step = editedStep
       ? r6StepMetadata({ ...r5StepMetadata(retainedStepFields), ...editedStep })
-      : retainedStepFields;
+      : "modifierExtension" in retainedStepFields ? r6StepMetadata(retainedStepFields as Partial<EzCourseStep>) : retainedStepFields;
     if (!step) {
       structuredChanged = true;
       addWarning(

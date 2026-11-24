@@ -628,7 +628,7 @@ export function scopeSequentialPhaseSemantics(
         // recurrence, not the preceding phase's duration, count or dates.
         // The onset-only construction has one complete cadence antecedent.
         // Explicit local cadence/anchors remain local.
-        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.activityTiming?.length);
+        const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length);
         const recurrence = {
           frequency: shared.frequency, frequencyMax: shared.frequencyMax,
           period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,

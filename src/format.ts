@@ -1,4 +1,5 @@
 import { TIMING_ABBREVIATIONS } from "./maps";
+import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
 import { getDoseUnitKind } from "./unit-lexicon";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
@@ -1190,6 +1191,16 @@ function shouldSuppressRoutePhrase(
 }
 
 /** A timing abbreviation is shorthand only while its typed recurrence agrees. */
+/** A free timing label is independent of any structured recurrence. */
+export function independentTimingText(code: string | undefined): string | undefined {
+  if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined ||
+      TIMING_ABBREVIATIONS[code.toLowerCase()]) return undefined;
+  // The existing compact interval family is cadence shorthand too, even
+  // when a particular numeric interval has no static abbreviation entry.
+  const interval = /^q[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?([a-z]+)$/iu.exec(code);
+  return interval && INTERVAL_UNIT_TOKENS_DATA.has(interval[1].toLowerCase()) ? undefined : code;
+}
+
 export function timingCodeMatchesRecurrence(
   schedule: Pick<CanonicalScheduleExpr, "timingCode" | "frequency" | "frequencyMax" | "period" | "periodMax" | "periodUnit" | "when" | "timeOfDay">,
   code = schedule.timingCode
@@ -1221,6 +1232,7 @@ export function timingCodeMatchesRecurrence(
 
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
+  const timingText = independentTimingText(schedule.timingCode);
   const parts: string[] = [];
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
@@ -1246,7 +1258,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(describeFrequency(schedule, words)!);
   } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
-  } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
+  } else if (schedule.timingCode && !timingText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (
     schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
@@ -1288,6 +1300,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
       parts.push(`${count}x/${qualifier}${schedule.periodUnit}`);
     } else parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
+  if (timingText) parts.push(timingText);
   if (schedule.when?.length) {
     parts.push(schedule.offset !== undefined || schedule.offsetMin !== undefined || schedule.offsetMax !== undefined
       ? collectWhenPhrases(schedule).join(" ") : schedule.when.join(" "));
@@ -1418,6 +1431,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
+  const timingText = independentTimingText(schedule.timingCode);
+  if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowEnglish(schedule, words);
   let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {

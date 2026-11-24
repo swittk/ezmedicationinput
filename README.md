@@ -426,10 +426,13 @@ build hashes, runtime details, raw paired samples, timing spread and the
 per-scenario gate. Cases with an independent edited-dose oracle record whether
 both versions perform the same clinical work. Incorrect baseline wording keeps
 its raw timing but receives no regression verdict. APIs missing from the baseline
-receive an explicit candidate-only measurement. An incomplete report is saved
-atomically before imports and fixture setup, then after each finished scenario;
-an interrupted run remains explicitly incomplete rather than losing its results. Host/JIT noise
-still requires repeated runs for borderline or sub-microsecond results.
+receive an explicit candidate-only measurement. After the entry paths have been
+validated, an incomplete report is saved atomically before imports and fixture
+setup, then after each finished scenario. An interruption after that checkpoint
+leaves an explicitly incomplete report. Use a fresh report path for each run and
+check its timestamp and the process exit status: an earlier path-validation
+failure cannot replace a previous run's report. Host/JIT noise still requires
+repeated runs for borderline or sub-microsecond results.
 
 ## Formal HPSG substrate
 
@@ -978,6 +981,8 @@ Key rules:
 - Interval-based schedules (`repeat.period` + `periodUnit`) step forward from `orderedAt`, respecting `dayOfWeek` filters.
 - Pure frequency schedules (`BID`, `TID`, etc.) fall back to clinic-defined institution times.
 - All timestamps are emitted as ISO strings that include the clinic time-zone offset.
+
+Timezone-aware scheduling and supply require `Intl.DateTimeFormat.prototype.formatToParts` and support for the requested IANA time zone.
 
 `from` is required and marks the evaluation window. `orderedAt` is optional—when supplied it acts as the baseline for interval calculations; otherwise the `from` timestamp is reused. The options bag also accepts `timeZone`, `eventClock`, `mealOffsets`, and `frequencyDefaults` at the top level (mirroring the legacy `config` object). `limit` defaults to 10 when omitted.
 

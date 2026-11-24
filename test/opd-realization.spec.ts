@@ -241,6 +241,9 @@ describe("OPD normalized realization and advanced schedule semantics", () => {
     const total = parseSig("take 1 tab q5min prn chest pain max 3 doses");
     expect(total.fhir.timing?.repeat?.count).toBeUndefined();
     expect(total.fhir.timing?.repeat).toMatchObject({ countMax: 3, period: 5, periodUnit: "min" });
+    expect(total.fhir.timing?.repeat?._count).toEqual({ extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+    }] });
     expect(total.meta.canonical.clauses[0]?.schedule?.occurrenceCap).toBeUndefined();
   });
 

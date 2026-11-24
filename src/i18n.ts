@@ -5,7 +5,7 @@ import { THAI_COURSE } from "./locales/course/th";
 import { getQuantityDurationUnit } from "./unit-lexicon";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
-import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, doseUnitUsesTargetScope } from "./format";
+import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText, doseUnitUsesTargetScope } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -2168,9 +2168,10 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     if (site) parts.push(site);
   }
   const timing = describeFrequencyThai(schedule, words);
+  const timingText = independentTimingText(schedule.timingCode);
   if (timing) {
     parts.push(timing);
-  } else if (schedule.timingCode && timingCodeMatchesRecurrence(schedule)) {
+  } else if (schedule.timingCode && !timingText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (schedule.period && schedule.periodUnit &&
       !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
@@ -2182,6 +2183,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
         : base;
     parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
   }
+  if (timingText) parts.push(timingText);
   const events = collectWhenPhrasesThai(schedule);
   if (events.length) {
     parts.push(events.join(" "));
@@ -2364,6 +2366,8 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
+  const timingText = independentTimingText(schedule.timingCode);
+  if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowThai(schedule, words);
   let clockPart: string | undefined;
   if (schedule.timeOfDay?.length) {

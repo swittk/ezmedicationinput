@@ -42,6 +42,7 @@ export function setCourseCycleCount(owner: CourseCountOwner, count: number | und
     else {
       changed ??= original!.slice(0, index);
       if (count !== undefined) changed.push({ ...item, valueInteger: count });
+      else (displaced ??= []).push(item);
     }
   }
   if (!found && count !== undefined) {

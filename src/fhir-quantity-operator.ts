@@ -62,17 +62,18 @@ for (const comparator of ["<", "<=", ">", ">=", "~", "ad"] as const)
 export function getEmaQuantityComparator(
   quantity: Pick<FhirQuantity, "extension"> | undefined
 ): FhirR6Quantity["comparator"] {
-  let found: FhirR6Quantity["comparator"];
+  let found: FhirR6Quantity["comparator"], equality = false;
   for (const ext of quantity?.extension ?? []) {
     if (ext.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
         ext.valueCoding?.system !== EMA_QUANTITY_OPERATOR_SYSTEM) continue;
     const code = ext.valueCoding.code;
+    if (code === EMA_EQUALITY_OPERATOR_CODE) { equality = true; continue; }
     const comparator = code ? comparatorByEmaCode[code] : undefined;
     if (!comparator) continue;
     if (found && found !== comparator) return undefined;
     found = comparator;
   }
-  return found;
+  return equality ? undefined : found;
 }
 
 /** Read the active qualifier. A clinician-edited native Quantity comparator
@@ -193,7 +194,7 @@ export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirS
   if (!quantity) return undefined;
   if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
   if (!quantity.extension?.length) return quantity;
-  let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false;
+  let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false, equalityActive = false;
   let corrected: FhirExtension[] | undefined, equalitySources: FhirExtension[] | undefined;
   let metadataOnly: FhirExtension | undefined, ambiguousMetadata = false;
   let operatorPrimitives: Map<string, FhirExtension> | undefined;
@@ -216,8 +217,11 @@ export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirS
         corrected ??= quantity.extension.slice(0, index);
         currentItem = editedOperator(item, undefined, equalitySources ??= []);
       }
-      if (current) {
-        if (comparator && comparator !== current) conflict = true;
+      if (coding.code === EMA_EQUALITY_OPERATOR_CODE) {
+        if (comparator) conflict = true;
+        equalityActive = true;
+      } else if (current) {
+        if (equalityActive || comparator && comparator !== current) conflict = true;
         comparator = current;
       }
     } else if (item.url === QUANTITY_OPERATOR_SOURCE_URL && item.valueCode === undefined &&

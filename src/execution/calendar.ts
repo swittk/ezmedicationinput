@@ -58,15 +58,7 @@ export function formatToParts(formatter: Intl.DateTimeFormat, date: Date): DateT
   if (typeof withParts.formatToParts === "function") {
     return withParts.formatToParts(date);
   }
-  const iso = date.toISOString();
-  return [
-    { type: "year", value: iso.slice(0, 4) },
-    { type: "month", value: iso.slice(5, 7) },
-    { type: "day", value: iso.slice(8, 10) },
-    { type: "hour", value: iso.slice(11, 13) },
-    { type: "minute", value: iso.slice(14, 16) },
-    { type: "second", value: iso.slice(17, 19) },
-  ];
+  throw new Error("Timezone-aware execution requires Intl.DateTimeFormat.prototype.formatToParts");
 }
 
 /**

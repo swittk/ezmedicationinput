@@ -3610,7 +3610,8 @@ function translatedArgument(arg: AdviceArgument, locale: string): string {
       // unit is already part of the amount realization.
       const nominal = arg.normalized;
       const entity = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
-        arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme;
+        arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme ||
+        arg.role === AdviceArgumentRole.Material;
       return entity && nominal && nominal !== arg.quantity.unit && !normalizeUnit(nominal)
         ? joinLocalizedTokens(locale, [amount, translatedArgumentConcept(arg, locale)])
         : amount;
@@ -4481,15 +4482,39 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
       changed = true;
       continue;
     }
-    if (arg.role === AdviceArgumentRole.Site && site &&
-        (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||
-          arg.coding?.system !== site.coding?.system)) {
-      changed = true;
+    if (arg.role === AdviceArgumentRole.Site && site) {
       const text = site.text ?? site.coding?.display ?? site.coding?.code ?? "";
-      args.push({ ...arg, text, normalized: text, conceptId: undefined,
-        coding: site.coding, codings: site.coding ? [site.coding] : undefined,
-        i18n: site.i18n ?? site.coding?.i18n ?? codingFromSite(text)?.i18n });
-      continue;
+      const currentTranslations = site.i18n ?? site.coding?.i18n;
+      if (arg.text !== site.text || arg.coding?.code !== site.coding?.code ||
+          arg.coding?.system !== site.coding?.system) {
+        changed = true;
+        args.push({ ...arg, text, normalized: text, conceptId: undefined,
+          coding: site.coding, codings: site.coding ? [site.coding] : undefined,
+          i18n: currentTranslations ?? codingFromSite(text)?.i18n });
+        continue;
+      }
+      // A translation edit does not change the argument's lexical identity.
+      // Supplied locales own their current wording; independent graph locales
+      // retain their lexical realization (for example English "the hair").
+      let i18n = arg.i18n;
+      if (currentTranslations) {
+        for (const locale of Object.keys(currentTranslations)) if (i18n?.[locale] !== currentTranslations[locale]) {
+          i18n = { ...i18n, ...currentTranslations };
+          break;
+        }
+      } else if (i18n) {
+        const defaults = codingFromSite(text)?.i18n;
+        for (const locale of Object.keys(i18n)) if (i18n[locale] !== defaults?.[locale]) {
+          if (i18n === arg.i18n) i18n = { ...i18n };
+          if (defaults?.[locale] !== undefined) i18n[locale] = defaults[locale];
+          else delete i18n[locale];
+        }
+      }
+      if (i18n !== arg.i18n) {
+        changed = true;
+        args.push({ ...arg, i18n });
+        continue;
+      }
     }
     args.push(arg);
   }

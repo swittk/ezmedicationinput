@@ -3558,13 +3558,15 @@ describe("round57 route-owned infusion boundaries", () => {
     });
   it("joins a route-only infusion volume and comma-separated rate", () => {
     const parsed = parsePublicSig("500 mL IV, 100 mL/hr");
+    expect(parsed.fhirNext.step?.[0].component[0].doseAndRate?.[0].rateQuantity)
+      .toMatchObject({ value: 100, unit: "mL/h" });
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     expect(parsed.meta.canonical.clauses[0]).toMatchObject({ dose: { value: 500, unit: "mL" },
       route: { code: "47625008" }, clinicalQuantity: { representation: "rate-quantity",
         numerator: { value: 100, unit: "mL" }, denominators: [{ value: 1, unit: "h" }] } });
     for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
-      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100 });
+      expect(row.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, unit: "mL/h" });
     }
   });
   it("keeps separately timed IV doses as separate administrations", () => {
@@ -3573,5 +3575,39 @@ describe("round57 route-owned infusion boundaries", () => {
     expect(parsed.meta.canonical.clauses.map(clause => clause.schedule?.when)).toEqual([[EventTiming.Morning], [EventTiming.Night]]);
     expect(parsed.fhir).toHaveLength(2);
     expect(parsed.fhir.map(row => row.doseAndRate?.[0].doseQuantity?.value)).toEqual([5, 10]);
+  });
+});
+
+
+describe("round58 qualified rate ownership and Thai unit aliases", () => {
+  it("retains an unlicensed qualified rate as source instead of an exact suffix rate", () => {
+    const parsed = parsePublicSig("Infuse 500 mL, not more than 1000 units/hr");
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 500, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBe("not more than 1000 units/hr");
+    for (const dose of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+      expect(dose.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
+      expect(dose.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      expect(dose.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(JSON.stringify(dose)).toContain("not more than 1000 units/hr");
+    }
+  });
+  it("keeps an explicitly licensed approximate rate with its comparator", () => {
+    const parsed = parsePublicSig("Infuse 500 mL at approximately 1000 units/hr");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      numerator: { value: 1000, unit: "[iU]", comparator: "~" },
+      denominators: [{ value: 1, unit: "h" }] });
+    for (const dose of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+      expect(dose.doseAndRate?.[0].rateQuantity).toMatchObject({ value: 1000, unit: "[iU]/h" });
+      expectSimpleQuantityOperator(dose.doseAndRate?.[0].rateQuantity, "~");
+    }
+  });
+  it.each(["tablet", "tablets", "เม็ด"])("folds a Thai spaced fraction with the existing %s alias", unit => {
+    const parsed = parsePublicSig("กิน ๑ / ๒ " + unit);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 0.5, unit: "tab" });
+    for (const dose of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]])
+      expect(dose.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
   });
 });

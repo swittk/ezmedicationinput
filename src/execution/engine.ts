@@ -702,7 +702,11 @@ function hasDefiniteAdministrationCount(
 /** Exact phase completion includes the implicit single immediate dose.
  * Upper count allowances alone never establish this completion point. */
 function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number | undefined {
-  const count = repeat?.count ?? (repeat?.anchors && arrayIncludes(repeat.anchors, TimingEvent.Immediate) ? 1 : undefined);
+  const count = repeat?.count ?? (
+    repeat?.anchors?.length === 1 && repeat.anchors[0] === TimingEvent.Immediate &&
+    !repeat.clocks?.length && repeat.frequency === undefined && repeat.frequencyMax === undefined &&
+    repeat.period === undefined && repeat.periodMax === undefined && repeat.periodUnit === undefined ? 1 : undefined
+  );
   return count !== undefined && Number.isInteger(count) && count > 0 &&
     (repeat?.countMax === undefined || repeat.countMax === count) ? count : undefined;
 }
@@ -2265,6 +2269,7 @@ function stageCalendarClock(
   course: CanonicalCourse,
   index: number,
   start: Date,
+  anchor: Date,
   timeZone: string,
   sourceClock?: TreatmentWallClock,
   predecessorClock?: TreatmentWallClock
@@ -2273,7 +2278,6 @@ function stageCalendarClock(
   const nextDay = startBoundary?.anchor === "previous-phase-next-day";
   const relative = startBoundary ?? (index > 0 ? course.stages[index - 1].end : undefined);
   const dayStart = relative?.anchor === "treatment-day-start";
-  if (!sourceClock && !nextDay && !dayStart) return undefined;
   if (!relative) {
     // An implicit successor inherits the predecessor's logical clock, not
     // the original course's clock or a gap-shifted physical timestamp.
@@ -2283,7 +2287,8 @@ function stageCalendarClock(
   const unit = offset?.code ?? offset?.unit;
   if (unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour)
     return getTimeParts(start, timeZone);
-  return nextDay || dayStart ? LOCAL_DAY_START_CLOCK : sourceClock;
+  return nextDay || dayStart ? LOCAL_DAY_START_CLOCK
+    : sourceClock ?? getTimeParts(anchor, timeZone);
 }
 /** Each component phase marker owns BOTH its cadence start and the civil
  * clock used by its calendar duration cap. Elapsed offsets create a fresh
@@ -2631,7 +2636,7 @@ function treatmentStepWindow(
       : treatmentRelativeInstant(stage.start, anchor, timeZone, sourceClock)
     : predecessorPoint ?? previousEnd;
   const capClock = repetitionWindow ? repetitionWindow.capClock
-    : stageCalendarClock(course, index, start, timeZone, sourceClock, predecessorClock);
+    : stageCalendarClock(course, index, start, anchor, timeZone, sourceClock, predecessorClock);
   const administrations: ResolvedAdministrationWindow[] = [];
   let allFinite = stage.administrations.length > 0;
   let completionPending = false;
@@ -4887,13 +4892,13 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     if (results.length >= effectiveLimit) {
       return results.slice(0, effectiveLimit);
     }
-    const canFallbackToFrequency =
+    const canFallbackToCadence =
       expanded.length === 0 &&
       timeOfDayEntries.length === 0 &&
-      !!repeat.frequency &&
-      !!repeat.period &&
-      !!repeat.periodUnit;
-    if (!canFallbackToFrequency) {
+      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
+        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
+          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
+    if (!canFallbackToCadence) {
       if (expanded.length === 0) {
         return results.slice(0, effectiveLimit);
       }
@@ -5149,13 +5154,13 @@ function derivePriorCountFromHistory(
         return count;
       }
     }
-    const canFallbackToFrequency =
+    const canFallbackToCadence =
       expanded.length === 0 &&
       timeOfDayEntries.length === 0 &&
-      !!repeat.frequency &&
-      !!repeat.period &&
-      !!repeat.periodUnit;
-    if (!canFallbackToFrequency) {
+      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
+        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
+          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
+    if (!canFallbackToCadence) {
       if (expanded.length === 0) {
         return count;
       }
@@ -5914,13 +5919,13 @@ function countScheduleEvents(
         recordCandidate(immediateSource);
       }
     }
-    const canFallbackToFrequency =
+    const canFallbackToCadence =
       expanded.length === 0 &&
       timeOfDayEntries.length === 0 &&
-      !!repeat.frequency &&
-      !!repeat.period &&
-      !!repeat.periodUnit;
-    if (!canFallbackToFrequency) {
+      ((!!repeat.frequency && !!repeat.period && !!repeat.periodUnit) ||
+        (whenCodes.length === 1 && whenCodes[0] === TimingEvent.Immediate &&
+          usesIntervalCadence(repeat) && isDayFilteredIntervalSupported(repeat, enforceDayFilter)));
+    if (!canFallbackToCadence) {
       if (expanded.length === 0) return count;
       if (hasDistributedClockFrequency(repeat, expanded, enforceDayFilter)) {
         return (

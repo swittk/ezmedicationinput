@@ -384,6 +384,8 @@ export function buildCanonicalParallelRegimen(
       if (authoredStart === null)
         return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-conflicting-onsets');
       if (authoredStart) {
+        if (phases.length && compareRegimenPositions(phases[phases.length - 1].start!, authoredStart) !== -1)
+          return partialParallelRegimen(trackPhases, clauses, 'parallel-regimen-non-increasing-onsets');
         at = authoredStart;
         boundaries.push(at);
       }
@@ -438,10 +440,14 @@ export function buildCanonicalParallelRegimen(
     const end = ordered[index + 1];
     const components: CanonicalParallelComponent[] = [];
     for (const phases of relativeTracks) {
-      const phase = phases.find(candidate => {
+      const phase = phases.find((candidate, phaseIndex) => {
         const begins = compareRegimenPositions(candidate.start!, start);
         const finishes = candidate.end ? compareRegimenPositions(start, candidate.end) : -1;
-        return (begins === -1 || begins === 0) && finishes === -1;
+        // A licensed same-track successor replaces execution eligibility.
+        // Keep the authored end separate so an earlier end still leaves a gap.
+        const nextStart = phases[phaseIndex + 1]?.start;
+        const beforeSuccessor = !nextStart || compareRegimenPositions(start, nextStart) === -1;
+        return (begins === -1 || begins === 0) && finishes === -1 && beforeSuccessor;
       });
       if (phase) {
         components.push(...phase.members.map(item => ({

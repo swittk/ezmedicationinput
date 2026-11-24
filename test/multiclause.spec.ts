@@ -762,6 +762,16 @@ describe("round52 authored PRN and local activity scope", () => {
       expect(nextDueDoses(input, { ...clock, limit: 3 })).toEqual(due);
       expect(calculateTotalUnits({ ...clock, dosage: input, durationValue: 3, durationUnit: "d" }))
         .toMatchObject({ totalUnits: units, unit: "tab", quantityKind: "scheduled" });
+      if (stages === 2) {
+        expect(calculateTotalUnits({ ...clock, dosage: input, from: "2026-12-01T21:00:00Z",
+          durationValue: 2, durationUnit: "h" })).toMatchObject({
+          totalUnits: 1, unit: "tab", quantityKind: "scheduled"
+        });
+        expect(calculateTotalUnits({ ...clock, dosage: input, from: "2026-12-02T07:00:00Z",
+          durationValue: 2, durationUnit: "h" })).toMatchObject({
+          totalUnits: 2, unit: "tab", quantityKind: "scheduled"
+        });
+      }
       expect(JSON.stringify(input)).toBe(before);
     }
   });

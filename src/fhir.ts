@@ -130,16 +130,29 @@ export function cycleDayConstraintExtension(
     const entries = owned.get(child.url);
     if (entries) entries.push(child); else owned.set(child.url, [child]);
   }
+  // Day metadata belongs to that ordinal, not its old array position.
+  const dayOwners = new Map<number, { values: FhirExtension[]; cursor: number }>();
+  for (const child of previous.extension ?? []) if (child.url === "day" && typeof child.valueInteger === "number") {
+    const owners = dayOwners.get(child.valueInteger);
+    if (owners) owners.values.push(child);
+    else dayOwners.set(child.valueInteger, { values: [child], cursor: 0 });
+  }
+  const days = owned.get("day")?.map(child => {
+    const owners = dayOwners.get(child.valueInteger!);
+    return owners?.values[owners.cursor++] ?? child;
+  });
+  if (days) owned.set("day", days);
   const positions = new Map<string, number>();
   const children: FhirExtension[] = [];
   let changed = false;
   for (const child of previous.extension ?? []) {
-    // Annotation-only primitive children have no generated clinical value.
-    // Preserve their metadata without claiming a later valued child's position.
+    // An unvalued day is an independent annotation. An unvalued scalar
+    // owns its slot when that scalar is newly supplied; otherwise keep it.
+    const annotationOnly = (child.url === "periodDays" || child.url === "cycles") && child.valueInteger === undefined ||
+      (child.url === "anchor" || child.url === "source") && child.valueString === undefined ||
+      child.url === "reason" && child.valueCode === undefined;
     if (child.url === "day" && typeof child.valueInteger !== "number" ||
-        (child.url === "periodDays" || child.url === "cycles") && child.valueInteger === undefined ||
-        (child.url === "anchor" || child.url === "source") && child.valueString === undefined ||
-        child.url === "reason" && child.valueCode === undefined) {
+        annotationOnly && !owned.get(child.url)?.[positions.get(child.url) ?? 0]) {
       children.push(child); continue;
     }
     if (child.url !== "day" && child.url !== "periodDays" && child.url !== "cycles" &&
@@ -150,7 +163,17 @@ export function cycleDayConstraintExtension(
     positions.set(child.url, position + 1);
     const next = owned.get(child.url)?.[position];
     if (!next) { changed = true; continue; }
-    if (child.valueInteger === next.valueInteger && child.valueString === next.valueString &&
+    if (child.url === "day") {
+      children.push(next);
+      if (next !== child) changed = true;
+    } else if (annotationOnly && child.extension !== undefined) {
+      // Filling a primitive must not combine value[x] with nested extensions.
+      // Keep the complete former annotation-only child as inactive source.
+      const { extension: _annotations, ...metadata } = child;
+      children.push({ ...metadata, ...next },
+        { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [child] });
+      changed = true;
+    } else if (child.valueInteger === next.valueInteger && child.valueString === next.valueString &&
         child.valueCode === next.valueCode) children.push(child);
     else { children.push({ ...child, ...next }); changed = true; }
   }
@@ -161,6 +184,10 @@ export function cycleDayConstraintExtension(
     for (let index = positions.get(url) ?? 0; index < entries.length; index++) {
       children.push(entries[index]); changed = true;
     }
+  }
+  for (const owners of dayOwners.values()) for (let index = owners.cursor; index < owners.values.length; index++) {
+    children.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [owners.values[index]] });
+    changed = true;
   }
   return changed ? { ...previous, extension: children } : previous;
 }
@@ -181,16 +208,24 @@ export function parseTimingAdministrationDuration(
   if (range) {
     let low = quantityFromR5(range.low);
     let high = quantityFromR5(range.high);
-    if (current?.duration !== undefined) {
-      low = { ...low, value: current.duration,
+    if (current?.duration !== undefined && (current.duration !== low?.value ||
+        current.durationUnit !== undefined && current.durationUnit !== getQuantityDurationUnit(low))) {
+      // A changed core scalar has no comparator. Keep the complete displaced
+      // qualified endpoint as inert source rather than lending its qualifier.
+      low = { ...(getQuantityComparator(low) ? { extension: [{
+        url: DOSAGE_RECONCILIATION_SOURCE_URL, valueQuantity: range.low,
+      }] } : low), value: current.duration,
         ...(current.durationUnit ? { unit: current.durationUnit,
           code: current.durationUnit, system: "http://unitsofmeasure.org" } : {}) };
     }
-    if (current?.durationMax !== undefined) {
-      // A live core upper endpoint owns its numeric value. Keep the other
+    if (current?.durationMax !== undefined && (current.durationMax !== high?.value ||
+        current.durationUnit !== undefined && current.durationUnit !== getQuantityDurationUnit(high))) {
+      // A changed core upper endpoint owns its numeric value. Keep the other
       // authored endpoint and independent annotations; the displaced marker
       // remains source provenance when the adapter writes the updated range.
-      high = { ...high, value: current.durationMax,
+      high = { ...(getQuantityComparator(high) ? { extension: [{
+        url: DOSAGE_RECONCILIATION_SOURCE_URL, valueQuantity: range.high,
+      }] } : high), value: current.durationMax,
         ...(current.durationUnit ? { unit: current.durationUnit,
           code: current.durationUnit, system: "http://unitsofmeasure.org" } : {}) };
     }
@@ -833,16 +868,16 @@ function buildActivityTimingExtension(
   item: CanonicalActivityTimingExpr,
   options?: FhirProjectionOptions
 ) {
+  const translation = options?.includeTranslationExtensions
+    ? buildTranslationPrimitiveElement(item.activity.i18n) : undefined;
   const children = [
     { url: "relation", valueCode: item.relation },
     {
       url: "activity",
       valueCodeableConcept: {
-        text: item.activity.text,
-        coding: item.activity.coding?.code ? [{ ...item.activity.coding }] : undefined,
-        _text: options?.includeTranslationExtensions
-          ? buildTranslationPrimitiveElement(item.activity.i18n)
-          : undefined
+        ...(item.activity.text !== undefined ? { text: item.activity.text } : {}),
+        ...(item.activity.coding?.code ? { coding: [{ ...item.activity.coding }] } : {}),
+        ...(translation ? { _text: translation } : {})
       }
     },
     activityTimingOffsetChild("offset", item.offset),
