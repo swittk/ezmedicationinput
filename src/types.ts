@@ -977,6 +977,8 @@ export interface AdviceArgument {
   codings?: FhirCoding[];
   components?: InstructionConceptComponent[];
   i18n?: Record<string, string>;
+  /** Unrecognized imported argument children, retained as non-executable FHIR data. */
+  sourceExtensions?: FhirExtension[];
   quantity?: {
     value?: number;
     range?: CanonicalDoseRange;

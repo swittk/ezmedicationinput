@@ -1116,12 +1116,26 @@ function resolveFrequencyClocks(
       : undefined;
   const staleDailyCode =
     codeFrequency !== undefined && liveDailyFrequency !== undefined && codeFrequency !== liveDailyFrequency;
+  let configuredCodeClocks = normalizedCode ? configured?.byCode?.[normalizedCode] : undefined;
+  if (!staleDailyCode && configuredCodeClocks === undefined && configured?.byCode && codeFrequency !== undefined) {
+    // The standard coding owns cadence; a compatible local coding may own
+    // clinic clocks when the standard code has no configured mapping.
+    for (const alternative of timing.code?.coding ?? []) {
+      const code = alternative.code?.toUpperCase();
+      if (!code || (isStandardTimingCoding(alternative) && GTS_TIMING_CODES.has(code))) continue;
+      const clocks = configured.byCode[code];
+      if (clocks?.length === Math.ceil(codeFrequency)) {
+        configuredCodeClocks = clocks;
+        break;
+      }
+    }
+  }
   const codeClocks = !staleDailyCode && normalizedCode
-    ? configured?.byCode?.[normalizedCode] ??
+    ? configuredCodeClocks ??
       (isStandardTimingCoding(coding) ? DEFAULT_FREQUENCY_DEFAULTS.byCode[normalizedCode] : undefined)
     : undefined;
   if (codeClocks) {
-    if (clockOwner && codeClocks.length && codeClocks === configured?.byCode?.[normalizedCode!])
+    if (clockOwner && codeClocks.length && codeClocks === configuredCodeClocks)
       clockOwner.configured = true;
     for (const clock of codeClocks) collected.add(normalizeClock(clock));
   }
@@ -1149,15 +1163,16 @@ function codedExecutionRecurrence(timing: CanonicalTiming | undefined, config: N
   const repeat = timing?.recurrence;
   if (!repeat || !timing?.code || repeat.clocks?.length || repeat.anchors?.length ||
       timing.explicitEvents?.length) return repeat;
-  if (repeat.frequency === 1) {
-    if (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day) return repeat;
-    const coding = executionTimingCoding(timing);
-    return standardTimingCodeFrequency(coding) === 0.5
-      ? { ...repeat, clocks: resolveFrequencyClocks(timing, config, coding) } : repeat;
+  if (repeat.frequency === 1 && (repeat.period !== 2 || repeat.periodUnit !== DurationUnit.Day)) return repeat;
+  const coding = executionTimingCoding(timing);
+  if (repeat.frequency && repeat.period && repeat.periodUnit === DurationUnit.Day &&
+      standardTimingCodeFrequency(coding) === 0.5 && matchesDailyCodeCadence(0.5, repeat)) {
+    // Equivalent aggregate QOD repeats share the same alternate-day clinic grid.
+    return { ...repeat, frequency: 1, period: 2, clocks: resolveFrequencyClocks(timing, config, coding) };
   }
+  if (repeat.frequency === 1) return repeat;
   // A matching aggregate count (Q4H + 6/day) does not erase the code's
   // elapsed spacing. Explicit events and clocks remain authoritative above.
-  const coding = executionTimingCoding(timing);
   const hours = isStandardTimingCoding(coding) && coding?.code
     ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
   return hours && repeat.frequency && repeat.period && repeat.periodUnit &&
@@ -2473,7 +2488,7 @@ function resolveAdministrationWindow(
   if (implicitPredecessor?.point) successorFloor = implicitPredecessor.end;
   const implicitStart = stage.start && !implicitPredecessor
     ? start
-    : successorIntervalStart(administration, implicitPredecessor?.point ?? predecessorPoint,
+    : successorIntervalStart(administration, implicitPredecessor ? implicitPredecessor.point : predecessorPoint,
         implicitPredecessor ? implicitPredecessor.point ?? implicitPredecessor.end : start, timeZone);
   const componentClock = implicitStart > start ? getTimeParts(implicitStart, timeZone) : capClock;
   const cadence = recurrence?.calendarWindow && !administration.phaseStart &&
@@ -5011,7 +5026,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       to: courseEnd ?? undefined,
       orderedAt,
       limit: effectiveLimit,
-      defaultClock: toLocalClock(baseTime, timeZone),
+      defaultClock: inferredLocalClock(baseTime, timeZone),
       calendarDays,
     }).slice(0, effectiveLimit);
   }
@@ -5249,7 +5264,7 @@ function derivePriorCountFromHistory(
       to: from,
       orderedAt,
       limit: normalizedCount ?? 31 * 365,
-      defaultClock: toLocalClock(orderedAt, timeZone),
+      defaultClock: inferredLocalClock(orderedAt, timeZone),
       calendarDays,
     });
     return count + generated.length;
@@ -5719,6 +5734,10 @@ function isDayFilteredIntervalSupported(repeat: CanonicalRecurrence, enforceDayF
     (repeat.periodUnit === "wk" && repeat.period !== undefined && !Number.isInteger(repeat.period * 7))
   );
 }
+function inferredLocalClock(at: Date, timeZone: string): string {
+  const clock = toLocalClock(at, timeZone), milliseconds = at.getUTCMilliseconds();
+  return milliseconds ? clock + "." + pad(milliseconds, 3) : clock;
+}
 type DayFilteredPeriodSeriesOptions = {
   recurrence: CanonicalRecurrence;
   timeZone: string;
@@ -6010,7 +6029,7 @@ function countScheduleEvents(
       to,
       orderedAt,
       limit: hardLimit,
-      defaultClock: toLocalClock(baseTime, timeZone),
+      defaultClock: inferredLocalClock(baseTime, timeZone),
       calendarDays,
     });
     return count + generated.length;

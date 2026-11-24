@@ -1,5 +1,5 @@
 import {
-  parseInstructionActions, isSupplementalHydrationInstruction
+  parseInstructionActions, isSupplementalHydrationInstruction, frameActionDefinition
 } from "../instruction-graph";
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
@@ -233,7 +233,7 @@ export function sourceRangeAttachmentClass(
   }
   if (enclosing.polarity === AdvicePolarity.Negate || isConditionalAdviceFrame(context, enclosing) ||
       isFixedClockMealCounsel(context, enclosing, frames)) return "procedure";
-  const definition = getMedicationInstructionAction(enclosing.predicate.lemma, context.options);
+  const definition = frameActionDefinition(enclosing, context.options);
   if (definition?.semanticClass === "administration_pattern") return "administration";
   if (definition && !definition.procedural &&
       !isSupplementalHydrationInstruction(enclosing)) return "administration";

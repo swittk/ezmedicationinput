@@ -1726,6 +1726,7 @@ describe("round50 counted implicit successors in independent tracks", () => {
         // The real storage converter rejects value[x] together with children.
         // Both the origin and dependency identity use the existing envelope.
         expect(marker.valueQuantity).toBeUndefined();
+        expect(Object.keys(marker).filter(key => /^value[A-Z]/.test(key))).toEqual([]);
       }
       expect(participants).toBe(2);
     }

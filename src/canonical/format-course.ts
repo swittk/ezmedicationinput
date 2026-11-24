@@ -19,7 +19,7 @@ import { measureOperator as getQuantityComparator, compareRegimenPositions, hasA
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
-import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence } from "../format";
+import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
   resolveSigLocalization,
@@ -632,24 +632,25 @@ function formatCanonicalBase(
   // With no structured administration, the live guard qualifies the supplied
   // directions. Independent advice (for example, "Otherwise hold") is not
   // the administration and must not acquire that guard. Do not parse the text.
-  const authoredCondition = a.predicate && a.text?.trim() &&
+  const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
-  const displayClause = authoredCondition
+  const displayClause = authoredQualifiers && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
     : clause;
   let rendered = formatCanonicalClause(displayClause, style, env.localization, options);
-  if (authoredCondition) {
-    const directions = appendMedicationConditionText(a.text!, a.predicate!, options, env);
+  if (authoredQualifiers) {
+    const directions = a.predicate ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
-  // A route, timing or condition alone cannot replace the only authored
-  // dose/manner directions. Label retained source separately from current
-  // structured facts; it cannot override a live structured dose or method.
-  if (!authoredCondition && a.text?.trim() && (source.schedule || source.route || source.target || source.siteReference || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
+  // Partial timing, site, method or guard facts cannot replace the only
+  // authored amount/manner. Keep source separate from the current facts;
+  // a live structured amount still supersedes conflicting source wording.
+  if (!authoredQualifiers && a.text?.trim() && (source.schedule || source.route || source.target || source.siteReference || source.predicate || source.method) && !administrationHasAmountFacts(source) &&
       !clause.instructionGraph?.actions.length)
-    rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), a.text);
-  if (a.predicate && style !== "long" && !authoredCondition)
+    rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""),
+      a.predicate && style === "long" ? appendMedicationConditionText(a.text, a.predicate, options, env) : a.text);
+  if (a.predicate && style !== "long" && !authoredQualifiers)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
     rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
@@ -885,8 +886,11 @@ export function formatCanonicalCourse(
           const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
             timingCodeMatchesRecurrence(display.schedule.recurrence,
               timingCode?.coding?.[0]?.code ?? timingCode?.text);
+          const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
           display = { ...display, schedule: {
-            ...(structuredCount || !codeAgrees ? withoutCode : display.schedule), recurrence: rest
+            ...(structuredCount || !codeAgrees
+              ? { ...withoutCode, ...(independentText ? { code: { text: independentText } } : {}) }
+              : display.schedule), recurrence: rest
           } };
         }
         // The clause owns one untyped dose, including its qualifier and target.

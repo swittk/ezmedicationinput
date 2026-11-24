@@ -3611,3 +3611,32 @@ describe("round58 qualified rate ownership and Thai unit aliases", () => {
       expect(dose.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 0.5, unit: "tab" });
   });
 });
+
+
+describe("round59 glued qualified fraction words", () => {
+  it.each([
+    ["~3 quarters of a", 0.75, "~"],
+    [">=3 quarters of a", 0.75, ">="],
+    ["~1/2", 0.5, "~"],
+    ["about 3 quarters of a", 0.75, "~"],
+    ["~0.75", 0.75, "~"]
+  ] as const)("keeps the literal fractional rate and qualifier: %s mL per hour", (amount, value, comparator) => {
+    const source = "Infuse " + amount + " mL per hour";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toMatchObject({
+      representation: "rate-quantity", status: "resolved",
+      numerator: { value, unit: "mL", comparator },
+      denominators: [{ value: 1, unit: "h" }]
+    });
+    expect(parsed.meta.canonical.clauses[0].leftovers).toEqual([]);
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0], saved[0]]) {
+      const rate = row.doseAndRate![0].rateQuantity;
+      expect(rate).toMatchObject({ value, unit: "mL/h", code: "mL/h" });
+      expect(getQuantityComparator(rate)).toBe(comparator);
+    }
+    const reopened = importCanonicalCourse(saved);
+    const administration = reopened.stages[0].administrations[0];
+    expect(administration.amounts?.[0].rate).toBeDefined();
+  });
+});

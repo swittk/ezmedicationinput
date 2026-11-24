@@ -52,7 +52,7 @@ import {
   BODY_SITE_ATTRIBUTIVE_MODIFIERS,
   AS_NEEDED_LEAD_PHRASES,
   COMPOUND_DOSE_UNITS,
-  DOSE_NUMBER_WORDS,
+  DOSE_NUMBER_WORDS, DOSE_UNIT_CONNECTORS,
   DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_MERIDIEM_CLOCK_RANGES,
   SUPPLEMENTAL_DOSE_MODIFIERS,
   DURATION_LEAD_TOKENS,
@@ -814,8 +814,11 @@ function parseQuantityArgument(
       doseComparatorNumberAt(parts, index, numberEndExclusive, key(valueToken));
     const numberIndex = qualified?.numericIndex ?? index;
     const modifier = parts[numberIndex + 1];
-    const unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
+    let unitStart = modifier && SUPPLEMENTAL_DOSE_MODIFIERS.has(key(modifier))
       ? numberIndex + 2 : numberIndex + 1;
+    // Qualified fractions own their bounded partitive/article before the unit.
+    if (qualified) for (let count = 0; count < 2 && unitStart < numberEndExclusive &&
+        DOSE_UNIT_CONNECTORS.has(key(parts[unitStart])); count++) unitStart++;
     const compactUnit = qualified?.rawUnit ? normalizeUnit(qualified.rawUnit, options) : undefined;
     const unitMatch = qualified?.rawUnit
       ? compactUnit ? { unit: compactUnit, endExclusive: numberIndex + 1 } : undefined
@@ -2478,11 +2481,19 @@ interface SemanticSourceSpan extends TextRange {
   kind: SemanticSourceKind;
 }
 
-function frameActionDefinition(
+export function frameActionDefinition(
   frame: AdviceFrame,
   options?: ParseOptions
 ): ActionDefinition | undefined {
-  return getMedicationInstructionAction(frame.predicate.lemma, options);
+  const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
+  if (!options?.instructionActionMap || !getMedicationInstructionAction(frame.predicate.lemma)) return definition;
+  // A stored code can collide with a different configured lexical surface.
+  // Reuse the selected frame's typed wording/coding before a code-only fallback;
+  // deliberate lexical overrides still resolve to their configured definition.
+  const selected = resolveMedicationInstructionActionForMethod({
+    text: frame.predicate.display, coding: frame.predicate.codings?.[0]
+  }, options);
+  return selected?.code === frame.predicate.lemma ? selected : definition;
 }
 
 /** A water-consumption counseling frame with a typed fluid substance is
@@ -5181,6 +5192,15 @@ export function realizeInstructionGraph(
       ? frameWithReconciledAmount(sourceFrame, currentDose,
           Boolean(primary && amountOwner && amountOwner.span.end <= primary.start))
       : sourceFrame;
+    if (editedPrimary && frame.args.length === 0 && options?.omitCanonicalAdministration &&
+        primaryActionCoveredByCanonicalClause(frame, graph.actions,
+          options.omitCanonicalAdministration, sourceFrame, sourceFrame)) {
+      // A removed stale Amount can leave only the administration already
+      // rendered from current facts. Its index still owns graph conditions.
+      conditionTargets.set(actionIndex, frame);
+      coveredPrimaryAction = actionIndex;
+      continue;
+    }
     const definition = getMedicationInstructionAction(frame.predicate.lemma);
     const secondaryAdministration = Boolean(
       definition?.administrationMethod?.code &&

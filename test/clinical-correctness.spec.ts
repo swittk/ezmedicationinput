@@ -3463,11 +3463,13 @@ describe("round52 live site and partial-direction previews", () => {
     const reopened = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
     for (const input of [[row], r6, reopened]) {
       const before = JSON.parse(JSON.stringify(input));
-      for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
-        const preview = formatSig(input, "long", { locale, realizationMode: mode });
+      for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
+        const preview = formatSig(input, style, { locale, realizationMode: mode });
         expect(preview).toMatch(completeThreshold);
         if (liveDose) {
-          expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
+          expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
+          expect(preview).toMatch(exactAmount);
           expect(preview).not.toContain("1 tablet");
           expect(preview).not.toContain("1 เม็ด");
         } else expect(preview).toContain(authored);
@@ -3499,13 +3501,15 @@ describe("round52 live site and partial-direction previews", () => {
       const typedReopened = JSON.parse(JSON.stringify(toFhirR5Dosages(typedR6)));
       for (const input of [[typed], typedR6, typedReopened]) {
         const before = structuredClone(input);
-        for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) {
-          const preview = formatSig(input, "long", { locale, realizationMode: mode });
+        for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
+          const preview = formatSig(input, style, { locale, realizationMode: mode });
           expect(preview).toMatch(completeThreshold);
-          expect(preview).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
+          expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
+          expect(preview).toMatch(exactAmount);
           expect(preview).not.toContain("1 tablet");
           expect(preview).not.toContain("1 เม็ด");
-          expect(preview).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
+          if (style === "long") expect(preview).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
         }
         expect(input).toEqual(before);
       }

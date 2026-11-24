@@ -732,10 +732,18 @@ describe("round50 selected monthly mornings and local continuation windows", () 
         expect(recurrence.eventWindow).toBeUndefined();
       } else {
         expect(recurrence.clockWindow).toBeUndefined();
-        if (activity) expect(recurrence.activityTiming).toEqual(prior.activityTiming);
+        if (activity) {
+          expect(recurrence.activityTiming).toEqual(prior.activityTiming);
+          expect(recurrence.activityTiming).toMatchObject([{
+            relation: "before", offset: 30, activity: { text: "exercise", coding: { code: "256235009" } },
+          }]);
+        }
         else expect(recurrence.eventWindow).toEqual(prior.eventWindow);
       }
-      if (activity) expect(prior.activityTiming![0]).toMatchObject({ relation: "before", offset: 30 });
+      if (activity) {
+        expect(prior.activityTiming![0]).toMatchObject({ relation: "before", offset: 30 });
+        expect(prior.activityTiming![0].activity).toMatchObject({ text: "exercise", coding: { code: "256235009" } });
+      }
       else expect(prior.eventWindow).toEqual({ start: "WAKE", end: "HS" });
     }
   });

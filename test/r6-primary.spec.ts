@@ -2978,7 +2978,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         rateExpression: { language: "text/fhirpath", expression: "4*%patient.weight" }
       }]
     }] }] };
-    const rows = fromFhir(imported).fhir;
+    const rows = JSON.parse(JSON.stringify(fromFhir(imported).fhir));
     rows[0].doseAndRate![0].doseQuantity = { value: 2, unit: "mg" };
     rows[0].doseAndRate![0].rateQuantity = { value: 4, unit: "mL/h" };
     const corrected = toDosageDetails(rows);
@@ -2994,7 +2994,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     // A different clinician-edited expression is not the old retained one.
     // Keep both authored choices available for manual correction, rather than
     // silently choosing between contradictory edits.
-    const conflicting = fromFhir(imported).fhir;
+    const conflicting = JSON.parse(JSON.stringify(fromFhir(imported).fhir));
     conflicting[0].doseAndRate![0].doseExpression = { expression: "%patient.weight*3" };
     conflicting[0].doseAndRate![0].doseQuantity = { value: 3, unit: "mg" };
     const unresolved = toDosageDetails(conflicting);
@@ -7178,7 +7178,7 @@ describe("round58 partial facts and independent timing text", () => {
         for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
           const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
           expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
-          if (kind === "site only") expect(rendered).toContain("Apply a thin layer");
+          if (kind !== "structured dose") expect(rendered).toContain("Apply a thin layer");
           else expect(rendered).not.toContain("Apply a thin layer");
           if (kind === "structured dose") expect(rendered).toContain("2");
         }

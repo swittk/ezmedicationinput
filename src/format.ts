@@ -1069,6 +1069,12 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
 }
 
 function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
+  if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
+      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
+    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (schedule.durationUnit ?? "");
+    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (schedule.durationMaxUnit ?? "");
+    return `x${low} – ${high}`;
+  }
   if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
@@ -1101,6 +1107,12 @@ function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefine
 }
 
 function describeDuration(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
+  if (schedule?.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
+      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
+    const endpoint = (value: number, unit: string | undefined, comparator: string | undefined): string =>
+      (comparator ?? "") + stripTrailingZero(value) + (unit ? " " + (words.timeUnit(unit, value) ?? unit) : "");
+    return `for ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxComparator)}`;
+  }
   if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit) {
     return undefined;
   }
@@ -1575,7 +1587,10 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     if (routePart) graphRegimenTail.push(routePart);
     if (timing.frequency) graphRegimenTail.push(timing.frequency);
     if (timing.event && !richPrimaryCoversSingleEvent) graphRegimenTail.push(timing.event);
-    else if (clockPart) graphRegimenTail.push(clockPart);
+    else {
+      if (timingText) graphRegimenTail.push(timingText);
+      if (clockPart) graphRegimenTail.push(clockPart);
+    }
     if (eventWindowPart) graphRegimenTail.push(eventWindowPart);
     graphRegimenTail.push(...formatActivityTimingEnglish(schedule));
     if (calendarEventPart) graphRegimenTail.push(calendarEventPart);

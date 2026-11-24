@@ -1110,6 +1110,10 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   const timingLabel = dosage.timing?.code?.text;
   if (timingLabel && independentTimingText(timingLabel, dosage.timing?.repeat) &&
       !preferredTimingCoding(dosage.timing!)?.code) return true;
+  // A compact R5 decoder cannot lend one range endpoint's unit to another.
+  const durationRange = dosage.timing?.repeat?.boundsRange;
+  if (durationRange?.low?.value !== undefined && durationRange.high?.value !== undefined &&
+      (!(durationRange.low.code ?? durationRange.low.unit) || !(durationRange.high.code ?? durationRange.high.unit))) return true;
   const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
   if (missingSite && dosage.siteReference?.display) return true;
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||
@@ -1122,10 +1126,10 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
             field.valueCodeableReference?.reference?.display)))))
     return true;
   const primary = dosage.doseAndRate?.[0];
-  // With no structured dose or method, authored text may be the only
-  // directions. Preserve the existing graph realizer when that owner exists;
-  // the native fallback retains plain directions beside partial facts.
-  if (!primary && !dosage.method && dosage.text?.trim() &&
+  // With no structured amount, authored text may be the only dose/manner
+  // directions even when a method is known. Preserve the graph realizer when
+  // that owner exists; the native fallback keeps source beside partial facts.
+  if (!primary && dosage.text?.trim() &&
       (dosage.route || !dosage.extension?.some(extension =>
         extension.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
@@ -1166,7 +1170,7 @@ export function formatSig(
   }
   const dosage = oneOrCourse as EzDosage;
   const edit = sourceDisplayEdit(dosage);
-  if (typeof edit === "string" && options?.realizationMode !== "normalized") return edit;
+  if (typeof edit === "string" && options?.realizationMode === "roundtrip") return edit;
   if (getDosageSourceTextAgreement(dosage, false) === false || edit !== false) {
     const course = courseFromR5([dosage], undefined, undefined, undefined, true);
     // Source agreement or the submitted fields rejected retained wording.
@@ -1442,7 +1446,7 @@ function fromFhirDosageInternal(
   options: FormatOptions | undefined
 ): ParseResult {
   const edit = sourceDisplayEdit(dosage);
-  const replacementText = typeof edit === "string" && options?.realizationMode !== "normalized" ? edit : undefined;
+  const replacementText = typeof edit === "string" && options?.realizationMode === "roundtrip" ? edit : undefined;
   const unverified = replacementText === undefined &&
     (getDosageSourceTextAgreement(dosage, false) === false || edit !== false);
   const nativeCourse = unverified || needsNativeR5Preview(dosage, options)

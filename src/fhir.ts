@@ -152,7 +152,9 @@ export function cycleDayConstraintExtension(
       (child.url === "anchor" || child.url === "source") && child.valueString === undefined ||
       child.url === "reason" && child.valueCode === undefined;
     if (child.url === "day" && typeof child.valueInteger !== "number" ||
-        annotationOnly && !owned.get(child.url)?.[positions.get(child.url) ?? 0]) {
+        annotationOnly && (child.url === "source" && !constraint.sourceText ||
+          child.url === "reason" && constraint.reason === "unresolved-cycle-eligibility" ||
+          !owned.get(child.url)?.[positions.get(child.url) ?? 0])) {
       children.push(child); continue;
     }
     if (child.url !== "day" && child.url !== "periodDays" && child.url !== "cycles" &&
@@ -392,7 +394,6 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">, target: "r5" | "r6" = "r5"
 ): T {
   let clocks = repeat.timeOfDay;
-  const mixed = Boolean(repeat.when?.length && clocks?.length);
   // Native clocks contain only values. Restore a source's primitive positions
   // only when those same values still occupy its non-null slots.
   const sourceClocks = wireSource?.timeOfDay;
@@ -407,6 +408,7 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
       restorePositions = true;
     }
   }
+  const mixed = Boolean(repeat.when?.length && clocks?.length);
   if (!mixed && !repeat.extension?.length)
     return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   let markers: FhirExtension[] | undefined;

@@ -540,7 +540,8 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     schedule.administrationDurationRange=r?.occurrenceDurationRange;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
     schedule.durationIsRange=range ? true : undefined;
-    schedule.durationUnit=(length?.code??length?.unit??range?.low?.code??range?.low?.unit??range?.high?.code??range?.high?.unit) as typeof schedule.durationUnit;
+    schedule.durationUnit=(length?.code??length?.unit??(range?.low?.value !== undefined
+      ? range.low.code??range.low.unit : range?.high?.code??range?.high?.unit)) as typeof schedule.durationUnit;
     schedule.durationMaxUnit=(range?.high?.code??range?.high?.unit) as typeof schedule.durationMaxUnit;
     schedule.durationComparator=length?.comparator??range?.low?.comparator;
     schedule.durationMaxComparator=range?.high?.comparator;

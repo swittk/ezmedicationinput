@@ -1,3 +1,4 @@
+import { frameActionDefinition } from "../../instruction-graph";
 import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
@@ -138,7 +139,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
 }
 
 function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = frameActionDefinition(frame, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
     isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true ||
     medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);

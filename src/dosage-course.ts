@@ -1351,7 +1351,9 @@ export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
     if(Array.isArray(part)&&!part.length){
       const conditionMarker=key==="condition"?dosage.modifierExtension?.find(item=>
         item.url===DOSAGE_CONDITION_R5_URL):undefined;
-      if(!conditionMarker||parseConditionModifier(conditionMarker)===undefined)continue;
+      const clearsDates=key==="excludedDates"&&
+        getDosageExcludedDates({modifierExtension:dosage.modifierExtension}).length>0;
+      if(!clearsDates&&(!conditionMarker||parseConditionModifier(conditionMarker)===undefined))continue;
     }
     if(key==="extension"){
       let opened=false;

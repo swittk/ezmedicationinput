@@ -169,6 +169,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       ]
     });
   }
+  if (argument.sourceExtensions) nested.push(...argument.sourceExtensions);
   return { url: "argument", extension: nested };
 }
 
@@ -307,7 +308,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     coding:FhirExtension|undefined,spanStart:FhirExtension|undefined,spanEnd:FhirExtension|undefined,
     quantity:FhirExtension|undefined;
   const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
-  let i18n:Record<string,string>|undefined;
+  let i18n:Record<string,string>|undefined,sourceExtensions:FhirExtension[]|undefined;
   for(const entry of extension.extension??[])switch(entry.url){
     case "role":if(!role)role=entry;break;
     case "text":if(!text)text=entry;break;
@@ -335,6 +336,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       }
       break;
     }
+    default:(sourceExtensions??=[]).push(entry);break;
   }
   if(!role?.valueCode||text?.valueString===undefined)return undefined;
   const result:AdviceArgument={role:role.valueCode as AdviceArgumentRole,text:text.valueString,
@@ -342,6 +344,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     normalized:normalized?.valueString,conceptId:concept?.valueString,
     coding:readCoding(coding?.valueCoding),codings};
   if(components.length)result.components=components;
+  if(sourceExtensions)result.sourceExtensions=sourceExtensions;
   if(spanStart?.valueInteger!==undefined&&spanEnd?.valueInteger!==undefined)
     result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
   if(quantity){

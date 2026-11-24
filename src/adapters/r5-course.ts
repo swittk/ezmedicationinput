@@ -347,7 +347,9 @@ export function projectNativeR5Course(
       const retainedSequence = strict.extension?.find(
         (e) => e.url === DOSAGE_RETAINED_R5_SEQUENCE_URL
       );
-      if (retainedSequence?.valueDecimal !== undefined && Number.isFinite(retainedSequence.valueDecimal))
+      if (retainedSequence?.valueDecimal !== undefined && Number.isFinite(retainedSequence.valueDecimal) &&
+          (Number.isInteger(retainedSequence.valueDecimal) && retainedSequence.valueDecimal >= 1
+            ? retainedSequence.valueDecimal : 1) === stageIndex + 1)
         strict.sequence = retainedSequence.valueDecimal;
       if (retainedSequence?._valueDecimal !== undefined && strict._sequence === undefined)
         strict._sequence = retainedSequence._valueDecimal;

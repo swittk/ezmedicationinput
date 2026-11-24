@@ -120,9 +120,13 @@ describe("canonical course architecture", () => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const accesses: string[] = [];
       const visit = (node: ts.Node) => {
+        const boundProperty = ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent)
+          ? node.propertyName ?? node.name : undefined;
         if ((ts.isPropertyAccessExpression(node) && node.name.text === "modifierExtension") ||
             (ts.isElementAccessExpression(node) && node.argumentExpression &&
-             ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "modifierExtension"))
+             ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === "modifierExtension") ||
+            (boundProperty && (ts.isIdentifier(boundProperty) || ts.isStringLiteralLike(boundProperty)) &&
+             boundProperty.text === "modifierExtension"))
           accesses.push(node.getText(source));
         ts.forEachChild(node, visit);
       };
@@ -132,7 +136,10 @@ describe("canonical course architecture", () => {
     for (const access of ["row.modifierExtension", "row?.modifierExtension",
       'row["modifierExtension"]', 'row?.["modifierExtension"]'])
       expect(wireModifierAccess("const modifiers = " + access + " ?? [];")).toEqual([access]);
+    for (const binding of ["modifierExtension", "modifierExtension: markers", '"modifierExtension": markers'])
+      expect(wireModifierAccess("const { " + binding + " } = row;")).toEqual([binding]);
     expect(wireModifierAccess('const text = "row.modifierExtension";')).toEqual([]);
+    expect(wireModifierAccess('const text = "{ modifierExtension: markers }";')).toEqual([]);
     for (const name of [
       "../src/execution/engine.ts",
       "../src/canonical/compile.ts",
@@ -1026,7 +1033,11 @@ describe("review 26 external display ownership", () => {
       expect(text).toContain("10 mL");
     }
     row.text = "Clinician replacement instruction: maximum 10 mL";
-    expect(formatSig(structuredClone(row), "long")).toBe(row.text);
+    expect(formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    const normalized = formatSig(structuredClone(row), "long", { realizationMode: "normalized" });
+    expect(formatSig(structuredClone(row), "long")).toBe(normalized);
+    expect(normalized).toContain("10 mL");
+    expect(normalized).not.toContain("5 mL/h");
   });
 
   it.each(["en", "th"])("keeps a strict high dose endpoint in both %s public previews", locale => {

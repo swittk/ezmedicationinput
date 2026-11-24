@@ -31,7 +31,7 @@ import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from '../hpsg/signature';
-import { parseInstructionActions } from '../instruction-graph';
+import { parseInstructionActions, frameActionDefinition } from '../instruction-graph';
 import { getMedicationInstructionAction, resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
@@ -496,7 +496,7 @@ class EvidenceContext {
         if (!left || action.span.end > left.span.end) left = action;
       } else if (action.span.start >= range.end && (!right || action.span.start < right.span.start)) right = action;
     }
-    return Boolean(left && right && getMedicationInstructionAction(left.predicate.lemma, this.options)?.procedural &&
+    return Boolean(left && right && frameActionDefinition(left, this.options)?.procedural &&
       Math.max(0, range.start - left.span.end) <= 2 && Math.max(0, right.span.start - range.end) <= 2);
   }
 
@@ -633,7 +633,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
     for (const site of sites) {
       if (site.kind !== 'adjacent-dose') continue;
       const owner = frames.find(frame => {
-        const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
+        const definition = frameActionDefinition(frame, options);
         return definition?.procedural === true && definition.definesDose !== true &&
           frame.span.start < site.start && site.start < frame.span.end &&
           // An action frame may have an opaque tail past an explicit
@@ -1174,7 +1174,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             // action as procedural suppressed legitimate independently dosed
             // "inhale 2 puffs OR nebulize 2.5 mg" alternatives.
             return rightActions().some((frame) => {
-              const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
+              const definition = frameActionDefinition(frame, options);
               return definition?.procedural === true && definition.definesDose !== true;
             });
           },

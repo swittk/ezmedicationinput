@@ -142,7 +142,7 @@ import {
   BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL,
 } from "../body-site-target";
 
-/** An incomplete authored R5 maximum is retained source, not an invented R6 limit. */
+/** A maximum without both endpoint objects is retained source, not an invented R6 limit. */
 export const R5_SOURCE_ONLY_MAXIMUM_URL =
   "urn:ezmedicationinput:StructureDefinition:r5-source-only-maximum";
 /** Source-only maxima are never executable limits. Their typed source can
@@ -774,7 +774,7 @@ function baseAdministration(
   if (format === "r5") {
     let limits: CanonicalDoseLimit[] | undefined, sourceMaxima: FhirExtension[] | undefined;
     for (const maximum of input.maxDosePerPeriod ?? []) {
-      if (maximum.numerator?.value === undefined || maximum.denominator?.value === undefined) {
+      if (maximum.numerator === undefined || maximum.denominator === undefined) {
         (sourceMaxima ??= []).push(retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum));
         continue;
       }
