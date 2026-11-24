@@ -6808,25 +6808,30 @@ describe("round29 typed course display scope", () => {
   const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
 
   it("short and long previews both follow the live recurrence while preserving source timing", () => {
-    const source: FhirR6DosageInstruction = { step: [{ component: [{
+    const fixture: FhirR6DosageInstruction = { step: [{ component: [{
       ...dose, timing: { code: { coding: [{
         system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID"
       }] }, repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
     }] }] };
+    const source = structuredClone(fixture);
     const before = JSON.stringify(source);
     expect(formatSig(source, "short")).toBe("1 tab 1x/d");
     expect(formatSig(source, "long")).toContain("once daily");
     expect(JSON.stringify(source)).toBe(before);
-    source.step![0].component[0].timing!.repeat!.frequency = 2;
-    expect(formatSig(source, "short")).toBe("1 tab BID");
-    delete source.step![0].component[0].timing!.repeat;
-    expect(formatSig(source, "short")).toBe("1 tab BID");
+    const twiceDaily = structuredClone(fixture);
+    twiceDaily.step![0].component[0].timing!.repeat!.frequency = 2;
+    expect(formatSig(twiceDaily, "short")).toBe("1 tab BID");
+    const codeOnlyBid = structuredClone(fixture);
+    delete codeOnlyBid.step![0].component[0].timing!.repeat;
+    expect(formatSig(codeOnlyBid, "short")).toBe("1 tab BID");
     for (const code of ["QOD", "Q6H", "WK", "MO"]) {
-      source.step![0].component[0].timing!.code!.coding![0].code = code;
-      source.step![0].component[0].timing!.repeat = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
-      expect(formatSig(source, "short")).toBe("1 tab 1x/d");
-      delete source.step![0].component[0].timing!.repeat;
-      expect(formatSig(source, "short")).toBe("1 tab " + code);
+      const repeated = structuredClone(fixture);
+      repeated.step![0].component[0].timing!.code!.coding![0].code = code;
+      expect(formatSig(repeated, "short")).toBe("1 tab 1x/d");
+      const codeOnly = structuredClone(fixture);
+      codeOnly.step![0].component[0].timing!.code!.coding![0].code = code;
+      delete codeOnly.step![0].component[0].timing!.repeat;
+      expect(formatSig(codeOnly, "short")).toBe("1 tab " + code);
     }
   });
 

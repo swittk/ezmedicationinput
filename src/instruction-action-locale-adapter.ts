@@ -138,7 +138,7 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
 function mixArgumentContent(c: InstructionActionRealizationInput) {
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
     unmarkedSubstance: AdviceArgument | undefined, unmarkedNominal: AdviceArgument | undefined,
-    amountArg: AdviceArgument | undefined;
+    nominalThemeArg: AdviceArgument | undefined, amountArg: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
     const nominal = arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container;
     const material = arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material;
@@ -148,14 +148,23 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
       (relationHasGrammarFeature(arg.relation, "accompanimentComplement") ||
         relationHasSemanticClass(arg.relation, "accompaniment") ||
         relationHasSemanticClass(arg.relation, "locative"));
-    if (!themeArg && !arg.relation && (arg.role === AdviceArgumentRole.Theme || nominal)) themeArg = arg;
-    if (!unmarkedNominal && nominal && !arg.relation && arg !== themeArg) unmarkedNominal = arg;
+    if (!arg.relation) {
+      if (arg.role === AdviceArgumentRole.Theme) themeArg ??= arg;
+      else if (nominal) {
+        if (!nominalThemeArg) nominalThemeArg = arg;
+        else unmarkedNominal ??= arg;
+      }
+    }
     if (!substanceArg && companion && (material || nominal || arg.role === AdviceArgumentRole.Theme))
       substanceArg = arg;
     else if (!unmarkedSubstance && material && !arg.relation) unmarkedSubstance = arg;
     if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
     if (themeArg && substanceArg && amountArg) break;
   }
+  // Typed Theme wins over an earlier nominal fallback. With a real Theme,
+  // the first unmarked nominal remains available as the legacy vehicle.
+  if (themeArg) unmarkedNominal = nominalThemeArg;
+  else themeArg = nominalThemeArg;
   if (substanceArg) themeArg ??= unmarkedSubstance;
   else {
     substanceArg = unmarkedSubstance;

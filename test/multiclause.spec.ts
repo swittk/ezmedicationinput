@@ -216,10 +216,10 @@ describe("multi-clause parsing", () => {
   });
 
   it("re-realizes ordinary saved courses when explicit format options make their text stale", () => {
-    const details = parseSig(
-      "1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner"
-    ).dosageDetails;
-    details.renderedInstruction = "stale saved instruction";
+    const details = {
+      ...parseSig("1 tab po pc breakfast lunch dinner + 2 tab po pc breakfast lunch dinner").dosageDetails,
+      renderedInstruction: "stale saved instruction"
+    };
     const options = {
       locale: "th",
       groupMealTimingsByRelation: true,

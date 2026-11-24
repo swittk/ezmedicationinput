@@ -62,8 +62,9 @@ describe("scoped maximum quantities retain all usable information", () => {
       timing: { repeat: { frequency: 2, period: 1, periodUnit: Unit.Day, timeOfDay: ["08:00:00", "20:00:00"] } },
       maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: { value: 1, unit: "d" } }] };
     const lifted = toEzDosages([row])[0];
-    lifted.maxDosePerPeriod = [{ numerator: { value: 1, unit: "tab" }, denominator: { value: 1, unit: "d" } }];
-    expect(nextDueDoses(lifted, { ...options, limit: 2 })).toEqual([
+    const edited = { ...lifted,
+      maxDosePerPeriod: [{ numerator: { value: 1, unit: "tab" }, denominator: { value: 1, unit: "d" } }] };
+    expect(nextDueDoses(edited, { ...options, limit: 2 })).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
     ]);
   });
@@ -4435,11 +4436,11 @@ describe("round49 partial-event supply windows and external inputs", () => {
   it("imports current external R6 edits while retaining the original parsed batch", () => {
     const batch = parseSig("Take 1 tablet daily at 08:00");
     const original = JSON.stringify(batch);
-    const external = JSON.parse(JSON.stringify(batch.fhirNext)) as FhirR6DosageInstruction;
-    const component = external.step![0].component[0];
     const query = { from: "2026-11-23T00:00:00Z", orderedAt: "2026-11-23T00:00:00Z",
       timeZone: "UTC", limit: 1, durationValue: 1, durationUnit: Unit.Day };
     for (const [clock, quantity] of [["10:00:00", 2], ["11:00:00", 3]] as const) {
+      const external = JSON.parse(JSON.stringify(batch.fhirNext)) as FhirR6DosageInstruction;
+      const component = external.step![0].component[0];
       component.timing!.repeat!.timeOfDay = [clock];
       component.doseAndRate![0].doseQuantity!.value = quantity;
       const saved = JSON.stringify(external);

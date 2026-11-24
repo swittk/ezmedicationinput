@@ -3437,8 +3437,8 @@ describe("round52 live site and partial-direction previews", () => {
     for (const input of [r6, rows]) for (const locale of ["en", "th"] as const) {
       const preview = formatSig(input, "long", { locale, realizationMode: "normalized" });
       expect(preview).toContain("where skin is red");
-      expect(preview).toContain("1 g");
-      expect(preview).toContain("2 g");
+      expect(preview).toMatch(locale === "en" ? /^Apply 1 g(?=\s)/u : /^ทาครั้งละ 1 g(?=\s)/u);
+      expect(preview).toMatch(/(?:^|;\s*)max per period: 2 g \/ 1 d(?:$|[.;])/u);
     }
     expect(toDosageDetails(rows).step?.[0].component?.[0].site?.concept).toEqual(expectedSite);
     expect(r6).toEqual(expected);

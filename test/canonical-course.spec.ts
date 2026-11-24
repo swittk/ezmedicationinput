@@ -886,11 +886,13 @@ describe("saved R5 source replay observes all live timing values", () => {
     const row = JSON.parse(JSON.stringify(parseSig("Take 1 tablet at 08:00 and 20:00").items[0].fhir));
     const options = { locale: "en", realizationMode: "roundtrip" as const };
     const original = formatSig(row, "long", options);
-    row.timing.repeat.timeOfDay[1] = "22:00:00";
-    expect(formatSig(row, "long", options)).toContain("10:00 pm");
-    expect(formatSig(row, "long", options)).not.toContain("8:00 pm");
-    row.timing.repeat.timeOfDay[1] = "20:00:00";
-    expect(formatSig(row, "long", options)).toBe(original);
+    const edited = structuredClone(row);
+    edited.timing.repeat.timeOfDay[1] = "22:00:00";
+    expect(formatSig(edited, "long", options)).toContain("10:00 pm");
+    expect(formatSig(edited, "long", options)).not.toContain("8:00 pm");
+    const restored = structuredClone(edited);
+    restored.timing.repeat.timeOfDay[1] = "20:00:00";
+    expect(formatSig(restored, "long", options)).toBe(original);
   });
 });
 
@@ -1408,9 +1410,10 @@ describe("round30 current cadence and duration metadata", () => {
     expect(beforeText.toLowerCase()).toContain(expected as string);
     expect(beforeText).not.toMatch(/\b(?:WK|MO)\b/u);
     expect(JSON.stringify(input)).toBe(before);
-    input.step[0].component[0].timing.repeat.frequency = 1;
-    input.step[0].component[0].timing.repeat.frequencyMax = undefined;
-    const afterText = formatSig(input, "short", { locale: "en" });
+    const edited = structuredClone(input);
+    edited.step[0].component[0].timing.repeat.frequency = 1;
+    edited.step[0].component[0].timing.repeat.frequencyMax = undefined;
+    const afterText = formatSig(edited, "short", { locale: "en" });
     expect(afterText).toContain(unit === "wk" ? "WK" : "MO");
     expect(afterText.toLowerCase()).not.toContain(expected as string);
   });
@@ -1542,15 +1545,16 @@ describe("round35 partial authored directions and sequential previews", () => {
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
     }] }] };
     formatSig(raw, "long", options);
-    raw.step[0].component[0].timing!.repeat!.frequency = 2;
-    const before = JSON.stringify(raw);
-    for (const text of [formatSig(raw, "long", options), fromFhir(raw, options).longText]) {
+    const edited = structuredClone(raw);
+    edited.step[0].component[0].timing!.repeat!.frequency = 2;
+    const before = JSON.stringify(edited);
+    for (const text of [formatSig(edited, "long", options), fromFhir(edited, options).longText]) {
       expect(text).toContain("Swallow 1 tablet whole");
       expect(text).toContain("twice daily");
       expect(text).not.toContain("once daily");
     }
-    expect(JSON.stringify(raw)).toBe(before);
-    expect(courseToR6(courseFromR6(raw)).step[0].component[0].text).toBe("Swallow 1 tablet whole");
+    expect(JSON.stringify(edited)).toBe(before);
+    expect(courseToR6(courseFromR6(edited)).step[0].component[0].text).toBe("Swallow 1 tablet whole");
   });
 
   it("lets a live structured dose replace old component wording", () => {

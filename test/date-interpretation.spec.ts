@@ -1420,7 +1420,9 @@ describe("calendar date interpretation", () => {
     expect(course.stages[0].administrations[0].schedule?.recurrence?.anchors).toBeUndefined();
     expect(firstDosage.timing?.repeat?.frequency).toBe(2);
     expect(firstDosage.timing?.repeat?.when).toBeUndefined();
+    expect(firstDosage.timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
     expect(result.fhirNext.step[0].component[0].timing?.repeat?.when).toBeUndefined();
+    expect(result.fhirNext.step[0].component[0].timing?.repeat?.timeOfDay).toEqual(["08:00:00"]);
     expect(nextDueDoses(firstDosage, {
       from: "2026-11-02T00:00:00+07:00",
       orderedAt: "2026-11-02T00:00:00+07:00",

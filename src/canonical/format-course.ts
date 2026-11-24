@@ -449,7 +449,8 @@ function previewCourseWindows(
     const members = selected ? step.administrations.filter(member =>
       !member.choice || member.choice.groupId !== selected.groupId || member.choice.branchId === selected.branchId)
       : step.administrations;
-    if (selected && !members.length) continue;
+    // A choice can remove its own stage, but never an authored empty pause.
+    if (selected && !members.length && step.administrations.length > 0) continue;
     if (step.start || step.end) hasTimedStages = true;
     const start = step.start ? treatmentStepOffsetDays(step.start) : included === 0 ? 0 : priorEndDays;
     const startAnchor = step.start?.anchor ?? (included === 0 ? "treatment-start" : priorEndAnchor);

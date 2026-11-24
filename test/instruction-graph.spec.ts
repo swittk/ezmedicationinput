@@ -2198,7 +2198,7 @@ describe("source-owned action amounts remain editable across the whole graph", (
       omitCanonicalAdministration: clause
     })!;
     expect(selected).toContain("Take 1 tablet");
-    expect(selected).not.toContain("take 2 tablets");
+    expect(selected).not.toMatch(/take 2 tablets/iu);
   });
 
   it("does not treat a later independent dose as a mismatch when the primary is unchanged", () => {
@@ -3368,7 +3368,7 @@ describe("round33 current rich-primary ownership", () => {
     row.extension = row.extension.filter((x: { url: string }) => x.url !== graph.url && x.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL);
     row.extension.push(graph);
     if (!structured) delete row.site;
-    const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source, true,
+    let saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source, true,
       edit === "explicit-false" ? [{ sourceAgreement: true, sourceHasStructuredSite: false }] : undefined)[0]));
     expect(getDosageSourceOwnership(saved)?.site).toBe(structured);
     if (edit !== "metadata") saved.doseAndRate[0].doseQuantity.value = 2;
@@ -3379,7 +3379,7 @@ describe("round33 current rich-primary ownership", () => {
       saved.site = parsePublicSig("Instill 1 drop into left eye").fhir[0].site;
       // Saving an independent graph site alongside a later structured site
       // must not invent original structured ownership of that graph argument.
-      Object.assign(saved, JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([saved]))[0])));
+      saved = JSON.parse(JSON.stringify(toFhirR5Dosages(toDosageDetails([saved]))[0]));
       delete saved.site;
     }
     const before = JSON.stringify(saved), r6 = toDosageDetails([saved]);
@@ -5727,14 +5727,14 @@ describe("round 49 saved instruction ownership", () => {
           const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
           expect(text.match(unit === "tab" ? /3 tablets/gu : /3 mg/gu)).toHaveLength(1);
           expect(text).toMatch(new RegExp("^" + source.split(" ")[0]));
-          if (source.startsWith("Disperse")) {
-            const amount = unit === "tab" ? "3 tablets" : "3 mg";
-            const preparation = text.split(/[.;]/u)[0];
-            const swallowing = text.match(/\bswallow\b.*$/iu)?.[0];
-            expect(preparation).toContain(amount);
-            expect(swallowing).toBeDefined();
-            expect(swallowing).not.toContain(amount);
-          }
+          const amount = unit === "tab" ? "3 tablets" : "3 mg";
+          const preparation = text.split(/[.;]/u)[0];
+          const administration = text.slice(preparation.length);
+          const action = source.startsWith("Dissolve") ? /\bdrink\b/iu
+            : source.startsWith("Draw up") ? /\binject\b/iu : /\bswallow\b/iu;
+          expect(preparation).toContain(amount);
+          expect(administration).toMatch(action);
+          expect(administration).not.toContain(amount);
         }
         expect(JSON.stringify(input)).toBe(before);
       }
@@ -5759,6 +5759,12 @@ describe("round50 configured safety action identity", () => {
     expect(advice[0].frames![0].predicate.lemma).toBe(code);
     const before = JSON.stringify(parsed.fhirNext);
     for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const extensions = Array.isArray(input) ? input[0].extension : input.step[0].component[0].extension;
+      const savedGraph = parseInstructionGraphExtension(extensions);
+      expect(savedGraph?.actions.map(action => action.predicate.lemma)).toEqual([code]);
+      expect(savedGraph?.actions[0].predicate.codings).toContainEqual({
+        system: "urn:ezmedicationinput:CodeSystem:medication-instruction-action", code, display: "Defer"
+      });
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
         expect(text).toMatch(/Defer if BP >\s*160(?![0-9]|[.][0-9])/u);

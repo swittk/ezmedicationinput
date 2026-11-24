@@ -1902,7 +1902,9 @@ function describeCalendarEventsThai(
   if (!events?.length) return undefined;
   const parts: string[] = [];
   for (const event of events) {
-    const formatted = event.fhirDateTime ?? formatIsoCalendarDateThai(event.isoDate);
+    const date = formatIsoCalendarDateThai(event.isoDate);
+    const formatted = event.fhirDateTime
+      ? `${date} เวลา ${event.fhirDateTime.slice(11)}` : date;
     if (formatted) parts.push(formatted);
   }
   if (!parts.length) return undefined;
@@ -2762,7 +2764,8 @@ function formatLongThai(
   if (clause.clinicalAdjuncts?.condition)
     administrationText = appendClinicalConditionText(administrationText, clause.clinicalAdjuncts.condition, words)
       .replace(/[.!?]+$/u, "");
-  if (primaryConditions?.length)
+  // A current clinical condition replaces the retained primary relation.
+  if (!clause.clinicalAdjuncts?.condition && primaryConditions?.length)
     administrationText = attachInstructionGraphPrimaryConditions(administrationText, primaryConditions, "th");
   if (preFlowsIntoAdministration && preGraphInstruction) {
     administrationText = `${preGraphInstruction} ${sequenceSurface}${administrationText}`;

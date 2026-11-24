@@ -429,7 +429,7 @@ describe("round 23: attached carrier amounts share the quantity grammar", () => 
 
 describe("round 24: current facts and independent source wording", () => {
   it("keeps a newly supplied dose beside an amountless rich source action", () => {
-    const dosage = parseSig("Swallow slowly with water").fhir[0];
+    const dosage = structuredClone(parseSig("Swallow slowly with water").fhir[0]);
     dosage.doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
     const saved = JSON.stringify(dosage);
     const text = formatSig(dosage, "long", { locale: "en", realizationMode: "roundtrip" });
@@ -447,8 +447,8 @@ describe("round 24: current facts and independent source wording", () => {
 
   it("keeps a saved primary Time from overriding an edited Thai schedule", () => {
     const source = "Take one tablet slowly before bed";
-    const dosage = parseSig(source).fhir[0];
-    const actions = parseInstructionActions(source);
+    const dosage = structuredClone(parseSig(source).fhir[0]);
+    const actions = structuredClone(parseInstructionActions(source));
     // This saved graph has separate typed Amount, Manner and Time slots.
     // Opaque additional advice has its own source contract and is not re-parsed.
     actions[0].args = actions[0].args.map(arg => arg.role === AdviceArgumentRole.Object
@@ -474,7 +474,7 @@ describe("round 24: current facts and independent source wording", () => {
     expect(JSON.stringify(dosage)).toBe(saved);
 
     // The ordinary parser also supplies this graph for a rich swallow action.
-    const natural = parseSig("Swallow 1 tablet slowly before bed").fhir[0];
+    const natural = structuredClone(parseSig("Swallow 1 tablet slowly before bed").fhir[0]);
     natural.timing!.repeat!.when = [EventTiming.Morning];
     const naturalText = formatSig(natural, "long", { locale: "th", realizationMode: "roundtrip" });
     expect(naturalText).toContain("เช้า");
@@ -483,7 +483,7 @@ describe("round 24: current facts and independent source wording", () => {
   });
 
   it("keeps a dose-less rich source from replaying its old clock through a locale fallback", () => {
-    const dosage = parseSig("Swallow slowly with water at 08:00").fhir[0];
+    const dosage = structuredClone(parseSig("Swallow slowly with water at 08:00").fhir[0]);
     dosage.timing!.repeat!.timeOfDay![0] = "10:00:00";
     const saved = JSON.stringify(dosage);
     for (const locale of ["en", "th"]) {
@@ -498,7 +498,7 @@ describe("round 24: current facts and independent source wording", () => {
 
   it("clears a source-owned Object quantity without erasing its noun or an independent equal amount", () => {
     const parsed = parseSig("Dissolve 1 tablet of amoxicillin in 1 tablet saline");
-    const dosage = parsed.fhir[0];
+    const dosage = structuredClone(parsed.fhir[0]);
     const graph = JSON.parse(JSON.stringify(parsed.meta.canonical.clauses[0].instructionGraph)) as CanonicalInstructionGraph;
     const theme = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Theme)!;
     // Source span still covers the original Amount; nominal text need not repeat it.
@@ -797,7 +797,7 @@ describe("round 25: typed source owners survive independent clinical edits", () 
 
   it("composes a typed before relation with its breakfast event before comparing live timing", () => {
     const source = "Swallow 1 tablet slowly before breakfast";
-    const actions = parseInstructionActions(source);
+    const actions = structuredClone(parseInstructionActions(source));
     actions[0].args = actions[0].args.map(arg =>
       arg.role === AdviceArgumentRole.Time
         ? { ...arg, normalized: EventTiming.Breakfast, relation: AdviceRelation.Before }
@@ -809,14 +809,15 @@ describe("round 25: typed source owners survive independent clinical edits", () 
       sourceText: source, sourceLocale: "en", actions,
       primaryAdministrationSpan: { start: 0, end: 7 }
     };
-    const dosage = parseSig(source).fhir[0];
-    dosage.extension = [
-      ...(dosage.extension ?? []).filter(item => item.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL),
+    const fixture = structuredClone(parseSig(source).fhir[0]);
+    fixture.extension = [
+      ...(fixture.extension ?? []).filter(item => item.url !== MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL),
       buildInstructionGraphExtension(graph)!
     ];
-    delete dosage.additionalInstruction;
+    delete fixture.additionalInstruction;
     const sourceGraph = JSON.stringify(graph);
     for (const event of [EventTiming["Before Breakfast"], EventTiming.Breakfast]) {
+      const dosage = structuredClone(fixture);
       dosage.timing!.repeat!.when = [event];
       const saved = JSON.stringify(dosage);
       for (const locale of ["en", "th"]) {
@@ -1032,15 +1033,16 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
       expect(formatSig(row, "long", { locale, realizationMode: "roundtrip" }))
         .toContain(locale === "en" ? "bedtime" : "ก่อนนอน");
     }
-    row.timing!.repeat!.when = [EventTiming.Morning];
+    const edited = structuredClone(row);
+    edited.timing!.repeat!.when = [EventTiming.Morning];
     for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
-      const text = formatSig(row, "long", { locale, realizationMode });
+      const text = formatSig(edited, "long", { locale, realizationMode });
       expect(text).toBe(locale === "en" ? "Take 1 tablet orally in the morning." :
         realizationMode === "roundtrip" ? "รับประทาน 1 เม็ด เช้า." : "รับประทานครั้งละ 1 เม็ด ตอนเช้า.");
       expect(text).not.toMatch(/bedtime|sleep|นอน/);
       expect(text.match(locale === "en" ? /1 tablet/g : /1 เม็ด/g)).toHaveLength(1);
     }
-    expect(JSON.stringify(row.extension)).toBe(originalGraph);
+    expect(JSON.stringify(edited.extension)).toBe(originalGraph);
   });
 
   it("keeps the independent later action's bedtime when only the primary schedule changes", () => {
@@ -1630,7 +1632,7 @@ describe("round 28: explicit routes delimit inherited administration sites", () 
 describe("round 28: dirty PRN previews preserve authored reason qualifiers", () => {
   it.each([false, true])("keeps an unrecognized qualified reason after a cap edit (saved=%s)", saved => {
     const parsed = parseSig("Take 1 tablet PO daily as needed for pain max 2 tablets/day");
-    const row = saved ? JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage : parsed.fhir[0];
+    const row = saved ? JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage : structuredClone(parsed.fhir[0]);
     const source = row.text;
     row.asNeededFor![0].text = "severe breakthrough pain when standing";
     row.maxDosePerPeriod![0].numerator!.value = 3;
@@ -1970,9 +1972,10 @@ describe("round 30: completed phase origins and exact boundary display", () => {
       expect(input.step![0].start?.offsetRange).toEqual(range);
     }
     expect(JSON.stringify(source)).toBe(before);
-    source.step![0].start!.offsetRange!.low!.value = 1;
-    source.step![0].start!.offsetRange!.high!.value = 2;
-    expect(formatSig(source, "long", { locale: "en", realizationMode: "normalized" }))
+    const bounded = structuredClone(source);
+    bounded.step![0].start!.offsetRange!.low!.value = 1;
+    bounded.step![0].start!.offsetRange!.high!.value = 2;
+    expect(formatSig(bounded, "long", { locale: "en", realizationMode: "normalized" }))
       .toContain("1 day – 2 days after follow-up");
   });
 
@@ -2123,12 +2126,14 @@ describe("round 31: conditional and qualified timing display", () => {
         durationValue: 3, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
     }
     expect(JSON.stringify(source)).toBe(before);
-    source.step[0].start!.offsetDuration = { unit: "d" };
-    const incomplete = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+    const incompleteInput = structuredClone(source);
+    incompleteInput.step[0].start!.offsetDuration = { unit: "d" };
+    const incomplete = formatSig(incompleteInput, "long", { locale: "en", realizationMode: "normalized" });
     expect(incomplete).toContain("requires review");
     expect(incomplete).not.toContain("Days 1–2");
-    source.step[0].start = { contextCode: { text: "follow-up" } };
-    const unresolved = formatSig(source, "long", { locale: "en", realizationMode: "normalized" });
+    const unresolvedInput = structuredClone(source);
+    unresolvedInput.step[0].start = { contextCode: { text: "follow-up" } };
+    const unresolved = formatSig(unresolvedInput, "long", { locale: "en", realizationMode: "normalized" });
     expect(unresolved).toContain("follow-up");
     expect(unresolved).not.toContain("Days 1–2");
   });
@@ -2211,9 +2216,10 @@ describe("round 31: bounded event windows remain in preview", () => {
 
   it("keeps a window beside an already owned rich event and accompaniment", () => {
     const source = "Take 1 tablet in the morning with water";
-    const row: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
-    const originalText = row.text;
-    formatSig(row, "long", { locale: "en" });
+    const baseline: FhirDosage = JSON.parse(JSON.stringify(parseSig(source).fhir[0]));
+    const originalText = baseline.text;
+    formatSig(baseline, "long", { locale: "en" });
+    const row = structuredClone(baseline);
     const repeat = row.timing!.repeat!;
     repeat.extension = [...repeat.extension ?? [], {
       url: TIMING_EVENT_WINDOW_EXTENSION_URL,
@@ -2465,8 +2471,9 @@ describe("review family: course preview preserves partial clinical bounds", () =
     const long = formatSig(row, "long", { locale });
     expect(long).toContain(locale === "en" ? "for up to 7 days" : "ไม่เกิน 7 วัน");
     expect(formatSig(row, "short", { locale })).toContain("x<=7d");
-    row.timing!.repeat!.boundsRange!.high = simpleQuantityForR5({ value: 7, unit: "d", comparator: "<" });
-    expect(formatSig(row, "long", { locale })).toContain("<7");
+    const qualified = structuredClone(row);
+    qualified.timing!.repeat!.boundsRange!.high = simpleQuantityForR5({ value: 7, unit: "d", comparator: "<" });
+    expect(formatSig(qualified, "long", { locale })).toContain("<7");
   });
 
   it.each(["en", "th"])("shows equal endpoints when only the lower endpoint is qualified in %s", locale => {
@@ -2919,15 +2926,17 @@ describe("round33 mixed clock and event recurrence", () => {
     expect(clock.valueTime).toBe("09:00:00");
     const due = (value: FhirDosage) => nextDueDoses([value], { ...context, limit: 2 });
     expect(due(row)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T09:00:00+00:00"]);
-    clock.valueTime = "10:00:00";
-    expect(due(row)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T10:00:00+00:00"]);
-    const rewritten = toFhirR5Dosages(toDosageDetails([row]))[0];
+    const edited = structuredClone(row);
+    edited.timing!.repeat!.extension!.find(field => field.url === clockUrl)!.valueTime = "10:00:00";
+    expect(due(edited)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T10:00:00+00:00"]);
+    const rewritten = structuredClone(toFhirR5Dosages(toDosageDetails([edited]))[0]);
     rewritten.timing!.repeat!.extension = rewritten.timing!.repeat!.extension!.filter(field => field.url !== clockUrl);
     expect(nextDueDoses([rewritten], { ...context, limit: 2 })).toEqual([
       "2026-01-01T08:30:00+00:00", "2026-01-02T08:30:00+00:00"
     ]);
-    repeat.timeOfDay = ["11:00:00"];
-    const replaced = toFhirR5Dosages(toDosageDetails([row]))[0];
+    const override = structuredClone(edited);
+    override.timing!.repeat!.timeOfDay = ["11:00:00"];
+    const replaced = toFhirR5Dosages(toDosageDetails([override]))[0];
     expect(due(replaced)).toEqual(["2026-01-01T08:30:00+00:00", "2026-01-01T11:00:00+00:00"]);
     expect(importCanonicalCourse(replaced).stages[0].administrations[0].schedule!.recurrence!.clocks).toEqual(["11:00:00"]);
   });
@@ -3158,9 +3167,11 @@ describe("review 21 current structured course preview", () => {
       const raw: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: tablet.doseAndRate, timing: { event: [event] },
       }] }] };
+      const thaiEvent = event === "2026-11-20T15:00:00Z"
+        ? "20/11/2569 เวลา 15:00:00Z" : "20/11/2569 เวลา 15:30:00+07:00";
       for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
         const text = formatSig(raw, style, { locale, realizationMode: "normalized" });
-        expect(text).toContain(event);
+        expect(text).toContain(locale === "th" && style === "long" ? thaiEvent : event);
       }
       expect(fromFhir(raw).meta.canonical.course!.stages[0].administrations[0].schedule?.explicitEvents)
         .toEqual([event]);
@@ -3296,8 +3307,9 @@ describe("review 21 R5 quantity and indication import", () => {
     }) }] };
     expect(canonicalFromFhir(row).dose).toMatchObject({ value: 500, unit: "mg", comparator: "~" });
     expect(formatSig(row, "long", normalized)).toMatch(/approximately 500 mg/i);
-    row.doseAndRate![0].doseQuantity!.unit = "milligrams";
-    expect(canonicalFromFhir(row).dose?.unit).toBe("milligrams");
+    const authored = structuredClone(row);
+    authored.doseAndRate![0].doseQuantity!.unit = "milligrams";
+    expect(canonicalFromFhir(authored).dose?.unit).toBe("milligrams");
   });
 
   it.each([false, true])("retains every PRN reason independently of array order (%s)", reverse => {
@@ -3343,9 +3355,10 @@ describe("review 21 source graph amount ownership", () => {
     "does not revive a removed %s dose but retains duration and the independent spit action", kind => {
       const source = "Swish 10 mL for 30 seconds, then spit";
       const parsed = parseSig(source);
-      const row = kind === "fresh" ? structuredClone(toFhirR5Dosages(parsed.fhir)[0])
+      const baseline = kind === "fresh" ? structuredClone(toFhirR5Dosages(parsed.fhir)[0])
         : JSON.parse(JSON.stringify(parsed.fhir[0])) as FhirDosage;
-      const savedGraph = canonicalFromFhir(kind === "fresh" ? structuredClone(row) : row).instructionGraph;
+      const savedGraph = canonicalFromFhir(baseline).instructionGraph;
+      const row = structuredClone(baseline);
       delete row.doseAndRate;
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(row, "long", { locale: "en", realizationMode });
@@ -4460,5 +4473,217 @@ describe("round52 independent preparation and explicit accompaniment owners", ()
       expect(cold[0].extension).toContainEqual(annotation);
       expect(JSON.stringify(row)).toBe(before);
       expect(JSON.stringify(graph)).toBe(graphBefore);
+    });
+});
+
+
+describe("round 53: saved graph and calendar realization ownership", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const annotation = { url: "urn:round53:independent-note", valueString: "keep authored note" };
+  const graphNote = { url: "urn:round53:graph-note", valueString: "keep graph annotation" };
+  const rowForGraph = (graph: CanonicalInstructionGraph): FhirDosage => {
+    const wire = persist(buildInstructionGraphExtension(graph)!);
+    wire.extension!.push(graphNote);
+    return { extension: [wire, annotation] };
+  };
+  const graphViews = (row: FhirDosage) => {
+    const r6 = toDosageDetails([row]);
+    const cold = persist(toFhirR5Dosages(r6));
+    expect(cold[0].extension).toContainEqual(annotation);
+    expect(cold[0].extension!.find(item => item.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL)!.extension)
+      .toContainEqual(graphNote);
+    return [[row], r6, cold];
+  };
+
+  it.each(["A", "B", "no-choice"] as const)(
+    "retains an authored empty timed stage before a selected successor (%s)", branch => {
+      const boundary = (value: number): CanonicalBoundary => ({
+        anchor: "treatment-start", displacement: { value, system: "http://unitsofmeasure.org", code: "d" }
+      });
+      const member = (value: number, choice?: string): CanonicalAdministration => ({
+        kind: "administration", amounts: [{ quantity: { value, unit: "tab" } }],
+        schedule: { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } },
+        ...(choice ? { choice: { groupId: "round53-pause", branchId: choice } } : {})
+      });
+      const course: CanonicalCourse = { kind: "course", stages: [
+        { start: boundary(0), end: boundary(2), administrations: branch === "no-choice"
+          ? [member(1)] : [member(1, "A"), member(2, "B")] },
+        { end: boundary(4), administrations: [] },
+        { end: boundary(7), administrations: [member(3)] }
+      ] };
+      const before = JSON.stringify(course), r6 = courseToR6(course);
+      for (const input of [r6, persist(toFhirR5Dosages(r6))]) {
+        const saved = JSON.stringify(input);
+        expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-03T00:00:00Z",
+          timeZone: "UTC", limit: 2,
+          ...(branch === "no-choice" ? {} : { alternativeChoices: { "round53-pause": branch } })
+        })).toEqual(["2026-01-05T08:00:00+00:00", "2026-01-06T08:00:00+00:00"]);
+        const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+        expect(english).toContain("No doses from 2 days after treatment start until 4 days after treatment start.");
+        expect(english.match(/No doses/gu)).toHaveLength(1);
+        const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(thai).toContain("งดยาตั้งแต่2 วันหลังเริ่มการรักษาจนถึง4 วันหลังเริ่มการรักษา.");
+        expect(thai.match(/งดยา/gu)).toHaveLength(1);
+        expect(JSON.stringify(input)).toBe(saved);
+      }
+      expect(JSON.stringify(course)).toBe(before);
+    });
+
+  it.each(["current-threshold", "graph-only"] as const)(
+    "keeps primary and independent graph conditions with the correct owner (%s)", mode => {
+      const source = "Take 1 tablet daily if SBP > 160; Call clinic if dizzy";
+      const take = parseInstructionActions("Take 1 tablet")[0];
+      const callStart = source.indexOf("Call"), conditionStart = source.indexOf("if SBP");
+      const call = parseInstructionActions("Call clinic")[0];
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en",
+        primaryAdministrationSpan: take.span,
+        actions: [take, { ...call, span: { start: callStart, end: callStart + 11 } }],
+        relations: [
+          { kind: AdviceRelation.If, toActionIndex: 0, text: "if SBP > 160",
+            span: { start: conditionStart, end: conditionStart + 12 } },
+          { kind: AdviceRelation.If, toActionIndex: 1, text: "if dizzy",
+            span: { start: source.indexOf("if dizzy"), end: source.length } }
+        ] };
+      const row = rowForGraph(graph);
+      const base = persist(parseSig("Take 1 tablet daily if SBP > 160").fhirNext.step![0].component[0]);
+      const condition = mode === "current-threshold" ? [{ ...base.condition![0],
+        valueQuantity: { ...base.condition![0].valueQuantity, value: 140 } }] : undefined;
+      const current: FhirR6DosageInstruction = { step: [{ component: [{ ...base,
+        condition, extension: row.extension, text: undefined
+      }] }] };
+      const saved = JSON.stringify(current), graphSaved = JSON.stringify(graph);
+      for (const input of [current, persist(toFhirR5Dosages(current))]) {
+        const inputSaved = JSON.stringify(input);
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text.match(new RegExp(mode === "current-threshold" ? "140" : "160", "gu"))).toHaveLength(1);
+          if (mode === "current-threshold") expect(text).not.toContain("160");
+          expect(text).toContain(locale === "en" ? "if dizzy" : "ถ้าเวียนศีรษะ");
+          expect(text).toContain("Call clinic");
+        }
+        const exported = toFhirR5Dosages(input);
+        expect(exported[0].extension).toContainEqual(annotation);
+        expect(parseInstructionGraphExtension(exported[0].extension)?.relations)
+          .toEqual(graph.relations);
+        expect(JSON.stringify(input)).toBe(inputSaved);
+      }
+      expect(JSON.stringify(current)).toBe(saved);
+      expect(JSON.stringify(graph)).toBe(graphSaved);
+    });
+
+  it.each(["theme-first", "vehicle-first", "explicit-vehicle-first"] as const)(
+    "prefers the explicit mixing Theme regardless of saved argument order (%s)", order => {
+      const source = "Mix powder with household spoon", parsed = parseInstructionActions(source)[0];
+      const theme = { ...parsed.args.find(arg => arg.role === AdviceArgumentRole.Theme)!,
+        i18n: { en: "powder", th: "ผง" } };
+      const vehicle = { ...parsed.args.find(arg => arg.role === AdviceArgumentRole.Object)!,
+        relation: order === "explicit-vehicle-first" ? AdviceRelation.With : undefined };
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, relation: AdviceRelation.With,
+        args: order === "theme-first" ? [theme, vehicle] : [vehicle, theme]
+      }] };
+      const saved = JSON.stringify(graph), row = rowForGraph(graph), rowSaved = JSON.stringify(row);
+      expect(realizeInstructionGraph(graph, "en")).toBe(source);
+      const thaiAction = realizeInstructionGraph(graph, "th")!;
+      expect(thaiAction.match(/ผง/gu)).toHaveLength(1);
+      expect(thaiAction.match(/ช้อนกินข้าว/gu)).toHaveLength(1);
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text.match(locale === "en" ? /powder/gu : /ผง/gu)).toHaveLength(1);
+          expect(text.match(locale === "en" ? /with household spoon/gu : /ช้อนกินข้าว/gu)).toHaveLength(1);
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(graph)).toBe(saved);
+      expect(JSON.stringify(row)).toBe(rowSaved);
+    });
+
+  it.each(["substance", "material", "unmarked-material", "legacy-to"] as const)(
+    "renders a dilution material and each related complement once (%s)", kind => {
+      const source = kind === "legacy-to" ? "Dilute to 10 mL" :
+        kind === "unmarked-material" ? "Dilute 1 mL saline to 10 mL" : "Dilute 1 mL with saline to 10 mL";
+      const parsed = parseInstructionActions("Dilute 1 mL with saline to 10 mL")[0];
+      const amount = parsed.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
+      const saline = { role: kind === "substance" ? AdviceArgumentRole.Substance : AdviceArgumentRole.Material,
+        text: "saline", normalized: "saline", i18n: { th: "น้ำเกลือ" },
+        relation: kind === "unmarked-material" ? undefined : AdviceRelation.With };
+      const destination = { role: kind === "legacy-to" ? AdviceArgumentRole.Object : AdviceArgumentRole.Destination,
+        text: "10 mL", normalized: "mL", quantity: { value: 10, unit: "mL" },
+        relation: kind === "legacy-to" ? undefined : AdviceRelation.To };
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, sourceText: source, span: { start: 0, end: source.length },
+        relation: kind === "legacy-to" ? AdviceRelation.To : undefined,
+        args: kind === "legacy-to" ? [destination] : [amount, saline, destination]
+      }] };
+      const saved = JSON.stringify(graph), row = rowForGraph(graph), rowSaved = JSON.stringify(row);
+      expect(realizeInstructionGraph(graph, "en")).toBe(kind === "unmarked-material"
+        ? "Dilute 1 mL of saline to 10 mL" : source);
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+          if (kind !== "legacy-to") {
+            expect(text.match(locale === "en" ? /saline/gu : /น้ำเกลือ/gu)).toHaveLength(1);
+            expect(text.match(locale === "en" ? /1 mL/gu : /1 มิลลิลิตร/gu)).toHaveLength(1);
+          }
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(graph)).toBe(saved);
+      expect(JSON.stringify(row)).toBe(rowSaved);
+    });
+
+  it.each(["before-and-until", "before-only", "until-only"] as const)(
+    "keeps a saved action time and independently related result distinct (%s)", kind => {
+      const source = "Shake" + (kind !== "until-only" ? " before each use" : "") +
+        (kind !== "before-only" ? " until evenly mixed" : "");
+      const parsed = parseInstructionActions("Shake before each use")[0];
+      const time = { role: AdviceArgumentRole.Time, text: "each use", normalized: "each use",
+        relation: AdviceRelation.Before, i18n: { th: "การใช้แต่ละครั้ง" } };
+      const result = { role: AdviceArgumentRole.Result, text: "evenly mixed", normalized: "evenly mixed",
+        relation: AdviceRelation.Until, i18n: { th: "ผสมเข้ากันดี" } };
+      const graph: CanonicalInstructionGraph = { sourceText: source, sourceLocale: "en", actions: [{
+        ...parsed, predicate: { ...parsed.predicate, realizer: "default" },
+        sourceText: source, span: { start: 0, end: source.length },
+        relation: kind === "until-only" ? AdviceRelation.Until : AdviceRelation.Before,
+        args: kind === "before-only" ? [time] : kind === "until-only" ? [result] : [time, result]
+      }] };
+      const saved = JSON.stringify(graph), row = rowForGraph(graph), rowSaved = JSON.stringify(row);
+      expect(realizeInstructionGraph(graph, "en")).toBe(source);
+      for (const input of graphViews(row)) {
+        const before = JSON.stringify(input);
+        for (const locale of ["en", "th"]) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          if (kind !== "until-only") expect(text.match(locale === "en"
+            ? /before each use/gu : /ก่อนการใช้แต่ละครั้ง/gu)).toHaveLength(1);
+          if (kind !== "before-only") expect(text.match(locale === "en"
+            ? /until evenly mixed/gu : /จนกว่าผสมเข้ากันดี/gu)).toHaveLength(1);
+          expect(text).not.toContain(locale === "en" ? "before evenly mixed" : "ก่อนผสมเข้ากันดี");
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      expect(JSON.stringify(graph)).toBe(saved);
+      expect(JSON.stringify(row)).toBe(rowSaved);
+    });
+
+  it.each(["2026-12-05T09:00:00+07:00", "2026-12-05T02:00:00Z", "2026-12-05"])(
+    "uses the Buddhist date while preserving the exact event time and offset (%s)", event => {
+      const row: FhirDosage = { timing: { event: [event], _event: [{ id: "authored-event" }] },
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [annotation] };
+      const r6 = toDosageDetails([row]), cold = persist(toFhirR5Dosages(r6));
+      for (const input of [[row], r6, cold]) {
+        const before = JSON.stringify(input);
+        const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(thai).toContain("วันที่ 5/12/2569" + (event.length > 10 ? " เวลา " + event.slice(11) : ""));
+        expect(thai).not.toContain("2026-12-05");
+        const exported = toFhirR5Dosages(input)[0];
+        expect(exported.timing?.event).toEqual([event]);
+        expect(exported.timing?._event).toEqual([{ id: "authored-event" }]);
+        expect(exported.extension).toContainEqual(annotation);
+        expect(JSON.stringify(input)).toBe(before);
+      }
     });
 });

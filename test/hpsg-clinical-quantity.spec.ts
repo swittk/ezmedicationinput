@@ -17,7 +17,7 @@ import {
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
 import { EventTiming, FhirPeriodUnit, type FhirDosage, type FhirQuantity, type ParseOptions } from "../src/types";
-import { getQuantityComparator } from "../src/fhir-quantity-operator";
+import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, getQuantityComparator } from "../src/fhir-quantity-operator";
 import { formatZonedIso } from "../src/execution/calendar";
 
 /** Scalar dose/rate choices use SimpleQuantity at either wire boundary.
@@ -28,6 +28,9 @@ function expectSimpleQuantityOperator(quantity: FhirQuantity | undefined, compar
   expect(quantity?._comparator).toBeUndefined();
   expect(getQuantityComparator(quantity)).toBe(comparator);
   expect(getEmaQuantityComparator(quantity)).toBe(comparator);
+  if (comparator === undefined) {
+    expect(quantity?.extension?.some(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL) ?? false).toBe(false);
+  }
 }
 import { getTimingMonthDays, TIMING_DAY_OF_MONTH_EXTENSION_URL } from "../src/fhir";
 
@@ -2024,8 +2027,8 @@ describe("round30 qualified duration unit ownership", () => {
       administrationDuration: 3, administrationDurationUnit: "min", administrationDurationComparator: "~"
     });
     expect(JSON.stringify(row)).toBe(before);
-    repeat.duration = 4;
-    expect(importCanonicalCourse([row]).stages[0].administrations[0].schedule!.recurrence)
+    const exactRow = { ...row, timing: { ...row.timing, repeat: { ...repeat, duration: 4 } } };
+    expect(importCanonicalCourse([exactRow]).stages[0].administrations[0].schedule!.recurrence)
       .toMatchObject({ occurrenceDuration: 4, occurrenceDurationUnit: "h", occurrenceDurationComparator: undefined });
   });
 });
@@ -2858,7 +2861,7 @@ it("keeps an explicitly added upper duration endpoint with its authored unit and
       url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, id: "authored-duration",
       valueRange: { low: { value: 90, unit: "min", code: "min", id: "minimum" } }
     }] } } };
-  let wire = toDosageDetails([original]);
+  let wire = structuredClone(toDosageDetails([original]));
   const repeat = wire.step[0].component[0].timing!.repeat!;
   repeat.durationMax = 2;
   repeat.durationUnit = FhirPeriodUnit.Hour;

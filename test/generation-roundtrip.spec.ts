@@ -576,8 +576,14 @@ describe("round49 endpoint units and normalized conditions", () => {
     }
     const r6 = toDosageDetails([row]);
     expect(r6.step![0].component[0].doseAndRate?.[0].doseRange).toEqual(range);
+    expect(r6.step![0].component[0].extension).toContainEqual({
+      url: "urn:round49:row-note", valueString: "preserve unrelated data"
+    });
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
     expect(cold[0].doseAndRate[0].doseRange).toEqual(range);
+    expect(cold[0].extension).toContainEqual({
+      url: "urn:round49:row-note", valueString: "preserve unrelated data"
+    });
     expect(JSON.stringify(row)).toBe(saved);
   });
 

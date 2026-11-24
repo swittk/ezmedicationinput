@@ -3833,6 +3833,7 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const profile = localeRealizationProfile(c.locale);
   let targetArgument: AdviceArgument | undefined;
   let materialArgument: AdviceArgument | undefined;
+  let unmarkedMaterial: AdviceArgument | undefined, unmarkedSubstance: AdviceArgument | undefined;
   for (const arg of c.frame.args) {
     if (arg.role === AdviceArgumentRole.Time) continue;
     if (arg.relation && arg.relation === c.frame.relation) {
@@ -3841,6 +3842,8 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
         arg.role !== AdviceArgumentRole.Duration &&
         arg.role !== AdviceArgumentRole.Activity && arg.role !== AdviceArgumentRole.Manner) {
       materialArgument ??= arg;
+      if (arg.role === AdviceArgumentRole.Material) unmarkedMaterial ??= arg;
+      else if (arg.role === AdviceArgumentRole.Substance) unmarkedSubstance ??= arg;
     }
   }
   // Older dilution frames kept TO on the head and its final volume as an
@@ -3870,10 +3873,11 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
     ]));
   }
   const destination = joinLocalizedTokens(c.locale, destinations);
-  const materialValue = targetArgument
-    ? materialArgument && translatedArgument(materialArgument, c.locale)
-    : c.material ?? (!relation || c.destination ? c.substance : undefined) ??
-      (materialArgument && translatedArgument(materialArgument, c.locale));
+  // Explicitly related arguments were rendered as complements above. Only
+  // unmarked material can also occupy the dilution material slot.
+  const materialSource = targetArgument ? materialArgument : unmarkedMaterial ??
+    ((!relation || c.destination) ? unmarkedSubstance : undefined) ?? materialArgument;
+  const materialValue = materialSource && translatedArgument(materialSource, c.locale);
   const material = materialValue
     ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
@@ -3909,7 +3913,8 @@ function realizeAction(
   let temporalAdjuncts: AdviceArgument[] | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
-    if (independentTemporal && arg.relation &&
+    if ((independentTemporal || arg.role === AdviceArgumentRole.Result && arg.relation !== frame.relation) &&
+        arg.relation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
         relationHasSemanticClass(arg.relation, "temporal")) {

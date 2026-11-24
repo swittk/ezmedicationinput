@@ -3378,8 +3378,9 @@ describe("PR14 round 29 execution semantics", () => {
       expect(() => calculateTotalUnits({ dosage, ...supplyOptions })).toThrowError(
         expect.objectContaining({ code: "timing-code-repeat-conflict" }));
     }
-    course.step[0].component[0].timing!.repeat!.period = 2;
-    for (const dosage of representations(course)) {
+    const matching = structuredClone(course);
+    matching.step[0].component[0].timing!.repeat!.period = 2;
+    for (const dosage of representations(matching)) {
       expect(nextDueDoses(dosage, { ...options, limit: 2 })).toEqual([
         "2027-01-01T09:00:00+00:00", "2027-01-03T09:00:00+00:00",
       ]);

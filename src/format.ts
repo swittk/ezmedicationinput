@@ -1888,7 +1888,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const compose = (base: string): string => {
     let effectiveBase = richGraphAdministrationSentence ?? primarySourceSentence ?? base;
     if (condition) effectiveBase = appendClinicalConditionText(effectiveBase, condition, words);
-    if (primaryConditions?.length)
+    // The live primary condition owns this dose; independent graph actions
+    // retain their own conditional relations in the graph realization.
+    if (!condition && primaryConditions?.length)
       effectiveBase = attachInstructionGraphPrimaryConditions(effectiveBase, primaryConditions, "en");
     if (preFlowsIntoAdministration && preGraphInstruction) {
       const rawPre = preGraphInstruction.replace(/[.!?]+$/, "");

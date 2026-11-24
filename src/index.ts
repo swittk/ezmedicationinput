@@ -1104,7 +1104,9 @@ function appendSourceLessRateRanges(
 
 /** Compact clauses cannot carry independent phase origins or qualified ranges. */
 function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolean {
-  if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL))
+  if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||
+      extension.url === DOSAGE_DETAILS_R5_URL &&
+      extension.extension?.some(child => child.url === "timingOffsets")))
     return true;
   const primary = dosage.doseAndRate?.[0];
   // With no structured dose or method, authored text may be the only
@@ -1156,7 +1158,7 @@ export function formatSig(
     const course = courseFromR5([dosage], undefined, undefined, undefined, true);
     // Source agreement or the submitted fields rejected retained wording.
     // Carry that result into the generated native view.
-    const administration = course.stages[0]?.administrations[0];
+    const administration = course.stages.find(stage => stage.administrations.length)?.administrations[0];
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
     return formatCanonicalCourse(course, style, options ?? {});
@@ -1431,7 +1433,8 @@ function fromFhirDosageInternal(
   const unverified = replacementText === undefined &&
     (getDosageSourceTextAgreement(dosage, false) === false || edit !== false);
   const native = unverified || needsNativeR5Preview(dosage, options)
-    ? courseFromR5([dosage], undefined, undefined, undefined, true).stages[0]?.administrations[0]
+    ? courseFromR5([dosage], undefined, undefined, undefined, true).stages
+        .find(stage => stage.administrations.length)?.administrations[0]
     : undefined;
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
   const hasMaximumDose = hasMaximumDoseForDisplay(dosage);
