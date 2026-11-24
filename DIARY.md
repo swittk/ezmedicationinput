@@ -15578,3 +15578,159 @@ Historical decisions and evidence remain in AgentBoard thread 27, the round-52 r
 - `/tmp/ezmed14-round52-takeover-audit-execution-terminal.json` — SHA-256 `b89c49a06a4f4f8d33aa1c974552ac58beaae491f2a2e83a8ad78ad713990469`
 
 This verified entry is appended as a DIARY-only child of the validated source commit. Normal push, replies in the seven original threads, a fresh resolution audit, PR description update and the next full review are subsequent delivery actions. No merge, publishing or deployment is authorized.
+
+
+## 2026-11-24 — PR #14 round 53: supported corrections and complete validation
+
+The original takeover files and all integrated work remain preserved. AgentBoard thread 27 remains the scope authority; caller-misuse prevention is excluded. No completed review round was restarted.
+
+## Round 53 changes
+
+The completed manual full review [6031664313](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6031664313) reviewed `7eb4b2a59df90e51a631ae42f194e1793a0746b1` and produced 12 inline findings plus 27 body findings. One earlier substantive reply in the prior round's original I7 thread is tracked once as F1. Empty acknowledgement reviews and the automatically paused push check are not counted as full reviews.
+
+**Validated source:** `bbc5f17d0d0ffd9ca423dac66f91b6a58b9a4d2d`. **Delivery:** `DIARY-only child; exact commit is bound in the delivery manifest`.
+
+### Current FHIR facts and source preservation
+
+- Fresh structured edits retire stale active row text and its translations together. Complete original wording and primitive companions remain in source provenance, while unrelated current primitive annotations remain active.
+- After a component deletion, indistinguishable anonymous R5 projections no longer acquire an arbitrary retained reference-only site. Unique identities and distinguishable projections keep their supported owners; unresolved original references remain recoverable.
+- Annotation-only end-boundary changes retain saved empty pauses and the current annotated end. Genuine completion changes still invalidate inappropriate restoration.
+- Single-row previews use retained cycle offsets and the first nonempty administration without deleting retained empty draft stages.
+- The current primary clinical condition governs its own threshold. Independent conditions and saved graph data remain intact.
+
+### Timing, supply and instruction realization
+
+- Clock windows respect calendar cadence; a two-day or weekly interval no longer opens on every date. Existing subday window behavior remains.
+- Shifted supply counting uses the matching eligibility floor and preserves cadence origins and civil caps. Partial month/year events use their shifted possible-date envelope without inventing exact instants.
+- Alternative selection retains authored empty timed stages in execution and preview. Shared-anchor inheritance compares exact and ranged offsets; a successor's own event window prevents predecessor-clock inheritance.
+- Resolving the parser's typed “at the same time” reference no longer manufactures an empty advice array. This correction is confined to that producer branch; external FHIR fields and unrelated advice are preserved.
+- A daypart can qualify its matching clock while other authored clocks remain. The compact and spaced AM/PM examples already preserved the approximate successor dose and now have exact controls.
+- Qualified strength numerators do not produce unqualified ingredient estimates or concentration-based container conversions. Authored dose totals and independent volume estimates remain available. No invalid denominator-comparator handling was added.
+- Explicit mixing Theme arguments take priority over nominal fallback. Dilution vehicles render once, and an independent Until result retains its relation alongside Before timing.
+- Long Thai previews use the Buddhist date while preserving the authored time and offset. English/compact Thai behavior and exact wire instants remain covered.
+- An empty dosage list returns an empty schedule without requiring a time zone.
+
+### Test corrections and scope decisions
+
+The 18 review-body test cards and the earlier F1 follow-up correct fixture identity where needed and strengthen exact dose/cap, timing, operator-absence, unknown-extension, preparation ownership, action-code and omission assertions. All 7,077 previous identities and their multiplicities remain; no closed-round identity mapping is replayed. Two old long-Thai expectations were corrected to the supported Buddhist calendar presentation while retaining their exact clock, offset and wire assertions. One existing internal empty-advice expectation now checks omission after timing-reference resolution; its dose, clock-window, unresolved-reference and reopen checks are unchanged.
+
+B7's proposed exclusive-choice type-hardening campaign addresses invalid caller construction and remains outside the owner contract. B11 requests a new catch-up or warning policy. Moving the independently authored successor to preserve the missed first dose would change calendar meaning; neither policy was added. The prior pure-event THEN decision remains settled. No direct native mutation API, same-instance mutation detection, source-observer snapshot framework, or downstream application change was introduced.
+
+Round 52 remains delivered and integrated, including the B22 clone correction and the removal of unsupported same-instance observation machinery. Its complete validation, rejected scope requests and failed attempts remain recorded in the diary and AgentBoard thread 27.
+
+## Verification and compatibility
+
+Actual managed process `proc-7d54dde2-7f29-4ab5-bd54-ce41673641c8` exited 0 without timeout on the frozen validated source. The delivery commit changes only DIARY.md after that validated commit.
+
+| Gate | Result |
+|---|---|
+| Strict TypeScript, target ES6 | Pass |
+| Source tests | 7,139 / 7,139 across the same 48 files; no skipped or todo cases |
+| Prior test identities | All 7,077 retained with exact multiplicity; all 62 additions match the pinned inventory |
+| Distribution tests | 4 / 4 original identities |
+| Build | All 107 artifacts verified |
+| Storage | 800 complete cases: 787 exact and 13 explicit external losses, as detailed below |
+| Equivalent performance | 177 / 177 at or below +4%; all 184 ordered pairs retained |
+| PR paths | 100 |
+
+The fixed full run used 22 samples x 35 ms, baseline first. Exactly 5 initially flagged scenario(s) received 1 candidate-first confirmation run of 72 samples x 140 ms. The worst accepted equivalent scenario was parseSnomedBodySiteTopographicalModifierPostcoordinationCode (parseSnomedBodySiteTopographicalModifierPostcoordinationCode), at +3.874216864335%. Each of the 177 equivalent ratios passed individually. No unchanged timed candidate was retried and no aggregate waiver was used.
+
+| Confirmed scenario | Initial change | Accepted confirmation |
+|---|---|---|
+| suggestSig/empty | +10.494555130468% | -0.270468645476% |
+| formatSig/R5/en | +9.786590729128% | -9.611306116607% |
+| buildBodySiteSpatialRelationExtensions | +6.299797716295% | -5.614256912315% |
+| parseSnomedFindingSitePostcoordinationCode | +17.732798651976% | -1.130610576284% |
+| findSymptomDefinitionByCoding | +7.958967832940% | +0.065122686402% |
+
+
+The independent audit verified the actual managed terminal, complete test identities, source/build/configuration/input hashes, unchanged historical storage records and accepted performance ratios recomputed from raw paired samples. Audit: `c85cb49becb0aa5daaf18447183b8afda2f2941c785f83af6b7fce3efad0525e`. Source SHA-256: `8d9cefc17c1d2d6a5b6b16d22959551d54454e83462a85cb01cb6650e9aa0d62`. Candidate ESM SHA-256: `3de3695fe41b43442ed91c29f8f7f099fe90c3c3dde880399c849ffc2adc85ce`.
+
+### Storage fidelity and explicit external limitations
+
+All 694 historical complete result/snapshot records and all 415 historical supplied-input records remain unchanged. The 106 current fixtures comprise 53 R5 and 53 R6 inputs; every complete supplied input remains unchanged. Historical R6 inputs are not reprojected to reconstruct old expectations.
+
+The five historical losses remain explicit: null-clock converter rejection, an unvalued scalar loss, two unvalued lower-endpoint losses, and a lower-only range collapsed to a scalar. The historical round49 manifest retains its original accounting and full payloads.
+
+Eight new cases demonstrate a separate pre-existing external loss: the unchanged Shinebright converter and UsageMap omit the active top-level `Dosage._text` companion, including a primitive ID, an unrelated annotation and, when present, an authored Thai translation. The loss occurs on raw R5 inputs that bypass EZMedicationInput and on fresh annotated exports from pinned master, the actual reviewed build and the candidate. The package itself preserves current primitive annotations and archives stale complete wording/translation through repeated fresh imports and exports.
+
+Following AgentBoard #191–194 and #261, those eight exact original/converted/saved outcomes are pinned in a finite manifest and are explicitly `preserved:false`; they are not counted among the 787 exact cases. Every unlisted or changed loss fails. No generic text-field exemption, authored-data normalization or downstream code change was used. The complete original failed attempt is preserved. Its six parser-generated empty-array losses were corrected at the producer and are exact in the final gate; the original failing inputs remain archived.
+
+The first complete round53 attempt passed strict types, all 7,139 source cases, build and four dist tests, then stopped in storage. The second attempt passed strict types and 7,138 source cases but found the old internal empty-array expectation; it stopped before build, storage or performance. Both failed attempts are preserved and are not acceptance evidence. After correcting that single representation assertion, the candidate was frozen and independently verified through the complete gate. No performance benchmark ran in either failed attempt.
+
+### Review coverage and delivery status
+
+CodeRabbit's actual manual check completed successfully but reported incomplete coverage of one file. The published check/status does not identify that file, its size cap or omitted regions. The full local test suite and independent engineering review are separate evidence; they do not establish complete bot inspection. The existing file layout and review configuration remain.
+
+This verified entry is appended as a DIARY-only immediate child of the validated source. Normal push, evidence-based replies in all 13 original threads, a fresh paginated resolution audit, PR description update and the next full CodeRabbit review follow. No merge, publishing or deployment is authorized.
+
+
+### Findings and original-thread routing
+
+| Finding | Disposition | Change or scope decision | Original reply route |
+|---|---|---|---|
+| I1 | fix | Fresh R5 quantity changes now retire stale active row translations together with unchanged old text. The full text and primitive companion are retained as source, while unrelated Element annotations remain active. Compact and row-baseline imports both preserve this through repeated library save/reopen. | [I1](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823637) |
+| I2 | fix | Historical membership changes now leave reference ownership unresolved when anonymous equal R5 projections point to different retained sites. The live dose survives and both candidate references remain recoverable. Unique IDs, distinct projections, and equivalent references retain their supported ownership. | [I2](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823643) |
+| I3 | fix | Execution and preview now preserve an authored empty timed pause when an alternative branch is selected. They remove only populated stages emptied by selection, so the successor cannot start inside the displayed pause. Branch A, branch B, and no-choice controls share the same clinical timeline. | [I3](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823648) |
+| I4 | fix | Calendar cadence is checked before opening each clock window. The every-two-days case schedules January 1, 3, and 5 and counts two tablets over the first three days; weekly cadence and restarting subday intervals have separate controls. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| I5 | fix | The supply recursion applies the same inverse shift to the count-eligibility floor and the query. Positive and negative offsets now count the same eligible actual doses as scheduling, with capped and uncapped controls retaining the existing cadence origin and civil-cap behavior. | [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823664) |
+| I6 | fix | The current primary clinical condition owns the rendered dose threshold. A retained relation for that same dose is omitted from active wording, while the saved graph and conditions on independent instructions remain intact. English and Thai controls cover a changed threshold and a graph-only condition. | [I6](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823674) |
+| I7 | fix | The existing native preview path recognizes retained timing offsets and selects the first nonempty administration from the imported course. Both public previews retain the two-day start offset and five-day rest for a surviving later row and for a first-stage row; empty draft stages remain present. | [I7](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823684) |
+| I8 | fix | Saved mixing frames now select an explicit Theme independently of nominal argument order. The powder remains the material being mixed and the spoon remains the companion for Theme-first, vehicle-first, and explicitly related vehicle controls in both locales. | [I8](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823695) |
+| I9 | fix | Dilution material fallback excludes arguments already rendered as related complements. Saline is rendered once as the vehicle; unmarked material and legacy frame-level To controls retain their existing meaning and source annotations. | [I9](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823700) |
+| I10 | fix | An independently related Result keeps its own Until relation when the frame also has Before timing. The combined, Before-only, and Until-only controls preserve both meanings and render each once. | [I10](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823709) |
+| I11 | fix | Shared-anchor inheritance now compares offset, offsetMin, and offsetMax by scalar equality. Different predecessor offsets leave the timing reference unresolved and recoverable; equal exact, lower-bound, and upper-bound offsets retain the existing inheritance. The producer now omits its own empty advice array after resolving the typed reference; other advice and supplied FHIR remain untouched. | [I11](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823713) |
+| I12 | fix | An authored event window now owns the successor anchor group alongside existing local clock, event, and activity fields. The waking-interval successor keeps its cadence instead of acquiring a predecessor clock. | [I12](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823737) |
+| B1 | test-only | The saved-course fixture is now a new R6 value with the replacement renderedInstruction before submission. Existing regenerated English and Thai previews and retained supplied-wire text checks remain unchanged. | [I7](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823684) |
+| B2 | fix | Pause ownership now reuses the existing semantic end-boundary comparison. Adding an Element ID preserves the saved pause and the live annotated end; changing the actual displacement still prevents inappropriate restoration. The original pause note remains recoverable. | [I3](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823648) |
+| B3 | fix | Supported strength numerator qualifiers now suppress an unqualified ingredient estimate and cross-dimension container conversion. Exact, less-than, and lower-bounded numerator controls retain the authored strength, dose totals, and independent volume estimates. The pinned Ratio denominator is SimpleQuantity, so the requested native denominator-comparator defense is outside this fix. | [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823664) |
+| B4 | test-only | Every cadence and code-only variant is built independently from an unsubmitted R6 fixture. The exact `1 tab 1x/d` and `1 tab BID` expectations, all four timing codes, and source-preservation check are retained. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B5 | test-only | The skin-restriction preview requires exactly 1 g in the administration phrase and 2 g/day in the cap phrase. The former substring checks could accept 11 g or 12 g; the clinical site and wire-preservation assertions remain. | [I6](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823674) |
+| B6 | test-only | Clock edit, restoration, R6 cadence edit, and partial-direction edit each submit a distinct value. The 10:00 pm replacement, absence of 8:00 pm, restored wording, cadence, and independent swallow directions remain exact expectations. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B7 | reject | Rejected as caller-misuse hardening. The example supplies doseExpression and doseQuantity together, which violates the pinned exclusive dose[x] contract. It demonstrates no wrong result for a valid current-R6 input. The owner excludes a new exclusive-union or defensive-validation campaign; existing R5 interchange remains supported. | [I2](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823643) |
+| B8 | fix | The existing typed daypart qualification succeeds when an authored clock qualifies that daypart, while preserving every other authored clock. The 08:00/16:00 case gains no extra configured morning administration, and the 08:00/09:00 control retains both clocks. | [I11](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823713) |
+| B9 | test-only | The public parser already preserves the approximate successor quantity for compact `8am`/`8pm` and spaced `8 AM`/`8 PM`. Exact public-path controls now assert the qualified amount and authored clock in both R5 and R6; no parser change was needed. | [I11](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823713) |
+| B10 | test-only | Both R5 and R6 must retain timeOfDay exactly `["08:00:00"]`, alongside the existing no-extra-when and execution assertions. | [I11](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823713) |
+| B11 | reject | Rejected as a new catch-up or warning policy. The authored first window ends at the independently retained December 2 successor. An 08:00 December 1 order schedules December 1 at 22:00 plus December 2 at 08:00, totaling 3 tablets; a 23:00 order leaves December 2 at 08:00, totaling 2 tablets. Rescheduling the missed first dose would change the authored calendar meaning. Original first-stage data remain present. | [I12](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823737) |
+| B12 | test-only | The projected R6 value is copied before adding the upper duration endpoint. Existing 90-minute low endpoint, 2-hour high endpoint, authored units, and marker identity checks remain. | [I3](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823648) |
+| B13 | test-only | The shared quantity oracle now checks actual absence of the EMA comparator marker for unqualified values. Conflicting recognized operators cannot pass merely because both readers return undefined; unrelated extensions remain allowed. | [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823664) |
+| B14 | test-only | The exact four-hour duration override uses a new R5 row and repeat object. The original qualified three-minute duration and unit assertions remain on the first row. | [I3](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823648) |
+| B15 | fix | Partial-event overlap uses the minimum and maximum expanded day shift for its possible-date envelope. A shifted month or year can remain unresolved when it overlaps the query; nonoverlap and exact-date controls retain their correct results. No partial date is invented as an exact instant. | [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823664) |
+| B16 | test-only | The matching-QOD control uses a distinct R6 value after the original conflicting input is submitted. Both coding orders, conflict results, exact timestamps, and supply totals remain. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B17 | fix | The public scheduling boundary returns an empty schedule for an empty dosage list without requiring a time zone. Nonempty scheduling retains its established zone handling. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B18 | test-only | Each external clock/dose edit starts from a fresh copy of the parsed R6 batch. The 10:00/two-tablet and 11:00/three-tablet cases retain their exact results, and the original 08:00/one-tablet batch control remains unchanged. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B19 | test-only | The replacement maximum is placed on a new lifted R5 row before scheduling. Both consecutive 08:00 expectations are unchanged. | [I5](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823664) |
+| B20 | fix | Long Thai previews use the Buddhist civil date and retain the exact authored time and offset. Offset timestamps, Z timestamps, and date-only controls preserve their wire values and execution instants. Two older locale oracles were corrected without changing their identities; English and compact Thai retain the raw timestamp. | [I6](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823674) |
+| B21 | test-only | The unrelated urn:round49:row-note extension is now asserted on the R6 component and reopened R5 row, alongside all exact range and authored-unit expectations. | [I1](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823637) |
+| B22 | test-only | Clock replacement, clock deletion, and ordinary timeOfDay override use separate R5 submissions. All literal timestamps remain, including the independent 08:30 event. | [I4](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823655) |
+| B23 | test-only | The cited preview/import cases now prepare independent fresh or persisted FHIR values before editing; baseline values remain unchanged. All existing dose, condition, clock, PRN, source-graph, and independent-instruction expectations and expanded identities are retained. | [I7](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823684) |
+| B24 | test-only | Dissolve, Disperse, Measure, and Draw up now all require the edited amount on the preparation and exclude it from the following administration. The exactly-once amount and preparation-verb checks remain. | [I8](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823695) |
+| B25 | test-only | The add-delete site case assigns the deserialized row as the new saved value before deletion. It retains the independent right-eye site and warning assertions. | [I8](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823695) |
+| B26 | test-only | Every R5, R6, and reopened-R5 path now asserts the saved action lemma and coding, including clinic-defer. The existing rendered-condition check remains. | [I10](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823709) |
+| B27 | test-only | The omitted second action is checked case-insensitively. The positive first-action assertion remains unchanged. | [I10](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4673823709) |
+| F1 | test-only | The two graph-codec fixtures now copy/persist returned values before editing their comparator annotations. All four existing expanded identities and ten clinical/preservation assertion lines remain unchanged; this is a test-only follow-up in the original I7 thread. | [prior-I7-F1](https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4668809280) |
+
+### Final evidence pins
+
+| Evidence | SHA-256 |
+|---|---|
+| `/tmp/ezmed14-round53-gates.json` | `91b8dff9416f1aa0583fb314378be1f58c841eddf3031589c19badb67f36927a` |
+| `/tmp/ezmed14-round53-source-freeze.json` | `ae6f55083588a289b431bc902b89e3c44f28e805ae54501ffa881143bacae60c` |
+| `/tmp/ezmed14-round53-gate-config.json` | `33b51a8ced9cc05a4c08333c5591d8a2af8cc5d463d657e23689538fccde39b3` |
+| `/tmp/ezmed14-round53-source-final.json` | `992c4b1186d31f226fdc26a6edaf42ec5bba695342d0e84e85211d6f2935e273` |
+| `/tmp/ezmed14-round53-dist-final.json` | `63e9e12a39f6c271d06b7b82d981b8c4884ad7f5a3d9778d05e405f9b11919eb` |
+| `/tmp/ezmed14-round53-storage-check.json` | `7ea9399fcf046087d03238d0f4cdc3e3558fac21930445e3545119859f4fc795` |
+| `/tmp/ezmed14-round53-storage-raw-snapshots.json` | `de2e6f38e89d95bf955ee06c15e66ca624c2096c9ea52a82ee876a034fab7585` |
+| `/tmp/ezmed14-round53-performance-gate.json` | `f7a2d5cc175d03ce0b47f46d11be370476ac0f9af581fce25723faf3fdfa2cb6` |
+| `/tmp/ezmed14-round53-master-full.json` | `2b45cf04da467a5c8f0671bcff2bf12fb73131173aeaaf3551cdb6b912c43c6d` |
+| `/tmp/ezmed14-round53-independent-audit.json` | `c85cb49becb0aa5daaf18447183b8afda2f2941c785f83af6b7fce3efad0525e` |
+| `/tmp/ezmed14-round53-takeover-managed-terminal.json` | `c1792523d9c5c86de4e8d91a390f2429a75fc8dfed9a4c2b779f60509c388588` |
+| `/tmp/ezmed14-round53-takeover-audit-pins.json` | `21b384d69ea2f7e24ec04dad22692c28a26c40d18d15f2968caf3251f957a741` |
+| `/tmp/ezmed14-round53-new-source-identities.json` | `fb664e1960f1930c27e7ce9ecae7a71ff3bd042a8152f43ee020f76fd7d49f90` |
+| `/tmp/ezmed14-round53-storage-text-limitations.json` | `69a490e61a087f41decc3052d0259069f5b2cde6a9247bebd6aa8fc10e471151` |
+| `/tmp/ezmed14-round53-takeover-audit-text-companion-proof-v3.json` | `1f95af175322cfb9a995a27014e6f231ba72e620a0469754439fe7f60a65176d` |
+| `/tmp/ezmed14-round53-root-storage-recapture-independent-review.json` | `0ea054be57020b31aa6c342f96af222e77471cf43792f902a47fd61afc8252ed` |
+| `/tmp/ezmed14-round53-storage-text-limitations-independent-policy-review.json` | `1b33cc113d51dae117a2e9147ae64dd95795f9a8f6d3a18a9c3542f425fc58e9` |
+| `/tmp/ezmed14-round53-master-confirm.json` | `e8f7e8e5d948ee4203b78a55068bb225a6670d5336f7c3415f5844e45dfffe85` |
+
+Attempt1 archive SHA-256: 6f2618d221a0d7b907be487c1a80dcae8e9bdd1f59dcd109ca05d02cd6a04238. Attempt2 archive SHA-256: 5a8256fb4194c2e989929ccbd2f411c13af0b278db89e216f5ba59c947875510. Both complete archives remain under their round53 attempt directories.
