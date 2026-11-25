@@ -548,6 +548,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.target-change', priority: 755, relation: 'coordination',
     semanticLicense: 'target-transition', constraints: [
     coordinationOrSequence, conjunctionOrSequence,
+    constraint('right.not-typed-next-point', f => !typedNextPoint(f)),
     constraint('left.targetCue', f => f.leftTargetCue),
     constraint('right.targetCue', f => f.rightTargetCue),
     constraint('left.hasIndependentCadence', f =>

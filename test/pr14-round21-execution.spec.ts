@@ -6260,3 +6260,129 @@ describe("round61 zero-minimum compatible timing codes", () => {
     }
   }
 });
+
+describe("round61 PRN history, bare hourly codes and immediate supply", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const wire = (member: CanonicalAdministration, version: typeof versions[number]) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    return version === "native" ? course
+      : freshExecutionInput(version === "R5" ? courseToR5(course) : courseToR6(course));
+  };
+  const reopen = (input: ReturnType<typeof wire>) =>
+    freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
+  const start = "2026-01-03T00:00:00Z";
+  const query = { orderedAt: start, from: start, timeZone: "UTC" };
+
+  const untimed = (calendar = false) => courseFromR6({ step: [{ component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], asNeeded: true,
+    timing: { repeat: { countMax: 2, ...(calendar ? { boundsPeriod: { start: "2026-01-03" } } : {}),
+      extension: [{ url: TIMING_OCCURRENCE_CAP_EXTENSION_URL, extension: [
+        { url: "max", valueInteger: 1 },
+        { url: "period", valueQuantity: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
+      ] }],
+    } },
+  }] }] }).stages[0].administrations[0];
+
+  for (const version of versions) {
+    it("counts only current-order records against untimed PRN allowance (" + version + ")", () => {
+      for (const calendar of [false, true]) {
+        const member = untimed(calendar);
+        const input = wire(member, version);
+        const local = { ...query, orderedAt: calendar ? origin : start };
+        for (const dosage of [input, reopen(input)]) {
+          const calculate = (extra = {}) => calculateTotalUnits({
+            dosage, ...local, durationValue: 2, durationUnit: Unit.Day, ...extra,
+          }).totalUnits;
+          expect(calculate()).toBe(2);
+          expect(calculate({ priorDoseTimes: ["2026-01-02T12:00:00Z"] })).toBe(2);
+          expect(calculate({ priorDoseTimes: ["2026-01-02T12:00:00Z"], priorCount: 1 })).toBe(1);
+          expect(calculate({ priorDoseTimes: ["2026-01-02T12:00:00Z"], priorCount: 0 })).toBe(2);
+          expect(calculate({ from: "2026-01-04T00:00:00Z",
+            priorDoseTimes: ["2026-01-02T12:00:00Z", "2026-01-03T09:00:00Z"] })).toBe(1);
+        }
+      }
+    });
+
+    it("retains pre-order history for rolling PRN limits (" + version + ")", () => {
+      const member: CanonicalAdministration = {
+        ...untimed(),
+        limits: [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 24, unit: "h" } }],
+      };
+      const input = wire(member, version);
+      for (const dosage of [input, reopen(input)]) {
+        const supply = { dosage, ...query, durationValue: 12, durationUnit: Unit.Hour };
+        expect(calculateTotalUnits(supply).totalUnits).toBe(1);
+        expect(calculateTotalUnits({ ...supply, priorDoseTimes: ["2026-01-02T20:00:00Z"] }).totalUnits).toBe(0);
+      }
+    });
+
+    for (const variant of ["bare", "explicit events", "local code"] as const) {
+      it("executes only recognized bare hourly cadence with event ownership (" + variant + "/" + version + ")", () => {
+        const code = { coding: [{ code: "Q4H",
+          ...(variant === "local code" ? { system: "urn:clinic:local-timing" } : {}),
+        }] };
+        const events = ["2026-01-03T03:00:00Z", "2026-01-03T13:00:00Z"];
+        const input = wire({ ...dose(), schedule: { code,
+          ...(variant === "explicit events" ? { explicitEvents: events } : {}),
+        } }, version);
+        for (const dosage of [input, reopen(input)]) {
+          if (variant === "local code") {
+            expect(nextDueDoses(dosage, { ...query, limit: 6 })).toEqual([]);
+            expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+              .toThrow(expect.objectContaining({ code: "timing-required" }));
+          } else {
+            const clocks = variant === "bare" ? ["00", "04", "08", "12", "16", "20"] : ["03", "13"];
+            expect(nextDueDoses(dosage, { ...query, limit: 6 }))
+              .toEqual(clocks.map(hour => "2026-01-03T" + hour + ":00:00+00:00"));
+            expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+              .toBe(clocks.length);
+          }
+          expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule)
+            .toMatchObject({ code, ...(variant === "explicit events" ? { explicitEvents: events } : {}) });
+        }
+      });
+    }
+
+    for (const variant of ["coincident", "distinct", "counted"] as const) {
+      it("counts immediate and inferred administrations once (" + variant + "/" + version + ")", () => {
+        const member = { ...dose(), schedule: { recurrence: {
+          anchors: [EventTiming.Immediate], frequency: 2,
+          period: variant === "distinct" ? 1 : 24, periodUnit: variant === "distinct" ? Unit.Day : Unit.Hour,
+          ...(variant === "counted" ? { count: 2 } : {}),
+        } } };
+        const input = wire(member, version);
+        const stamp = "2026-01-03T" + (variant === "coincident" ? "08" : "07") + ":00:00Z";
+        const local = { orderedAt: stamp, from: stamp, timeZone: "UTC" };
+        const clocks = variant === "coincident" ? ["08", "20"] : variant === "distinct" ? ["07", "08", "20"] : ["07", "19"];
+        for (const dosage of [input, reopen(input)]) {
+          expect(nextDueDoses(dosage, { ...local, limit: clocks.length }))
+            .toEqual(clocks.map(hour => "2026-01-03T" + hour + ":00:00+00:00"));
+          expect(calculateTotalUnits({ dosage, ...local, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+            .toBe(clocks.length);
+        }
+      });
+    }
+  }
+});
+
+describe("round61 distinct-target typed NEXT ownership", () => {
+  const query = { orderedAt: "2026-12-01T23:00:00Z", from: "2026-12-01T23:00:00Z", timeZone: "UTC", limit: 2 };
+  for (const version of ["native", "R5", "R6"] as const) {
+    for (const next of [true, false]) {
+      it("preserves an explicit next-day sequence across eye targets (" + next + "/" + version + ")", () => {
+        const parsed = parseSig("Instill 1 drop in the right eye at 22:00 and instill 2 drops in the left eye at 06:00" +
+          (next ? " the next morning" : ""));
+        const input = version === "native" ? parsed.meta!.canonical!.course!
+          : freshExecutionInput(version === "R5" ? parsed.fhir : parsed.fhirNext);
+        const saved = freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
+        for (const dosage of [input, saved]) {
+          expect(nextDueDoses(dosage, query)).toEqual(next
+            ? ["2026-12-02T22:00:00+00:00", "2026-12-03T06:00:00+00:00"]
+            : ["2026-12-02T06:00:00+00:00", "2026-12-02T22:00:00+00:00"]);
+          if (next)
+            expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(3);
+        }
+      });
+    }
+  }
+});

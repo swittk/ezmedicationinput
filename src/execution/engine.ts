@@ -526,7 +526,13 @@ function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdmi
   const repeat = timing?.recurrence;
   if (!timing) return dosage;
   if (!repeat) {
-    const daily = standardTimingCodeFrequency(executionTimingCoding(timing));
+    const coding = executionTimingCoding(timing);
+    const hours = isStandardTimingCoding(coding) && coding?.code
+      ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
+    if (hours && !timing.explicitEvents?.length)
+      return { ...dosage, schedule: { ...timing, recurrence:
+        { frequency: 1, period: hours, periodUnit: DurationUnit.Hour } } };
+    const daily = standardTimingCodeFrequency(coding);
     if (daily === undefined) return dosage;
     return { ...dosage, schedule: { ...timing, recurrence:
       daily >= 1 ? { frequency: daily, period: 1, periodUnit: DurationUnit.Day } :
@@ -1716,6 +1722,7 @@ function maximumUnscheduledCapCount(
   end: Date,
   options: CanonicalSupplyOptions,
   timeZone: string,
+  historyOrigin: Date | null,
   quantityCaps: readonly CanonicalOccurrenceCapExpr[] = [],
   allocations?: SupplyAllocation[],
   range?: ExecutableDoseRange,
@@ -1778,8 +1785,18 @@ function maximumUnscheduledCapCount(
     }
   }
   const total = repeat ? repeatOccurrenceCap(repeat) : undefined;
-  const remaining = total === undefined ? Infinity
-    : Math.max(0, total - Math.floor(options.priorCount ?? options.priorDoseTimes?.length ?? 0));
+  let allowanceUsed = options.priorCount ?? 0;
+  if (total !== undefined && options.priorCount === undefined) {
+    const eligibility = (options as PhaseCountOptions).countEligibilityStart;
+    const start = eligibility && (!historyOrigin || eligibility > historyOrigin) ? eligibility : historyOrigin;
+    // Only this order/phase spends its finite allowance. Older records still
+    // enter the rolling-cap calculation below.
+    for (const stamp of options.priorDoseTimes ?? []) {
+      const at = coerceDate(stamp, "priorDoseTimes");
+      if ((!start || at >= start) && at < from) allowanceUsed++;
+    }
+  }
+  const remaining = total === undefined ? Infinity : Math.max(0, total - Math.floor(allowanceUsed));
   if (quantityCaps.length || allocations) {
     const packed = allocations ?? [];
     const count = maximumCapacityWithRollingLimits(
@@ -6034,7 +6051,9 @@ function countScheduleEvents(
       defaultClock: inferredLocalClock(baseTime, timeZone),
       calendarDays,
     });
-    return count + generated.length;
+    if (count === 0) return generated.length;
+    for (const at of generated) recordCandidate(new Date(at));
+    return count;
   }
   if (repeat.frequency && repeat.period && repeat.periodUnit) {
     const clockOwner = config.frequencyDefaults ? { configured: false } : undefined;
@@ -6042,22 +6061,22 @@ function countScheduleEvents(
     const codedDaily = recognizedDailyTimingCode(timing) !== undefined;
     const ordinaryDaily = repeat.period === 1 && repeat.periodUnit === DurationUnit.Day;
     if (!codedDaily && !ordinaryDaily) {
-      return (
-        count +
-        generateFrequencyPerPeriodSeries(
-          baseTime,
-          from,
-          hardLimit,
-          repeat,
-          timeZone,
-          orderedAt,
-          to,
-          clocks,
-          calendarDays,
-          clockOwner?.configured,
-          enforceDayFilter ? dayFilter : undefined
-        ).length
+      const generated = generateFrequencyPerPeriodSeries(
+        baseTime,
+        from,
+        hardLimit,
+        repeat,
+        timeZone,
+        orderedAt,
+        to,
+        clocks,
+        calendarDays,
+        clockOwner?.configured,
+        enforceDayFilter ? dayFilter : undefined
       );
+      if (count === 0) return generated.length;
+      for (const at of generated) recordCandidate(new Date(at));
+      return count;
     }
     if (clocks.length === 0) return count;
     let currentDay = startOfLocalDay(from, timeZone);
@@ -6947,6 +6966,7 @@ function calculateTotalUnitsSingle(
       endDay,
       options,
       timeZone,
+      admissionStart,
       rangePlan?.caps ?? executableQuantityCaps(dosage, context),
       capacityAllocations, rangePlan, supplyAccounting?.rangePrior, supplyAccounting?.capacityWindows
     );
