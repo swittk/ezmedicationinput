@@ -1001,6 +1001,8 @@ export interface AdviceArgument {
   /** Independent typed relation from this action to its argument.
    * Permits material WITH and event BEFORE to coexist on one action. */
   relation?: AdviceRelation;
+  /** Original relation Coding annotations; the current typed relation owns meaning. */
+  sourceRelationCoding?: FhirCoding;
   normalized?: string;
   conceptId?: string;
   coding?: FhirCoding;
@@ -1046,6 +1048,8 @@ export interface AdviceFrame {
     semanticComponents?: InstructionActionSemanticComponent[];
   };
   relation?: AdviceRelation;
+  /** Original relation Coding annotations; the current typed relation owns meaning. */
+  sourceRelationCoding?: FhirCoding;
   args: AdviceArgument[];
   span: TextRange;
   sourceText: string;

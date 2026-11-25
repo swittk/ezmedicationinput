@@ -124,18 +124,23 @@ function valueCoding(url: string, value: FhirCoding | undefined): FhirExtension 
  * @param relation Resolved typed relation, not a free-text guess.
  */
 function addRelation(
-  extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined
-): void {
-  if (!relation) return;
-  const coding = getAdviceRelationCoding(relation);
-  if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
-  else add(extensions, valueCode(name, relation));
+  extensions: FhirExtension[], name: string, relation: AdviceRelation | undefined,
+  sourceCoding?: FhirCoding
+): FhirExtension | undefined {
+  const currentCoding = sourceCoding && relation !== undefined &&
+    getAdviceRelationByCoding(sourceCoding) === relation;
+  if (relation) {
+    const coding = currentCoding ? sourceCoding : getAdviceRelationCoding(relation);
+    if (coding) add(extensions, valueCoding(`${name}Coding`, coding));
+    else add(extensions, valueCode(name, relation));
+  }
+  return sourceCoding && !currentCoding ? valueCoding("sourceRelationCoding", sourceCoding) : undefined;
 }
 
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
-  addRelation(nested, "relation", argument.relation);
+  const sourceRelation = addRelation(nested, "relation", argument.relation, argument.sourceRelationCoding);
   add(nested, valueString("text", argument.text));
   add(nested, valueString("normalized", argument.normalized));
   add(nested, valueString("conceptId", argument.conceptId));
@@ -214,6 +219,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       ]
     });
   }
+  add(nested, sourceRelation);
   if (argument.sourceExtensions) nested.push(...argument.sourceExtensions);
   return { url: "argument", extension: nested };
 }
@@ -227,7 +233,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueCode("polarity", frame.polarity));
   add(nested, valueCode("polaritySource", frame.polaritySource));
   add(nested, valueCode("modality", frame.modality));
-  addRelation(nested, "relation", frame.relation);
+  const sourceRelation = addRelation(nested, "relation", frame.relation, frame.sourceRelationCoding);
   add(nested, valueString("predicateLemma", frame.predicate.lemma));
   add(nested, valueString("predicateDisplay", frame.predicate.display));
   add(nested, valueString("semanticClass", frame.predicate.semanticClass));
@@ -277,6 +283,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   add(nested, valueInteger("spanEnd", frame.span.end));
   add(nested, valueString("sourceText", frame.sourceText));
   for (const argument of frame.args) nested.push(buildArgumentExtension(argument));
+  add(nested, sourceRelation);
   if (frame.sourceExtensions) for (const field of frame.sourceExtensions) nested.push(field);
   return { url: "action", extension: nested };
 }
@@ -415,6 +422,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
     normalized:normalized?.valueString,conceptId:concept?.valueString,
     coding:readCoding(coding?.valueCoding),codings};
+  if(relationCoding?.valueCoding)result.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(components.length)result.components=components;
   if(sourceExtensions)result.sourceExtensions=sourceExtensions;
   if(spanStart?.valueInteger!==undefined&&spanEnd?.valueInteger!==undefined)
@@ -534,6 +542,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
       semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
       realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
     args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString,sequenceIndex:sequence?.valueInteger};
+  if(relationCoding?.valueCoding)frame.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
   return frame;
 }

@@ -4631,9 +4631,10 @@ function timeArgumentCoversSingleScheduledEvent(
   const words = normalizeActionSurface(arg.normalized ?? arg.text)
     .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
   for (let index = 0; index < words.length; index += 1) {
-    const timing = resolveEventTimingExpression(words, index)?.timing;
-    if (!timing) continue;
-    if (timeArgumentCoveredBySchedule(frame, arg, clause, timing)) return true;
+    const expression = resolveEventTimingExpression(words, index);
+    if (!expression) continue;
+    if (timeArgumentCoveredBySchedule(frame, arg, clause, expression.timing)) return true;
+    index += expression.length - 1;
   }
   return false;
 }

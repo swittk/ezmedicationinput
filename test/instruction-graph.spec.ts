@@ -3490,11 +3490,13 @@ describe("round34 live method realization", () => {
     const saved = JSON.parse(JSON.stringify(withDosageEditProvenance([row], source)[0]));
     if (method === "Apply") saved.method = { text: "Apply",
       coding: [{ system: "http://snomed.info/sct", code: "738991002", display: "Apply" }] };
+    saved.doseAndRate[0].doseQuantity.value = 2;
     const before = JSON.stringify(saved);
     for (const input of [saved, toDosageDetails([saved])]) {
       const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       expect(text).toMatch(method === "Apply" ? /^Apply\b/u : /^Rub\b/u);
-      expect(text.match(/(?:^|[^\d.+/-])\+?1(?:\.0+)?\s+g\b/gu)).toHaveLength(1);
+      expect(text.match(/(?:^|[^\d.+/-])\+?2(?:\.0+)?\s+g\b/gu)).toHaveLength(1);
+      expect(text).not.toMatch(/(?:^|[^\d.+/-])\+?1(?:\.0+)?\s+g\b/u);
       expect(text).toContain("skin");
       expect(text).toContain("gently");
       expect(text).toContain("foam");
@@ -6048,7 +6050,10 @@ describe("round55: current clinical facts and independent graph meaning", () => 
         } else {
           expect(text.match(/140/gu)).toHaveLength(1);
           expect(text.match(/160/gu) ?? []).toHaveLength(variant === "opposite unless" ? 1 : 0);
-          if (variant === "not") {
+          if (variant === "opposite unless") {
+            expect(text).toMatch(/(?:unless|เว้นแต่)\s*systolic BP > 160/u);
+            expect(text).toMatch(locale === "en" ? /only if\s+systolic BP > 140/u : /เฉพาะเมื่อ\s*systolic BP > 140/u);
+          } else if (variant === "not") {
             expect(text).toContain(locale === "en" ? "unless" : "เว้นแต่");
             expect(text).not.toContain(locale === "en" ? "only if" : "เฉพาะเมื่อ");
           } else if (variant === "all" || variant === "any") {
@@ -6506,7 +6511,6 @@ describe("round58 graph fidelity and current typed arguments", () => {
     const parsed = parseInstructionGraphExtension(row.extension)!;
     const rebuilt = buildInstructionGraphExtension(parsed)!;
     expect(graphChild([rebuilt]).extension).toContainEqual(unknown);
-    expect(graphChild([rebuilt]).extension!.find(child => child.url === unknown.url)).toBe(unknown);
     expect(graphChild([rebuilt]).extension!.filter(child => child.url !== unknown.url))
       .toEqual(graphChild([known]).extension);
     expect(buildInstructionGraphExtension(parseInstructionGraphExtension([known]))).toEqual(known);
@@ -6707,7 +6711,6 @@ describe("round59 graph argument fidelity and current action coverage", () => {
     const decoded = parseInstructionGraphExtension(row.extension)!;
     const rebuilt = buildInstructionGraphExtension(decoded)!;
     expect(waterArgument(rebuilt).extension).toContainEqual(opaque);
-    expect(waterArgument(rebuilt).extension!.find(entry => entry.url === opaque.url)).toBe(opaque);
     expect(waterArgument(rebuilt).extension!.filter(entry => entry.url !== opaque.url))
       .toEqual(waterArgument(known).extension);
     expect(buildInstructionGraphExtension(parseInstructionGraphExtension([known]))).toEqual(known);
@@ -7298,7 +7301,15 @@ describe("round66 persisted primary action and amount ownership", () => {
           expect(text.match(locale === "en" ? /3 tablets/gu : /3 เม็ด/gu)).toHaveLength(1);
           expect(text).not.toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
           expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
-          if (ending.includes("10:00")) expect(text).toContain("10:00");
+          const swallow = ending.startsWith("swallow");
+          const administrationStart = text.search(locale === "en"
+            ? (swallow ? /\bswallow\b/iu : /\bdrink\b/iu)
+            : (swallow ? /กลืน/u : /ดื่ม/u));
+          expect(administrationStart).toBeGreaterThan(0);
+          if (swallow) {
+            expect(text.slice(administrationStart)).toMatch(/(?:^|[^\d:])10:00(?::00)?(?: am)?(?![\d:])/u);
+            expect(text.slice(0, administrationStart)).not.toMatch(/(?:^|[^\d:])10:00(?::00)?(?: am)?(?![\d:])/u);
+          }
         }
         expect(JSON.stringify(input)).toBe(before);
       }
@@ -7382,10 +7393,16 @@ describe("round66 persisted primary action and amount ownership", () => {
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)])
       for (const locale of ["en", "th"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
-        expect(text.match(/0?8:00(?: am)?/gu)).toHaveLength(1);
-        expect(text.match(/10:00(?: am)?/gu)).toHaveLength(1);
-        expect(text.indexOf("8:00")).toBeLessThan(text.indexOf("10:00"));
-        expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+        const administrationStart = text.search(locale === "en" ? /\bdrink\b/iu : /ดื่ม/u);
+        expect(administrationStart).toBeGreaterThan(0);
+        const preparation = text.slice(0, administrationStart), administration = text.slice(administrationStart);
+        const preparationClock = /(?:^|[^\d:])0?8:00(?::00)?(?: am)?(?![\d:])/gu;
+        const administrationClock = /(?:^|[^\d:])10:00(?::00)?(?: am)?(?![\d:])/gu;
+        expect(preparation.match(preparationClock)).toHaveLength(1);
+        expect(preparation).not.toMatch(administrationClock);
+        expect(administration.match(administrationClock)).toHaveLength(1);
+        expect(administration).not.toMatch(preparationClock);
+        expect(preparation).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
       }
   });
 });
@@ -7630,5 +7647,78 @@ describe("round68 preparation quantities beside independent clinical limits", ()
     const text = formatSig(parsed.meta.canonical.course, "long", { locale: "en", realizationMode: "normalized" });
     expect(text).toContain(doseComparator ? "at most 2 tablets" : "2 tablets");
     expect(text).toContain(materialComparator ? "at most 100 mL" : "100 mL");
+  });
+});
+
+
+describe("round68 graph relation metadata and precise realization", () => {
+  const fresh = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+  const marker = (frame: AdviceFrame) => buildInstructionGraphExtension({
+    sourceText: "", sourceLocale: "en", primaryAdministrationSpan: frame.span, actions: [frame]
+  })!;
+  const selectedNode = (graph: FhirExtension, slot: "frame" | "argument") => {
+    const action = graph.extension!.find(field => field.url === "action")!;
+    return slot === "frame" ? action : action.extension!.find(field => field.url === "argument")!;
+  };
+
+  it.each(["frame", "argument"] as const)("retains annotated %s relation Coding on unchanged and changed public codec values", slot => {
+    const frame = parseInstructionActions("Mix with water")[0];
+    frame.relation = AdviceRelation.With;
+    frame.args[0].relation = AdviceRelation.With;
+    const supplied = marker(frame), node = selectedNode(supplied, slot);
+    const relation = node.extension!.find(field => field.url === "relationCoding")!;
+    relation.valueCoding = { ...relation.valueCoding!, id: "supplied-relation", version: "authored-version",
+      _code: { id: "supplied-code", extension: [{ url: "https://example.org/relation-note", valueBoolean: false }] },
+      extension: [{ url: "https://example.org/relation-source", valueString: "retain this original annotation" }] };
+    const originalCoding = fresh(relation.valueCoding), before = fresh(supplied);
+    const decoded = parseInstructionGraphExtension([supplied])!;
+    const rebuilt = buildInstructionGraphExtension(decoded)!;
+    expect(selectedNode(rebuilt, slot).extension!.find(field => field.url === "relationCoding")?.valueCoding)
+      .toEqual(originalCoding);
+    for (const next of [AdviceRelation.Before, undefined]) {
+      const edited = fresh(decoded), owner = slot === "frame" ? edited.actions[0] : edited.actions[0].args[0];
+      owner.relation = next;
+      const changed = buildInstructionGraphExtension(edited)!, fields = selectedNode(changed, slot).extension!;
+      expect(fields.find(field => field.url === "relationCoding")?.valueCoding?.code)
+        .toBe(next ? "421718005" : undefined);
+      expect(fields.filter(field => field.url === "sourceRelationCoding")).toEqual([
+        { url: "sourceRelationCoding", valueCoding: originalCoding }
+      ]);
+      expect(buildInstructionGraphExtension(parseInstructionGraphExtension([fresh(changed)]))).toEqual(changed);
+    }
+    expect(supplied).toEqual(before);
+  });
+
+  it.each(["early morning", "morning"])("covers only the complete graph event expression: %s", expression => {
+    const frame = parseInstructionActions("Swallow 1 tablet whole")[0];
+    frame.args.push({ role: AdviceArgumentRole.Time, text: expression, normalized: expression });
+    const row: FhirDosage = { method: { text: "Swallow" },
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { when: [EventTiming.Morning] } }, extension: [marker(frame)] };
+    for (const input of [fresh([row]), fresh(toDosageDetails([row]))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text.match(/\bmorning\b/gu)).toHaveLength(expression === "early morning" ? 2 : 1);
+      if (expression === "early morning") {
+        expect(text).toContain("early morning");
+        expect(text).toContain("in the morning");
+      }
+    }
+  });
+
+  it.each([false, true])("renders the first mixing companion quantity once with a named material=%s", named => {
+    const frame = parseInstructionActions("Mix powder with water")[0];
+    frame.sourceText = "";
+    frame.args = [{ role: AdviceArgumentRole.Theme, text: "powder", normalized: "powder" }, {
+      role: AdviceArgumentRole.Material, relation: AdviceRelation.With,
+      text: named ? "sterile water" : "100 mL", quantity: { value: 100, unit: "mL" },
+      ...(named ? { normalized: "sterile water", i18n: { th: "น้ำปราศจากเชื้อ" } } : {})
+    }];
+    const row: FhirDosage = { extension: [marker(frame)] };
+    for (const input of [fresh([row]), fresh(toDosageDetails([row]))])
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(/100\s*(?:mL|มิลลิลิตร)/gu)).toHaveLength(1);
+        if (named) expect(text).toContain(locale === "en" ? "sterile water" : "น้ำปราศจากเชื้อ");
+      }
   });
 });

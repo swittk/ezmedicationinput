@@ -134,12 +134,16 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
   return `${c.label}${object ? ` ${object}` : ""}`;
 }
 
-function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
-  const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
-  const quantityOnly = arg.quantity && !arg.conceptId && !arg.coding && !arg.codings?.length &&
+function quantityOnlyMixArgument(arg: AdviceArgument | undefined): boolean {
+  return Boolean(arg?.quantity && !arg.conceptId && !arg.coding && !arg.codings?.length &&
     (arg.normalized !== undefined && arg.normalized === arg.quantity.unit ||
       arg.normalized === undefined && !arg.i18n && arg.quantity.value !== undefined &&
-      arg.text.replace(/\s+/gu, "") === `${arg.quantity.value}${arg.quantity.unit ?? ""}`);
+      arg.text.replace(/\s+/gu, "") === `${arg.quantity.value}${arg.quantity.unit ?? ""}`));
+}
+
+function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
+  const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
+  const quantityOnly = quantityOnlyMixArgument(arg);
   const text = !quantityOnly || !amount
     ? arg.quantity && !amount ? arg.text || arg.normalized : c.translateArgumentConcept(arg)
     : undefined;
@@ -199,16 +203,14 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
   // A quantity-only daughter carries its unit as normalized identity; it has
   // no ingredient noun to repeat as "5 mL of mL".
-  const quantityOnlyTheme = themeArg?.quantity && !themeArg.conceptId && !themeArg.coding &&
-    !themeArg.codings?.length && themeArg.normalized === themeArg.quantity.unit;
+  const quantityOnlyTheme = quantityOnlyMixArgument(themeArg);
   const theme = themeArg && (!quantityOnlyTheme || !themeAmount)
     ? themeArg.quantity && !themeAmount
       ? themeArg.text || themeArg.normalized
       : c.translateArgumentConcept(themeArg)
     : undefined;
   const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
-  const quantityOnlySubstance = substanceArg?.quantity && !substanceArg.conceptId && !substanceArg.coding &&
-    !substanceArg.codings?.length && substanceArg.normalized === substanceArg.quantity.unit;
+  const quantityOnlySubstance = quantityOnlyMixArgument(substanceArg);
   const substance = substanceArg && (!quantityOnlySubstance || !substanceQuantity)
     ? substanceArg.quantity && !substanceQuantity
       ? substanceArg.text || substanceArg.normalized
