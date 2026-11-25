@@ -1,3 +1,6 @@
+import { lexInput } from "../src/lexer/lex";
+import { scanSurfaceTokens } from "../src/lexer/surface";
+import { SurfaceTokenKind } from "../src/lexer/token-types";
 import { unifySynsem } from "../src/hpsg/unification";
 import { describe, expect, it } from "vitest";
 import { parseClauseSign, parseClauseState } from "../src/parser";
@@ -4476,5 +4479,40 @@ describe("qualified maximum and omitted-unit ownership", () => {
     expect(parsed.meta.canonical.clauses[1].dose).toEqual({ value: 2, unit: "tab", comparator: "~" });
     expect(parsed.meta.canonical.clauses[1].schedule?.administrationOffsetMinutes).toBe(360);
     expectSimpleQuantityOperator(parsed.fhirNext.step[1].component[0].doseAndRate?.[0].doseQuantity, "~");
+  });
+});
+
+describe("comparator-prefixed leading decimal source tokenization", () => {
+  it.each(["~", "≈", ">=", "<=", "≥", "≤"] as const)(
+    "does not split the decimal point after %s in a compact dose rate", operator => {
+      const text = "Infuse " + operator + ".1mcg/kg/min";
+      const tokens = lexInput(text);
+      expect(tokens.map(token => token.original)).toEqual([
+        "Infuse", operator + ".1mcg/kg/min"
+      ]);
+      expect(tokens[1].sourceStart).toBe(7);
+      expect(tokens[1].sourceEnd).toBe(text.length);
+      expect(tokens.every(token => token.original !== ".")).toBe(true);
+    }
+  );
+
+  it("still separates ordinary sentence punctuation after leading-decimal rates", () => {
+    const text = "Infuse .1mcg/kg/min. Monitor BP.";
+    const tokens = lexInput(text);
+    expect(tokens[1].original).toBe(".1mcg/kg/min");
+    expect(tokens[2].original).toBe(".");
+    expect(tokens.slice(3).some(token => token.lower === "monitor")).toBe(true);
+  });
+});
+
+
+describe("round77 leading decimals after clause separators", () => {
+  it.each([",", ";"])("keeps the decimal and separator in compact %s directions", separator => {
+    const source = "1 tab AM" + separator + ".5 tab PM";
+    const tokens = scanSurfaceTokens(source);
+    expect(tokens.map(token => token.original)).toEqual(["1", "tab", "AM", separator, ".5", "tab", "PM"]);
+    expect(tokens[3].kind).toBe(SurfaceTokenKind.Separator);
+    expect(tokens[4]).toMatchObject({ kind: SurfaceTokenKind.Text, start: 9, end: 11 });
+    expect(lexInput(source).find(token => token.sourceStart === 9)).toMatchObject({ value: 0.5 });
   });
 });
