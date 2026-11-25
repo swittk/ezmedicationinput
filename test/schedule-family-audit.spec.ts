@@ -4947,3 +4947,35 @@ describe("round65 dated terminal treatment pauses", () => {
     }
   });
 });
+
+
+describe("round65 dated pauses before an unclocked successor", () => {
+  it.each([
+    ["Starting 2026-12-01, take 1 tablet daily for 7 days", false],
+    ["Starting 2026-12-01, take 1 tablet daily for 7 days", true],
+    ["Take 1 tablet daily starting 2026-12-01 for 7 days", false],
+    ["Take 1 tablet daily starting 2026-12-01 for 7 days", true],
+  ] as const)("keeps the pause without adding recurrence: %s (PRN %s)", (first, prn) => {
+    const parsed = parseSig(first + ", then stop for 2 days, then take 2 tablets" +
+      (prn ? " as needed for pain" : ""));
+    const schedule = parsed.meta.canonical.clauses[1].schedule;
+    expect(schedule?.boundsStart).toBe("2026-12-10");
+    expect(schedule?.frequency).toBeUndefined();
+    expect(schedule?.period).toBeUndefined();
+    expect(schedule?.count).toBeUndefined();
+    const r6 = parsed.fhirNext;
+    for (const dosage of [r6, importCanonicalCourse(r6), JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const current = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(current.schedule?.recurrence?.calendarWindow?.start).toBe("2026-12-10");
+      expect(current.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(Boolean(current.asNeeded)).toBe(prn);
+      for (const orderedAt of ["2026-11-28T00:00:00Z", "2026-12-01T00:00:00Z"]) {
+        const options = { orderedAt, from: "2026-12-08T00:00:00Z", timeZone: "UTC" };
+        expect(nextDueDoses(dosage, { ...options, limit: 3 })).toEqual([]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(0);
+        expect(() => calculateTotalUnits({ dosage, ...options, from: "2026-12-10T00:00:00Z",
+          durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toThrow(expect.objectContaining({ code: "timing-required" }));
+      }
+    }
+  });
+});

@@ -549,10 +549,10 @@ export function scopeSequentialPhaseSemantics(
       for (const member of next) {
         const clause = states[member]?.primaryClause;
         const schedule = clause?.schedule;
-        if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
-            schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd ||
-            schedule.calendarEvents?.length) continue;
-        schedule.boundsStart = advanceDate(start, phasePauseDays);
+        if (!clause || schedule?.treatmentStartOffsetDays !== undefined ||
+            schedule?.phaseStartReference || schedule?.boundsStart || schedule?.boundsEnd ||
+            schedule?.calendarEvents?.length) continue;
+        (clause.schedule ??= {}).boundsStart = advanceDate(start, phasePauseDays);
         clause.evidence.push({
           rule: "hpsg.regimen.terminal-treatment-pause",
           spans: [], scheduleFields: ["boundsStart"],
