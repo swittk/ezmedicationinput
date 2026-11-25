@@ -1649,6 +1649,10 @@ describe("round71 prepared successor without an authored cadence", () => {
         expect(text.match(locale === "en" ? /\b2 tablets\b/gu : /(?:^|[^0-9.,+-])2 เม็ด/gu)).toHaveLength(1);
         expect(text.match(locale === "en" ? /\b30 mL\b/gu : /(?:^|[^0-9.,+-])30 มิลลิลิตร/gu)).toHaveLength(1);
         expect(text.match(locale === "en" ? /\b60 mL\b/gu : /(?:^|[^0-9.,+-])60 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text).toMatch(locale === "en"
+          ? /dissolve 1 tablet in 30 mL water/iu : /ละลาย\s*1 เม็ดในน้ำ 30 มิลลิลิตร/u);
+        expect(text).toMatch(locale === "en"
+          ? /dissolve 2 tablets in 60 mL water/iu : /ละลาย\s*2 เม็ดในน้ำ 60 มิลลิลิตร/u);
         expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(2);
         expect(text.match(locale === "en" ? /once daily/gu : /วันละครั้ง/gu)).toHaveLength(1);
       }
@@ -1667,5 +1671,29 @@ describe("round71 prepared successor without an authored cadence", () => {
     expect(single.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
     expect(single.meta.canonical.clauses[0].method?.text).toBe("Drink");
     expect(single.meta.canonical.clauses[0].schedule).toBeUndefined();
+  });
+});
+
+
+describe("round74 selected administration scope", () => {
+  it("keeps bedtime when an unrelated safety surface matches the selected head code", () => {
+    const options = { instructionActionMap: {
+      swallow: { ...getMedicationInstructionAction("swallow")!, code: "clinic-ingest" },
+      "clinic-ingest": { code: "clinic-defer", display: "Defer", semanticClass: "procedure",
+        procedural: true, safetyScopeTarget: true }
+    } };
+    const source = "Swallow 1 tablet whole before bedtime", parsed = parsePublicSig(source, options);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+    expect(clause.method?.text).toBe("Swallow");
+    expect(clause.schedule?.when).toEqual(["HS"]);
+    for (const input of [parsed.fhir, parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const en = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" });
+      expect(en).toMatch(/Swallow 1 tablet whole before sleep/u);
+      expect(th).toContain("ก่อนนอน");
+      expect(th).toContain("ทั้งเม็ด");
+    }
   });
 });

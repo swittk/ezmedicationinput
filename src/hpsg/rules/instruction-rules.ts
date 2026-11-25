@@ -3,7 +3,7 @@ import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
-import { getMedicationInstructionAction, medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { getMedicationInstructionAction, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { listMedicationInstructionConcepts, medicationInstructionConceptCodings, normalizeConceptSurface, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
   getAdviceRelationRealizations,
@@ -141,8 +141,7 @@ function startsScheduledAdministration(context: HpsgClauseContext, index: number
 function isProceduralInstructionFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
   const definition = frameActionDefinition(frame, context.options);
   const scopedDirective = frame.polarity === AdvicePolarity.Negate ||
-    isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true ||
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
+    isConditionalAdviceFrame(context, frame) || definition?.safetyScopeTarget === true;
   return !(
     (!definition?.procedural && !scopedDirective) ||
     (definition?.primaryAdministrationHead && !scopedDirective) ||

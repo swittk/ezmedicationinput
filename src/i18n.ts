@@ -1371,6 +1371,11 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
       periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "ทุกวัน";
+  if (periodUnit === undefined && period === undefined && frequencyMax !== undefined) {
+    if (frequency === undefined) return `ไม่เกิน ${stripTrailingZero(frequencyMax)} ครั้ง`;
+    if (frequency !== frequencyMax)
+      return `${stripTrailingZero(frequency)} ถึง ${stripTrailingZero(frequencyMax)} ครั้ง`;
+  }
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
       return "ครั้งเดียว";

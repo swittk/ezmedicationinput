@@ -658,8 +658,8 @@ function formatCanonicalBase(
   const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
-    (source.schedule || source.route || source.target || source.siteReference || source.predicate || source.asNeeded) &&
-    !administrationHasAmountFacts(source) && !source.method && !clause.instructionGraph?.actions.length;
+    (source.schedule || source.route || source.target || source.siteReference || source.method || source.predicate || source.asNeeded) &&
+    !administrationHasAmountFacts(source) && !clause.instructionGraph?.actions.length;
   if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
   const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
@@ -670,8 +670,8 @@ function formatCanonicalBase(
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
-  // Partial route, timing or guard facts cannot replace source-only
-  // directions. A typed method or graph retains its established owner;
+  // Partial method, route, timing or guard facts cannot replace source-only
+  // dose directions. A typed amount or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
   if (partialAuthoredDirections)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""),

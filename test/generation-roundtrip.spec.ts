@@ -644,14 +644,16 @@ describe("round63 imported member preview ownership", () => {
       const rendered = formatSig(input, style, { locale: "en" });
       expect(rendered).toContain("Take 1 tablet in the morning");
       expect(rendered).toContain("Take 1 tablet at bedtime");
-      expect(rendered).toMatch(/ or /u);
+      expect(rendered).toMatch(/Take 1 tablet in the morning\.? or Take 1 tablet at bedtime/u);
     }
     const structured = fresh(source);
     structured.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
     const rendered = formatSig(structured, style, { locale: "en" });
     expect(rendered).toMatch(style === "short" ? /2 tab\b/u : /2 tablets/u);
     expect(rendered).not.toContain("Take 1 tablet in the morning");
-    expect(rendered).toContain("Take 1 tablet at bedtime");
+    expect(rendered).toMatch(style === "short"
+      ? /2 tab\.? or Take 1 tablet at bedtime/u
+      : /2 tablets\.? or Take 1 tablet at bedtime/u);
     expect(source).toEqual(before);
   });
 
@@ -725,5 +727,28 @@ describe("round63 imported member preview ownership", () => {
     expect(normalized).toMatch(/right eye/u);
     expect(normalized).toMatch(/left eye/u);
     expect(formatSigBatch(complete, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+  });
+});
+
+
+describe("round74 incomplete Thai frequency bounds", () => {
+  it.each([
+    [{ frequency: 1, frequencyMax: 2 }, "1 ถึง 2 ครั้ง"],
+    [{ frequencyMax: 2 }, "ไม่เกิน 2 ครั้ง"],
+    [{ frequency: 1 }, "ครั้งเดียว"],
+    [{ frequency: 2 }, "2 ครั้ง"]
+  ] as const)("retains the supplied count bounds without inventing a period: %s", (repeat, expected) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat }
+    }] }] };
+    const before = JSON.stringify(source), rows = JSON.parse(JSON.stringify(toFhirR5Dosages(source)));
+    for (const input of [source, rows, JSON.parse(JSON.stringify(toDosageDetails(rows)))])
+      for (const style of ["short", "long"] as const) {
+        const text = formatSig(input, style, { locale: "th", realizationMode: "normalized" });
+        expect(text).toContain(expected);
+        expect(text).not.toMatch(/วัน|สัปดาห์|เดือน|ปี/u);
+      }
+    expect(JSON.stringify(source)).toBe(before);
+    expect(toDosageDetails(rows).step![0].component[0].timing?.repeat).toEqual(repeat);
   });
 });
