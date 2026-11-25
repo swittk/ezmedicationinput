@@ -251,6 +251,15 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
     coextensiveAmount, primaryAmount, substanceAmount };
 }
 
+function englishDirectTime(time: string): string {
+  const lower = time.toLowerCase();
+  return lower === "night" ? "at night"
+    : lower === "bed" || lower === "bedtime" || lower === "sleep" ? "at bedtime"
+      : /^(?:the )?(?:morning|afternoon|evening)$/.test(lower)
+        ? `in ${lower.startsWith("the ") ? lower : `the ${lower}`}`
+        : `at ${time}`;
+}
+
 function renderEnglish(realizer: MedicationInstructionActionRealizer, c: InstructionActionRealizationInput): string | undefined {
   switch (realizer) {
     case "source-faithful": {
@@ -265,7 +274,11 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relation = c.frame.relation
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "before";
-      return `${c.label}${container ? ` ${container}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.activity ? ` ${relation} ${c.activity}` : ""}`;
+      const time = c.time && (c.timeRelation && !relationHasGrammarFeature(c.timeRelation, "directTimeRealization")
+        ? `${localizeAdviceRelation(c.timeRelation, c.locale) ?? c.timeRelation} ${c.time}`
+        : englishDirectTime(c.time));
+      if (c.timeWasRendered !== undefined && time) c.timeWasRendered = true;
+      return `${c.label}${container ? ` ${container}` : ""}${c.duration ? ` for ${c.duration}` : ""}${c.activity ? ` ${relation} ${c.activity}` : ""}${time ? ` ${time}` : ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
@@ -305,12 +318,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? ` ${object}` : "";
         if (c.time && relationHasGrammarFeature(c.timeRelation ?? c.frame.relation, "directTimeRealization")) {
-          const lower = c.time.toLowerCase();
-          const timePhrase = lower === "night" ? "at night"
-            : lower === "bed" || lower === "bedtime" || lower === "sleep" ? "at bedtime"
-              : /^(?:the )?(?:morning|afternoon|evening)$/.test(lower)
-                ? `in ${lower.startsWith("the ") ? lower : `the ${lower}`}`
-                : `at ${c.time}`;
+          const timePhrase = englishDirectTime(c.time);
           return `${c.label}${target}${manner} ${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);
@@ -425,6 +433,11 @@ function renderThaiRelationDuration(c: InstructionActionRealizationInput): strin
   return `${c.label}${objectText}`;
 }
 
+function thaiDirectTime(time: string): string {
+  return time === "กลางคืน" ? "ตอนกลางคืน"
+    : time === "นอน" || time === "bedtime" ? "ก่อนนอน" : time;
+}
+
 function renderThai(realizer: MedicationInstructionActionRealizer, c: InstructionActionRealizationInput): string | undefined {
   switch (realizer) {
     case "source-faithful":
@@ -434,7 +447,11 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relation = c.frame.relation
         ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
         : "ก่อน";
-      return `${c.label}${container ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${c.activity ? `${relation}${c.activity}` : ""}`;
+      const time = c.time && (c.timeRelation && !relationHasGrammarFeature(c.timeRelation, "directTimeRealization")
+        ? `${localizeAdviceRelation(c.timeRelation, c.locale) ?? c.timeRelation}${c.time}`
+        : thaiDirectTime(c.time));
+      if (c.timeWasRendered !== undefined && time) c.timeWasRendered = true;
+      return `${c.label}${container ?? ""}${c.duration ? `เป็นเวลา ${c.duration}` : ""}${c.activity ? `${relation}${c.activity}` : ""}${time ?? ""}`;
     }
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;
@@ -475,8 +492,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
         const target = object && (!c.site || !suppressSite(c)) ? object : "";
         if (c.time && relationHasGrammarFeature(c.timeRelation ?? c.frame.relation, "directTimeRealization")) {
-          const timePhrase = c.time === "กลางคืน" ? "ตอนกลางคืน"
-            : c.time === "นอน" || c.time === "bedtime" ? "ก่อนนอน" : c.time;
+          const timePhrase = thaiDirectTime(c.time);
           return `${c.label}${target}${manner}${timePhrase}`;
         }
         const semanticRelation = relationForSite(c);

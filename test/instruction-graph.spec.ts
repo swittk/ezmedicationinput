@@ -5117,9 +5117,12 @@ describe("round45 saved instruction meaning", () => {
     expect(parsePublicSig(source).longText).toContain(companion);
   });
 
-  it.each(["container-activity", "amount-material-destination"] as const)(
-    "keeps the accepted duration and container with a configured procedural realizer: %s", realizer => {
-    const source = "Agitate bottle ten seconds", requests: string[] = [];
+  it.each([
+    ["container-activity", false], ["container-activity", true],
+    ["amount-material-destination", false], ["amount-material-destination", true]
+  ] as const)(
+    "keeps the accepted duration, container and Time with a configured procedural realizer: %s (%s)", (realizer, timed) => {
+    const source = "Agitate bottle ten seconds" + (timed ? " lights-out" : ""), requests: string[] = [];
     const options: ParseOptions = {
       unitMap: { s: "s" },
       instructionActionMap: {
@@ -5131,7 +5134,8 @@ describe("round45 saved instruction meaning", () => {
         if (request.sourceText !== source) return undefined;
         return { actions: [{ action: "clinic-agitation", range: { start: 0, end: source.length }, args: [
           { role: AdviceArgumentRole.Container, range: { start: 8, end: 14 }, concept: "bottle" },
-          { role: AdviceArgumentRole.Duration, range: { start: 15, end: 26 }, quantity: { value: 10, unit: "s" } }
+          { role: AdviceArgumentRole.Duration, range: { start: 15, end: 26 }, quantity: { value: 10, unit: "s" } },
+          ...(timed ? [{ role: AdviceArgumentRole.Time, range: { start: 27, end: 37 }, concept: "bedtime" }] : [])
         ] }] };
       }
     };
@@ -5151,6 +5155,11 @@ describe("round45 saved instruction meaning", () => {
       const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
       expect(thai).toContain(realizer === "container-activity" ? "เขย่าขวดเป็นเวลา 10 วินาที" : "เขย่าขวด 10 วินาที");
       expect(thai.match(/10 วินาที/gu)).toHaveLength(1);
+      if (timed) {
+        expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, conceptId: "bedtime" }));
+        expect(english.match(/bedtime/gu)).toHaveLength(1);
+        expect(thai.match(/นอน/gu)).toHaveLength(1);
+      }
     }
     expect(JSON.stringify(parsed.fhir)).toBe(before);
   });
