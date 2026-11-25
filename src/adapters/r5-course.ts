@@ -296,7 +296,9 @@ export function projectNativeR5Course(
         needsBridge = true;
       const site = a.provenance?.format === "r6"
         ? (a.provenance.data as FhirR6Dosage).site : a.provenance?.retained?.site;
-      if (site?.id || site?.extension?.length) needsBridge = true;
+      if (site) for (const field in site) {
+        if (field !== "concept") { needsBridge = true; break; }
+      }
       if (needsBridge) break;
       for (const value of a.amounts ?? [])
         if (

@@ -152,9 +152,9 @@ export interface DosageAlternativeChoice {
  * @returns Recognized membership, or undefined while unfamiliar data stays attached.
  */
 export function getDosageAlternativeChoice(
-  dosage: Pick<FhirDosage, "modifierExtension">
+  dosage: Pick<FhirR6Dosage, "modifierExtension">
 ): DosageAlternativeChoice | undefined {
-  let fields:FhirExtension[]|undefined;
+  let fields:FhirR6Extension[]|undefined;
   for(const marker of dosage.modifierExtension??[])if(marker.url===DOSAGE_ALTERNATIVE_CHOICE_URL){fields=marker.extension;break;}
   if(!fields)return undefined;
   let groupId:string|undefined,branchId:string|undefined,behavior:string|undefined,seen=0;
@@ -173,11 +173,11 @@ export function getDosageAlternativeChoice(
  * @param choice Proven membership; undefined explicitly clears this modifier.
  */
 export function setDosageAlternativeChoice(
-  dosage: Pick<FhirDosage, "modifierExtension" | "extension">,
+  dosage: Pick<FhirR6Dosage, "modifierExtension" | "extension">,
   choice: DosageAlternativeChoice | undefined
 ): void {
   const original = dosage.modifierExtension;
-  let found = false, updated: FhirExtension[] | undefined, retired: FhirExtension[] | undefined;
+  let found = false, updated: FhirR6Extension[] | undefined, retired: FhirR6Extension[] | undefined;
   for (let index = 0; index < (original?.length ?? 0); index++) {
     const marker = original![index];
     if (marker.url !== DOSAGE_ALTERNATIVE_CHOICE_URL) { updated?.push(marker); continue; }
@@ -187,7 +187,7 @@ export function setDosageAlternativeChoice(
       continue;
     }
     found = true;
-    let fields: FhirExtension[] | undefined, seen = 0;
+    let fields: FhirR6Extension[] | undefined, seen = 0, retireNested = false;
     const children = marker.extension ?? [];
     for (let childIndex = 0; childIndex < children.length; childIndex++) {
       const child = children[childIndex];
@@ -197,8 +197,14 @@ export function setDosageAlternativeChoice(
       if (bit && !(seen & bit)) {
         seen |= bit;
         const value = bit === 1 ? choice.groupId : bit === 2 ? choice.branchId : choice.selectionBehavior;
-        if ((bit === 4 ? child.valueCode : child.valueString) !== value)
+        const previous = bit === 4 ? child.valueCode : child.valueString;
+        if (previous !== value) {
           next = bit === 4 ? { ...child, valueCode: value } : { ...child, valueString: value };
+          if (previous === undefined && child.extension?.length) {
+            delete next.extension;
+            retireNested = true;
+          }
+        }
       }
       if (next !== child) fields ??= children.slice(0, childIndex);
       fields?.push(next);
@@ -209,6 +215,7 @@ export function setDosageAlternativeChoice(
       if (!(seen & 2)) fields.push({ url: "branchId", valueString: choice.branchId });
       if (!(seen & 4)) fields.push({ url: "selectionBehavior", valueCode: choice.selectionBehavior });
     }
+    if (retireNested) (retired ??= []).push(marker);
     if (fields) {
       updated ??= original!.slice(0, index);
       updated.push({ ...marker, extension: fields });
@@ -354,7 +361,7 @@ function valueKeys(extension: FhirExtension): string[] {
  * codec. It reads each named field once, preserving last-defined-value
  * semantics. Composite or foreign field shapes use the existing complete
  * codec below; no input text is interpreted here and no information is lost. */
-function ordinaryConditionLeaf(node:FhirExtension):MedicationCondition|undefined {
+function ordinaryConditionLeaf(node:FhirR6Extension):MedicationCondition|undefined {
   if(!node.extension||node.valueString!==undefined)return undefined;
   let kind:string|undefined,name:string|undefined,operation:string|undefined,
     value:number|undefined,unit:string|undefined,text:string|undefined,expected:boolean|undefined;
@@ -385,7 +392,7 @@ function ordinaryConditionLeaf(node:FhirExtension):MedicationCondition|undefined
   return undefined;
 }
 
-function parseConditionModifier(extension: FhirExtension): MedicationCondition | undefined {
+function parseConditionModifier(extension: FhirR6Extension): MedicationCondition | undefined {
   // Read/edit paths are intentionally tolerant. The complete extension stays
   // on the dosage, while the first usable predicate supplies a suggestion.
   for (const predicate of extension.extension ?? []) {
@@ -413,7 +420,7 @@ export function assertUnderstoodDosageModifiers(_dosage: FhirDosage | EzDosage):
   // Compatibility API. Unknown modifier semantics remain attached for editing.
 }
 
-function parseDosageCondition(dosage: Pick<FhirDosage,"modifierExtension"> & {condition?:FhirR6DosageCondition[]}): MedicationCondition | undefined {
+function parseDosageCondition(dosage: Pick<FhirR6Dosage,"modifierExtension"> & {condition?:FhirR6DosageCondition[]}): MedicationCondition | undefined {
   const expanded = dosage as EzDosage;
   // A clinician-cleared native condition also owns direct reads: do not
   // resurrect the older R5 modifier before an export/reload reconciles it.
@@ -426,19 +433,19 @@ function parseDosageCondition(dosage: Pick<FhirDosage,"modifierExtension"> & {co
   return extension ? parseConditionModifier(extension) : undefined;
 }
 
-export function getDosageCondition(dosage: Pick<FhirDosage,"modifierExtension"> & {condition?:FhirR6DosageCondition[]}): MedicationCondition | undefined {
+export function getDosageCondition(dosage: Pick<FhirR6Dosage,"modifierExtension"> & {condition?:FhirR6DosageCondition[]}): MedicationCondition | undefined {
   return parseDosageCondition(dosage);
 }
 
 /** Read the source-certified whole-day predicate from the existing condition bridge.
  * @param dosage Editable dosage containing a structured condition extension.
  */
-function calendarDayPredicateFromMarker(extension: FhirExtension | undefined): MedicationCondition | undefined {
+function calendarDayPredicateFromMarker(extension: FhirR6Extension | undefined): MedicationCondition | undefined {
   const child = extension?.extension?.find(value => value.url === "calendarDayPredicate");
   const value = child ? decodeConditionPredicate(child) : undefined;
   return isMedicationCondition(value) ? value : undefined;
 }
-function retainedCalendarDayPredicate(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+function retainedCalendarDayPredicate(dosage: Pick<FhirR6Dosage, "modifierExtension">): MedicationCondition | undefined {
   return calendarDayPredicateFromMarker(dosage.modifierExtension?.find(value => value.url === DOSAGE_CONDITION_R5_URL));
 }
 
@@ -447,7 +454,7 @@ function retainedCalendarDayPredicate(dosage: FhirDosage | EzDosage): Medication
  * condition or a mixed measurement/day predicate cannot inherit that claim.
  * @param dosage Native or R5 dosage with optional source-owned day-domain metadata.
  */
-export function getDosageCalendarDayCondition(dosage: FhirDosage | EzDosage): MedicationCondition | undefined {
+export function getDosageCalendarDayCondition(dosage: FhirDosage | EzDosage | FhirR6Dosage): MedicationCondition | undefined {
   const calendar = retainedCalendarDayPredicate(dosage);
   if (!calendar) return undefined;
   const condition = parseDosageCondition(dosage);
@@ -500,7 +507,7 @@ export function setDosageCondition(
   } : undefined);
 }
 
-export function getDosageExcludedDates(dosage: FhirDosage | EzDosage): string[] {
+export function getDosageExcludedDates(dosage: FhirDosage | EzDosage | FhirR6Dosage): string[] {
   if ((dosage as EzDosage).excludedDates) return [...(dosage as EzDosage).excludedDates!];
   const extension = dosage.modifierExtension?.find(value => value.url === DOSAGE_EXCLUDED_DATES_R5_URL);
   return [...new Set((extension?.extension ?? [])
@@ -578,7 +585,7 @@ export function setDosageExcludedDates(dosage: FhirDosage, dates: string[]): voi
   }
 }
 
-export function getDosageExcludedWeekdays(dosage: FhirDosage): FhirDayOfWeek[] {
+export function getDosageExcludedWeekdays(dosage: FhirDosage | FhirR6Dosage): FhirDayOfWeek[] {
   const extension = dosage.extension?.find(value => value.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL);
   return (extension?.extension ?? [])
     .filter(child => child.url === "day" && typeof child.valueCode === "string")
@@ -1429,7 +1436,7 @@ function dosageProjectionHash(dosage: FhirDosage | EzDosage, clinical: boolean):
 
 /** Source text can be retained without claiming it agrees with current
  * external clinical fields. The compact annotation is local to every row. */
-export function getDosageSourceTextFingerprint(dosage: Pick<FhirDosage, "extension">): string | undefined {
+export function getDosageSourceTextFingerprint(dosage: Pick<FhirR6Dosage, "extension">): string | undefined {
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
     const text = marker.extension?.find(field => field.url === "textFingerprint")?.valueString ??
@@ -1439,7 +1446,7 @@ export function getDosageSourceTextFingerprint(dosage: Pick<FhirDosage, "extensi
   return undefined;
 }
 export function getDosageSourceTextAgreement(
-  dosage: Pick<FhirDosage, "extension" | "text">, acceptTextEdits = true
+  dosage: Pick<FhirR6Dosage, "extension" | "text">, acceptTextEdits = true
 ): boolean | undefined {
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
@@ -1480,7 +1487,7 @@ export function getFreshDoseSource(dosage: FhirDosage): FreshDoseSource | undefi
 }
 
 export interface DosageSourceOwnership { clocks?: boolean; events?: boolean; site?: boolean; }
-export function sourceOwnership(marker: FhirExtension): DosageSourceOwnership | undefined {
+export function sourceOwnership(marker: FhirR6Extension): DosageSourceOwnership | undefined {
   let result: DosageSourceOwnership | undefined;
   let fields = marker.extension ?? [], local = false;
   for (let index = 0; index < fields.length; index++) {
@@ -1561,7 +1568,7 @@ export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boo
   return undefined;
 }
 
-export function dosageTextFingerprint(dosage: FhirDosage | EzDosage): string {
+export function dosageTextFingerprint(dosage: FhirDosage | EzDosage | FhirR6Dosage): string {
   return compactProjectionFingerprint(dosage.text ?? null);
 }
 
@@ -2526,7 +2533,7 @@ function encodeConditionPredicate(condition: MedicationCondition): FhirExtension
  * union before using them as meaning and preserves unfamiliar input unchanged.
  * @param node The predicate child extension.
  */
-function decodeConditionPredicate(node: FhirExtension): unknown {
+function decodeConditionPredicate(node: FhirR6Extension): unknown {
   return node.extension && node.valueString === undefined ? decodeFields(node.extension, PREDICATE) : undefined;
 }
 

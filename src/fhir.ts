@@ -63,6 +63,8 @@ import {
   FhirCodeableConcept,
   FhirDosage,
   FhirExtension,
+  FhirR6Extension,
+  FhirR6Dosage,
   FhirPeriodUnit,
   FhirPrimitiveElement,
   FhirQuantity,
@@ -86,7 +88,7 @@ export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:Struct
 /** Read the recognized cycle constraint without interpreting narrative text.
  * @param dosage Editable R5/R6-compatible dosage with a retained known modifier.
  */
-export function getCycleDayConstraint(dosage: FhirDosage): CanonicalCycleDayConstraint | undefined {
+export function getCycleDayConstraint(dosage: FhirDosage | FhirR6Dosage): CanonicalCycleDayConstraint | undefined {
   const extension = dosage.modifierExtension?.find(item => item.url === CYCLE_DAY_ELIGIBILITY_EXTENSION_URL);
   if (!extension) return undefined;
   const child = (url: string) => extension.extension?.find(item => item.url === url);
@@ -245,7 +247,7 @@ export function parseTimingAdministrationDuration(
 /** Modifier: each retained base-schedule opportunity occurs this many minutes later. */
 export const ADMINISTRATION_OFFSET_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-administration-offset";
 
-export function getAdministrationOffsetMinutes(dosage: FhirDosage): number | undefined {
+export function getAdministrationOffsetMinutes(dosage: FhirDosage | FhirR6Dosage): number | undefined {
   const quantity = dosage.modifierExtension?.find(extension =>
     extension.url === ADMINISTRATION_OFFSET_EXTENSION_URL)?.valueQuantity;
   return quantity?.value !== undefined && Number.isFinite(quantity.value) &&
@@ -260,10 +262,10 @@ export const ANCHORED_COURSE_DURATION_EXTENSION_URL = "urn:ezmedicationinput:Str
  * @returns The retained duration quantity or range, when supplied.
  */
 export function getAnchoredCourseDuration(
-  dosage: Pick<FhirDosage, "modifierExtension"> & {
+  dosage: Pick<FhirR6Dosage, "modifierExtension"> & {
     timing?: { repeat?: { boundsRange?: FhirRange; boundsDuration?: FhirR6Quantity } }
   }
-): Pick<FhirExtension, "valueQuantity" | "valueRange"> | undefined {
+): Pick<FhirR6Extension, "valueQuantity" | "valueRange"> | undefined {
   const marker = dosage.modifierExtension?.find(extension =>
     extension.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
   if (!marker) return undefined;
@@ -666,7 +668,7 @@ export function clinicalCarrierQuantityFromFhir(
   const volumeUnit = carrier?.code ?? carrier?.unit;
   const doseLabel = active?.unit ?? active?.code;
   const volumeLabel = carrier?.unit ?? carrier?.code;
-  const durationUnit = duration?.code ?? duration?.unit;
+  const durationUnit = getQuantityDurationUnit(duration);
   const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
   if ((!material && !selfCarrier) ||
       typeof active?.value !== "number" || !Number.isFinite(active.value) ||
@@ -2077,8 +2079,8 @@ function clinicalAdjunctsFromFhir(dosage: FhirDosage): CanonicalSigClause["clini
  * No dose, rate, Timing, course, or compatibility marker is interpreted here.
  * Native-course import supplies an R6 CodeableReference's concept explicitly. */
 export function deserializeCanonicalContext(
-  dosage: Pick<FhirDosage, "text" | "route" | "site" | "method" | "extension" |
-    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction">,
+  dosage: Pick<FhirDosage, "text" | "route" | "site" | "method" |
+    "asNeeded" | "asNeededFor" | "additionalInstruction" | "patientInstruction"> & Pick<FhirR6Dosage, "extension">,
   options?: ParseOptions
 ): CanonicalSigClause {
   const rawText = dosage.text ?? "";

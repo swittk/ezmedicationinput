@@ -501,9 +501,9 @@ function parseGraphCoverage(extension:FhirExtension):CanonicalInstructionCoverag
  * order, first scalar fields retain ownership, and unknown metadata remains
  * outside interpreted clinical meaning. No indexed heap copies or cached
  * input identities are needed to read the same mutable external input again. */
-export function parseInstructionGraphExtension(extensions:FhirExtension[]|undefined):CanonicalInstructionGraph|undefined {
+export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url">>(extensions:readonly T[]|undefined):CanonicalInstructionGraph|undefined {
   let graph:FhirExtension|undefined;
-  for(const item of extensions??[])if(item.url===MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL){graph=item;break;}
+  for(const item of extensions??[])if(item.url===MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL){graph=item as FhirExtension;break;}
   if(!graph)return undefined;
   const actions:AdviceFrame[]=[],relations:CanonicalInstructionRelation[]=[],opaque:CanonicalSourceSpan[]=[];
   let coverage:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,

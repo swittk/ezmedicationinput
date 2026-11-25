@@ -83,14 +83,11 @@ export function cloneBodySiteSpatialRelation(
       ? { system: coding.system, code: coding.code, display: coding.display }
       : undefined,
     targetText: relation.targetText,
-    targetCoding: target
-      ? !("display" in target) && !("i18n" in target)
-        ? { system: target.system, code: target.code }
-        : { system: target.system, code: target.code, display: target.display,
-          i18n: cloneI18nRecord(target.i18n) }
-      : undefined,
+    targetCoding: target ? { ...target } : undefined,
     sourceText: relation.sourceText
   };
+  if (target && cloned.targetCoding && "i18n" in target)
+    cloned.targetCoding.i18n = cloneI18nRecord(target.i18n);
   if (cloned.relationCoding) {
     for (const key in coding) {
       if (key !== "system" && key !== "code" && key !== "display") {

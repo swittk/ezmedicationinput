@@ -239,8 +239,9 @@ describe("native course and sibling projections", () => {
     expect(out.safety?.doseLimit?.[0]).toMatchObject({ id: "limit-a", valueQuantity: { value: 3 } });
     expect(out.safety?.doseLimit?.[1]).toEqual(raw.step[0].component[0].safety?.doseLimit?.[1]);
     expect(out.safety?.ifExceeded).toBe("contact prescriber");
-    a.limits!.splice(0, 1);
-    out = courseToR6(native).step[0].component[0];
+    const removed = courseFromR6(structuredClone(raw), true);
+    removed.stages[0].administrations[0].limits!.splice(0, 1);
+    out = courseToR6(removed).step[0].component[0];
     expect(out.safety?.doseLimit).toHaveLength(1);
     expect(out.safety?.doseLimit?.[0].id).toBe("limit-b");
   });
@@ -271,8 +272,9 @@ describe("native course and sibling projections", () => {
       valueQuantity: { value: 160 },
     });
     expect(raw.step[0].component[0].condition?.[0].text).toBe("Original guard");
-    c.stages[0].administrations[0].predicate = undefined;
-    expect(courseToR6(c).step[0].component[0]).not.toHaveProperty("condition");
+    const cleared = courseFromR6(structuredClone(raw), true);
+    cleared.stages[0].administrations[0].predicate = undefined;
+    expect(courseToR6(cleared).step[0].component[0]).not.toHaveProperty("condition");
   });
 });
 
@@ -465,8 +467,10 @@ describe("November 17 review: live native clinical facts own projection and real
     let reopened = inputToCanonical(rows);
     expect("stages" in reopened && reopened.stages[0].administrations[0].siteReference).toBeUndefined();
     expect("stages" in reopened && reopened.stages[0].administrations[0].target?.text).toBe("left eye");
-    a.target = undefined;
-    rows = courseToR5(native);
+    const cleared = courseFromR6(structuredClone(source), true);
+    cleared.stages[0].administrations[0].siteReference = undefined;
+    cleared.stages[0].administrations[0].target = undefined;
+    rows = courseToR5(cleared);
     reopened = inputToCanonical(rows);
     if (!("stages" in reopened)) throw new Error("R5 course metadata lost");
     expect(reopened.stages[0].administrations[0].target).toBeUndefined();
@@ -696,9 +700,10 @@ describe("compiled clinical facts and source units survive projection", () => {
         courseLength: { value: 7, unit: "d" } } } });
     const first = dose(), second = dose();
     expect(courseFromAdministrations([first, second], "").stages[0].end!.displacement).toMatchObject({ value: 7, unit: "d" });
-    first.schedule!.recurrence!.courseLength!.comparator = "~";
-    second.schedule!.recurrence!.courseLength!.comparator = "~";
-    expect(courseFromAdministrations([first, second], "").stages[0].end).toBeUndefined();
+    const approximateFirst = dose(), approximateSecond = dose();
+    approximateFirst.schedule!.recurrence!.courseLength!.comparator = "~";
+    approximateSecond.schedule!.recurrence!.courseLength!.comparator = "~";
+    expect(courseFromAdministrations([approximateFirst, approximateSecond], "").stages[0].end).toBeUndefined();
   });
 
   it.each([
@@ -1720,7 +1725,8 @@ describe("round37 upper-only timing and stage origins", () => {
           else if (minimum === undefined) expect(text).toContain(locale === "en" ? "over up to 30 minutes" : "ไม่เกิน 30 นาที");
           else expect(text).toContain(locale === "en" ? (minimum === 15 ? "over 15 to 30 minutes" : "over 30 minutes")
             : (minimum === 15 ? "15 ถึง 30 นาที" : "30 นาที"));
-          expect(text).toContain("100");
+          expect(text).toMatch(locale === "en" ? /(?:^|\s)100 mL(?:\s|[.,;]|$)/
+            : style === "short" ? /(?:^|\s)100 มล\.(?:\s|$)/ : /(?:^|\s)100 มิลลิลิตร(?:\s|$)/);
         }
       const repeat = saved.step[0].component[0].timing!.repeat!;
       expect(repeat.duration).toBe(minimum);
@@ -3137,7 +3143,7 @@ describe("round 43 supported supply bounds", () => {
       durationValue: 7, durationUnit: FhirPeriodUnit.Day,
       context: { containerValue: 2, containerUnit: "tab" } };
     const before = structuredClone(raw);
-    const phaseRow = toFhirR5Dosages(scalar)[0];
+    const phaseRow = structuredClone(toFhirR5Dosages(scalar)[0]);
     phaseRow.modifierExtension = [...(phaseRow.modifierExtension ?? []), {
       url: "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin",
       valueQuantity: { value: 0, unit: "d", code: "d", system: "http://unitsofmeasure.org" }

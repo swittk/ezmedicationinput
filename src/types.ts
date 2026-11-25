@@ -645,7 +645,9 @@ export interface FhirCodeableReference extends FhirElement {
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,
   "sequence" | "_sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
-  "maxDosePerLifetime" | "doseAndRate" | "timing"> {
+  "maxDosePerLifetime" | "doseAndRate" | "timing" | "extension" | "modifierExtension"> {
+  extension?: FhirR6Extension[];
+  modifierExtension?: FhirR6Extension[];
   timing?: FhirR6Timing;
   condition?: FhirR6DosageCondition[];
   site?: FhirCodeableReference;

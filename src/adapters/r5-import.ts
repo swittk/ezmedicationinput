@@ -32,7 +32,7 @@ import { equalStructuredValues, hashStructuredValue } from "../stable-structure"
 import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { FHIR_TRANSLATION_EXTENSION_URL } from "../fhir-translations";
 import { R6_DRAFT_STEPS_SOURCE_URL, retainedDraftStepIndices } from "./r6-editable-metadata";
-import { quantityFromR5, simpleQuantityForR5, quantityForR5 } from "../fhir-quantity-operator";
+import { quantityFromR5, simpleQuantityForR5, quantityForR5, getQuantityComparator } from "../fhir-quantity-operator";
 import {
   DOSAGE_DETAILS_R5_URL,
   DOSAGE_RECONCILIATION_SOURCE_URL,
@@ -252,7 +252,7 @@ function restoreComponentDelta(
     // Current external modifiers remain live. The compact row-profile marker
     // is a storage owner, while retained native context annotations are
     // rebuilt against the separately imported current missingContext facts.
-    const modifiers: FhirExtension[] = [];
+    const modifiers: FhirR6Extension[] = [];
     for (const item of row.modifierExtension ?? [])
       if (item.url !== DOSAGE_DETAILS_R5_URL) modifiers.push(item);
     modifiers.push(...delta.modifierExtension);
@@ -467,11 +467,12 @@ function restoreComponentDelta(
           if (!equalStructuredValues(entry.rate, old.rateQuantity)) supersededQuantity = true;
         }
       }
-      if (old.rateRatio?.numerator?.comparator === "~") {
-        if (unchangedRate && !entry.rateExpression) entry.rateRatio = {
-          ...entry.rateRatio, numerator: old.rateRatio.numerator,
-        };
-        else {
+      if (old.rateRatio && (old.rateRatio.numerator?.comparator === "~" || getQuantityComparator(old.rateRatio.denominator))) {
+        if (unchangedRate && !entry.rateExpression) {
+          if (old.rateRatio.numerator?.comparator === "~") entry.rateRatio = {
+            ...entry.rateRatio, numerator: old.rateRatio.numerator,
+          };
+        } else {
           const oldR5 = { ...old.rateRatio, numerator: quantityForR5(old.rateRatio.numerator) };
           if (
             equalStructuredValues(live?.rateRatio, oldR5) &&
@@ -506,7 +507,7 @@ function restoreComponentDelta(
         if (
           old.doseQuantity?.comparator || old.doseRange ||
           old.rateQuantity?.comparator || old.rateRange ||
-          old.rateRatio?.numerator?.comparator === "~"
+          old.rateRatio?.numerator?.comparator === "~" || getQuantityComparator(old.rateRatio?.denominator)
         )
           supersededQuantity = true;
       }
@@ -1997,8 +1998,9 @@ export function courseFromR5(
       // A translation belongs to its original wording. Keep unrelated Element
       // annotations active; the existing retained source archives the old text
       // and translation together. An explicit replacement companion owns itself.
-      if (instruction !== retained.renderedInstruction &&
-          !Object.prototype.hasOwnProperty.call(replacementHeader, "_renderedInstruction"))
+      const primitiveChanged = replacementHeader._renderedInstruction !== undefined &&
+        !equalStructuredValues(replacementHeader._renderedInstruction, retained._renderedInstruction);
+      if (instruction !== retained.renderedInstruction && !primitiveChanged)
         removeInstructionTranslations(header);
       if (instruction !== retained.renderedInstruction || !equalStructuredValues(originalHeader, header))
         edited = true;

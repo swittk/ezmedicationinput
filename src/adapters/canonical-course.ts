@@ -32,6 +32,7 @@ import type {
   ParseBatchResult,
   FhirCodeableConcept,
   FhirExtension,
+  FhirR6Extension,
   FormatOptions,
 } from "../types";
 import type {
@@ -598,12 +599,12 @@ function baseAdministration(
   let sourceMember: number | undefined, phasePredecessors: number[] | undefined;
   let missingContexts: string[] | undefined,
     contextIssue: CanonicalAdministration["contextIssue"];
-  let anchored: FhirExtension | undefined,
-    choiceMarker: FhirExtension | undefined,
-    predicateMarker: FhirExtension | undefined,
-    datesMarker: FhirExtension | undefined,
-    cycleMarker: FhirExtension | undefined,
-    delayMarker: FhirExtension | undefined;
+  let anchored: FhirR6Extension | undefined,
+    choiceMarker: FhirR6Extension | undefined,
+    predicateMarker: FhirR6Extension | undefined,
+    datesMarker: FhirR6Extension | undefined,
+    cycleMarker: FhirR6Extension | undefined,
+    delayMarker: FhirR6Extension | undefined;
   // Classify modifiers once. Specialized codecs see only their own retained
   // field rather than repeatedly traversing the whole imported marker list.
   for (const e of raw.modifierExtension ?? [])
@@ -669,7 +670,7 @@ function baseAdministration(
     ? { condition: input.condition }
     : undefined;
   const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
-  let weekdaysMarker: FhirExtension | undefined;
+  let weekdaysMarker: FhirR6Extension | undefined;
   let sourceFields: ReturnType<typeof sourceOwnership>;
   let hasCarrierMaterial = false;
   for (const e of raw.extension ?? []) {
@@ -947,7 +948,7 @@ export function isR6DosageInstruction(input: object): input is FhirR6DosageInstr
   if ("step" in input || "renderedInstruction" in input || "_renderedInstruction" in input || "repeatCycle" in input) return true;
   // Header-only R6 instructions may carry just safety or known R6 source.
   // An extended R5 dosage still owns its explicit dosage fields.
-  if ("text" in input || "sequence" in input || "doseAndRate" in input || "timing" in input ||
+  if ("text" in input || "sequence" in input || "_sequence" in input || "doseAndRate" in input || "timing" in input ||
       "route" in input || "site" in input || "siteReference" in input || "method" in input || "condition" in input ||
       "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
       "patientInstruction" in input || "maxDosePerPeriod" in input ||

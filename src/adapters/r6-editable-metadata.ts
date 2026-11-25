@@ -105,11 +105,15 @@ function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): obje
   return { ...fields, offsetDuration: draftCompletionQuantity(offsetDuration),
     offsetRange: draftCompletionRange(offsetRange) };
 }
-/** The member's typed phase end owns completion independently of timing. */
-function draftMemberPhaseEnd(value: FhirR6Dosage): object | undefined {
+/** A member's current origin and boundaries own completion independently of timing. */
+function draftMemberPhase(value: FhirR6Dosage): object | undefined {
   const marker = value.modifierExtension?.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
-  if (!marker || marker.valueQuantity) return undefined;
-  return draftCompletionBoundary(decodeR6SourceMetadata(marker, "step")?.end as FhirR6RelativeTime | undefined);
+  if (!marker) return undefined;
+  if (marker.valueQuantity) return { origin: draftCompletionQuantity(marker.valueQuantity) };
+  const fields = decodeR6SourceMetadata(marker, "step");
+  const start = draftCompletionBoundary(fields?.start as FhirR6RelativeTime | undefined);
+  const end = draftCompletionBoundary(fields?.end as FhirR6RelativeTime | undefined);
+  return start || end ? { start, end } : undefined;
 }
 function draftAnchoredLength(dosage: FhirR6Dosage): object | undefined {
   const length = getAnchoredCourseDuration(dosage);
@@ -183,7 +187,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
-            !equalStructuredValues(draftMemberPhaseEnd(before), draftMemberPhaseEnd(after)) ||
+            !equalStructuredValues(draftMemberPhase(before), draftMemberPhase(after)) ||
             (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==
               (getAdministrationOffsetMinutes({ modifierExtension: after.modifierExtension }) ?? 0) ||
             !equalStructuredValues(getDosageExcludedDates({ modifierExtension: before.modifierExtension }),

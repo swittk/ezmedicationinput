@@ -6676,7 +6676,8 @@ describe("review 27 external editing and batch course semantics", () => {
       step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
         timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
           boundsDuration: { value: 2, unit: "d", code: "d" } } } }] }] };
-    let editable = fromDosageDetails(input);
+    const before = structuredClone(input);
+    let editable = structuredClone(fromDosageDetails(input));
     editable.dosages[0].doseAndRate![0].doseQuantity!.value = 2;
     if (replaceText) editable.course.renderedInstruction = replacement;
     for (let save = 0; save < 3; save++) {
@@ -6694,6 +6695,7 @@ describe("review 27 external editing and batch course semantics", () => {
       expect(preview).not.toContain("1 tablet");
       editable = fromDosageDetails(reopened);
     }
+    expect(input).toEqual(before);
   });
 
   it.each(["period", "administration", "lifetime"] as const)("owns independent lifted and retained %s safety quantities", scope => {
