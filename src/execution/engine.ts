@@ -515,6 +515,29 @@ function positiveInteger(value: number | undefined): number | undefined {
 function positiveNumber(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value > 0 ? value : undefined;
 }
+/** A Timing code owns cadence when repeat supplies only independent
+ * constraints, such as a count or calendar bounds. Preserve those constraints
+ * on the execution copy; explicit positions and authored cadence still own it. */
+function prepareTimingCodeCadence(dosage: CanonicalAdministration): CanonicalAdministration {
+  const timing = dosage.schedule;
+  const repeat = timing?.recurrence;
+  if (!timing?.code || timing.explicitEvents?.length || repeat && (
+      repeat.frequency !== undefined || repeat.frequencyMax !== undefined ||
+      repeat.period !== undefined || repeat.periodMax !== undefined || repeat.periodUnit !== undefined ||
+      repeat.clocks?.length || repeat.anchors?.length)) return dosage;
+  const coding = executionTimingCoding(timing);
+  const hours = isStandardTimingCoding(coding) && coding?.code
+    ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
+  let recurrence: CanonicalRecurrence;
+  if (hours) recurrence = { ...repeat, frequency: 1, period: hours, periodUnit: DurationUnit.Hour };
+  else {
+    const daily = standardTimingCodeFrequency(coding);
+    if (daily === undefined) return dosage;
+    recurrence = daily >= 1 ? { ...repeat, frequency: daily, period: 1, periodUnit: DurationUnit.Day }
+      : { ...repeat, frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day };
+  }
+  return { ...dosage, schedule: { ...timing, recurrence } };
+}
 /**
  * Make an executable copy of imported range timing without changing the
  * preserved FHIR object. Scheduling APIs return timestamps rather than a
@@ -522,22 +545,11 @@ function positiveNumber(value: number | undefined): number | undefined {
  * period. Explicit clocks/event anchors are kept and remain authoritative.
  */
 function prepareBestEffortTiming(dosage: CanonicalAdministration): CanonicalAdministration {
+  const coded = prepareTimingCodeCadence(dosage);
+  if (coded !== dosage) return coded;
   const timing = dosage.schedule;
   const repeat = timing?.recurrence;
-  if (!timing) return dosage;
-  if (!repeat) {
-    const coding = executionTimingCoding(timing);
-    const hours = isStandardTimingCoding(coding) && coding?.code
-      ? TIMING_CODE_HOURLY_PERIODS[coding.code.toUpperCase()] : undefined;
-    if (hours && !timing.explicitEvents?.length)
-      return { ...dosage, schedule: { ...timing, recurrence:
-        { frequency: 1, period: hours, periodUnit: DurationUnit.Hour } } };
-    const daily = standardTimingCodeFrequency(coding);
-    if (daily === undefined) return dosage;
-    return { ...dosage, schedule: { ...timing, recurrence:
-      daily >= 1 ? { frequency: daily, period: 1, periodUnit: DurationUnit.Day } :
-        { frequency: 1, period: 1 / daily, periodUnit: DurationUnit.Day } } };
-  }
+  if (!timing || !repeat) return dosage;
   // Keep the ordinary path allocation-free. It is also important not to
   // normalize an explicit zero count into "unlimited": range handling only
   // needs an operational copy when a range is actually present.
@@ -6159,6 +6171,7 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   periodMinimum: boolean;
   infusionDurationMaximum: boolean;
 } {
+  dosage = prepareTimingCodeCadence(dosage);
   const repeat = dosage.schedule?.recurrence;
   if (!repeat)
     return {

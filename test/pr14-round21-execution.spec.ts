@@ -6386,3 +6386,85 @@ describe("round61 distinct-target typed NEXT ownership", () => {
     }
   }
 });
+
+describe("round62 coded cadence with independent constraints", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const note = { url: "urn:clinic:timing-note", valueString: "Keep the prescribed timing" };
+  const query = { ...options, limit: 5 };
+  const wire = (source: FhirR6DosageInstruction, version: typeof versions[number]) => {
+    const course = courseFromR6(source);
+    return version === "native" ? course
+      : freshExecutionInput(version === "R5" ? courseToR5(course) : source);
+  };
+  const reopen = (input: ReturnType<typeof wire>) =>
+    freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
+
+  for (const version of versions) {
+    for (const kind of ["count", "maximum", "window", "BID", "event", "local"] as const) {
+      it("retains independent constraints on a coded cadence (" + kind + "/" + version + ")", () => {
+        const repeat = {
+          ...(kind === "window" ? { boundsPeriod: { start: "2026-01-01T08:00:00Z", end: "2026-01-01T17:00:00Z" } }
+            : kind === "maximum" ? { countMax: 3 } : { count: kind === "event" ? 1 : 3 }),
+          extension: [note],
+        };
+        const code = { coding: [{
+          system: kind === "local" ? "urn:clinic:local-timing" : "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation",
+          code: kind === "BID" ? "BID" : "Q4H",
+        }] };
+        const input = wire({ step: [{ component: [{
+          doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { code, repeat, ...(kind === "event" ? { event: ["2026-01-01T13:00:00Z"] } : {}) },
+        }] }] }, version);
+        const expected = kind === "window"
+          ? ["2026-01-01T08:00:00+00:00", "2026-01-01T12:00:00+00:00", "2026-01-01T16:00:00+00:00"]
+          : kind === "BID"
+          ? ["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00", "2026-01-02T08:00:00+00:00"]
+          : kind === "event" ? ["2026-01-01T13:00:00+00:00"]
+          : ["2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00", "2026-01-01T08:00:00+00:00"];
+        for (const dosage of [input, reopen(input)]) {
+          const before = JSON.stringify(dosage);
+          if (kind === "local") {
+            expect(nextDueDoses(dosage, query)).toEqual([]);
+            expect(() => calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Day }))
+              .toThrow(expect.objectContaining({ code: "timing-required" }));
+          } else {
+            expect(nextDueDoses(dosage, query)).toEqual(expected);
+            expect(calculateTotalUnits({ dosage, ...query, durationValue: 2, durationUnit: Unit.Day }))
+              .toMatchObject({ totalUnits: kind === "event" ? 1 : 3, unit: "tab",
+                ...(kind === "maximum" ? { quantityKind: "maximum" } : {}),
+              });
+          }
+          const timing = courseToR5(importCanonicalCourse(dosage))[0].timing!;
+          expect(timing.code).toEqual(code);
+          expect(timing.repeat).toMatchObject(repeat);
+          expect(timing.repeat?.frequency).toBeUndefined();
+          expect(timing.repeat?.period).toBeUndefined();
+          expect(JSON.stringify(dosage)).toBe(before);
+        }
+      });
+    }
+
+    it("opens a successor only after the counted coded loading course (" + version + ")", () => {
+      const input = wire({ step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { code: { coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q4H",
+        }] }, repeat: { count: 3 } },
+      }] }, { component: [{
+        doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { count: 1, timeOfDay: ["10:00:00"] } },
+      }] }] }, version);
+      for (const dosage of [input, reopen(input)]) {
+        expect(nextDueDoses(dosage, query)).toEqual([
+          "2026-01-01T00:00:00+00:00", "2026-01-01T04:00:00+00:00",
+          "2026-01-01T08:00:00+00:00", "2026-01-01T10:00:00+00:00",
+        ]);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(5);
+        const later = { ...query, from: "2026-01-01T05:00:00Z" };
+        expect(nextDueDoses(dosage, later))
+          .toEqual(["2026-01-01T08:00:00+00:00", "2026-01-01T10:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...later, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+      }
+    });
+  }
+});
