@@ -295,6 +295,14 @@ export const recurrenceCap = (r: CanonicalRecurrence | undefined) => r?.occurren
 export const administrationCycleDays = (a: CanonicalAdministration) => a.cycleDays;
 export const recurrenceClockWindow = (r: CanonicalRecurrence | undefined) => r?.clockWindow;
 export const recurrenceEventWindow = (r: CanonicalRecurrence | undefined) => r?.eventWindow;
+/** A dated phase can own its local clock boundary only with an explicit,
+ * unconditional clock. Execution resolves the instant in the requested zone. */
+export function administrationHasDatedClockStart(a: CanonicalAdministration): boolean {
+  const repeat = a.schedule?.recurrence;
+  return Boolean(repeat?.calendarWindow?.start?.length === 10 && repeat.clocks?.length &&
+    !repeat.anchors?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate &&
+    !a.choice && !a.choiceIssue);
+}
 
 /** Normalize equivalent count-unit labels before dimensional conversion. */
 export function normalizeQuantityCapUnit(unit: string): string {

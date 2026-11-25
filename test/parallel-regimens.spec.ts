@@ -1961,3 +1961,50 @@ it("round74 a late absolute query retains the dated replacement opening without 
     }
   }
 });
+
+
+describe("round79 dated clock replacement retains earlier-starting doses", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([[false, "UTC", "+00:00"], [true, "UTC", "+00:00"],
+    [false, "Asia/Bangkok", "+07:00"], [true, "Asia/Bangkok", "+07:00"]] as const)(
+    "uses the authored replacement clock after an earlier start (independent=%s, zone=%s)",
+    (independent, timeZone, offset) => {
+      const parsed = parseSig("Instill 1 drop OD at 08:00 and 20:00 daily starting 2026-12-04, then starting 2026-12-05 at 18:00 instill 2 drops OD daily" +
+        (independent ? "; instill 1 drop OS daily at 10:00 starting 2026-12-05" : ""));
+      const before = JSON.stringify(parsed);
+      const query = { orderedAt: "2026-12-04T00:00:00" + offset,
+        from: "2026-12-05T00:00:00" + offset, timeZone, limit: 3 };
+      const expected = (independent
+        ? ["2026-12-05T08:00:00", "2026-12-05T10:00:00", "2026-12-05T18:00:00"]
+        : ["2026-12-05T08:00:00", "2026-12-05T18:00:00", "2026-12-06T18:00:00"])
+        .map(time => time + offset);
+      for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir),
+        fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(nextDueDoses(dosage, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: independent ? 4 : 3, unit: "drop" });
+      }
+      expect(JSON.stringify(parsed)).toBe(before);
+    });
+});
+
+
+it.each([false, true])("round79 dated clock replacement retains an undated predecessor's actual origin (independent=%s)", independent => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const parsed = parseSig("Instill 1 drop OD at 08:00 and 20:00 daily, then starting 2026-12-05 at 18:00 instill 2 drops OD daily" +
+    (independent ? "; instill 1 drop OS daily at 10:00 starting 2026-12-05" : ""));
+  const before = JSON.stringify(parsed);
+  const query = { orderedAt: "2026-12-04T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
+  const expected = independent
+    ? ["2026-12-05T08:00:00+00:00", "2026-12-05T10:00:00+00:00", "2026-12-05T18:00:00+00:00", "2026-12-06T10:00:00+00:00"]
+    : ["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00", "2026-12-06T18:00:00+00:00", "2026-12-07T18:00:00+00:00"];
+  for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir),
+    fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+    expect(nextDueDoses(dosage, query)).toEqual(expected);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
+      .toMatchObject({ totalUnits: independent ? 4 : 3, unit: "drop" });
+  }
+  expect(parsed.meta.canonical.course!.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.start)
+    .toBeUndefined();
+  expect(JSON.stringify(parsed)).toBe(before);
+});

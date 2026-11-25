@@ -29,6 +29,7 @@ import {
   DurationUnit,
   TimingEvent,
   numericAdministrationLimits,
+  administrationHasDatedClockStart,
   normalizeQuantityCapUnit,
   hasPeriodLimits,
   measureOperator as getQuantityComparator,
@@ -2685,20 +2686,18 @@ function completePhaseDependency(
   }
   return ready;
 }
-/** A same-day dated replacement starts at its authored clock, not midnight.
+/** A dated replacement starts at its authored clock, not midnight.
  * Resolve that occurrence with the ordinary admission owner in the requested
  * zone. An inferred event clock or conditional opportunity proves no boundary. */
-function sameDayDatedSuccessorBoundary(
+function datedClockSuccessorBoundary(
   successor: CanonicalAdministration, precedingStart: Date,
   zone: string, options?: NextDueDoseOptions
 ): Date | undefined {
-  const repeat = successor.schedule?.recurrence;
-  if (repeat?.calendarWindow?.start?.length !== 10 || !repeat.clocks?.length ||
-      repeat.anchors?.length || successor.asNeeded ||
-      successor.predicate || successor.calendarPredicate || hasAlternativeChoice(successor)) return undefined;
-  const bounds = resolveRepeatBoundsPeriod(repeat, zone, (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
+  if (!administrationHasDatedClockStart(successor)) return undefined;
+  const bounds = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
+    (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
   if (!bounds.start || !bounds.nominalStart ||
-      getLocalDayNumber(bounds.start, zone) !== getLocalDayNumber(precedingStart, zone)) return undefined;
+      getLocalDayNumber(bounds.start, zone) < getLocalDayNumber(precedingStart, zone)) return undefined;
   const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
     phaseOriginIssue: undefined, phasePredecessors: undefined };
   const first = nextDueDosesSingle(execution, {
@@ -2726,7 +2725,7 @@ function datedMemberReplacementEnds(
     const start = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
       (getAdministrationOffsetMinutes(successor) ?? 0) * 60000).start;
     if (!start) continue;
-    const end = sameDayDatedSuccessorBoundary(successor, start, zone, options);
+    const end = datedClockSuccessorBoundary(successor, start, zone, options);
     if (!end) continue;
     if (!members) {
       members = new Map();
@@ -2734,10 +2733,7 @@ function datedMemberReplacementEnds(
         if (member.sourceMember !== undefined) members.set(member.sourceMember, member);
     }
     for (const id of successor.phasePredecessors) {
-      const predecessor = members.get(id);
-      const priorStart = predecessor && resolveRepeatBoundsPeriod(predecessor.schedule?.recurrence, zone,
-        (getAdministrationOffsetMinutes(predecessor) ?? 0) * 60000).start;
-      if (!priorStart || getLocalDayNumber(priorStart, zone) !== getLocalDayNumber(start, zone)) continue;
+      if (!members.has(id)) continue;
       const earlier = ends?.get(id);
       if (!earlier || end < earlier) (ends ??= new Map()).set(id, end);
     }
@@ -2890,7 +2886,7 @@ function treatmentStepWindow(
     let opening = administrations[0]?.eligibleFrom ?? start;
     for (let member = 1; member < administrations.length; member++)
       if (administrations[member].eligibleFrom < opening) opening = administrations[member].eligibleFrom;
-    const replacement = sameDayDatedSuccessorBoundary(nextStage.administrations[0], opening, timeZone, options);
+    const replacement = datedClockSuccessorBoundary(nextStage.administrations[0], opening, timeZone, options);
     if (replacement && (!end || replacement < end)) {
       end = replacement;
       completionPoint = undefined;

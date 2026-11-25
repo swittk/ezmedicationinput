@@ -124,13 +124,22 @@ function calendarPhaseStart(clause: CanonicalSigClause): string | undefined {
  * Both complete and partial parallel courses retain these same known cuts. */
 function calendarPhaseMembers(
   members: readonly CanonicalParallelComponent[],
-  nextStarts: readonly (string | undefined)[] | undefined
+  nextClauses: readonly CanonicalSigClause[] | undefined
 ): CanonicalParallelComponent[] | string {
   let nextStart: string | undefined;
-  for (const value of nextStarts ?? [])
+  for (const clause of nextClauses ?? []) {
+    const value = calendarPhaseStart(clause);
     if (value && (nextStart === undefined || value < nextStart)) nextStart = value;
-  if (nextStarts?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
-  const inferredEnd = nextStart ? precedingCalendarDay(nextStart) : undefined;
+  }
+  if (nextClauses?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
+  const successor = nextClauses?.length === 1 ? nextClauses[0] : undefined;
+  const nextSchedule = successor?.schedule;
+  // A selected explicit clock requires a zoned execution boundary. Keep the
+  // track unresolved here instead of discarding that clock with a day cutoff.
+  const clockBoundary = nextSchedule?.boundsStart?.length === 10 && nextSchedule.timeOfDay?.length &&
+    !nextSchedule.when?.length && !successor?.prn?.enabled &&
+    !successor?.clinicalAdjuncts?.condition && !successor?.clinicalAdjuncts?.calendarDayCondition;
+  const inferredEnd = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {
     const schedule = item.clause.schedule;
@@ -207,8 +216,7 @@ function partialParallelRegimen(
       const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
         item.clause.schedule?.calendarEvents?.length);
       if (calendar) {
-        const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member =>
-          calendarPhaseStart(clauses[member])));
+        const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member => clauses[member]));
         if (typeof normalized !== "string") members = normalized;
       }
       // A dated successor also closes an undated predecessor on this track.
@@ -216,8 +224,7 @@ function partialParallelRegimen(
       // end is inferred, using the same calendar cutoff as dated predecessors.
       if (calendar && index > 0 && phases[index - 1].kind === "relative") {
         const previous = phases[index - 1];
-        const normalized = calendarPhaseMembers(previous.members,
-          members.map(item => calendarPhaseStart(item.clause)));
+        const normalized = calendarPhaseMembers(previous.members, members.map(item => item.clause));
         if (typeof normalized !== "string") previous.members = normalized;
       }
       const first = members[0] && durationPosition(members[0].clause);
@@ -336,7 +343,7 @@ export function buildCanonicalParallelRegimen(
       }));
       for (let index = 0; index < phases.length; index++) {
         const normalized = calendarPhaseMembers(phases[index].members,
-          phases[index + 1]?.members.map(item => item.clause.schedule?.boundsStart));
+          phases[index + 1]?.members.map(item => item.clause));
         if (typeof normalized === "string") return partialParallelRegimen(trackPhases, clauses, normalized);
         phases[index] = { ...phases[index], members: normalized };
       }

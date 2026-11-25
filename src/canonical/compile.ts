@@ -14,7 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
-import { hasAmountRole, administrationHasAmountFacts } from "./course";
+import { hasAmountRole, administrationHasAmountFacts, administrationHasDatedClockStart } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -389,17 +389,11 @@ export function courseFromPartialParallel(
           if (finitePredecessors) dependsOnPrevious = true;
           else a.phaseStart = { anchor: "unresolved" };
         }
-        // A same-day dated replacement still belongs to this track. Retain
-        // that relation so execution can close the predecessor at the owned
-        // successor clock in the requested timezone, rather than at midnight.
-        const datedStart = a.schedule?.recurrence?.calendarWindow?.start;
-        if (!dependsOnPrevious && index > 0 && datedStart?.length === 10 &&
-            a.schedule?.recurrence?.clocks?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate) {
-          let sameDay = priorEnd > priorStart;
-          for (let parent = priorStart; sameDay && parent < priorEnd; parent++)
-            sameDay = administrations[parent].schedule?.recurrence?.calendarWindow?.start === datedStart;
-          if (sameDay) dependsOnPrevious = true;
-        }
+        // A dated replacement still belongs to this track even when its
+        // predecessor began earlier. Execution owns the successor's local
+        // clock boundary; the compiler retains only the selected relation.
+        if (!dependsOnPrevious && index > 0 && priorEnd > priorStart && administrationHasDatedClockStart(a))
+          dependsOnPrevious = true;
         if (dependsOnPrevious) {
           if (!predecessors) {
             predecessors = [];
@@ -783,7 +777,8 @@ export function courseFromAdministrations(
         if (!candidate) for (const event of timing?.explicitEvents ?? [])
           if (nextStart === undefined || event < nextStart) nextStart = event;
       }
-      const cutoff = nextStart ? precedingCalendarDay(nextStart) : undefined;
+      const clockBoundary = administrations.length === 1 && administrationHasDatedClockStart(administrations[0]);
+      const cutoff = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
       if (cutoff) previous.administrations = previous.administrations.map(administration => {
         const timing = administration.schedule, recurrence = timing?.recurrence;
         const window = recurrence?.calendarWindow;
