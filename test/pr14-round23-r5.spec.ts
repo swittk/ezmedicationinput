@@ -1925,7 +1925,7 @@ describe("round59 interop live wire ownership", () => {
   };
   const sequenceInput = (sequence: number, moved: boolean): FhirR6DosageInstruction => {
     const rows: FhirDosage[] = [
-      { id: "anchor", sequence: 1, doseAndRate: [{ doseQuantity: q(1) }],
+      { id: "anchor", sequence, doseAndRate: [{ doseQuantity: q(1) }],
         timing: { repeat: { ...daily, boundsDuration: { value: 1, unit: "d" } } } },
       { id: "movable", sequence, _sequence: { id: "sequence-note", extension: [note] },
         doseAndRate: [{ doseQuantity: q(3) }],
