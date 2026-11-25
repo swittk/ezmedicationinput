@@ -165,22 +165,25 @@ function actionAtIsGovernedByDirective(parts: Lexeme[], index: number): boolean 
 }
 
 function actionPhraseCandidates(parts: Lexeme[], index: number, length: number): string[] {
-  const slice = parts.slice(index, index + length);
-  if (slice.length !== length) return [];
-  const canonical = slice.map((part) => key(part)).filter(Boolean);
-  if (canonical.length !== length) return [];
-  const candidates = new Set<string>();
-  candidates.add(canonical.join(" "));
-  candidates.add(slice.map((part) => part.original).join(" "));
+  if (index + length > parts.length) return [];
+  let canonical = "", spaced = "", contiguousText = "";
   let contiguous = true;
-  for (let offset = 1; offset < slice.length; offset += 1) {
-    if (slice[offset - 1].sourceEnd !== slice[offset].sourceStart) {
-      contiguous = false;
-      break;
-    }
+  for (let offset = 0; offset < length; offset += 1) {
+    const part = parts[index + offset];
+    const normalized = key(part);
+    if (!normalized) return [];
+    const separator = offset ? " " : "";
+    canonical += separator + normalized;
+    spaced += separator + part.original;
+    if (offset && parts[index + offset - 1].sourceEnd !== part.sourceStart) contiguous = false;
+    if (contiguous) contiguousText += part.original;
   }
-  if (contiguous) candidates.add(slice.map((part) => part.original).join(""));
-  return Array.from(candidates).filter((candidate) => candidate.trim().length > 0);
+  const candidates: string[] = [];
+  if (canonical.trim()) candidates.push(canonical);
+  if (spaced !== canonical && spaced.trim()) candidates.push(spaced);
+  if (contiguous && contiguousText !== canonical && contiguousText !== spaced && contiguousText.trim())
+    candidates.push(contiguousText);
+  return candidates;
 }
 
 function actionCandidateIsAnchoredSiteModifier(
