@@ -341,7 +341,8 @@ export function buildCanonicalParallelRegimen(
         if (item.clause.schedule?.phaseStartReference)
           return partialParallelRegimen(trackPhases, clauses, "parallel-regimen-local-day-origin");
         allMembers.push(item);
-        calendarBounded ||= Boolean(item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd);
+        calendarBounded ||= Boolean(item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
+          item.clause.schedule?.calendarEvents?.length);
       }
     }
 

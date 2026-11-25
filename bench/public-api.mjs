@@ -301,14 +301,14 @@ add("nextDueDoses", "nextDueDoses/varied-calendars", (m, i) => {
   return m.nextDueDoses(rows[0], { ...schedule, from: d, orderedAt: d });
 });
 // A separate fresh workload advances the same ordinal in each build through
-// probes, warmup, calibration and measured rounds. Millisecond offsets retain
-// the existing 2026-27 calendar range instead of extending weeks indefinitely.
+// probes, warmup, calibration and measured rounds. Negative millisecond offsets
+// retain the morning dose and the existing 2026-27 calendar range.
 // The warm varied case must not seed the first fresh-calendar input instants.
-const freshCalendarBases = variedDates.map(date => new Date(date).getTime() + 1);
+const freshCalendarBases = variedDates.map(date => new Date(date).getTime() - 1);
 const freshCalendarState = new Map([baseline, candidate].map(m =>
   [m, { nextOrdinal: 0, blocks: [] }]));
 function freshCalendarDate(ordinal) {
-  return new Date(freshCalendarBases[ordinal % freshCalendarBases.length] +
+  return new Date(freshCalendarBases[ordinal % freshCalendarBases.length] -
     Math.floor(ordinal / freshCalendarBases.length)).toISOString();
 }
 function prepareFreshCalendars(module, iterations) {
@@ -329,11 +329,22 @@ cases[cases.length - 1].prepare = prepareFreshCalendars;
 // Check the first wrap explicitly, outside timing and without advancing either
 // build's execution sequence or touching the production calendar cache.
 const freshCalendarCheck = Array.from({ length: 195 }, (_, i) => freshCalendarDate(i));
-if (freshCalendarDate(0) !== "2026-01-01T01:00:00.001Z" ||
-    freshCalendarDate(97) !== "2026-01-01T01:00:00.002Z" ||
-    freshCalendarDate(194) !== "2026-01-01T01:00:00.003Z" ||
+if (freshCalendarDate(0) !== "2026-01-01T00:59:59.999Z" ||
+    freshCalendarDate(97) !== "2026-01-01T00:59:59.998Z" ||
+    freshCalendarDate(194) !== "2026-01-01T00:59:59.997Z" ||
     new Set(freshCalendarCheck).size !== 195 || freshCalendarCheck.some(date => variedDates.includes(date)))
   throw new Error("Fresh-calendar fixture must retain distinct valid query instants disjoint from the varied case");
+// Use a held-out year so this oracle does not warm measured input instants.
+if (filter.test("nextDueDoses/fresh-calendars")) {
+  const warm = "2025-01-01T01:00:00.000Z", fresh = "2025-01-01T00:59:59.999Z";
+  for (const module of [baseline, candidate]) {
+    const expected = module.nextDueDoses(rows[0], { ...schedule, from: warm, orderedAt: warm });
+    const actual = module.nextDueDoses(rows[0], { ...schedule, from: fresh, orderedAt: fresh });
+    if (expected[0] !== "2025-01-01T08:00:00+07:00" ||
+        JSON.stringify(actual) !== JSON.stringify(expected))
+      throw new Error("Fresh-calendar offsets must preserve the warm case's administration times");
+  }
+}
 for (const [name, input] of [
   ["simple", rows],
   ["complex", parsed.eye.fhir],
@@ -782,6 +793,10 @@ function completeComplexRows(output) {
     const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
     if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) ||
         row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
+        amount.comparator !== undefined || amount.extension?.some(extension =>
+          extension.url === "http://ema.europa.eu/fhir/extension/comparator" &&
+          extension.valueCoding?.system === "http://spor.ema.europa.eu/v1/lists/100000000008" &&
+          extension.valueCoding.code !== "100000000049") ||
         amount.system !== "http://standardterms.edqm.eu" || amount.code !== "15022000" ||
         !oneCode(row.route, "http://snomed.info/sct", "54485002") ||
         !oneCode(row.site, "http://snomed.info/sct", expected[1]) ||
@@ -812,6 +827,13 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
   if (!completeComplexRows(ongoingBidControl))
     throw new Error("Six-row oracle rejected the complete unbounded BID control");
+  const qualifiedDose = structuredClone(ongoingBidControl);
+  qualifiedDose.fhir[0].doseAndRate[0].doseQuantity.extension = [{
+    url: "http://ema.europa.eu/fhir/extension/comparator",
+    valueCoding: { system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: "100000000050" },
+  }];
+  if (completeComplexRows(qualifiedDose))
+    throw new Error("Six-row oracle accepted a qualified one-drop dose");
   for (const bound of [{ boundsDuration: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
     { boundsRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
     { boundsPeriod: { end: "2026-12-01T00:00:00Z" } }]) {

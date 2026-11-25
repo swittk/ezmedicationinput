@@ -1219,10 +1219,14 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
           if (evidence.instructionContinuation(site.rightIndex, broadEnd)) {
             proposals.push(keep('regimen.instruction-continuation', 500, 'right.type', 'instruction'));
           } else {
-            const prefix = evidence.probe(start, site.start), full = evidence.probe(start, broadEnd);
-            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule) ||
-              full.conditionStarts.some(offset => offset < site.start);
-            if (full.complete && full.hasHead && fronted) {
+            const prefix = evidence.probe(start, site.start);
+            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule);
+            // A fronted adjunct belongs to its complete administration, even
+            // when a later phase makes the broad one-clause probe incomplete.
+            const bounded = fronted ? evidence.probe(start, probeEnd(site.rightIndex)) : undefined;
+            const full = bounded?.complete && bounded.hasHead ? bounded : evidence.probe(start, broadEnd);
+            if (full.complete && full.hasHead &&
+                (fronted || full.conditionStarts.some(offset => offset < site.start))) {
               proposals.push(keep('regimen.fronted-adjunct', 850, 'whole.completeWithFrontedAdjunct', true));
             } else proposals.push({ action: 'split', rule: 'regimen.comma-administration-head', priority: 250, relation: 'independent',
               evidence: [{ feature: 'right.headLexeme', value: lexeme(right) }] });

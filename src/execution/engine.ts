@@ -2603,7 +2603,7 @@ function resolveAdministrationWindow(
       options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
       timeZone,
       countEligibilityStart ?? cadence.origin,
-      administration.schedule?.explicitEvents?.length ? cycleEnd : undefined
+      earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd : undefined) ?? undefined
     );
     if (completion) {
       const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
@@ -4403,7 +4403,10 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const available = Math.max(0, acceptedCount - Math.floor(used));
     if (!available) return [];
     const capped = Math.min(available, 10000);
-    const uncapped: CanonicalAdministration = {
+    // A count-only single administration has no recurrence after removing its
+    // count. Keep that identity and anchor its one event at phase eligibility.
+    const singleAdministration = repeatForCount && isSingleAdministrationRepeat(repeatForCount);
+    const uncapped: CanonicalAdministration = singleAdministration ? one : {
       ...one,
       schedule: {
         ...one.schedule,
@@ -4419,6 +4422,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       ? { possible: false, from: requestedFrom } : undefined;
     const candidates = nextDueDoses(uncapped, {
       ...options,
+      ...(singleAdministration ? { orderedAt: origin } : undefined),
       ...(eventStatus ? { explicitEventStatus: eventStatus } : undefined),
       countEligibilityStart: undefined,
       countedActualTimes,
@@ -6840,7 +6844,8 @@ function calculateTotalUnitsSingle(
   // actual dates. Keep elapsed-cap arithmetic shifted, while the existing
   // filtered enumerator owns displaced candidates for civil admission.
   const shiftedAdmission = administrationOffset !== undefined &&
-    (!!getTimingOccurrenceCap(sourceDosage.schedule?.recurrence) ||
+    (!!sourceDosage.excludedDates?.length || !!sourceDosage.excludedWeekdays?.length ||
+      !!getTimingOccurrenceCap(sourceDosage.schedule?.recurrence) ||
       !!sourceDosage.limits?.some(limit => {
         const unit = limit.scope === "period" ? parseBoundsDurationUnit(limit.period) : undefined;
         return unit === DurationUnit.Month || unit === DurationUnit.Year;
@@ -8142,7 +8147,7 @@ function finiteAdministrationCompletion(
   options: NextDueDoseOptions,
   zone: string,
   eligibleFrom: Date = start,
-  absoluteCycleEnd?: Date
+  endExclusive?: Date
 ):
   | {
       end: Date;
@@ -8167,12 +8172,13 @@ function finiteAdministrationCompletion(
   const actual: number[] = [];
   for (const stamp of options.priorDoseTimes ?? []) {
     const at = coerceDate(stamp, "priorDoseTimes").getTime();
-    if (at >= eligibleFrom.getTime() && at < queryFrom.getTime()) actual.push(at);
+    if (at >= eligibleFrom.getTime() && at < queryFrom.getTime() &&
+        (!endExclusive || at < endExclusive.getTime())) actual.push(at);
   }
   if (actual.length > 1) actual.sort((a, b) => a - b);
   if (actual.length >= count) {
     const last = new Date(actual[count - 1]);
-    return !absoluteCycleEnd || last < absoluteCycleEnd
+    return !endExclusive || last < endExclusive
       ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
   }
   // A PRN phase cannot complete from unrecorded opportunities before this
@@ -8195,7 +8201,7 @@ function finiteAdministrationCompletion(
   } as PhaseCountOptions);
   if (due.length !== remaining) return undefined;
   const last = new Date(due[due.length - 1]);
-  return !absoluteCycleEnd || last < absoluteCycleEnd
+  return !endExclusive || last < endExclusive
     ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
 }
 

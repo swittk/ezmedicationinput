@@ -542,6 +542,23 @@ export function scopeSequentialPhaseSemantics(
       // The same source onset also belongs to the succeeding step's start.
       // Do not erase it after bounding the predecessor: R6/R5 lowering must
       // still emit the exact treatment-relative date on the next phase.
+    } else if (start && phasePauseDays) {
+      // A dated completion owns its terminal pause independently of the order.
+      // Preserve a successor's explicit onset instead of replacing that owner.
+      relativePhaseStarts.set(edge.to, null);
+      for (const member of next) {
+        const clause = states[member]?.primaryClause;
+        const schedule = clause?.schedule;
+        if (!clause || !schedule || schedule.treatmentStartOffsetDays !== undefined ||
+            schedule.phaseStartReference || schedule.boundsStart || schedule.boundsEnd ||
+            schedule.calendarEvents?.length) continue;
+        schedule.boundsStart = advanceDate(start, phasePauseDays);
+        clause.evidence.push({
+          rule: "hpsg.regimen.terminal-treatment-pause",
+          spans: [], scheduleFields: ["boundsStart"],
+          note: "The next administration starts after the dated completion and its finite no-medication interval."
+        });
+      }
     } else if (!contextualNextDay) {
       const lengths = schedules.map(exactPhaseDurationDays);
       if (priorStart !== null && lengths.length &&

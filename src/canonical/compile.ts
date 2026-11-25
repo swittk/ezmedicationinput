@@ -348,6 +348,7 @@ export function courseFromPartialParallel(
             for (let parent = priorStart; finitePredecessors && parent < priorEnd; parent++) {
               const previous = administrations[parent], repeat = previous.schedule?.recurrence;
               finitePredecessors = Boolean(previous.phaseEnd || repeat?.calendarWindow?.end ||
+                previous.schedule?.explicitEvents?.length ||
                 repeat?.courseLength?.value !== undefined &&
                   !repeat.courseLength.comparator ||
                 previous.anchoredLength?.quantity?.value !== undefined &&
