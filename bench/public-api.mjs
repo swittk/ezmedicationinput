@@ -53,10 +53,6 @@ if (!smoke && (!Number.isFinite(targetMs) || targetMs <= 0))
 // batches. Preserve the requested minimum, including historical odd inputs.
 const rounds = requestedRounds + requestedRounds % 2;
 const candidateFirst = argv.includes("--candidate-first");
-const baselineEntry = realpathSync(resolve(baselinePath));
-const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
-if (baselineEntry === candidateEntry)
-  throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
 const maxRegression = 0.04;
 const indicativeMeaningfulUs = 500;
 const forceMeaningful = argv.includes("--meaningful");
@@ -104,22 +100,20 @@ function checkpoint(complete = false) {
   }
 }
 checkpoint();
-let baseline, candidate;
+// Report path resolution, imports and untimed fixture preparation together.
 try {
-  baseline = await import(pathToFileURL(baselineEntry).href);
-  candidate = await import(pathToFileURL(candidateEntry).href);
-} catch (error) {
-  report.phase = "setup-error";
-  report.errors.push({ name: "setup", error: String(error.stack ?? error) });
-  checkpoint();
-  throw error;
-}
+const baselineEntry = realpathSync(resolve(baselinePath));
+const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
+if (baselineEntry === candidateEntry)
+  throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
+const baseline = await import(pathToFileURL(baselineEntry).href);
+const candidate = await import(pathToFileURL(candidateEntry).href);
 const emaComparatorQuantity = { extension: [{
   url: candidate.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
   valueCoding: { system: candidate.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
 }] };
 const candidateEmaComparator = candidate.getEmaQuantityComparator;
-if (candidateEmaComparator(emaComparatorQuantity) !== "~")
+if (filter.test("getEmaQuantityComparator") && candidateEmaComparator(emaComparatorQuantity) !== "~")
   throw new Error("EMA comparator fixture must decode the encoded approximation");
 const S = {
   ordinary: "1 tab PO BID",
@@ -574,20 +568,14 @@ const newApis = new Set([...covered].filter(api =>
 const missing = Object.keys(candidate).filter(
   (key) => typeof candidate[key] === "function" && !covered.has(key)
 );
-if (all && missing.length) {
-  const error = new Error("Uncovered public APIs: " + missing.join(", "));
-  report.phase = "setup-error";
-  report.errors.push({ name: "setup", error: String(error.stack ?? error) });
-  checkpoint();
-  throw error;
-}
+if (all && missing.length)
+  throw new Error("Uncovered public APIs: " + missing.join(", "));
 if (counted) for (const module of [baseline, candidate]) {
   const decode = module.parseBodySiteAdministrationTargetCountExtension;
   if (typeof decode === "function" && decode(counted) !== 2)
     throw new Error("Target-count decoder fixture must exercise the encoded count, not an empty input");
 }
 Object.assign(report, {
-  phase: smoke ? "smoke" : "measuring",
   runtime: {
     node: process.version,
     platform: process.platform,
@@ -682,7 +670,7 @@ function completeThaiRightEyeDose(output) {
 }
 function completeThaiPreparedDrink(output) {
   return completeThaiDose(output, "ดื่ม", "เม็ด", 2) &&
-    /^\s*ผสมน้ำ\s*(?:[.;,]\s*|(?:จากนั้น|แล้ว)\s*)?ดื่ม\s*(?:ครั้งละ\s*)?\+?2(?:\.0+)?\s*เม็ด\s*[.;,]?\s*$/u.test(output);
+    /^\s*ผสมน้ำ\s*(?:[.;,]\s*)?(?:(?:จากนั้น|แล้ว)\s*)?ดื่ม\s*(?:ครั้งละ\s*)?\+?2(?:\.0+)?\s*เม็ด\s*[.;,]?\s*$/u.test(output);
 }
 function completeStagedBatch(output) {
   if (typeof output !== "string") return false;
@@ -805,7 +793,8 @@ function completeComplexRows(output) {
     if (part("rowIndex")?.valueInteger !== index || part("sequence")?.valueInteger !== expected[0] ||
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
-    if (repeat?.count !== undefined || repeat?.countMax !== undefined) return false;
+    if (repeat?.count !== undefined || repeat?.countMax !== undefined ||
+        (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2])) return false;
     // The final left-eye BID phase is ongoing. A standard repeat bound must
     // not silently shorten it while the retained step still looks open-ended.
     if (index === 5 && (repeat?.boundsDuration !== undefined || repeat?.boundsRange !== undefined ||
@@ -818,16 +807,24 @@ function completeComplexRows(output) {
   });
 }
 // Clinical oracle controls stay outside every measured invocation.
-const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
-if (!completeComplexRows(ongoingBidControl))
-  throw new Error("Six-row oracle rejected the complete unbounded BID control");
-for (const bound of [{ boundsDuration: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
-  { boundsRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
-  { boundsPeriod: { end: "2026-12-01T00:00:00Z" } }]) {
-  const shortened = structuredClone(ongoingBidControl);
-  Object.assign(shortened.fhir[5].timing.repeat, bound);
-  if (completeComplexRows(shortened))
-    throw new Error("Six-row oracle accepted a bounded ongoing BID phase");
+if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
+  const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
+  if (!completeComplexRows(ongoingBidControl))
+    throw new Error("Six-row oracle rejected the complete unbounded BID control");
+  for (const bound of [{ boundsDuration: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
+    { boundsRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
+    { boundsPeriod: { end: "2026-12-01T00:00:00Z" } }]) {
+    const shortened = structuredClone(ongoingBidControl);
+    Object.assign(shortened.fhir[5].timing.repeat, bound);
+    if (completeComplexRows(shortened))
+      throw new Error("Six-row oracle accepted a bounded ongoing BID phase");
+  }
+  for (const frequencyMax of [2, 3]) {
+    const cadence = structuredClone(ongoingBidControl);
+    cadence.fhir[5].timing.repeat.frequencyMax = frequencyMax;
+    if (completeComplexRows(cadence) !== (frequencyMax === 2))
+      throw new Error("Six-row oracle must preserve the fixed twice-daily cadence");
+  }
 }
 for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
@@ -918,6 +915,7 @@ for (const text of ["หยอดตาขวา 2 หยด.", "หยอดต
     throw new Error("Complete-dose oracle accepted a missing/conflicting eye or a negated administration");
 if (!completeThaiPreparedDrink("ผสมน้ำ จากนั้นดื่มครั้งละ 2 เม็ด.") ||
     !completeThaiPreparedDrink("ผสมน้ำ. ดื่ม 2 เม็ด.") ||
+    !completeThaiPreparedDrink("ผสมน้ำ. จากนั้นดื่มครั้งละ 2 เม็ด.") ||
     !completeThaiPreparedDrink("ผสมน้ำ;\nดื่มครั้งละ 2.0 เม็ด.") ||
     completeThaiPreparedDrink("ดื่มครั้งละ 2 เม็ด.") ||
     completeThaiPreparedDrink("ผสมน้ำ จากนั้นห้ามดื่มครั้งละ 2 เม็ด.") ||
@@ -975,6 +973,8 @@ for (const changed of [
   try { requireParallelSchedule(changed); } catch { rejected = true; }
   if (!rejected) throw new Error("Parallel schedule oracle accepted wrong count, multiplicity, order or instants");
 }
+report.phase = smoke ? "smoke" : "measuring";
+checkpoint();
 const candidateOnlyCases = [];
 for (const test of cases) {
   if (!filter.test(test.name)) continue;
@@ -1150,3 +1150,10 @@ console.log(
 );
 console.log("Meaningful workloads retain the 4% limit; selectively confirm suspects with --only. REVIEW marks fast timings needing absolute-latency, frequency and noise judgment, not automatic acceptance; use --meaningful when cumulative impact warrants the limit.");
 if (report.errors.length || report.unavailable.length || report.meaningfulRegressions) process.exitCode = 1;
+} catch (error) {
+  const setup = report.phase === "initializing";
+  report.phase = setup ? "setup-error" : "run-error";
+  report.errors.push({ name: setup ? "setup" : "run", error: String(error.stack ?? error) });
+  checkpoint();
+  throw error;
+}
