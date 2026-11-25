@@ -5,7 +5,7 @@ import { THAI_COURSE } from "./locales/course/th";
 import { getQuantityDurationUnit } from "./unit-lexicon";
 export type { CourseLanguage } from "./locales/course/types";
 import { localizedValue, quantityComparatorText } from "./localization";
-import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText, doseUnitUsesTargetScope } from "./format";
+import { hasDailyRecurrenceAcrossClocks, formatDoseEnglish, timingCodeMatchesRecurrence, timingEventPreviewSchedule, independentTimingText, doseUnitUsesTargetScope } from "./format";
 import { composedCodedWarningActionSources, findAdditionalInstructionDefinitionByCoding, parseAdditionalInstructions, realizeAdviceFramesText } from "./advice";
 import { resolveBodySitePhrase, realizeBodySiteRestriction, type BodySiteQualifierFeatures } from "./body-site-grammar";
 import { getPrimitiveTranslation } from "./fhir-translations";
@@ -1526,7 +1526,7 @@ function collectWhenPhrasesThai(
   schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  return collectLocalizedWhenPhrases(schedule, TH_TIMING_GRAMMAR, options);
+  return collectLocalizedWhenPhrases(timingEventPreviewSchedule(schedule), TH_TIMING_GRAMMAR, options);
 }
 
 export function joinWithAndThai(parts: string[]): string {

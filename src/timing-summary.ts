@@ -58,7 +58,8 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
 
 /** Standard BED and the existing QHS shorthand share the same event anchor. */
 export function timingPreviewDescriptor(code: string) {
-  return TIMING_ABBREVIATIONS[code === "BED" ? "qhs" : code.toLowerCase()];
+  const lower = code.toLowerCase();
+  return TIMING_ABBREVIATIONS[lower === "bed" ? "qhs" : lower];
 }
 
 /** Human previews also recognize existing SIG shorthand without treating it

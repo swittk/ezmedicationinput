@@ -171,8 +171,8 @@ maintainability; no old internal representation must be retained.
 Native courses are parser implementation data. EZMED does not expose a native
 editing workflow. Parser and projection outputs, including borrowed provider
 listings, are immutable by caller contract; ordinary imports do not deep-clone
-or freeze them defensively. Public instruction action and concept vocabulary
-lookups and listings retain their established detached definition copies.
+or freeze them defensively. Instruction action and concept vocabulary lookups
+and listings also return borrowed immutable definitions.
 Applications that modify external R5 or current R6 data pass those values back
 through the corresponding import boundary. Native scheduling, formatting, and
 supply consume clinical facts directly; the R5 reconciliation bridge is confined
@@ -416,8 +416,9 @@ helpers before scenario classification. An older baseline lacking those fixture
 APIs or the current R6 structure stops during setup; candidate-only classification
 does not supply those prerequisites.
 
-The harness checks that every exported function has a representative fixture or
-an explicit new-API classification. Each scenario is measured independently
+The default run measures a representative subset. Add `--all` to check that
+every exported function has a fixture or an explicit new-API classification.
+Each scenario is measured independently
 with paired alternating runs; faster scheduling cannot hide slower suggestions
 or conversion. Helper exports are captured before timing, so repeated module
 namespace lookups are not mistaken for the cost of a named function call.

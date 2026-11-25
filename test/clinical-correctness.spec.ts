@@ -3758,3 +3758,61 @@ describe("round79 current clinical preview ownership", () => {
     expect(toDosageDetails(fresh(toFhirR5Dosages(raw))).step[0].component[0].doseAndRate?.[0]?.[field]).toEqual(expression);
   });
 });
+
+
+describe("independent coded timing previews", () => {
+  const gts = "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation";
+  it.each([
+    ["AM", "in the morning", "ตอนเช้า"],
+    ["PM", "in the evening", "ตอนเย็น"],
+    ["BED", "at bedtime", "ก่อนนอน"],
+    ["bed", "at bedtime", "ก่อนนอน"],
+  ])("retains the event in code-only %s long previews", (value, english, thai) => {
+    const code = { coding: [{ code: value, ...(value === value.toUpperCase() ? { system: gts } : {}) }] };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { code } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, r6]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe(`Use 1 tablet ${english}.`);
+      expect(formatSig(input, "long", { locale: "th" })).toBe(`ใช้ครั้งละ 1 เม็ด ${thai}.`);
+    }
+    expect(toFhirR5Dosages(r6)[0].timing?.code).toEqual(code);
+    expect(toDosageDetails([row]).step[0].component[0].timing?.code).toEqual(code);
+  });
+
+  it.each([
+    ["bid", "twice daily"], ["tid", "three times daily"], ["qid", "four times daily"],
+    ["qd", "once daily"], ["qod", "every other day"], ["wk", "once weekly"], ["mo", "once monthly"],
+  ])("renders the recognized systemless %s cadence without changing its spelling", (value, phrase) => {
+    const code = { coding: [{ code: value }] };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { code } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, r6])
+      expect(formatSig(input, "long", { locale: "en" })).toBe(`Use 1 tablet ${phrase}.`);
+    expect(toFhirR5Dosages(r6)[0].timing?.code).toEqual(code);
+  });
+
+  it("keeps explicit event and clock previews without duplicating a code anchor", () => {
+    const doseAndRate = [{ doseQuantity: { value: 1, unit: "tab" } }];
+    const code = { coding: [{ system: gts, code: "AM" }] };
+    const event = { doseAndRate, timing: { code, repeat: { when: [EventTiming.Morning] } } };
+    const clock = { doseAndRate, timing: { code, repeat: { timeOfDay: ["08:00:00"] } } };
+    expect(formatSig(event, "long", { locale: "en" })).toBe("Use 1 tablet in the morning.");
+    expect(formatSig(event, "long", { locale: "th" })).toBe("ใช้ครั้งละ 1 เม็ด ตอนเช้า.");
+    expect(formatSig(clock, "long", { locale: "en" })).toBe("Use 1 tablet at 8:00 am.");
+    expect(formatSig(clock, "long", { locale: "th" })).toBe("ใช้ครั้งละ 1 เม็ด เวลา 08:00.");
+  });
+
+  it.each([false, true])("retains compact interval meaning with a frequency-only repeat (complete=%s)", complete => {
+    const code = { coding: [{ code: "q4-6h", display: "every 4 to 6 hours" }] };
+    const repeat = { frequency: 1, ...(complete ? { period: 4, periodMax: 6, periodUnit: FhirPeriodUnit.Hour } : {}) };
+    const row = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { code, repeat } };
+    const r6: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    for (const input of [row, r6]) {
+      expect(formatSig(input, "long", { locale: "en" })).toBe(complete
+        ? "Use 1 tablet once every 4 to 6 hours." : "Use 1 tablet once q4-6h.");
+      expect(formatSig(input, "long", { locale: "th" })).toBe(complete
+        ? "ใช้ครั้งละ 1 เม็ด 1 ครั้ง ทุก 4 ถึง 6 ชั่วโมง." : "ใช้ครั้งละ 1 เม็ด ครั้งเดียว q4-6h.");
+    }
+    expect(toFhirR5Dosages(r6)[0].timing?.code).toEqual(code);
+  });
+});

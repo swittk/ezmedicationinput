@@ -429,7 +429,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
   const period = schedule?.period;
   const periodMax = schedule?.periodMax;
   const periodUnit = schedule?.periodUnit;
-  const timingCode = schedule?.timingCode;
+  const timingCode = schedule?.timingCode?.toUpperCase();
   const rangedPeriod = periodMax !== undefined && periodMax !== period;
   const countPrefix = frequency !== undefined &&
     (rangedPeriod || frequency !== 1 || frequencyMax !== undefined && frequencyMax !== frequency)
@@ -821,7 +821,7 @@ function collectWhenPhrases(
   schedule: CanonicalScheduleExpr | undefined,
   options?: TimingSummaryOptions
 ): string[] {
-  return collectLocalizedWhenPhrases(schedule, EN_TIMING_GRAMMAR, options);
+  return collectLocalizedWhenPhrases(timingEventPreviewSchedule(schedule), EN_TIMING_GRAMMAR, options);
 }
 
 export function joinWithAnd(parts: string[]): string {
@@ -1235,10 +1235,8 @@ export function independentTimingText(
        recurrence.periodUnit !== undefined)) return undefined;
   // Compact interval shorthand yields only when a typed cadence replaces it.
   // Otherwise retain the existing code when no preview descriptor expands it.
-  return isCompactIntervalTimingCode(code) && recurrence &&
-    (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
-     recurrence.period !== undefined || recurrence.periodMax !== undefined ||
-     recurrence.periodUnit !== undefined) ? undefined : code;
+  return isCompactIntervalTimingCode(code) && recurrence?.periodUnit !== undefined &&
+    (recurrence.period !== undefined || recurrence.periodMax !== undefined) ? undefined : code;
 }
 
 export function timingCodeMatchesRecurrence(
@@ -1268,6 +1266,15 @@ export function timingCodeMatchesRecurrence(
     (schedule.period === undefined || schedule.period === period) &&
     (schedule.periodMax === undefined || schedule.periodMax === period) &&
     (schedule.periodUnit === undefined || schedule.periodUnit === unit);
+}
+
+/** A code-only event supplies display meaning without changing authored timing. */
+export function timingEventPreviewSchedule(
+  schedule: CanonicalScheduleExpr | undefined
+): CanonicalScheduleExpr | undefined {
+  if (!schedule?.timingCode || schedule.when?.length || schedule.timeOfDay?.length) return schedule;
+  const when = timingPreviewDescriptor(schedule.timingCode)?.when;
+  return when?.length && timingCodeMatchesRecurrence(schedule) ? { ...schedule, when } : schedule;
 }
 
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
