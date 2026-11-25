@@ -12331,3 +12331,59 @@ describe("round74 shared source owners", () => {
     expect(source).toEqual(before);
   });
 });
+
+describe("round74 ancillary advice and independent authored directions", () => {
+  const header = "Swallow 1 tablet whole";
+  const timing = { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } };
+
+  it.each(["Shake well", "Do not crush"])("keeps header dose directions beside current timing and %s", advice => {
+    const graph = parseSig(advice).meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.primaryOwnership).toEqual({});
+    const source: FhirR6DosageInstruction = { renderedInstruction: header, step: [{ component: [{
+      timing, extension: [buildInstructionGraphExtension(graph)!],
+    }] }] };
+    const original = persist(source);
+    const rows = persist(toFhirR5Dosages(source)), native = importCanonicalCourse(persist(source));
+    for (const input of [native, persist(source), rows]) for (const locale of ["en", "th"] as const) {
+      const text = formatSig(input, "long", { locale, realizationMode: "roundtrip" });
+      expect(text.split(header).length - 1).toBe(1);
+      expect(text).toMatch(locale === "en" ? /twice daily/iu : /วันละ ?2/u);
+      expect(text).toMatch(locale === "en" ? (advice === "Shake well" ? /shake well/iu : /do not crush/iu)
+        : advice === "Shake well" ? /เขย่า/u : /ห้ามบด/u);
+    }
+    expect(fromFhir(persist(source), { locale: "en", realizationMode: "roundtrip" }).longText.split(header).length - 1).toBe(1);
+    expect(source).toEqual(original);
+  });
+
+  it.each([false, true])("shares source ownership for a fresh R5 member beside ancillary advice (current dose %s)", dose => {
+    const graph = parseSig("Shake well").meta.canonical.clauses[0].instructionGraph!;
+    const source: FhirDosage = { text: header, timing, extension: [buildInstructionGraphExtension(graph)!],
+      ...(dose ? { doseAndRate: [{ doseQuantity: q(2) }] } : {}) };
+    const before = persist(source), options = { locale: "en", realizationMode: "roundtrip" as const };
+    const imported = fromFhirDosage(source, options);
+    for (const text of [formatSig(source, "long", options), imported.longText]) {
+      expect(text.split(header).length - 1).toBe(1);
+      const current = text.split("; original directions:")[0];
+      expect(current).toMatch(/twice daily/iu);
+      expect(current).toMatch(/shake well/iu);
+      if (dose) {
+        expect(current).toMatch(/2 tablets/iu);
+        expect(current).not.toContain("1 tablet");
+      }
+    }
+    expect(source).toEqual(before);
+  });
+
+  it("keeps the current structured amount authoritative beside a different course header", () => {
+    const graph = parseSig("Shake well").meta.canonical.clauses[0].instructionGraph!;
+    const source: FhirR6DosageInstruction = { renderedInstruction: header, step: [{ component: [{
+      timing, doseAndRate: [{ doseQuantity: q(2) }], extension: [buildInstructionGraphExtension(graph)!],
+    }] }] };
+    for (const input of [importCanonicalCourse(persist(source)), persist(source), persist(toFhirR5Dosages(source))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
+      expect(text).toMatch(/2 tablets.*twice daily/iu);
+      expect(text).toMatch(/shake well/iu);
+      expect(text).not.toContain(header);
+    }
+  });
+});

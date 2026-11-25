@@ -573,9 +573,23 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
     !!r.activityTiming?.length || !!r.occurrenceCap || !!r.clockWindow || !!r.eventWindow ||
     !!r.startOffset || !!r.endOffset);
 }
+/** Primary source owners and a complete graph of these same directions can
+ * own their wording; unrelated ancillary advice cannot supply a missing dose. */
+function administrationOwnsSourceDirections(
+  administration: CanonicalAdministration,
+  graph: CanonicalSigClause["instructionGraph"],
+  sourceText: string | undefined
+): boolean {
+  if (administrationHasAmountFacts(administration)) return true;
+  if (!graph?.actions.length) return false;
+  const owner = graph.primaryOwnership;
+  if (owner ? owner.administrationActionIndex !== undefined || owner.dose !== undefined
+      : graph.primaryAdministrationSpan !== undefined) return true;
+  return sourceText !== undefined && graph.sourceText === sourceText && graph.coverage?.complete === true;
+}
 function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
   for (const stage of course.stages) for (const administration of stage.administrations)
-    if (administrationHasAmountFacts(administration) || administration.syntax?.instructionGraph?.actions.length ||
+    if (administrationOwnsSourceDirections(administration, administration.syntax?.instructionGraph, course.instruction) ||
         administration.text === course.instruction) return false;
   return true;
 }
@@ -665,7 +679,7 @@ function formatCanonicalBase(
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
     (source.schedule || source.route || source.target || source.siteReference || source.method || source.predicate || source.asNeeded) &&
-    !administrationHasAmountFacts(source) && !clause.instructionGraph?.actions.length;
+    !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
   if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
   const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
