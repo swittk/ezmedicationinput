@@ -4074,13 +4074,15 @@ describe("round56 interop current ownership", () => {
 
   const partialInput = (variant: string) => {
     const ratio: FhirRatio = { id: "authored-period-limit",
-      numerator: { ...(variant === "missing amount" ? {} : { value: 4 }), unit: "tab",
+      numerator: { ...(variant === "missing amount" ? {} : { value: 1 }), unit: "tab",
         extension: [{ url: "urn:clinic:amount-note", valueString: "keep authored amount metadata" }] },
       denominator: { ...(variant === "missing period" ? {} : { value: 1 }), unit: "d",
         extension: [{ url: "urn:clinic:period-note", valueString: "keep authored period metadata" }] },
       extension: [{ url: "urn:clinic:ratio-note", valueString: "keep the incomplete Ratio" }],
     };
-    const rows: EzDosage[] = [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily }, maxDosePerPeriod: [ratio] }];
+    const rows: EzDosage[] = [{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: {
+      ...daily, frequency: 2, timeOfDay: ["08:00:00", "20:00:00"],
+    } }, maxDosePerPeriod: [ratio] }];
     return { rows, ratio };
   };
 
@@ -4178,7 +4180,7 @@ describe("round56 interop current ownership", () => {
         expect(exported[0].maxDosePerPeriod).toEqual([ratio]);
         expect(toEzDosages(persist(exported))[0].safety?.doseLimit).toHaveLength(1);
         expect(calculateTotalUnits({ dosage: wire, ...options, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
-          .toMatchObject({ totalUnits: 2, unit: "tab" });
+          .toMatchObject({ totalUnits: variant === "complete" ? 2 : 4, unit: "tab" });
         wire = toDosageDetails(persist(exported));
       }
     });

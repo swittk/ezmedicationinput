@@ -2833,7 +2833,7 @@ describe("round59 partial facts and complete authored directions", () => {
           expect(current).not.toContain("a thin layer");
           expect(rendered.trim()).not.toBe("");
           if (style === "long" || !hasSite && !hasRoute)
-            expect(rendered).toMatch(locale === "en" ? /apply/iu : /ทา/u);
+            expect(current).toMatch(locale === "en" ? /apply/iu : /ทา/u);
           if (hasSite) expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
         }
       expect(input.step![0].component[0].text).toBe(row.text);
@@ -4289,7 +4289,7 @@ describe("round76 partial-event selectors and supply qualifications", () => {
       const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day });
       expect(result).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
       expect(result.explanation).toContain("could not be applied");
-      const exactCourse = importCanonicalCourse(freshExecutionInput(input));
+      const exactCourse = freshExecutionInput(importCanonicalCourse(freshExecutionInput(input)));
       delete exactCourse.stages[0].administrations[0].limits![0].period!.comparator;
       expect(calculateTotalUnits({ dosage: exactCourse, ...options, durationValue: 1, durationUnit: Unit.Day }))
         .toMatchObject({ totalUnits: 1, unit: "tab" });

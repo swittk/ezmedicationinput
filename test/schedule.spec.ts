@@ -2506,8 +2506,10 @@ describe("civil boundaries retain the intended instant", () => {
       .toEqual(["2021-10-29T00:30:00+03:00"]);
   });
   it.each([Unit.Day, Unit.Week])("preserves fractional seconds in a civil %s supply horizon", unit => {
-    const input = dose(); input.schedule = { explicitEvents: [unit === Unit.Day
-      ? "2026-01-02T12:00:00.250Z" : "2026-01-08T12:00:00.250Z"] };
+    const day = unit === Unit.Day ? "2026-01-02" : "2026-01-08";
+    const input = dose(); input.schedule = { explicitEvents: [
+      day + "T12:00:00.250Z", day + "T12:00:00.500Z",
+    ] };
     expect(calculateTotalUnits({ ...options, dosage: input, from: "2026-01-01T12:00:00.500Z",
       durationValue: 1, durationUnit: unit }).totalUnits).toBe(1);
   });

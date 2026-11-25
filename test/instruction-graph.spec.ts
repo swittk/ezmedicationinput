@@ -2745,8 +2745,8 @@ describe("round 27: action heads and complements keep separate quantities", () =
     });
     const en = realizeInstructionAction(frame, "en");
     const th = realizeInstructionAction(frame, "th");
-    expect(en).toMatch(/^Do not mix.*milk before each dose$/u);
-    expect(th).toContain("ห้ามผสม");
+    expect(en).toBe("Do not mix with milk before each dose");
+    expect(th).toMatch(/ห้ามผสม(?:ด้วย|กับ)(?:milk|นม)ก่อนการให้ยาแต่ละครั้ง/u);
     expect(th).toContain("ก่อนการให้ยาแต่ละครั้ง");
     expect(en.match(/before each dose/gu)).toHaveLength(1);
     expect(th.match(/ก่อนการให้ยาแต่ละครั้ง/gu)).toHaveLength(1);
@@ -5401,12 +5401,21 @@ describe("round75 coordinated Time daughters", () => {
     for (const input of [changed, importCanonicalCourse(changed), r6, saved]) for (const locale of ["en", "th"]) {
       const current = formatSig(input, "long", { locale, realizationMode: "normalized" })
         .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0];
-      expect(current.split("08:00")).toHaveLength(2);
-      expect(current).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
-      expect(current).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
-      expect(current).toContain(locale === "en" ? "30 seconds" : "30 วินาที");
-      for (const event of locale === "en" ? ["before breakfast", "before dinner"] : ["ก่อนอาหารเช้า", "ก่อนอาหารเย็น"])
-        expect(current.split(event)).toHaveLength(2);
+      const administrationStart = current.search(locale === "en" ? /\bgargle\b/iu : /กลั้วคอ/u);
+      expect(administrationStart).toBeGreaterThan(0);
+      const preparation = current.slice(0, administrationStart), administration = current.slice(administrationStart);
+      expect(preparation.split("08:00")).toHaveLength(2);
+      expect(administration).not.toContain("08:00");
+      for (const amount of locale === "en" ? ["15 mL", "100 mL"] : ["15 มิลลิลิตร", "100 มิลลิลิตร"]) {
+        expect(preparation).toContain(amount);
+        expect(administration).not.toContain(amount);
+      }
+      expect(administration).toContain(locale === "en" ? "30 seconds" : "30 วินาที");
+      expect(preparation).not.toContain(locale === "en" ? "30 seconds" : "30 วินาที");
+      for (const event of locale === "en" ? ["before breakfast", "before dinner"] : ["ก่อนอาหารเช้า", "ก่อนอาหารเย็น"]) {
+        expect(administration.split(event)).toHaveLength(2);
+        expect(preparation).not.toContain(event);
+      }
       expect(current).not.toMatch(locale === "en" ? /after breakfast|after dinner/u : /หลังอาหารเช้า|หลังอาหารเย็น/u);
     }
     expect(parseInstructionGraphExtension(saved[0].extension)?.sourceText).toBe(source);

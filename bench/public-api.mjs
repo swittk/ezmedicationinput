@@ -603,12 +603,12 @@ Object.assign(report, {
     cpu: cpus()[0]?.model,
   },
   baselineSha256: createHash("sha256")
-    .update(readFileSync(resolve(baselinePath)))
+    .update(readFileSync(baselineEntry))
     .digest("hex"),
   candidateSha256: createHash("sha256")
-    .update(readFileSync(new URL("../dist/index.js", import.meta.url)))
+    .update(readFileSync(candidateEntry))
     .digest("hex"),
-  baseline: resolve(baselinePath),
+  baseline: baselineEntry,
   candidate: candidateEntry,
   publicFunctions: Object.keys(candidate).filter((k) => typeof candidate[k] === "function").length,
   coveredPublicFunctions: covered.size,
@@ -809,7 +809,7 @@ function completeComplexRows(output) {
   return complexRowFacts.every((expected, index) => {
     const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
     if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) || row.asNeededFor?.length ||
-        row.maxDosePerLifetime !== undefined ||
+        row.maxDosePerLifetime !== undefined || row.maxDosePerPeriod?.length ||
         row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
         amount.comparator !== undefined || amount.extension?.some(extension =>
           extension.url === "http://ema.europa.eu/fhir/extension/comparator" &&
@@ -850,6 +850,13 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   lifetimeCapped.fhir[5].maxDosePerLifetime = { ...lifetimeCapped.fhir[5].doseAndRate[0].doseQuantity };
   if (completeComplexRows(lifetimeCapped))
     throw new Error("Six-row oracle accepted an added lifetime dose maximum");
+  const periodCapped = structuredClone(ongoingBidControl);
+  periodCapped.fhir[5].maxDosePerPeriod = [{
+    numerator: { ...periodCapped.fhir[5].doseAndRate[0].doseQuantity },
+    denominator: { value: 1, unit: "d", system: "http://unitsofmeasure.org", code: "d" },
+  }];
+  if (completeComplexRows(periodCapped))
+    throw new Error("Six-row oracle accepted an added daily dose maximum");
   const conditional = structuredClone(ongoingBidControl);
   delete conditional.fhir[5].asNeeded;
   conditional.fhir[5].asNeededFor = [{ text: "eye discomfort" }];

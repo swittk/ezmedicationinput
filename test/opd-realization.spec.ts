@@ -1200,7 +1200,8 @@ describe("round37 action participant and method ownership", () => {
     const recovered = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
     for (const candidate of [graph, recovered]) for (const locale of ["en", "th"]) {
       const text = realizeInstructionGraph(candidate, locale)!;
-      expect(text).toContain(complete ? "2" : "up to the prescribed amount of powder");
+      expect(text).toContain(complete ? locale === "en" ? "2 g of powder" : "powder 2 g"
+        : "up to the prescribed amount of powder");
       expect(text).toContain(locale === "en" ? "water" : "น้ำ");
       if (complete) expect(text).toContain("powder");
     }
@@ -1209,7 +1210,8 @@ describe("round37 action participant and method ownership", () => {
     for (let save = 0; save < 3; save++) {
       for (const input of [row, saved, toFhirR5Dosages(saved)]) for (const locale of ["en", "th"]) {
         const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
-        expect(text).toContain(complete ? "2" : "up to the prescribed amount of powder");
+        expect(text).toContain(complete ? locale === "en" ? "2 g of powder" : "powder 2 g"
+        : "up to the prescribed amount of powder");
         expect(text).toContain(locale === "en" ? "water" : "น้ำ");
       }
       saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(saved))));

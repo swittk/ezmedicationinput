@@ -25,7 +25,7 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
   else{SEGMENTER_INDEX.set(locale,SEGMENTERS.length);SEGMENTERS.push(normalized);}
 }
 
-export function listMedicationSurfaceSegmenters(): MedicationSurfaceSegmenter[] {
+export function listMedicationSurfaceSegmenters(): Readonly<MedicationSurfaceSegmenter>[] {
   // The list is a registry snapshot; its entries are immutable-by-contract
   // providers. Recopying every provider object adds no clinical meaning.
   return SEGMENTERS.slice();

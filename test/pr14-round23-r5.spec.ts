@@ -1162,7 +1162,8 @@ describe("round34 compact range and maximum ownership", () => {
       }
     }
     const rows = toFhirR5Dosages(raw), reopened = toDosageDetails(persist(rows));
-    expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
+    if (known === "both") expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
+    expect(importCanonicalCourse(rows).stages[0].administrations[0].amounts![0].range).toEqual(range);
     expect(reopened.step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
     expect(JSON.stringify([row, raw])).toBe(before);
   });

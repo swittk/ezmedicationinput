@@ -5411,7 +5411,10 @@ describe("round67 reviewed execution boundaries", () => {
       } }] }] };
       for (const dosage of views(source)) {
         const before = JSON.stringify(dosage);
-        expect(nextDueDoses(dosage, options)).toHaveLength(4);
+        expect(nextDueDoses(dosage, options)).toEqual([
+          "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00",
+          "2026-01-02T08:00:00+00:00", "2026-01-02T20:00:00+00:00",
+        ]);
         expect(calculateTotalUnits({ dosage, ...options })).toMatchObject({ totalUnits: 2, unit: "tab" });
         expect(JSON.stringify(dosage)).toBe(before);
       }

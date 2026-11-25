@@ -5120,6 +5120,15 @@ describe("round79 dated clock replacement retains earlier-starting doses", () =>
       for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir),
         fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
         expect(nextDueDoses(dosage, query)).toEqual(expected);
+        const priorDay = { ...query, from: "2026-12-04T00:00:00" + offset, limit: 2 };
+        expect(nextDueDoses(dosage, priorDay)).toEqual([
+          "2026-12-04T08:00:00" + offset, "2026-12-04T20:00:00" + offset,
+        ]);
+        expect(calculateTotalUnits({ dosage, ...priorDay, durationValue: 1, durationUnit: "d" }))
+          .toMatchObject({ totalUnits: 2, unit: "drop" });
+        for (const [clock, amount] of [["08:00:00", 1], ["18:00:00", 2]] as const)
+          expect(calculateTotalUnits({ dosage, ...query, from: "2026-12-05T" + clock + offset,
+            durationValue: 1, durationUnit: "h" })).toMatchObject({ totalUnits: amount, unit: "drop" });
         expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
           .toMatchObject({ totalUnits: independent ? 4 : 3, unit: "drop" });
       }
@@ -5140,6 +5149,15 @@ it.each([false, true])("round79 dated clock replacement retains an undated prede
   for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir),
     fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
     expect(nextDueDoses(dosage, query)).toEqual(expected);
+    const priorDay = { ...query, from: "2026-12-04T00:00:00Z", limit: 2 };
+    expect(nextDueDoses(dosage, priorDay)).toEqual([
+      "2026-12-04T08:00:00+00:00", "2026-12-04T20:00:00+00:00",
+    ]);
+    expect(calculateTotalUnits({ dosage, ...priorDay, durationValue: 1, durationUnit: "d" }))
+      .toMatchObject({ totalUnits: 2, unit: "drop" });
+    for (const [clock, amount] of [["08:00:00", 1], ["18:00:00", 2]] as const)
+      expect(calculateTotalUnits({ dosage, ...query, from: "2026-12-05T" + clock + "Z",
+        durationValue: 1, durationUnit: "h" })).toMatchObject({ totalUnits: amount, unit: "drop" });
     expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
       .toMatchObject({ totalUnits: independent ? 4 : 3, unit: "drop" });
   }

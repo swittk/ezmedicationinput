@@ -1293,11 +1293,12 @@ describe("round24 supported FHIR edit boundaries", () => {
     ] };
     const output = courseToR6(importCanonicalCourse(input));
     expect(importCanonicalCourse(output).stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
-    output.step![0].start!.contextCode!.coding![0].code = "treatment-end";
-    const marker = output.extension!.find(value => value.url === R6_DRAFT_STEPS_SOURCE_URL)!;
+    const edited = structuredClone(output);
+    edited.step![0].start!.contextCode!.coding![0].code = "treatment-end";
+    const marker = edited.extension!.find(value => value.url === R6_DRAFT_STEPS_SOURCE_URL)!;
     const saved = decodeR6SourceMetadata(marker, "drafts") as { projected: FhirR6DosageStep[] };
     expect(saved.projected[0].start!.contextCode!.coding![0].code).toBe("treatment-start");
-    const current = importCanonicalCourse(output);
+    const current = importCanonicalCourse(edited);
     expect(current.stages).toHaveLength(1);
     expect(courseToR6(current).step![0].start).toEqual({
       ...relative(2), contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-end" }] },
@@ -1483,8 +1484,9 @@ describe("round24 supported FHIR edit boundaries", () => {
     const snapshot = decodeR6SourceMetadata(draftSource, "drafts") as { projected: FhirR6DosageStep[] };
     expect(snapshot.projected[0].component[0].doseAndRate![0].rateRatio!.numerator!.comparator).toBe("~");
     expect(importCanonicalCourse(rows).stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
-    numerator.value = 51;
-    expect(importCanonicalCourse(persist(output)).stages.map(stage => stage.administrations.length)).toEqual([1]);
+    const edited = persist(output);
+    edited.step![0].component[0].doseAndRate![0].rateRatio!.numerator!.value = 51;
+    expect(importCanonicalCourse(edited).stages.map(stage => stage.administrations.length)).toEqual([1]);
   });
 
   it("preserves limit wrapper metadata across coded display edits but not changed codes", () => {
@@ -2075,8 +2077,9 @@ describe("R5 edit ownership and quantity boundaries", () => {
     const output = toFhirR5Dosages(changed);
     expect(toDosageDetails(output).step![0].component[0].timing!.repeat!.startOffset).toBeUndefined();
     // Returning to the earlier cadence later must not revive a retired marker.
-    output[0].timing!.repeat!.period = 1;
-    const next = toDosageDetails(persist(output)).step![0].component[0];
+    const reverted = persist(output);
+    reverted[0].timing!.repeat!.period = 1;
+    const next = toDosageDetails(reverted).step![0].component[0];
     expect(next.timing!.repeat!.period).toBe(1);
     expect(next.timing!.repeat!.startOffset).toBeUndefined();
     expect(toDosageDetails(rows).step![0].component[0].timing!.repeat!.startOffset).toMatchObject({ value: 8 });
@@ -2208,9 +2211,14 @@ describe("round34 interchange current clinical ownership", () => {
     const resolved = toDosageDetails(rows, undefined, { step: [{ sequence: 1, count: 1 }],
       modifierExtension: [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 3 }] }, { resolvedPhaseSequences: [1] });
     const actual = nextDueDoses(resolved, { ...options, limit: 100 });
-    expect(actual).toHaveLength(42); // two members, three seven-day active blocks
-    expect(new Set(actual).size).toBe(21);
-    expect(new Date(actual[41]).toISOString()).toBe("2026-12-25T08:00:00.000Z");
+    const activeDays = [
+      "2026-11-21", "2026-11-22", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27",
+      "2026-12-05", "2026-12-06", "2026-12-07", "2026-12-08", "2026-12-09", "2026-12-10", "2026-12-11",
+      "2026-12-19", "2026-12-20", "2026-12-21", "2026-12-22", "2026-12-23", "2026-12-24", "2026-12-25",
+    ];
+    const expected: string[] = [];
+    for (const day of activeDays) expected.push(day + "T08:00:00+00:00", day + "T08:00:00+00:00");
+    expect(actual).toEqual(expected);
     expect(calculateTotalUnits({ ...options, dosage: resolved, durationValue: 42, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(42);
     expect(JSON.stringify(resolved.extension)).toContain("72f2f03d1f8289c5");
   });
@@ -2264,6 +2272,15 @@ describe("round34 interchange current clinical ownership", () => {
     expect(warm).toBe(formatSig(persist(saved), "long", { locale: "en", realizationMode: "roundtrip" }));
     expect(warm).not.toBe(row.text);
     if (edit === "value") expect(warm).toContain("2 tab");
+    if (edit === "period") {
+      expect(warm).toContain("4 tab");
+      expect(warm).toMatch(/(?:per|every)\s*2\s*(?:d|days?)\b|\/\s*2\s*d\b/u);
+    }
+    if (edit === "scope") {
+      expect(warm).toContain("lifetime");
+      expect(warm).toContain("4 tab");
+    }
+    if (edit === "expression") expect(warm).toContain("%currentLimit");
     if (edit === "action") expect(warm).toContain("Contact the clinician");
   });
 
@@ -3172,10 +3189,10 @@ describe("round37 interchange phase, limit and source ownership", () => {
   });
 
   it.each([false, true])("keeps incomplete annotated period maxima source-only through editable saves (valid sibling=%s)", valid => {
-    const incomplete: FhirRatio = { id: "incomplete-limit", numerator: q(2), denominator: {
+    const incomplete: FhirRatio = { id: "incomplete-limit", numerator: q(1), denominator: {
       unit: "d", extension: [{ url: "urn:period-note", valueString: "Period value was not authored" }],
     } };
-    const complete: FhirRatio = { id: "complete-limit", numerator: q(2), denominator: { value: 1, unit: "d" } };
+    const complete: FhirRatio = { id: "complete-limit", numerator: q(1), denominator: { value: 2, unit: "d" } };
     let rows = toEzDosages([{ doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily },
       maxDosePerPeriod: [incomplete, ...(valid ? [complete] : [])] }]);
     // Retained partials are editable, but do not acquire a numeric period.
@@ -3184,12 +3201,12 @@ describe("round37 interchange phase, limit and source ownership", () => {
       const native = importCanonicalCourse(persist(rows));
       const limits = native.stages[0].administrations[0].limits ?? [];
       expect(limits.map(limit => ({ amount: limit.amount?.value, period: limit.period?.value })))
-        .toEqual([{ amount: 2, period: undefined }, ...(valid ? [{ amount: 2, period: 1 }] : [])]);
+        .toEqual([{ amount: 1, period: undefined }, ...(valid ? [{ amount: 1, period: 2 }] : [])]);
       expect(limits.filter(limit => limit.amount?.value !== undefined && limit.period?.value !== undefined)
         .map(limit => ({ amount: limit.amount?.value, period: limit.period?.value })))
-        .toEqual(valid ? [{ amount: 2, period: 1 }] : []);
+        .toEqual(valid ? [{ amount: 1, period: 2 }] : []);
       expect(calculateTotalUnits({ dosage: rows, orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC",
-        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 2, unit: "tab" });
+        durationValue: 2, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: valid ? 1 : 2, unit: "tab" });
       const output = projectCanonicalCourse(native);
       expect(output.fhir[0].maxDosePerPeriod).toEqual([incomplete, ...(valid ? [complete] : [])]);
       expect(JSON.stringify(output.fhirNext)).toContain("Period value was not authored");
@@ -4217,13 +4234,17 @@ describe("round42 interop current public contracts", () => {
     delete row.doseAndRate;
     const seen: string[] = [];
     const options: FormatOptions = { locale: "en", realizationMode: "roundtrip", i18n: {
-      formatShort(context) { seen.push(context.realizationMode); return context.defaultText; },
-      formatLong(context) { seen.push(context.realizationMode); return context.defaultText; },
+      formatShort(context) { seen.push("short:" + context.realizationMode); return "[short] " + context.defaultText; },
+      formatLong(context) { seen.push("long:" + context.realizationMode); return "[long] " + context.defaultText; },
     } };
     const imported = fromFhirDosage(row, options);
+    expect(imported.shortText).toMatch(/^\[short\] /u);
+    expect(imported.longText).toMatch(/^\[long\] /u);
+    expect(new Set(seen)).toEqual(new Set(["short:roundtrip", "long:roundtrip"]));
+    seen.length = 0;
     const direct = formatSig(row, "long", options);
-    expect(seen.length).toBeGreaterThan(0);
-    expect(new Set(seen)).toEqual(new Set(["roundtrip"]));
+    expect(direct).toMatch(/^\[long\] /u);
+    expect(new Set(seen)).toEqual(new Set(["long:roundtrip"]));
     expect(imported.longText).toBe(direct);
     for (const preview of [imported.shortText, imported.longText, direct]) {
       expect(preview).not.toContain("5 mL");

@@ -1951,7 +1951,10 @@ it("normalizes editable R5 and R6 course previews while retaining original wordi
   expect(phases).toHaveLength(2);
   expect(phases[0]).toMatch(/Instill 1 drop every 2 hours[\s\S]*in the right eye/iu);
   expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
-  for (const phase of phases) expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
+  for (const phase of phases) {
+    expect(phase.match(/\bInstill\b/giu)).toHaveLength(1);
+    expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
+  }
   const thaiPhases = formatSig(parsed.fhirNext, "long", { locale: "th" }).split("จากนั้น");
   expect(thaiPhases).toHaveLength(2);
   expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
@@ -5414,6 +5417,11 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
         edit(row);
         const restored = toDosageDetails([row]);
         const limits = activeLimits(restored);
+        expect(limits.filter(limit => limit.scope === "period"), label).toEqual(
+          label === "period delete" ? [] : [expect.objectContaining({
+            scope: "period", valueQuantity: expect.objectContaining({ value: label === "period edit" ? 50 : 40, unit: "mg" }),
+            period: expect.objectContaining({ value: 1, unit: "d" }),
+          })]);
         expect(limits, label).toContainEqual(hidden);
         expect(limits.some(limit => limit.scope === scope &&
           limit.id === owned.id)).toBe(label !== "scalar delete");
