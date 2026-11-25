@@ -6870,6 +6870,7 @@ function sumCourseUnits(
   let ingredient: TotalUnitsResult["totalApproximateIngredientQuantity"];
   let mixedApproximate = false,
     mixedIngredient = false;
+  let containerComparable = true;
   let maximum = false;
   const details: string[] = [];
   for (const { total, unit } of entries) {
@@ -6902,6 +6903,9 @@ function sumCourseUnits(
     if (total.quantityKind === "maximum") maximum = true;
     if (total.explanation) details.push(total.explanation);
     if (quantity === 0) continue;
+    // Aggregation cannot infer a container dimension from an opaque display
+    // label when the component could not calculate its container quantity.
+    if (total.totalContainers === undefined) containerComparable = false;
     if (total.totalApproximateQuantity && !mixedApproximate) {
       const q = total.totalApproximateQuantity;
       if (!approximate) approximate = { ...q };
@@ -6981,7 +6985,7 @@ function sumCourseUnits(
     ...(ingredient ? { totalApproximateIngredientQuantity: ingredient } : {}),
   };
   const context = options.context;
-  if (context?.containerValue && context.containerValue > 0) {
+  if (containerComparable && context?.containerValue && context.containerValue > 0) {
     const containerUnit = context.containerUnit;
     const packageUnit = context.packageUnit;
     const estimateValue = approximate?.value;
@@ -7534,8 +7538,8 @@ function calculateTotalUnitsSingle(
   const containerValue = context?.containerValue;
   const containerUnit = context?.containerUnit;
   const packageUnit = context?.packageUnit;
-  const doseUnit = doseUnitForLimits;
-  const unitSemantics = getDoseUnitSemantics(getDoseQuantityUnit(doseForLimits, false), context);
+  const doseUnit = getDoseQuantityUnit(doseForLimits, false);
+  const unitSemantics = getDoseUnitSemantics(doseUnit, context);
   if (unitSemantics?.approximateQuantity) {
     const approximation = unitSemantics.approximateQuantity;
     result.totalApproximateQuantity = {
@@ -7550,7 +7554,7 @@ function calculateTotalUnitsSingle(
       context
     );
   }
-  if (containerValue && containerValue > 0) {
+  if (containerValue && containerValue > 0 && (doseUnit || !doseUnitForLimits)) {
     let effectiveUnits = totalUnits;
     let effectiveContainerValue = containerValue;
     let containerComparable = true;

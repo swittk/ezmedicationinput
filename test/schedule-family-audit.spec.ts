@@ -5983,3 +5983,40 @@ describe("coded target quantity identity", () => {
     expect(toFhirR5Dosages(fresh(r6))[0].doseAndRate?.[0]?.doseQuantity).toEqual(quantity);
   });
 });
+
+
+describe("coded container quantity identity", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["opaque local volume", { system: "urn:clinic:medication-units", code: "mL" }, undefined, undefined],
+    ["opaque local package", { system: "urn:clinic:medication-units", code: "bottle" }, undefined, undefined],
+    ["authored volume", { system: "urn:clinic:medication-units", code: "local-dose", unit: "mL" }, 4, 1],
+    ["standard volume", { system: "http://unitsofmeasure.org", code: "mL" }, 4, 1],
+    ["authored package", { system: "urn:clinic:medication-units", code: "local-dose", unit: "bottle" }, 20, 4],
+    ["authored drop", { system: "urn:clinic:medication-units", code: "local-dose", unit: "drop" }, 0.2, 1],
+  ] as const)("uses measured identity before converting into bottles: %s", (_label, identity, volume, bottles) => {
+    const quantity = { value: 1, ...identity, extension: [
+      { url: "urn:clinic:quantity-note", valueString: "Retain the supplied quantity" },
+    ] };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: quantity }],
+      timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] } },
+    };
+    const r6 = toDosageDetails([fresh(row)]);
+    for (const dosage of [fresh(row), importCanonicalCourse(fresh(row)), fresh(r6),
+      fresh(toFhirR5Dosages(fresh(r6)))]) {
+      const before = fresh(dosage);
+      const result = calculateTotalUnits({ dosage, orderedAt: "2026-11-22T00:00:00Z",
+        from: "2026-11-22T00:00:00Z", timeZone: "UTC",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day,
+        context: { containerValue: 5, containerUnit: "mL", packageUnit: "bottle" } });
+      expect(result.totalUnits).toBe(4);
+      expect(result.totalContainers).toBe(bottles);
+      if (volume === undefined) expect(result.totalContainerQuantity).toBeUndefined();
+      else expect(result.totalContainerQuantity).toEqual({ value: volume, unit: "mL" });
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(r6))[0].doseAndRate?.[0]?.doseQuantity).toEqual(quantity);
+  });
+});
