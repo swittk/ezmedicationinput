@@ -2,6 +2,8 @@
 
 Inputs and outputs are immutable by caller contract after crossing an API boundary. Detecting later in-place edits to an already-consumed or returned object instance is not supported. Do not keep field snapshots, repeated revalidation, defensive recursive comparisons, freezing, or mutation-isolation machinery solely for that misuse. A simple result memo for an immutable instance does not need mutation detection.
 
+Locale providers, configuration, execution options and interchange values are ordinary plain data. Class instances, Proxies, prototype/getter-driven fields and cross-realm receiver repair are outside the contract. Do not add receiver rebinding, accessor snapshots or defensive callback copies for those inputs or for later caller mutation. Preserve normal plain-data language extensions and the explicitly named copy APIs.
+
 Fresh independently constructed or persisted R5/current-R6 values are supported interchange inputs. On their first submission, honor their current clinical fields and retain all unrelated known and unknown data. Keep the source/projection evidence needed for fresh import and save/reopen fidelity; stale former dose, timing, phase, site or condition must not override an explicitly submitted new value. Tests of caller edits must prepare a new value rather than mutate an already-consumed instance.
 
 The existing explicit spatial clone retains its narrow field/value contract: distinct clone shells and detached standard primitive companions, extension content and translations. Preserve opaque extra values, which may remain shared under the immutable contract; do not introduce universal recursive isolation for arbitrary custom metadata.
