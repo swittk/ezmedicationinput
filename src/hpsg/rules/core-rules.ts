@@ -402,10 +402,14 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       if (!tokens) {
         continue;
       }
-      const phrase = tokens
-        .map((token) => normalizeTokenLower(token))
-        .filter((part) => !isPunctuation(part))
-        .join(" ");
+      let phrase = "";
+      let separator = "";
+      for (const token of tokens) {
+        const part = normalizeTokenLower(token);
+        if (isPunctuation(part)) continue;
+        phrase += separator + part;
+        separator = " ";
+      }
       if (!phrase) {
         continue;
       }
@@ -418,14 +422,18 @@ export function routeLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         continue;
       }
       const routeCandidates = routePhraseCandidates(phrase);
-      const customCode = routeCandidates
-        .map((candidate) => context.options?.routeMap?.[candidate])
-        .find((code): code is RouteCode => Boolean(code));
+      let customCode: RouteCode | undefined;
+      for (const candidate of routeCandidates) {
+        const code = context.options?.routeMap?.[candidate];
+        if (code) { customCode = code; break; }
+      }
       const tokenRoute = span === 1 ? getRouteMeaning(tokens[0]) : undefined;
       const routeFromSitePreposition = routeFromSitePrepositionPhrase(tokens, context);
-      const synonym = routeCandidates
-        .map((candidate) => DEFAULT_ROUTE_SYNONYMS[candidate])
-        .find(Boolean);
+      let synonym: (typeof DEFAULT_ROUTE_SYNONYMS)[string] | undefined;
+      for (const candidate of routeCandidates) {
+        const match = DEFAULT_ROUTE_SYNONYMS[candidate];
+        if (match) { synonym = match; break; }
+      }
       const route = customCode
         ? { code: customCode, text: ROUTE_TEXT[customCode] }
         : tokenRoute ?? synonym ?? routeFromSitePreposition;
@@ -517,12 +525,9 @@ function routePhraseCandidates(phrase: string): string[] {
     return [];
   }
   const withoutHyphen = normalized.replace(/-/g, " ");
-  return Array.from(new Set([
-    normalized,
-    `${normalized}.`,
-    withoutHyphen,
-    `${withoutHyphen}.`
-  ]));
+  return withoutHyphen === normalized
+    ? [normalized, `${normalized}.`]
+    : [normalized, `${normalized}.`, withoutHyphen, `${withoutHyphen}.`];
 }
 
 export function fillerLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
