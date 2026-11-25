@@ -922,7 +922,11 @@ export function doseComparatorNumberAt(
 }
 
 export function normalizeTokenLower(token: LexToken): string {
-  return (token.canonical ?? token.lower).replace(/[{};]/g, "").replace(/^\.+|\.+$/g, "");
+  const lower = (token.canonical ?? token.lower).replace(/[{};]/g, "");
+  let start = 0, end = lower.length;
+  while (lower.charCodeAt(start) === 46) start++;
+  while (end > start && lower.charCodeAt(end - 1) === 46) end--;
+  return start === 0 && end === lower.length ? lower : lower.slice(start, end);
 }
 
 function pad2(value: number): string {
