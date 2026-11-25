@@ -16082,3 +16082,24 @@ difference was about 0.6 microseconds and was assessed against ordinary call
 frequency and measurement spread. Every clinical test was retained while
 consolidating modules to keep the changed-path count at 100. Detailed review
 dispositions remain separate.
+
+
+## 2026-11-26 — Dated administrations and plain-data extension contracts
+
+Clocked replacements retain earlier eligible doses and share their exact cutoff
+across scheduling and supply. Dated elapsed infusions share one HPSG decision
+for single versus recurring administration; independently authored cadence and
+course bounds retain their meaning. Quantity caps, phase consumption, current
+safety and saved boundaries keep their existing typed owners. Ratio annotations
+and graph wrapper identities survive fresh interchange.
+
+Locale registration, execution options and vocabulary lookups follow the
+plain-data, immutable-caller contract. Prototype/accessor adaptation, callback
+rebinding and mutation-isolation copies were removed. Public names, ordinary
+language extensions, explicit spatial cloning and clinical assertions remain.
+Oversized test groups were redistributed without dropping clinical coverage.
+
+Source tests and the final terminology follow-up, strict types, build and four
+distribution tests passed. Representative paired measurements found no
+reproducible meaningful-work regression above 4%; the small scalar supply
+difference was assessed by absolute latency and ordinary call frequency.
