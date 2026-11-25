@@ -15946,3 +15946,36 @@ Validation passed 8,326 source tests, configured strict TypeScript, the build,
 and four distribution tests. Fourteen representative paired workloads passed
 with equivalent work and no meaningful regression above 4%. The changed-path
 count remains 100. Detailed review dispositions remain separate.
+
+
+## 2026-11-25 — Current annotations and dated phase replacement
+
+Prepared successor doses retain their administration head and local amounts
+without acquiring an unauthored cadence. Selected methods and translated action
+labels retain their configured identity even when codes overlap. Registered
+times and typed quantities remain visible in container and negated result
+instructions.
+
+Explicit divided-dose counts survive NEXT onset. Multi-clock successors begin
+on the proper next day, while dated replacements close their predecessor before
+the replacement starts and preserve the authored course length. Calendar event
+windows share the existing clock-window execution path. Historical replay no
+longer contributes rounding limits to a later supply window. Unsupported rate
+ranges cannot become exact scalar endpoints.
+
+Current clinical edits control saved completion and authored directions. Graph
+components, predicates and configured Codings preserve unknown annotations and
+inactive source values across repeated saves. One-stage imported course headers,
+negated advice and distinct preparation quantities retain their existing owners.
+Code-only hourly cadences, opaque event identifiers and declared date resolver
+callbacks remain available through public formatting.
+
+Straight-loop action phrase assembly and reuse of resolved calendar time parts
+reduce repeated work. Clinical assertions now bind dose, vehicle, timing and
+condition values to their actual phase or action, and spanless imports do not
+acquire an unauthored instruction order.
+
+Validation passed 8,384 source tests, configured strict TypeScript, the build,
+and four distribution tests. Eighteen representative and affected paired
+workloads passed with equivalent work and no meaningful regression above 4%.
+The changed-path count remains 100. Detailed review dispositions remain separate.
