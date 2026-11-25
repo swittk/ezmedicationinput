@@ -2070,14 +2070,22 @@ const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
 
 /** Resolve standard codes and plain unit labels to the same calculation unit.
  * @param quantity A dose or limit quantity; its original display remains untouched.
+ * @param includeOpaqueCode Retain an unknown code as a display/counting label.
+ * Dimensional calculations disable that fallback, while still accepting authored
+ * unit labels and explicit UCUM expressions outside the simple-unit lexicon.
  */
-export function getDoseQuantityUnit(quantity: { system?: string; code?: string; unit?: string } | undefined): string {
+export function getDoseQuantityUnit(
+  quantity: { system?: string; code?: string; unit?: string } | undefined,
+  includeOpaqueCode = true
+): string {
   if (!quantity) return "";
+  const fallbackCode = includeOpaqueCode || !quantity.system || quantity.system === "http://unitsofmeasure.org"
+    ? quantity.code : undefined;
   if (quantity.system === "http://standardterms.edqm.eu" && quantity.code) {
-    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+    return EDQM_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
-    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? quantity.code;
+    return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
   const recognizedUnit = (label: string | undefined): string | undefined => {
     if (!label) return undefined;
@@ -2092,8 +2100,12 @@ export function getDoseQuantityUnit(quantity: { system?: string; code?: string; 
     return measured === "5.mL" ? "tsp" :
       measured === "15.mL" ? "tbsp" : measured;
   };
-  return recognizedUnit(quantity.code) ?? recognizedUnit(quantity.unit) ??
-    quantity.unit ?? quantity.code ?? "";
+  // A foreign code must not override the authored unit as a UCUM spelling.
+  // Keep the existing lexical and opaque-label fallbacks for imported quantities.
+  const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"
+    ? recognizedUnit(quantity.code) ?? (!includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
+      ? quantity.code : undefined) : undefined;
+  return codedUnit ?? recognizedUnit(quantity.unit) ?? quantity.unit ?? fallbackCode ?? "";
 }
 
 /** Resolve a known dosage unit without changing its display or numerical value.

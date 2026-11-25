@@ -1925,8 +1925,10 @@ function measuredRateComparator(
     "The rate ratio's quantity bounds do not determine a usable dose bound. Retain the ratio and supply the applicable rate before calculating.");
 }
 function getRateQuantityUnit(rate: CanonicalMeasure): string | undefined {
+  // Rates keep the full coded UCUM expression and otherwise prefer the authored
+  // label; the shared reader excludes opaque foreign-code dimensional inference.
   return rate.system === "http://unitsofmeasure.org"
-    ? rate.code ?? rate.unit : rate.unit ?? rate.code;
+    ? rate.code ?? rate.unit : rate.unit ?? (getDoseQuantityUnit(rate, false) || undefined);
 }
 function measuredRateQuantity(
   amount: CanonicalAmount,
@@ -6673,8 +6675,7 @@ function prepareMeasuredDose(
   if (
     quantity &&
     Number.isFinite(quantity.value) &&
-    quantity.value! > 0 &&
-    !/\/kg$/i.test(quantity.code ?? quantity.unit ?? "")
+    quantity.value! > 0
   )
     // The known numeric amount stays useful even when qualified by <=,
     // >= or ~. Its original comparator remains in the caller's FHIR data.
@@ -6758,7 +6759,7 @@ function prepareMeasuredDose(
   };
 }
 function weightResolvedQuantity(quantity: CanonicalMeasure, weight: number): CanonicalMeasure {
-  const perKg = (quantity.code ?? quantity.unit ?? "").match(/^(.+?)\/kg$/i);
+  const perKg = getDoseQuantityUnit(quantity, false).match(/^(.+?)\/kg$/i);
   return perKg && quantity.value !== undefined ? {
     ...quantity, value: roundCalculatedUnits(quantity.value * weight),
     unit: perKg[1], code: quantity.code ? perKg[1] : undefined,

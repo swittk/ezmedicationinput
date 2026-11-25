@@ -5609,3 +5609,109 @@ describe("round72 reviewed calendar windows and rounding ownership", () => {
     }
   });
 });
+
+
+describe("round77 weight quantity unit ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const note = { url: "urn:clinic:quantity-note", valueString: "Preserve the authored quantity" };
+  const quantity = (value: number, unit: string, local = true) => ({
+    value, unit, system: local ? "urn:clinic:medication-units" : "http://unitsofmeasure.org",
+    code: local ? "weight-dose" : unit, extension: [note],
+  });
+  const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day };
+  const daily = { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+    timeOfDay: ["08:00:00", "20:00:00"] };
+  const forms = (row: FhirDosage) => {
+    const r6 = toDosageDetails([fresh(row)]);
+    return [fresh(row), importCanonicalCourse(fresh(row)), fresh(r6), fresh(toFhirR5Dosages(fresh(r6)))];
+  };
+
+  it.each([
+    ["quantity", 140], ["range", 280], ["ratio", 140], ["rate", 140], ["maximum", 100],
+  ] as const)("resolves the authored weight unit beside an opaque local %s code", (kind, expected) => {
+    const row: FhirDosage = {
+      doseAndRate: [kind === "range" ? { doseRange: {
+        low: quantity(1, "mg/kg"), high: quantity(2, "mg/kg"),
+      } } : kind === "ratio" ? { rateRatio: {
+        numerator: quantity(1, "mg/kg"), denominator: quantity(2, "h", false),
+      } } : kind === "rate" ? { rateQuantity: quantity(0.5, "mg/kg/h") }
+        : { doseQuantity: kind === "maximum" ? quantity(100, "mg", false) : quantity(1, "mg/kg") }],
+      timing: { repeat: { ...daily, ...(kind === "ratio" || kind === "rate"
+        ? { duration: 2, durationUnit: FhirPeriodUnit.Hour } : {}) } },
+      ...(kind === "maximum" ? { maxDosePerPeriod: [{
+        numerator: quantity(1.5, "mg/kg"), denominator: quantity(1, "d", false),
+      }] } : {}),
+    };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: expected, unit: "mg" });
+      if (kind !== "maximum") expect(calculateTotalUnits({ dosage, ...options }))
+        .toMatchObject({ totalUnits: kind === "range" ? 4 : 2, unit: "mg/kg" });
+      expect(dosage).toEqual(before);
+    }
+    const saved = toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0];
+    expect(saved.doseAndRate).toEqual(row.doseAndRate);
+    expect(saved.maxDosePerPeriod).toEqual(row.maxDosePerPeriod);
+  });
+
+
+  it.each(["urn:clinic:medication-units", "http://standardterms.edqm.eu",
+    "http://spor.ema.europa.eu/v1/lists/200000000014"])(
+    "does not give an opaque code-only quantity a weight dimension: %s", system => {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: {
+        value: 1, system, code: "mg/kg", extension: [note],
+      } }], timing: { repeat: daily } };
+      for (const dosage of forms(row)) {
+        const before = fresh(dosage);
+        expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+          .toMatchObject({ totalUnits: 2, unit: "mg/kg" });
+        expect(dosage).toEqual(before);
+      }
+      expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].doseAndRate).toEqual(row.doseAndRate);
+    });
+
+
+  it("keeps a code-only foreign infusion dimension unresolved", () => {
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: {
+      value: 0.5, system: "urn:clinic:medication-units", code: "mg/kg/h", extension: [note],
+    } }], timing: { repeat: { ...daily, duration: 2, durationUnit: FhirPeriodUnit.Hour } } };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      expect(() => calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toThrow(expect.objectContaining({ code: "rate-units-unresolved" }));
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].doseAndRate).toEqual(row.doseAndRate);
+  });
+
+  it.each(["quantity", "rate"] as const)("retains a UCUM compound %s outside the simple unit lexicon", kind => {
+    const row: FhirDosage = { doseAndRate: [kind === "quantity" ? { doseQuantity: {
+      ...quantity(1, "millimoles per kilogram", false), code: "mmol/kg",
+    } } : { rateQuantity: {
+      ...quantity(0.5, "millimoles per kilogram per hour", false), code: "mmol/kg/h",
+    } }], timing: { repeat: { ...daily, ...(kind === "rate"
+      ? { duration: 2, durationUnit: FhirPeriodUnit.Hour } : {}) } } };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 140, unit: "mmol" });
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].doseAndRate).toEqual(row.doseAndRate);
+  });
+
+  it.each(["mg", "clinic units"])("does not interpret a foreign weight-shaped code over the authored %s unit", unit => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: {
+      ...quantity(1, unit), code: "mg/kg",
+    } }], timing: { repeat: daily } };
+    for (const dosage of forms(row)) {
+      const before = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...options, patientWeightKg: 70 }))
+        .toMatchObject({ totalUnits: 2, unit });
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].doseAndRate).toEqual(row.doseAndRate);
+  });
+});
