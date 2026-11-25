@@ -801,7 +801,8 @@ function expandTiming(code: string, config: NextDueDoseConfig, repeat: Canonical
   const eventClock = config.eventClock ?? {};
   const exactOffset = getExactTimingOffsetMinutes(repeat);
   const normalized: ExpandedTime[] = [];
-  const clockValue = eventClock[code];
+  // Noon names a fixed clock; other event defaults retain their frequency rules.
+  const clockValue = eventClock[code] ?? (code === TimingEvent.Noon ? "12:00:00" : undefined);
   if (clockValue) {
     normalized.push({ time: normalizeClock(clockValue), dayShift: 0 });
   } else if (code === TimingEvent["Before Meal"]) {
@@ -3275,7 +3276,7 @@ function scheduleTreatmentRelativeCourse(
           ? new Date(effectiveEnd.getTime() - (getAdministrationOffsetMinutes(original) ?? 0) * 60000 - 1).toISOString()
           : undefined;
         const execution: CanonicalAdministration = {
-          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
+          ...original, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
           ...(collect && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
@@ -4371,7 +4372,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   }
   requireConsistentTimingCode(one.schedule);
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
-      one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
+      one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return nextDueDoses(courseFromCanonicalRows([one]), options);
   // The successor's cadence can be anchored to its predecessor's last
   // administration, even though that point belongs to the PREVIOUS phase.
@@ -5828,7 +5829,7 @@ function isDayFilteredIntervalSupported(repeat: CanonicalRecurrence, enforceDayF
     repeat.periodUnit === "min" ||
     repeat.periodUnit === "h" ||
     repeat.periodUnit === "d" ||
-    (repeat.periodUnit === "wk" && repeat.period !== undefined && !Number.isInteger(repeat.period * 7))
+    (repeat.periodUnit === "wk" && repeat.period !== undefined && !Number.isInteger(repeat.period))
   );
 }
 function inferredLocalClock(at: Date, timeZone: string): string {
@@ -7316,8 +7317,9 @@ function calculateTotalUnitsSingle(
       options.patientWeightKg > 0
     )
   ) {
-    result.quantityKind = "scheduled";
-    result.explanation = "Weight-normalized total; provide patientWeightKg for an absolute quantity.";
+    result.quantityKind ??= "scheduled";
+    result.explanation = (result.explanation ? result.explanation + " " : "") +
+      "Weight-normalized total; provide patientWeightKg for an absolute quantity.";
   }
   const roundingLimits = (options as PhaseCountOptions).roundingLimits;
   const roundingKey = supplyAccounting?.roundingKey;
@@ -7636,7 +7638,7 @@ function calculateCourseTotalUnits(
     for (const [key, plan] of collected) {
       plan.windows.sort((a, b) => a.start - b.start);
       const source = plan.dosage;
-      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
+      const dosage: CanonicalAdministration = { ...source, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
         schedule: { ...source.schedule, recurrence: { ...source.schedule?.recurrence,
           count: undefined, countMax: undefined,
           courseLength: undefined, courseLengthRange: undefined, calendarWindow: undefined } } };
@@ -7834,6 +7836,7 @@ function calculateCourseTotalUnits(
         phaseStart: undefined,
         phaseEnd: undefined,
         phaseOriginIssue: undefined,
+        phasePredecessors: undefined,
         schedule: {
           ...dosage.schedule,
           recurrence: {
@@ -7986,7 +7989,7 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
     });
   }
   if (one.phaseOrigin || one.phaseStart || one.phaseEnd || one.phaseOriginIssue ||
-      one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
+      one.phasePredecessors?.length || one.schedule?.recurrence?.startOffset || one.schedule?.recurrence?.endOffset)
     return calculateTotalUnits({ ...options, dosage: courseFromCanonicalRows([one]) });
   return calculateTotalUnitsSingle(
     options as Omit<CanonicalSupplyOptions, "dosage"> & {
@@ -8141,7 +8144,7 @@ function explicitAdministrationCompletion(
 ): { end: Date; point: boolean } | undefined {
   const repeat = dosage.schedule?.recurrence;
   const raw = withoutOccurrenceCap({
-    ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined,
+    ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
     limits: dosage.limits?.filter(limit => limit.scope !== "period"),
     schedule: { ...dosage.schedule, recurrence: repeat
       ? { ...repeat, count: undefined, countMax: undefined } : undefined },
@@ -8179,8 +8182,8 @@ function finiteAdministrationCompletion(
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
   const local =
-    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue
-      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined }
+    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue || dosage.phasePredecessors?.length
+      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined }
       : dosage;
   // Completion is a historical boundary, not the number of doses still due.
   // Only records inside this phase can complete it; older records still belong

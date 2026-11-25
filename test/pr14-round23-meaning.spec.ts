@@ -1928,7 +1928,14 @@ describe("round 30: completed phase origins and exact boundary display", () => {
       JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: from as string,
         timeZone: "UTC", limit: (expected as string[]).length })).toEqual(expected);
-      if ((source as string).includes("from day 4")) {
+      if (!(source as string).includes("from day 4")) {
+        expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-21T08:00:00Z",
+          timeZone: "UTC", limit: 7 })).toEqual([
+          "2026-11-21T08:00:00+00:00", "2026-11-21T14:00:00+00:00", "2026-11-21T20:00:00+00:00",
+          "2026-11-22T02:00:00+00:00", "2026-11-22T08:00:00+00:00", "2026-11-22T14:00:00+00:00",
+          "2026-11-25T06:00:00+00:00",
+        ]);
+      } else {
         expect(nextDueDoses(input, { orderedAt: "2026-11-21T08:00:00Z", from: "2026-11-26T00:00:00Z",
           timeZone: "UTC", limit: 3 })).toEqual([
           "2026-11-26T20:00:00+00:00", "2026-11-29T06:00:00+00:00", "2026-11-29T07:00:00+00:00"

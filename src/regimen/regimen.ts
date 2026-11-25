@@ -96,6 +96,17 @@ function advanceDate(value: string, days = 1): string | undefined {
   return date.toISOString().slice(0, 10);
 }
 
+/** Whether the authored endpoints identify one exact course duration. */
+export function hasExactScheduleDuration(
+  schedule: CanonicalSigClause["schedule"]
+): schedule is NonNullable<CanonicalSigClause["schedule"]> & { duration: number } {
+  return Boolean(schedule && schedule.duration !== undefined &&
+    !schedule.durationComparator && !schedule.durationMaxComparator &&
+    (!schedule.durationIsRange || schedule.durationMax !== undefined) &&
+    (schedule.durationMax === undefined || schedule.durationMax === schedule.duration &&
+      (!schedule.durationMaxUnit || schedule.durationMaxUnit === schedule.durationUnit)));
+}
+
 /**
  * A date-anchored whole-day or calendar-month duration has one inclusive window.
  * Materialize that window on the typed schedule before FHIR projection so the
@@ -104,11 +115,7 @@ function advanceDate(value: string, days = 1): string | undefined {
 export function anchoredScheduleDurationEnd(
   schedule: CanonicalSigClause['schedule']
 ): string | undefined {
-  if (!schedule?.boundsStart || schedule.duration === undefined ||
-      schedule.durationComparator || schedule.durationMaxComparator ||
-      schedule.durationIsRange && schedule.durationMax === undefined ||
-      schedule.durationMax !== undefined && (schedule.durationMax !== schedule.duration ||
-        schedule.durationMaxUnit && schedule.durationMaxUnit !== schedule.durationUnit)) return undefined;
+  if (!hasExactScheduleDuration(schedule) || !schedule.boundsStart) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(schedule.boundsStart) || schedule.duration <= 0) {
     return undefined;
   }
@@ -139,10 +146,7 @@ function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedul
 }
 /** An exact fixed-day phase can establish a later relative origin. */
 function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): number | undefined {
-  if (!schedule || schedule.duration === undefined || schedule.durationComparator ||
-      schedule.durationMaxComparator || schedule.durationIsRange && schedule.durationMax === undefined ||
-      schedule.durationMax !== undefined && (schedule.durationMax !== schedule.duration ||
-        schedule.durationMaxUnit && schedule.durationMaxUnit !== schedule.durationUnit)) return undefined;
+  if (!hasExactScheduleDuration(schedule)) return undefined;
   return schedule.durationUnit === "d" ? schedule.duration :
     schedule.durationUnit === "wk" ? schedule.duration * 7 : undefined;
 }
@@ -550,7 +554,7 @@ export function scopeSequentialPhaseSemantics(
         const clause = states[member]?.primaryClause;
         const schedule = clause?.schedule;
         if (!clause || schedule?.treatmentStartOffsetDays !== undefined ||
-            schedule?.phaseStartReference || schedule?.boundsStart || schedule?.boundsEnd ||
+            schedule?.phaseStartReference || schedule?.boundsStart ||
             schedule?.calendarEvents?.length) continue;
         (clause.schedule ??= {}).boundsStart = advanceDate(start, phasePauseDays);
         clause.evidence.push({

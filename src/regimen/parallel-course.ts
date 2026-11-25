@@ -6,7 +6,7 @@ import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
 import { compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan } from '../hpsg/signature';
-import { anchoredScheduleDurationEnd, type RegimenGraph } from './regimen';
+import { anchoredScheduleDurationEnd, hasExactScheduleDuration, type RegimenGraph } from './regimen';
 import type {
   CanonicalSigClause,
   EzCourseMetadata,
@@ -93,13 +93,9 @@ function orderedCalendarBounds(earlier: string, later: string): boolean {
 
 function durationPosition(clause: CanonicalSigClause): RegimenPosition | undefined {
   const schedule = clause.schedule;
-  if (!schedule || schedule.boundsStart || schedule.boundsEnd ||
+  if (!hasExactScheduleDuration(schedule) || schedule.boundsStart || schedule.boundsEnd ||
       schedule.count !== undefined || schedule.countMax !== undefined ||
-      schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined ||
-      schedule.duration === undefined || schedule.duration <= 0 ||
-      !Number.isInteger(schedule.duration) ||
-      schedule.durationIsRange && schedule.durationMax === undefined ||
-      schedule.durationMax !== undefined && schedule.durationMax !== schedule.duration ||
+      schedule.duration <= 0 || !Number.isInteger(schedule.duration) ||
       schedule.durationMaxUnit !== undefined && schedule.durationMaxUnit !== schedule.durationUnit) {
     return undefined;
   }
@@ -228,8 +224,7 @@ function partialParallelRegimen(
       });
       const calendar = members.some(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
         item.clause.schedule?.calendarEvents?.length);
-      if (calendar && members.every(item => item.clause.schedule?.boundsStart || item.clause.schedule?.boundsEnd ||
-          item.clause.schedule?.calendarEvents?.length)) {
+      if (calendar) {
         const normalized = calendarPhaseMembers(members, source[index + 1]?.members.map(member =>
           calendarPhaseStart(clauses[member])));
         if (typeof normalized !== "string") members = normalized;
