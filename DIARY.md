@@ -15916,3 +15916,33 @@ Validation passed 8,268 source tests, configured strict TypeScript, the build,
 and four distribution tests. Sixteen representative paired workloads and a
 focused longer Thai parsing check found no reproducible meaningful-workload
 regression above 4%. The changed-path count remains 100.
+
+
+## 2026-11-25 — Calendar admission and preparation ownership
+
+Native recurrence annotations now retain month days, weekday ordinals and
+occurrence caps through interchange. Explicit month-day selectors prevent an
+invented weekday ordinal. Admission retains independent events until a date is
+eligible, and a single non-repeating cycle retains its supplied consumed count.
+Explicit next-day onset remains open-ended; finite NEXT durations stay local.
+
+Prepared doses remain attached to their timed administration phases. Sequential
+infusions retain independent amounts and durations under the selected head.
+Fronted onsets retain their following dose and cadence, glued meridiem clocks
+use the existing clock reader, and quantified vehicles retain their whole noun.
+
+Current partial maximum-dose endpoints and qualified rate periods survive fresh
+edits. Numeric limits retain their maximum-plan policy without an unevaluated
+safety warning. Unknown graph component annotations, translated activity data
+and opaque timing labels remain preserved. English frequency and duration
+ranges retain both endpoints; Thai calendar bounds retain the authored clock
+and offset while displaying the Buddhist civil date.
+
+Static separable-action lookup and one-pass whitespace normalization reduce
+repeated parser work. Benchmark calendar batches cover complete date cycles,
+and invalid module locations preserve an existing report.
+
+Validation passed 8,326 source tests, configured strict TypeScript, the build,
+and four distribution tests. Fourteen representative paired workloads passed
+with equivalent work and no meaningful regression above 4%. The changed-path
+count remains 100. Detailed review dispositions remain separate.
