@@ -5414,6 +5414,44 @@ describe("graph argument singleton annotations", () => {
     expect(argumentField(original, "conceptId").valueString).toBe("occlusive_dressing");
   });
 
+  it.each([false, true])("retains coding wrapper annotations beside current identity (edited=%s)", edited => {
+    const source = "Cover with an occlusive dressing";
+    const original = saved(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const field = argumentField(original, "coding");
+    field.id = "material-coding";
+    field.valueCoding!._code = { id: "material-code", extension: [
+      { url: "urn:clinic:coding-note", valueString: "retain coding annotation" },
+    ] };
+    const input = saved(original);
+    if (edited) {
+      const coding = argumentField(input, "coding").valueCoding!;
+      coding.code = "new_patch";
+      coding.display = "a new patch";
+      argumentField(input, "conceptId").valueString = "new_patch";
+      const action = input.extension!.find(item => item.url === "action")!;
+      const argument = action.extension!.find(item => item.url === "argument" &&
+        item.extension!.some(child => child.url === "coding"))!;
+      argument.extension = argument.extension!.filter(child => child.url !== "component");
+      argument.extension.find(child => child.url === "text")!.valueString = "a new patch";
+      const normalized = argument.extension.find(child => child.url === "normalized");
+      if (normalized) normalized.valueString = "a new patch";
+    }
+    const before = saved(input), expected = saved(argumentField(input, "coding"));
+    let graph = parseInstructionGraphExtension([input])!;
+    for (let save = 0; save < 2; save++) {
+      const coding = graph.actions[0].args.find(argument => argument.coding)?.coding;
+      expect(coding?.code).toBe(edited ? "new_patch" : "occlusive_dressing");
+      expect(coding?.display).toBe(edited ? "a new patch" : "an occlusive dressing");
+      const rebuilt = buildInstructionGraphExtension(graph)!;
+      expect(argumentField(rebuilt, "coding")).toEqual(expected);
+      graph = parseInstructionGraphExtension([saved(rebuilt)])!;
+    }
+    expect(input).toEqual(before);
+    expect(argumentField(original, "coding").valueCoding!.code).toBe("occlusive_dressing");
+  });
+
   it.each([false, true])("retains quantity wrapper identity beside current amount (edited=%s)", edited => {
     const source = "Rinse mouth with 10 mL water";
     const original = saved(buildInstructionGraphExtension({

@@ -456,7 +456,10 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       if(!concept)concept=entry;
       if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
       break;
-    case "coding":if(!coding)coding=entry;break;
+    case "coding":
+      if(!coding)coding=entry;
+      if(hasFieldMetadata(entry,"valueCoding")||hasCodingMetadata(entry.valueCoding))(sourceExtensions??=[]).push(entry);
+      break;
     case "spanStart":if(!spanStart)spanStart=entry;break;
     case "spanEnd":if(!spanEnd)spanEnd=entry;break;
     case "quantity":
