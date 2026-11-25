@@ -6393,8 +6393,8 @@ describe("round76 R6 primitive metadata contracts", () => {
     expect(strictR5._text!.extension![0].valueQuantity!.comparator).toBe("~");
   });
 
-  it.each(["scalar", "ratio"] as const)(
-    "bridges a nested Quantity on an amount primitive without changing its annotation owner (%s)", kind => {
+  it.each([["scalar", "primitive"], ["scalar", "element"], ["ratio", "primitive"], ["ratio", "element"]] as const)(
+    "bridges a nested Quantity without changing its annotation owner (%s/%s)", (kind, placement) => {
     const unknown = { url: "urn:clinic:device", valueString: "device-A" };
     const annotation: FhirR6PrimitiveElement = { id: "dose-value-note", extension: [{
       url: "urn:clinic:estimated-area", id: "area-estimate",
@@ -6402,7 +6402,8 @@ describe("round76 R6 primitive metadata contracts", () => {
         system: "http://unitsofmeasure.org", code: "cm2", extension: [unknown] },
     }, { url: "urn:clinic:opaque-note", valueString: "retain this" }] };
     const unit = kind === "scalar" ? "tab" : "mL";
-    const quantity = { value: 1, unit, _value: annotation };
+    const quantity: FhirR6Quantity = { value: 1, unit, ...(placement === "primitive"
+      ? { _value: annotation } : { id: annotation.id, extension: annotation.extension }) };
     const input = course({ doseAndRate: [kind === "scalar" ? { doseQuantity: quantity } :
       { rateRatio: { numerator: quantity, denominator: { value: 1, unit: "h" } } }] });
     const original = persist(input);
@@ -6414,16 +6415,17 @@ describe("round76 R6 primitive metadata contracts", () => {
       const amount = kind === "scalar" ? rows[0].doseAndRate![0].doseQuantity! :
         rows[0].doseAndRate![0].rateRatio!.numerator!;
       expect(amount.value).toBe(save ? 3 : 1);
-      expect(amount._value!.id).toBe("dose-value-note");
-      expect(amount._value!.extension![0]).toMatchObject({
+      const metadata = placement === "primitive" ? amount._value! : amount;
+      expect(metadata.id).toBe("dose-value-note");
+      expect(metadata.extension![0]).toMatchObject({
         url: "urn:clinic:estimated-area", id: "area-estimate",
         valueQuantity: { value: 2, unit: "cm2", system: "http://unitsofmeasure.org", code: "cm2" },
       });
-      const nested = amount._value!.extension![0].valueQuantity!;
+      const nested = metadata.extension![0].valueQuantity!;
       expect(nested.comparator).toBeUndefined();
       expect(nested.extension).toEqual([unknown, { url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
         valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" } }]);
-      expect(amount._value!.extension![1]).toEqual(annotation.extension![1]);
+      expect(metadata.extension![1]).toEqual(annotation.extension![1]);
       const fresh = persist(rows);
       const current = kind === "scalar" ? fresh[0].doseAndRate![0].doseQuantity! :
         fresh[0].doseAndRate![0].rateRatio!.numerator!;
@@ -6433,7 +6435,7 @@ describe("round76 R6 primitive metadata contracts", () => {
       expect(fresh).toEqual(saved);
       const nativeAmount = wire.step![0].component[0].doseAndRate![0];
       expect(kind === "scalar" ? nativeAmount.doseQuantity : nativeAmount.rateRatio!.numerator)
-        .toEqual({ value: 3, unit, _value: annotation });
+        .toEqual({ ...quantity, value: 3 });
       if (kind === "ratio") expect(nativeAmount.rateRatio!.denominator).toEqual({ value: 1, unit: "h" });
     }
     expect(input).toEqual(original);
@@ -6444,6 +6446,17 @@ describe("round76 R6 primitive metadata contracts", () => {
       },
     }] } } }] };
     expect(strictR5.doseAndRate![0].doseQuantity!._value!.extension![0].valueQuantity!.comparator).toBe("~");
+  });
+
+  it("retains unchanged opaque Quantity annotations without copying their owner", () => {
+    const quantity: FhirR6Quantity = { value: 1, unit: "tab", extension: [{
+      url: "urn:clinic:device", id: "dose-device", valueString: "device-A",
+    }, {
+      url: "urn:clinic:notes", extension: [{ url: "urn:clinic:note", valueString: "retain this" }],
+    }] };
+    expect(quantityForR5(quantity)).toBe(quantity);
+    expect(simpleQuantityForR5(quantity)).toBe(quantity);
+    expect(quantityFromWire(quantity)).toBe(quantity);
   });
 
   it("keeps the target version of a scalar operator's primitive source", () => {

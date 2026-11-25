@@ -11,6 +11,7 @@
  * EMA http://spor.ema.europa.eu/v1/lists/100000000008
  * HL7 http://hl7.org/fhir/quantity-comparator
  */
+import { DOSAGE_RECONCILIATION_SOURCE_URL } from "./dosage-course";
 import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
   FhirR6SimpleQuantity, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
@@ -127,6 +128,11 @@ function quantityAnnotationExtensions(
   let result: FhirR6Extension[] | undefined;
   for (let index = 0; index < source.length; index++) {
     const item = source[index];
+    // Retired wire values remain literal source, not current annotations.
+    if (item.url === DOSAGE_RECONCILIATION_SOURCE_URL) {
+      result?.push(item);
+      continue;
+    }
     const quantity = target === "r5" ? quantityForR5(item.valueQuantity) : quantityFromWire(item.valueQuantity);
     const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
     const current = quantity === item.valueQuantity && children === item.extension ? item : {
@@ -153,12 +159,14 @@ export function quantityPrimitiveForR5(
   return quantityPrimitiveForWire(primitive, "r5") as FhirPrimitiveElement | undefined;
 }
 const quantityPrimitiveFields = ["_value", "_unit", "_system", "_code", "_comparator"] as const;
-function quantityPrimitiveMetadata(
+function quantityMetadataForWire(
   quantity: FhirR6Quantity, target: "r5" | "r6"
 ): FhirR6Quantity {
-  if (!quantity._value && !quantity._unit && !quantity._system && !quantity._code && !quantity._comparator)
-    return quantity;
-  let result = quantity;
+  if (!quantity.extension?.length && !quantity._value && !quantity._unit && !quantity._system &&
+      !quantity._code && !quantity._comparator) return quantity;
+  const extension = quantity.extension?.length
+    ? quantityAnnotationExtensions(quantity.extension, target) : quantity.extension;
+  let result = extension === quantity.extension ? quantity : { ...quantity, extension };
   for (const field of quantityPrimitiveFields) {
     const primitive = quantityPrimitiveForWire(quantity[field], target);
     if (primitive === quantity[field]) continue;
@@ -173,7 +181,7 @@ function quantityPrimitiveMetadata(
 function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5" | "r6"):
   FhirR6SimpleQuantity | undefined {
   if (!quantity) return undefined;
-  if (target === "r5") quantity = quantityPrimitiveMetadata(quantity, "r5");
+  if (target === "r5") quantity = quantityMetadataForWire(quantity, "r5");
   const comparator = quantity.comparator;
   if (!comparator && quantity._comparator === undefined) return quantity as FhirR6SimpleQuantity;
   const { comparator: _r6Comparator, _comparator, ...numeric } = quantity;
@@ -223,9 +231,9 @@ export function simpleQuantityForR6(quantity: FhirR6Quantity | undefined): FhirR
 export function quantityForR5(quantity: FhirR6Quantity | undefined):
   FhirQuantity | undefined {
   if (!quantity) return undefined;
-  quantity = quantityPrimitiveMetadata(quantity, "r5");
-  if (!quantity.comparator) return quantity as FhirQuantity;
   if (quantity.comparator === "~") return simpleQuantityForR5(quantity);
+  quantity = quantityMetadataForWire(quantity, "r5");
+  if (!quantity.comparator) return quantity as FhirQuantity;
   return quantityForR6(quantity) as FhirQuantity;
 }
 
@@ -258,7 +266,7 @@ export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quant
 export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirSimpleQuantity | undefined):
   FhirR6Quantity | undefined {
   if (!quantity) return undefined;
-  quantity = quantityPrimitiveMetadata(quantity, "r6");
+  quantity = quantityMetadataForWire(quantity, "r6");
   if (quantity.comparator !== undefined) return quantity;
   if (!quantity.extension?.length) return quantity;
   let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false, equalityActive = false;
