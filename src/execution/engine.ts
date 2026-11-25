@@ -3199,6 +3199,16 @@ function cycleOwnedAdministrationEnd(
     ? earlierDate(end, cycleEnd) : end;
 }
 
+/** A resolved phase keeps its nominal grid after calendar eligibility has
+ * moved into the caller's from/count gate. Source recurrence stays immutable. */
+function recurrenceAtResolvedOrigin(
+  repeat: CanonicalRecurrence | undefined, origin: Date
+): CanonicalRecurrence | undefined {
+  return repeat?.calendarWindow?.start ? {
+    ...repeat, calendarWindow: { ...repeat.calendarWindow, start: origin.toISOString() },
+  } : repeat;
+}
+
 function scheduleTreatmentRelativeCourse(
   course: CanonicalCourse,
   options: NextDueDoseOptions,
@@ -3288,6 +3298,9 @@ function scheduleTreatmentRelativeCourse(
         const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat, original.schedule?.explicitEvents)
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
           : originalRepeat;
+        // Eligibility is already owned by effectiveFrom/countEligibilityStart.
+        // Keep the resolved nominal grid when a separate calendar floor exists.
+        const executionRepeat = recurrenceAtResolvedOrigin(counted, member.recurrenceOrigin);
         // The resolved end fences actual administrations. The recurrence
         // below is enumerated in nominal time, before its displacement.
         const nominalEnd = effectiveEnd && originalRepeat && (collect || rollingUsage)
@@ -3298,19 +3311,21 @@ function scheduleTreatmentRelativeCourse(
           ...(collect ? { limits: original.limits?.filter(item => item.scope !== "period") } : {}),
           ...(collect && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
-              ...counted, occurrenceCap: undefined,
+              ...executionRepeat, occurrenceCap: undefined,
               ...(effectiveEnd ? { calendarWindow: {
-                ...originalRepeat.calendarWindow,
+                ...executionRepeat?.calendarWindow,
                 end: nominalEnd,
               } } : {}),
             } },
           } : rollingUsage && effectiveEnd && originalRepeat ? {
             schedule: { ...original.schedule, recurrence: {
-              ...originalRepeat, calendarWindow: {
-                ...originalRepeat.calendarWindow,
+              ...executionRepeat, calendarWindow: {
+                ...executionRepeat?.calendarWindow,
                 end: nominalEnd,
               },
             } },
+          } : executionRepeat !== originalRepeat ? {
+            schedule: { ...original.schedule, recurrence: executionRepeat },
           } : {}),
         };
         const eventStatus = collect && (options as PhaseCountOptions).quantityEstimation &&
@@ -3992,7 +4007,7 @@ function scheduleRepeatedCourse(
     return events.map(event => event.iso);
   }
   if (rollingUsage) options = withActualReplayHistory(options, from);
-  const cyclePriorCount = rollingUsage ? undefined : singleCyclePriorCount(course, options.priorCount);
+  const cyclePriorCount = singleCyclePriorCount(course, options.priorCount);
   let cycleStart = anchor;
   let guard = 0;
   const historicalOrdinal = cycleOrdinalNearQuery(course.cycleInterval, anchor, from, timeZone);
@@ -7589,16 +7604,21 @@ function largerSupplyPlan(
 /** A single parallel stage with independently owned limits can choose each
  * member's feasible clock plan separately. Shared caps and phase dependencies
  * couple those choices and must retain a joint course plan. */
-function hasIndependentClockAlternatives(course: CanonicalCourse): boolean {
+function hasIndependentClockAlternatives(course: CanonicalCourse, zone: string, anchor: Date): boolean {
   if (course.stages.length !== 1 || course.safety) return false;
   const stage = course.stages[0];
   if (stage.safety || stage.administrations.length < 2) return false;
   // An explicit stage end fixes every repetition window independently of
-  // its members' clock choices. Count-completed phases remain joint plans.
-  if (!stage.end && ((course.cycleInterval && course.cycleCount !== 1) ||
-      (stage.count !== undefined && stage.count !== 1))) return false;
-  for (const member of stage.administrations)
+  // its members' clock choices. Count-completed repeated steps remain joint.
+  if (!stage.end && stage.count !== undefined && stage.count !== 1) return false;
+  const repeatedCycles = course.cycleInterval && course.cycleCount !== 1;
+  for (const member of stage.administrations) {
     if (member.phasePredecessors?.length) return false;
+    // Fixed cycle starts and member-local duration caps remain independent
+    // even when those windows overlap. An unbounded member may instead use
+    // the shared completion horizon, so retain its joint plan.
+    if (!stage.end && repeatedCycles && !resolveRepeatDurationCapEnd(member, anchor, zone)) return false;
+  }
   return true;
 }
 /** Compare feasible supply plans; inferred upper-frequency clocks cannot
@@ -7610,7 +7630,7 @@ function maximumChronologicalTimedCourseUnits(
   const maximum = maximumChronologicalSupplyCourse(course, options);
   if (!maximum.hasClockAlternative) return calculateChronologicalCourseUnits(
     maximum.course, maximum.originalOf, options, zone, queryStart, queryEnd, anchor, lifetimeUsage);
-  const independent = hasIndependentClockAlternatives(course);
+  const independent = hasIndependentClockAlternatives(course, zone, anchor);
   const upperMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
   const upperUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
   // A discarded clock plan must not contribute a member's rounding ceiling.
@@ -7817,7 +7837,7 @@ function calculateCourseTotalUnits(
     }
     if (priorCycleUsage) options = { ...withActualReplayHistory(options, queryStart),
       prnOpportunityFrom: queryStart } as CanonicalSupplyOptions & PhaseCountOptions;
-    const cyclePriorCount = priorCycleUsage ? undefined : singleCyclePriorCount(course, options.priorCount);
+    const cyclePriorCount = singleCyclePriorCount(course, options.priorCount);
     let cycleStart = anchor;
     let guard = 0;
     while (
@@ -8293,9 +8313,12 @@ function finiteAdministrationCompletion(
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
+  const executionRepeat = recurrenceAtResolvedOrigin(repeat, start);
   const local =
-    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue || dosage.phasePredecessors?.length
-      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined }
+    dosage.phaseOrigin || dosage.phaseStart || dosage.phaseEnd || dosage.phaseOriginIssue || dosage.phasePredecessors?.length ||
+      executionRepeat !== repeat
+      ? { ...dosage, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined, phaseOriginIssue: undefined, phasePredecessors: undefined,
+        ...(executionRepeat !== repeat ? { schedule: { ...dosage.schedule, recurrence: executionRepeat } } : {}) }
       : dosage;
   // Completion is a historical boundary, not the number of doses still due.
   // Only records inside this phase can complete it; older records still belong
@@ -8320,7 +8343,7 @@ function finiteAdministrationCompletion(
   if (remaining <= 0) return undefined;
   const future = !!actual.length || !!dosage.asNeeded;
   const probe = future ? {
-    ...local, schedule: { ...local.schedule, recurrence: { ...repeat, count: undefined, countMax: undefined } },
+    ...local, schedule: { ...local.schedule, recurrence: { ...executionRepeat, count: undefined, countMax: undefined } },
   } : local;
   const due = nextDueDoses(probe, {
     ...options,
