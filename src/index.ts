@@ -1121,7 +1121,9 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     return true;
   const primary = dosage.doseAndRate?.[0];
   // Native source ownership preserves directions beside independent advice.
-  if (!primary && !dosage.method && dosage.text?.trim()) return true;
+  // Unverified roundtrip inputs already take that path in sourceDisplayEdit;
+  // verified source mode retains the existing graph-source replay below.
+  if (!primary && !dosage.method && dosage.text?.trim() && options?.realizationMode !== "roundtrip") return true;
   if (primary?.extension?.some(extension => extension.url === R5_EXPRESSION_SLOT_SOURCE_URL)) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
