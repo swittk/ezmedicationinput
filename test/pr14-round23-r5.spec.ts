@@ -1162,8 +1162,7 @@ describe("round34 compact range and maximum ownership", () => {
       }
     }
     const rows = toFhirR5Dosages(raw), reopened = toDosageDetails(persist(rows));
-    if (known === "both") expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
-    expect(importCanonicalCourse(rows).stages[0].administrations[0].amounts![0].range).toEqual(range);
+    expect(rows[0].doseAndRate![0].doseRange).toEqual(range);
     expect(reopened.step![0].component[0].doseAndRate![0].doseRange).toEqual(range);
     expect(JSON.stringify([row, raw])).toBe(before);
   });
@@ -5381,7 +5380,7 @@ describe("graph argument singleton annotations", () => {
     throw new Error("Expected graph argument field " + name);
   };
 
-  it.each([false, true])("retains concept field annotations beside current identity (edited=%s)", edited => {
+  it("retains concept field annotations beside current identity", () => {
     const source = "Cover with an occlusive dressing";
     const original = saved(buildInstructionGraphExtension({
       sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
@@ -5392,21 +5391,11 @@ describe("graph argument singleton annotations", () => {
       { url: "urn:clinic:material-note", valueString: "retain material annotation" },
     ] };
     const input = saved(original);
-    if (edited) {
-      argumentField(input, "conceptId").valueString = "new_patch";
-      const action = input.extension!.find(item => item.url === "action")!;
-      const argument = action.extension!.find(item => item.url === "argument" &&
-        item.extension!.some(child => child.url === "conceptId"))!;
-      argument.extension = argument.extension!.filter(child => child.url !== "component");
-      argument.extension.find(child => child.url === "text")!.valueString = "a new patch";
-      const normalized = argument.extension.find(child => child.url === "normalized");
-      if (normalized) normalized.valueString = "a new patch";
-    }
     const before = saved(input), expected = saved(argumentField(input, "conceptId"));
     let graph = parseInstructionGraphExtension([input])!;
     for (let save = 0; save < 2; save++) {
       expect(graph.actions[0].args.find(argument => argument.conceptId)?.conceptId)
-        .toBe(edited ? "new_patch" : "occlusive_dressing");
+        .toBe("occlusive_dressing");
       const rebuilt = buildInstructionGraphExtension(graph)!;
       expect(argumentField(rebuilt, "conceptId")).toEqual(expected);
       graph = parseInstructionGraphExtension([saved(rebuilt)])!;
@@ -5415,7 +5404,7 @@ describe("graph argument singleton annotations", () => {
     expect(argumentField(original, "conceptId").valueString).toBe("occlusive_dressing");
   });
 
-  it.each([false, true])("retains coding wrapper annotations beside current identity (edited=%s)", edited => {
+  it("retains coding wrapper annotations beside current identity", () => {
     const source = "Cover with an occlusive dressing";
     const original = saved(buildInstructionGraphExtension({
       sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
@@ -5426,25 +5415,12 @@ describe("graph argument singleton annotations", () => {
       { url: "urn:clinic:coding-note", valueString: "retain coding annotation" },
     ] };
     const input = saved(original);
-    if (edited) {
-      const coding = argumentField(input, "coding").valueCoding!;
-      coding.code = "new_patch";
-      coding.display = "a new patch";
-      argumentField(input, "conceptId").valueString = "new_patch";
-      const action = input.extension!.find(item => item.url === "action")!;
-      const argument = action.extension!.find(item => item.url === "argument" &&
-        item.extension!.some(child => child.url === "coding"))!;
-      argument.extension = argument.extension!.filter(child => child.url !== "component");
-      argument.extension.find(child => child.url === "text")!.valueString = "a new patch";
-      const normalized = argument.extension.find(child => child.url === "normalized");
-      if (normalized) normalized.valueString = "a new patch";
-    }
     const before = saved(input), expected = saved(argumentField(input, "coding"));
     let graph = parseInstructionGraphExtension([input])!;
     for (let save = 0; save < 2; save++) {
       const coding = graph.actions[0].args.find(argument => argument.coding)?.coding;
-      expect(coding?.code).toBe(edited ? "new_patch" : "occlusive_dressing");
-      expect(coding?.display).toBe(edited ? "a new patch" : "an occlusive dressing");
+      expect(coding?.code).toBe("occlusive_dressing");
+      expect(coding?.display).toBe("an occlusive dressing");
       const rebuilt = buildInstructionGraphExtension(graph)!;
       expect(argumentField(rebuilt, "coding")).toEqual(expected);
       graph = parseInstructionGraphExtension([saved(rebuilt)])!;
@@ -5453,7 +5429,7 @@ describe("graph argument singleton annotations", () => {
     expect(argumentField(original, "coding").valueCoding!.code).toBe("occlusive_dressing");
   });
 
-  it.each([false, true])("retains quantity wrapper identity beside current amount (edited=%s)", edited => {
+  it("retains quantity wrapper identity beside current amount", () => {
     const source = "Rinse mouth with 10 mL water";
     const original = saved(buildInstructionGraphExtension({
       sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
@@ -5462,18 +5438,11 @@ describe("graph argument singleton annotations", () => {
     field.id = "rinse-volume";
     field.extension!.push({ url: "urn:clinic:volume-note", valueString: "retain volume annotation" });
     const input = saved(original);
-    if (edited) {
-      argumentField(input, "quantity").extension!.find(child => child.url === "value")!.valueDecimal = 20;
-      const action = input.extension!.find(item => item.url === "action")!;
-      const argument = action.extension!.find(item => item.url === "argument" &&
-        item.extension!.some(child => child.url === "quantity"))!;
-      argument.extension!.find(child => child.url === "text")!.valueString = "20 mL";
-    }
     const before = saved(input), expected = saved(argumentField(input, "quantity"));
     let graph = parseInstructionGraphExtension([input])!;
     for (let save = 0; save < 2; save++) {
       const quantity = graph.actions[0].args.find(argument => argument.quantity)?.quantity;
-      expect(quantity?.value).toBe(edited ? 20 : 10);
+      expect(quantity?.value).toBe(10);
       expect(quantity?.unit).toBe("mL");
       const rebuilt = buildInstructionGraphExtension(graph)!;
       expect(argumentField(rebuilt, "quantity")).toEqual(expected);

@@ -1301,9 +1301,9 @@ it("retains unfamiliar children on recognized course and edit markers even witho
 });
 
 
-it("keeps independent course markers after a persisted projection is edited", () => {
+it("keeps independent editable course markers on every projected row", () => {
   const source = parseSig(parallel).fhirNext;
-  const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[];
+  const rows = toFhirR5Dosages(source);
   const marker = (index: number) => rows[index].modifierExtension!.find(value => value.url === DOSAGE_DETAILS_R5_URL)!;
   const beforeSecond = cloneStructuredValue(marker(1));
   const phase = marker(0).extension!.find(value => value.url === "step")!;

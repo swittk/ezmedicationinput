@@ -78,9 +78,11 @@ one typed HPSG pass; this is not a second grammar or a competing parser IR.
   course or administration extends `FhirDosage` or `DosageInstruction`.
 - `canonical/compile.ts` composes existing scoped clauses and parallel regimen
   phases. Syntax/source spans are evidence, not another editable dosage truth.
-- Native models have no public editor or mutation lifecycle. Externally
-  modified FHIR is reconciled at the interchange boundary; internal facts remain
-  free to change without defensive copying or compatibility obligations.
+- Native models have no public editor or mutation lifecycle. Independent valid
+  R5/R6 input supports best-effort formatting and conversion. Historical edits
+  to emitted FHIR and stale-marker reconciliation are best effort only, with no
+  further feature or correctness work. Authored SIG phase sequencing remains
+  in scope; internal facts need no defensive copying or compatibility machinery.
 - `canonical/format-course.ts` renders native facts without R5 lowering.
 - `execution/engine.ts` consumes native facts only. Its resolved administration
   windows separately own recurrence origin, first eligibility, exclusive end,
@@ -338,9 +340,10 @@ If learned behavior is added later, it should be:
   remains opaque provenance only, never executable clinical data.
 - Inputs and outputs are immutable **by caller contract**, not by defensive
   copying, freezing or same-instance mutation detection. There is no public
-  native edit API. Fresh independently submitted wire values must read their
-  current clinical contents; per-instance verification need not recheck an
-  already-consumed object for later caller mutation.
+  native edit API. Ordinary independent valid wire conversion preserves supplied
+  clinical facts where supported; historical export edits, saved draft/pause
+  restoration and source-history reconciliation have no conformance guarantee.
+  Per-instance verification need not recheck later caller mutation.
 - Performance review (updated by the owner on 2026-11-24): use short paired
   measurements of representative parse, format, FHIR, schedule, supply and
   suggestion workflows. Judge absolute latency, usage frequency, CPU spread
@@ -405,9 +408,9 @@ FHIR R5 and current R6 are independent projections from canonical
 meaning. The ancillary instruction graph can lack an Amount even
 when the HPSG primary dosage owns an authored quantity. Source
 roundtrip may reuse that old text only with source evidence or
-verified persisted R5 projection. Editing a quantity invalidates
-its evidence and uses the typed canonical realizer. An inferred
-default does not claim to be an authored source quantity.
+verified persisted R5 projection. Historical quantity edits and source-evidence
+reconciliation remain best effort only. An inferred default does not claim
+to be an authored source quantity.
 Persisted source evidence is verified without reparsing or emitting
 a new FHIR metadata field; the ordinary parsing and formatting
 hot paths never pay a second realization/graph traversal.

@@ -104,19 +104,6 @@ function draftCompletionQuantity(quantity: FhirR6Quantity | undefined): object |
 function draftCompletionRange(range: FhirRange | undefined): object | undefined {
   return range ? { low: draftCompletionQuantity(range.low), high: draftCompletionQuantity(range.high) } : undefined;
 }
-/** Rolling limits can postpone the last administration of a finite count. */
-function draftCompletionLimits(dosage: FhirR6Dosage): object[] | undefined {
-  const repeat = dosage.timing?.repeat;
-  if (repeat?.count === undefined || repeat.countMax !== undefined && repeat.countMax !== repeat.count)
-    return undefined;
-  const limits: object[] = [];
-  for (const limit of dosage.safety?.doseLimit ?? []) if (limit.scope === "period") limits.push({
-    valueQuantity: draftCompletionQuantity(limit.valueQuantity),
-    valueInteger: limit.valueInteger, valueExpression: limit.valueExpression,
-    period: draftCompletionQuantity(limit.period),
-  });
-  return limits.length ? limits : undefined;
-}
 function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): object | undefined {
   if (!boundary) return undefined;
   const { id: _id, offsetDuration, offsetRange, ...fields } = boundary;
@@ -214,10 +201,9 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       // completion retires only the outgoing pause, not its unchanged start.
       if (!prior.end && index <= lastDraftPredecessor) {
         const before = prior.component[member], after = current.component[member];
-        // Weekday order and Element annotations cannot change completion.
+        // Getters return fresh arrays; weekday order cannot change completion.
         if (Boolean(before.asNeeded || before.asNeededFor?.length) !== Boolean(after.asNeeded || after.asNeededFor?.length) ||
             !equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
-            !equalStructuredValues(draftCompletionLimits(before), draftCompletionLimits(after)) ||
             !equalStructuredValues(getDosageCondition(before), getDosageCondition(after)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
             !equalStructuredValues(draftMemberPhase(before), draftMemberPhase(after)) ||
