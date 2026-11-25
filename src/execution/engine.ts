@@ -2603,7 +2603,7 @@ function resolveAdministrationWindow(
       options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
       timeZone,
       countEligibilityStart ?? cadence.origin,
-      earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd : undefined) ?? undefined
+      earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd ?? null : null) ?? undefined
     );
     if (completion) {
       const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
