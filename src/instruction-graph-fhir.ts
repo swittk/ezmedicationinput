@@ -1,3 +1,4 @@
+import { equalStructuredValues } from "./stable-structure";
 import { getEmaQuantityComparator, QUANTITY_OPERATOR_SOURCE_URL, quantityFromWire, simpleQuantityForR5 } from "./fhir-quantity-operator";
 import {
   AdviceArgument,
@@ -140,7 +141,9 @@ function addComponentSource(parts: FhirExtension[], sources: FhirExtension[] | u
     }
     if (source.url === "coding" && source.valueCoding) {
       const current = index >= 0 ? parts[index].valueCoding : undefined, old = source.valueCoding;
-      if (!current || current.system !== old.system || current.version !== old.version || current.code !== old.code) {
+      // A replacement may retain code identity while changing its display or
+      // primitive metadata. Preserve the full displaced Coding as inactive source.
+      if (!current || !equalStructuredValues(current, old)) {
         parts.push({ ...source, url: "sourceCoding" });
         continue;
       }

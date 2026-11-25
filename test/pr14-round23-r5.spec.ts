@@ -11893,7 +11893,7 @@ describe("round71 recognized graph component annotations", () => {
 });
 
 describe("round71 predicate component annotations", () => {
-  it("retains source annotations while a fresh typed Coding replacement stays active", () => {
+  it.each(["code", "display", "clear display"])("retains source annotations while a fresh typed Coding %s edit stays active", edit => {
     const parsed = parseSig("Rub cream gently");
     const marker = buildInstructionGraphExtension(parsed.meta.canonical.clauses[0].instructionGraph!)!;
     const component = (wire: FhirExtension) => wire.extension!.find(item => item.url === "action")!
@@ -11921,14 +11921,19 @@ describe("round71 predicate component annotations", () => {
     expect(row).toEqual(rowBefore);
 
     const decoded = parseInstructionGraphExtension([persist(marker)])!, edited = persist(decoded);
-    const replacement = { system: "https://example.org/clinic/mechanisms", code: "gentle-rubbing", display: "Gentle rubbing" };
+    const previous = coding.valueCoding!;
+    const replacement = edit === "code"
+      ? { system: "https://example.org/clinic/mechanisms", code: "gentle-rubbing", display: "Gentle rubbing" }
+      : { system: previous.system, code: previous.code,
+          ...(previous.version === undefined ? {} : { version: previous.version }),
+          ...(edit === "display" ? { display: "Current friction label" } : {}) };
     edited.actions[0].predicate.semanticComponents![0].coding = replacement;
     const editedBefore = persist(edited);
     current = buildInstructionGraphExtension(edited)!;
     for (let save = 0; save < 2; save++) {
       const fields = component(current).extension!;
-      expect(fields.filter(item => item.url === "coding")).toEqual([{ url: "coding", valueCoding: replacement }]);
       expect(fields.filter(item => item.url === "sourceCoding")).toEqual([{ ...coding, url: "sourceCoding" }]);
+      expect(fields.filter(item => item.url === "coding")).toEqual([{ url: "coding", valueCoding: replacement }]);
       expect(fields).toContainEqual(role);
       expect(fields).toContainEqual(note);
       const fresh = parseInstructionGraphExtension([persist(current)])!;
