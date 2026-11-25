@@ -362,7 +362,10 @@ export function scopeSequentialPhaseSemantics(
     const recordedStart = relativePhaseStarts.get(edge.from);
     const inheritedStart = recordedStart !== undefined ? recordedStart : 0;
     const firstSchedule = schedules[0];
-    let priorStart: number | null = firstSchedule?.treatmentStartOffsetDays ?? inheritedStart;
+    // A NEXT displacement belongs to the preceding phase, not the order.
+    // Keep that dependency until execution resolves its actual origin.
+    let priorStart: number | null = firstSchedule?.phaseStartReference === "previous-phase-next-day"
+      ? null : firstSchedule?.treatmentStartOffsetDays ?? inheritedStart;
     // An omitted member onset inherits the phase origin, not a sibling's
     // independently authored onset. Distinct origins keep their dependency
     // for the native phase resolver, which already owns member completion.

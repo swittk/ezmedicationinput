@@ -1035,6 +1035,7 @@ export function formatCanonicalCourse(
         const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
         let memberTiming = component.phasePredecessors?.length && !component.phaseStart && !origin
           ? words.afterPreviousPhase : undefined;
+        let memberStartPoint: string | undefined;
         if (component.phaseStart) {
           const boundary = component.phaseStart;
           const quantity = treatmentStepOffsetQuantity(boundary);
@@ -1043,9 +1044,11 @@ export function formatCanonicalCourse(
             courseBoundaryPoint(quantity, boundary.anchor, words, cycleStart) ?? boundaryEventText(boundary, words, cycleStart);
           const knownOrigin = boundary.anchor === "treatment-start" || boundary.anchor === "treatment-day-start" ||
             (boundary.anchor === "previous-phase-next-day" && (index > 0 || Boolean(component.phasePredecessors?.length)));
+          if (knownOrigin) memberStartPoint = point ??
+            (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart);
           memberTiming = knownOrigin
-            ? days !== undefined ? words.fromDay(days + 1)
-              : words.calendarWindow(point ?? (boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart : words.treatmentDayStart))
+            ? component.phaseEnd ? memberStartPoint
+              : days !== undefined ? words.fromDay(days + 1) : words.calendarWindow(memberStartPoint)
             : words.reviewTiming(point ?? boundary.description);
         }
         if (!memberTiming && origin && origin.value !== undefined && origin.value !== 0) {
@@ -1059,16 +1062,19 @@ export function formatCanonicalCourse(
               (stageOrigin.code ?? stageOrigin.unit) === (origin.code ?? origin.unit) &&
               stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
           }
-          if (!stageCoversOrigin) memberTiming = words.calendarWindow(
-            afterCourseStart(formatCourseTimeQuantity(origin, words), words, cycleStart), undefined);
+          if (!stageCoversOrigin) {
+            memberStartPoint = afterCourseStart(formatCourseTimeQuantity(origin, words), words, cycleStart);
+            memberTiming = component.phaseEnd ? memberStartPoint : words.calendarWindow(memberStartPoint);
+          }
         }
         if (component.phaseEnd) {
           const boundary = component.phaseEnd;
           const point = treatmentBoundaryRangeText(boundary, words, cycleStart) ??
             courseBoundaryPoint(treatmentStepOffsetQuantity(boundary), boundary.anchor, words, cycleStart) ??
             boundaryEventText(boundary, words, cycleStart);
-          const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description);
-          memberTiming = memberTiming ? memberTiming + "; " + endTiming : endTiming;
+          const endTiming = point ? words.calendarWindow(undefined, point) : words.reviewTiming(boundary.description, "end");
+          memberTiming = memberStartPoint && point ? words.calendarWindow(memberStartPoint, point)
+            : memberTiming ? memberTiming + "; " + endTiming : endTiming;
         }
         return memberTiming ? memberTiming + ": " + body : body;
       },
@@ -1143,6 +1149,8 @@ export function formatCanonicalCourse(
           ? words.dayRange(startDays + 1, endDays)
           : startDays !== undefined ? words.fromDay(startDays + 1)
           : endDays !== undefined ? words.throughDay(endDays) : "";
+        if (index > 0 && !step.start && startDays === undefined)
+          timing = timing ? words.afterPreviousPhase + "; " + timing : words.afterPreviousPhase;
       } else if (startDays !== undefined || endDays !== undefined) {
         timing = formatCalendarStepWindow(
           startDays === undefined ? undefined : { value: startDays, code: "d" },

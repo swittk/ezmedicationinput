@@ -6421,7 +6421,8 @@ function maximumChronologicalSupplyCourse(
       if ((maximal.frequencyMaximum || maximal.periodMinimum) && !preserveClocks) {
         const repeat = generated.schedule!.recurrence!;
         hasClockAlternative ||= !!(generated.schedule!.code ||
-          maximal.frequencyMaximum && (repeat.clocks?.length || repeat.anchors?.length));
+          maximal.frequencyMaximum && (repeat.clocks?.length || repeat.anchors?.length ||
+            positiveInteger(source.schedule?.recurrence?.frequency)));
         generated = {
           ...generated,
           schedule: {
@@ -6430,6 +6431,15 @@ function maximumChronologicalSupplyCourse(
             recurrence: maximal.frequencyMaximum ? { ...repeat, clocks: undefined, anchors: undefined } : repeat,
           },
         };
+      } else if (preserveClocks && maximal.frequencyMaximum) {
+        const repeat = generated.schedule!.recurrence!;
+        if (positiveInteger(repeat.frequency) && !generated.schedule!.code &&
+            !repeat.clocks?.length && !repeat.anchors?.length) {
+          // Each concrete frequency has its own clinic-clock plan. Pin this
+          // lower plan so best-effort timing cannot promote it to the upper one.
+          generated = { ...generated, schedule: { ...generated.schedule!,
+            recurrence: { ...repeat, frequencyMax: undefined } } };
+        }
       }
       if (generated === source) continue;
       if (!members) members = stage.administrations.slice();
@@ -7995,6 +8005,7 @@ function successorIntervalStart(
     !repeat.anchors?.length &&
     !repeat.clocks?.length &&
     !repeat.dayOfWeek?.length &&
+    !repeat.monthDays?.length &&
     !isWakingHoursInterval(repeat) &&
     !dosage.schedule?.explicitEvents?.length &&
     !dosage.schedule?.code?.coding?.length
