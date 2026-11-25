@@ -2782,7 +2782,14 @@ function treatmentStepWindow(
       // A dated successor already owns an absolute boundary. It can close
       // this otherwise open execution window without inventing an authored
       // predecessor duration/count or combining disparate parallel origins.
-      end = resolveRepeatBoundsStart(nextStage.administrations[0].schedule?.recurrence, timeZone) ?? undefined;
+      const successor = nextStage.administrations[0];
+      end = resolveRepeatBoundsStart(successor.schedule?.recurrence, timeZone) ?? undefined;
+      // A retained empty predecessor cannot block an independently anchored
+      // member. Resolve its typed origin through the same cadence owner.
+      if (!end && !stage.administrations.length &&
+          successor.phaseStart?.anchor !== "previous-phase-next-day" &&
+          (successor.phaseStart || successor.phaseOrigin))
+        end = parallelComponentCadence(successor, anchor, timeZone, start, sourceClock).origin;
     }
   }
   if (end && end <= start)
