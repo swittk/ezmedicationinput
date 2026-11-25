@@ -726,6 +726,21 @@ export function courseContinuationDurationAt(
     ? { end: cursor + 2, value, unit } : undefined;
 }
 
+/** One range daughter shared by ordinary doses and dimensional quantities. */
+export function doseRangeNumberAt(tokens: readonly LexToken[], start: number, limit: number) {
+  const token = tokens[start];
+  if (!token || start >= limit) return undefined;
+  if (token.kind === LexKind.NumberRange && token.low !== undefined && token.high !== undefined &&
+      token.high >= token.low) {
+    return { range: { low: token.low, high: token.high }, numericIndex: start };
+  }
+  if (token.kind !== LexKind.Number || token.value === undefined || start + 2 >= limit) return undefined;
+  const connector = tokens[start + 1], high = tokens[start + 2];
+  if (!connector || !RANGE_CONNECTORS.has(connector.canonical ?? connector.lower) ||
+      high?.kind !== LexKind.Number || high.value === undefined || high.value < token.value) return undefined;
+  return { range: { low: token.value, high: high.value }, numericIndex: start + 2 };
+}
+
 /** Authored comparative dose NPs. Only complete number+medication-unit
  * constituents are licensed; "about 3 weeks" stays temporal, and no
  * second text-level dose parser runs after HPSG.

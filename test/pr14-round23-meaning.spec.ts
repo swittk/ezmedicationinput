@@ -5602,3 +5602,89 @@ describe("round61 supported grammar and display ownership", () => {
     expect(row).toEqual(before);
   });
 });
+
+
+describe("round62 active range beside a scalar infusion carrier", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["2-4", 2, 4, "mg", "mg", ""],
+    ["2 to 4", 2, 4, "mg", "mg", ""],
+    ["2–4", 2, 4, "mg", "mg", " IV"],
+    ["0.5-1", 0.5, 1, "mg", "mg", ""],
+    ["0-2", 0, 2, "mg", "mg", ""],
+    ["2-4", 2, 4, "milligrams", "mg", " IV"],
+    ["2-4", 2, 4, "units", "[iU]", " IV"],
+    ["2 to 4", 2, 4, "mg", "mg", " normal saline IV"],
+    ["2-4", 2, 4, "mg", "mg", " IV slowly"],
+  ] as const)("keeps %s (%s–%s %s, normalized %s) with carrier%s", (range, low, high, activeUnit, unit, material) => {
+    const source = `Infuse ${range} ${activeUnit} in 50 mL${material} over 1 hour`;
+    const parsed = parseSig(source), clause = parsed.meta.canonical.clauses[0];
+    expect(parsed.input).toBe(source);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(clause.dose).toEqual({ range: { low, high }, unit });
+    expect(clause.clinicalQuantity?.projectedDose).toBeUndefined();
+    expect(clause.clinicalQuantity?.rateNumerator).toEqual({ value: 50, unit: "mL" });
+    const wireInputs = [parsed.fhir, parsed.fhirNext, fresh(parsed.fhir), fresh(parsed.fhirNext),
+      fresh(toFhirR5Dosages(fresh(parsed.fhirNext)))];
+    for (const input of [parsed.meta.canonical.course!, ...wireInputs]) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const member = course.stages[0].administrations[0];
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      expect(member.amounts).toHaveLength(1);
+      expect(member.amounts![0]).toMatchObject({
+        range: { low: { value: low, unit }, high: { value: high, unit } },
+        rateRatio: { numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" } }
+      });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.target).toBeUndefined();
+      if (material.includes("IV")) expect(member.route?.coding?.[0].code).toBe("47625008");
+      else expect(member.route).toBeUndefined();
+      for (const locale of ["en", "th"]) {
+        const short = formatCanonicalCourse(course, "short", { locale, realizationMode: "normalized" });
+        expect(short).toContain(`${low}-${high}`);
+        expect(short).toMatch(/50 mL(?: normal saline)? \/ 1 h/);
+        if (material.includes("normal saline")) expect(short).toContain("normal saline");
+        expect(short).not.toMatch(/intranasal|ทางจมูก/);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    for (const wire of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+      expect(wire.doseAndRate![0].doseQuantity).toBeUndefined();
+      expect(wire.doseAndRate![0].doseRange).toMatchObject({
+        low: { value: low, unit }, high: { value: high, unit }
+      });
+    }
+  });
+
+  it.each([
+    "Infuse 20-40 mg in 100 mL over 1 hour in 2 divided doses",
+    "Infuse 20 to 40 mg in 100 mL over 1 hour in 2 divided doses",
+  ])("divides the active range and carrier independently: %s", source => {
+    const parsed = parseSig(source);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ range: { low: 10, high: 20 }, unit: "mg" });
+    expect(clause.clinicalQuantity?.projectedDose).toBeUndefined();
+    expect(clause.clinicalQuantity?.numerator).toMatchObject({ value: 100, unit: "mL" });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+      fresh(toFhirR5Dosages(fresh(parsed.fhirNext)))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts![0]).toMatchObject({
+        range: { low: { value: 10, unit: "mg" }, high: { value: 20, unit: "mg" } },
+        rateRatio: { numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" } }
+      });
+      expect(member.amounts![0].quantity).toBeUndefined();
+      expect(member.schedule?.recurrence?.count).toBe(2);
+    }
+  });
+
+  it.each(["1-2 tablets PO BID", "1 to 2 tablets PO BID"])(
+    "keeps the ordinary shared range daughter in %s", source => {
+      const clause = parseSig(source).meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ range: { low: 1, high: 2 }, unit: "tab" });
+      expect(clause.route?.code).toBe("26643006");
+      expect(clause.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      expect(clause.clinicalQuantity).toBeUndefined();
+    });
+});

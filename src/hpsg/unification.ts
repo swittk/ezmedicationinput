@@ -430,8 +430,10 @@ function mergeDose(
       range === undefined &&
       !clinicalQuantity.administrationDuration;
     const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedWeightTotal;
+    const rangedActiveDose = range !== undefined && (independentRate ||
+      clinicalQuantity.representation === "dose-with-rate-ratio");
     const activeDose = clinicalQuantity.projectedDose ??
-      (independentRate
+      (independentRate || rangedActiveDose
         ? value !== undefined && unit ? {
             value, unit, comparator: mergeOptionalScalar(left.comparator, right.comparator)
           } : undefined
@@ -460,14 +462,17 @@ function mergeDose(
             ? { comparator: activeDose.comparator } : {})
         }
       };
-    } else if (independentRate && range && unit) {
-      // A separately authored total range divides just like a scalar amount;
-      // the independent infusion rate keeps its original numerator and period.
+    } else if (rangedActiveDose && range && unit) {
+      // Divide the authored active range. A carrier preparation also divides
+      // its separate volume; an independent flow rate keeps its numerator.
       range = {
         low: range.low === undefined ? undefined : range.low / divisionCount,
         high: range.high === undefined ? undefined : range.high / divisionCount,
       };
-      clinicalQuantity = { ...clinicalQuantity, dividedDoseCount: divisionCount };
+      clinicalQuantity = { ...clinicalQuantity, dividedDoseCount: divisionCount,
+        ...(clinicalQuantity.rateNumerator ? { rateNumerator: {
+          ...clinicalQuantity.rateNumerator, value: clinicalQuantity.rateNumerator.value / divisionCount
+        } } : {}) };
     }
   } else if (clinicalQuantity?.representation === "rate-quantity" && value !== undefined && unit) {
     // Independently supplied volume and rate are compatible arguments of one

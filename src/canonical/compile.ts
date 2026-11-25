@@ -81,15 +81,15 @@ function amounts(clause: CanonicalSigClause): CanonicalAmount[] | undefined {
       },
     ];
   const duration = q.administrationDuration;
-  if (!duration || !projected) return result ? [result] : undefined;
   const numerator = q.rateNumerator ?? projected;
+  if (!duration || !numerator || (!projected && !result?.range)) return result ? [result] : undefined;
   return [
     {
-      quantity: {
+      ...(projected ? { quantity: {
         ...resolved,
         ...(projected.system ? { system: projected.system } : {}),
         ...(projected.code ? { code: projected.code } : {}),
-      },
+      } } : { range: result!.range }),
       rateRatio: {
         numerator: {
           ...quantity(numerator.value, numerator.unit, numerator.comparator),

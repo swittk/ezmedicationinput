@@ -6,6 +6,7 @@ import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-con
 import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
+  doseRangeNumberAt,
   millionDoseNumberAt,
   compactMillionDoseNumber,
   DOSE_FRACTION_ARTICLES,
@@ -23,6 +24,7 @@ import {
 import {
   HpsgClinicalQuantityFeature,
   HpsgDimensionalQuantityTerm,
+  HpsgDoseFeature,
   HpsgLexicalRule,
   HpsgScheduleFeature,
   HpsgSign,
@@ -257,7 +259,7 @@ function clinicalSign(
   rule: string,
   indices: number[],
   clinicalQuantity: HpsgClinicalQuantityFeature,
-  dose?: { value: number; unit: string },
+  dose?: HpsgDoseFeature,
   schedule?: HpsgScheduleFeature,
   warning?: string,
   explicitRoute?: RouteCode
@@ -287,7 +289,8 @@ function activeDoseInCarrierOverTime(
   start: number,
   value: number,
   attachedUnit?: string,
-  phraseStart = start
+  phraseStart = start,
+  activeRange?: HpsgDoseFeature["range"]
 ) {
   const unitShift = attachedUnit ? -1 : 0;
   const activeUnitToken = context.tokens[start + 1];
@@ -369,7 +372,7 @@ function activeDoseInCarrierOverTime(
     status: "resolved",
     numerator: carrier,
     denominators: [{ value: durationValue, unit: durationUnit, dimension: "time", ...durationQualifier }],
-    projectedDose: { value, unit: activeDose.unit },
+    ...(!activeRange ? { projectedDose: { value, unit: activeDose.unit } } : {}),
     rateNumerator: { value: carrier.value, unit: carrier.unit,
       ...(carrier.comparator ? { comparator: carrier.comparator } : {}) },
     ...(materialEnd > materialStart ? { carrierMaterial: {
@@ -390,7 +393,7 @@ function activeDoseInCarrierOverTime(
     Array.from({ length: durationEnd - start }, (_, offset) => start + offset)
       .filter(index => index < mannerStart || index >= mannerEnd),
     clinicalQuantity,
-    clinicalQuantity.projectedDose,
+    activeRange ? { range: activeRange, unit: activeDose.unit } : clinicalQuantity.projectedDose,
     { sourceRanges: [{
       start: overToken.sourceStart, end: context.tokens[durationEnd - 1].sourceEnd
     }] },
@@ -751,15 +754,20 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   const compactMillion = attachedLower?.endsWith("m") ? compactMillionDoseNumber(attachedLower) : undefined;
   const markedNumber = quantityToken.lower.startsWith("@") && /^@(?:\d+(?:\.\d+)?|\.\d+)$/u.test(quantityToken.lower)
     ? Number(quantityToken.lower.slice(1)) : undefined;
-  const plainNumber = qualified ? undefined :
+  const rangedNumber = qualified ? undefined : doseRangeNumberAt(context.tokens, phraseStart, context.limit);
+  if (rangedNumber) {
+    for (let index = phraseStart; index <= rangedNumber.numericIndex; index++)
+      if (!available(context, index)) return [];
+  }
+  const plainNumber = qualified || rangedNumber ? undefined :
     plainClinicalNumberAt(context, phraseStart, compactMillion ?? markedNumber);
-  const numericStart = qualified?.numericIndex ?? plainNumber?.numericIndex ?? phraseStart;
+  const numericStart = rangedNumber?.numericIndex ?? qualified?.numericIndex ?? plainNumber?.numericIndex ?? phraseStart;
   // The general lower-case normalizer strips leading punctuation, but a
   // leading dot is a significant decimal point in '.1mcg/kg/min'. Trim
   // trailing sentence punctuation only; never turn .1 into 1.
   const attached = compactMillion === undefined && attachedLower
     ? attachedNumberUnitAt(attachedLower) : undefined;
-  const value = qualified?.value ?? plainNumber?.value ?? attached?.value;
+  const value = rangedNumber?.range.high ?? qualified?.value ?? plainNumber?.value ?? attached?.value;
   // Both a qualified amount ('~0.1mcg/kg per min') and an exact compact
   // amount ('0.1mcg/kg per min') use one bounded dimensional unit grammar.
   const unit = (qualified?.rawUnit ?? attached?.rawUnit)?.replace(/[μµ]/gu, "u");
@@ -775,9 +783,9 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   }
   const comparator = qualified?.comparator;
   const activeInCarrier = qualifyClinicalSign(context, phraseStart, quantityEnd,
-    activeDoseInCarrierOverTime(context, quantityEnd, value, unit, phraseStart), comparator);
-  const volume = activeInCarrier ?? qualifyClinicalSign(context, phraseStart, quantityEnd,
-    fixedVolumeOverTime(context, quantityEnd, value, unit, phraseStart), comparator);
+    activeDoseInCarrierOverTime(context, quantityEnd, value, unit, phraseStart, rangedNumber?.range), comparator);
+  const volume = activeInCarrier ?? (rangedNumber ? undefined : qualifyClinicalSign(context, phraseStart, quantityEnd,
+    fixedVolumeOverTime(context, quantityEnd, value, unit, phraseStart), comparator));
   if (volume) {
     // The volume-over-time construction owns its leading rate marker too.
     const sign = phraseStart > start ? lexicalSign({
@@ -791,6 +799,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
   }
+  if (rangedNumber) return [];
   const accepts = (candidate: string) =>
     /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
     /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);

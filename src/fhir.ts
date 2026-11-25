@@ -670,12 +670,15 @@ export function clinicalCarrierQuantityFromFhir(
   const volumeLabel = carrier?.unit ?? carrier?.code;
   const durationUnit = getQuantityDurationUnit(duration);
   const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
+  // The current range remains in doseRange; its explicitly named carrier
+  // needs no scalar medication amount to retain that separate material.
+  if (active && (typeof active.value !== "number" || !Number.isFinite(active.value) ||
+      active.value <= 0 || !doseUnit)) return undefined;
+  if (!active && !measure?.doseRange) return undefined;
   if ((!material && !selfCarrier) ||
-      typeof active?.value !== "number" || !Number.isFinite(active.value) ||
       typeof carrier?.value !== "number" || !Number.isFinite(carrier.value) ||
       typeof duration?.value !== "number" || !Number.isFinite(duration.value) ||
-      active.value <= 0 || carrier.value <= 0 || duration.value <= 0 ||
-      !doseUnit || !volumeUnit ||
+      carrier.value <= 0 || duration.value <= 0 || !volumeUnit ||
       !/^(?:mL|L)$/u.test(volumeUnit) ||
       (durationUnit !== "h" && durationUnit !== "min")) return undefined;
   const periodUnit = durationUnit === "h" ? FhirPeriodUnit.Hour : FhirPeriodUnit.Minute;
@@ -692,10 +695,12 @@ export function clinicalCarrierQuantityFromFhir(
     },
     denominators: [{ value: duration.value, unit: periodUnit, dimension: "time",
       ...(durationComparator ? { comparator: durationComparator } : {}) }],
-    projectedDose: { value: active.value, unit: doseLabel ?? doseUnit, ...nonRegenerableUnitCoding(active),
-      ...(activeComparator ? { comparator: activeComparator } : {}) },
+    ...(active ? { projectedDose: {
+      value: active.value!, unit: doseLabel ?? doseUnit!, ...nonRegenerableUnitCoding(active),
+      ...(activeComparator ? { comparator: activeComparator } : {})
+    } } : {}),
     ...(material || doseLabel !== volumeLabel || activeComparator !== carrierComparator ||
-        active.system !== carrier.system || active.code !== carrier.code
+        active?.system !== carrier.system || active?.code !== carrier.code
       ? { rateNumerator: {
           value: carrier.value, unit: volumeLabel ?? volumeUnit, ...nonRegenerableUnitCoding(carrier),
           ...(carrierComparator ? { comparator: carrierComparator } : {})
@@ -2728,16 +2733,16 @@ function projectHpsgClinicalQuantityToFhir(
   }
   const duration = quantity.administrationDuration;
   const dose = quantity.projectedDose;
-  if (!duration || !dose) return;
-  const doseQuantity = { ...resolvedDose(dose),
-    ...(dose.system ? { system: dose.system } : {}),
-    ...(dose.code ? { code: dose.code } : {}) };
   const rate = quantity.rateNumerator ?? dose;
+  if (!duration || !rate || (!dose && !originalAmount?.doseRange)) return;
+  const doseQuantity = dose ? { ...resolvedDose(dose),
+    ...(dose.system ? { system: dose.system } : {}),
+    ...(dose.code ? { code: dose.code } : {}) } : undefined;
   const rateNumerator = { ...buildFhirDoseQuantity(rate.value, rate.unit),
     ...(rate.system ? { system: rate.system } : {}),
     ...(rate.code ? { code: rate.code } : {}) };
   dosage.doseAndRate = [{
-    doseQuantity,
+    ...(doseQuantity ? { doseQuantity } : { doseRange: originalAmount!.doseRange }),
     rateRatio: {
       numerator: rate.comparator ? quantityForR5({ ...rateNumerator, comparator: rate.comparator })! : rateNumerator,
       denominator: buildFhirDoseQuantity(duration.value, duration.unit, duration.comparator)

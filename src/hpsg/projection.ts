@@ -565,7 +565,8 @@ export function projectHpsgSignToState(
         const comparator = clinical.projectedDose.comparator ?? dose.comparator;
         if (comparator !== undefined && state.primaryClause.dose)
           state.primaryClause.dose.comparator = comparator;
-      } else if (clinical.status === "resolved" && clinical.representation === "rate-quantity" && dose.range) {
+      } else if (clinical.status === "resolved" && dose.range &&
+          (clinical.representation === "rate-quantity" || clinical.representation === "dose-with-rate-ratio")) {
         // An independently authored range remains the dose beside its rate.
         state.doseRange = dose.range;
         if (dose.unit !== undefined) state.unit = dose.unit;

@@ -23,8 +23,7 @@ import { getProceduralFrames, sourceRangeAttachmentClass, actionEventRelationAt 
 import {
   FREQUENCY_NUMBER_WORDS,
   FREQUENCY_TIMES_WORDS,
-  mapIntervalUnit,
-  parseNumericRange
+  mapIntervalUnit
 } from "../timing-lexicon";
 import {
   ACTION_COORDINATION_CONNECTORS,
@@ -42,6 +41,7 @@ import {
   DOSE_COMPARATOR_PREFIXES,
   DOSE_COMPARATOR_SYMBOLS,
   doseComparatorNumberAt,
+  doseRangeNumberAt,
   millionDoseNumberAt,
   compactMillionDoseNumber,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS,
@@ -1252,58 +1252,25 @@ export function doseLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
         })
       ];
     }
-    const range = parseNumericRange(lower);
-    if (range) {
-      const unit = unitAfter(context, start + 1);
-      return [
-        lexicalSign({
+    const rangedNumber = doseRangeNumberAt(context.tokens, start, context.limit);
+    if (rangedNumber && tokensAvailable(context, start, rangedNumber.numericIndex + 1 - start)) {
+      const unit = unitAfter(context, rangedNumber.numericIndex + 1);
+      const separated = rangedNumber.numericIndex !== start;
+      // A separated range needs its medication unit to distinguish it from
+      // another numeric constituent; compact ranges already own their bounds.
+      if (!separated || unit) {
+        const numbers = context.tokens.slice(start, rangedNumber.numericIndex + 1);
+        return [lexicalSign({
           type: "dose-sign",
-          rule: "hpsg.lex.dose.range",
-          tokens: unit ? [...tokens, ...unit.tokens] : tokens,
+          rule: separated ? "hpsg.lex.dose.separatedRange" : "hpsg.lex.dose.range",
+          tokens: unit ? [...numbers, ...unit.tokens] : numbers,
           synsem: {
-            head: {
-              dose: {
-                range,
-                unit: unit?.unit
-              }
-            },
+            head: { dose: { range: rangedNumber.range, unit: unit?.unit } },
             valence: {},
             cont: { clauseKind: "administration" }
           },
-          score: 8
-        })
-      ];
-    }
-    if (token.kind === LexKind.Number && token.value !== undefined) {
-      const connector = context.tokens[start + 1];
-      const high = context.tokens[start + 2];
-      const connectorLower = connector ? normalizeTokenLower(connector) : "";
-      if (
-        connector && RANGE_CONNECTORS.has(connectorLower) &&
-        high?.kind === LexKind.Number && high.value !== undefined &&
-        high.value >= token.value
-      ) {
-        const separatedUnit = unitAfter(context, start + 3);
-        if (separatedUnit) {
-          return [
-            lexicalSign({
-              type: "dose-sign",
-              rule: "hpsg.lex.dose.separatedRange",
-              tokens: [token, connector, high, ...separatedUnit.tokens],
-              synsem: {
-                head: {
-                  dose: {
-                    range: { low: token.value, high: high.value },
-                    unit: separatedUnit.unit
-                  }
-                },
-                valence: {},
-                cont: { clauseKind: "administration" }
-              },
-              score: 12
-            })
-          ];
-        }
+          score: separated ? 12 : 8
+        })];
       }
     }
 
