@@ -630,7 +630,8 @@ function formatCanonicalBase(
   compiled?: CanonicalSigClause,
   environment?: CourseFormatEnvironment,
   source: CanonicalAdministration = a,
-  authored?: AuthoredDirectionsState
+  authored?: AuthoredDirectionsState,
+  deferredDirections?: { text?: string }
 ): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
@@ -686,12 +687,6 @@ function formatCanonicalBase(
     rendered = a.additionalInstructions?.length || a.patientInstruction
       ? directions + " " + rendered : directions;
   }
-  // Partial method, route, timing or guard facts cannot replace source-only
-  // dose directions. A typed amount or graph retains its established owner;
-  // do not infer missing semantics by comparing localized renderings.
-  if (partialAuthoredDirections)
-    rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""),
-      a.predicate && style === "long" ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!);
   if (a.predicate && style !== "long" && !authoredQualifiers)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   // The clause's calendar view needs a complete civil date. Partial FHIR
@@ -754,7 +749,17 @@ function formatCanonicalBase(
     const text = amount.rateRange && rateRangePreview(amount.rateRange);
     if (text) ranges.push(amountLabel(amount, "rateRange", words) + text);
   }
-  return ranges.length ? joinGeneratedClauses(rendered ? [rendered, ...ranges] : ranges) : rendered;
+  if (ranges.length) rendered = joinGeneratedClauses(rendered ? [rendered, ...ranges] : ranges);
+  // Partial method, route, timing or guard facts cannot replace source-only
+  // dose directions. A typed amount or graph retains its established owner;
+  // do not infer missing semantics by comparing localized renderings.
+  if (partialAuthoredDirections) {
+    const directions = a.predicate && style === "long"
+      ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
+    if (deferredDirections) deferredDirections.text = directions;
+    else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
+  }
+  return rendered;
 }
 export function formatCanonicalAdministration(
   a: CanonicalAdministration,
@@ -976,6 +981,9 @@ export function formatCanonicalCourse(
             }),
           };
         }
+        // Rich rates and expressions belong to the current member. Append
+        // its separate original directions after those current facts.
+        const deferredDirections: { text?: string } | undefined = component.text ? {} : undefined;
         const recognized = formatCanonicalBase(
           display,
           style,
@@ -983,7 +991,8 @@ export function formatCanonicalCourse(
           display === component ? compiled?.get(component) : undefined,
           environment,
           component,
-          authored
+          authored,
+          deferredDirections
         );
         const expressions: string[] = [];
         if (hasOffsets && repeat) {
@@ -1087,7 +1096,9 @@ export function formatCanonicalCourse(
             expressions.push((hasAmountRole(amount.role) ? amountLabel(amount, "rate", words) : "") +
               unevaluatedExpressionText(amount.rateExpression, "rate", words));
         }
-        const body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+        let body = joinGeneratedClauses([recognized, ...expressions].filter(Boolean));
+        if (deferredDirections?.text)
+          body = words.withAuthoredDirections(body.replace(/\.\s*$/u, ""), deferredDirections.text);
         let memberTiming = component.phasePredecessors?.length && !component.phaseStart && !origin
           ? words.afterPreviousPhase : undefined;
         let memberStartPoint: string | undefined;

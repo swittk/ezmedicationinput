@@ -530,8 +530,10 @@ describe("round 24: current facts and independent source wording", () => {
     const saved = JSON.stringify(dosage);
     for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
       const text = formatSig(dosage, style, { locale });
-      expect(text).toContain("~10 mL/h");
-      expect(text).not.toContain("5 mL/h");
+      const [current, original] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(current).toContain("~10 mL/h");
+      expect(current).not.toContain("5 mL/h");
+      expect(original).toBe("Infuse at 5 mL/h.");
     }
     expect(JSON.stringify(dosage)).toBe(saved);
     expect(formatSig({ step: [{ component: [{ text: "Keep this exact text." }] }] }, "long"))

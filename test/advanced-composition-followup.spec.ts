@@ -6179,10 +6179,11 @@ describe("round78 current clinical facts and retained directions", () => {
     expect(toFhirR5Dosages(fresh(wire))[0].timing!.code).toEqual(code);
   });
 
-  it.each(["standard first", "local first", "foreign only"] as const)("reads Boolean condition coding by identity: %s", order => {
+  it.each(["standard first", "local first", "systemless", "foreign only"] as const)("reads Boolean condition coding by identity: %s", order => {
     const standard = { system: "http://hl7.org/fhir/CodeSystem/dosage-condition-code", code: "problem-presents" };
     const local = { system: "urn:clinic:condition", code: order === "foreign only" ? "problem-presents" : "rash-present" };
-    const coding = order === "standard first" ? [standard, local] : order === "local first" ? [local, standard] : [local];
+    const coding = order === "standard first" ? [standard, local] : order === "local first" ? [local, standard]
+      : order === "systemless" ? [{ code: "problem-presents" }] : [local];
     const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...dose, condition: [{
       code: { coding }, details: { text: "Rash" }, operation: "ne", valueBoolean: true,
     }] }] }] };
