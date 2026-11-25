@@ -6864,6 +6864,31 @@ describe("round62 selected action ownership", () => {
     expect(JSON.stringify(options)).toBe(beforeOptions);
   });
 
+  it.each([false, true])("retains the selected Thai action label through saved roundtrip display (custom %s)", custom => {
+    const options: ParseOptions | undefined = custom ? { instructionActionMap: {
+      rinse: { ...getMedicationInstructionAction("rinse")!, i18n: { th: "ชะล้าง" }, roundtripI18n: undefined }
+    } } : undefined;
+    const beforeOptions = JSON.stringify(options);
+    const parsed = parsePublicSig("Take 1 tablet daily; rinse with water", options);
+    expect(parsed.meta.canonical.clauses[0].instructionGraph!.actions.find(action => action.predicate.lemma === "rinse")?.predicate)
+      .toMatchObject({ display: "Rinse", i18n: { th: custom ? "ชะล้าง" : "ล้าง" } });
+    const edited = fresh(parsed.fhir);
+    edited[0].doseAndRate![0].doseQuantity!.value = 2;
+    const r6 = toDosageDetails(edited);
+    for (const input of [edited, fresh(r6), fresh(toFhirR5Dosages(r6))]) {
+      const before = JSON.stringify(input);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const label = custom ? "ชะล้าง" : realizationMode === "roundtrip" ? "ล้างออก" : "ล้าง";
+        const take = realizationMode === "normalized" ? "รับประทานครั้งละ" : "รับประทาน";
+        // The saved frame owns its translation without the original parse options.
+        expect(formatSig(input, "long", { locale: "th", realizationMode }))
+          .toBe(`${take} 2 เม็ด วันละครั้ง. ${label}ด้วยน้ำ.`);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify(options)).toBe(beforeOptions);
+  });
+
   it.each(["none", "minimal", "procedure"] as const)(
     "keeps the built-in dose's pain onset beside an independent call (%s custom collision)", kind => {
       const options: ParseOptions | undefined = kind === "none" ? undefined : { instructionActionMap: {

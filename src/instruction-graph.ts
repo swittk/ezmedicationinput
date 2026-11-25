@@ -3756,8 +3756,13 @@ function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false):
   // A selected custom head may share a default code without sharing its label.
   // Only matching default wording can supply a missing locale translation.
   const definition = !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
-  return (roundtripSafe ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
-    localizedValue(frame.predicate.i18n, locale) ??
+  const selectedLabel = localizedValue(frame.predicate.i18n, locale);
+  // Stock roundtrip wording may refine its normal label, but cannot replace
+  // a different translation already selected and retained in the frame.
+  return (roundtripSafe &&
+    (selectedLabel === undefined || selectedLabel === localizedValue(definition?.i18n, locale))
+    ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
+    selectedLabel ??
     localizedValue(definition?.i18n, locale) ??
     frame.predicate.display ??
     definition?.display ??
