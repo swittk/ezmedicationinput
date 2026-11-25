@@ -156,10 +156,8 @@ export function medicationInstructionActionSpanLimit(lead: string, options?: Par
 
 export function normalizeActionSurface(value: string): string {
   return value
-    .trim()
     .toLowerCase()
-    .replace(/[{}]/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[{}\s]+/g, " ")
     .trim();
 }
 
