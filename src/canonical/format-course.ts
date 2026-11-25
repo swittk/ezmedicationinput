@@ -15,7 +15,7 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts, administrationHasDatedClockStart } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
@@ -450,6 +450,7 @@ function previewCourseWindows(
     startAnchor: CanonicalBoundary["anchor"] | undefined;
     endAnchor: CanonicalBoundary["anchor"] | undefined;
     choiceDependentStart: boolean;
+    datedStart: boolean;
   }> = [];
   const activeWindows: Array<{ start: number | undefined; end: number | undefined }> = [];
   for (const step of course.stages) {
@@ -459,11 +460,15 @@ function previewCourseWindows(
     // A choice can remove its own stage, but never an authored empty pause.
     if (selected && !members.length && step.administrations.length > 0) continue;
     if (step.start || step.end) hasTimedStages = true;
-    const start = step.start ? treatmentStepOffsetDays(step.start) : included === 0 ? 0 : priorEndDays;
+    const datedStart = !step.start && included > 0 && members.some(administrationHasDatedClockStart);
+    // The authored calendar date can open a successor before its predecessor's
+    // nominal end; it cannot be described by an inherited treatment-day offset.
+    const start = step.start ? treatmentStepOffsetDays(step.start)
+      : included === 0 ? 0 : datedStart ? undefined : priorEndDays;
     const startAnchor = step.start?.anchor ?? (included === 0 ? "treatment-start" : priorEndAnchor);
     const endAnchor = step.end?.anchor, end = treatmentStepOffsetDays(step.end);
     const choiceDependentStart = !step.start && priorOptional;
-    windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart });
+    windows.push({ start, end, startAnchor, endAnchor, choiceDependentStart, datedStart });
     let activeEnd = end, repetitionResolved = true;
     if (step.count !== undefined && step.count !== 1) {
       // A later implicit start repeats its resolved elapsed span in execution.
@@ -898,7 +903,7 @@ export function formatCanonicalCourse(
   const { windows, activeWindows, hasTimedStages, gapAnchor, mixedGapOrigins } = previewCourseWindows(oneOrCourse, groups);
   for (let index = 0; index < oneOrCourse.stages.length; index++) {
     const step = oneOrCourse.stages[index];
-    const { start: startDays, end: endDays, startAnchor, endAnchor, choiceDependentStart } = windows[index];
+    const { start: startDays, end: endDays, startAnchor, endAnchor, choiceDependentStart, datedStart } = windows[index];
     let rendered = formatCourseChoices(
       step.administrations,
       (component) => {
@@ -1158,7 +1163,8 @@ export function formatCanonicalCourse(
     if (!rendered.trim() && !step.start && !step.end && step.count === undefined) continue;
     let timing = "";
     if (step.start || step.end || index > 0) {
-      const previous = !step.start && !choiceDependentStart && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
+      const previous = !step.start && !choiceDependentStart && !datedStart && index > 0
+        ? oneOrCourse.stages[index - 1] : undefined;
       const inheritedStart = previous && (previous.count === undefined || previous.count === 1)
         ? treatmentStepOffsetQuantity(previous.end) : undefined;
       const reversedWindow = startAnchor === endAnchor &&

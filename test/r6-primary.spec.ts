@@ -7688,3 +7688,31 @@ describe("independently authored integer phase order", () => {
   });
 
 });
+
+
+describe("dated phase start previews", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+  it("uses an authored calendar start instead of an inherited later-day heading", () => {
+    const boundary = (value: number) => ({ contextCode: { coding: [{
+      system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: { value, unit: "d", code: "d" } });
+    for (const dated of [true, false]) {
+      const course: FhirR6DosageInstruction = { step: [
+        { end: boundary(4), component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } } }] },
+        { end: boundary(6), component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"],
+            ...(dated ? { boundsPeriod: { start: "2027-01-03" } } : {}) } } }] }
+      ] };
+      for (const input of [course, toFhirR5Dosages(course), importCanonicalCourse(course)]) {
+        const text = formatSig(input, "long", { locale: "en" });
+        if (dated) {
+          expect(text).toContain("starting 3 Jan 2027");
+          expect(text).not.toContain("From 4 days after treatment start");
+          expect(calculateTotalUnits({ dosage: input, ...options, from: "2027-01-03T00:00:00Z",
+            durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+        } else expect(text).toContain("From 4 days after treatment start");
+      }
+    }
+  });
+});
