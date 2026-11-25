@@ -1,4 +1,3 @@
-import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization } from "../src/i18n";
 import {
@@ -258,8 +257,7 @@ describe("locale-extensible language architecture", () => {
 
 describe("round54 descriptor-owned surface segmenter callbacks", () => {
   it.each(["g", "y", ""])("uses the normalized script receiver for a plain descriptor (%s)", flags => {
-    // Plain descriptors use their registered configuration through `this`;
-    // class callbacks instead retain their original receiver and private state.
+    // Plain descriptors use their registered script configuration.
     const provider = {
       locale: "round54-own-script-" + (flags || "plain"),
       script: new RegExp("[ⴰⴱ]", flags + "u"),
@@ -279,17 +277,6 @@ describe("round54 descriptor-owned surface segmenter callbacks", () => {
     expect(registered.script.sticky).toBe(false);
     expect(provider.script.global).toBe(flags === "g");
     expect(provider.script.sticky).toBe(flags === "y");
-  });
-});
-
-
-describe("round64 declared locale descriptor fields", () => {
-  it("reads a declared non-enumerable detector priority", () => {
-    const marker = "__round64_priority__ไทย";
-    const detector = { locale: "round64priority", test: (text: string) => text === marker };
-    Object.defineProperty(detector, "priority", { value: 200 });
-    registerMedicationLocaleDetector(detector);
-    expect(inferMedicationLocale(marker)).toBe("round64priority");
   });
 });
 
@@ -332,22 +319,5 @@ describe("shared timing article roles", () => {
     // The indefinite quantity determiner has different semantics: it supplies one.
     expect(parseSig("Take 1 tablet daily for a week").fhir[0].timing!.repeat!.boundsDuration)
       .toMatchObject({ value: 1, code: "wk" });
-  });
-});
-
-describe("round79 locale detector receiver", () => {
-  it("normalizes a cross-realm plain descriptor while preserving a class receiver", () => {
-    const plain = runInNewContext("({ locale: 'fr-CA', priority: 900, test(text) { return this.locale === 'fr' && text === '__round79_fr__'; } })");
-    registerMedicationLocaleDetector(plain);
-    expect(inferMedicationLocale("__round79_fr__")).toBe("fr");
-    expect(plain.locale).toBe("fr-CA");
-    class Detector {
-      locale = "de-AT";
-      priority = 900;
-      #text = "__round79_de__";
-      test(text: string) { return this.locale === "de-AT" && text === this.#text; }
-    }
-    registerMedicationLocaleDetector(new Detector());
-    expect(inferMedicationLocale("__round79_de__")).toBe("de");
   });
 });

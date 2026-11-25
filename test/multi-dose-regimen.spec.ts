@@ -26,7 +26,6 @@ import { importCanonicalCourse } from "../src/index";
 import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
-import { runInNewContext } from "node:vm";
 import { THAI_COURSE } from "../src/locales/course/th";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { withDosageEditProvenance } from "../src/dosage-course";
@@ -2102,44 +2101,6 @@ describe("round47 public preview timing and resolver ownership", () => {
     }
   });
 
-  it("snapshots own class resolver methods separately for explicit and yearless dates", () => {
-    class Calendar implements MedicationDateResolver {
-      id: string;
-      offset: number;
-      resolveYear: MedicationDateResolver["resolveYear"];
-      calendarYearFromIsoYear: NonNullable<MedicationDateResolver["calendarYearFromIsoYear"]>;
-      constructor(id: string, offset: number) {
-        this.id = id;
-        this.offset = offset;
-        this.resolveYear = function (this: Calendar, year: number, digits: number) {
-          return digits === 4 && year >= 3000
-            ? { isoYear: year - this.offset, calendarYear: year, inferredYear: false }
-            : undefined;
-        };
-        this.calendarYearFromIsoYear = function (this: Calendar, year: number) {
-          return year + this.offset;
-        };
-      }
-    }
-    registerMedicationDateResolver(new Calendar("round47-own-calendar-a", 1000));
-    registerMedicationDateResolver(new Calendar("round47-own-calendar-b", 1001));
-    for (const [calendar, explicitDate, inferredYear] of [
-      ["round47-own-calendar-a", "2026-09-28", 3026],
-      ["round47-own-calendar-b", "2025-09-28", 3027]
-    ] as const) {
-      for (const source of ["28/9/3026", "28/9"]) {
-        const parsed = parseSig("Take 1 tablet on " + source, {
-          datePolicy: { calendars: [calendar], referenceDate: "2026-09-01" }
-        });
-        expect(parsed.fhirNext.step[0].component[0].timing?.event)
-          .toEqual([source === "28/9/3026" ? explicitDate : "2026-09-28"]);
-        expect(parsed.meta.canonical.clauses[0].schedule?.calendarEvents?.[0]).toMatchObject({
-          calendar, calendarYear: source === "28/9/3026" ? 3026 : inferredYear
-        });
-      }
-    }
-  });
-
   it.each([
     { name: "code-only", period: undefined, short: "1 tab QAM" },
     { name: "daily", period: 1, short: "1 tab QAM MORN" },
@@ -2215,21 +2176,6 @@ describe("round48 saved sequence and locale ownership", () => {
         .toContain(locale === "en" ? "every up to 2 days" : "ทุกไม่เกิน 2 วัน");
     }
     expect(JSON.stringify(row)).toBe(saved);
-  });
-
-  it("retains constructor-owned locale callbacks on independent providers", () => {
-    class Detector implements MedicationLocaleDetector {
-      priority = 902;
-      test: MedicationLocaleDetector["test"];
-      constructor(public locale: string, public marker: string) {
-        this.test = function (this: Detector, text: string) { return text === this.marker; };
-      }
-    }
-    registerMedicationLocaleDetector(new Detector("round48owna", "__round48_locale_a__"));
-    registerMedicationLocaleDetector(new Detector("round48ownb", "__round48_locale_b__"));
-    expect(inferMedicationLocale("__round48_locale_a__")).toBe("round48owna");
-    expect(inferMedicationLocale("__round48_locale_b__")).toBe("round48ownb");
-    expect(inferMedicationLocale("ordinary English")).toBe("en");
   });
 });
 
@@ -3381,7 +3327,7 @@ describe("round61 supported grammar and display ownership", () => {
       expect(daily.clinicalQuantity?.dailyTotal).toBe(true);
     });
 
-  it("retains distinct descriptor locales and the normalized callback receiver", () => {
+  it("retains distinct plain-data locales and registered script configuration", () => {
     const providers = [
       { locale: "round61-script-a", script: /[ⵤⵥ]/gu, char: "ⵤ" },
       { locale: "round61-script-b", script: /[ꙮ꙯]/yu, char: "ꙮ" }
@@ -3389,7 +3335,6 @@ describe("round61 supported grammar and display ownership", () => {
     for (const input of providers) {
       const provider: MedicationSurfaceSegmenter = { locale: input.locale, script: input.script,
         *segment(text: string) { if (this.script.test(text[0])) yield { segment: text, index: 0 }; } };
-      Object.defineProperty(provider, "locale", { value: input.locale, enumerable: false });
       registerMedicationSurfaceSegmenter(provider);
     }
     for (const input of providers) {

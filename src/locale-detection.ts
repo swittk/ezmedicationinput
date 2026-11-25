@@ -12,18 +12,8 @@ const DETECTOR_INDEX = new Map<string, { position: number; priority: number }>()
 
 export function registerMedicationLocaleDetector(detector: MedicationLocaleDetector): void {
   const locale = baseLanguageTag(detector.locale) ?? detector.locale.toLowerCase();
-  // Snapshot descriptor fields once. Class providers retain their original
-  // receiver so prototype methods and private fields remain callable; plain
-  // descriptors keep their existing registered configuration through `this`.
   const normalized: MedicationLocaleDetector = Object.assign({}, detector);
   normalized.locale = locale;
-  normalized.priority = detector.priority;
-  normalized.joinsAdjacentSourceTokens = detector.joinsAdjacentSourceTokens;
-  const prototype = Object.getPrototypeOf(detector);
-  if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
-    normalized.test = detector.test.bind(detector);
-  }
-  normalized.test = normalized.test ?? detector.test;
   const previous = DETECTOR_INDEX.get(locale),
     priority = normalized.priority ?? 0;
   if (previous) {

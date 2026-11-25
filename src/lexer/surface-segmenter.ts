@@ -16,20 +16,9 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
   // Stateless script tests can safely reuse the registered expression.
   // Only /g or /y must lose their mutation-prone lastIndex behavior.
   const normalized: MedicationSurfaceSegmenter = Object.assign({}, segmenter);
-  // The typed provider may expose a non-enumerable script property.
-  const script = normalized.script ?? segmenter.script;
+  const script = segmenter.script;
   normalized.script = script.global || script.sticky
     ? new RegExp(script.source, script.flags.replace(/[gy]/g, "")) : script;
-  const prototype = Object.getPrototypeOf(segmenter);
-  // An ordinary descriptor's prototype is its realm's root Object prototype.
-  // It must receive the normalized script even when created in another realm.
-  if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
-    normalized.locale = segmenter.locale;
-    // Class callbacks retain their private receiver regardless of placement.
-    normalized.segment = segmenter.segment.bind(segmenter);
-  }
-  normalized.segment = normalized.segment ?? segmenter.segment;
-  normalized.locale = normalized.locale ?? segmenter.locale;
   const locale = normalized.locale;
   const existing=SEGMENTER_INDEX.get(locale);
   if(existing!==undefined)SEGMENTERS[existing]=normalized;

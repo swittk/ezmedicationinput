@@ -5,7 +5,6 @@ import { parseClauseState } from "../src/parser";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { composeCoordinatedTimingAnchors } from "../src/regimen/coordination-scope";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
-import { runInNewContext } from "node:vm";
 import { THAI_COURSE } from "../src/locales/course/th";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { withDosageEditProvenance, encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
@@ -29,9 +28,9 @@ import { ParserState } from "../src/parser-state";
 import { instructionLexicalRule } from "../src/hpsg/rules/instruction-rules";
 import { clinicalQuantityLexicalRule } from "../src/hpsg/rules/clinical-quantity-rules";
 import type { HpsgClauseContext } from "../src/hpsg/rule-context";
-import { inferMedicationLocale, registerMedicationLocaleDetector, type MedicationLocaleDetector } from "../src/locale-detection";
-import { listMedicationSurfaceSegmenters, registerMedicationSurfaceSegmenter, splitMedicationScriptRuns, type MedicationSurfaceSegmenter } from "../src/lexer/surface-segmenter";
-import { AdviceArgumentRole, AdviceRelation, AdvicePolarity, EventTiming, FhirPeriodUnit, type CanonicalInstructionGraph, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions, type MedicationDateResolver, RouteCode, type FhirR6Dosage } from "../src/types";
+import { inferMedicationLocale, registerMedicationLocaleDetector } from "../src/locale-detection";
+import { listMedicationSurfaceSegmenters, registerMedicationSurfaceSegmenter, splitMedicationScriptRuns } from "../src/lexer/surface-segmenter";
+import { AdviceArgumentRole, AdviceRelation, AdvicePolarity, EventTiming, FhirPeriodUnit, type CanonicalInstructionGraph, type FhirDosage, type FhirR6DosageInstruction, type ParseOptions, RouteCode, type FhirR6Dosage } from "../src/types";
 
 describe("multi-clause parsing", () => {
   it("returns batch shape and keeps first-item compatibility fields", () => {
@@ -904,64 +903,6 @@ const parseSig = parsePublicSig;
 
 
 describe("round 23: language provider callable contracts", () => {
-  it("retains class detector methods and private receivers while snapshotting registration priority", () => {
-    class Detector implements MedicationLocaleDetector {
-      #marker = "__round23_class_locale__";
-      constructor(public locale: string, public priority: number) {}
-      test(text: string) { return text === this.#marker; }
-    }
-    const first = new Detector("classlocalea", 901);
-    const second = new Detector("classlocaleb", 900);
-    registerMedicationLocaleDetector(first);
-    registerMedicationLocaleDetector(second);
-    expect(inferMedicationLocale("ordinary English")).toBe("en");
-    expect(inferMedicationLocale("__round23_class_locale__")).toBe("classlocalea");
-    registerMedicationLocaleDetector(new Detector("classlocalea", 899));
-    expect(inferMedicationLocale("__round23_class_locale__")).toBe("classlocaleb");
-    expect(parseSig("Take 1 tablet daily").meta.canonical.clauses[0].dose)
-      .toMatchObject({ value: 1, unit: "tab" });
-  });
-
-  it("retains class surface segmentation and normalizes only stateful script matching", () => {
-    class Segmenter implements MedicationSurfaceSegmenter {
-      locale = "round23-segment";
-      script = /[ⴰⴱ]/gu;
-      #size = 1;
-      *segment(input: string) {
-        for (let index = 0; index < input.length; index += this.#size)
-          yield { segment: input.slice(index, index + this.#size), index };
-      }
-    }
-    registerMedicationSurfaceSegmenter(new Segmenter());
-    const registered = listMedicationSurfaceSegmenters().find(s => s.locale === "round23-segment")!;
-    expect([...registered.segment("ⴰⴱ")]).toEqual([
-      { segment: "ⴰ", index: 0 }, { segment: "ⴱ", index: 1 }
-    ]);
-    expect(registered.script.global).toBe(false);
-    expect(splitMedicationScriptRuns("AⴰⴱB").map(run => run.text)).toEqual(["A", "ⴰⴱ", "B"]);
-  });
-
-  it("retains both class calendar resolver methods through explicit and inferred years", () => {
-    class Calendar implements MedicationDateResolver {
-      id = "round23-class-calendar";
-      #offset = 1000;
-      resolveYear(year: number, digits: number) {
-        return digits === 4 && year >= 3000
-          ? { isoYear: year - this.#offset, calendarYear: year, inferredYear: false }
-          : undefined;
-      }
-      calendarYearFromIsoYear(year: number) { return year + this.#offset; }
-    }
-    registerMedicationDateResolver(new Calendar());
-    for (const source of ["28/9/3026", "28/9"]) {
-      const parsed = parseSig("Take 1 tablet on " + source, {
-        datePolicy: { calendars: ["round23-class-calendar"], referenceDate: "2026-09-01" }
-      });
-      expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
-      expect(parsed.meta.canonical.clauses[0].schedule?.calendarEvents?.[0])
-        .toMatchObject({ calendar: "round23-class-calendar", calendarYear: 3026 });
-    }
-  });
 
   it("forwards the same request action vocabulary to short and long language callbacks", () => {
     const clause = parseSig("Take 1 tablet daily").meta.canonical.clauses[0];
@@ -1548,30 +1489,6 @@ describe("round 24: independent local complements", () => {
     const text = formatSig(parsed.fhirNext, "long", { locale: "en", realizationMode: "normalized" });
     expect(text).toContain("1 cm line");
     expect(text).toContain("cream on each spot with water");
-  });
-});
-
-describe("round 24: descriptor surface providers", () => {
-  it("reads a non-enumerable script once and normalizes stateful flags", () => {
-    const provider: MedicationSurfaceSegmenter = {
-      locale: "round24-descriptor", script: /[ⴲⴳ]/gyu,
-      *segment(input: string) {
-        for (let index = 0; index < input.length; index++) yield { segment: input[index], index };
-      }
-    };
-    let reads = 0;
-    Object.defineProperty(provider, "script", {
-      enumerable: false, get() { reads++; return /[ⴲⴳ]/gyu; }
-    });
-    registerMedicationSurfaceSegmenter(provider);
-    const registered = listMedicationSurfaceSegmenters().find(item => item.locale === provider.locale)!;
-    expect(reads).toBe(1);
-    expect(registered.script.global).toBe(false);
-    expect(registered.script.sticky).toBe(false);
-    expect(splitMedicationScriptRuns("AⴲⴳB").map(run => run.text)).toEqual(["A", "ⴲⴳ", "B"]);
-    expect([...registered.segment("ⴲⴳ")]).toEqual([
-      { segment: "ⴲ", index: 0 }, { segment: "ⴳ", index: 1 }
-    ]);
   });
 });
 
@@ -5110,43 +5027,6 @@ describe("round62 review: typed grammar and partial display facts", () => {
     expect(JSON.stringify(amount)).toContain("[iU]");
   });
 
-  it.each(["local", "second realm"] as const)(
-    "retains a non-enumerable plain segment callback on its normalized receiver (%s)", realm => {
-    const provider: MedicationSurfaceSegmenter = realm === "local"
-      ? { locale: "round62-descriptor", script: /[ⴵⴶ]/gyu,
-        *segment(input) {
-          expect(this.script.global).toBe(false);
-          expect(this.script.sticky).toBe(false);
-          for (let index = 0; index < input.length; index++) yield { segment: input[index], index };
-        } }
-      : runInNewContext("({ locale: 'round62-descriptor', script: /[ⴵⴶ]/gyu, " +
-        "*segment(input) { for (let index = 0; index < input.length; index++) " +
-        "if (this.script.test(input[index])) yield { segment: input[index], index }; } })");
-    Object.defineProperty(provider, "segment", { value: provider.segment, enumerable: false });
-    registerMedicationSurfaceSegmenter(provider);
-    const stored = listMedicationSurfaceSegmenters().find(item => item.locale === provider.locale)!;
-    for (let repeat = 0; repeat < 2; repeat++) {
-      expect([...stored.segment("ⴵⴶ")]).toEqual([{ segment: "ⴵ", index: 0 }, { segment: "ⴶ", index: 1 }]);
-      expect(tokenize("ⴵⴶ").map(token => token.lower)).toEqual(["ⴵ", "ⴶ"]);
-    }
-  });
-
-  it("retains a non-enumerable already-bound detector callback", () => {
-    class Detector implements MedicationLocaleDetector {
-      locale = "round62bound";
-      priority = 1001;
-      #marker = "__round62_bound_locale__";
-      test!: MedicationLocaleDetector["test"];
-      constructor() {
-        Object.defineProperty(this, "test", { enumerable: false, value: ((text: string) => text === this.#marker).bind(this) });
-      }
-    }
-    registerMedicationLocaleDetector(new Detector());
-    expect(inferMedicationLocale("__round62_bound_locale__")).toBe("round62bound");
-    expect(inferMedicationLocale("ordinary English")).toBe("en");
-    expect(inferMedicationLocale("ภาษาไทย")).toBe("th");
-  });
-
   it.each([undefined, 0, 2])("keeps duration annotations without inventing a medication direction: %s", lowValue => {
     const annotation = { url: "https://example.test/duration-note", valueString: "retain" };
     const range = { low: { id: "low", extension: [annotation], ...(lowValue === undefined ? {} : { value: lowValue, unit: "h", code: "h" }) },
@@ -5370,42 +5250,6 @@ describe("round73 logical event identity", () => {
       expect(toDosageDetails(rows).step[0][boundary]).toEqual(relative);
       expect(JSON.stringify(source)).toBe(before);
     }
-  });
-});
-
-
-describe("round74 class callback receivers", () => {
-  it.each([false, true])("retains private state in an own detector callback (enumerable %s)", enumerable => {
-    const locale = enumerable ? "round74enum" : "round74hidden", marker = "__" + locale + "__";
-    class Detector {
-      locale = locale;
-      priority = 1500;
-      #marker = marker;
-      constructor() { Object.defineProperty(this, "test", { value: this.test, enumerable }); }
-      test(text: string) { return text === this.#marker; }
-    }
-    registerMedicationLocaleDetector(new Detector());
-    expect(inferMedicationLocale(marker)).toBe(locale);
-    expect(inferMedicationLocale("ordinary English")).toBe("en");
-  });
-
-  it.each([false, true])("retains private state in an own segment callback (enumerable %s)", enumerable => {
-    const locale = enumerable ? "round74segmentenum" : "round74segmenthidden";
-    class Segmenter {
-      locale = locale;
-      script = /[ⴲⴳ]/gu;
-      #size = 1;
-      constructor() { Object.defineProperty(this, "segment", { value: this.segment, enumerable }); }
-      *segment(input: string) {
-        for (let index = 0; index < input.length; index += this.#size)
-          yield { segment: input.slice(index, index + this.#size), index };
-      }
-    }
-    registerMedicationSurfaceSegmenter(new Segmenter());
-    const registered = listMedicationSurfaceSegmenters().find(item => item.locale === locale)!;
-    expect([...registered.segment("ⴲⴳ")]).toEqual([{ segment: "ⴲ", index: 0 }, { segment: "ⴳ", index: 1 }]);
-    expect(registered.script.global).toBe(false);
-    expect(registered.script.sticky).toBe(false);
   });
 });
 

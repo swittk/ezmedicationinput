@@ -91,19 +91,8 @@ function matchedDateRelationLead(
 export function registerMedicationDateResolver(resolver: MedicationDateResolver): void {
   const id = resolver.id.trim().toLowerCase();
   if (!id) return;
-  // Registration fixes the descriptor associated with this ID. Reusing a
-  // caller's descriptor for another registration must not change this entry.
   const normalized: MedicationDateResolver = Object.assign({}, resolver);
-  normalized.resolveYear = resolver.resolveYear;
-  normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear;
   normalized.id = id;
-  const prototype = Object.getPrototypeOf(resolver);
-  if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
-    // Class callbacks retain prototype helpers and private state even when
-    // the constructor exposes them as own properties.
-    normalized.resolveYear = resolver.resolveYear.bind(resolver);
-    normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
-  }
   DATE_RESOLVERS.set(id, normalized);
 }
 
