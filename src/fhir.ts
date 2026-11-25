@@ -33,7 +33,7 @@ import {
 } from "./fhir-translations";
 import { formatCanonicalClause } from "./format";
 import {
-  getQuantityComparator, simpleQuantityForR5, quantityForR5, quantityFromR5
+  getQuantityComparator, simpleQuantityForR5, quantityPrimitiveForR5, quantityForR5, quantityFromR5
 } from "./fhir-quantity-operator";
 import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "./instruction-graph-fhir";
 import { ParserState } from "./parser-state";
@@ -332,7 +332,7 @@ function reconcileDurationEndpoint(
     const annotation = ("_" + field) as "_unit" | "_code" | "_system";
     if (current[annotation] !== undefined) retainProjectedAnnotations = true;
     if (source[annotation] === undefined) delete result[annotation];
-    else result[annotation] = source[annotation];
+    else result[annotation] = quantityPrimitiveForR5(source[annotation]);
   }
   if (retainProjectedAnnotations)
     result.extension = [...(result.extension ?? []), { url: DOSAGE_RECONCILIATION_SOURCE_URL,

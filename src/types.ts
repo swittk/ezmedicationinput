@@ -164,8 +164,18 @@ export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator" | "_comparator"
 };
 
 /** FHIR R6 also supports the approximate (~) comparator in general Quantity. */
-export type FhirR6Quantity = Omit<FhirQuantity, "comparator"> & {
+export type FhirR6Quantity = Omit<FhirQuantity,
+  "comparator" | "_comparator" | "_value" | "_unit" | "_system" | "_code"> & {
   comparator?: FhirQuantity["comparator"] | "~";
+  _comparator?: FhirR6PrimitiveElement;
+  _value?: FhirR6PrimitiveElement;
+  _unit?: FhirR6PrimitiveElement;
+  _system?: FhirR6PrimitiveElement;
+  _code?: FhirR6PrimitiveElement;
+};
+export type FhirR6SimpleQuantity = Omit<FhirR6Quantity, "comparator" | "_comparator"> & {
+  comparator?: never;
+  _comparator?: never;
 };
 
 export interface FhirRange extends FhirElement {
@@ -502,8 +512,8 @@ export type FhirR6DoseAndRate = Omit<EzDoseAndRate,
   "extension" | "modifierExtension" | "doseQuantity" | "rateQuantity" | "rateRatio"> & FhirR6Element & {
   /** Both R5 and R6 scalar dose/rate choices constrain Quantity to
    * SimpleQuantity. Qualifiers use the shared quantity-operator extension. */
-  doseQuantity?: FhirSimpleQuantity;
-  rateQuantity?: FhirSimpleQuantity;
+  doseQuantity?: FhirR6SimpleQuantity;
+  rateQuantity?: FhirR6SimpleQuantity;
   rateRatio?: FhirR6Ratio;
 };
 
@@ -1055,7 +1065,7 @@ export interface AdviceArgument {
     /** Authored qualifier follows this amount through graph matching and FHIR. */
     comparator?: FhirR6Quantity["comparator"];
     /** Active primitive metadata follows the current operator through FHIR. */
-    comparatorElement?: FhirElement;
+    comparatorElement?: FhirR6PrimitiveElement;
     /** Original wire operator annotations; the current comparator owns meaning. */
     comparatorExtensions?: FhirExtension[];
     /** Primitive child annotations; current typed values own quantity meaning. */

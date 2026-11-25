@@ -11,7 +11,8 @@
  * EMA http://spor.ema.europa.eu/v1/lists/100000000008
  * HL7 http://hl7.org/fhir/quantity-comparator
  */
-import type { FhirExtension, FhirQuantity, FhirR6Quantity, FhirSimpleQuantity } from "./types";
+import type { FhirExtension, FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
+  FhirR6SimpleQuantity, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
   "http://ema.europa.eu/fhir/extension/comparator";
@@ -117,18 +118,69 @@ function editedOperator(
   } };
 }
 
-/** Project a native R6 Quantity into a valid R5 SimpleQuantity, while using
- * the existing EMA comparator extension (including approximation). */
-export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
-  FhirSimpleQuantity | undefined {
+/** Quantity-valued annotations use the same operator bridge as their owner.
+ * Other Extension value choices remain opaque; this is not a general
+ * extension-version converter or an object-tree normalizer. */
+function quantityAnnotationExtensions(
+  source: FhirR6Extension[], target: "r5" | "r6"
+): FhirR6Extension[] {
+  let result: FhirR6Extension[] | undefined;
+  for (let index = 0; index < source.length; index++) {
+    const item = source[index];
+    const quantity = target === "r5" ? quantityForR5(item.valueQuantity) : quantityFromWire(item.valueQuantity);
+    const children = item.extension ? quantityAnnotationExtensions(item.extension, target) : undefined;
+    const current = quantity === item.valueQuantity && children === item.extension ? item : {
+      ...item, ...(quantity !== item.valueQuantity ? { valueQuantity: quantity } : {}),
+      ...(children !== item.extension ? { extension: children } : {}),
+    };
+    if (current !== item) result ??= source.slice(0, index);
+    result?.push(current);
+  }
+  return result ?? source;
+}
+function quantityPrimitiveForWire(
+  primitive: FhirR6PrimitiveElement | undefined, target: "r5" | "r6"
+): FhirR6PrimitiveElement | undefined {
+  if (!primitive?.extension?.length) return primitive;
+  const extension = quantityAnnotationExtensions(primitive.extension, target);
+  return extension === primitive.extension ? primitive : { ...primitive, extension };
+}
+/** The known Quantity choice is projected; all unrelated opaque annotations
+ * retain their original datatype and fields at this version boundary. */
+export function quantityPrimitiveForR5(
+  primitive: FhirR6PrimitiveElement | undefined
+): FhirPrimitiveElement | undefined {
+  return quantityPrimitiveForWire(primitive, "r5") as FhirPrimitiveElement | undefined;
+}
+const quantityPrimitiveFields = ["_value", "_unit", "_system", "_code", "_comparator"] as const;
+function quantityPrimitiveMetadata(
+  quantity: FhirR6Quantity, target: "r5" | "r6"
+): FhirR6Quantity {
+  if (!quantity._value && !quantity._unit && !quantity._system && !quantity._code && !quantity._comparator)
+    return quantity;
+  let result = quantity;
+  for (const field of quantityPrimitiveFields) {
+    const primitive = quantityPrimitiveForWire(quantity[field], target);
+    if (primitive === quantity[field]) continue;
+    if (result === quantity) result = { ...quantity };
+    result[field] = primitive;
+  }
+  return result;
+}
+
+/** Both scalar wire versions use comparator-free SimpleQuantity and the
+ * existing EMA operator. Primitive annotations keep their target version. */
+function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5" | "r6"):
+  FhirR6SimpleQuantity | undefined {
   if (!quantity) return undefined;
+  if (target === "r5") quantity = quantityPrimitiveMetadata(quantity, "r5");
   const comparator = quantity.comparator;
-  if (!comparator && quantity._comparator === undefined) return quantity as FhirSimpleQuantity;
+  if (!comparator && quantity._comparator === undefined) return quantity as FhirR6SimpleQuantity;
   const { comparator: _r6Comparator, _comparator, ...numeric } = quantity;
   const existing = numeric.extension ?? [];
   const sources: FhirExtension[] = _comparator ? [{
     url: QUANTITY_OPERATOR_SOURCE_URL,
-    ...(comparator ? { valueCode: comparator } : {}), _valueCode: _comparator,
+    ...(comparator ? { valueCode: comparator } : {}), _valueCode: quantityPrimitiveForR5(_comparator),
   }] : [];
   if (!comparator) return { ...numeric, extension: [...existing, ...sources] };
   const code = emaCodeByComparator[comparator];
@@ -154,11 +206,24 @@ export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined):
   return { ...numeric, extension: extensions };
 }
 
+export function simpleQuantityForR5(quantity: FhirR6Quantity | undefined): FhirSimpleQuantity | undefined {
+  // Quantity primitive values are projected above. Unrelated opaque
+  // annotation choices retain their supplied wire fields.
+  return simpleQuantityForWire(quantity, "r5") as FhirSimpleQuantity | undefined;
+}
+/** R6 SimpleQuantity keeps native primitive annotations while using the same
+ * comparator-free scalar representation as R5. */
+export function simpleQuantityForR6(quantity: FhirR6Quantity | undefined): FhirR6SimpleQuantity | undefined {
+  return simpleQuantityForWire(quantity, "r6");
+}
+
 /** A general R5 Quantity supports older native comparators. Its only
  * missing R6 comparator is "~"; use the EMA extension for that case. */
 export function quantityForR5(quantity: FhirR6Quantity | undefined):
   FhirQuantity | undefined {
-  if (!quantity?.comparator) return quantity as FhirQuantity | undefined;
+  if (!quantity) return undefined;
+  quantity = quantityPrimitiveMetadata(quantity, "r5");
+  if (!quantity.comparator) return quantity as FhirQuantity;
   if (quantity.comparator === "~") return simpleQuantityForR5(quantity);
   return quantityForR6(quantity) as FhirQuantity;
 }
@@ -192,7 +257,8 @@ export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quant
 export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirSimpleQuantity | undefined):
   FhirR6Quantity | undefined {
   if (!quantity) return undefined;
-  if (quantity.comparator !== undefined) return quantity as FhirR6Quantity;
+  quantity = quantityPrimitiveMetadata(quantity, "r6");
+  if (quantity.comparator !== undefined) return quantity;
   if (!quantity.extension?.length) return quantity;
   let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false, equalityActive = false;
   let corrected: FhirExtension[] | undefined, equalitySources: FhirExtension[] | undefined;

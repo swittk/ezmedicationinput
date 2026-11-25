@@ -6378,4 +6378,48 @@ describe("round76 R6 primitive metadata contracts", () => {
       } }] } };
     expect(strictR5._text!.extension![0].valueQuantity!.comparator).toBe("~");
   });
+
+  it("bridges a nested Quantity on a dose primitive without changing its annotation owner", () => {
+    const unknown = { url: "urn:clinic:device", valueString: "device-A" };
+    const annotation: FhirR6PrimitiveElement = { id: "dose-value-note", extension: [{
+      url: "urn:clinic:estimated-area", id: "area-estimate",
+      valueQuantity: { value: 2, comparator: "~", unit: "cm2",
+        system: "http://unitsofmeasure.org", code: "cm2", extension: [unknown] },
+    }, { url: "urn:clinic:opaque-note", valueString: "retain this" }] };
+    const input = course({ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab", _value: annotation } }] });
+    const original = persist(input);
+    let wire = r6Save(persist(input));
+    for (let save = 0; save < 2; save++) {
+      const before = persist(wire);
+      const rows = toFhirR5Dosages(wire);
+      expect(wire).toEqual(before);
+      const amount = rows[0].doseAndRate![0].doseQuantity!;
+      expect(amount.value).toBe(save ? 3 : 1);
+      expect(amount._value!.id).toBe("dose-value-note");
+      expect(amount._value!.extension![0]).toMatchObject({
+        url: "urn:clinic:estimated-area", id: "area-estimate",
+        valueQuantity: { value: 2, unit: "cm2", system: "http://unitsofmeasure.org", code: "cm2" },
+      });
+      const nested = amount._value!.extension![0].valueQuantity!;
+      expect(nested.comparator).toBeUndefined();
+      expect(nested.extension).toEqual([unknown, { url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+        valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" } }]);
+      expect(amount._value!.extension![1]).toEqual(annotation.extension![1]);
+      const fresh = persist(rows);
+      fresh[0].doseAndRate![0].doseQuantity!.value = 3;
+      const saved = persist(fresh);
+      wire = toDosageDetails(fresh);
+      expect(fresh).toEqual(saved);
+      expect(wire.step![0].component[0].doseAndRate![0].doseQuantity)
+        .toEqual({ value: 3, unit: "tab", _value: annotation });
+    }
+    expect(input).toEqual(original);
+    const strictR5: FhirDosage = { doseAndRate: [{ doseQuantity: { _value: { extension: [{
+      url: "urn:clinic:estimated-area", valueQuantity: {
+        // @ts-expect-error R5 primitive Quantity values use the operator extension for approximation.
+        comparator: "~",
+      },
+    }] } } }] };
+    expect(strictR5.doseAndRate![0].doseQuantity!._value!.extension![0].valueQuantity!.comparator).toBe("~");
+  });
 });

@@ -127,7 +127,7 @@ import {
 } from "../fhir";
 import {
   getQuantityComparator,
-  simpleQuantityForR5,
+  simpleQuantityForR5, simpleQuantityForR6,
   quantityForR5 as generalQuantityForR5,
   quantityFromR5,
   quantityFromWire,
@@ -1595,6 +1595,8 @@ function administrationToWire(
         original.doseQuantity === value.quantity &&
         original.doseRange === value.range &&
         original.rateQuantity === value.rate &&
+        (target !== "r5" || simpleQuantityForR5(value.quantity) === value.quantity &&
+          simpleQuantityForR5(value.rate) === value.rate) &&
         original.rateRange === value.rateRange &&
         original.rateRatio === value.rateRatio &&
         original.type === value.role &&
@@ -1633,7 +1635,7 @@ function administrationToWire(
       assign(
         rate,
         "doseQuantity",
-        simpleQuantityForR5(code(value.quantity))
+        (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.quantity))
       );
       assign(
         rate,
@@ -1644,7 +1646,7 @@ function administrationToWire(
       assign(
         rate,
         "rateQuantity",
-        simpleQuantityForR5(code(value.rate))
+        (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(code(value.rate))
       );
       assign(
         rate,
