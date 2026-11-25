@@ -285,6 +285,18 @@ export function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, 
   ));
 }
 
+/** A single dated clock locates an elapsed administration; it does not
+ * supply a repeat cadence. Course bounds and independent recurrences retain
+ * their usual ownership of clock slots. */
+export function hasRecurringAdministrationSchedule(
+  schedule: HpsgScheduleFeature | undefined, positionsRepeat = true
+): boolean {
+  const datedPoint = schedule?.boundsStart?.length === 10 && schedule.timeOfDay?.length === 1 &&
+    !schedule.when?.length && !schedule.boundsEnd && schedule.duration === undefined &&
+    schedule.durationMax === undefined && schedule.durationUnit === undefined;
+  return hasRecurringSchedule(schedule, positionsRepeat && !datedPoint);
+}
+
 function appendRange(target: TextRange[], value: TextRange): void {
   if (!target.some((candidate) =>
     candidate.start === value.start && candidate.end === value.end
@@ -680,8 +692,8 @@ export function projectHpsgSignToState(
       target.frequency = dividedCount;
       target.timingCode = undefined;
     }
-    if (!hasRecurringSchedule(schedule, dividedCount === undefined) &&
-        !hasRecurringSchedule(target, dividedCount === undefined) &&
+    if (!hasRecurringAdministrationSchedule(schedule, dividedCount === undefined) &&
+        !hasRecurringAdministrationSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
         (dividedCount !== undefined || !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE)) &&
         (dividedCount !== undefined || target.timingReference !== "previous") &&

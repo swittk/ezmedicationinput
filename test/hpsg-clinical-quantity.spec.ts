@@ -4399,3 +4399,53 @@ describe("round78 next-day onset and complete clinical cap ownership", () => {
       }
     });
 });
+
+
+describe("round80 dated single-administration duration ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (source: ReturnType<typeof parsePublicSig>) => [source.meta.canonical.course!,
+    fresh(source.fhir), fresh(source.fhirNext), fresh(toFhirR5Dosages(source.fhirNext))];
+  const query = { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z", timeZone: "UTC", limit: 4 };
+
+  it.each(["over", "for"])("gives the selected elapsed administration one dated clock (%s)", introducer => {
+    const parsed = parsePublicSig("Infuse 100 mL " + introducer + " 2 hours starting 2026-11-22 at 08:00");
+    for (const input of views(parsed)) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.recurrence).toMatchObject({ count: 1, occurrenceDuration: 2,
+        occurrenceDurationUnit: "h", clocks: ["08:00:00"] });
+      expect(nextDueDoses(input, query)).toEqual(["2026-11-22T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 100, unit: "mL" });
+    }
+  });
+
+  it.each(["daily", "for 3 days", "through 2026-11-24"])("retains independently recurring infusion slots (%s)", cadence => {
+    const parsed = parsePublicSig("Infuse 100 mL over 2 hours starting 2026-11-22 at 08:00 " + cadence);
+    for (const input of views(parsed)) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 3 })).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00", "2026-11-24T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 300, unit: "mL" });
+    }
+  });
+
+  it("keeps a fresh wire count absence authoritative for an already structured clock recurrence", () => {
+    const note = { url: "urn:clinical:infusion-note", valueString: "retained" };
+    const row: FhirDosage = { method: { text: "Infuse" }, extension: [note],
+      doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }], timing: { repeat: {
+        duration: 2, durationUnit: FhirPeriodUnit.Hour, timeOfDay: ["08:00:00"],
+        boundsPeriod: { start: "2026-11-22" }
+      } } };
+    const r6 = fresh(toDosageDetails([row]));
+    for (const input of [[fresh(row)], r6, fresh(toFhirR5Dosages(r6))]) {
+      const before = fresh(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.schedule?.recurrence?.count).toBeUndefined();
+      expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-23T08:00:00+00:00"]);
+      expect(input).toEqual(before);
+    }
+    expect(toFhirR5Dosages(r6)[0].extension).toContainEqual(note);
+  });
+});
