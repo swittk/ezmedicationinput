@@ -137,7 +137,12 @@ const ACTION_ROUTE_TAIL_SURFACES = new Set([
 ]);
 
 function key(part: Lexeme | undefined): string {
-  return part ? (part.canonical ?? part.lower).replace(/^\.+|\.+$/g, "") : "";
+  if (!part) return "";
+  const lower = part.canonical ?? part.lower;
+  let start = 0, end = lower.length;
+  while (lower.charCodeAt(start) === 46) start++;
+  while (end > start && lower.charCodeAt(end - 1) === 46) end--;
+  return start === 0 && end === lower.length ? lower : lower.slice(start, end);
 }
 
 interface ActionMatch {
@@ -243,7 +248,7 @@ function actionMatchAt(
   ) {
     return undefined;
   }
-  const previous = parts.slice(index - 1, index)[0];
+  const previous = parts[index - 1];
   const governingRelation = previous ? resolveActionRelationSurface(key(previous)) : undefined;
   const maxSpan = Math.min(medicationInstructionActionSpanLimit(key(current), options), parts.length - index);
   for (let length = maxSpan; length >= 1; length -= 1) {
