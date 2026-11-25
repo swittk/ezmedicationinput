@@ -206,7 +206,7 @@ describe("native course and sibling projections", () => {
     expect(input).toEqual(original);
   });
   it("clearing one target side cannot resurrect it from the retained CodeableReference wrapper", () => {
-    const native = courseFromR6(source, true);
+    const native = cloneStructuredValue(courseFromR6(source, true));
     native.stages[0].administrations[0].siteReference = undefined;
     const a = courseToR6(native).step[0].component[0];
     expect(a.site?.concept?.text).toBe("left eye");
@@ -238,14 +238,14 @@ describe("native course and sibling projections", () => {
         },
       ],
     };
-    const native = courseFromR6(raw, true),
+    const native = cloneStructuredValue(courseFromR6(raw, true)),
       a = native.stages[0].administrations[0];
     a.limits![0].amount = { value: 3, unit: "tab" };
     let out = courseToR6(native).step[0].component[0];
     expect(out.safety?.doseLimit?.[0]).toMatchObject({ id: "limit-a", valueQuantity: { value: 3 } });
     expect(out.safety?.doseLimit?.[1]).toEqual(raw.step[0].component[0].safety?.doseLimit?.[1]);
     expect(out.safety?.ifExceeded).toBe("contact prescriber");
-    const removed = courseFromR6(structuredClone(raw), true);
+    const removed = cloneStructuredValue(courseFromR6(structuredClone(raw), true));
     removed.stages[0].administrations[0].limits!.splice(0, 1);
     out = courseToR6(removed).step[0].component[0];
     expect(out.safety?.doseLimit).toHaveLength(1);
@@ -264,7 +264,7 @@ describe("native course and sibling projections", () => {
         },
       ],
     };
-    const c = courseFromR6(raw, true);
+    const c = cloneStructuredValue(courseFromR6(raw, true));
     c.stages[0].administrations[0].predicate = {
       kind: "measurement",
       name: "SBP",
@@ -278,7 +278,7 @@ describe("native course and sibling projections", () => {
       valueQuantity: { value: 160 },
     });
     expect(raw.step[0].component[0].condition?.[0].text).toBe("Original guard");
-    const cleared = courseFromR6(structuredClone(raw), true);
+    const cleared = cloneStructuredValue(courseFromR6(structuredClone(raw), true));
     cleared.stages[0].administrations[0].predicate = undefined;
     expect(courseToR6(cleared).step[0].component[0]).not.toHaveProperty("condition");
   });
@@ -315,7 +315,7 @@ describe("native ownership of source-encoded semantics", () => {
         },
       ],
     };
-    const native = courseFromR6(external, true);
+    const native = cloneStructuredValue(courseFromR6(external, true));
     const a = native.stages[0].administrations[0];
     a.schedule!.recurrence!.monthDays = [15];
     a.delayMinutes = undefined;
@@ -340,7 +340,7 @@ describe("native ownership of source-encoded semantics", () => {
     expect(external.step[0].component[0].timing?.repeat?.extension?.[0].valuePositiveInt).toBe(1);
   });
   it("a fractional native offset is one clinical field and one correct wire encoding", () => {
-    const native = courseFromR6(
+    const native = cloneStructuredValue(courseFromR6(
       {
         step: [
           {
@@ -362,7 +362,7 @@ describe("native ownership of source-encoded semantics", () => {
         ],
       },
       true
-    );
+    ));
     const r = native.stages[0].administrations[0].schedule!.recurrence!;
     expect(r.offset).toBe(0.5);
     r.offset = 1.5;
@@ -373,7 +373,7 @@ describe("native ownership of source-encoded semantics", () => {
     expect(courseFromR6(out).stages[0].administrations[0].schedule?.recurrence?.offset).toBe(1.5);
   });
   it("exports native target multiplicity once while retaining the source site identity", () => {
-    const native = courseFromR6(source, true);
+    const native = cloneStructuredValue(courseFromR6(source, true));
     native.stages[0].administrations[0].targetCount = 2;
     const out = courseToR6(native);
     const a = courseFromR6(out).stages[0].administrations[0];
@@ -455,7 +455,7 @@ describe("November 17 review: live native clinical facts own projection and real
         },
       ],
     };
-    const native = courseFromR6(raw, true);
+    const native = cloneStructuredValue(courseFromR6(raw, true));
     expect(native.stages[0].administrations[0].limits).toHaveLength(1);
     native.stages[0].administrations[0].limits = undefined;
     const exported = courseToR6(native).step[0].component[0].safety!;
@@ -466,14 +466,14 @@ describe("November 17 review: live native clinical facts own projection and real
   });
 
   it("R5 retained site metadata cannot restore explicitly cleared native concept/reference", () => {
-    const native = courseFromR6(source, true);
+    const native = cloneStructuredValue(courseFromR6(source, true));
     const a = native.stages[0].administrations[0];
     a.siteReference = undefined;
     let rows = courseToR5(native);
     let reopened = inputToCanonical(rows);
     expect("stages" in reopened && reopened.stages[0].administrations[0].siteReference).toBeUndefined();
     expect("stages" in reopened && reopened.stages[0].administrations[0].target?.text).toBe("left eye");
-    const cleared = courseFromR6(structuredClone(source), true);
+    const cleared = cloneStructuredValue(courseFromR6(structuredClone(source), true));
     cleared.stages[0].administrations[0].siteReference = undefined;
     cleared.stages[0].administrations[0].target = undefined;
     rows = courseToR5(cleared);
@@ -3625,4 +3625,19 @@ describe("round68 numeric member safety qualification", () => {
     }
   });
 
+});
+
+describe("round74 current instruction identity", () => {
+  it("keeps each coded instruction's source annotations after a typed composition reorders them", () => {
+    const native = cloneStructuredValue(parseSig("Take 1 tablet daily").meta.canonical.course!);
+    const administration = native.stages[0].administrations[0];
+    const original = ["A", "B", "C"].map(code => ({
+      coding: { system: "urn:clinic:instructions", code, display: code }, i18n: { th: "คำแนะนำ " + code },
+    }));
+    administration.syntax!.additionalInstructions = original;
+    administration.additionalInstructions = [original[2], original[0], original[1]].map(item => ({ coding: [item.coding] }));
+    const before = cloneStructuredValue(native), clause = clauseForAdministration(administration);
+    expect(clause.additionalInstructions).toEqual([original[2], original[0], original[1]]);
+    expect(native).toEqual(before);
+  });
 });

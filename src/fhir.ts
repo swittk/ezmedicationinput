@@ -1474,7 +1474,7 @@ export function instructionTextRepresented(text: string, instructions: readonly 
   for (const instruction of instructions ?? []) {
     if (!instruction.text?.trim()) continue;
     const candidate = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-    if (candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)) return true;
+    if (candidate === normalized || candidate.includes(normalized)) return true;
   }
   return false;
 }
@@ -1962,12 +1962,12 @@ export function serializeCanonicalSchedule(
     };
   }
 
-  if (schedule?.timingCode) {
+  if (schedule?.timingCode || schedule?.timingText) {
     dosage.timing = dosage.timing ?? {};
-    const normalizedCode = schedule.timingCode.toUpperCase();
+    const normalizedCode = schedule.timingCode?.toUpperCase();
     // A CodeableConcept.text preserves supported local wording without
     // falsely attaching an HL7 standard identity to non-standard codes.
-    dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
+    dosage.timing.code = normalizedCode && FHIR_GTS_TIMING_CODES.has(normalizedCode)
       ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
           text: schedule.timingText ?? schedule.timingCode }
       : { text: schedule.timingText ?? schedule.timingCode };

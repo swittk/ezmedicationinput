@@ -1208,6 +1208,8 @@ function updateNativeTimingAnnotations(
     !live?.occurrenceCap &&
     !live?.clockWindow &&
     !live?.eventWindow &&
+    !live?.occurrenceDurationRange &&
+    !live?.occurrenceDurationComparator &&
     live?.offset === original?.offset &&
     live?.offsetMin === undefined &&
     live?.offsetMax === undefined &&
@@ -1218,9 +1220,10 @@ function updateNativeTimingAnnotations(
     return target;
   const durationMarker = original?.extension?.find(item => item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
   const duration = parseTimingAdministrationDuration(durationMarker);
-  const durationChanged = duration && (duration.value !== live?.occurrenceDuration ||
+  const durationChanged = duration ? duration.value !== live?.occurrenceDuration ||
     duration.unit !== live?.occurrenceDurationUnit || duration.comparator !== live?.occurrenceDurationComparator ||
-    !same(duration.range, live?.occurrenceDurationRange));
+    !same(duration.range, live?.occurrenceDurationRange)
+    : Boolean(live?.occurrenceDurationRange || live?.occurrenceDurationComparator);
   const exactOffset = original?.offset !== undefined
     ? original.extension?.find(item => item.url === TIMING_OFFSET_EXACT_EXTENSION_URL) : undefined;
   const supersededOffset = exactOffset &&
@@ -1245,8 +1248,8 @@ function updateNativeTimingAnnotations(
   };
   if (durationChanged) {
     changes.add(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
-    output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
-      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker!] }];
+    if (durationMarker) output.extension = [...((output.extension as FhirExtension[] | undefined) ?? []),
+      { url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [durationMarker] }];
   }
   const administrationChanges = new Set<string>();
   if (nativeOwnsAnnotations) {

@@ -190,7 +190,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       if (!prior.end && index <= lastDraftPredecessor) {
         const before = prior.component[member], after = current.component[member];
         // Getters return fresh arrays; weekday order cannot change completion.
-        if ((before.asNeeded === true) !== (after.asNeeded === true) ||
+        if (Boolean(before.asNeeded || before.asNeededFor?.length) !== Boolean(after.asNeeded || after.asNeededFor?.length) ||
             !equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
             !equalStructuredValues(getDosageCondition(before), getDosageCondition(after)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||

@@ -144,32 +144,25 @@ export function mergeTranslationPrimitiveElement(
   base: FhirPrimitiveElement | undefined,
   translations: Record<string, string> | undefined
 ): FhirPrimitiveElement | undefined {
-  const nextExtensions = base?.extension?.map(cloneExtension) ?? [];
-  const existingTranslationLocales = new Set<string>();
-
-  for (const extension of nextExtensions) {
-    if (extension.url !== FHIR_TRANSLATION_EXTENSION_URL) {
-      continue;
+  const supplied = mergeI18nRecords(translations), seen = new Set<string>();
+  const nextExtensions: FhirExtension[] = [];
+  for (const extension of base?.extension ?? []) {
+    let current = extension;
+    if (extension.url === FHIR_TRANSLATION_EXTENSION_URL) {
+      const { locale, content } = getTranslationParts(extension);
+      if (locale && content) {
+        seen.add(locale);
+        const replacement = supplied?.[locale];
+        if (replacement && replacement !== content)
+          current = { ...extension, extension: extension.extension?.map(part =>
+            part.url === TRANSLATION_CONTENT_EXTENSION_URL ? { ...part, valueString: replacement } : part) };
+      }
     }
-    const { locale, content } = getTranslationParts(extension);
-    if (locale && content) {
-      existingTranslationLocales.add(locale);
-    }
+    nextExtensions.push(current);
   }
-
-  const additions = buildTranslationPrimitiveElement(translations)?.extension ?? [];
-  for (const extension of additions) {
-    const { locale } = getTranslationParts(extension);
-    if (locale && existingTranslationLocales.has(locale)) {
-      continue;
-    }
-    if (locale) {
-      existingTranslationLocales.add(locale);
-    }
-    nextExtensions.push(extension);
-  }
-
-  return nextExtensions.length ? { extension: nextExtensions } : undefined;
+  for (const locale in supplied)
+    if (!seen.has(locale)) nextExtensions.push(buildTranslationExtension(locale, supplied[locale]));
+  return nextExtensions.length ? { ...base, extension: nextExtensions } : base ? { ...base } : undefined;
 }
 
 function getTranslationParts(

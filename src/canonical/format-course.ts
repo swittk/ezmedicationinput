@@ -573,6 +573,12 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
     !!r.activityTiming?.length || !!r.occurrenceCap || !!r.clockWindow || !!r.eventWindow ||
     !!r.startOffset || !!r.endOffset);
 }
+function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
+  for (const stage of course.stages) for (const administration of stage.administrations)
+    if (administrationHasAmountFacts(administration) || administration.syntax?.instructionGraph?.actions.length ||
+        administration.text === course.instruction) return false;
+  return true;
+}
 function courseHasClinicalFacts(course: CanonicalCourse): boolean {
   if (course.cycleInterval || course.cycleCount !== undefined || safetyHasClinicalFacts(course.safety)) return true;
   for (const stage of course.stages) {
@@ -816,6 +822,10 @@ export function formatCanonicalCourse(
     if (oneOrCourse.instruction && authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
     return oneOrCourse.instruction ? words.withAuthoredDirections(rendered, oneOrCourse.instruction) : rendered;
   }
+  // A timing-only component cannot replace dose/manner directions owned only
+  // by the header. Matching member text already carries those directions.
+  const headerDirections = !sourceReplayAllowed && oneOrCourse.instruction && courseNeedsAuthoredHeader(oneOrCourse)
+    ? oneOrCourse.instruction : undefined;
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
   if (
@@ -849,7 +859,8 @@ export function formatCanonicalCourse(
         rendered = appendDoseLimits(rendered, only.safety.limits, words, "stage", only.safety.ifExceeded);
       if (oneOrCourse.safety)
         rendered = appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded);
-      return rendered;
+      if (headerDirections && authored?.text === headerDirections) authored.rendered = true;
+      return headerDirections ? words.withAuthoredDirections(rendered, headerDirections) : rendered;
     }
   }
   // Rendering needs each component's projection, not a persisted copy of
@@ -1244,7 +1255,9 @@ export function formatCanonicalCourse(
   const rendered = stages.join(options?.separator ??
     (hasTimedStages || oneOrCourse.cycleInterval || oneOrCourse.cycleCount !== undefined
       ? " " : words.stageSeparator));
-  return oneOrCourse.safety
+  const current = oneOrCourse.safety
     ? appendDoseLimits(rendered, oneOrCourse.safety.limits, words, "course", oneOrCourse.safety.ifExceeded)
     : rendered;
+  if (headerDirections && authored?.text === headerDirections) authored.rendered = true;
+  return headerDirections ? words.withAuthoredDirections(current, headerDirections) : current;
 }

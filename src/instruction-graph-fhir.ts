@@ -76,18 +76,7 @@ function valueBoolean(url: string, value: boolean | undefined): FhirExtension | 
  */
 function wireCoding(value: FhirCoding): FhirCoding {
   let displayPrimitive = value._display;
-  if (value.i18n) {
-    const merged = mergeTranslationPrimitiveElement(displayPrimitive, value.i18n);
-    if (displayPrimitive) {
-      // Base Element data is already immutable wire input. Retain it intact;
-      // only newly supplied translations need to be appended.
-      const original = displayPrimitive.extension ?? [];
-      const additions = merged?.extension?.slice(original.length);
-      if (additions?.length) displayPrimitive = {
-        ...displayPrimitive, extension: [...original, ...additions]
-      };
-    } else displayPrimitive = merged;
-  }
+  if (value.i18n) displayPrimitive = mergeTranslationPrimitiveElement(displayPrimitive, value.i18n);
   // Keep supplied Coding fields, including unknown wire annotations, while
   // the translated display primitive remains the only rewritten field.
   const source = value as FhirCoding & Record<string, unknown>;
@@ -321,7 +310,16 @@ export function buildInstructionGraphExtension(
     add(ownership, valueInteger("administrationActionIndex", graph.primaryOwnership.administrationActionIndex));
     add(ownership, valueInteger("doseActionIndex", graph.primaryOwnership.dose?.actionIndex));
     add(ownership, valueInteger("doseArgumentIndex", graph.primaryOwnership.dose?.argumentIndex));
-    nested.push({ url: "primaryOwnership", extension: ownership });
+    const activeFields = ownership.length;
+    for (const field of graph.primaryOwnership.sourceExtensions ?? []) {
+      let index = -1;
+      for (let i = 0; i < activeFields; i++) if (ownership[i].url === field.url) { index = i; break; }
+      if (index >= 0) ownership[index] = { ...field, ...ownership[index] };
+      else if (field.url !== "resolved" && field.url !== "administrationActionIndex" &&
+          field.url !== "doseActionIndex" && field.url !== "doseArgumentIndex") ownership.push(field);
+    }
+    nested.push({ ...(graph.primaryOwnership.sourceId !== undefined ? { id: graph.primaryOwnership.sourceId } : {}),
+      url: "primaryOwnership", extension: ownership });
   }
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
@@ -643,14 +641,30 @@ function parseGraphCoverage(extension:FhirExtension):CanonicalInstructionCoverag
 function parsePrimaryOwnership(extension: FhirExtension): CanonicalInstructionGraph["primaryOwnership"] {
   let resolved: FhirExtension | undefined, administration: FhirExtension | undefined,
     doseAction: FhirExtension | undefined, doseArgument: FhirExtension | undefined;
+  let sourceExtensions: FhirExtension[] | undefined;
   for (const field of extension.extension ?? []) switch (field.url) {
-    case "resolved": if (!resolved) resolved = field; break;
-    case "administrationActionIndex": if (!administration) administration = field; break;
-    case "doseActionIndex": if (!doseAction) doseAction = field; break;
-    case "doseArgumentIndex": if (!doseArgument) doseArgument = field; break;
+    case "resolved":
+      if (!resolved) resolved = field;
+      if (hasFieldMetadata(field, "valueBoolean")) (sourceExtensions ??= []).push(field);
+      break;
+    case "administrationActionIndex":
+      if (!administration) administration = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    case "doseActionIndex":
+      if (!doseAction) doseAction = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    case "doseArgumentIndex":
+      if (!doseArgument) doseArgument = field;
+      if (hasFieldMetadata(field, "valueInteger")) (sourceExtensions ??= []).push(field);
+      break;
+    default: (sourceExtensions ??= []).push(field); break;
   }
   if (resolved?.valueBoolean !== true) return undefined;
   return {
+    ...(extension.id !== undefined ? { sourceId: extension.id } : {}),
+    ...(sourceExtensions ? { sourceExtensions } : {}),
     ...(administration?.valueInteger !== undefined ? { administrationActionIndex: administration.valueInteger } : {}),
     ...(doseAction?.valueInteger !== undefined && doseArgument?.valueInteger !== undefined
       ? { dose: { actionIndex: doseAction.valueInteger, argumentIndex: doseArgument.valueInteger } } : {})

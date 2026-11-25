@@ -56,12 +56,14 @@ export interface FhirExtension {
   valueTiming?: FhirTiming;
 }
 
-/** R6 Extension values retain their native Quantity and Timing contracts. */
-export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming"> {
+/** R6 Extension values retain their native datatype contracts. */
+export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference"> {
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
   valueRatio?: FhirR6Ratio;
   valueTiming?: FhirR6Timing;
+  valueReference?: FhirR6Reference;
+  valueCodeableReference?: FhirR6CodeableReference;
 }
 
 export interface FhirR6Element extends Omit<FhirElement, "extension"> {
@@ -557,21 +559,21 @@ interface FhirR6DosageConditionValues {
   valueAnnotation?: Record<string, unknown>;
   valueAttachment?: Record<string, unknown>;
   valueCodeableConcept?: FhirCodeableConcept;
-  valueCodeableReference?: FhirCodeableReference;
+  valueCodeableReference?: FhirR6CodeableReference;
   valueCoding?: FhirCoding;
   valueContactPoint?: Record<string, unknown>;
   valueCount?: FhirR6Quantity;
   valueDistance?: FhirR6Quantity;
   valueDuration?: FhirR6Quantity;
   valueHumanName?: Record<string, unknown>;
-  valueIdentifier?: NonNullable<FhirReference["identifier"]>;
+  valueIdentifier?: NonNullable<FhirR6Reference["identifier"]>;
   valueMoney?: Record<string, unknown>;
   valuePeriod?: FhirPeriod;
   valueQuantity?: FhirR6Quantity;
   valueRange?: FhirRange;
   valueRatio?: FhirR6Ratio;
   valueRatioRange?: Record<string, unknown>;
-  valueReference?: FhirReference;
+  valueReference?: FhirR6Reference;
   valueSampledData?: Record<string, unknown>;
   valueSignature?: Record<string, unknown>;
   valueTiming?: FhirR6Timing;
@@ -1974,6 +1976,9 @@ export interface CanonicalInstructionGraph {
   primaryOwnership?: {
     administrationActionIndex?: number;
     dose?: { actionIndex: number; argumentIndex: number };
+    /** Opaque annotations retained independently of the active source binding. */
+    sourceId?: string;
+    sourceExtensions?: FhirExtension[];
   };
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];

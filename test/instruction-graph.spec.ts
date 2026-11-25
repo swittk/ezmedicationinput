@@ -7403,10 +7403,13 @@ describe("round66 persisted primary action and amount ownership", () => {
     for (const current of [rows, reopened]) {
       expect(current[0].extension!.find(field => field.url === marker.url)).toEqual(savedMarker);
       const graph = parseInstructionGraphExtension(current[0].extension)!;
-      expect(graph.primaryOwnership).toEqual({ administrationActionIndex: 1, dose: { actionIndex: 0, argumentIndex: 0 } });
+      expect(graph.primaryOwnership).toMatchObject({ administrationActionIndex: 1, dose: { actionIndex: 0, argumentIndex: 0 } });
       expect(graph.actions[1].predicate.lemma).toBe("swallow");
       expect(graph.actions[0].args[0].quantity).toMatchObject({ value: 2, unit: "tab" });
-      expect(buildInstructionGraphExtension(graph)!.extension!.filter(field => field.url === "primaryOwnership")).toHaveLength(1);
+      const rebuilt = buildInstructionGraphExtension(graph)!.extension!.filter(field => field.url === "primaryOwnership");
+      expect(rebuilt).toHaveLength(1);
+      expect(rebuilt[0].id).toBe("retained-source-owner");
+      expect(rebuilt[0].extension).toContainEqual({ url: "https://example.org/owner-note", valueString: "original source binding" });
       const text = formatSig(current, "long", { locale: "en", realizationMode: "normalized" });
       expect(text).toMatch(/^Disperse 3 tablets in 100 mL water/u);
       expect(text.match(/3 tablets/gu)).toHaveLength(1);
