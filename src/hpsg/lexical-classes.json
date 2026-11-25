@@ -2331,6 +2331,7 @@
   "nextDayModifiers": ["next", "following"],
   "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
   "nextDayStartLeads": ["from", "starting"],
+  "nextDayPrepositions": ["on"],
   "treatmentPeriodStartLeads": [
     "from",
     "starting",

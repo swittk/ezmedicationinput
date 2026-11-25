@@ -142,10 +142,11 @@ export function anchoredScheduleDurationEnd(
   return date.toISOString().slice(0, 10);
 }
 
-function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedule']): void {
+function materializeAnchoredScheduleWindow(schedule: CanonicalSigClause['schedule']): string | undefined {
   if (!schedule || schedule.boundsEnd) return;
   const durationEnd = anchoredScheduleDurationEnd(schedule);
   if (durationEnd) schedule.boundsEnd = durationEnd;
+  return durationEnd;
 }
 /** An exact fixed-day phase can establish a later relative origin. */
 function exactPhaseDurationDays(schedule: CanonicalSigClause["schedule"]): number | undefined {
@@ -300,9 +301,11 @@ export function scopeSequentialPhaseSemantics(
   options?: ParseOptions
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
+  let derivedEnds: Map<NonNullable<CanonicalSigClause["schedule"]>, string> | undefined;
   for (const state of states) {
     const clause = state.primaryClause, schedule = clause.schedule;
-    materializeAnchoredScheduleWindow(schedule);
+    const derivedEnd = materializeAnchoredScheduleWindow(schedule);
+    if (derivedEnd && schedule) (derivedEnds ??= new Map()).set(schedule, derivedEnd);
     // A typed relative delay locates one future administration unless the
     // clause supplies recurring or as-needed use. Establish it before native
     // and R5 projection; an empty repeat cannot decide this at execution time.
@@ -439,7 +442,9 @@ export function scopeSequentialPhaseSemantics(
           schedules.some(value => value?.count !== undefined || value?.countMax !== undefined ||
             value?.phaseStartReference === 'previous-phase-next-day' ||
             value?.duration !== undefined || value?.durationUnit !== undefined ||
-            hasIndependentRecurrence(value, false)));
+            // An open phase with one shared calendar origin already locates NEXT.
+            // Recurrence alone cannot turn it into a completion dependency.
+            !firstSchedule?.boundsStart && hasIndependentRecurrence(value, false)));
       }
       const authoredOffset = schedule.evidence.some(item => !isNextDayScheduleRule(item.rule) &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
@@ -659,6 +664,12 @@ export function scopeSequentialPhaseSemantics(
       if (sharedMethod && !clause.method && routeCompatible && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         applyAdministrationDurationSemantics(states[index], options, true);
+        // Only an end materialized from this provisional course duration can
+        // disappear when the inherited head claims administration run time.
+        // Independently authored or subsequently changed bounds stay intact.
+        const derivedEnd = schedule && derivedEnds?.get(schedule);
+        if (derivedEnd && schedule?.boundsEnd === derivedEnd && schedule.duration === undefined)
+          delete schedule.boundsEnd;
         fields.push('method');
       }
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&

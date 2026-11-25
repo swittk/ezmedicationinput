@@ -822,7 +822,9 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   if (rangedNumber) {
     // An unsupported fixed-rate range still owns both numeric endpoints.
     // Neither endpoint may become an exact rate or an independent scalar dose.
-    if (expression && timeUnit(expression.compact.split("/")[1])) {
+    const weight = expression && weightQuantity(context, quantityEnd, value, expression, phraseStart);
+    if (expression && (timeUnit(expression.compact.split("/")[1]) ||
+        weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity")) {
       const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
       for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);
     }

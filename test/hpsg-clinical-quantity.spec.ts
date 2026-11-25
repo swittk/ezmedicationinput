@@ -3190,7 +3190,8 @@ describe("round46 supported quantity and boundary ownership", () => {
   it.each(["until the next morning", "until 8 AM the next morning", "until 08:00 the next morning",
     "until 8am next morning", "until 8:30am the next day", "until 8:30 am the next day",
     "until 8:30pm the next day", "until 8:30 pm the next day", "until the next morning at 8 AM",
-    "until the next morning at 08:00"])("retains the relative ending %s without turning it into an onset", ending => {
+    "until the next morning at 08:00", "until 8 AM on the next morning",
+    "until 8:30am on the next day", "until 08:00 on next day"])("retains the relative ending %s without turning it into an onset", ending => {
     const source = "Take 1 tablet every 6 hours " + ending;
     const parsed = parsePublicSig(source);
     const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
@@ -4080,14 +4081,21 @@ describe("round72 reviewed quantity and onset ownership", () => {
     }
   });
 
-  it.each(["50 to 100", "50–100", "50-100"])("does not detach an exact endpoint from an unsupported rate range: %s", range => {
-    const source = "Infuse at " + range + " mL/hr";
+  it.each([
+    ["50 to 100", "mL/hr"], ["50–100", "mL/hr"], ["50-100", "mL/hr"],
+    ["0.05 to 0.1", "mcg/kg/min"],
+  ])("does not detach an exact endpoint from an unsupported rate range: %s %s", (range, unit) => {
+    const source = "Infuse at " + range + " " + unit;
     const parsed = parsePublicSig(source);
     expect(parsed.meta.canonical.clauses[0].raw.text).toBe(source);
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
-    for (const dosage of views(parsed))
-      expect(importCanonicalCourse(dosage).stages[0].administrations[0].amounts ?? []).toEqual([]);
+    for (const dosage of views(parsed)) {
+      const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(member.amounts ?? []).toEqual([]);
+      expect(member.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(formatSig(dosage, "long", { locale: "en", realizationMode: "roundtrip" })).toContain(range + " " + unit);
+    }
     const exact = parsePublicSig("Infuse at 100 mL/hr");
     expect(exact.fhir[0].doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, code: "mL/h" });
   });
@@ -4135,6 +4143,50 @@ describe("round72 reviewed quantity and onset ownership", () => {
     for (const dosage of views(parsed)) {
       const limit = importCanonicalCourse(dosage).stages[0].administrations[0].limits?.[0];
       expect(limit).toMatchObject({ scope: "period", amount: { value: 50, unit: "mL" }, period: { value: 0.5, unit: "h" } });
+    }
+  });
+});
+
+describe("round74 dated NEXT and inherited administration duration", () => {
+  const views = (parsed: ReturnType<typeof parsePublicSig>) => [
+    structuredClone(parsed.meta.canonical.course!),
+    JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[],
+    JSON.parse(JSON.stringify(parsed.fhirNext)) as typeof parsed.fhirNext,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))) as FhirDosage[]
+  ];
+
+  it.each([false, true])("uses a dated open origin but retains finite counted completion (%s)", counted => {
+    const source = "Take 1 tablet daily at 20:00 starting 2026-11-23" +
+      (counted ? " for 2 doses" : "") + ", then take 2 tablets at 08:00 the next morning";
+    const parsed = parsePublicSig(source);
+    for (const input of views(parsed)) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z",
+        timeZone: "UTC", limit: 5 })).toEqual(counted ? [
+          "2026-11-23T20:00:00+00:00", "2026-11-24T20:00:00+00:00", "2026-11-25T08:00:00+00:00"
+        ] : ["2026-11-23T20:00:00+00:00", "2026-11-24T08:00:00+00:00"]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("removes only a derived end when inherited Infuse owns the duration (%s)", authoredEnd => {
+    const source = "Infuse 100 mL over 2 hours starting 2026-11-22 at 08:00, then from 2026-11-23 " +
+      "100 mL over 1 day weekly at 09:00" + (authoredEnd ? " through 2026-12-01" : "");
+    const parsed = parsePublicSig(source);
+    for (const input of views(parsed)) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      const repeat = course.stages[1].administrations[0].schedule?.recurrence;
+      expect(repeat?.calendarWindow).toMatchObject({ start: "2026-11-23" });
+      expect(repeat?.calendarWindow?.end).toBe(authoredEnd ? "2026-12-01" : undefined);
+      expect(repeat?.occurrenceDuration).toBe(1);
+      expect(repeat?.occurrenceDurationUnit).toBe("d");
+      expect(repeat?.courseLength).toBeUndefined();
+      expect(nextDueDoses(input, { orderedAt: "2026-11-22T00:00:00Z", from: "2026-11-22T00:00:00Z",
+        timeZone: "UTC", limit: 4 })).toEqual([
+          "2026-11-22T08:00:00+00:00", "2026-11-23T09:00:00+00:00", "2026-11-30T09:00:00+00:00",
+          ...(!authoredEnd ? ["2026-12-07T09:00:00+00:00"] : [])
+        ]);
+      expect(JSON.stringify(input)).toBe(before);
     }
   });
 });

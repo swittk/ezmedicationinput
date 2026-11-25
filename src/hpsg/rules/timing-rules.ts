@@ -53,6 +53,7 @@ import {
   nextDayOnsetAt,
   NEXT_DAY_MODIFIERS,
   NEXT_DAY_HEADS,
+  NEXT_DAY_PREPOSITIONS,
   RELATIVE_TIME_END_LEADS,
   attachedNumberUnitAt,
   isEndBoundDaypartAt,
@@ -3220,7 +3221,10 @@ export function timeOfDayRule(): HpsgLexicalRule<HpsgClauseContext> {
     const timeOfDay: string[] = [];
     while (cursor < context.limit) {
       const token = context.tokens[cursor];
-      if (!token || context.state.consumed.has(token.index)) {
+      // An unsupported dimensional rate still owns its numeric range, even
+      // after AT. Decimal endpoints cannot become independent clock daughters.
+      if (!token || context.state.consumed.has(token.index) ||
+          context.clinicalCache.unlicensedRateTokenIndices?.has(token.index)) {
         break;
       }
       const parsed = parseClockToken(token, context.tokens[cursor + 1]);
@@ -3423,6 +3427,8 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   let next = start + 1;
   const clock = parseClockToken(context.tokens[next], context.tokens[next + 1]);
   if (clock) next += clock.tokens.length;
+  const preposition = context.tokens[next];
+  if (preposition && NEXT_DAY_PREPOSITIONS.has(normalizeTokenLower(preposition))) next += 1;
   const article = context.tokens[next];
   if (article && normalizeTokenLower(article) === 'the') next += 1;
   // A relative end owns its optional clock and NEXT + day/daypart nominal. Its clock is

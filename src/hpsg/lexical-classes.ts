@@ -530,6 +530,7 @@ export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLea
 export const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
 export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
 export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
+export const NEXT_DAY_PREPOSITIONS = setOf(source.nextDayPrepositions);
 const NEXT_DAY_START_LEADS = setOf(source.nextDayStartLeads);
 /** Typed derivation identity shared by lexical timing and phase composition. */
 export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
@@ -542,6 +543,8 @@ function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number):
   let before = start - 1;
   let previous = tokens[before];
   if (previous && EVENT_ARTICLE_TOKENS.has(previous.canonical ?? previous.lower))
+    previous = tokens[--before];
+  if (previous && NEXT_DAY_PREPOSITIONS.has(previous.canonical ?? previous.lower))
     previous = tokens[--before];
   // An optional clock belongs to the same end nominal: UNTIL 8 AM NEXT day.
   // The lexical gate only locates its governor; the end rule parses the clock.
