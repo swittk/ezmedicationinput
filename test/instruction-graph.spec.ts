@@ -8015,3 +8015,102 @@ it("round73 retains the schedule-owned bedtime beside a gargling duration", () =
   expect(formatSig(parsed.fhir, "long", { locale: "th", realizationMode: "normalized" }))
     .toBe("กลั้วคอ 10 มิลลิลิตร นาน 30 วินาที ก่อนนอน.");
 });
+describe("round74 independent material and time owners", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (frame: AdviceFrame) => {
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    const r6 = toDosageDetails([row]);
+    return [[row], r6, fresh(toFhirR5Dosages(r6))] as const;
+  };
+
+  it.each(["Dilute", "Mix"])("separates opaque measured material from current quantities for %s", action => {
+    const frame: AdviceFrame = { ...fresh(parseInstructionActions(action + " with water")[0]), sourceText: "",
+      args: [{ role: AdviceArgumentRole.Material, relation: AdviceRelation.With,
+        text: "100 mL sterile water", quantity: { value: 100, unit: "mL" } }] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+    for (const value of [100, 50, 1100]) {
+      const submitted = fresh(row);
+      const savedArgument = submitted.extension![0].extension!.find(item => item.url === "action")!
+        .extension!.find(item => item.url === "argument")!;
+      savedArgument.extension!.find(item => item.url === "quantity")!.extension!
+        .find(item => item.url === "value")!.valueDecimal = value;
+      const before = JSON.stringify(submitted), r6 = toDosageDetails([submitted]);
+      for (const input of [[submitted], r6, fresh(toFhirR5Dosages(r6))]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        const separator = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+        const [current, original] = text.split(separator);
+        expect(original).toBe("100 mL sterile water.");
+        expect(current).toContain(locale === "en" ? value + " mL" : value + " มิลลิลิตร");
+        expect(current.match(/[0-9]+/gu)).toEqual([String(value)]);
+        if (locale === "en") expect(current).toBe("Current: " + action + " with " + value + " mL");
+      }
+      expect(JSON.stringify(submitted)).toBe(before);
+      expect(parseInstructionGraphExtension(toFhirR5Dosages(r6)[0].extension)?.actions[0].args[0])
+        .toMatchObject({ text: "100 mL sterile water", quantity: { value, unit: "mL" } });
+    }
+  });
+
+  it("retains opaque mixing companions under their original-directions label", () => {
+    const frame: AdviceFrame = { ...fresh(parseInstructionActions("Mix with water")[0]), sourceText: "",
+      args: [
+        { role: AdviceArgumentRole.Substance, relation: AdviceRelation.With, text: "100 mL sterile water",
+          quantity: { value: 100, unit: "mL" } },
+        { role: AdviceArgumentRole.Material, relation: AdviceRelation.With, text: "50 mL saline",
+          quantity: { value: 50, unit: "mL" } }
+      ] };
+    for (const input of views(frame)) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      const [current, original] = text.split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(original).toBe("100 mL sterile water; 50 mL saline.");
+      expect(current.match(/[0-9]+/gu)).toEqual(["100", "50"]);
+    }
+  });
+
+  it.each(["bare quantity", "separate label"])("localizes the measured material with %s", kind => {
+    const frame: AdviceFrame = { ...fresh(parseInstructionActions("Dilute with water")[0]), sourceText: "",
+      args: [{ role: AdviceArgumentRole.Material, relation: AdviceRelation.With,
+        text: kind === "bare quantity" ? "100 mL" : "100 mL sterile water",
+        ...(kind === "separate label" ? { normalized: "sterile water", i18n: { th: "น้ำปราศจากเชื้อ" } } : {}),
+        quantity: { value: 100, unit: "mL" } }] };
+    for (const input of views(frame)) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(kind === "bare quantity" ? "Dilute with 100 mL." : "Dilute with 100 mL sterile water.");
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(th.match(/100 มิลลิลิตร/gu)).toHaveLength(1);
+      if (kind === "separate label") expect(th).toContain("น้ำปราศจากเชื้อ");
+    }
+  });
+
+  it("retains distinct times that share the frame relation and deduplicates the same time", () => {
+    const time = (text: string, thai: string) => ({ role: AdviceArgumentRole.Time, relation: AdviceRelation.Before,
+      text, normalized: text, i18n: { th: thai } });
+    const frame: AdviceFrame = { ...fresh(parseInstructionActions("Swallow 1 tablet before breakfast")[0]), sourceText: "",
+      relation: AdviceRelation.Before, args: [
+        { role: AdviceArgumentRole.Amount, text: "1 tablet", quantity: { value: 1, unit: "tab" } },
+        time("breakfast", "อาหารเช้า"), time("dinner", "อาหารเย็น"), time("breakfast", "อาหารเช้า")
+      ] };
+    for (const input of views(frame)) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text.match(locale === "en" ? /before breakfast/gu : /ก่อนอาหารเช้า/gu)).toHaveLength(1);
+      expect(text.match(locale === "en" ? /before dinner/gu : /ก่อนอาหารเย็น/gu)).toHaveLength(1);
+      expect(text.match(locale === "en" ? /1 tablet/gu : /1 เม็ด/gu)).toHaveLength(1);
+    }
+  });
+
+  it("keeps a later water quantity off the medication head after WITH breakfast", () => {
+    const source = "Take with breakfast and with 200 mL water", actions = parseInstructionActions(source);
+    expect(actions).toHaveLength(1);
+    expect(actions[0].args.some(arg => arg.role === AdviceArgumentRole.Amount)).toBe(false);
+    expect(actions[0].args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance,
+      relation: AdviceRelation.With, normalized: "water", quantity: { value: 200, unit: "mL" } }));
+    for (const input of views(actions[0])) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "with 200 mL water" : "200 มิลลิลิตรน้ำ");
+      expect(text).toContain(locale === "en" ? "breakfast" : "อาหารเช้า");
+    }
+    expect(parsePublicSig(source).meta.canonical.clauses[0].dose).toBeUndefined();
+    const positive = parseInstructionActions("Take with breakfast 1 tablet")[0];
+    expect(positive.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+      quantity: { value: 1, unit: "tab" } }));
+  });
+});

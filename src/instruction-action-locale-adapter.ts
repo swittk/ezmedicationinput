@@ -7,7 +7,9 @@ import {
   relationHasGrammarFeature,
   relationHasSemanticClass
 } from "./relation-terminology";
-import { baseLanguageTag } from "./localization";
+import { baseLanguageTag, localizedValue } from "./localization";
+import { ENGLISH_COURSE } from "./locales/course/en";
+import { THAI_COURSE } from "./locales/course/th";
 import {
   AdviceArgument,
   AdviceArgumentRole,
@@ -58,6 +60,7 @@ export interface InstructionActionLocaleAdapter {
   postposedCondition(text: string): string;
   sequenceSeparator(): string;
   continuationText(text: string, understood: boolean): string;
+  withAuthoredDirections?(current: string, source: string): string;
 }
 
 const ADAPTERS = new Map<string, InstructionActionLocaleAdapter>();
@@ -134,17 +137,27 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
   return `${c.label}${object ? ` ${object}` : ""}`;
 }
 
-function quantityOnlyMixArgument(arg: AdviceArgument | undefined): boolean {
+export function quantityOnlyInstructionArgument(arg: AdviceArgument | undefined): boolean {
   return Boolean(arg?.quantity && !arg.conceptId && !arg.coding && !arg.codings?.length &&
     (arg.normalized !== undefined && arg.normalized === arg.quantity.unit ||
       arg.normalized === undefined && !arg.i18n && arg.quantity.value !== undefined &&
       arg.text.replace(/\s+/gu, "") === `${arg.quantity.value}${arg.quantity.unit ?? ""}`));
 }
 
+/** A typed measured nominal without its own noun label retains the opaque
+ * argument separately; its source text cannot override the current quantity. */
+export function instructionArgumentNeedsAuthoredDirections(arg: AdviceArgument, locale: string): boolean {
+  const nominal = arg.role === AdviceArgumentRole.Destination || arg.role === AdviceArgumentRole.Substance ||
+    arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Material;
+  return nominal && arg.quantity !== undefined &&
+    (arg.quantity.value !== undefined || arg.quantity.range?.low !== undefined || arg.quantity.range?.high !== undefined) &&
+    arg.normalized === undefined && !localizedValue(arg.i18n, locale) && !quantityOnlyInstructionArgument(arg);
+}
+
 function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
   const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
-  const quantityOnly = quantityOnlyMixArgument(arg);
-  const text = !quantityOnly || !amount
+  const quantityOnly = quantityOnlyInstructionArgument(arg);
+  const text = instructionArgumentNeedsAuthoredDirections(arg, c.locale) ? undefined : !quantityOnly || !amount
     ? arg.quantity && !amount ? arg.text || arg.normalized : c.translateArgumentConcept(arg)
     : undefined;
   return { amount, text };
@@ -203,19 +216,19 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const themeAmount = themeArg?.quantity ? c.translateQuantity(themeArg.quantity) : undefined;
   // A quantity-only daughter carries its unit as normalized identity; it has
   // no ingredient noun to repeat as "5 mL of mL".
-  const quantityOnlyTheme = quantityOnlyMixArgument(themeArg);
-  const theme = themeArg && (!quantityOnlyTheme || !themeAmount)
+  const quantityOnlyTheme = quantityOnlyInstructionArgument(themeArg);
+  const theme = themeArg && !instructionArgumentNeedsAuthoredDirections(themeArg, c.locale) && (!quantityOnlyTheme || !themeAmount)
     ? themeArg.quantity && !themeAmount
       ? themeArg.text || themeArg.normalized
       : c.translateArgumentConcept(themeArg)
     : undefined;
   const substanceQuantity = substanceArg?.quantity ? c.translateQuantity(substanceArg.quantity) : undefined;
-  const quantityOnlySubstance = quantityOnlyMixArgument(substanceArg);
-  const substance = substanceArg && (!quantityOnlySubstance || !substanceQuantity)
+  const quantityOnlySubstance = quantityOnlyInstructionArgument(substanceArg);
+  const substance = substanceArg && !instructionArgumentNeedsAuthoredDirections(substanceArg, c.locale) && (!quantityOnlySubstance || !substanceQuantity)
     ? substanceArg.quantity && !substanceQuantity
       ? substanceArg.text || substanceArg.normalized
       : c.translateArgumentConcept(substanceArg)
-    : quantityOnlySubstance ? undefined : c.substance;
+    : substanceArg ? undefined : c.substance;
   // c.amount already preserves a partial quantity's authored wording. Reusing
   // it avoids fabricating a number or attaching a tablet amount to plain water.
   const coextensiveAmount = themeArg && amountArg?.quantity &&
@@ -591,6 +604,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
 
 const EN_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "en",
+  withAuthoredDirections: ENGLISH_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
     if (!input.time || (input.frame.predicate.realizer ?? input.definition?.realizer) !== "amount-material-destination")
       return input;
@@ -659,6 +673,7 @@ const EN_ADAPTER: InstructionActionLocaleAdapter = {
 
 const TH_ADAPTER: InstructionActionLocaleAdapter = {
   locale: "th",
+  withAuthoredDirections: THAI_COURSE.withAuthoredDirections,
   selectLexicalRealization(input) {
     if (input.time && (input.frame.predicate.realizer ?? input.definition?.realizer) === "amount-material-destination") {
       const relation = input.timeRelation ?? input.frame.relation;

@@ -26,6 +26,7 @@ import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedVal
 import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
 import {
   getInstructionActionLocaleAdapter,
+  instructionArgumentNeedsAuthoredDirections,
   InstructionActionRealizationInput
 } from "./instruction-action-locale-adapter";
 import { joinLocalizedTokens, localeRealizationProfile, localizedTimeArgument, renderLocaleTemplate } from "./locale-realization";
@@ -1730,11 +1731,12 @@ function buildActionFrame(
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
   let amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  let laterAccompaniment: AdviceArgument | undefined;
   // A leading temporal adjunct does not transfer ownership of a later
   // material/destination quantity to the head. Follow the same typed valence
   // through later relations while retaining post-temporal head amounts.
   if (!headOwnsAmount && definition.acceptsAmount && relIndex >= argumentStart &&
-      relationHasSemanticClass(relation, "temporal")) {
+      (relationTime || relationHasSemanticClass(relation, "temporal"))) {
     let index = nextRelationIndex, current = nextRelation;
     while (index >= 0 && index < semanticEnd) {
       const following = relationIndex(parts, index + 1, semanticEnd);
@@ -1743,7 +1745,15 @@ function buildActionFrame(
           !timeArgumentFromParts(parts, index + 1, following < 0 ? semanticEnd : following, input)
         : (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
           !relationHasSemanticClass(current, "temporal");
-      if (ownsQuantity) { amountEnd = index; break; }
+      if (ownsQuantity) {
+        amountEnd = index;
+        if (directObjectValence) {
+          laterAccompaniment = quantifiedEntityArgument(parts, index + 1,
+            following < 0 ? semanticEnd : following, input, offset, AdviceArgumentRole.Substance, options);
+          if (laterAccompaniment) laterAccompaniment.relation = current;
+        }
+        break;
+      }
       index = following;
       current = index >= 0 ? resolveActionRelationSurface(key(parts[index]),
         definition.preferredRelationSemanticClasses) : undefined;
@@ -1766,6 +1776,7 @@ function buildActionFrame(
     separableParticleIndex: actionMatch.separableParticleIndex
   });
   const args = parsed.args;
+  pushArgument(args, laterAccompaniment);
   // Orthogonal temporal-event daughters are arguments of the SAME composed
   // action, not a second medication administration. A material WITH/IN
   // relation remains the head's relation while BEFORE/AFTER is owned by the
@@ -4012,6 +4023,12 @@ const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, Acti
   "amount-material-destination": AMOUNT_MATERIAL_DESTINATION_REALIZER
 };
 
+function sameTimeConstraint(left: AdviceArgument, right: AdviceArgument, inherited: AdviceRelation | undefined): boolean {
+  return left.role === AdviceArgumentRole.Time &&
+    (left.relation ?? inherited) === (right.relation ?? inherited) &&
+    (left.normalized ?? left.conceptId ?? left.text) === (right.normalized ?? right.conceptId ?? right.text);
+}
+
 function realizeAction(
   frame: AdviceFrame, locale: string, roundtripSafe = false,
   coverage?: { singleScheduledEvent: boolean }, clause?: CanonicalSigClause
@@ -4025,15 +4042,27 @@ function realizeAction(
   }
   const firstArguments: Partial<Record<AdviceArgumentRole, AdviceArgument>> = {};
   let temporalAdjuncts: AdviceArgument[] | undefined;
+  let retainedMeasuredSource: string | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
   for (const arg of frame.args) {
-    if ((independentTemporal || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
+    if (instructionArgumentNeedsAuthoredDirections(arg, locale) && arg.text)
+      retainedMeasuredSource = retainedMeasuredSource ? retainedMeasuredSource + "; " + arg.text : arg.text;
+    const firstTime = firstArguments[AdviceArgumentRole.Time];
+    const additionalTime = arg.role === AdviceArgumentRole.Time && firstTime !== undefined;
+    if (arg.role === AdviceArgumentRole.Time) {
+      let duplicate = firstTime !== undefined && sameTimeConstraint(firstTime, arg, frame.relation);
+      if (!duplicate) for (const prior of temporalAdjuncts ?? [])
+        if (sameTimeConstraint(prior, arg, frame.relation)) { duplicate = true; break; }
+      if (duplicate) continue;
+    }
+    const temporalRelation = arg.relation ?? (additionalTime ? frame.relation : undefined);
+    if ((independentTemporal || additionalTime || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
         arg.role === AdviceArgumentRole.Activity) && arg.relation !== frame.relation) &&
-        arg.relation &&
+        temporalRelation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
           arg.role === AdviceArgumentRole.Result) &&
-        relationHasSemanticClass(arg.relation, "temporal")) {
-      (temporalAdjuncts ??= []).push(arg);
+        relationHasSemanticClass(temporalRelation, "temporal")) {
+      (temporalAdjuncts ??= []).push(arg.relation ? arg : { ...arg, relation: temporalRelation });
     } else firstArguments[arg.role] ??= arg;
   }
   const first = (role: AdviceArgumentRole): string | undefined => {
@@ -4113,7 +4142,10 @@ function realizeAction(
         coverage.singleScheduledEvent = true;
     }
   }
-  return negated ? complete : adapter.applyPositiveModality(complete, frame);
+  if (!negated) complete = adapter.applyPositiveModality(complete, frame);
+  return retainedMeasuredSource
+    ? (adapter.withAuthoredDirections ?? getInstructionActionLocaleAdapter("en").withAuthoredDirections!)(complete, retainedMeasuredSource)
+    : complete;
 }
 
 export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): string {
