@@ -9,6 +9,12 @@ export const FHIR_GTS_TIMING_CODES = new Set([
   "BED", "WK", "MO"
 ]);
 
+/** Only a supported standard identity owns executable/abbreviation meaning. */
+export function isStandardTimingCoding(coding: { system?: string; code?: string } | undefined): boolean {
+  return Boolean(coding?.code && (!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) &&
+    FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()));
+}
+
 /** Prefer an understood cadence over a local translation without changing
  * either coding or its authored order. Local-only concepts keep their first code. */
 export function preferredTimingCoding<T extends { system?: string; code?: string }>(
@@ -16,9 +22,8 @@ export function preferredTimingCoding<T extends { system?: string; code?: string
 ): T | undefined {
   let fallback: T | undefined;
   for (const coding of timing.code?.coding ?? []) {
-    const code = coding.code?.toUpperCase();
-    if (!code) continue;
-    if ((!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) && FHIR_GTS_TIMING_CODES.has(code)) return coding;
+    if (!coding.code) continue;
+    if (isStandardTimingCoding(coding)) return coding;
     if (fallback === undefined) fallback = coding;
   }
   return fallback;

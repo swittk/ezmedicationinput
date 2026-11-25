@@ -14,7 +14,7 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
-  EventTiming, FhirPeriodUnit, AdviceRelation, parseInstructionActions, cloneBodySiteSpatialRelation
+  EventTiming, FhirPeriodUnit, AdviceRelation, AdviceArgumentRole, type CanonicalInstructionGraph, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
   canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, getTimingClocks,
@@ -7520,5 +7520,138 @@ describe("round64 retained interchange annotations", () => {
       expect(repeat._timeOfDay).toEqual(annotations);
       wire = toDosageDetails(fresh(toFhirR5Dosages(wire)));
     }
+  });
+});
+
+
+describe("round68 native condition and count meaning", () => {
+  it.each([
+    ["eq", true, true], ["eq", false, false],
+    ["ne", true, false], ["ne", false, true],
+  ] as const)("applies Boolean %s to %s without rewriting source annotations", (operation, valueBoolean, expected) => {
+    const condition = { code: { coding: [{ code: "problem-presents" }] },
+      details: { text: "fasting" }, operation, valueBoolean,
+      extension: [{ url: "https://example.org/condition-note", valueString: "retain" }] };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], condition: [condition],
+    }] }] };
+    const before = cloneStructuredValue(source);
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[];
+    for (const input of [source, saved]) {
+      expect(formatSig(input, "long", { locale: "en" }))
+        .toContain(expected ? "only if fasting" : "only if not fasting");
+      expect(courseToR6(importCanonicalCourse(input)).step?.[0].component?.[0].condition)
+        .toEqual([condition]);
+    }
+    expect(getDosageCondition(saved[0])).toMatchObject({ kind: "state", name: "fasting", expected });
+    expect(source).toEqual(before);
+  });
+
+  it("retains an unresolved Boolean operation without interpreting it as equality", () => {
+    const condition = { code: { coding: [{ code: "problem-presents" }] },
+      details: { text: "fasting" }, operation: "gt" as const, valueBoolean: false };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ condition: [condition] }] }] };
+    const rows = toFhirR5Dosages(source);
+    expect(getDosageCondition(rows[0])).toMatchObject({ kind: "text", text: "fasting" });
+    expect(courseToR6(importCanonicalCourse(rows)).step?.[0].component?.[0].condition).toEqual([condition]);
+  });
+
+  it.each([2, undefined])("retains both count bounds in Thai long preview (minimum %s)", count => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count, countMax: 3, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    }] }] };
+    for (const input of [source, JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
+      expect(formatSig(input, "long", { locale: "th" })).toContain(count === undefined ? "ไม่เกิน 3 ครั้ง" : "จำนวน 2-3 ครั้ง");
+    }
+  });
+});
+
+
+describe("round68 current preview fields", () => {
+  it.each([1, 2])("honors a fresh cadence of %s without changing the retained instruction", frequency => {
+    const text = "1 tablet twice daily; do not crush";
+    const row = JSON.parse(JSON.stringify(parseSig(text).fhir[0])) as FhirDosage;
+    row.timing!.repeat!.frequency = frequency;
+    const before = cloneStructuredValue(row), native = importCanonicalCourse(row);
+    const r6 = courseToR6(native);
+    for (const input of [row, native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const preview = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
+      expect(preview).toMatch(frequency === 1 ? /daily/i : /twice daily/i);
+      if (frequency === 1) expect(preview).not.toContain("twice daily");
+      expect(preview.toLowerCase()).toContain("do not crush");
+    }
+    expect(row).toEqual(before);
+    expect(JSON.stringify(r6)).toContain(text);
+  });
+
+  it.each([
+    [{ system: "urn:hospital:timing", code: "QID" }, "Per clinic protocol", "Per clinic protocol"],
+    [{ system: "urn:hospital:timing", code: "QID" }, "QID", "QID"],
+    [{ system: "urn:hospital:timing", code: "QID" }, undefined, "QID"],
+    [{ system: "urn:hospital:timing", code: "rx17", display: "At bedtime" }, undefined, "At bedtime"],
+  ] as const)("keeps local timing %j as its supplied label", (coding, text, label) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [coding], ...(text ? { text } : {}) } },
+    }] }] };
+    const before = cloneStructuredValue(source);
+    for (const input of [source, importCanonicalCourse(source), JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        const preview = formatSig(input, style, { locale, realizationMode: "normalized" });
+        expect(preview).toContain(label);
+        expect(preview).not.toMatch(/four times daily|วันละ 4 ครั้ง/);
+      }
+    }
+    expect(source).toEqual(before);
+  });
+
+  it.each([2, 3, undefined])("keeps the English occurrence bounds with minimum %s", count => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count, countMax: 3, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    }] }] };
+    const expected = count === undefined ? "for up to 3 doses" : count === 3 ? "for 3 doses" : "for 2 to 3 doses";
+    for (const input of [source, JSON.parse(JSON.stringify(toFhirR5Dosages(source)))])
+      expect(formatSig(input, "long", { locale: "en" })).toContain(expected);
+  });
+
+  it("keeps a separate target count when the rich action realizes its site", () => {
+    const text = "Apply 1 g to affected skin gently", frame = parseInstructionActions("Apply 1 g")[0];
+    const graph: CanonicalInstructionGraph = { sourceText: text, sourceLocale: "en",
+      primaryAdministrationSpan: { start: 0, end: text.length }, actions: [{ ...frame,
+        sourceText: text, span: { start: 0, end: text.length }, args: [
+          frame.args.find(argument => argument.role === AdviceArgumentRole.Amount)!,
+          { role: AdviceArgumentRole.Site, text: "affected skin", normalized: "affected skin", i18n: { th: "ผิวหนังบริเวณที่เป็น" } },
+          { role: AdviceArgumentRole.Manner, text: "gently", normalized: "gently", i18n: { th: "เบาๆ" } },
+        ],
+      }] };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }],
+      site: { text: "affected skin" }, method: { text: "Apply" },
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      extension: [buildInstructionGraphExtension(graph)!] };
+    const native = importCanonicalCourse(row);
+    native.stages[0].administrations[0].targetCount = 3;
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("รวม 3 จุด");
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("across 3 sites");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("shows an unmapped site code in both Thai styles without guessing laterality", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      site: { concept: { coding: [{ system: "urn:hospital:site", code: "SITE-OD" }] } },
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    }] }] };
+    for (const input of [source, JSON.parse(JSON.stringify(toFhirR5Dosages(source)))])
+      for (const style of ["short", "long"] as const) {
+        const preview = formatSig(input, style, { locale: "th", realizationMode: "normalized" });
+        expect(preview).toContain("SITE-OD");
+        expect(preview).not.toMatch(/ตาขวา|ตาซ้าย/);
+      }
   });
 });

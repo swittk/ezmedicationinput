@@ -1259,8 +1259,8 @@ export function timingCodeMatchesRecurrence(
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
   const codeText = independentTimingText(schedule.timingCode, schedule);
-  const timingText = schedule.timingText === undefined ? codeText
-    : independentTimingText(schedule.timingText, schedule);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : schedule.timingText === undefined ? codeText : independentTimingText(schedule.timingText, schedule);
   const parts: string[] = [];
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
@@ -1467,7 +1467,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
-  const timingText = independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowEnglish(schedule, words);
   let clockPart: string | undefined;
@@ -1496,7 +1497,11 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const calendarEventPart = describeCalendarEventsEnglish(schedule);
   const calendarBoundsPart = describeCalendarBoundsEnglish(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
-    ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
+    ? schedule.count === undefined
+      ? `for up to ${stripTrailingZero(schedule.countMax)} doses`
+      : schedule.count === schedule.countMax
+        ? schedule.count === 1 ? "once only" : `for ${stripTrailingZero(schedule.count)} doses`
+        : `for ${stripTrailingZero(schedule.count)} to ${stripTrailingZero(schedule.countMax)} doses`
     : schedule.count !== undefined && !standaloneOccurrenceCount
       ? schedule.count === 1
         ? "once only"
@@ -1625,6 +1630,9 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
     if (asNeededPart) graphRegimenTail.push(asNeededPart);
     if (sitePart && !richPrimaryHasSite) graphRegimenTail.push(sitePart);
+    else if (richPrimaryHasSite && clause.site?.administrationTargetCount !== undefined &&
+        clause.site.administrationTargetCount > 1)
+      graphRegimenTail.push(words.applicationSites(clause.site.administrationTargetCount));
   }
   const richGraphAdministrationSentence = richPrimaryGraphText
     ? formatPatientInstructionSentence(

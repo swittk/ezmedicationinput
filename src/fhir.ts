@@ -61,6 +61,7 @@ import {
   BodySiteSpatialRelation,
   EventTiming,
   FhirCodeableConcept,
+  FhirCoding,
   FhirDosage,
   FhirExtension,
   FhirR6Extension,
@@ -80,7 +81,7 @@ import {
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
 import { equalStructuredValues } from "./stable-structure";
-import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredTimingCoding } from "./timing-summary";
+import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredTimingCoding, isStandardTimingCoding } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
 export const CYCLE_DAY_ELIGIBILITY_EXTENSION_URL = "urn:ezmedicationinput:StructureDefinition:medication-cycle-day-eligibility";
@@ -2071,11 +2072,14 @@ export function toFhir(state: ParserState): FhirDosage {
  * abbreviation, not arbitrary prose. Coding identities always take priority.
  */
 const TIMING_ABBREVIATION_TEXT = /^(?:C|BID|TID|QID|QD|QOD|AM|PM|QAM|QPM|QHS|BLD|BED|WK|MO|Q\d+(?:MIN|H|HR|D|WK|W|MO|Y))$/iu;
-function timingCodeFromFhir(dosage: FhirDosage): string | undefined {
-  const coding = dosage.timing ? preferredTimingCoding(dosage.timing)?.code : undefined;
-  if (coding) return coding;
+function timingCodeFromFhir(dosage: FhirDosage, coding: FhirCoding | undefined): string | undefined {
+  if (coding) return isStandardTimingCoding(coding) ? coding.code : undefined;
   const raw = dosage.timing?.code?.text?.trim();
   return raw && TIMING_ABBREVIATION_TEXT.test(raw) ? raw.toUpperCase() : undefined;
+}
+
+function timingTextFromFhir(dosage: FhirDosage, coding: FhirCoding | undefined): string | undefined {
+  return dosage.timing?.code?.text ?? (!isStandardTimingCoding(coding) ? coding?.display ?? coding?.code : undefined);
 }
 
 /** Restore explicitly supplied clinical guards without reparsing dosage text.
@@ -2259,7 +2263,10 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   const clause = deserializeCanonicalContext(dosage, options);
   clause.clinicalAdjuncts = clinicalAdjunctsFromFhir(dosage);
   const repeat = dosage.timing?.repeat;
-  const timingCode = timingCodeFromFhir(dosage);
+  const timingCoding = dosage.timing && preferredTimingCoding(dosage.timing);
+  const timingCode = timingCodeFromFhir(dosage, timingCoding);
+  const timingText = timingTextFromFhir(dosage, timingCoding);
+  const timingTextIsLiteral = timingCoding && !isStandardTimingCoding(timingCoding) ? true : undefined;
   const administrationDurationMarker = repeat?.extension?.find(
     extension => extension.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
   const administrationDuration = parseTimingAdministrationDuration(administrationDurationMarker, repeat);
@@ -2286,7 +2293,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   if (
     administrationOffsetMinutes !== undefined ||
     timingBounds.duration !== undefined || timingBounds.durationMax !== undefined ||
-    timingCode ||
+    timingCode || timingText ||
     repeat?.count !== undefined ||
     repeat?.countMax !== undefined ||
     activityTiming?.length ||
@@ -2324,7 +2331,8 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       cycleDayConstraint,
       administrationOffsetMinutes,
       timingCode,
-      timingText: timingCode ? dosage.timing?.code?.text : undefined,
+      timingText,
+      timingTextIsLiteral,
       count: repeat?.count,
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
@@ -2420,8 +2428,14 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
         .filter((event): event is CanonicalCalendarEventExpr => Boolean(event))
     };
   }
-  state.timingCode = timingCodeFromFhir(dosage);
-  if (state.timingCode) state.primaryClause.schedule!.timingText = dosage.timing?.code?.text;
+  const timingCoding = dosage.timing && preferredTimingCoding(dosage.timing);
+  state.timingCode = timingCodeFromFhir(dosage, timingCoding);
+  const timingText = timingTextFromFhir(dosage, timingCoding);
+  if (timingText !== undefined) {
+    const schedule = state.primaryClause.schedule ??= {};
+    schedule.timingText = timingText;
+    schedule.timingTextIsLiteral = timingCoding && !isStandardTimingCoding(timingCoding) ? true : undefined;
+  }
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;

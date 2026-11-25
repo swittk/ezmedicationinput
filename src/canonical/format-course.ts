@@ -869,9 +869,9 @@ export function formatCanonicalCourse(
           // A first-stage authored week must not disappear behind a derived day heading.
           const distinctAuthoredUnit = startsHere && order === 0 &&
             (length.code ?? length.unit) !== (end?.code ?? end?.unit);
-          if ((order === 0 || order === -1) && !distinctAuthoredUnit) {
-            // The heading already bounds this copied phase. Displaying its whole
-            // source length here would suggest restarting it at this global cut.
+          if ((order === 0 || order === -1 && !startsHere) && !distinctAuthoredUnit) {
+            // The matching end, or a later copied phase, is bounded by its heading.
+            // A length beginning here remains visible across an earlier global cut.
             const { courseLength: _length, ...cadence } = repeat!;
             display = { ...display, schedule: { ...display.schedule, recurrence: cadence } };
           }

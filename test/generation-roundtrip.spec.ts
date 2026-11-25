@@ -699,9 +699,13 @@ describe("round63 imported member preview ownership", () => {
     for (const style of ["short", "long"] as const) {
       const rendered = formatParseBatch(batch, style, " | ");
       expect(rendered).toContain("After the previous phase");
-      expect(rendered).toMatch(/2 (?:tab|tablets)/u);
-      expect(rendered).toMatch(style === "short" ? /x4\b/u : /4 (?:dose|administration)/u);
-      expect(rendered).toMatch(/After the previous phase[^.]*1 (?:tab|tablet)/u);
+      const phases = rendered.split("After the previous phase");
+      expect(phases).toHaveLength(2);
+      expect(phases[0]).toMatch(/2 (?:tab|tablets)\b/u);
+      const count = style === "short" ? /x4\b/u : /4 (?:dose|administration)/u;
+      expect(phases[0]).toMatch(count);
+      expect(phases[1]).toMatch(/1 (?:tab|tablet)\b/u);
+      expect(phases[1]).not.toMatch(count);
     }
     const independent = fresh(source);
     for (const component of independent.step![0].component) delete component.modifierExtension;

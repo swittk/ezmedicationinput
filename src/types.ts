@@ -1845,6 +1845,8 @@ export interface CanonicalScheduleExpr {
   timingCode?: string;
   /** Independent authored Timing.code.text, separate from the cadence code. */
   timingText?: string;
+  /** Label selected from an explicit nonstandard Coding, never a cadence abbreviation. */
+  timingTextIsLiteral?: true;
   count?: number;
   countMax?: number;
   duration?: number;
@@ -1902,7 +1904,7 @@ export interface CanonicalScheduleExpr {
 }
 
 /** Schedule fields explicitly contributed by typed grammar evidence. */
-export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence">;
+export type CanonicalScheduleSemanticField = Exclude<keyof CanonicalScheduleExpr, "evidence" | "timingTextIsLiteral">;
 
 export interface CanonicalPrnReasonExpr {
   text?: string;

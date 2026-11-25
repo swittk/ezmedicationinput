@@ -334,15 +334,22 @@ if (freshCalendarDate(0) !== "2026-01-01T00:59:59.999Z" ||
     freshCalendarDate(194) !== "2026-01-01T00:59:59.997Z" ||
     new Set(freshCalendarCheck).size !== 195 || freshCalendarCheck.some(date => variedDates.includes(date)))
   throw new Error("Fresh-calendar fixture must retain distinct valid query instants disjoint from the varied case");
+function expectedFreshCalendarDoses(year) {
+  const expected = [];
+  for (const day of ["01", "02", "03"])
+    for (const clock of ["08:00:00", "20:00:00"])
+      expected.push(year + "-01-" + day + "T" + clock + "+07:00");
+  return expected;
+}
 // Use a held-out year so this oracle does not warm measured input instants.
 if (filter.test("nextDueDoses/fresh-calendars")) {
   const warm = "2025-01-01T01:00:00.000Z", fresh = "2025-01-01T00:59:59.999Z";
   for (const module of [baseline, candidate]) {
-    const expected = module.nextDueDoses(rows[0], { ...schedule, from: warm, orderedAt: warm });
+    const expected = JSON.stringify(expectedFreshCalendarDoses(2025));
+    const ordinary = module.nextDueDoses(rows[0], { ...schedule, from: warm, orderedAt: warm });
     const actual = module.nextDueDoses(rows[0], { ...schedule, from: fresh, orderedAt: fresh });
-    if (expected[0] !== "2025-01-01T08:00:00+07:00" ||
-        JSON.stringify(actual) !== JSON.stringify(expected))
-      throw new Error("Fresh-calendar offsets must preserve the warm case's administration times");
+    if (JSON.stringify(ordinary) !== expected || JSON.stringify(actual) !== expected)
+      throw new Error("Fresh-calendar offsets must preserve all six independently expected administrations");
   }
 }
 for (const [name, input] of [
@@ -757,12 +764,20 @@ function normalizeClinicalPreview(output) {
   return output.replace(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)/gu, token => String(Number(token)))
     .replace(/\.(?=\s|$)/gu, "").replace(/[\s,;:]+/gu, "").toLowerCase();
 }
+// The left-eye month already ends at the explicit global month boundary.
+// Stating that same full length at its own start is equivalent for this fixture.
 const expectedComplexPreview = Object.fromEntries(
-  Object.entries(complexPreviewPhrases).map(([locale, phrases]) =>
-    [locale, normalizeClinicalPreview(phrases.join(" "))]));
+  Object.entries(complexPreviewPhrases).map(([locale, phrases]) => {
+    const withInitialLength = phrases.slice();
+    withInitialLength[2] = locale === "en"
+      ? "Instill 1 drop four times daily for 1 month in the left eye"
+      : "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง เป็นเวลา 1 เดือน";
+    return [locale, new Set([normalizeClinicalPreview(phrases.join(" ")),
+      normalizeClinicalPreview(withInitialLength.join(" "))])];
+  }));
 function currentComplexPreview(output, locale) {
   return typeof output === "string" &&
-    normalizeClinicalPreview(output) === expectedComplexPreview[locale];
+    expectedComplexPreview[locale].has(normalizeClinicalPreview(output));
 }
 // Independent R5 output facts for the two-eye taper. These are not read back
 // through either build's importer, and remain outside every timed invocation.
@@ -791,7 +806,7 @@ function completeComplexRows(output) {
   // Iterate the required positions: a sparse six-slot array is not six rows.
   return complexRowFacts.every((expected, index) => {
     const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
-    if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) ||
+    if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) || row.asNeededFor?.length ||
         row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
         amount.comparator !== undefined || amount.extension?.some(extension =>
           extension.url === "http://ema.europa.eu/fhir/extension/comparator" &&
@@ -808,7 +823,7 @@ function completeComplexRows(output) {
     if (part("rowIndex")?.valueInteger !== index || part("sequence")?.valueInteger !== expected[0] ||
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
-    if (repeat?.count !== undefined || repeat?.countMax !== undefined ||
+    if (repeat?.count !== undefined || repeat?.countMax !== undefined || repeat?.dayOfWeek?.length ||
         (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2]) ||
         (repeat?.periodMax !== undefined && repeat.periodMax !== expected[3])) return false;
     // The final left-eye BID phase is ongoing. A standard repeat bound must
@@ -827,6 +842,15 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
   if (!completeComplexRows(ongoingBidControl))
     throw new Error("Six-row oracle rejected the complete unbounded BID control");
+  const conditional = structuredClone(ongoingBidControl);
+  delete conditional.fhir[5].asNeeded;
+  conditional.fhir[5].asNeededFor = [{ text: "eye discomfort" }];
+  if (completeComplexRows(conditional))
+    throw new Error("Six-row oracle accepted an as-needed indication");
+  const weekdaysOnly = structuredClone(ongoingBidControl);
+  weekdaysOnly.fhir[5].timing.repeat.dayOfWeek = ["mon", "tue", "wed", "thu", "fri"];
+  if (completeComplexRows(weekdaysOnly))
+    throw new Error("Six-row oracle accepted a weekday-restricted daily phase");
   const qualifiedDose = structuredClone(ongoingBidControl);
   qualifiedDose.fhir[0].doseAndRate[0].doseQuantity.extension = [{
     url: "http://ema.europa.eu/fhir/extension/comparator",
@@ -859,6 +883,15 @@ for (const locale of ["en", "th"]) {
   const exact = complexPreviewPhrases[locale].join(". ");
   if (!currentComplexPreview(exact, locale))
     throw new Error("Complex preview oracle rejected its six exact administrations");
+  const initialLength = locale === "en"
+    ? "Instill 1 drop four times daily for 1 month in the left eye"
+    : "หยอดตาซ้าย ครั้งละ 1 หยด วันละ 4 ครั้ง เป็นเวลา 1 เดือน";
+  if (!currentComplexPreview(exact.replace(complexPreviewPhrases[locale][2], initialLength), locale))
+    throw new Error("Complex preview oracle rejected the same authored month at its own origin");
+  const wrongPhase = complexPreviewPhrases[locale].slice();
+  wrongPhase[5] = initialLength;
+  if (currentComplexPreview(wrongPhase.join(". "), locale))
+    throw new Error("Complex preview oracle accepted a restarted month in the copied phase");
   for (const amount of ["11", "1.2", "-1", "2", ".1", "0.1"])
     if (currentComplexPreview(exact.replace(/1 (drop|หยด)/u, amount + " $1"), locale))
       throw new Error("Complex preview oracle accepted a different numeric amount");
@@ -885,6 +918,11 @@ function verifiedPreviewOrSource(output, current, savedSource) {
   if (output === savedSource) return false;
   throw new Error("Preview is neither the independent current preview nor the saved-source fixture");
 }
+equivalenceOracles.set("nextDueDoses/fresh-calendars", output => {
+  if (JSON.stringify(output) !== JSON.stringify(expectedFreshCalendarDoses(2026)))
+    throw new Error("Fresh-calendar probe failed the independent six-administration oracle");
+  return true;
+});
 const equivalenceDetails = new Map();
 for (const name of ["formatSig/R5-roundtrip-edited-thai", "formatSig/R5-roundtrip-added-dose-thai"])
   equivalenceDetails.set(name, {

@@ -1587,7 +1587,7 @@ describe("round48 parallel duration display boundaries", () => {
     const firstDuration = duration === "1wk" ? " for 1 week" : "";
     const expected = "From treatment start until 7 days after treatment start: " +
       "Instill 1 drop every 2 hours" + firstDuration + " in the right eye; " +
-      "Instill 1 drop four times daily in the left eye. " +
+      "Instill 1 drop four times daily for 1 month in the left eye. " +
       "From 7 days after treatment start until 1 month after treatment start: " +
       "Instill 1 drop four times daily in the right eye; Instill 1 drop four times daily in the left eye. " +
       "From 1 month after treatment start onward: " +
@@ -1601,6 +1601,7 @@ describe("round48 parallel duration display boundaries", () => {
 
   it.each([
     ["shorter", "for 2 days", 0, 0],
+    ["longer", "for 9 days", 0, 0],
     ["range", "for 1 to 9 days", 0, 0],
     ["qualified", "for <8 days", 0, 0],
     ["calendar", "for 30 days", 1, 1]
@@ -1611,8 +1612,14 @@ describe("round48 parallel duration display boundaries", () => {
     if (kind === "range") {
       delete repeat.boundsDuration;
       repeat.boundsRange = { low: quantity(1), high: quantity(9) };
-    } else repeat.boundsDuration = { ...quantity(kind === "shorter" ? 2 : kind === "qualified" ? 8 : 30),
+    } else repeat.boundsDuration = { ...quantity(kind === "shorter" ? 2 : kind === "longer" ? 9 : kind === "qualified" ? 8 : 30),
       ...(kind === "qualified" ? { comparator: "<" } : {}) };
+    if (kind === "longer") {
+      const component = current.step[stage].component[member];
+      const origin = component.extension?.find((field: { url: string }) => field.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
+      if (origin) origin.valueQuantity = quantity(0);
+      else (component.extension ??= []).push({ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: quantity(0) });
+    }
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(current)));
     for (const input of [importCanonicalCourse(current), current, cold]) {
       const before = JSON.stringify(input);

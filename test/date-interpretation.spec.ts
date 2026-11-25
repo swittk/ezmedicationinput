@@ -1627,12 +1627,15 @@ it.each([
   const sign = parseRawHpsgSign(source, { locale: "th" }).sign;
   expect(sign.synsem.head.schedule).toMatchObject(expected);
   expect(sign.synsem.head.schedule?.frequency).toBeUndefined();
+  expect(sign.synsem.head.schedule?.frequencyMax).toBeUndefined();
   const parsed = parseBatch(source, { locale: "th" });
   expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(expected);
   expect(parsed.meta.canonical.clauses[0].schedule?.frequency).toBeUndefined();
+  expect(parsed.meta.canonical.clauses[0].schedule?.frequencyMax).toBeUndefined();
   expect(parsed.meta.leftoverText).toBeUndefined();
   for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
     expect(row.timing?.repeat).toMatchObject(expected);
     expect(row.timing?.repeat?.frequency).toBeUndefined();
+    expect(row.timing?.repeat?.frequencyMax).toBeUndefined();
   }
 });

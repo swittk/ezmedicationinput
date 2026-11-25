@@ -1684,7 +1684,7 @@ function formatSiteThai(clause: CanonicalSigClause, grammar: ThaiRouteGrammar, w
   const translated = perTargetSiteThai(clause) ?? structuralTranslation ??
     clause.site?.i18n?.th ?? clause.site?.coding?.i18n?.th ?? (text
       ? translateSiteThai(text, codingCode, clause.site?.spatialRelation)
-      : translateSpatialSiteThai(undefined, clause.site?.spatialRelation));
+      : translateSpatialSiteThai(undefined, clause.site?.spatialRelation)) ?? codingCode;
   if (!translated) {
     return undefined;
   }
@@ -2190,8 +2190,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   }
   const timing = describeFrequencyThai(schedule, words);
   const codeText = independentTimingText(schedule.timingCode, schedule);
-  const timingText = schedule.timingText === undefined ? codeText
-    : independentTimingText(schedule.timingText, schedule);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : schedule.timingText === undefined ? codeText : independentTimingText(schedule.timingText, schedule);
   if (timing) {
     parts.push(timing);
   } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
@@ -2391,7 +2391,8 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
-  const timingText = independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
+  const timingText = schedule.timingTextIsLiteral ? schedule.timingText
+    : independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowThai(schedule, words);
   let clockPart: string | undefined;
@@ -2419,7 +2420,11 @@ function formatLongThai(
   const calendarEventPart = describeCalendarEventsThai(schedule);
   const calendarBoundsPart = describeCalendarBoundsThai(schedule);
   const countPart = schedule.countMax !== undefined && !standaloneOccurrenceCount
-    ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
+    ? schedule.count === undefined
+      ? `ไม่เกิน ${stripTrailingZero(schedule.countMax)} ครั้ง`
+      : schedule.count === schedule.countMax
+        ? schedule.count === 1 ? "ครั้งเดียว" : `จำนวน ${stripTrailingZero(schedule.count)} ครั้ง`
+        : `จำนวน ${stripTrailingZero(schedule.count)}-${stripTrailingZero(schedule.countMax)} ครั้ง`
     : schedule.count !== undefined && !standaloneOccurrenceCount
       ? schedule.count === 1
         ? "ครั้งเดียว"
@@ -2560,6 +2565,9 @@ function formatLongThai(
     if (occurrenceCapPart) graphRegimenTail.push(occurrenceCapPart);
     if (asNeeded) graphRegimenTail.push(asNeeded);
     if (sitePart && !richPrimaryHasSite) graphRegimenTail.push(sitePart);
+    else if (richPrimaryHasSite && clause.site?.administrationTargetCount !== undefined &&
+        clause.site.administrationTargetCount > 1)
+      graphRegimenTail.push(words.applicationSites(clause.site.administrationTargetCount));
   }
   const richGraphAdministrationText = richPrimaryGraphText
     ? [richPrimaryGraphText, ...graphRegimenTail].filter(Boolean).join(" ").replace(/\s+/g, " ").trim()

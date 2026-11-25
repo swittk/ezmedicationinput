@@ -3488,8 +3488,10 @@ describe("round52 live site and partial-direction previews", () => {
         const preview = formatSig(input, style, { locale, realizationMode: mode });
         expect(preview).toMatch(positiveThreshold[locale]);
         if (liveDose) {
-          const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
-          expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
+          const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
+            : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
+          expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
+          expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
           expect(preview).toMatch(exactAmount);
           expect(preview).not.toContain("1 tablet");
           expect(preview).not.toContain("1 เม็ด");
@@ -3525,8 +3527,10 @@ describe("round52 live site and partial-direction previews", () => {
         for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
           const preview = formatSig(input, style, { locale, realizationMode: mode });
           expect(preview).toMatch(positiveThreshold[locale]);
-          const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
-          expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
+          const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
+            : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
+          expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
+          expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
           expect(preview).toMatch(exactAmount);
           expect(preview).not.toContain("1 tablet");
           expect(preview).not.toContain("1 เม็ด");

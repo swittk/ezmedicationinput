@@ -23,7 +23,7 @@ import {
   DEFAULT_PRN_REASON_DEFINITIONS, findPrnReasonDefinitionByCoding, normalizePrnReasonKey
 } from "../maps";
 import { SNOMED_SYSTEM } from "../snomed";
-import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredTimingCoding } from "../timing-summary";
+import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredTimingCoding, isStandardTimingCoding } from "../timing-summary";
 import type { RouteCode } from "../types";
 
 const quantity = (
@@ -568,9 +568,13 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
         periodUnit:(limit.period.code??limit.period.unit) as NonNullable<typeof schedule.periodUnit>,periodComparator:limit.period.comparator});
     }
     schedule.maxDosePerPeriod=limits;
-    const timingCode = preferredTimingCoding(a.schedule)?.code;
-    schedule.timingCode=timingCode??a.schedule.code?.text;
-    schedule.timingText=timingCode ? a.schedule.code?.text : undefined;
+    const coding = preferredTimingCoding(a.schedule);
+    const literalTimingText = coding !== undefined && !isStandardTimingCoding(coding);
+    schedule.timingCode = literalTimingText ? undefined : coding?.code ?? a.schedule.code?.text;
+    schedule.timingText = coding
+      ? a.schedule.code?.text ?? (literalTimingText ? coding.display ?? coding.code : undefined)
+      : undefined;
+    schedule.timingTextIsLiteral = literalTimingText ? true : undefined;
     result.schedule=schedule;
   }else result.schedule=undefined;
   result.clinicalAdjuncts=Object.assign({},base?.clinicalAdjuncts,{condition:a.predicate,
