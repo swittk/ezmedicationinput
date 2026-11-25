@@ -70,6 +70,7 @@ interface ActionSource {
 const DEFAULT_ACTIONS = (source.actions as ActionSource[]).map(normalizeDefinition);
 const DEFAULT_BY_CODE = new Map<string, MedicationInstructionActionDefinition>();
 const DEFAULT_BY_ALIAS = new Map<string, MedicationInstructionActionDefinition>();
+const DEFAULT_SEPARABLE_BY_LEAD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
 const DEFAULT_SPAN_BY_LEAD = new Map<string, number>();
 const DEFAULT_BY_METHOD = new Map<string, Map<string, MedicationInstructionActionDefinition>>();
 
@@ -102,6 +103,13 @@ let defaultActionSurfaceLength = 0;
 
 for (const definition of DEFAULT_ACTIONS) {
   DEFAULT_BY_CODE.set(definition.code, definition);
+  for (const alias of definition.separableAliases ?? []) {
+    const lead = normalizeActionSurface(alias.lead);
+    const particle = normalizeActionSurface(alias.particle);
+    let particles = DEFAULT_SEPARABLE_BY_LEAD.get(lead);
+    if (!particles) DEFAULT_SEPARABLE_BY_LEAD.set(lead, (particles = new Map()));
+    if (!particles.has(particle)) particles.set(particle, definition);
+  }
   if (definition.administrationMethod) {
     indexMethodCoding(definition.administrationMethod, definition);
     indexMethodCoding(definition.coding, definition);
@@ -482,20 +490,15 @@ export function resolveMedicationInstructionSeparableAction(
   const map = options?.instructionActionMap;
   if (map) {
     for (const surface of Object.keys(map)) {
-      const definition = normalizeCustomDefinition(surface, map[surface]);
-      if (definition.separableAliases?.some((alias) =>
-        normalizeActionSurface(alias.lead) === normalizedLead &&
-        normalizeActionSurface(alias.particle) === normalizedParticle
-      )) return definition;
+      const input = map[surface];
+      for (const alias of input.separableAliases ?? []) {
+        if (normalizeActionSurface(alias.lead) === normalizedLead &&
+            normalizeActionSurface(alias.particle) === normalizedParticle)
+          return normalizeCustomDefinition(surface, input);
+      }
     }
   }
-  for (const definition of DEFAULT_ACTIONS) {
-    if (definition.separableAliases?.some((alias) =>
-      normalizeActionSurface(alias.lead) === normalizedLead &&
-      normalizeActionSurface(alias.particle) === normalizedParticle
-    )) return definition;
-  }
-  return undefined;
+  return DEFAULT_SEPARABLE_BY_LEAD.get(normalizedLead)?.get(normalizedParticle);
 }
 
 export function medicationInstructionActionIsSafetyScopeTarget(
