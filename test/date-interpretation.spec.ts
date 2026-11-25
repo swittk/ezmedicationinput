@@ -1554,3 +1554,65 @@ describe("Thai clock suffixes belong to the time constituent", () => {
     expect(parsed.fhir.map(row => row.timing?.repeat?.boundsDuration?.value)).toEqual([7, 7]);
   });
 });
+
+describe("explicit cadence with distributive weekday selectors", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const monday = ["2026-11-23T08:00:00+00:00", "2026-11-23T20:00:00+00:00"];
+  const mondayFriday = [...monday, "2026-11-27T08:00:00+00:00", "2026-11-27T20:00:00+00:00"];
+  const query = { orderedAt: "2026-11-23T00:00:00Z", from: "2026-11-23T00:00:00Z", timeZone: "UTC" };
+  it.each([
+    { locale: "th", source: "รับประทาน 1 เม็ด วันละ 2 ครั้ง ทุกวันจันทร์และวันศุกร์", days: ["mon", "fri"], due: mondayFriday },
+    { locale: "th", source: "รับประทาน 1 เม็ด ทุกวันจันทร์และวันศุกร์ วันละ 2 ครั้ง", days: ["mon", "fri"], due: mondayFriday },
+    { locale: "th", source: "รับประทาน 1 เม็ด วันละ 2 ครั้ง ทุกวันจันทร์", days: ["mon"], due: monday },
+    { locale: "th", source: "รับประทาน 1 เม็ด ทุกวันจันทร์ วันละ 2 ครั้ง", days: ["mon"], due: monday },
+    { locale: "th", source: "รับประทาน 1 เม็ด วันละ 2 ครั้ง วันจันทร์และวันศุกร์", days: ["mon", "fri"], due: mondayFriday },
+    { locale: "en", source: "Take 1 tablet twice daily on Monday and Friday", days: ["mon", "fri"], due: mondayFriday },
+    { locale: "en", source: "Take 1 tablet twice daily every Monday and Friday", days: ["mon", "fri"], due: mondayFriday }
+  ])("retains each selected day beside the authored daily cadence: $source", ({ locale, source, days, due }) => {
+    const expected = { frequency: 2, period: 1, periodUnit: "d", dayOfWeek: days };
+    const raw = parseRawHpsgSign(source, { locale }).sign;
+    expect(raw.synsem.head.schedule).toMatchObject(expected);
+    const parsed = parseBatch(source, { locale });
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(expected);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject(expected);
+    expect(parsed.fhirNext.step![0].component[0].timing?.repeat).toMatchObject(expected);
+    const english = days.length === 1 ? "Take 1 tablet orally twice daily on Monday."
+      : "Take 1 tablet orally twice daily on Monday and Friday.";
+    const thai = days.length === 1 ? "รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง ในวันจันทร์."
+      : "รับประทานครั้งละ 1 เม็ด วันละ 2 ครั้ง ในวันจันทร์ และ วันศุกร์.";
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
+      fresh(toDosageDetails(fresh(parsed.fhir)))]) {
+      const before = fresh(input);
+      expect(nextDueDoses(input, { ...query, limit: due.length })).toEqual(due);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 7,
+        durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: due.length, unit: "tab" });
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(english);
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toBe(thai);
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([
+    { source: "รับประทาน 1 เม็ด ทุกวันจันทร์ เวลา 08:00", days: ["mon"], frequency: 1,
+      due: ["2026-11-23T08:00:00+00:00"] },
+    { source: "รับประทาน 1 เม็ด ทุกวันจันทร์และวันศุกร์ เวลา 08:00", days: ["mon", "fri"], frequency: 2,
+      due: ["2026-11-23T08:00:00+00:00", "2026-11-27T08:00:00+00:00"] },
+    { source: "รับประทาน 1 เม็ด สัปดาห์ละ 2 ครั้ง ทุกวันจันทร์และวันศุกร์ เวลา 08:00",
+      days: ["mon", "fri"], frequency: 2,
+      due: ["2026-11-23T08:00:00+00:00", "2026-11-27T08:00:00+00:00"] }
+  ])("retains standalone or explicitly authored weekly cadence: $source", ({ source, days, frequency, due }) => {
+    const parsed = parseBatch(source, { locale: "th" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      frequency, period: 1, periodUnit: "wk", dayOfWeek: days, timeOfDay: ["08:00:00"]
+    });
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      expect(nextDueDoses(input, { ...query, limit: due.length })).toEqual(due);
+      expect(calculateTotalUnits({ ...query, dosage: input, durationValue: 7,
+        durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: due.length, unit: "tab" });
+    }
+  });
+});

@@ -1475,6 +1475,7 @@ export function timingLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
             valence: {},
             cont: { clauseKind: "administration" }
           },
+          scheduleDefault: "weekday-recurrence",
           score: 18
         })
       ];

@@ -78,7 +78,7 @@ export interface HpsgEvidence {
   lexicalCategory?: CanonicalLexicalCategory;
   tokenIndices: number[];
   /** Lexical evidence that a schedule field is an inferred, construction-local default. */
-  scheduleDefault?: "daily-frequency";
+  scheduleDefault?: "daily-frequency" | "weekday-recurrence";
   /** Exact typed schedule fields contributed by this lexical evidence. */
   scheduleFields?: CanonicalScheduleSemanticField[];
 }

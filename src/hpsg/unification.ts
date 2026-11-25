@@ -25,7 +25,7 @@ import {
 } from "./signature";
 import { combineSignFeatureStructures } from "./feature-structure";
 import { selectHpsgConstruction } from "./constructions";
-import { AdviceRelation, BodySiteSpatialRelation, EventTiming, FhirCoding, PrnReasonLookupRequest, RouteCode } from "../types";
+import { AdviceRelation, BodySiteSpatialRelation, EventTiming, FhirCoding, FhirPeriodUnit, PrnReasonLookupRequest, RouteCode } from "../types";
 
 export interface HpsgUnificationContext {
   normalizeSiteText(text: string): string;
@@ -1023,15 +1023,41 @@ function schedulePeriodMatches(left: HpsgScheduleFeature, right: HpsgScheduleFea
     left.periodUnit === right.periodUnit;
 }
 
-function refinedDailyCadenceSynsem(
+function hasIndependentCadenceEvidence(sign: HpsgSign): boolean {
+  return sign.evidence.some(item => item.scheduleDefault !== "weekday-recurrence" &&
+    item.scheduleFields?.some(field => field === "frequency" || field === "frequencyMax" ||
+      field === "period" || field === "periodMax" || field === "periodUnit" || field === "timingCode"));
+}
+
+function refinedDefaultCadenceSynsem(
   cadenceSign: HpsgSign,
   explicitSign: HpsgSign
 ): HpsgSynsem | undefined {
   const cadence = cadenceSign.synsem.head.schedule;
   const explicit = explicitSign.synsem.head.schedule;
-  if (!cadence || !explicit || !hasDailyFrequencyDefaultEvidence(cadenceSign)) return undefined;
-  if (cadence.frequency !== 1 || explicit.frequency === undefined || explicit.frequency === 1) return undefined;
-  if (!schedulePeriodMatches(cadence, explicit)) return undefined;
+  if (!cadence || !explicit || cadence.frequency !== 1 || explicit.frequency === undefined) return undefined;
+  if (cadence.period === 1 && cadence.periodUnit === FhirPeriodUnit.Week && cadence.dayOfWeek?.length &&
+      explicit.period !== undefined && explicit.periodUnit !== undefined &&
+      (explicit.frequency !== 1 || !schedulePeriodMatches(cadence, explicit)) &&
+      cadenceSign.evidence.some(item => item.scheduleDefault === "weekday-recurrence") &&
+      !hasIndependentCadenceEvidence(cadenceSign) && hasIndependentCadenceEvidence(explicitSign)) {
+    // The weekday remains a restriction; only its inferred weekly cadence yields.
+    // Once an authored cadence owns this sign, later cadence conflicts stay conflicts.
+    return {
+      ...cadenceSign.synsem,
+      head: {
+        ...cadenceSign.synsem.head,
+        schedule: {
+          ...cadence,
+          frequency: undefined,
+          period: undefined,
+          periodUnit: undefined
+        }
+      }
+    };
+  }
+  if (explicit.frequency === 1 || !hasDailyFrequencyDefaultEvidence(cadenceSign) ||
+      !schedulePeriodMatches(cadence, explicit)) return undefined;
   return {
     ...cadenceSign.synsem,
     head: {
@@ -1241,9 +1267,9 @@ function scheduleRefinementSynsems(
   const qualifiedLeft = fixedClockEventAdjunctSynsem(right, left, context);
   if (qualifiedLeft) return { left: qualifiedLeft.synsem, right: right.synsem, refined: true,
     qualifiedDaypartTokens: qualifiedLeft.qualifiedDaypartTokens };
-  const refinedLeft = refinedDailyCadenceSynsem(left, right);
+  const refinedLeft = refinedDefaultCadenceSynsem(left, right);
   if (refinedLeft) return { left: refinedLeft, right: right.synsem, refined: true };
-  const refinedRight = refinedDailyCadenceSynsem(right, left);
+  const refinedRight = refinedDefaultCadenceSynsem(right, left);
   if (refinedRight) return { left: left.synsem, right: refinedRight, refined: true };
   return { left: left.synsem, right: right.synsem, refined: false };
 }
