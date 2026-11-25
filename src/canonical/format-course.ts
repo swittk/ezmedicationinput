@@ -754,7 +754,7 @@ function formatCanonicalBase(
   // dose directions. A typed amount or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
   if (partialAuthoredDirections) {
-    const directions = a.predicate && style === "long"
+    const directions = a.predicate
       ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!;
     if (deferredDirections) deferredDirections.text = directions;
     else rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), directions);
