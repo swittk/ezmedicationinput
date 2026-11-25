@@ -10915,17 +10915,21 @@ describe("round62 reviewed interchange ownership", () => {
       const before = persist(current);
       expect(dosageMatchesSavedProjection(current)).toBe(false);
       if (save > 0) expect(getDosageSourceTextAgreement(current, false)).toBe(false);
-      const imported = fromFhirDosage(current, options);
-      for (const preview of [formatSig(current, "long", options), imported.longText]) {
-        expect(preview).toMatch(/\b2 tablets\b/u);
-        expect(preview).toMatch(/22:00|10:00 pm/u);
-        expect(preview).not.toMatch(/20:00|8:00 pm/u);
-        expect(preview).toContain("slowly");
-        expect(preview).toContain("water");
+      for (const locale of ["en", "th"] as const) {
+        const localized = { ...options, locale };
+        const imported = fromFhirDosage(current, localized);
+        for (const preview of [formatSig(current, "long", localized), imported.longText]) {
+          expect(preview.match(locale === "en" ? /\b2 tablets\b/gu : /\b2 เม็ด/gu)).toHaveLength(1);
+          if (locale === "th") expect(preview).not.toContain("tablets");
+          expect(preview).toMatch(/22:00|10:00 pm/u);
+          expect(preview).not.toMatch(/20:00|8:00 pm/u);
+          expect(preview).toContain("slowly");
+          expect(preview).toContain(locale === "en" ? "water" : "น้ำ");
+        }
+        expect(imported.fhir).toEqual(before);
       }
       expect(current.timing!.repeat!.timeOfDay).toEqual(["22:00:00"]);
       expect(current.doseAndRate![0].doseQuantity!.value).toBe(2);
-      expect(imported.fhir).toEqual(before);
       expect(current).toEqual(before);
       expect(JSON.stringify(current)).toContain("swallow 2 tablets slowly with water at 20:00");
       current = persist(toFhirR5Dosages([current]))[0];

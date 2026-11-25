@@ -7018,9 +7018,9 @@ describe("round62 review: instruction argument ownership", () => {
       expect(importCanonicalCourse(value).stages[0].administrations[0].amounts![0].quantity)
         .toMatchObject({ value: 1, unit: "tab" });
       expect(text).toContain(locale === "en" ? "Swallow" : "กลืน");
-      // This uncoded source object has no Thai translation. Keep its authored
-      // amount-and-manner wording while localizing the known action and clocks.
-      expect(text).toContain("1 tablet slowly");
+      // The owned Amount localizes independently; the uncoded manner stays verbatim.
+      expect(text).toContain(locale === "en" ? "1 tablet slowly" : "slowly 1 เม็ด");
+      if (locale === "th") expect(text).not.toContain("tablet");
     }
     expect(saved).toEqual(before);
     expect(saved.extension).toContainEqual(marker);

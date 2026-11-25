@@ -4081,11 +4081,19 @@ export function realizeRichPrimaryWithCanonicalDose(
 ): string {
   const sourceFrame = frame;
   frame = frameWithCanonicalPrimaryContext(frame, clause);
-  if (primaryActionAmountConflicts(frame, clause.dose,
-      !clause.dose && clause.sourceProjectionVerified === false))
-    frame = frameWithReconciledAmount(frame, clause.dose, Boolean(
-      clause.instructionGraph && primaryDoseAmountOwner(clause.instructionGraph, clause, options) === sourceFrame
-    ));
+  const conflictingAmount = primaryActionAmountConflicts(frame, clause.dose,
+    !clause.dose && clause.sourceProjectionVerified === false);
+  // Once current context forbids raw-source replay, its typed Amount must use
+  // the target locale even when the numeric dose itself did not change.
+  // The existing ownership reconciliation keeps any opaque nominal remainder.
+  const localizeAmount = Boolean(!frame.sourceText && clause.dose && clause.instructionGraph &&
+    baseLanguageTag(clause.instructionGraph.sourceLocale ?? "en") !== baseLanguageTag(locale));
+  if (conflictingAmount || localizeAmount) {
+    const ownsAmount = Boolean(clause.instructionGraph &&
+      primaryDoseAmountOwner(clause.instructionGraph, clause, options) === sourceFrame);
+    if (conflictingAmount || ownsAmount)
+      frame = frameWithReconciledAmount(frame, clause.dose, ownsAmount, localizeAmount && ownsAmount);
+  }
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
@@ -4649,29 +4657,30 @@ function sourceAmountLabelOffset(text: string, label: string): number {
     (at + label.length === text.length || !/[a-z0-9]/i.test(text[at + label.length])) ? at : -1;
 }
 
-/** Realize an edited administration without rewriting its saved graph.
- * Its old Amount may also be embedded in a larger Object ('1 tablet of
- * amoxicillin'); remove only the source-owned amount, keep the drug name and
- * the action's independent material/target. No raw-source fallback is valid
- * after a numeric edit. */
+/** Realize the current Amount without rewriting its saved graph.
+ * Its source label may also be embedded in a larger Object ('1 tablet of
+ * amoxicillin'); remove only the owned amount, keeping the drug name and the
+ * action's independent material/target. Numeric edits and forced localized
+ * display use the same typed ownership. */
 function frameWithReconciledAmount(
-  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false
+  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false,
+  localizeOwnedAmount = false
 ): AdviceFrame {
   const replacement = replaceAtOwner && currentDose &&
     (currentDose.value !== undefined || currentDose.range) ? {
       value: currentDose.value, range: currentDose.range,
       unit: currentDose.unit, comparator: currentDose.comparator
     } : undefined;
-  const superseded = frame.args.filter(arg =>
+  const sourceAmounts = frame.args.filter(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-    !quantityCoveredByDose(arg, currentDose));
+    (localizeOwnedAmount || !quantityCoveredByDose(arg, currentDose)));
   const args: AdviceArgument[] = [];
   for (const arg of frame.args) {
     // Only the dose-bearing Amount belongs to the canonical dose. An
     // independent 100 mL mixing Substance or 5-minute Duration must never
     // disappear because the tablet amount changed.
     if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-        !quantityCoveredByDose(arg, currentDose)) {
+        (localizeOwnedAmount || !quantityCoveredByDose(arg, currentDose))) {
       if (replacement) args.push({ ...arg, quantity: replacement, i18n: undefined });
       continue;
     }
@@ -4679,7 +4688,7 @@ function frameWithReconciledAmount(
       const text = arg.text ?? "";
       let sourceAmount: AdviceArgument | undefined;
       let labelOffset = -1;
-      for (const amount of superseded) {
+      for (const amount of sourceAmounts) {
         const label = amount.text ?? "";
         const at = sourceAmountLabelOffset(text, label);
         const hasLabel = at >= 0;
@@ -4700,16 +4709,16 @@ function frameWithReconciledAmount(
               text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
           : text;
         const quantity = sourceAmount.quantity;
-        const sharesSupersededQuantity = quantity && arg.quantity &&
+        const sharesSourceQuantity = quantity && arg.quantity &&
           quantity.value === arg.quantity.value && quantity.unit === arg.quantity.unit &&
           quantity.comparator === arg.quantity.comparator &&
           quantity.range?.low === arg.quantity.range?.low &&
           quantity.range?.high === arg.quantity.range?.high;
-        if (!remaining && (!arg.quantity || sharesSupersededQuantity)) continue;
+        if (!remaining && (!arg.quantity || sharesSourceQuantity)) continue;
         // Amount owns the current dose. This Object keeps its remaining drug
         // description and any independent quantity, never a second dose copy.
         args.push({ ...arg,
-          ...(sharesSupersededQuantity ? { quantity: undefined } : {}),
+          ...(sharesSourceQuantity ? { quantity: undefined } : {}),
           text: remaining, normalized: remaining || undefined, i18n: undefined });
         continue;
       }
