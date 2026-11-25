@@ -31,7 +31,7 @@ import type { ParserState, Token } from '../parser-state';
 import { buildCustomSiteHints, parseClauseState, findUnparsedTokenGroups } from '../parser';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
 import type { BoundaryPlan, BoundarySite, CoordinationConnectorKind, PlannerOptions, PlannerMetrics, PlanningInput, Proposal, ProbeSummary, Range, StructuralClaim } from '../hpsg/signature';
-import { parseInstructionActions, frameActionDefinition } from '../instruction-graph';
+import { parseInstructionActions, frameActionDefinition, instructionGraphPreparationOwnsDose } from '../instruction-graph';
 import { getMedicationInstructionAction, resolveMedicationInstructionAction } from '../instruction-action-terminology';
 import { resolveActionRelationSurface } from '../relation-terminology';
 import { parseAdditionalInstructions } from '../advice';
@@ -1125,6 +1125,22 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             const onset = evidence.probe(nextBoundary.start, onsetEnd);
             if ((onset.hasSchedule || onset.clause.schedule?.treatmentStartOffsetDays !== undefined ||
                 onset.clause.schedule?.phaseStartReference) && !onset.hasDose && !onset.method) end = onsetEnd;
+          }
+        }
+        // A prepared dose and its following administration form one right
+        // daughter. The ordinary short probe stops at their internal connector;
+        // extend by that one constituent only when selected HPSG ownership
+        // confirms that the preparation still owns the administered amount.
+        if (site.kind === 'sequence' && nextBoundary?.surface &&
+            (nextBoundary.kind === 'sequence' || nextBoundary.kind === 'coordination' &&
+              semanticConnectorKind(nextBoundary) === 'conjunction')) {
+          const prefix = evidence.probe(rightStart, end);
+          if (prefix.hasDose && !prefix.hasSchedule && !prefix.method &&
+              prefix.clause.instructionGraph?.primaryOwnership?.dose) {
+            const administrationEnd = probeEnd(nextBoundary.rightIndex);
+            const full = evidence.probe(rightStart, administrationEnd);
+            if (full.complete && full.method && full.hasSchedule &&
+                instructionGraphPreparationOwnsDose(full.clause, options)) end = administrationEnd;
           }
         }
         const rightUnit = hasUnit(site.rightIndex, end);

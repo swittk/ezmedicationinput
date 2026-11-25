@@ -2,7 +2,7 @@ import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
   calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
+  formatSig, lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import { shiftCanonicalSigClauses } from '../src/ir';
@@ -1527,5 +1527,66 @@ describe("round68 selected withholding and successor route ownership", () => {
       if (route === "PO") expect(rows[1].method).toBeUndefined();
       else expect(rows[1].method?.coding?.[0].code).toBe("740685003");
     }
+  });
+});
+
+
+describe("round69 prepared dose phase ownership", () => {
+  it.each([
+    ["Dissolve 1 tablet in 30 mL water, then drink daily", [1]],
+    ["Dissolve 1 tablet in 30 mL water, then drink daily for 3 days, then take 2 tablets daily", [1, 2]]
+  ] as const)("preserves an ordinary workflow or separately dosed administration: %s", (source, doses) => {
+    const parsed = parsePublicSig(source, { context: { dosageForm: "effervescent tablet" } });
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual(doses);
+    expect(parsed.meta.canonical.clauses.every(clause => clause.schedule?.frequency === 1)).toBe(true);
+    expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions.filter(action => action.predicate.lemma === "dissolve"))
+      .toHaveLength(1);
+  });
+
+  it.each([
+    "Dissolve 1 tablet in 30 mL water, then drink daily for 3 days, then dissolve 2 tablets in 60 mL water, then drink daily",
+    "Dissolve 1 tablet in 30 mL water, then drink daily for 3 days; then dissolve 2 tablets in 60 mL water, then drink daily",
+    "ละลาย1เม็ดในน้ำ30มล. แล้วดื่มวันละครั้งนาน3วัน จากนั้นละลาย2เม็ดในน้ำ60มล. แล้วดื่มวันละครั้ง"
+  ])("keeps each prepared dose with its following administration: %s", source => {
+    const parsed = parsePublicSig(source, { context: { dosageForm: "effervescent tablet" } });
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses.map(clause => clause.dose)).toEqual([{ value: 1, unit: "tab" }, { value: 2, unit: "tab" }]);
+    expect(clauses.map(clause => clause.method?.text)).toEqual(["Drink", "Drink"]);
+    expect(clauses.map(clause => clause.schedule?.duration)).toEqual([3, undefined]);
+    for (let index = 0; index < clauses.length; index++) {
+      const clause = clauses[index];
+      expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      const graph = clause.instructionGraph!, owner = graph.primaryOwnership!.dose!;
+      expect(graph.actions[owner.actionIndex].args[owner.argumentIndex].quantity)
+        .toEqual({ value: index + 1, unit: "tab" });
+      expect(graph.actions[owner.actionIndex].args.find(arg => arg.role === "substance")?.quantity)
+        .toEqual({ value: index === 0 ? 30 : 60, unit: "mL" });
+    }
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+    const original = JSON.stringify([parsed.fhir, parsed.fhirNext]);
+    const rows: typeof parsed.fhir = JSON.parse(JSON.stringify(parsed.fhir));
+    const r6: typeof parsed.fhirNext = JSON.parse(JSON.stringify(parsed.fhirNext));
+    expect(rows).toHaveLength(2);
+    expect(r6.step).toHaveLength(2);
+    for (let index = 0; index < 2; index++) {
+      rows[index].doseAndRate![0].doseQuantity!.value = index + 3;
+      r6.step![index].component[0].doseAndRate![0].doseQuantity!.value = index + 3;
+    }
+    for (const input of [rows, r6]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(locale === "en" ? /3 tablets/gu : /3 เม็ด/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /4 tablets/gu : /4 เม็ด/gu)).toHaveLength(1);
+        expect(text).not.toMatch(locale === "en" ? /[12] tablets?/u : /[12] เม็ด/u);
+        expect(text.match(locale === "en" ? /30 mL/gu : /30 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /60 mL/gu : /60 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(2);
+        expect(text.match(locale === "en" ? /once daily/gu : /วันละครั้ง/gu)).toHaveLength(2);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify([parsed.fhir, parsed.fhirNext])).toBe(original);
   });
 });
