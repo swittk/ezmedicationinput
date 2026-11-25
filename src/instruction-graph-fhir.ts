@@ -13,7 +13,8 @@ import {
   CanonicalInstructionRelation,
   CanonicalSourceSpan,
   FhirCoding,
-  FhirExtension
+  FhirExtension,
+  FhirR6Extension
 } from "./types";
 import {
   getPrimitiveTranslations,
@@ -476,7 +477,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     result.span={start:spanStart.valueInteger,end:spanEnd.valueInteger};
   if(quantity){
     let value:FhirExtension|undefined,low:FhirExtension|undefined,high:FhirExtension|undefined,unit:FhirExtension|undefined;
-    let comparatorExtensions:FhirExtension[]|undefined;
+    let comparatorExtensions:FhirR6Extension[]|undefined;
     for(const field of quantity.extension??[])switch(field.url){
       case "value":if(!value)value=field;break;case "low":if(!low)low=field;break;
       case "high":if(!high)high=field;break;case "unit":if(!unit)unit=field;break;

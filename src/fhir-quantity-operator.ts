@@ -11,7 +11,7 @@
  * EMA http://spor.ema.europa.eu/v1/lists/100000000008
  * HL7 http://hl7.org/fhir/quantity-comparator
  */
-import type { FhirExtension, FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
+import type { FhirQuantity, FhirR6Quantity, FhirSimpleQuantity,
   FhirR6SimpleQuantity, FhirR6Extension, FhirPrimitiveElement, FhirR6PrimitiveElement } from "./types";
 
 export const EMA_QUANTITY_COMPARATOR_EXTENSION_URL =
@@ -61,7 +61,7 @@ for (const comparator of ["<", "<=", ">", ">=", "~", "ad"] as const)
 /** Read the published EMA Coding without treating "average", "equivalent"
  * or "range" as invented HL7 comparator semantics. */
 export function getEmaQuantityComparator(
-  quantity: Pick<FhirQuantity, "extension"> | undefined
+  quantity: Pick<FhirR6Quantity, "extension"> | undefined
 ): FhirR6Quantity["comparator"] {
   let found: FhirR6Quantity["comparator"], equality = false;
   for (const ext of quantity?.extension ?? []) {
@@ -87,7 +87,7 @@ export function getQuantityComparator(
 }
 
 function exactGeneratedComparatorExtension(
-  ext: FhirExtension, comparator: NonNullable<FhirR6Quantity["comparator"]>
+  ext: FhirR6Extension, comparator: NonNullable<FhirR6Quantity["comparator"]>
 ): boolean {
   const coding = ext.valueCoding;
   return ext.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL &&
@@ -101,10 +101,10 @@ function exactGeneratedComparatorExtension(
 export const QUANTITY_OPERATOR_SOURCE_URL =
   "urn:ezmedicationinput:StructureDefinition:quantity-operator-source";
 function editedOperator(
-  extension: FhirExtension,
+  extension: FhirR6Extension,
   comparator: FhirR6Quantity["comparator"],
-  sources: FhirExtension[]
-): FhirExtension {
+  sources: FhirR6Extension[]
+): FhirR6Extension {
   const coding = extension.valueCoding!;
   const code = comparator ? emaCodeByComparator[comparator] : EMA_EQUALITY_OPERATOR_CODE;
   const display = comparator ? emaDisplayByComparator[comparator] : "equal to";
@@ -178,9 +178,10 @@ function simpleQuantityForWire(quantity: FhirR6Quantity | undefined, target: "r5
   if (!comparator && quantity._comparator === undefined) return quantity as FhirR6SimpleQuantity;
   const { comparator: _r6Comparator, _comparator, ...numeric } = quantity;
   const existing = numeric.extension ?? [];
-  const sources: FhirExtension[] = _comparator ? [{
+  const sources: FhirR6Extension[] = _comparator ? [{
     url: QUANTITY_OPERATOR_SOURCE_URL,
-    ...(comparator ? { valueCode: comparator } : {}), _valueCode: quantityPrimitiveForR5(_comparator),
+    ...(comparator ? { valueCode: comparator } : {}),
+    _valueCode: target === "r5" ? quantityPrimitiveForR5(_comparator) : _comparator,
   }] : [];
   if (!comparator) return { ...numeric, extension: [...existing, ...sources] };
   const code = emaCodeByComparator[comparator];
@@ -235,7 +236,7 @@ export function quantityForR5(quantity: FhirR6Quantity | undefined):
 export function quantityForR6(quantity: FhirR6Quantity | undefined): FhirR6Quantity | undefined {
   if (!quantity?.comparator || !quantity.extension?.length) return quantity;
   let changed = false;
-  const extension: FhirExtension[] = [];
+  const extension: FhirR6Extension[] = [];
   for (const item of quantity.extension) {
     const coding = item.valueCoding;
     if (item.url !== EMA_QUANTITY_COMPARATOR_EXTENSION_URL ||
@@ -261,10 +262,10 @@ export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirS
   if (quantity.comparator !== undefined) return quantity;
   if (!quantity.extension?.length) return quantity;
   let comparator: FhirR6Quantity["comparator"], conflict = false, hasOperator = false, equalityActive = false;
-  let corrected: FhirExtension[] | undefined, equalitySources: FhirExtension[] | undefined;
-  let metadataOnly: FhirExtension | undefined, ambiguousMetadata = false;
-  let operatorPrimitives: Map<string, FhirExtension> | undefined;
-  let primitiveSources: Set<FhirExtension> | undefined;
+  let corrected: FhirR6Extension[] | undefined, equalitySources: FhirR6Extension[] | undefined;
+  let metadataOnly: FhirR6Extension | undefined, ambiguousMetadata = false;
+  let operatorPrimitives: Map<string, FhirR6Extension> | undefined;
+  let primitiveSources: Set<FhirR6Extension> | undefined;
   // Classify the current operator and metadata-only source in one walk. Ordinary
   // exact annotated quantities do not pay a second scan for a rare source marker.
   for (let index = 0; index < quantity.extension.length; index++) {
@@ -308,11 +309,11 @@ export function quantityFromWire(quantity: FhirQuantity | FhirR6Quantity | FhirS
   if (conflict) comparator = undefined;
   if (!comparator && (!primitiveSources || !hasOperator && !operatorPrimitives && ambiguousMetadata))
     return quantity;
-  const remaining: FhirExtension[] = [];
+  const remaining: FhirR6Extension[] = [];
   const primitiveSource = quantity._comparator === undefined
     ? comparator ? operatorPrimitives?.get(comparator) : !hasOperator ? metadataOnly : undefined
     : undefined;
-  const primitive = quantity._comparator ?? primitiveSource?._valueCode;
+  const primitive = quantityPrimitiveForWire(quantity._comparator ?? primitiveSource?._valueCode, "r6");
   for (const ext of quantity.extension ?? []) {
     if (comparator && exactGeneratedComparatorExtension(ext, comparator)) continue;
     // The primitive annotation belongs to this exact operator. A live EMA

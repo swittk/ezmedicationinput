@@ -6431,4 +6431,32 @@ describe("round76 R6 primitive metadata contracts", () => {
     }] } } }] };
     expect(strictR5.doseAndRate![0].doseQuantity!._value!.extension![0].valueQuantity!.comparator).toBe("~");
   });
+
+  it("keeps the target version of a scalar operator's primitive source", () => {
+    const annotation: FhirR6PrimitiveElement = { id: "operator-annotation", extension: [{
+      url: "urn:clinic:estimated-area", id: "operator-area",
+      valueQuantity: { value: 2, comparator: "~", unit: "cm2" },
+    }] };
+    const quantity: FhirR6Quantity = { value: 2, unit: "mg", comparator: "~", _comparator: annotation };
+    const input: CanonicalCourse = { kind: "course", stages: [{ administrations: [{
+      kind: "administration", amounts: [{ quantity }],
+    }] }] };
+    const before = persist(input);
+    const native = projectCanonicalCourse(input).fhirNext;
+    const scalar = native.step![0].component[0].doseAndRate![0].doseQuantity!;
+    expect(scalar.comparator).toBeUndefined();
+    expect(scalar.extension!.find(item => item.url === QUANTITY_OPERATOR_SOURCE_URL)?._valueCode).toEqual(annotation);
+    const rows = toFhirR5Dosages(persist(native));
+    const source = rows[0].doseAndRate![0].doseQuantity!.extension!
+      .find(item => item.url === QUANTITY_OPERATOR_SOURCE_URL)!;
+    const nested = source._valueCode!.extension![0].valueQuantity!;
+    expect(nested.comparator).toBeUndefined();
+    expect(nested.extension).toEqual([{ url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+      valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" } }]);
+    const reopened = toDosageDetails(persist(rows));
+    expect(quantityFromWire(reopened.step![0].component[0].doseAndRate![0].doseQuantity)?._comparator).toEqual(annotation);
+    expect(reopened.step![0].component[0].doseAndRate![0].doseQuantity!.extension!
+      .find(item => item.url === QUANTITY_OPERATOR_SOURCE_URL)?._valueCode).toEqual(annotation);
+    expect(input).toEqual(before);
+  });
 });

@@ -165,7 +165,7 @@ export type FhirSimpleQuantity = Omit<FhirQuantity, "comparator" | "_comparator"
 
 /** FHIR R6 also supports the approximate (~) comparator in general Quantity. */
 export type FhirR6Quantity = Omit<FhirQuantity,
-  "comparator" | "_comparator" | "_value" | "_unit" | "_system" | "_code"> & {
+  "extension" | "comparator" | "_comparator" | "_value" | "_unit" | "_system" | "_code"> & FhirR6Element & {
   comparator?: FhirQuantity["comparator"] | "~";
   _comparator?: FhirR6PrimitiveElement;
   _value?: FhirR6PrimitiveElement;
@@ -1067,7 +1067,7 @@ export interface AdviceArgument {
     /** Active primitive metadata follows the current operator through FHIR. */
     comparatorElement?: FhirR6PrimitiveElement;
     /** Original wire operator annotations; the current comparator owns meaning. */
-    comparatorExtensions?: FhirExtension[];
+    comparatorExtensions?: FhirR6Extension[];
     /** Primitive child annotations; current typed values own quantity meaning. */
     fieldMetadata?: Partial<Record<"value" | "low" | "high" | "unit",
       Omit<FhirExtension, "url" | "valueDecimal" | "valueString">>>;
