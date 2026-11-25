@@ -7,7 +7,7 @@ import {
   MedicationDateListMatch,
   parseMedicationDateListAt
 } from "../../date-interpretation";
-import { resolveMedicationInstructionAction, getMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
 import {
@@ -763,7 +763,7 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const followsAdministration = getProceduralFrames(context).some(frame => {
         if (frame.polarity === AdvicePolarity.Negate || frame.span.end > lead.sourceStart ||
             context.state.input.slice(frame.span.end, lead.sourceStart).trim()) return false;
-        const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+        const definition = frameActionDefinition(frame, context.options);
         return (definition?.primaryAdministrationHead ||
           definition?.definesDose && definition.administrationMethod) &&
           frame.args.some(argument => argument.role === AdviceArgumentRole.Amount && argument.quantity);

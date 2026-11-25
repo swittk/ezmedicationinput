@@ -4200,3 +4200,63 @@ describe("round74 dated NEXT and inherited administration duration", () => {
     }
   });
 });
+
+
+describe("round76 lexical quantity ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each(["over an hour", "over 1 hour", "within an hour"])(
+    "keeps the administered volume separate from its complete maximum period: %s", period => {
+      const source = "Infuse 100 mL IV, no more than 50 mL " + period;
+      const parsed = parsePublicSig(source), clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ value: 100, unit: "mL" });
+      expect(clause.schedule?.maxDosePerPeriod).toEqual([{ amount: 50, unit: "mL", period: 1, periodUnit: "h" }]);
+      expect(parsed.meta.leftoverText).toBeUndefined();
+      const r6 = fresh(parsed.fhirNext), saved = fresh(toFhirR5Dosages(r6));
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), r6, saved]) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+        expect(member.amounts?.[0].rate).toBeUndefined();
+      }
+      for (const row of [...parsed.fhir, ...saved]) expect(row.maxDosePerPeriod)
+        .toMatchObject([{ numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" } }]);
+      expect(r6.step[0].component[0].safety?.doseLimit)
+        .toMatchObject([{ scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value: 1, unit: "h" } }]);
+      expect(parsed.input).toBe(source);
+    });
+
+  it.each(["Take .25-.5 mg daily", "Take .25–.5 mg daily", "Take .25—.5 mg daily",
+    "Take .25-0.5 mg daily", "รับประทาน .25-.5 มิลลิกรัม วันละครั้ง"])(
+    "keeps both leading-decimal range endpoints: %s", source => {
+      const parsed = parsePublicSig(source);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(parsed.meta.canonical.clauses[0].dose).toEqual({ range: { low: 0.25, high: 0.5 }, unit: "mg" });
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      const r6 = fresh(parsed.fhirNext), saved = fresh(toFhirR5Dosages(r6));
+      for (const row of [...parsed.fhir, ...r6.step[0].component, ...saved]) {
+        expect(row.doseAndRate?.[0].doseQuantity).toBeUndefined();
+        expect(row.doseAndRate?.[0].doseRange).toMatchObject({ low: { value: 0.25, unit: "mg" }, high: { value: 0.5, unit: "mg" } });
+      }
+      expect(parsed.input).toBe(source);
+    });
+
+  it("keeps sentence periods separate from a compact leading-decimal range", () => {
+    const parsed = parsePublicSig("Take .25-.5 mg daily. Do not drive.");
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ range: { low: 0.25, high: 0.5 }, unit: "mg" });
+    expect(parsed.longText).toContain("Do not drive");
+    expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+
+  it.each(["~", "≈", "around"])("keeps a %s-qualified clock out of scalar dose fallback", qualifier => {
+    const source = "Take " + qualifier + " 8 PM", parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["20:00:00"]);
+    for (const row of [...parsed.fhir, ...parsed.fhirNext.step[0].component]) expect(row.doseAndRate).toBeUndefined();
+    expect(parsed.input).toBe(source);
+  });
+
+  it("retains a qualified medication amount beside an independent clock", () => {
+    const parsed = parsePublicSig("Take ~ 8 mg at 8 PM");
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 8, unit: "mg", comparator: "~" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["20:00:00"]);
+  });
+});

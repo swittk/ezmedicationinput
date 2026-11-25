@@ -6911,8 +6911,11 @@ describe("round62 selected action ownership", () => {
     expect(JSON.stringify(options)).toBe(beforeOptions);
   });
 
-  it.each(["none", "minimal", "procedure"] as const)(
-    "keeps the built-in dose's pain onset beside an independent call (%s custom collision)", kind => {
+  it.each((["none", "minimal", "procedure"] as const).flatMap(kind => [
+    { kind, source: "Take 1 tablet at onset of pain, call your doctor" },
+    { kind, source: "Take 1 tablet when pain begins then call your doctor" }
+  ]))(
+    "keeps the built-in dose's pain onset beside an independent call ($kind collision): $source", ({ kind, source }) => {
       const options: ParseOptions | undefined = kind === "none" ? undefined : { instructionActionMap: {
         "custom-mix": kind === "minimal"
           ? { code: "take", display: "Custom mix", procedural: true, definesDose: false }
@@ -6921,7 +6924,7 @@ describe("round62 selected action ownership", () => {
             primaryAdministrationHead: false, administrationMethod: undefined },
       } };
       const beforeOptions = JSON.stringify(options);
-      const parsed = parsePublicSig("Take 1 tablet at onset of pain, call your doctor", options);
+      const parsed = parsePublicSig(source, options);
       expect(parsed.meta.canonical.clauses).toHaveLength(1);
       const clause = parsed.meta.canonical.clauses[0];
       expect(clause.dose).toEqual({ value: 1, unit: "tab" });
@@ -8333,4 +8336,31 @@ describe("round75 coordinated Time daughters", () => {
     expect(parseInstructionGraphExtension(saved[0].extension)?.sourceText).toBe(source);
   });
 
+});
+
+
+it.each([false, true])("round76 retains every saved point Time and its explicit direction (%s)", directional => {
+  const original = parseInstructionActions("Apply 1 patch")[0];
+  const frame: AdviceFrame = { ...original, sourceText: "", relation: undefined,
+    args: [...original.args, ...["08:00", "20:00", "08:00"].map(time => ({
+      role: AdviceArgumentRole.Time, text: time, normalized: time,
+      ...(directional ? { relation: time === "08:00" ? AdviceRelation.Before : AdviceRelation.After } : {})
+    }))] };
+  const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+  const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+  for (const input of [[row], importCanonicalCourse(row), JSON.parse(JSON.stringify(r6)),
+    JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) for (const locale of ["en", "th"]) {
+    const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+    for (const [index, time] of ["08:00", "20:00"].entries()) {
+      const relation = directional ? locale === "en" ? index === 0 ? "before " : "after "
+        : index === 0 ? "ก่อน" : "หลัง" : locale === "en" ? "at " : "เวลา ";
+      expect(text.split(relation + time), text).toHaveLength(2);
+      expect(text.split(time)).toHaveLength(2);
+    }
+  }
+  expect(parseInstructionGraphExtension(toFhirR5Dosages(r6)[0].extension)?.actions[0].args
+    .filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => [arg.normalized, arg.relation]))
+    .toEqual(["08:00", "20:00", "08:00"].map(time => [time,
+      directional ? time === "08:00" ? AdviceRelation.Before : AdviceRelation.After : undefined]));
+  expect(JSON.stringify(row)).toBe(before);
 });

@@ -1506,7 +1506,8 @@ function isClockDoseContext(context: HpsgClauseContext, start: number, lower: st
     // A comparative clock cannot re-enter the chart as a plain numeric dose
     // after its comparative-dose candidate correctly defers to timing.
     const lead = context.tokens[start - 1], meridiem = context.tokens[start + 1];
-    return Boolean(lead && DOSE_COMPARATOR_PREFIXES.has(normalizeTokenLower(lead)) &&
+    const leadLower = lead ? normalizeTokenLower(lead) : "";
+    return Boolean(lead && (DOSE_COMPARATOR_PREFIXES.has(leadLower) || DOSE_COMPARATOR_SYMBOLS[leadLower]) &&
       meridiem && isAmPmLower(normalizeTokenLower(meridiem)) &&
       parseClockToken(context.tokens[start], meridiem));
   }

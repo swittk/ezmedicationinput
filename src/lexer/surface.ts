@@ -92,6 +92,7 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
         before === "/" || before === "(" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
         before === "<" || before === ">" ||
+        /[-–—]/u.test(before) && index >= 2 && /[0-9๐-๙]/u.test(input[index - 2]) ||
         before === "=" && index >= 2 && /[<>]/u.test(input[index - 2]))) {
     return false;
   }

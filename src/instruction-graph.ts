@@ -3925,7 +3925,10 @@ const DEFAULT_ACTION_REALIZER = (
     ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation
     : undefined;
   if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-  text = appendLocale(text, c.time ? joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined);
+  const directTime = !timeSemanticRelation || relationHasGrammarFeature(timeSemanticRelation, "directTimeRealization");
+  const timePhrase = c.time ? (directTime ? getInstructionActionLocaleAdapter(c.locale).directTime?.(c.time) : undefined) ??
+    joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined;
+  text = appendLocale(text, timePhrase);
   if (withTarget && targetRelation) {
     const materialRelation = localizeAdviceRelation(
       targetRelation, c.locale, "complement"
@@ -4089,7 +4092,8 @@ function realizeAction(
       if (duplicate) continue;
     }
     const temporalRelation = arg.relation ?? (additionalTime ? frame.relation : undefined);
-    if ((independentTemporal || additionalTime || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
+    const additionalPointTime = additionalTime && !temporalRelation;
+    if (additionalPointTime || (independentTemporal || additionalTime || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
         arg.role === AdviceArgumentRole.Activity) && arg.relation !== frame.relation) &&
         temporalRelation &&
         (arg.role === AdviceArgumentRole.Activity || arg.role === AdviceArgumentRole.Time ||
@@ -4097,7 +4101,7 @@ function realizeAction(
         (relationHasSemanticClass(temporalRelation, "temporal") ||
           additionalTime && arg.role === AdviceArgumentRole.Time &&
           relationHasGrammarFeature(temporalRelation, "timeComplement"))) {
-      (temporalAdjuncts ??= []).push(arg.relation ? arg : { ...arg, relation: temporalRelation });
+      (temporalAdjuncts ??= []).push(arg.relation || !temporalRelation ? arg : { ...arg, relation: temporalRelation });
     } else firstArguments[arg.role] ??= arg;
   }
   const first = (role: AdviceArgumentRole): string | undefined => {
@@ -4169,7 +4173,7 @@ function realizeAction(
       if (entailed?.has(adjunct.role + "\0" + adjunct.conceptId + "\0" + adjunct.relation)) continue;
       const value = translatedArgument(adjunct, locale);
       const direct = adjunct.role === AdviceArgumentRole.Time &&
-        relationHasGrammarFeature(adjunct.relation, "directTimeRealization");
+        (!adjunct.relation || relationHasGrammarFeature(adjunct.relation, "directTimeRealization"));
       const temporalPhrase = (direct && adapter.directTime?.(value)) || joinLocalizedTokens(locale, [
         localizeAdviceRelation(adjunct.relation!, locale) ?? adjunct.relation, value
       ]);
@@ -4714,7 +4718,7 @@ function timeArgumentCoversSingleScheduledEvent(
   if (timeArgumentCoveredBySchedule(frame, arg, clause)) return true;
   if (arg.normalized && KNOWN_EVENT_TIMINGS.has(arg.normalized)) return false;
   const words = normalizeActionSurface(arg.normalized ?? arg.text)
-    .split(/\s+/u).filter((word) => word !== "the" && word.length > 0);
+    .split(/\s+/u).filter((word) => word.length > 0 && !EVENT_ARTICLE_TOKENS.has(word));
   for (let index = 0; index < words.length; index += 1) {
     const expression = resolveEventTimingExpression(words, index);
     if (!expression) continue;

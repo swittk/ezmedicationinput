@@ -16,6 +16,8 @@ import {
   normalizeTokenLower,
   attachedNumberUnitAt,
   DAYPART_INTERVAL_TOKENS,
+  DOSE_FRACTION_ARTICLES,
+  EVENT_ARTICLE_TOKENS,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   MAXIMUM_COUNT_LEAD_SEQUENCES,
   MAXIMUM_PERIOD_PREPOSITIONS,
@@ -250,55 +252,42 @@ function maximumDosePeriodAt(
   if (defined) return defined;
 
   const connector = context.tokens[start];
-  const unitToken = context.tokens[start + 1];
-  if (!connector || !unitToken ||
-      context.state?.consumed.has(connector.index) ||
-      context.state?.consumed.has(unitToken.index)) return undefined;
+  const first = context.tokens[start + 1];
+  if (!connector || !first || context.state?.consumed.has(connector.index) ||
+      context.state?.consumed.has(first.index)) return undefined;
   const connectorLower = normalizeTokenLower(connector);
-  if (MAXIMUM_PERIOD_PREPOSITIONS.has(connectorLower)) {
-    let cursor = start + 1;
-    const article = context.tokens[cursor];
-    if (article && !context.state?.consumed.has(article.index) &&
-        ["a", "an", "the"].indexOf(normalizeTokenLower(article)) >= 0) cursor++;
-    const modifier = context.tokens[cursor];
-    if (modifier && !context.state?.consumed.has(modifier.index) &&
-        MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
-    const value = context.tokens[cursor];
-    const attached = value?.kind !== LexKind.Number && value
-      ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
-    const unit = attached ? undefined : context.tokens[cursor + 1];
-    const amount = attached?.value ?? (value?.kind === LexKind.Number ? value.value
-      : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined);
-    const unitLower = attached?.rawUnit ?? (unit && normalizeTokenLower(unit));
-    const periodUnit = unitLower && mapIntervalUnit(unitLower);
-    if (amount !== undefined && amount > 0 && periodUnit && value &&
-        !context.state?.consumed.has(value.index) && (!unit || !context.state?.consumed.has(unit.index))) {
-      const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
-      return DAYPART_INTERVAL_TOKENS.has(unitLower!)
-        ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
-    }
+  if (!MAXIMUM_PERIOD_PREPOSITIONS.has(connectorLower)) return undefined;
+
+  let cursor = start + 1;
+  const articleLower = normalizeTokenLower(first);
+  const article = DOSE_FRACTION_ARTICLES.has(articleLower) || EVENT_ARTICLE_TOKENS.has(articleLower);
+  if (article) cursor++;
+  const modifier = context.tokens[cursor];
+  if (modifier && !context.state?.consumed.has(modifier.index) &&
+      MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
+  const value = context.tokens[cursor];
+  if (!value || context.state?.consumed.has(value.index)) return undefined;
+  const lower = normalizeTokenLower(value);
+  const bareUnit = mapIntervalUnit(lower);
+  // An article supplies the same one-unit interval as PER, A or /.
+  // Explicit numeric periods use the single number/unit reader below.
+  if (bareUnit && (article || connectorLower === "/" || connectorLower === "per" || connectorLower === "a")) {
+    const tokens = context.tokens.slice(start, cursor + 1);
+    return DAYPART_INTERVAL_TOKENS.has(lower)
+      ? { tokens, daypart: true } : { tokens, period: 1, periodUnit: bareUnit };
   }
-  if (connectorLower !== "/" && connectorLower !== "per" && connectorLower !== "a") {
-    return undefined;
-  }
-  const unitLower = normalizeTokenLower(unitToken);
-  const periodUnit = mapIntervalUnit(unitLower);
-  if (periodUnit) {
-    const tokens = [connector, unitToken];
-    return DAYPART_INTERVAL_TOKENS.has(unitLower)
-      ? { tokens, daypart: true } : { tokens, period: 1, periodUnit };
-  }
-  const attached = attachedNumberUnitAt(unitToken.lower.replace(/[{};]+|\.+$/gu, ""));
-  const amount = attached?.value ?? (unitToken.kind === LexKind.Number
-    ? unitToken.value : FREQUENCY_NUMBER_WORDS[unitLower]);
-  const elapsedUnit = attached ? undefined : context.tokens[start + 2];
-  if (elapsedUnit && context.state?.consumed.has(elapsedUnit.index)) return undefined;
-  const elapsedSurface = attached?.rawUnit ?? (elapsedUnit && normalizeTokenLower(elapsedUnit));
-  const elapsedPeriodUnit = elapsedSurface && mapIntervalUnit(elapsedSurface);
-  if (amount === undefined || amount <= 0 || !elapsedPeriodUnit) return undefined;
-  const tokens = attached ? [connector, unitToken] : [connector, unitToken, elapsedUnit!];
-  return DAYPART_INTERVAL_TOKENS.has(elapsedSurface!)
-    ? { tokens, daypart: true } : { tokens, period: amount, periodUnit: elapsedPeriodUnit };
+  const attached = value.kind !== LexKind.Number
+    ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
+  const amount = attached?.value ?? (value.kind === LexKind.Number ? value.value : FREQUENCY_NUMBER_WORDS[lower]);
+  const unit = attached ? undefined : context.tokens[cursor + 1];
+  if (unit && context.state?.consumed.has(unit.index)) return undefined;
+  const unitLower = attached?.rawUnit ?? (unit && normalizeTokenLower(unit));
+  const periodUnit = unitLower && mapIntervalUnit(unitLower);
+  if (amount === undefined || amount <= 0 || !periodUnit) return undefined;
+  const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
+  return DAYPART_INTERVAL_TOKENS.has(unitLower!)
+    ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
+
 }
 
 /** Shared lexical constituent: a dose limit owns both its amount and period. */
