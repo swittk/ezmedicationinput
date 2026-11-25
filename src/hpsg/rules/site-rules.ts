@@ -223,11 +223,7 @@ function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMa
   if (SITE_MULTIPLICITY_WORDS.has(lower)) {
     return false;
   }
-  const siteLike = Boolean(resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
-    bodySiteContext: context.options?.context?.bodySiteContext
-  }));
-  const actionLike = resolveMedicationInstructionAction(lower, context.options);
-  return (
+  if (
     isPunctuation(lower) ||
     PRN_LEADS.has(lower) ||
     PRN_STANDALONE_REASON_LEADS.has(lower) ||
@@ -236,23 +232,25 @@ function siteBoundary(lower: string, context: HpsgClauseContext, allowRelativeMa
     (!allowRelativeMarker && SITE_RELATIVE_MARKERS.has(lower)) ||
     SITE_SCOPE_BOUNDARY_WORDS.has(lower) ||
     INSTRUCTION_START_WORDS.has(lower) ||
-    Boolean(
-      actionLike ||
-      (DEFAULT_ROUTE_SYNONYMS[lower] && !siteLike) ||
-      productRouteHint(lower) ||
-      (normalizeUnit(lower, context.options) && !siteLike) ||
-      TIMING_ABBREVIATIONS[lower] ||
-      WORD_FREQUENCIES[lower] ||
-      FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
-      FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
-      FREQUENCY_TIMES_WORDS.has(lower) ||
-      EVENT_TIMING_TOKENS[lower] ||
-      isClockLikeLower(lower) ||
-      isAmPmLower(lower) ||
-      EVERY_INTERVAL_TOKENS.has(lower) ||
-      mapFrequencyAdverb(lower) ||
-      mapIntervalUnit(lower)
-    )
+    resolveMedicationInstructionAction(lower, context.options) ||
+    productRouteHint(lower) ||
+    TIMING_ABBREVIATIONS[lower] ||
+    WORD_FREQUENCIES[lower] ||
+    FREQUENCY_SIMPLE_WORDS[lower] !== undefined ||
+    FREQUENCY_NUMBER_WORDS[lower] !== undefined ||
+    FREQUENCY_TIMES_WORDS.has(lower) ||
+    EVENT_TIMING_TOKENS[lower] ||
+    isClockLikeLower(lower) ||
+    isAmPmLower(lower) ||
+    EVERY_INTERVAL_TOKENS.has(lower) ||
+    mapFrequencyAdverb(lower) ||
+    mapIntervalUnit(lower)
+  ) return true;
+  return Boolean(
+    (DEFAULT_ROUTE_SYNONYMS[lower] || normalizeUnit(lower, context.options)) &&
+    !resolveBodySiteLexeme(lower, context.options?.siteCodeMap, {
+      bodySiteContext: context.options?.context?.bodySiteContext
+    })
   );
 }
 
