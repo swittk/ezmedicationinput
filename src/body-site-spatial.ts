@@ -5,7 +5,6 @@ import {
   FhirCoding,
   FhirExtension
 } from "./types";
-import { cloneI18nRecord } from "./fhir-translations";
 import { cloneStructuredValue } from "./stable-structure";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
@@ -86,8 +85,12 @@ export function cloneBodySiteSpatialRelation(
     targetCoding: target ? { ...target } : undefined,
     sourceText: relation.sourceText
   };
-  if (target && cloned.targetCoding && "i18n" in target)
-    cloned.targetCoding.i18n = cloneI18nRecord(target.i18n);
+  if (target && cloned.targetCoding) {
+    for (const key in target) {
+      if (key !== "system" && key !== "code" && key !== "display")
+        copyAdditionalCodingField(cloned.targetCoding, target, key);
+    }
+  }
   if (cloned.relationCoding) {
     for (const key in coding) {
       if (key !== "system" && key !== "code" && key !== "display") {

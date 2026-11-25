@@ -14,14 +14,16 @@ import {
   toDosageDetails, toFhirR5Dosages, toEzDosages, fromDosageDetails,
   getBodySiteText, evaluateMedicationCondition, setDosageCondition, getDosageCondition,
   type FormatOptions, type FhirR6DosageInstruction, type FhirR6Dosage, type FhirDosage, type FhirExtension, type EzDosage, type MedicationCondition,
-  EventTiming, FhirPeriodUnit
+  EventTiming, FhirPeriodUnit, AdviceRelation, parseInstructionActions, cloneBodySiteSpatialRelation
 } from "../src/index";
 import {
   canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL, getTimingClocks,
   toFhir as parserStateToFhir, getAdministrationOffsetMinutes, ADMINISTRATION_OFFSET_EXTENSION_URL,
-  buildInfusionCarrierMaterialStructureDefinition
+  buildInfusionCarrierMaterialStructureDefinition, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL
 } from "../src/fhir";
 import { parseMedicationGuard } from "../src/medication-condition";
+import { courseToR6 } from "../src/adapters/canonical-course";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import {
   setDosageExcludedDates, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCalendarDayCondition,
   DOSAGE_ALTERNATIVE_CHOICE_URL, getDosageAlternativeChoice,
@@ -3624,13 +3626,14 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       expect(JSON.stringify(entry)).not.toContain('"comparator":');
     expect(JSON.stringify(rows)).toContain('"100000000055"');
     expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
-    const reordered = toFhirR5Dosages(course);
+    const reordered = cloneStructuredValue(toFhirR5Dosages(course));
     reordered[0].doseAndRate!.reverse();
     expect(toDosageDetails(reordered).step[0].component[0].doseAndRate).toEqual(
       [...course.step[0].component[0].doseAndRate!].reverse()
     );
-    const edited = toFhirR5Dosages(course);
+    const edited = cloneStructuredValue(toFhirR5Dosages(course));
     edited[0].doseAndRate![0].doseQuantity!.value = 11;
+    expect(course.step[0].component[0].doseAndRate![0].doseQuantity!.value).toBe(10);
     const corrected = toDosageDetails(edited);
     expect(corrected.step[0].component[0].doseAndRate?.[0].doseQuantity)
       .toEqual(simpleQuantityForR5({ value: 11, unit: "mg", code: "mg",
@@ -7370,4 +7373,151 @@ it("retains current-R6 approximate Quantity extensions on Timing elements", () =
   for (const restored of [fromFhir(input).fhirNext, toDosageDetails(structuredClone(rows))])
     expect(restored.step![0].component[0].timing).toEqual(timing);
   expect(input).toEqual(before);
+});
+
+
+describe("round64 retained interchange annotations", () => {
+  const fresh = <T>(value: T): T => cloneStructuredValue(value);
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day };
+  const dose = (value = 1): FhirR6Dosage => ({ doseAndRate: [{ doseQuantity: { value, unit: "tab" } }] });
+
+  it.each([undefined, 30])("keeps a qualified scalar duration and its authored upper endpoint %s", maximum => {
+    const quantity = simpleQuantityForR5({ id: "qualified-duration", value: 15, comparator: "~",
+      unit: "min", code: "min", system: "http://unitsofmeasure.org" })!;
+    const marker = { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueQuantity: quantity };
+    const row: FhirDosage = { doseAndRate: [{ rateQuantity: { value: 20, unit: "mL/h" } }],
+      timing: { repeat: { ...daily, ...(maximum !== undefined ? {
+        durationMax: maximum, durationUnit: FhirPeriodUnit.Minute,
+        _duration: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason",
+          valueCode: "unknown" }] },
+      } : {}), extension: [marker] } } };
+    const before = fresh(row);
+    let wire = toDosageDetails([row]);
+    for (let save = 0; save < 2; save++) {
+      const recurrence = importCanonicalCourse(fresh(wire)).stages[0].administrations[0].schedule!.recurrence!;
+      if (maximum !== undefined) {
+        expect(recurrence.occurrenceDurationRange?.low).toEqual(quantityFromR5(quantity));
+        expect(recurrence.occurrenceDurationRange?.high).toMatchObject({ value: 30, unit: "min", code: "min" });
+        expect(recurrence.occurrenceDuration).toBeUndefined();
+      } else {
+        expect(recurrence.occurrenceDuration).toBe(15);
+        expect(recurrence.occurrenceDurationComparator).toBe("~");
+        expect(recurrence.occurrenceDurationRange).toBeUndefined();
+      }
+      wire = toDosageDetails(fresh(toFhirR5Dosages(wire)));
+    }
+    expect(row).toEqual(before);
+  });
+
+  it("preserves an extension-only event beside an authored clock using the existing clock carrier", () => {
+    const annotation = { id: "event-note", extension: [{ url: "urn:clinic:event-note", valueString: "retain" }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose(), timing: {
+      repeat: { ...daily, timeOfDay: ["08:00:00"], _when: [annotation] },
+    } }] }] };
+    const before = fresh(input);
+    let wire = courseToR6(importCanonicalCourse(input));
+    for (let save = 0; save < 2; save++) {
+      const row = toFhirR5Dosages(wire)[0], repeat = row.timing!.repeat!;
+      expect(repeat.timeOfDay).toBeUndefined();
+      expect(repeat._timeOfDay).toBeUndefined();
+      expect(repeat._when).toEqual([annotation]);
+      expect(getTimingClocks(repeat)).toEqual(["08:00:00"]);
+      expect(nextDueDoses([row], { orderedAt: "2026-11-25T00:00:00Z", from: "2026-11-25T00:00:00Z",
+        timeZone: "UTC", limit: 2 })).toEqual(["2026-11-25T08:00:00+00:00", "2026-11-26T08:00:00+00:00"]);
+      wire = toDosageDetails(fresh([row]));
+    }
+    expect(input).toEqual(before);
+    const ordinary: FhirR6DosageInstruction = { step: [{ component: [{ ...dose(), timing: {
+      repeat: { ...daily, timeOfDay: ["08:00:00"] },
+    } }] }] };
+    expect(toFhirR5Dosages(ordinary)[0].timing!.repeat!.timeOfDay).toEqual(["08:00:00"]);
+  });
+
+  it("retains graph relation IDs and unfamiliar children through the existing graph codec", () => {
+    const actions = parseInstructionActions("shake well bottle then rinse off with water");
+    expect(actions).toHaveLength(2);
+    const wire = fresh(buildInstructionGraphExtension({ actions, relations: [{
+      kind: AdviceRelation.Before, fromActionIndex: 0, toActionIndex: 1,
+    }] })!);
+    const relation = wire.extension!.find(value => value.url === "graphRelation")!;
+    const annotation = { url: "urn:clinic:relation-provenance", extension: [{ url: "author", valueString: "clinic" }] };
+    relation.id = "authored-before";
+    relation.extension!.push(annotation);
+    const before = fresh(wire);
+    let rebuilt = wire;
+    for (let save = 0; save < 2; save++) {
+      const graph = parseInstructionGraphExtension([fresh(rebuilt)])!;
+      expect(graph.relations![0]).toMatchObject({ kind: AdviceRelation.Before, fromActionIndex: 0, toActionIndex: 1 });
+      rebuilt = buildInstructionGraphExtension(graph)!;
+      const current = rebuilt.extension!.find(value => value.url === "graphRelation")!;
+      expect(current.id).toBe("authored-before");
+      expect(current.extension).toContainEqual(annotation);
+    }
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose(), extension: [rebuilt] }] }] };
+    const reopened = toDosageDetails(fresh(toFhirR5Dosages(input)));
+    const graph = reopened.step[0].component[0].extension!.find(value => value.url === rebuilt.url)!;
+    expect(graph.extension!.find(value => value.url === "graphRelation")).toMatchObject({
+      id: "authored-before", extension: expect.arrayContaining([annotation]),
+    });
+    expect(wire).toEqual(before);
+  });
+
+  it("detaches standard target Coding annotations only in the explicit spatial clone", () => {
+    const opaque = { clinic: ["shared opaque value"] };
+    const target = { system: "http://snomed.info/sct", code: "123", display: "target",
+      _display: { extension: [{ url: "urn:clinic:display", valueString: "authored" }] },
+      extension: [{ url: "urn:clinic:coding", valueBoolean: true }], i18n: { th: "ตำแหน่ง" }, opaque };
+    const input = { relationText: "around", targetCoding: target };
+    const cloned = cloneBodySiteSpatialRelation(input)!;
+    const current = cloned.targetCoding as typeof target;
+    expect(cloned).toEqual(input);
+    expect(cloned).not.toBe(input);
+    expect(current).not.toBe(target);
+    expect(current._display).not.toBe(target._display);
+    expect(current._display.extension).not.toBe(target._display.extension);
+    expect(current.extension).not.toBe(target.extension);
+    expect(current.i18n).not.toBe(target.i18n);
+    expect(current.opaque).toBe(opaque);
+  });
+
+  it("preserves native approximate Quantity extensions on the R6 site wrapper", () => {
+    const extension = { url: "urn:clinic:site-area", valueQuantity: { value: 2, comparator: "~" as const, unit: "cm2" } };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ ...dose(),
+      site: { id: "application-site", concept: { text: "left arm" }, extension: [extension] },
+    }] }] };
+    const before = fresh(input);
+    const current = courseToR6(importCanonicalCourse(input));
+    expect(current.step[0].component[0].site).toEqual(input.step[0].component[0].site);
+    expect(toDosageDetails(fresh(toFhirR5Dosages(current))).step[0].component[0].site)
+      .toEqual(input.step[0].component[0].site);
+    expect(input).toEqual(before);
+  });
+
+  it.each(["append annotation", "new annotation", "changed clock"] as const)(
+    "keeps an editable pause only when valued induction clocks are unchanged (%s)", edit => {
+    const changed = edit === "changed clock";
+    const input: FhirR6DosageInstruction = { step: [
+      { id: "induction", component: [{ ...dose(), id: "initial",
+        timing: { repeat: { ...daily, count: 7,
+          ...(edit === "new annotation" ? {} : { timeOfDay: ["09:00:00"] }) } } }] },
+      { id: "pause", end: { offsetDuration: { value: 14, unit: "d" } }, component: [] },
+      { id: "resume", component: [{ ...dose(2), id: "later", timing: { repeat: daily } }] },
+    ] };
+    let wire = fresh(courseToR6(importCanonicalCourse(input)));
+    const note = { id: "clock-note", extension: [{ url: "urn:clinic:clock-note", valueString: "retain" }] };
+    const clocks = edit === "new annotation" ? [null] : [changed ? "10:00:00" : "09:00:00", null];
+    const annotations = edit === "new annotation" ? [note] : [null, note];
+    wire.step[0].component[0].timing!.repeat!.timeOfDay = clocks;
+    wire.step[0].component[0].timing!.repeat!._timeOfDay = annotations;
+    for (let save = 0; save < 2; save++) {
+      const before = fresh(wire);
+      expect(fromDosageDetails(wire).course.step?.map(step => step.id))
+        .toEqual(changed ? ["induction", "resume"] : ["induction", "pause", "resume"]);
+      expect(wire).toEqual(before);
+      const repeat = wire.step[0].component[0].timing!.repeat!;
+      expect(repeat.timeOfDay).toEqual(clocks);
+      expect(repeat._timeOfDay).toEqual(annotations);
+      wire = toDosageDetails(fresh(toFhirR5Dosages(wire)));
+    }
+  });
 });

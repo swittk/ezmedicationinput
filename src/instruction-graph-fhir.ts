@@ -295,7 +295,9 @@ export function buildInstructionGraphExtension(
       add(relationNested, valueInteger("spanStart", relation.span.start));
       add(relationNested, valueInteger("spanEnd", relation.span.end));
     }
-    nested.push({ url: "graphRelation", extension: relationNested });
+    if (relation.sourceExtensions) relationNested.push(...relation.sourceExtensions);
+    nested.push({ url: "graphRelation", ...(relation.sourceId !== undefined ? { id: relation.sourceId } : {}),
+      extension: relationNested });
   }
   if (graph.coverage) {
     const coverage: FhirExtension[] = [];
@@ -509,17 +511,21 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
 function parseGraphRelation(extension:FhirExtension):CanonicalInstructionRelation|undefined {
   let coding:FhirExtension|undefined,kind:FhirExtension|undefined,to:FhirExtension|undefined,from:FhirExtension|undefined,
     start:FhirExtension|undefined,end:FhirExtension|undefined,text:FhirExtension|undefined;
+  let sourceExtensions:FhirExtension[]|undefined;
   for(const field of extension.extension??[])switch(field.url){
     case "kindCoding":if(!coding)coding=field;break;case "kind":if(!kind)kind=field;break;
     case "toActionIndex":if(!to)to=field;break;case "fromActionIndex":if(!from)from=field;break;
     case "spanStart":if(!start)start=field;break;case "spanEnd":if(!end)end=field;break;
     case "text":if(!text)text=field;break;
+    default:(sourceExtensions??=[]).push(field);break;
   }
   const value=coding?.valueCoding;
   const relation=value?.system==="http://hl7.org/fhir/action-relationship-type"&&(value.code==="before"||value.code==="after")
     ? value.code as AdviceRelation:firstRelation(value,kind?.valueCode);
   if(!relation||to?.valueInteger===undefined)return undefined;
   return {kind:relation,fromActionIndex:from?.valueInteger,toActionIndex:to.valueInteger,text:text?.valueString,
+    ...(extension.id !== undefined ? {sourceId:extension.id} : {}),
+    ...(sourceExtensions ? {sourceExtensions} : {}),
     span:start?.valueInteger!==undefined&&end?.valueInteger!==undefined?{start:start.valueInteger,end:end.valueInteger}:undefined};
 }
 function parseOpaqueSpan(extension:FhirExtension):CanonicalSourceSpan|undefined {

@@ -421,6 +421,8 @@ export interface FhirTimingRepeat extends FhirElement {
   durationMax?: number;
   durationUnit?: FhirPeriodUnit;
   period?: number;
+  /** Primitive annotation for a stated or unspecified lower period. */
+  _period?: FhirPrimitiveElement;
   periodMax?: number;
   periodUnit?: FhirPeriodUnit;
   dayOfWeek?: Array<FhirDayOfWeek | null>;
@@ -638,11 +640,14 @@ export interface FhirReference extends FhirElement {
   _display?: FhirPrimitiveElement;
 }
 
-/** R6 CodeableReference includes its own Element metadata. */
+/** CodeableReference fields with R5-compatible Element metadata. */
 export interface FhirCodeableReference extends FhirElement {
   concept?: FhirCodeableConcept;
   reference?: FhirReference;
 }
+
+/** Current R6 Element annotations may carry native R6 Quantity choices. */
+export interface FhirR6CodeableReference extends Omit<FhirCodeableReference, "extension">, FhirR6Element {}
 
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,
@@ -652,7 +657,7 @@ export interface FhirR6Dosage extends Omit<FhirDosage,
   modifierExtension?: FhirR6Extension[];
   timing?: FhirR6Timing;
   condition?: FhirR6DosageCondition[];
-  site?: FhirCodeableReference;
+  site?: FhirR6CodeableReference;
   doseAndRate?: FhirR6DoseAndRate[];
   safety?: FhirR6DosageSafety;
 }
@@ -1914,6 +1919,9 @@ export interface CanonicalAdditionalInstructionExpr {
 }
 
 export interface CanonicalInstructionRelation {
+  /** Retained wire annotations are source data, never relationship semantics. */
+  sourceId?: string;
+  sourceExtensions?: FhirExtension[];
   kind: AdviceRelation;
   fromActionIndex?: number;
   toActionIndex: number;

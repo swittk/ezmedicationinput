@@ -11,7 +11,7 @@ import type {
 } from "../types";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { boundaryFromR6 } from "./canonical-course";
-import { getAdministrationOffsetMinutes, getAnchoredCourseDuration } from "../fhir";
+import { getAdministrationOffsetMinutes, getAnchoredCourseDuration, getTimingClocks } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
 
@@ -74,6 +74,9 @@ export function retainDraftSteps(
 function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
   if (!timing) return undefined;
   const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
+  const clocks = getTimingClocks(timing.repeat);
+  if (clocks?.length) repeat.timeOfDay = clocks;
+  else delete repeat.timeOfDay;
   // Only standard primitive companions are annotations. Keep unfamiliar
   // recurrence fields and extensions in the completion comparison.
   for (const field of ["_count", "_countMax", "_frequency", "_frequencyMax",

@@ -3,7 +3,7 @@ import { resolveMedicationInstructionActionForMethod, selectMedicationInstructio
 import {
   setDosageCondition, setDosageExcludedDates, setDosageExcludedWeekdays, attachQualifiedR5AmountDetails,
   getDosageCondition, getDosageCalendarDayCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum, withR5DurationMinimum
+  retainField, readRetainedField, DOSAGE_RECONCILIATION_SOURCE_URL, withR5CountMinimum, withR5DurationMinimum, withR5PeriodMinimum
 } from "./dosage-course";
 import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
@@ -240,6 +240,12 @@ export function parseTimingAdministrationDuration(
   const quantity = extension?.valueQuantity;
   const unit = getQuantityDurationUnit(quantity);
   if (quantity?.value === undefined || !unit) return undefined;
+  if (current?.durationMax !== undefined) {
+    const upperUnit = current.durationUnit ?? unit;
+    return { range: { low: quantityFromR5(quantity), high: {
+      value: current.durationMax, unit: upperUnit, code: upperUnit, system: "http://unitsofmeasure.org",
+    } } };
+  }
   const comparator = getQuantityComparator(quantity);
   return { value: quantity.value, unit, ...(comparator ? { comparator } : {}) };
 }
@@ -392,7 +398,7 @@ export function getTimingClocks(
 /** Independent event and clock opportunities share one wire recurrence.
  * The original wire repeat distinguishes a bridge read from a current core edit;
  * no administration/count/cap is split, and retired carriers cannot revive. */
-export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "extension">>(
+export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDay" | "_timeOfDay" | "when" | "_when" | "extension">>(
   repeat: T, wireSource?: Pick<FhirTimingRepeat, "timeOfDay">, target: "r5" | "r6" = "r5"
 ): T {
   let clocks = repeat.timeOfDay;
@@ -410,7 +416,9 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
       restorePositions = true;
     }
   }
-  const mixed = Boolean(repeat.when?.length && clocks?.length);
+  // Extension-only primitive elements also participate in FHIR tim-10.
+  // Keep their annotations in place and use the established clock carrier.
+  const mixed = Boolean((repeat.when?.length || repeat._when?.some(Boolean)) && clocks?.length);
   if (!mixed && !repeat.extension?.length)
     return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   let markers: FhirR6Extension[] | undefined;
@@ -1970,6 +1978,8 @@ export function canonicalToFhir(
     dosage.timing.repeat = withR5CountMinimum(dosage.timing.repeat);
   if (schedule?.administrationDurationMax !== undefined && dosage.timing?.repeat)
     dosage.timing.repeat = withR5DurationMinimum(dosage.timing.repeat);
+  if (schedule?.periodMax !== undefined && dosage.timing?.repeat)
+    dosage.timing.repeat = withR5PeriodMinimum(dosage.timing.repeat);
   if (schedule?.maxDosePerPeriod?.length) {
     dosage.maxDosePerPeriod = schedule.maxDosePerPeriod.map((maximum) => {
       const numerator = buildFhirDoseQuantity(maximum.amount, maximum.unit);
