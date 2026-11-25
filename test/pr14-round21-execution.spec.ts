@@ -6776,3 +6776,81 @@ describe("round74 independent count history and cadence origins", () => {
   });
 
 });
+
+
+describe("round75 duration identity in execution", () => {
+  const contextCode = { coding: [{
+    system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start"
+  }] };
+  const annotation = { url: "urn:clinic:duration-note", valueString: "Retain the authored duration" };
+  const local = (value: number, code: string, unit: string) => ({
+    value, code, unit, system: "urn:clinic:time", extension: [annotation]
+  });
+  const forms = (source: FhirR6DosageInstruction) => {
+    const rows = freshExecutionInput(toFhirR5Dosages(freshExecutionInput(source)));
+    return [freshExecutionInput(source), rows, freshExecutionInput(toDosageDetails(rows))];
+  };
+  const once = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { count: 1 } } };
+
+  it.each(["scalar", "range"] as const)("does not execute local %s treatment offsets as familiar time codes", kind => {
+    const quantity = local(kind === "scalar" ? 7 : 2, kind === "scalar" ? "d" : "h",
+      kind === "scalar" ? "treatment blocks" : "sessions");
+    const start = { contextCode, ...(kind === "scalar"
+      ? { offsetDuration: quantity } : { offsetRange: { low: quantity, high: { ...quantity } } }) };
+    const source: FhirR6DosageInstruction = { step: [{ start, component: [once] }] };
+    for (const input of forms(source)) {
+      const before = JSON.stringify(input);
+      expect(() => nextDueDoses(input, { ...options, limit: 2 })).toThrow(/treatment-start time unit/u);
+      expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Day }))
+        .toThrow(/treatment-start time unit/u);
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[0].start).toEqual(start);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["UCUM", "systemless"] as const)("retains recognized %s treatment offsets", identity => {
+    const offsetDuration = { value: 2, unit: "h", code: "h",
+      ...(identity === "UCUM" ? { system: "http://unitsofmeasure.org" } : {}), extension: [annotation] };
+    const start = { contextCode, offsetDuration };
+    const source: FhirR6DosageInstruction = { step: [{ start, component: [once] }] };
+    for (const input of forms(source)) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, { ...options, limit: 2 })).toEqual(["2026-01-01T02:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 3, durationUnit: Unit.Hour }))
+        .toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "scheduled" });
+      expect(toDosageDetails(toFhirR5Dosages(input)).step[0].start).toEqual(start);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each(["local collision", "opaque local", "UCUM", "systemless"] as const)(
+    "uses the period terminology before applying a rolling maximum: %s", identity => {
+      const known = identity === "UCUM" || identity === "systemless";
+      const period = known
+        ? { value: 1, unit: "d", code: "d",
+          ...(identity === "UCUM" ? { system: "http://unitsofmeasure.org" } : {}), extension: [annotation] }
+        : local(1, identity === "local collision" ? "d" : "clinic-session", "sessions");
+      const source: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00", "17:00:00"] } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 1, unit: "tab" }, period }] }
+      }] }] };
+      const expected = known
+        ? ["2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00",
+          "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00"]
+        : ["2026-01-01T09:00:00+00:00", "2026-01-01T17:00:00+00:00",
+          "2026-01-02T09:00:00+00:00", "2026-01-02T17:00:00+00:00"];
+      for (const input of forms(source)) {
+        const before = JSON.stringify(input);
+        expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual(expected);
+        const total = calculateTotalUnits({ dosage: input, ...options, durationValue: 2, durationUnit: Unit.Day });
+        expect(total).toMatchObject({ totalUnits: known ? 2 : 4, unit: "tab", quantityKind: "maximum" });
+        if (known) expect(total.explanation).not.toContain("unevaluable maximum-dose constraint");
+        else expect(total.explanation).toContain("an unevaluable maximum-dose constraint was retained but could not be applied");
+        expect(toDosageDetails(toFhirR5Dosages(input)).step[0].component[0].safety?.doseLimit?.[0].period).toEqual(period);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    }
+  );
+});

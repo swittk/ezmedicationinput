@@ -2020,7 +2020,7 @@ function executableQuantityCaps(
       denominator = limit.period;
     const maximum = numerator?.value;
     const period = denominator?.value;
-    const periodUnit = denominator?.code ?? denominator?.unit;
+    const periodUnit = getQuantityDurationUnit(denominator);
     const maximumOperator = getQuantityComparator(numerator);
     const periodOperator = getQuantityComparator(denominator);
     // A qualified window is not an exact rolling ceiling. Supply can explain
@@ -2263,7 +2263,7 @@ function treatmentRelativeInstant(
     return low;
   }
   const quantity = duration?.value ?? (dayStart ? 0 : undefined);
-  const unit = duration?.code ?? duration?.unit ?? (dayStart ? "d" : undefined);
+  const unit = duration ? getQuantityDurationUnit(duration) : dayStart ? DurationUnit.Day : undefined;
   if (
     !knownAnchor ||
     getQuantityComparator(duration) ||
@@ -2342,7 +2342,7 @@ function stageCalendarClock(
     return predecessorClock ?? sourceClock;
   }
   const offset = relative.displacement ?? relative.displacementRange?.low ?? relative.displacementRange?.high;
-  const unit = offset?.code ?? offset?.unit;
+  const unit = getQuantityDurationUnit(offset);
   if (unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour)
     return getTimeParts(start, timeZone);
   return nextDay || dayStart ? LOCAL_DAY_START_CLOCK
@@ -2382,7 +2382,7 @@ function parallelComponentCadence(
   const displacement = boundary
     ? boundary.displacement ?? boundary.displacementRange?.low ?? boundary.displacementRange?.high
     : offset;
-  const unit = displacement?.code ?? displacement?.unit;
+  const unit = getQuantityDurationUnit(displacement);
   const elapsed = unit === DurationUnit.Second || unit === DurationUnit.Minute || unit === DurationUnit.Hour;
   return {
     origin,
@@ -3226,7 +3226,7 @@ function trimRollingCycleHistory<T extends string | SupplyAllocation>(
       let oldest=upcoming.getTime(),found=false;
       for(const limit of member.limits??[]) {
         if(limit.scope!=="period")continue;
-        const period=limit.period?.value,unit=limit.period?.code??limit.period?.unit;
+        const period=limit.period?.value,unit=getQuantityDurationUnit(limit.period);
         if(period===undefined||!isQuantityCapPeriod(period,unit))continue;
         const since=quantityCapHistoryFloor(upcoming,
           {max:1,period,periodUnit:unit as DurationUnit},zone);
