@@ -2673,7 +2673,8 @@ function treatmentStepWindow(
   deferFiniteCompletion = false,
   capContext?: MedicationContext,
   repetitionWindow?: { start: Date; end: Date; capClock?: TreatmentWallClock },
-  cycleEnd?: Date
+  cycleEnd?: Date,
+  nextStageIndex = index + 1
 ): TreatmentStepWindow {
   const stage = course.stages[index];
   const start = repetitionWindow ? repetitionWindow.start : stage.start
@@ -2774,7 +2775,7 @@ function treatmentStepWindow(
     end = latest.end;
     completionPoint = latest.point;
   } else if (!end) {
-    const nextStage = course.stages[index + 1];
+    const nextStage = course.stages[nextStageIndex];
     const nextStart = nextStage?.start;
     // A predecessor-dependent start cannot prove its own predecessor's end.
     if (nextStart && nextStart.anchor !== "previous-phase-next-day")
@@ -2883,6 +2884,16 @@ function* treatmentStepWindows(
   let predecessorPoint: Date | undefined, predecessorClock = sourceClock;
   for (let index = 0; index < course.stages.length; index++) {
     const stage = course.stages[index];
+    let nextStageIndex = index + 1;
+    if (!stage.administrations.length && !stage.start && !stage.end && stage.count === undefined) {
+      // Removed rows can retain consecutive empty placeholders. Find their
+      // next boundary once; the window resolver still owns its actual onset.
+      while (nextStageIndex < course.stages.length) {
+        const next = course.stages[nextStageIndex];
+        if (next.administrations.length || next.start || next.end || next.count !== undefined) break;
+        nextStageIndex++;
+      }
+    }
     const repetitions = positiveInteger(stage.count) ?? 1;
     let localAnchor = anchor, localCourse = course, localClock = sourceClock;
     let advance: ((at: Date) => Date | null) | null | undefined;
@@ -2891,7 +2902,7 @@ function* treatmentStepWindows(
     for (let repetition = 0; repetition < repetitions; repetition++) {
       const window = treatmentStepWindow(localCourse, index, localAnchor, previousEnd,
         timeZone, localClock, predecessorClock, options, predecessorPoint,
-        deferFiniteCompletion, capContext, repetitionWindow, cycleEnd);
+        deferFiniteCompletion, capContext, repetitionWindow, cycleEnd, nextStageIndex);
       const accepted = yield { index, stage, window };
       if (accepted) {
         window.end = accepted.end;
@@ -2938,6 +2949,9 @@ function* treatmentStepWindows(
         }
       }
     }
+    // Advance only after that empty execution window has resolved; retained
+    // model stages and their provenance remain untouched.
+    index = nextStageIndex - 1;
   }
 }
 

@@ -10981,6 +10981,38 @@ describe("round62 reviewed interchange ownership", () => {
     }
   });
 
+  it.each([0, 7])("executes an independent %sd origin after two retained empty stages", offset => {
+    const independent = { ...member("independent-member", 2), timing: { repeat: { ...daily, count: 2 } },
+      extension: [note],
+      modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: { value: offset, unit: "d" } }] };
+    const source: FhirR6DosageInstruction = { step: [
+      { id: "previous-first", component: [{ ...member("previous-first-member", 1), timing: { repeat: { ...daily, count: 1 } } }] },
+      { id: "previous-second", component: [{ ...member("previous-second-member", 1), timing: { repeat: { ...daily, count: 1 } } }] },
+      { id: "independent", component: [independent] }
+    ] };
+    let rows = persist(toFhirR5Dosages(source).slice(2));
+    const options = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 };
+    const expected = offset === 0
+      ? ["2026-11-21T08:00:00+00:00", "2026-11-22T08:00:00+00:00"]
+      : ["2026-11-28T08:00:00+00:00", "2026-11-29T08:00:00+00:00"];
+    for (let save = 0; save < 2; save++) {
+      const native = importCanonicalCourse(rows);
+      expect(native.contextIssue).toBeUndefined();
+      expect(native.stages.map(stage => stage.administrations.length)).toEqual([0, 0, 1]);
+      expect(rows[0].extension).toContainEqual(note);
+      expect(native.stages[2].administrations[0].phaseOrigin).toEqual({ value: offset, unit: "d" });
+      expect(native.stages[2].administrations[0].amounts![0].quantity).toEqual(q(2));
+      for (const input of [native, rows, persist(toDosageDetails(rows)), [persist(independent)]]) {
+        const before = persist(input);
+        expect(nextDueDoses(input, options)).toEqual(expected);
+        expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 14,
+          durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
+        expect(input).toEqual(before);
+      }
+      rows = persist(toFhirR5Dosages(toDosageDetails(rows)));
+    }
+  });
+
   it("accepts native Ratio and Timing values in R6 extensions while R5 remains strict", () => {
     const ratio: FhirR6Extension = { url: "urn:clinic:ratio",
       valueRatio: { numerator: { value: 2, unit: "mg", comparator: "~" }, denominator: { value: 1, unit: "mL" } } };
