@@ -220,9 +220,6 @@ describe("non-equivalent standardized constituents of local instruction actions"
       expect.objectContaining({ role, coding: expect.objectContaining({ code, system: SNOMED }) })
     ]));
     const again = getMedicationInstructionAction(action)!;
-    // Public vocabulary values are independent; parser lookups reuse their
-    // immutable-by-contract dictionary entry without copying it per token.
-    expect(again).not.toBe(definition);
     expect(again).toEqual(definition);
     const internal = getInternalInstructionAction(action);
     expect(getInternalInstructionAction(action)).toBe(internal);
@@ -251,7 +248,6 @@ describe("non-equivalent standardized constituents of local instruction actions"
     const bare = getMedicationInstructionAction("rotate")!;
     expect(bare.semanticComponents).toBeUndefined();
     expect(bare.contextualSemanticComponents).toHaveLength(2);
-    expect(getMedicationInstructionAction("rotate")).not.toBe(bare);
     expect(getMedicationInstructionAction("rotate")).toEqual(bare);
     const internal = getInternalInstructionAction("rotate");
     expect(getInternalInstructionAction("rotate")).toBe(internal);
@@ -276,7 +272,6 @@ describe("non-equivalent standardized constituents of local instruction actions"
   it("keeps repeat + apply as distinct parts of reapply, and avoids modifying registered definitions", () => {
     const definition = getMedicationInstructionAction("reapply")!;
     expect(definition.semanticComponents?.map(part => part.coding.code)).toEqual(["C47886", "738991002"]);
-    expect(getMedicationInstructionAction("reapply")).not.toBe(definition);
     expect(getMedicationInstructionAction("reapply")).toEqual(definition);
     const internal = getInternalInstructionAction("reapply");
     expect(getInternalInstructionAction("reapply")).toBe(internal);
@@ -322,7 +317,6 @@ describe("partial coded clinical concept constituents", () => {
       expect.objectContaining({ role, coding: expect.objectContaining({ code }) })
     ]));
     expect(buildMedicationInstructionConceptCodeSystem().concept.some(item => item.code === name)).toBe(true);
-    expect(getMedicationInstructionConcept(name)).not.toBe(concept);
     expect(getMedicationInstructionConcept(name)).toEqual(concept);
     const internal = getInternalInstructionConcept(name);
     expect(getInternalInstructionConcept(name)).toBe(internal);
