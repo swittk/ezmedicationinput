@@ -2414,7 +2414,9 @@ describe("review 18: comparator-only graph quantities remain editable", () => {
     "round-trips a partial source-backed %s Quantity without inventing a number",
     comparator => {
       const parsed = parsePublicSig("Dissolve 2 tablets in water, then drink");
-      const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+      const sourceGraph = parsed.meta.canonical.clauses[0].instructionGraph!;
+      const before = JSON.stringify(sourceGraph);
+      const graph = JSON.parse(before) as typeof sourceGraph;
       const action = graph.actions.find(value => value.predicate.lemma === "dissolve")!;
       const amount = action.args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
       const sourceText = graph.sourceText;
@@ -2433,12 +2435,15 @@ describe("review 18: comparator-only graph quantities remain editable", () => {
         ?.actions.find(value => value.predicate.lemma === "dissolve")
         ?.args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
         .toEqual({ comparator });
+      expect(JSON.stringify(sourceGraph)).toBe(before);
     }
   );
 
   it("does not drop a known qualifier when an amount has a partial unit but no value", () => {
-    const graph = parsePublicSig("Dissolve 2 tablets in water, then drink")
+    const sourceGraph = parsePublicSig("Dissolve 2 tablets in water, then drink")
       .meta.canonical.clauses[0].instructionGraph!;
+    const before = JSON.stringify(sourceGraph);
+    const graph = JSON.parse(before) as typeof sourceGraph;
     const amount = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)!;
     amount.quantity = { unit: "mg", comparator: "~" };
     const restored = parseInstructionGraphExtension([buildInstructionGraphExtension(graph)!])!;
@@ -2447,6 +2452,7 @@ describe("review 18: comparator-only graph quantities remain editable", () => {
         unit: "mg", comparator: "~"
       });
     expect(restored.sourceText).toBe(graph.sourceText);
+    expect(JSON.stringify(sourceGraph)).toBe(before);
   });
 });
 
@@ -6927,6 +6933,14 @@ describe("round61 independent Time relation coverage", () => {
         expect(preview.match(locale === "en" ? /morning/gu : /เช้า/gu)).toHaveLength(coversPoint ? 1 : 2);
         if (relation === AdviceRelation.Until) expect(text).toContain(locale === "en" ? "until" : "จนกว่า");
         if (relation === AdviceRelation.During) expect(text).toContain(locale === "en" ? "during" : "ระหว่าง");
+        if (!coversPoint) {
+          const directional = relation === AdviceRelation.Until
+            ? locale === "en" ? "until the morning" : "จนกว่าตอนเช้า"
+            : locale === "en" ? "during the morning" : "ระหว่างตอนเช้า";
+          expect(preview.split(directional)).toHaveLength(2);
+          const scheduled = preview.replace(directional, "");
+          expect(scheduled.match(locale === "en" ? /in the morning/gu : /ตอนเช้า/gu)).toHaveLength(1);
+        }
       }
       expect(JSON.stringify(graph)).toBe(before);
     });

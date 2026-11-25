@@ -3651,8 +3651,8 @@ describe("round60 divided ranges beside independent infusion rates", () => {
       representation: "rate-quantity", numerator: { value: 30, unit: "mL" },
       dividedDoseCount: 2, denominators: [{ value: 1, unit: "h" }],
     });
-    const values = [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhirNext)),
-      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))];
+    const values = [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))];
     for (const input of values) {
       const before = JSON.stringify(input), course = importCanonicalCourse(input), member = course.stages[0].administrations[0];
       expect(member.amounts).toMatchObject([{ range: { low: { value: 50, unit: "mL" }, high: { value: 100, unit: "mL" } },
