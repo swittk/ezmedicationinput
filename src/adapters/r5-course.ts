@@ -16,6 +16,7 @@ import type {
   FhirR6DoseAndRate,
 } from "../types";
 import type { CanonicalCourse, CanonicalAdministration, CanonicalMeasure } from "../canonical/course";
+import { administrationHasAmountFacts } from "../canonical/course";
 import type { FhirProjectionOptions } from "../fhir";
 import {
   administrationToR5,
@@ -335,10 +336,11 @@ export function projectNativeR5Course(
       const sourceClocks = a.provenance?.sourceHasStructuredClocks,
         sourceEvents = a.provenance?.sourceHasStructuredEvents,
         sourceSite = a.provenance?.sourceHasStructuredSite,
-        sourceAgreed = a.provenance?.sourceTextAgreed === true;
+        sourceAgreed = a.provenance?.sourceTextAgreed === true && !administrationHasAmountFacts(a);
       const originalAgreement = sourceAgreed ? true :
         (originalRow?.text !== undefined && !dosageHasAgreedSourceText(originalRow) ||
-          a.text !== undefined && a.syntax?.instructionGraph?.actions.length) ? false :
+          a.text !== undefined && a.syntax?.instructionGraph?.actions.length) &&
+          !administrationHasAmountFacts(a) ? false :
         !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
           ? getDosageSourceTextAgreement(originalRow, false) : undefined;
       if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined || sourceAgreed ||

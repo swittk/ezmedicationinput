@@ -3,8 +3,6 @@
  * Display stays separate from executable interpretation: unknown expressions
  * and boundaries remain visible without inventing values or event dates. */
 import type { FormatBatchOptions, FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause, CanonicalDoseExpr } from "../types";
-import { AdviceArgumentRole, AdvicePolarity } from "../types";
-import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
   CanonicalCourse,
   CanonicalBoundary,
@@ -17,7 +15,7 @@ import type {
   CanonicalSafety,
   RegimenPosition,
 } from "./course";
-import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
+import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole, administrationHasAmountFacts } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
 import { preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
@@ -544,28 +542,6 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
   return Boolean(safety?.limits?.length || safety?.ifExceeded?.trim());
 }
 
-/** Text and foreign Element metadata alone do not establish clinical facts
- * that can replace an authored instruction with a generated preview. */
-function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
-  for (const amount of a.amounts ?? [])
-    if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
-        amount.range?.high?.value !== undefined || amount.expression || amount.rate?.value !== undefined ||
-        amount.rateRange?.low?.value !== undefined || amount.rateRange?.high?.value !== undefined ||
-        amount.rateRatio?.numerator?.value !== undefined || amount.rateRatio?.denominator?.value !== undefined ||
-        amount.rateExpression) return true;
-  // Coded qualitative amounts use the same typed administration templates
-  // as clause realization. Unrelated advice cannot replace source-only dose
-  // wording, and opaque text never supplies an amount here.
-  for (const instruction of a.additionalInstructions ?? []) for (const coding of instruction.coding ?? []) {
-    if (!coding.code) continue;
-    const frames = buildAdditionalInstructionFramesFromCoding(coding.system ?? "http://snomed.info/sct", coding.code);
-    for (const frame of frames ?? []) {
-      if (frame.predicate.semanticClass !== "administration" || frame.polarity === AdvicePolarity.Negate) continue;
-      for (const argument of frame.args) if (argument.role === AdviceArgumentRole.Amount) return true;
-    }
-  }
-  return false;
-}
 function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true, includeAdvice = true): boolean {
   if (administrationHasAmountFacts(a)) return true;
   if (a.asNeeded === true || a.target || a.targetCount !== undefined || a.siteReference ||

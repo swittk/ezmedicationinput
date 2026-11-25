@@ -19,8 +19,10 @@ import type {
   FhirR6DosageStep,
 } from "../types";
 import type { CanonicalCourse, CanonicalStage, CanonicalAdministration } from "../canonical/course";
+import { administrationHasAmountFacts } from "../canonical/course";
 import {
   administrationFromR5,
+  amountFromWire,
   administrationFromR6,
   boundaryFromR6,
   safetyFromWire,
@@ -47,7 +49,8 @@ import {
   offsetCadenceFingerprint,
   matchesOffsetCadence,
   matchesDosageProjectionFingerprint,
-  dosageTextFingerprint, dosageHasAgreedSourceText,
+  dosageTextFingerprint, getDosageSourceTextAgreement,
+  getDosageSourceProjectionFingerprint, getDosageSourceTextFingerprint,
   isRenderedInstructionMarker,
   hasUnrecognizedEditMetadata,
   localReconciliationSource,
@@ -943,8 +946,8 @@ function reconcileNativeCompactCourse(
     const local = localRows[index];
     const sourceIndex = local?.value.rowIndex ?? index;
     const baseline = baselineRows[sourceIndex];
-    const expectedProjection = baseline?.projection,
-      expectedText = baseline?.text;
+    const expectedProjection = baseline?.projection ?? getDosageSourceProjectionFingerprint(dosage),
+      expectedText = baseline?.text ?? getDosageSourceTextFingerprint(dosage);
     const expanded = dosage as EzDosage;
     const delta = local?.value.component;
     const nativeCleared = Boolean(
@@ -966,7 +969,7 @@ function reconcileNativeCompactCourse(
     if (!textMatches) textWasEdited = true;
     else allTextsWereEdited = false;
     if (!projectionMatches) structuredWasEdited = true;
-    const retireText = !projectionMatches && textMatches && dosageHasAgreedSourceText(dosage, projectionMatches);
+    const retireText = !projectionMatches && textMatches && rowTextCanBeRetired(dosage);
     if (retireText || !dosage.text) allTexts = false;
     if (retireText && (dosage.text !== undefined || dosage._text !== undefined))
       sources.push(retainedRowTextSource(dosage, sourceIndex));
@@ -1186,6 +1189,16 @@ function reconcileNativeCompactCourse(
       ? instructionMarker
       : undefined
   );
+}
+
+/** A failed replay agreement does not make a typed current dose unowned.
+ * Only independent source-only directions keep their text beside unrelated
+ * clinical edits. The existing quantity adapter supplies the native facts. */
+function rowTextCanBeRetired(row: FhirDosage | EzDosage): boolean {
+  return getDosageSourceTextAgreement(row, false) !== false || administrationHasAmountFacts({
+    amounts: row.doseAndRate?.map(amount => amountFromWire(amount, true)),
+    additionalInstructions: row.additionalInstruction,
+  });
 }
 
 /** A stale row instruction is independent of the course header. Retire the
@@ -1922,25 +1935,28 @@ export function courseFromR5(
     allTexts = true;
   let structuredWasEdited = false, allTextsWereEdited = true;
   let effectiveDosages: readonly (FhirDosage | EzDosage)[] = dosages;
-  if (hasInstructionBaseline)
-    for (let index = 0; index < dosages.length; index++) {
-      const dosage = dosages[index],
-        before = snapshot.rows[index];
-      const projectionMatches = matchesDosageProjectionFingerprint(dosage, before?.projection);
-      const textMatches = before?.text === dosageTextFingerprint(dosage);
-      if (!projectionMatches || !textMatches) instructionStillMatches = false;
-      if (!textMatches) textWasEdited = true;
-      else allTextsWereEdited = false;
-      if (!projectionMatches) structuredWasEdited = true;
-      if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
-      if (!projectionMatches && textMatches && dosageHasAgreedSourceText(dosage, projectionMatches)) {
-        if (dosage.text !== undefined || dosage._text !== undefined)
-          reconciliationSources.push(retainedRowTextSource(dosage, index));
-        if (effectiveDosages === dosages) effectiveDosages = dosages.slice();
-        (effectiveDosages as (FhirDosage | EzDosage)[])[index] = retireRowText(dosage);
-        allTexts = false;
-      }
+  for (let index = 0; index < dosages.length; index++) {
+    const dosage = dosages[index];
+    if (!hasInstructionBaseline && !dosage.extension?.length) continue;
+    const before = hasInstructionBaseline ? snapshot.rows[index] : undefined;
+    const projection = before?.projection ?? getDosageSourceProjectionFingerprint(dosage),
+      text = before?.text ?? getDosageSourceTextFingerprint(dosage);
+    if (projection === undefined || text === undefined) continue;
+    const projectionMatches = matchesDosageProjectionFingerprint(dosage, projection);
+    const textMatches = text === dosageTextFingerprint(dosage);
+    if (!projectionMatches || !textMatches) instructionStillMatches = false;
+    if (!textMatches) textWasEdited = true;
+    else allTextsWereEdited = false;
+    if (!projectionMatches) structuredWasEdited = true;
+    if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
+    if (!projectionMatches && textMatches && rowTextCanBeRetired(dosage)) {
+      if (dosage.text !== undefined || dosage._text !== undefined)
+        reconciliationSources.push(retainedRowTextSource(dosage, index));
+      if (effectiveDosages === dosages) effectiveDosages = dosages.slice();
+      (effectiveDosages as (FhirDosage | EzDosage)[])[index] = retireRowText(dosage);
+      allTexts = false;
     }
+  }
   let clinicianEditedText: string | undefined;
   if (hasInstructionBaseline && !instructionStillMatches && allTexts && textWasEdited &&
       (!structuredWasEdited || allTextsWereEdited)) {

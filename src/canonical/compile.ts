@@ -14,7 +14,7 @@ import type {
   CanonicalStage,
   CanonicalBoundary,
 } from "./course";
-import { hasAmountRole } from "./course";
+import { hasAmountRole, administrationHasAmountFacts } from "./course";
 import type { CanonicalParallelRegimen, RegimenPosition } from "../regimen/parallel-course";
 import { bodySiteTextConflictsWithCoding, getBodySiteAdministrationTargetCount } from "../body-site-target";
 import { getBodySiteText } from "../body-site-lookup";
@@ -242,7 +242,7 @@ export function administrationFromClause(
       period: quantity(limit.period, limit.periodUnit, limit.periodComparator),
     })),
   };
-  if (text !== undefined && clause.instructionGraph?.actions.length)
+  if (text !== undefined && clause.instructionGraph?.actions.length && !administrationHasAmountFacts(administration))
     administration.provenance = { format: "syntax", data: {}, sourceTextAgreed: true };
   return administration;
 }

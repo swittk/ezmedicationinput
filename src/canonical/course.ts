@@ -12,6 +12,8 @@
  * adapters serialize those fields and preserve unrelated source metadata.
  */
 import { convertValue } from "../utils/units";
+import { AdviceArgumentRole, AdvicePolarity } from "../types";
+import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
   CanonicalSigClause,
   CanonicalActivityTimingExpr,
@@ -402,4 +404,27 @@ export function compareRegimenPositions(
   const rightMin = right.unit === 'mo' ? right.value * 28 : right.value;
   const rightMax = right.unit === 'mo' ? right.value * 31 : right.value;
   return leftMax < rightMin ? -1 : rightMax < leftMin ? 1 : undefined;
+}
+
+/** Text and foreign Element metadata alone do not establish clinical facts
+ * that can replace an authored instruction with a generated preview. */
+export function administrationHasAmountFacts(a: Pick<CanonicalAdministration, "amounts" | "additionalInstructions">): boolean {
+  for (const amount of a.amounts ?? [])
+    if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
+        amount.range?.high?.value !== undefined || amount.expression || amount.rate?.value !== undefined ||
+        amount.rateRange?.low?.value !== undefined || amount.rateRange?.high?.value !== undefined ||
+        amount.rateRatio?.numerator?.value !== undefined || amount.rateRatio?.denominator?.value !== undefined ||
+        amount.rateExpression) return true;
+  // Coded qualitative amounts use the same typed administration templates
+  // as clause realization. Unrelated advice cannot replace source-only dose
+  // wording, and opaque text never supplies an amount here.
+  for (const instruction of a.additionalInstructions ?? []) for (const coding of instruction.coding ?? []) {
+    if (!coding.code) continue;
+    const frames = buildAdditionalInstructionFramesFromCoding(coding.system ?? "http://snomed.info/sct", coding.code);
+    for (const frame of frames ?? []) {
+      if (frame.predicate.semanticClass !== "administration" || frame.polarity === AdvicePolarity.Negate) continue;
+      for (const argument of frame.args) if (argument.role === AdviceArgumentRole.Amount) return true;
+    }
+  }
+  return false;
 }

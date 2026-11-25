@@ -1481,14 +1481,14 @@ export function retainedSourceProjectionFingerprint(dosage: FhirDosage | EzDosag
 }
 /** Prior wording agreement is narrower than accepting a newly edited text. */
 export function dosageHasAgreedSourceText(
-  dosage: FhirDosage | EzDosage | FhirR6Dosage, currentProjectionMatches?: boolean
+  dosage: FhirDosage | EzDosage | FhirR6Dosage
 ): boolean {
   const agreement = getDosageSourceTextAgreement(dosage, false);
   if (agreement === false) return false;
   const text = getDosageSourceTextFingerprint(dosage);
   return text !== undefined && text === dosageTextFingerprint(dosage) &&
     getDosageSourceProjectionFingerprint(dosage) !== undefined &&
-    (agreement === true || (currentProjectionMatches ?? dosageMatchesSavedProjection(dosage)) === true);
+    (agreement === true || dosageMatchesSavedProjection(dosage) === true);
 }
 export function getDosageSourceTextAgreement(
   dosage: Pick<FhirR6Dosage, "extension" | "text">, acceptTextEdits = true
@@ -1721,16 +1721,18 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     const rowAgreement = original?.sourceAgreement ?? sourceAgreement;
     const currentText = dosageTextFingerprint(row);
     const sourceText = original?.textFingerprint ?? currentText;
-    const priorProjection = original?.projectionFingerprint ??
-      (rowAgreement && dosageHasAgreedSourceText(row) ? getDosageSourceProjectionFingerprint(row) : undefined);
-    const localReplay = row.text !== undefined && Boolean(original?.sourceTextAgreed || priorProjection || row.maxDosePerPeriod?.length ||
+    const sourceTextAgreed = original?.sourceTextAgreed || rowAgreement && dosageHasAgreedSourceText(row);
+    // The final producer establishes its current row baseline. Only an imported
+    // native source can explicitly retain an older clinical agreement.
+    const priorProjection = original?.projectionFingerprint;
+    const localReplay = row.text !== undefined && Boolean(sourceTextAgreed || row.maxDosePerPeriod?.length ||
       row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety ||
       getTimingClocks(row.timing?.repeat)?.length);
     const baseline: FhirExtension[] = [{ url: "textFingerprint", valueString: currentText }];
     // Preserve explicit established agreement even when the header has the
     // same default; legacy implicit agreement requires a current clinical match.
     if (instruction !== undefined && (rowAgreement !== sourceAgreement || rowAgreement &&
-        (original?.sourceTextAgreed || priorProjection && getDosageSourceTextAgreement(row, false) === true)))
+        (original?.sourceTextAgreed || sourceTextAgreed && getDosageSourceTextAgreement(row, false) === true)))
       baseline.push({ url: "sourceAgreement", valueBoolean: rowAgreement });
     const local = row.text !== undefined && (!rowAgreement || !sourceAgreement || localReplay) &&
       (index > 0 || instruction === undefined);

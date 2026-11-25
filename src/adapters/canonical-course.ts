@@ -36,6 +36,7 @@ import type {
   FhirR6Extension,
   FormatOptions,
 } from "../types";
+import { administrationHasAmountFacts } from "../canonical/course";
 import type {
   CanonicalMeasure,
   CanonicalAmount,
@@ -1894,10 +1895,12 @@ function administrationToWire(
   // a projected component copied from an earlier edited source. Remove only
   // recognized old baselines; native course provenance retains their history.
   const priorExtensions = output.extension as FhirExtension[] | undefined;
+  let projectedGraph = false;
   if (priorExtensions) {
     let kept: FhirExtension[] | undefined;
     for (let i = 0; i < priorExtensions.length; i++) {
       const e = priorExtensions[i];
+      if (e.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL) projectedGraph = true;
       if (isRenderedInstructionMarker(e) || isSourceAgreementMarker(e)) {
         if (!kept) kept = priorExtensions.slice(0, i);
         if (hasUnrecognizedEditMetadata(e))
@@ -1908,20 +1911,22 @@ function administrationToWire(
   }
   let agreedSourceFields: FhirExtension[] | undefined;
   if (target === "r6") {
+    const agreedGraphText = a.provenance?.sourceTextAgreed === true && projectedGraph &&
+      !administrationHasAmountFacts(a);
     const clocks = a.provenance?.sourceHasStructuredClocks ??
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.clocks?.length) : undefined);
     const events = a.provenance?.sourceHasStructuredEvents ??
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
     const site = a.provenance?.sourceHasStructuredSite ??
       (clause?.instructionGraph ? Boolean(a.target || a.siteReference) : undefined);
-    if (clocks !== undefined || events !== undefined || site !== undefined || a.provenance?.sourceTextAgreed) {
+    if (clocks !== undefined || events !== undefined || site !== undefined || agreedGraphText) {
       // R6 current-source replay remains unverified. Preserve an established
       // component-text baseline independently of the primary-field evidence
       // that distinguishes deletions from independent graph facts.
-      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: a.provenance?.sourceTextAgreed === true }];
-      if (a.provenance?.sourceTextAgreed && a.text !== undefined) {
+      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: agreedGraphText }];
+      if (agreedGraphText && a.text !== undefined) {
         agreedSourceFields = fields;
-        fields.push({ url: "textFingerprint", valueString: getDosageSourceTextFingerprint(a.provenance.data) ?? dosageTextFingerprint({ text: a.text }) });
+        fields.push({ url: "textFingerprint", valueString: getDosageSourceTextFingerprint(a.provenance!.data) ?? dosageTextFingerprint({ text: a.text }) });
       }
       if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
       if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });

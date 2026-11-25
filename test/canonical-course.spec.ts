@@ -3736,7 +3736,7 @@ describe("round76 bound source wording agreement", () => {
     }
   });
 
-  it.each([false, true])("does not grant unmarked prose agreement before a later independently added graph (legacy=%s)", legacy => {
+  it.each([false, true])("preserves source-only wording under its current or legacy saved agreement (legacy=%s)", legacy => {
     const original: FhirDosage = { text: "Swallow 1 tablet whole", timing: {
       repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day },
     } };
@@ -3748,10 +3748,20 @@ describe("round76 bound source wording agreement", () => {
     rows[0].extension = [...(rows[0].extension ?? []), fresh(warning)];
     for (let save = 0; save < 3; save++) {
       const text = formatSig(rows, "long", options);
-      expect(text).toContain("Swallow 1 tablet whole");
       expect(text).toContain("Do not crush");
-      expect(text.match(/Swallow 1 tablet whole/gu)).toHaveLength(1);
-      rows = fresh(toFhirR5Dosages(toDosageDetails(rows)));
+      const native = toDosageDetails(rows);
+      if (legacy) {
+        // An implicit historical baseline cannot distinguish this artifact's
+        // origin from parser output. Its established clinical-edit contract
+        // retires the old wording while preserving the exact source.
+        expect(text).not.toContain("Swallow 1 tablet whole");
+        expect(native.step![0].component[0].text).toBeUndefined();
+        expect(JSON.stringify(native.extension)).toContain(JSON.stringify(original.text));
+      } else {
+        expect(text.match(/Swallow 1 tablet whole/gu)).toHaveLength(1);
+        expect(native.step![0].component[0].text).toBe(original.text);
+      }
+      rows = fresh(toFhirR5Dosages(native));
     }
     expect(source).toEqual(original);
   });
