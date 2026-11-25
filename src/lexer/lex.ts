@@ -324,6 +324,13 @@ function tryNumericRangeToken(
   const hyphen = surfaces[index + 1];
   const end = surfaces[index + 2];
 
+  // A spaced left endpoint may be followed by a dash attached to its right
+  // endpoint. It is the same bounded range as three separate surface tokens.
+  if (isSurfaceText(start) && isNumericText(start.lower) && isSurfaceText(hyphen) &&
+      /^[-–—]/u.test(hyphen.lower) && isNumericText(hyphen.lower.slice(1))) {
+    return { token: buildToken(start.original + hyphen.original, [start, hyphen], input,
+      undefined, undefined, true), nextIndex: index + 2 };
+  }
   if (
     !isSurfaceText(start) ||
     !hyphen ||

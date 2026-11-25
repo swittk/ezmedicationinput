@@ -5457,3 +5457,39 @@ it.each([false, true])("round76 retains every saved point Time and its explicit 
       directional ? time === "08:00" ? AdviceRelation.Before : AdviceRelation.After : undefined]));
   expect(JSON.stringify(row)).toBe(before);
 });
+
+
+describe("scoped action conditions and independent complements", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([false, true])("keeps a saved target-indexed condition with source offsets=%s", withSpan => {
+    const condition = "if able to swallow", source = condition + ", Swallow 1 tablet whole";
+    const frame = parseInstructionActions("Swallow 1 tablet whole", condition.length + 2)[0];
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame],
+      primaryAdministrationSpan: frame.span,
+      relations: [{ kind: AdviceRelation.If, toActionIndex: 0, text: condition,
+        ...(withSpan ? { span: { start: 0, end: condition.length } } : {}) }] })!;
+    const graph = parseInstructionGraphExtension([fresh(marker)])!;
+    expect(graph.relations?.[0].span).toEqual(withSpan ? { start: 0, end: condition.length } : undefined);
+    for (const locale of ["en", "th"]) expect(realizeInstructionGraph(graph, locale)).toContain(condition);
+    const row: FhirDosage = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      extension: [fresh(marker)] };
+    const r6 = toDosageDetails([fresh(row)]);
+    for (const input of [fresh([row]), fresh(r6), fresh(toFhirR5Dosages(fresh(r6)))])
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase()).toContain(condition);
+  });
+
+  it.each(["breakfast", "08:00"])("retains a dilution destination after the temporal complement %s", event => {
+    const source = "Dilute 1 mL with saline before " + event + " to 10 mL";
+    const parsed = parsePublicSig(source), frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: [frame] })!;
+    for (const action of [frame, parseInstructionGraphExtension([fresh(marker)])!.actions[0]]) {
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Amount,
+        quantity: expect.objectContaining({ value: 1, unit: "mL" }) }));
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Destination,
+        relation: AdviceRelation.To, quantity: expect.objectContaining({ value: 10, unit: "mL" }) }));
+      expect(action.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, relation: AdviceRelation.Before }));
+      expect(realizeInstructionAction(action, "en")).toContain("10 mL");
+    }
+    expect(parsed.longText).toContain("10 mL");
+  });
+});

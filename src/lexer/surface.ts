@@ -83,6 +83,10 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   if (char !== ".") return false;
   const before = index > 0 ? input[index - 1] : "";
   const after = index + 1 < input.length ? input[index + 1] : "";
+  let rangeLeft = index - 2;
+  if (/[-–—]/u.test(before)) {
+    while (rangeLeft >= 0 && (input[rangeLeft] === " " || input[rangeLeft] === "\t")) rangeLeft--;
+  }
   // Keep decimal points inside numeric tokens (e.g. 1.5 mL, .5 tab,
   // or a directly prefixed '~.1mcg/kg/min' / '@.5 mL/h'). Breaking the prefix changes
   // 0.1 into 1, a tenfold dose error. This is a lexical boundary, not a
@@ -92,7 +96,7 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
         before === "/" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
         before === "<" || before === ">" ||
-        /[-–—]/u.test(before) && index >= 2 && /[0-9๐-๙]/u.test(input[index - 2]) ||
+        /[-–—]/u.test(before) && rangeLeft >= 0 && /[0-9๐-๙]/u.test(input[rangeLeft]) ||
         before === "=" && index >= 2 && /[<>]/u.test(input[index - 2]))) {
     return false;
   }

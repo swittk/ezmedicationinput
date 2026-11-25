@@ -825,6 +825,11 @@
       "than"
     ],
     [
+      "no",
+      "greater",
+      "than"
+    ],
+    [
       "ไม่",
       "เกิน"
     ]
@@ -1350,6 +1355,8 @@
     "to",
     "through",
     "-",
+    "–",
+    "—",
     "ถึง"
   ],
   "eventOffsetMinimumLeadSequences": [

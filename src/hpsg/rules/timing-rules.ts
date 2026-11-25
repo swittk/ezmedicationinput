@@ -77,6 +77,7 @@ import {
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
   MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   OCCURRENCE_COUNT_WORDS,
   OCCURRENCE_COUNT_MODIFIERS,
   RANGE_CONNECTORS,
@@ -2639,7 +2640,8 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const { tokens: matched, amount, unit, period } = maximum;
     const rateHead = period.unitDenominator && !("daypart" in period) &&
       clinicalRatePeriodUnit(period.periodUnit) && volumeOrMassTerm(amount, unit)
-      ? clinicalRateHeadAt(context, start, start + matched.length, true) : undefined;
+      ? clinicalRateHeadAt(context, start, start + matched.length,
+          !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[start]))) : undefined;
     // The earlier clinical quantity rule already owns a licensed rate, including
     // its external AT marker. That same constituent cannot also be a dose cap.
     for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? start) ?? [])

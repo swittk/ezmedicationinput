@@ -4246,7 +4246,8 @@ describe("round76 lexical quantity ownership", () => {
     });
 
   it.each(["Take .25-.5 mg daily", "Take .25–.5 mg daily", "Take .25—.5 mg daily",
-    "Take .25-0.5 mg daily", "รับประทาน .25-.5 มิลลิกรัม วันละครั้ง"])(
+    "Take .25-0.5 mg daily", "Take .25 -.5 mg daily", "รับประทาน .25-.5 มิลลิกรัม วันละครั้ง",
+    "รับประทาน .๒๕–.๕มิลลิกรัม วันละครั้ง"])(
     "keeps both leading-decimal range endpoints: %s", source => {
       const parsed = parsePublicSig(source);
       expect(parsed.meta.canonical.clauses).toHaveLength(1);
@@ -4447,5 +4448,33 @@ describe("round80 dated single-administration duration ownership", () => {
       expect(input).toEqual(before);
     }
     expect(toFhirR5Dosages(r6)[0].extension).toContainEqual(note);
+  });
+});
+
+
+describe("qualified maximum and omitted-unit ownership", () => {
+  it.each([
+    ["Infuse 100 mL, no greater than 50 mL over 1 hour", 100, "mL", 50, 1],
+    ["Give 5 mg IV, maximum 10 mg per 2 hours", 5, "mg", 10, 2],
+  ] as const)("keeps the administered amount and cumulative limit distinct: %s", (source, dose, unit, cap, period) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: dose, unit });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: cap, unit, period, periodUnit: "h" }]);
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: dose, unit });
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: cap, unit }, denominator: { value: period, unit: "h" } }
+      ]);
+    }
+  });
+
+  it.each(["after", "in"])("keeps approximation on an omitted-unit dose %s a measured interval", lead => {
+    const parsed = parsePublicSig("Take 1 tablet now, then about 2 " + lead + " 6 hours");
+    expect(parsed.meta.canonical.clauses[1].dose).toEqual({ value: 2, unit: "tab", comparator: "~" });
+    expect(parsed.meta.canonical.clauses[1].schedule?.administrationOffsetMinutes).toBe(360);
+    expectSimpleQuantityOperator(parsed.fhirNext.step[1].component[0].doseAndRate?.[0].doseQuantity, "~");
   });
 });

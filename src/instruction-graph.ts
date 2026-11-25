@@ -1231,24 +1231,23 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
   let targetRelation = relation;
   let tailRelationIndex: number | undefined;
   while (targetIndex >= 0 && targetIndex + 1 < targetEnd) {
-    // The first complement can already be a complete clock daughter.
-    const clock = relationHasGrammarFeature(targetRelation, "timeComplement")
-      ? clockArgumentFromParts(parts, targetIndex + 1, targetEnd, input) : undefined;
-    if (!clock && targetIndex !== relIndex && relationHasSemanticClass(targetRelation, "temporal")) {
-      tailRelationIndex = targetIndex;
-      break;
-    }
-    if (clock) {
-      // This bounded clock is already owned here; later complements remain
-      // available to the same valence instead of joining a temporal tail.
-      tailRelationIndex = -1;
+    const temporal = relationHasSemanticClass(targetRelation, "temporal");
+    const times = relationHasGrammarFeature(targetRelation, "timeComplement")
+      ? timeArgumentsFromParts(parts, targetIndex + 1, targetEnd, input, offset, targetRelation) : undefined;
+    if (temporal) tailRelationIndex = -1;
+    if (times) {
+      // Each bounded clock or event remains with this action while later
+      // complements retain their independent relation and quantity.
       const bounds = semanticArgumentBounds(parts, targetIndex + 1, targetEnd);
       const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
-      pushArgument(args, { ...clock, relation: targetRelation,
-        ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {}) });
+      for (const time of times) pushArgument(args, { ...time, relation: time.relation ?? targetRelation,
+        span: time.span ?? (first && last ? { start: offset + first.sourceStart, end: offset + last.sourceEnd } : undefined) });
     } else {
+      const role = !temporal ? AdviceArgumentRole.Destination
+        : targetRelation === AdviceRelation.Until ? AdviceArgumentRole.Result
+        : relationHasGrammarFeature(targetRelation, "activityFallback") ? AdviceArgumentRole.Activity : AdviceArgumentRole.Time;
       const nominal = argumentFromParts(
-        parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
+        parts, targetIndex + 1, targetEnd, input, role, options
       );
       const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
         nominal?.role ?? AdviceArgumentRole.Destination, options);
@@ -5166,7 +5165,7 @@ function instructionGraphCondition(
   relation: CanonicalInstructionRelation, target: AdviceFrame,
   sourceLocale: string, targetLocale: string
 ): InstructionGraphPrimaryCondition | undefined {
-  if (!relation.text || !relation.span) return undefined;
+  if (!relation.text) return undefined;
   const normalizedRelation = normalizedInstructionSurface(relation.text);
   const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
     const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
@@ -5177,8 +5176,8 @@ function instructionGraphCondition(
   const text = localizeConditionRelationText(relation, sourceLocale, targetLocale);
   return text ? {
     text,
-    position: relation.span.end <= target.span.start ? "pre" : "post",
-    start: relation.span.start,
+    position: relation.span && relation.span.end <= target.span.start ? "pre" : "post",
+    start: relation.span?.start ?? target.span.end,
     imperative: !target.modality && target.polarity !== AdvicePolarity.Negate
   } : undefined;
 }
@@ -5409,7 +5408,7 @@ export function realizeInstructionGraph(
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex !== undefined || relation.toActionIndex === undefined) continue;
     const target = conditionTargets.get(relation.toActionIndex);
-    if (!target || !relation.text || !relation.span ||
+    if (!target || !relation.text || relation.span &&
         !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
     const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale);
     if (!condition) continue;
@@ -5424,8 +5423,13 @@ export function realizeInstructionGraph(
         relationHasGrammarFeature(relation.kind, "conditionScope")) {
       options.primaryConditions.push({
         ...condition,
-        position: relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"
+        position: relation.span && relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"
       });
+      continue;
+    }
+    if (!relation.span) {
+      const targetNode = nodes.find(node => node.actionIndex === relation.toActionIndex);
+      if (targetNode) targetNode.text += localeAdapter.postposedCondition(condition.text);
       continue;
     }
     nodes.push({

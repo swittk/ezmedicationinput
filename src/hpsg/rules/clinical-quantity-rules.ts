@@ -3,7 +3,7 @@ import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
-import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
+import { HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower } from "../rule-context";
 import { FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
@@ -20,6 +20,7 @@ import {
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   SITE_TRAILING_INSTRUCTION_WORDS
 } from "../lexical-classes";
 import {
@@ -619,7 +620,9 @@ export function clinicalRateHeadAt(
   const next = context.tokens[end];
   const after = next?.original === "," ? context.tokens[end + 1] : next;
   return { marker, licensed: marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
-    getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
+    // An explicit maximum cannot borrow the preceding dose's route.
+    getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] &&
+      !MAXIMUM_COUNT_LEAD_TOKENS.has(normalizeTokenLower(context.tokens[phraseStart])) ||
     getRouteMeaning(after)?.code === RouteCode["Intravenous route"] ||
     hasAdministrationCue(context, phraseStart, allowPrecedingDose) };
 }
@@ -810,6 +813,10 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[quantityEnd + 1]))) quantityEnd++;
   }
   const comparator = qualified?.comparator;
+  // A complete cumulative maximum owns its elapsed period. Its amount must
+  // not become a competing volume-over-time administration.
+  const maximum = qualified && maximumDosePerPeriodAt(context, phraseStart);
+  if (maximum && !maximum.period.unitDenominator) return [];
   const activeInCarrier = qualifyClinicalSign(context, phraseStart, quantityEnd,
     activeDoseInCarrierOverTime(context, quantityEnd, value, unit, phraseStart, rangedNumber?.range), comparator);
   const volume = activeInCarrier ?? (rangedNumber ? undefined : qualifyClinicalSign(context, phraseStart, quantityEnd,

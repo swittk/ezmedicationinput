@@ -1,5 +1,5 @@
 import lexicalClasses from "../lexical-classes.json";
-import { timingLexicalRule, timeOfDayRule, isScheduleLead } from "./timing-rules";
+import { timingLexicalRule, timeOfDayRule, isScheduleLead, countAndDurationRule } from "./timing-rules";
 import {
   DEFAULT_BODY_SITE_SNOMED,
   DEFAULT_ROUTE_SYNONYMS,
@@ -1130,6 +1130,9 @@ function comparativeDoseAt(
     const nextDayLead = nextDay && tokensAvailable(context, numericIndex + 1, nextDay.tokenEnd - numericIndex - 1);
     if (!weekdayLead && !nextDayLead && !isScheduleLead(context, numericIndex + 1) &&
         !timingLexicalRule().match(context, numericIndex + 1).some(sign => sign.synsem.head.schedule?.timingReference === "previous") &&
+        !(normalizeTokenLower(next) === AdviceRelation.After &&
+          countAndDurationRule().match(context, numericIndex + 1).some(sign =>
+            sign.synsem.head.schedule?.administrationOffsetMinutes !== undefined)) &&
         !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;
