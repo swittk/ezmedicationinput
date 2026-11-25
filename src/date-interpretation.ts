@@ -98,7 +98,7 @@ export function registerMedicationDateResolver(resolver: MedicationDateResolver)
   normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear;
   normalized.id = id;
   const prototype = Object.getPrototypeOf(resolver);
-  if (prototype !== Object.prototype && prototype !== null) {
+  if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
     // Class callbacks retain prototype helpers and private state even when
     // the constructor exposes them as own properties.
     normalized.resolveYear = resolver.resolveYear.bind(resolver);

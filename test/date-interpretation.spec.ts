@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { calculateTotalUnits, findMedicationDateListSpans, formatSig, listMedicationDateResolvers, fromFhirDosage, nextDueDoses, parseSig as parseBatch, registerMedicationDateResolver } from "../src/index";
 import { canonicalToFhir, canonicalFromFhir } from "../src/fhir";
@@ -1695,4 +1696,31 @@ it.each([false, true])("round74 retains own calendar callback receivers (enumera
     expect(parsed.fhir[0].timing?.event).toEqual(["2026-09-28"]);
     expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
   }
+});
+
+
+it("round79 uses the normalized descriptor for a cross-realm plain date resolver", () => {
+  const resolver = runInNewContext(`({
+    id: " Round79-Cross-Realm-Calendar ",
+    resolveYear(year, digits) {
+      return this.id === "round79-cross-realm-calendar" && digits === 4 && year >= 3000
+        ? { isoYear: year - 1000, calendarYear: year, inferredYear: false } : undefined;
+    },
+    calendarYearFromIsoYear(year) {
+      return this.id === "round79-cross-realm-calendar" ? year + 1000 : year;
+    }
+  })`);
+  const originalId = resolver.id;
+  registerMedicationDateResolver(resolver);
+  const options: ParseOptions = { datePolicy: {
+    calendars: ["round79-cross-realm-calendar"], referenceDate: REFERENCE_DATE
+  } };
+  for (const source of ["Take 1 tablet on 28/9/3026", "Take 1 tablet on 28/9"]) {
+    const parsed = parseBatch(source, options);
+    expect(parsed.meta.canonical.clauses[0].schedule?.calendarEvents?.[0])
+      .toMatchObject({ calendar: "round79-cross-realm-calendar", calendarYear: 3026, isoDate: "2026-09-28" });
+    expect(parsed.fhir[0].timing?.event).toEqual(["2026-09-28"]);
+    expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
+  }
+  expect(resolver.id).toBe(originalId);
 });
