@@ -1,5 +1,6 @@
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type ParseOptions } from "./types";
 import { TIMING_ABBREVIATIONS } from "./maps";
+import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
 
 /** Exact standard timing identities shared by native compilation and wire
  * projection. Local codes remain text unless this vocabulary recognizes them. */
@@ -16,11 +17,18 @@ export function isStandardTimingCoding(coding: { system?: string; code?: string 
     FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()));
 }
 
+/** Existing compact interval vocabulary applies to text and systemless codes. */
+export function isCompactIntervalTimingCode(code: string): boolean {
+  const interval = /^q[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?([a-z]+)$/iu.exec(code);
+  return Boolean(interval && INTERVAL_UNIT_TOKENS_DATA.has(interval[1].toLowerCase()));
+}
+
 /** Existing clinical preview abbreviations include shorthand such as QHS
  * that is not emitted as a standard FHIR code. Foreign systems stay opaque. */
 export function isPreviewTimingCoding(coding: { system?: string; code?: string } | undefined): boolean {
   return Boolean(coding?.code && (!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) &&
-    (FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()) || TIMING_ABBREVIATIONS[coding.code.toLowerCase()]));
+    (FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()) || TIMING_ABBREVIATIONS[coding.code.toLowerCase()] ||
+      isCompactIntervalTimingCode(coding.code)));
 }
 
 /** Prefer an understood cadence over a local translation without changing

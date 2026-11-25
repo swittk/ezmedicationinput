@@ -2055,8 +2055,8 @@ function describeAdministrationDurationThai(
     const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
     const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
     if (low && high) return short ? "นาน" + low + "-" + high : prefix + " " + low + " ถึง " + high;
-    if (high) return short ? "นาน" + (range.high?.comparator ? "" : "<=") + high : prefix + " " + (range.high?.comparator ? "" : "ไม่เกิน ") + high;
-    if (low) return short ? "นาน" + (range.low?.comparator ? "" : ">=") + low : prefix + " " + (range.low?.comparator ? "" : "อย่างน้อย ") + low;
+    if (high) return short ? "นาน" + (range.high?.comparator && range.high.comparator !== "~" ? "" : "<=") + high : prefix + " " + (range.high?.comparator && range.high.comparator !== "~" ? "" : "ไม่เกิน ") + high;
+    if (low) return short ? "นาน" + (range.low?.comparator && range.low.comparator !== "~" ? "" : ">=") + low : prefix + " " + (range.low?.comparator && range.low.comparator !== "~" ? "" : "อย่างน้อย ") + low;
     return undefined;
   }
   const value = schedule?.administrationDuration;

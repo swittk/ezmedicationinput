@@ -42,7 +42,7 @@ export const THAI_COURSE: CourseLanguage = {
   rateLabel: "อัตราการให้ยา: ",
   rateRangeLabel: "ช่วงอัตราการให้ยา: ",
   unspecified: "ไม่ระบุค่า",
-  withAuthoredDirections: (current, source) => "ปัจจุบัน: " + current + "; ข้อความเดิม: " + source,
+  withAuthoredDirections: (current, source) => (current.startsWith("ปัจจุบัน: ") ? current : "ปัจจุบัน: " + current) + "; ข้อความเดิม: " + source,
   treatmentStart: "เริ่มการรักษา",
   cycleStart: "จุดเริ่มต้นของแต่ละรอบ",
   incompleteInterpretation: "ข้อมูลบางส่วนเท่านั้น — ต้องตรวจสอบข้อจำกัดการใช้ยา",

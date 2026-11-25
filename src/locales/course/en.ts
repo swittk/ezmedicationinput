@@ -43,7 +43,7 @@ export const ENGLISH_COURSE: CourseLanguage = {
   rateLabel: "Rate: ",
   rateRangeLabel: "Rate range: ",
   unspecified: "unspecified",
-  withAuthoredDirections: (current, source) => "Current: " + current + "; original directions: " + source,
+  withAuthoredDirections: (current, source) => (current.startsWith("Current: ") ? current : "Current: " + current) + "; original directions: " + source,
   treatmentStart: "treatment start",
   cycleStart: "each cycle start",
   incompleteInterpretation: "INCOMPLETE medication interpretation — safety restrictions require review",

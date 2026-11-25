@@ -200,7 +200,7 @@ describe("published package entrypoints", () => {
     );
     expect(result.currentText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
     expect(result.roundTripText?.split("; ข้อความเดิม: ")[0])
-      .toBe("ปัจจุบัน: ปัจจุบัน: หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา");
+      .toBe("ปัจจุบัน: หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา");
     expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
     expect(result.originalComponentText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
     expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalComponentText);

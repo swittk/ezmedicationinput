@@ -408,13 +408,16 @@ export function compareRegimenPositions(
 
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
-export function administrationHasAmountFacts(a: Pick<CanonicalAdministration, "amounts" | "additionalInstructions">): boolean {
+export function administrationHasAmountFacts(
+  a: Pick<CanonicalAdministration, "amounts" | "additionalInstructions">,
+  includeRates = true
+): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
-        amount.range?.high?.value !== undefined || amount.expression || amount.rate?.value !== undefined ||
-        amount.rateRange?.low?.value !== undefined || amount.rateRange?.high?.value !== undefined ||
-        amount.rateRatio?.numerator?.value !== undefined || amount.rateRatio?.denominator?.value !== undefined ||
-        amount.rateExpression) return true;
+        amount.range?.high?.value !== undefined || amount.expression || includeRates && (
+          amount.rate?.value !== undefined || amount.rateRange?.low?.value !== undefined ||
+          amount.rateRange?.high?.value !== undefined || amount.rateRatio?.numerator?.value !== undefined ||
+          amount.rateExpression)) return true;
   // Coded qualitative amounts use the same typed administration templates
   // as clause realization. Unrelated advice cannot replace source-only dose
   // wording, and opaque text never supplies an amount here.

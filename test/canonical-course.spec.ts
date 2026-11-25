@@ -13,7 +13,7 @@ import {
   fromFhirDosage,
   formatSig, formatSigBatch, setDosageAlternativeChoice,
 
-  projectCanonicalCourse,
+  projectCanonicalCourse, importCanonicalCourse,
   toFhirR5Dosages,
   toDosageDetails,
 } from "../src/index";
@@ -21,7 +21,7 @@ import { formatCanonicalCourse, formatCanonicalAdministration,
   appendMedicationConditionText, appendMedicationExcludedWeekdaysText } from "../src/canonical/format-course";
 import { clauseForAdministration, courseFromAdministrations, administrationFromClause } from "../src/canonical/compile";
 import {
-  TIMING_DAY_OF_MONTH_EXTENSION_URL,
+  TIMING_DAY_OF_MONTH_EXTENSION_URL, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
   TIMING_WEEKDAY_ORDINAL_EXTENSION_URL,
   TIMING_CLOCK_WINDOW_EXTENSION_URL,
   TIMING_EVENT_WINDOW_EXTENSION_URL, ANCHORED_COURSE_DURATION_EXTENSION_URL,
@@ -3444,6 +3444,7 @@ describe("round64 independent endpoint and authored direction ownership", () => 
       : field === "rateRatio" ? /(?:^|[^\d.])5 mL \/ 1 h\b/u
       : /(?:^|[^\d.])5–10 mL\/h\b/u;
     expect(text).toMatch(completeRate);
+    expect(text).toContain("Infuse over 30 minutes");
     const saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(valued))));
     expect(saved.step![0].component[0].text).toBe("Infuse over 30 minutes");
     const replaced: FhirR6DosageInstruction = { step: [{ component: [{
@@ -3794,5 +3795,86 @@ describe("round76 bound source wording agreement", () => {
     const text = formatSig(current, "long", options);
     expect(text).toContain("Swallow 1 tablet whole");
     expect(text).toContain("Do not crush");
+  });
+});
+
+
+describe("round78 current clinical facts and retained directions", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const options = { locale: "en", realizationMode: "normalized" as const };
+  const dose = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] };
+
+  it("keeps the authored amount beside a ratio with only a measured denominator", () => {
+    const header = "Infuse 25 mL per hour";
+    const raw: FhirR6DosageInstruction = { renderedInstruction: header, step: [{ component: [{
+      doseAndRate: [{ rateRatio: { numerator: { id: "unvalued-dose", _value: { extension: [{
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+      }] } }, denominator: { value: 1, unit: "h" } } }],
+    }] }] };
+    for (const input of [raw, fresh(toFhirR5Dosages(raw)), fresh(toDosageDetails(fresh(toFhirR5Dosages(raw))))]) {
+      expect(formatSig(input, "long", options)).toContain(header);
+      const native = importCanonicalCourse(input);
+      const ratio = native.stages[0].administrations[0].amounts![0].rateRatio!;
+      expect(ratio.numerator!.value).toBeUndefined();
+      expect(ratio.numerator!.id).toBe("unvalued-dose");
+      expect(ratio.denominator).toEqual({ value: 1, unit: "h" });
+    }
+  });
+
+  it.each(["literal", "month-day"] as const)("renders rate-only %s timing in both styles", kind => {
+    const timing = kind === "literal" ? { code: { coding: [{ system: "urn:clinic:timing", code: "dialysis", display: "after dialysis" }] } }
+      : { repeat: { extension: [{ url: TIMING_DAY_OF_MONTH_EXTENSION_URL, valuePositiveInt: 15 }] } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }], timing,
+    }] }] };
+    for (const input of [raw, fresh(toFhirR5Dosages(raw)), fresh(toDosageDetails(fresh(toFhirR5Dosages(raw))))]) {
+      for (const style of ["long", "short"] as const) {
+        const text = formatSig(input, style, options);
+        expect(text).toContain("5 mL/h");
+        expect(text).toContain(kind === "literal" ? "after dialysis" : "15");
+      }
+    }
+  });
+
+  it.each(["coding", "text", "foreign"] as const)("keeps edited hourly cadence authoritative over %s timing", kind => {
+    const code = kind === "text" ? { text: "Q30MIN" } : { coding: [{ code: "Q30MIN",
+      ...(kind === "foreign" ? { system: "urn:clinic:timing" } : {}) }] };
+    const row: FhirDosage = { ...dose, timing: { code, repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Hour } } };
+    const wire = toDosageDetails([fresh(row)]);
+    for (const input of [[row], wire, fresh(toFhirR5Dosages(wire))]) {
+      const text = formatSig(input, "long", options);
+      expect(text).toMatch(/every (?:1 )?hour/u);
+      expect(text.includes("Q30MIN")).toBe(kind === "foreign");
+    }
+    expect(toFhirR5Dosages(fresh(wire))[0].timing!.code).toEqual(code);
+  });
+
+  it.each(["standard first", "local first", "foreign only"] as const)("reads Boolean condition coding by identity: %s", order => {
+    const standard = { system: "http://hl7.org/fhir/CodeSystem/dosage-condition-code", code: "problem-presents" };
+    const local = { system: "urn:clinic:condition", code: order === "foreign only" ? "problem-presents" : "rash-present" };
+    const coding = order === "standard first" ? [standard, local] : order === "local first" ? [local, standard] : [local];
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...dose, condition: [{
+      code: { coding }, details: { text: "Rash" }, operation: "ne", valueBoolean: true,
+    }] }] }] };
+    const predicate = courseFromR6(raw).stages[0].administrations[0].predicate;
+    expect(predicate).toEqual(order === "foreign only" ? { kind: "text", text: "Rash" }
+      : { kind: "state", name: "Rash", expected: false, text: "Rash" });
+    expect(toDosageDetails(fresh(toFhirR5Dosages(raw))).step![0].component[0].condition![0].code!.coding).toEqual(coding);
+  });
+
+  it.each(["low", "high"] as const)("retains an approximate administration-duration %s bound", side => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ ...dose, timing: { repeat: { extension: [{
+      url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueRange: { [side]: {
+        value: 2, unit: "h", system: "http://unitsofmeasure.org", code: "h", extension: [{
+          url: EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
+          valueCoding: { system: EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
+        }],
+      } },
+    }] } } }] }] };
+    for (const input of [raw, fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { ...options, locale });
+      expect(text).toContain(locale === "en" ? side === "low" ? "at least" : "up to" : side === "low" ? "อย่างน้อย" : "ไม่เกิน");
+      expect(formatSig(input, "short", { ...options, locale })).toContain((side === "low" ? ">=" : "<=") + "~2h");
+    }
   });
 });

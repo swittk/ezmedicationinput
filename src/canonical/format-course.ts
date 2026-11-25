@@ -570,7 +570,14 @@ function administrationOwnsSourceDirections(
   graph: CanonicalSigClause["instructionGraph"],
   sourceText: string | undefined
 ): boolean {
-  if (administrationHasAmountFacts(administration)) return true;
+  const recurrence = administration.schedule?.recurrence;
+  // A rate without an occurrence duration cannot replace authored infusion
+  // directions. Preserve that text as source without inferring a duration.
+  const rateHasDuration = recurrence?.occurrenceDuration !== undefined ||
+    recurrence?.occurrenceDurationMax !== undefined ||
+    recurrence?.occurrenceDurationRange?.low?.value !== undefined ||
+    recurrence?.occurrenceDurationRange?.high?.value !== undefined;
+  if (administrationHasAmountFacts(administration, rateHasDuration)) return true;
   if (!graph?.actions.length) return false;
   if (graph.primaryOwnership?.dose !== undefined) return true;
   return sourceText !== undefined && graph.coverage?.complete === true &&

@@ -1,5 +1,4 @@
 import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
-import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
 import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
@@ -65,7 +64,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
-  hourlyTimingPreviewPeriod,
+  hourlyTimingPreviewPeriod, isCompactIntervalTimingCode,
   TIMING_CODE_DAILY_FREQUENCIES,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
@@ -1167,8 +1166,8 @@ function describeAdministrationDuration(
     const low = range.low?.value !== undefined ? endpoint(range.low) : undefined;
     const high = range.high?.value !== undefined ? endpoint(range.high) : undefined;
     if (low && high) return short ? "over" + low + "-" + high : "over " + low + " to " + high;
-    if (high) return short ? "over" + (range.high?.comparator ? "" : "<=") + high : "over " + (range.high?.comparator ? "" : "up to ") + high;
-    if (low) return short ? "over" + (range.low?.comparator ? "" : ">=") + low : "over " + (range.low?.comparator ? "" : "at least ") + low;
+    if (high) return short ? "over" + (range.high?.comparator && range.high.comparator !== "~" ? "" : "<=") + high : "over " + (range.high?.comparator && range.high.comparator !== "~" ? "" : "up to ") + high;
+    if (low) return short ? "over" + (range.low?.comparator && range.low.comparator !== "~" ? "" : ">=") + low : "over " + (range.low?.comparator && range.low.comparator !== "~" ? "" : "at least ") + low;
     return undefined;
   }
   const value = schedule?.administrationDuration;
@@ -1235,8 +1234,7 @@ export function independentTimingText(
        recurrence.periodUnit !== undefined)) return undefined;
   // The existing compact interval family is cadence shorthand too, even
   // when a particular numeric interval has no static abbreviation entry.
-  const interval = /^q[0-9]+(?:\.[0-9]+)?(?:-[0-9]+(?:\.[0-9]+)?)?([a-z]+)$/iu.exec(code);
-  return interval && INTERVAL_UNIT_TOKENS_DATA.has(interval[1].toLowerCase()) ? undefined : code;
+  return isCompactIntervalTimingCode(code) ? undefined : code;
 }
 
 export function timingCodeMatchesRecurrence(

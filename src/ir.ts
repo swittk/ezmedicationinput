@@ -216,8 +216,8 @@ export function canonicalClauseHasAdministrationSemantics(clause: CanonicalSigCl
     Boolean(schedule.maxDosePerPeriod?.length) ||
     schedule.count !== undefined ||
     schedule.countMax !== undefined ||
-    schedule.timingCode ||
-    schedule.dayOfWeek?.length ||
+    schedule.timingCode || schedule.timingText?.trim() ||
+    schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.eventWindow || schedule.when?.length ||
     schedule.timeOfDay?.length ||
     schedule.calendarEvents?.length
