@@ -326,8 +326,8 @@ export function rateRangePreview(range: CanonicalRange): string | undefined {
       : lower + (loUnit ? " " + loUnit : "") + " – " + upper + (hiUnit ? " " + hiUnit : "");
   }
   return lower !== undefined
-    ? (lowComparator ? "" : ">=") + lower + (unit(low) ? " " + unit(low) : "")
-    : (highComparator ? "" : "<=") + upper + (unit(high) ? " " + unit(high) : "");
+    ? (lowComparator && lowComparator !== "~" ? "" : ">=") + lower + (unit(low) ? " " + unit(low) : "")
+    : (highComparator && highComparator !== "~" ? "" : "<=") + upper + (unit(high) ? " " + unit(high) : "");
 }
 
 export function prefersSourceInstruction(course: CanonicalCourse): boolean {

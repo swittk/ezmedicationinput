@@ -673,13 +673,14 @@ function conditionFromR6(value: FhirR6DosageCondition): MedicationCondition {
     if (isMedicationCondition(parsed)) return parsed;
     // The original extension remains attached when its meaning is unfamiliar.
   }
-  const name = value.details?.text ?? value.code?.text ?? value.code?.coding?.[0]?.display;
-  if (name && value.valueBoolean !== undefined &&
+  const problem = value.details?.text ?? value.details?.coding?.find(coding => coding.display)?.display;
+  const name = problem ?? value.code?.text ?? value.code?.coding?.[0]?.display;
+  if (problem && value.valueBoolean !== undefined &&
       (!value.operation || value.operation === "eq" || value.operation === "ne")) {
     for (const coding of value.code?.coding ?? []) {
       if (coding.code !== "problem-presents" || coding.system && coding.system !== CONDITION_CODE_SYSTEM) continue;
-      return { kind: "state", name, expected: value.operation === "ne" ? !value.valueBoolean : value.valueBoolean,
-        text: value.text ?? name };
+      return { kind: "state", name: problem, expected: value.operation === "ne" ? !value.valueBoolean : value.valueBoolean,
+        text: value.text ?? problem };
     }
   }
   if (value.valueQuantity?.value !== undefined && value.operation && name &&

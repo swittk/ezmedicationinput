@@ -7,7 +7,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
-  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition, FhirPeriodUnit,
+  calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition, FhirPeriodUnit, evaluateMedicationCondition,
   getDosageAlternativeChoice, importCanonicalCourse, projectCanonicalCourse, parseInstructionActions,
   type FhirDosage, type FhirR6DosageInstruction, type EzDosage, type FhirExtension
 } from "../src";
@@ -25,6 +25,7 @@ import { buildRegimenGraph } from "../src/regimen/regimen";
 import type { BoundaryPlan } from "../src/hpsg/signature";
 import type { HpsgSigSegment } from "../src/hpsg/segmenter";
 import { BODY_SITE_RESTRICTION_EXTENSION_URL } from "../src/fhir";
+import { BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL } from "../src/body-site-target";
 
 const beginning = "2026-10-19T08:00:00+07:00";
 const scheduler = {
@@ -2813,5 +2814,79 @@ describe("equivalent nebulizer presentation limits", () => {
     ]);
     expect(projectCanonicalCourse(importCanonicalCourse([input])).fhir[0].doseAndRate?.[0].doseQuantity)
       .toEqual({ value: 1, unit, system, code: "C71204" });
+  });
+});
+
+
+describe("independent clinical conditions and coded quantity meaning", () => {
+  const quantity = (value: number, unit: string) => ({
+    value, unit, system: "http://unitsofmeasure.org", code: unit,
+  });
+  const daily = { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } };
+
+  it("evaluates the coded problem rather than the generic condition-type label", () => {
+    const input: FhirR6DosageInstruction = {
+      step: [{ component: [{ timing: daily, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        condition: [{
+          code: { text: "Problem Presents", coding: [{
+            system: "http://hl7.org/fhir/CodeSystem/dosage-condition-code", code: "problem-presents",
+          }] },
+          details: { coding: [{ system: "http://snomed.info/sct", code: "422587007", display: "Nausea" }] },
+          operation: "ne", valueBoolean: true, text: "Only if nausea is absent",
+        }],
+      }] }],
+    };
+    const course = importCanonicalCourse(input);
+    const predicate = course.stages[0].administrations[0].predicate!;
+    expect(predicate).toMatchObject({ kind: "state", name: "Nausea", expected: false });
+    expect(evaluateMedicationCondition(predicate, { Nausea: false })).toBe(true);
+    expect(evaluateMedicationCondition(predicate, { Nausea: true })).toBe(false);
+    expect(formatSig(input)).toContain("only if not Nausea");
+    expect(projectCanonicalCourse(course).fhirNext.step[0].component[0].condition)
+      .toEqual(input.step[0].component[0].condition);
+  });
+
+  it.each([true, false])("uses the infusion ratio duration only without a separate upper duration (%s)", withUpper => {
+    const input: FhirDosage = {
+      ...(withUpper ? { timing: { repeat: { durationMax: 3, durationUnit: FhirPeriodUnit.Hour } } } : {}),
+      doseAndRate: [{ doseQuantity: quantity(120, "mL"), rateRatio: {
+        numerator: quantity(120, "mL"), denominator: simpleQuantityForR5({ ...quantity(2, "h"), comparator: "~" }),
+      } }],
+    };
+    const recurrence = importCanonicalCourse([input]).stages[0].administrations[0].schedule?.recurrence;
+    expect(recurrence?.occurrenceDuration).toBe(withUpper ? undefined : 2);
+    expect(recurrence?.occurrenceDurationMax).toBe(withUpper ? 3 : undefined);
+    const preview = fromFhirDosage(input).longText;
+    expect(preview).toContain(withUpper ? "over up to 3 hours" : "over approximately 2 hours");
+    expect(preview).not.toContain("2 to 3 hours");
+    expect(projectCanonicalCourse(importCanonicalCourse([input])).fhir[0].doseAndRate?.[0].rateRatio)
+      .toEqual(input.doseAndRate?.[0].rateRatio);
+  });
+
+  it.each([
+    ["http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C111984", "Pumpenhub", "pump"],
+    ["http://snomed.info/sct", "421954001", "dropper dose", "dropperful"],
+  ])("uses known presentation code %s/%s for target multiplication", (system, code, unit, measuredUnit) => {
+    const amount = { value: 1, system, code, unit };
+    const input: FhirR6DosageInstruction = {
+      step: [{ component: [{ timing: daily, doseAndRate: [{ doseQuantity: amount }], site: { concept: {
+        text: "two treatment sites", extension: [{ url: BODY_SITE_ADMINISTRATION_TARGET_COUNT_EXTENSION_URL, valueInteger: 2 }],
+      } } }] }],
+    };
+    const from = "2026-12-01T08:00:00Z";
+    expect(calculateTotalUnits({ dosage: input, from, orderedAt: from, timeZone: "UTC",
+      durationValue: 1, durationUnit: "d" })).toMatchObject({ totalUnits: 2, unit: measuredUnit });
+    expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.step[0].component[0].doseAndRate?.[0].doseQuantity)
+      .toEqual(amount);
+  });
+
+  it.each([
+    ["high", "~", "<=~60 mL/h"], ["low", "~", ">=~60 mL/h"], ["high", "<", "<60 mL/h"],
+  ] as const)("keeps the direction of a %s rate endpoint qualified by %s", (bound, comparator, expected) => {
+    const input: FhirDosage = { doseAndRate: [{ rateRange: {
+      [bound]: simpleQuantityForR5({ ...quantity(60, "mL/h"), comparator }),
+    } }] };
+    expect(formatSig([input])).toBe("Rate range: " + expected);
+    expect(fromFhirDosage(input).longText).toContain("Rate range: " + expected);
   });
 });

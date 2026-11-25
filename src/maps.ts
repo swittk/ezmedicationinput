@@ -2093,12 +2093,6 @@ export function getDoseQuantityUnit(
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
     return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
-  if (quantity.unit === undefined && quantity.system === "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl" && quantity.code) {
-    return NCIT_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
-  }
-  if (quantity.unit === undefined && quantity.system === "http://snomed.info/sct" && quantity.code) {
-    return SNOMED_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
-  }
   const recognizedUnit = (label: string | undefined): string | undefined => {
     if (!label) return undefined;
     if (label === "5.mL") return "tsp";
@@ -2112,6 +2106,12 @@ export function getDoseQuantityUnit(
     return measured === "5.mL" ? "tsp" :
       measured === "15.mL" ? "tbsp" : measured;
   };
+  if (quantity.system === "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl" && quantity.code) {
+    return recognizedUnit(quantity.unit) ?? NCIT_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
+  if (quantity.system === "http://snomed.info/sct" && quantity.code) {
+    return recognizedUnit(quantity.unit) ?? SNOMED_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
   // A foreign code must not override the authored unit as a UCUM spelling.
   // Keep the existing lexical and opaque-label fallbacks for imported quantities.
   const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"

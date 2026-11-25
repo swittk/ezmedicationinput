@@ -735,7 +735,8 @@ function baseAdministration(
   let schedule = timing(raw.timing, format === "r5");
   const denominator = raw.doseAndRate?.[0]?.rateRatio?.denominator;
   if (denominator && schedule?.recurrence?.occurrenceDuration === undefined &&
-      raw.timing?.repeat?.duration === undefined && getQuantityComparator(denominator) &&
+      raw.timing?.repeat?.duration === undefined && raw.timing?.repeat?.durationMax === undefined &&
+      getQuantityComparator(denominator) &&
       !raw.timing?.repeat?.extension?.some(e => e.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
     // Only an explicitly recognized carrier/self-carrier infusion supplies an
     // administration duration. An arbitrary rate denominator is not a dose time.

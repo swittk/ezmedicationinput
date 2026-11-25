@@ -2432,7 +2432,8 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
   if (carrierQuantity) {
     clause.clinicalQuantity = carrierQuantity;
     const duration = carrierQuantity.administrationDuration;
-    if (!administrationDurationMarker && duration?.comparator && clause.schedule?.administrationDuration === undefined) {
+    if (!administrationDurationMarker && duration?.comparator && clause.schedule?.administrationDuration === undefined &&
+        clause.schedule?.administrationDurationMax === undefined) {
       const schedule = clause.schedule ??= {};
       schedule.administrationDuration = duration.value;
       schedule.administrationDurationUnit = duration.unit;
@@ -2735,7 +2736,8 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
   if (carrierQuantity) {
     state.primaryClause.clinicalQuantity = carrierQuantity;
     const duration = carrierQuantity.administrationDuration;
-    if (!administrationDurationMarker && duration?.comparator && state.primaryClause.schedule?.administrationDuration === undefined) {
+    if (!administrationDurationMarker && duration?.comparator && state.primaryClause.schedule?.administrationDuration === undefined &&
+        state.primaryClause.schedule?.administrationDurationMax === undefined) {
       const schedule = state.primaryClause.schedule ??= {};
       schedule.administrationDuration = duration.value;
       schedule.administrationDurationUnit = duration.unit;
