@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 /** Short paired hot-path performance diagnostic.
  *
  * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
@@ -19,7 +18,7 @@ import { randomUUID } from "node:crypto";
  */
 import { performance } from "node:perf_hooks";
 import { readFileSync, writeFileSync, renameSync, realpathSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { cpus } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";

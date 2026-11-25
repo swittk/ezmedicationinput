@@ -15807,3 +15807,20 @@ projection-token controls require the exact clinical-v2 tag on every row.
 All 17 focused cases pass, every original identity and substantive post-edit
 assertion remains, and production source bytes are unchanged. A separate full
 attempt will validate this test-only child; no acceptance is inferred here.
+
+
+## 2026-11-25 — Calendar timing and bounded supply
+
+Corrected recorded-dose rolling-window bounds, combined lifetime limits after
+rounding, and supply ceilings for the selected clock plan. Finite anchored
+predecessors, next-day positions and sparse annual clocks now retain their
+intended bounds. Typed clock qualifiers and preparation actions keep their
+ownership; text-only alternatives and Coding primitive metadata survive
+interchange. R6 timing extensions retain their version-specific types. The
+faster Thai weekday correction uses the existing cadence path.
+
+Validation passed 8,060 source tests, configured strict TypeScript, the build
+and all four distribution tests. Thirteen representative paired workloads
+and focused checks found no reproducible meaningful-workload regression
+above 4%. The small R5 formatter cost measured approximately 3 microseconds
+per call and remains a separate optimization opportunity.
