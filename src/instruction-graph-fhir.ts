@@ -318,8 +318,9 @@ export function buildInstructionGraphExtension(
       else if (field.url !== "resolved" && field.url !== "administrationActionIndex" &&
           field.url !== "doseActionIndex" && field.url !== "doseArgumentIndex") ownership.push(field);
     }
-    nested.push({ ...(graph.primaryOwnership.sourceId !== undefined ? { id: graph.primaryOwnership.sourceId } : {}),
-      url: "primaryOwnership", extension: ownership });
+    const marker: FhirExtension = { url: "primaryOwnership", extension: ownership };
+    if (graph.primaryOwnership.sourceId !== undefined) marker.id = graph.primaryOwnership.sourceId;
+    nested.push(marker);
   }
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
