@@ -1291,6 +1291,9 @@ export function formatSigBatch(
   return text.join(separator);
 }
 
+// Retain the native renderer's presentation decision on its immutable result.
+const importedBatchesWithHeaderDirections = new WeakSet<ParseBatchResult>();
+
 export function formatParseBatch(batch:ParseBatchResult,style:"short"|"long"="short",separator=", "):string {
   // Keep already-localized whole-course timing and choice wording. Ordinary
   // items are collected once without mapping an unused array of FHIR rows.
@@ -1307,7 +1310,8 @@ function formatParseBatchContents(
   const whole=style==="short"?batch.shortText:batch.longText;
   // Preserve the imported renderer's selected directions without repeating
   // its clinical-fact classification or replacing independent item joining.
-  if(course?.provenance?.format==="r6"&&course.instruction&&whole===course.instruction)return whole;
+  if(importedBatchesWithHeaderDirections.has(batch)||
+      course?.provenance?.format==="r6"&&course.instruction&&whole===course.instruction)return whole;
   if(steps&&steps.length>1)return whole;
   if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
     return style==="short"?batch.shortText:batch.longText;
@@ -1379,8 +1383,10 @@ export function fromFhir(
       }
     });
   }
-  const shortText = formatCanonicalCourse(native, "short", options, compiled);
-  const longText = formatCanonicalCourse(native, "long", options, compiled);
+  const authored = native.instruction
+    ? { text: native.instruction, rendered: false, headerRendered: false } : undefined;
+  const shortText = formatCanonicalCourse(native, "short", options, compiled, authored);
+  const longText = formatCanonicalCourse(native, "long", options, compiled, authored);
   // A header-only instruction keeps the editable carrier. Its course
   // constraints are visible on that item as well as the batch preview.
   if (!items.length && r5Rows.length) {
@@ -1402,7 +1408,7 @@ export function fromFhir(
     for (const warning of item.warnings) warnings.add(warning);
   }
   // Importing structured R6 data is best-effort and data-preserving.
-  return {
+  const result: ParseBatchResult = {
     input: dosageDetails.renderedInstruction ?? "",
     count: items.length,
     items,
@@ -1421,6 +1427,8 @@ export function fromFhir(
       segments: []
     }
   };
+  if (authored?.headerRendered) importedBatchesWithHeaderDirections.add(result);
+  return result;
 }
 
 /**

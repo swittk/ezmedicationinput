@@ -618,6 +618,7 @@ function amountLabel(amount: CanonicalAmount, kind: "dose" | "rate" | "rateRange
 interface AuthoredDirectionsState {
   text: string;
   rendered: boolean;
+  headerRendered?: boolean;
 }
 
 /** Common clause preview; whole-course composition adds rich rates/expressions
@@ -835,6 +836,7 @@ export function formatCanonicalCourse(
   // by the header. Matching member text already carries those directions.
   const headerDirections = !sourceReplayAllowed && oneOrCourse.instruction && courseNeedsAuthoredHeader(oneOrCourse)
     ? oneOrCourse.instruction : undefined;
+  if (headerDirections && authored?.text === headerDirections) authored.headerRendered = true;
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
   const administration = only?.administrations.length === 1 ? only.administrations[0] : undefined;
   if (

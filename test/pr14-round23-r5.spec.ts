@@ -5583,6 +5583,24 @@ describe("round72 reviewed completion and batch directions", () => {
     expect(source).toEqual(before);
   });
 
+  it.each([1, 2])("keeps independently authored header directions beside %s clock-only components", count => {
+    const source: FhirR6DosageInstruction = { renderedInstruction: "Apply a thin layer", step: [{ component:
+      ["08:00:00", "17:00:00"].slice(0, count).map(clock => ({ timing: { repeat: { timeOfDay: [clock] } } }))
+    }] };
+    const before = persist(source);
+    for (const locale of ["en", "th"]) {
+      const batch = fromFhir(persist(source), { locale });
+      for (const style of ["short", "long"] as const) {
+        const whole = style === "short" ? batch.shortText : batch.longText;
+        expect(whole).toContain("Apply a thin layer");
+        expect(whole).toContain(style === "long" && locale === "en" ? "8:00 am" : "08:00");
+        if (count === 2) expect(whole).toContain(style === "long" && locale === "en" ? "5:00 pm" : "17:00");
+        expect(formatParseBatch(batch, style, " / ")).toBe(whole);
+      }
+    }
+    expect(source).toEqual(before);
+  });
+
   it("keeps separator joining for independent imported components with clinical facts", () => {
     const source: FhirR6DosageInstruction = { renderedInstruction: "Retained source heading", step: [{ component: [
       { doseAndRate: [{ doseQuantity: q(1) }], timing: { repeat: daily } },
