@@ -127,7 +127,8 @@ function addRelation(
 function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
   for (const source of sources ?? []) {
     let index = -1;
-    if (source.url === "role" || source.url === "text" || source.url === "coding" || source.url === "normalized") {
+    const optionalField = source.url === "normalized" || source.url === "conceptId" || source.url === "quantity";
+    if (source.url === "role" || source.url === "text" || source.url === "coding" || optionalField) {
       for (let i = 0; i < parts.length; i++) if (parts[i].url === source.url) { index = i; break; }
     }
     if (source.url === "coding" && source.valueCoding) {
@@ -140,7 +141,7 @@ function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | unde
       }
     }
     if (index >= 0) parts[index] = { ...source, ...parts[index] };
-    else if (source.url === "normalized")
+    else if (optionalField)
       parts.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [source] });
     else parts.push(source);
   }
@@ -451,11 +452,17 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       if(!normalized)normalized=entry;
       if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
       break;
-    case "conceptId":if(!concept)concept=entry;break;
+    case "conceptId":
+      if(!concept)concept=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
     case "coding":if(!coding)coding=entry;break;
     case "spanStart":if(!spanStart)spanStart=entry;break;
     case "spanEnd":if(!spanEnd)spanEnd=entry;break;
-    case "quantity":if(!quantity)quantity=entry;break;
+    case "quantity":
+      if(!quantity)quantity=entry;
+      if(hasFieldMetadata(entry,"extension"))(sourceExtensions??=[]).push(entry);
+      break;
     case "argumentCoding":{const value=readCoding(entry.valueCoding);if(value)codings.push(value);break;}
     case "translation":{const value=parseTranslationNode(entry);if(value.locale&&value.text)(i18n??={})[value.locale]=value.text;break;}
     case "component":{
