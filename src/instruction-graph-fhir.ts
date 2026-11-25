@@ -273,6 +273,13 @@ export function buildInstructionGraphExtension(
   add(nested, valueCode("sourceLocale", graph.sourceLocale));
   add(nested, valueInteger("primaryAdministrationStart", graph.primaryAdministrationSpan?.start));
   add(nested, valueInteger("primaryAdministrationEnd", graph.primaryAdministrationSpan?.end));
+  if (graph.primaryOwnership) {
+    const ownership: FhirExtension[] = [{ url: "resolved", valueBoolean: true }];
+    add(ownership, valueInteger("administrationActionIndex", graph.primaryOwnership.administrationActionIndex));
+    add(ownership, valueInteger("doseActionIndex", graph.primaryOwnership.dose?.actionIndex));
+    add(ownership, valueInteger("doseArgumentIndex", graph.primaryOwnership.dose?.argumentIndex));
+    nested.push({ url: "primaryOwnership", extension: ownership });
+  }
   for (const action of graph.actions) nested.push(buildActionExtension(action));
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
@@ -548,6 +555,23 @@ function parseGraphCoverage(extension:FhirExtension):CanonicalInstructionCoverag
     ?{understoodCharacters:known.valueInteger,opaqueCharacters:opaque.valueInteger,ratio:ratio.valueDecimal,complete:complete.valueBoolean}:undefined;
 }
 
+function parsePrimaryOwnership(extension: FhirExtension): CanonicalInstructionGraph["primaryOwnership"] {
+  let resolved: FhirExtension | undefined, administration: FhirExtension | undefined,
+    doseAction: FhirExtension | undefined, doseArgument: FhirExtension | undefined;
+  for (const field of extension.extension ?? []) switch (field.url) {
+    case "resolved": if (!resolved) resolved = field; break;
+    case "administrationActionIndex": if (!administration) administration = field; break;
+    case "doseActionIndex": if (!doseAction) doseAction = field; break;
+    case "doseArgumentIndex": if (!doseArgument) doseArgument = field; break;
+  }
+  if (resolved?.valueBoolean !== true) return undefined;
+  return {
+    ...(administration?.valueInteger !== undefined ? { administrationActionIndex: administration.valueInteger } : {}),
+    ...(doseAction?.valueInteger !== undefined && doseArgument?.valueInteger !== undefined
+      ? { dose: { actionIndex: doseAction.valueInteger, argumentIndex: doseArgument.valueInteger } } : {})
+  };
+}
+
 /** One traversal per known graph/action/argument node. Repeated children retain
  * order, first scalar fields retain ownership, and unknown metadata remains
  * outside interpreted clinical meaning. No indexed heap copies or cached
@@ -558,6 +582,7 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
   if(!graph)return undefined;
   const actions:AdviceFrame[]=[],relations:CanonicalInstructionRelation[]=[],opaque:CanonicalSourceSpan[]=[];
   let coverage:FhirExtension|undefined,start:FhirExtension|undefined,end:FhirExtension|undefined,
+    ownership:FhirExtension|undefined,
     source:FhirExtension|undefined,locale:FhirExtension|undefined,sourceExtensions:FhirExtension[]|undefined;
   for(const field of graph.extension??[])switch(field.url){
     case "action":{const action=parseActionExtension(field);if(action)actions.push(action);break;}
@@ -566,11 +591,13 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     case "coverage":if(!coverage)coverage=field;break;
     case "primaryAdministrationStart":if(!start)start=field;break;
     case "primaryAdministrationEnd":if(!end)end=field;break;
+    case "primaryOwnership":if(!ownership)ownership=field;break;
     case "sourceText":if(!source)source=field;break;case "sourceLocale":if(!locale)locale=field;break;
     default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;
   return {actions,...(sourceExtensions ? {sourceExtensions} : {}),
+    ...(ownership ? {primaryOwnership:parsePrimaryOwnership(ownership)} : {}),
     primaryAdministrationSpan:start?.valueInteger!==undefined&&end?.valueInteger!==undefined
     ?{start:start.valueInteger,end:end.valueInteger}:undefined,
     relations:relations.length?relations:undefined,opaqueSpans:opaque.length?opaque:undefined,

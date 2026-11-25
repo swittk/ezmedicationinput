@@ -3728,7 +3728,9 @@ describe("round36 rich primary rendered argument ownership", () => {
     const source = "Dissolve 2 tablets in water, then drink";
     const clause = parsePublicSig(source).meta.canonical.clauses[0];
     const graph = parseInstructionGraphExtension([buildInstructionGraphExtension({
-      ...clause.instructionGraph!, actions: parseInstructionActions(source)
+      // This saved span-only fixture retains the amountless head that the
+      // parser can omit. Its action array has its own legacy ownership.
+      ...clause.instructionGraph!, primaryOwnership: undefined, actions: parseInstructionActions(source)
     })!])!;
     expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["dissolve", "drink"]);
     const before = JSON.stringify(graph);
@@ -7261,5 +7263,123 @@ describe("round65 composed meal-state ownership", () => {
       expect(th).toContain("30 นาที");
     }
     expect(JSON.stringify([parsed.fhir, parsed.fhirNext])).toBe(original);
+  });
+});
+
+describe("round66 persisted primary action and amount ownership", () => {
+  const options: ParseOptions = { instructionActionMap: { disperse: {
+    code: "disperse", display: "Disperse", semanticClass: "prepare",
+    i18n: { th: "กระจายยา" }, procedural: true, acceptsAmount: true, definesDose: true,
+    argumentParser: "amount-material-destination", realizer: "amount-material-destination"
+  } } };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each(["drink slowly", "swallow slowly with water at 10:00"])(
+    "retains the original quantity owner when reopening a configured preparation before %s", ending => {
+      const parsed = parsePublicSig("Disperse 2 tablets in 100 mL water, then " + ending, options);
+      const binding = { ...(ending.startsWith("swallow") ? { administrationActionIndex: 1 } : {}),
+        dose: { actionIndex: 0, argumentIndex: 0 } };
+      expect(parsed.meta.canonical.clauses[0].instructionGraph?.primaryOwnership).toEqual(binding);
+      for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)])
+        expect(parseInstructionGraphExtension(rows[0].extension)?.primaryOwnership).toEqual(binding);
+      const rows = fresh(parsed.fhir), r6 = fresh(parsed.fhirNext);
+      rows[0].doseAndRate![0].doseQuantity!.value = 3;
+      r6.step![0].component[0].doseAndRate![0].doseQuantity!.value = 3;
+      for (const input of [rows, r6]) {
+        const before = JSON.stringify(input);
+        for (const locale of ["en", "th"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(text).toMatch(locale === "en" ? /^Disperse 3 tablets/u : /^กระจายยา\s*3 เม็ด/u);
+          expect(text.match(locale === "en" ? /3 tablets/gu : /3 เม็ด/gu)).toHaveLength(1);
+          expect(text).not.toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+          expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+          if (ending.includes("10:00")) expect(text).toContain("10:00");
+        }
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+  it("retains separate owners and unknown graph metadata through reordered marker fields and a fresh edit", () => {
+    const source = "Disperse 2 tablets in 100 mL water, then swallow slowly with water at 10:00";
+    const rows = fresh(parsePublicSig(source, options).fhir);
+    const marker = rows[0].extension!.find(field => field.extension?.some(child => child.url === "primaryOwnership"))!;
+    const ownership = marker.extension!.find(field => field.url === "primaryOwnership")!;
+    ownership.id = "retained-source-owner";
+    ownership.extension!.push({ url: "https://example.org/owner-note", valueString: "original source binding" });
+    ownership.extension!.reverse();
+    marker.extension!.push({ url: "https://example.org/graph-note", valueString: "keep this metadata" });
+    // Scalar child order is independent of the repeated action/argument order.
+    marker.extension = marker.extension!.filter(field => field !== ownership).concat(ownership);
+    const savedMarker = fresh(marker);
+    rows[0].doseAndRate![0].doseQuantity!.value = 3;
+    const before = fresh(rows), r6 = fresh(toDosageDetails(rows));
+    const reopened = fresh(toFhirR5Dosages(r6));
+    for (const current of [rows, reopened]) {
+      expect(current[0].extension!.find(field => field.url === marker.url)).toEqual(savedMarker);
+      const graph = parseInstructionGraphExtension(current[0].extension)!;
+      expect(graph.primaryOwnership).toEqual({ administrationActionIndex: 1, dose: { actionIndex: 0, argumentIndex: 0 } });
+      expect(graph.actions[1].predicate.lemma).toBe("swallow");
+      expect(graph.actions[0].args[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(buildInstructionGraphExtension(graph)!.extension!.filter(field => field.url === "primaryOwnership")).toHaveLength(1);
+      const text = formatSig(current, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(/^Disperse 3 tablets in 100 mL water/u);
+      expect(text.match(/3 tablets/gu)).toHaveLength(1);
+      expect(text).toContain("10:00");
+    }
+    expect(rows).toEqual(before);
+  });
+
+  it("remaps the same owners when an existing semantic resolver inserts an earlier action", () => {
+    const source = "local procedure; Disperse 2 tablets in 100 mL water, then swallow slowly with water at 10:00";
+    const parsed = parsePublicSig(source, { ...options, instructionSemanticResolvers: request => ({
+      actions: [{ action: "cover", range: { start: 0, end: request.sourceText.length }, args: [{
+        role: AdviceArgumentRole.Object, range: { start: 0, end: request.sourceText.length }, concept: "occlusive dressing"
+      }] }]
+    }) });
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions.map(action => action.predicate.lemma)).toEqual(["cover", "disperse", "swallow"]);
+    expect(graph.primaryOwnership).toEqual({ administrationActionIndex: 2, dose: { actionIndex: 1, argumentIndex: 0 } });
+    const rows = fresh(parsed.fhir);
+    rows[0].doseAndRate![0].doseQuantity!.value = 3;
+    for (const input of [rows, fresh(toDosageDetails(rows))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(/disperse 3 tablets in 100 mL water/iu);
+      expect(text.match(/3 tablets/gu)).toHaveLength(1);
+      expect(text.toLowerCase()).toContain("swallow slowly with water");
+      expect(text).toContain("10:00");
+    }
+  });
+
+  it("keeps resolved absence distinct from an older graph with no binding record", () => {
+    const graph = parsePublicSig("Do not dissolve 2 tablets in 100 mL water").meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.primaryOwnership).toEqual({});
+    const marker = buildInstructionGraphExtension(graph)!;
+    expect(marker.extension!.find(field => field.url === "primaryOwnership")).toEqual({
+      url: "primaryOwnership", extension: [{ url: "resolved", valueBoolean: true }]
+    });
+    expect(parseInstructionGraphExtension([fresh(marker)])?.primaryOwnership).toEqual({});
+    const legacy = fresh(marker);
+    legacy.extension = legacy.extension!.filter(field => field.url !== "primaryOwnership");
+    const reopened = parseInstructionGraphExtension([legacy])!;
+    expect(reopened.primaryOwnership).toBeUndefined();
+    expect(realizeInstructionGraph(reopened, "en")).toBe("Do not dissolve 2 tablets in 100 mL water");
+  });
+
+  it.each(["Dissolve", "Disperse"])("keeps an independent preparation clock when the %s amount owner is not the administration head", verb => {
+    const parsed = parsePublicSig(verb + " 2 tablets in 100 mL water at 08:00, then drink at 10:00", options);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.schedule?.timeOfDay).toEqual(["10:00:00"]);
+    expect(clause.instructionGraph?.primaryOwnership?.administrationActionIndex).toBeUndefined();
+    expect(clause.instructionGraph?.primaryOwnership?.dose).toBeDefined();
+    expect(clause.instructionGraph?.actions[0].args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Time, normalized: "08:00:00"
+    }));
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)])
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(/0?8:00(?: am)?/gu)).toHaveLength(1);
+        expect(text.match(/10:00(?: am)?/gu)).toHaveLength(1);
+        expect(text.indexOf("8:00")).toBeLessThan(text.indexOf("10:00"));
+        expect(text).toContain(locale === "en" ? "100 mL" : "100 มิลลิลิตร");
+      }
   });
 });

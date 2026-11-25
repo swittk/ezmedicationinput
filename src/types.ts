@@ -1943,6 +1943,13 @@ export interface CanonicalInstructionGraph {
   relations?: CanonicalInstructionRelation[];
   /** Source span of the canonical primary administration head, when known. */
   primaryAdministrationSpan?: TextRange;
+  /** Selected typed source owners, independent of later clinical edits.
+   * Presence is authoritative: an omitted member has no retained graph owner.
+   * Older graphs without this record retain their conservative span fallback. */
+  primaryOwnership?: {
+    administrationActionIndex?: number;
+    dose?: { actionIndex: number; argumentIndex: number };
+  };
   /** Source fragments the parser deliberately did not assign semantics to. */
   opaqueSpans?: CanonicalSourceSpan[];
   coverage?: CanonicalInstructionCoverage;

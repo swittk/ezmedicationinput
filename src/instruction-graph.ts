@@ -3201,7 +3201,7 @@ function conditionRelationsFromHpsgScopes(
 export function refreshInstructionGraphDerivedState(
   graph: CanonicalInstructionGraph
 ): void {
-  const previousActions = graph.relations?.length ? graph.actions.slice() : undefined;
+  const previousActions = graph.relations?.length || graph.primaryOwnership ? graph.actions.slice() : undefined;
   graph.actions.sort((left, right) =>
     left.span.start - right.span.start || left.span.end - right.span.end
   );
@@ -3210,6 +3210,14 @@ export function refreshInstructionGraphDerivedState(
   }
   if (previousActions) {
     const indices = new Map(graph.actions.map((action, index) => [action, index] as const));
+    const ownership = graph.primaryOwnership;
+    if (ownership?.administrationActionIndex !== undefined)
+      ownership.administrationActionIndex = indices.get(previousActions[ownership.administrationActionIndex]);
+    if (ownership?.dose) {
+      const actionIndex = indices.get(previousActions[ownership.dose.actionIndex]);
+      if (actionIndex !== undefined) ownership.dose.actionIndex = actionIndex;
+      else delete ownership.dose;
+    }
     for (const relation of graph.relations ?? []) {
       const target = indices.get(previousActions[relation.toActionIndex]);
       if (target !== undefined) relation.toActionIndex = target;
@@ -3615,6 +3623,7 @@ export function buildInstructionGraph(
   const hpsgConditionRelations = conditionRelationsFromHpsgScopes(clause, input, actions);
   graph.relations = hpsgConditionRelations.length ? hpsgConditionRelations : undefined;
   refreshInstructionGraphDerivedState(graph);
+  graph.primaryOwnership = inferPrimaryOwnership(graph, clause, options);
   return graph;
 }
 
@@ -4095,22 +4104,20 @@ export function realizeRichPrimaryWithCanonicalDose(
   coverage?: { singleScheduledEvent: boolean }
 ): string {
   const sourceFrame = frame;
+  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
+  const sourceAmount = owner?.action === sourceFrame ? owner.argument : undefined;
   frame = frameWithCanonicalPrimaryContext(frame, clause);
-  const conflictingAmount = primaryActionAmountConflicts(frame, clause.dose,
+  const conflictingAmount = primaryAmountConflicts(sourceAmount, clause.dose,
     !clause.dose && clause.sourceProjectionVerified === false);
   // Generated realization composes an owned Amount from its typed facts,
   // independently of an opaque nominal remainder or the requested parse locale.
   // Verified roundtrip source replay remains separate from this display copy.
-  const normalizeAmount = Boolean(clause.dose &&
+  const normalizeAmount = Boolean(sourceAmount && clause.dose &&
     (options?.realizationMode !== "roundtrip" || !frame.sourceText) &&
     frame.args.some(arg => arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
     (frame.predicate.realizer ?? frameActionDefinition(frame, options)?.realizer ?? "default") === "default");
-  if (conflictingAmount || normalizeAmount) {
-    const ownsAmount = Boolean(clause.instructionGraph &&
-      primaryDoseAmountOwner(clause.instructionGraph, clause, options) === sourceFrame);
-    if (conflictingAmount || ownsAmount)
-      frame = frameWithReconciledAmount(frame, clause.dose, ownsAmount, normalizeAmount && ownsAmount);
-  }
+  if (sourceAmount && (conflictingAmount || normalizeAmount))
+    frame = frameWithReconciledAmount(frame, sourceAmount, clause.dose, true);
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
@@ -4141,11 +4148,7 @@ export function realizeRichPrimaryWithCanonicalDose(
     (dose.value === undefined && !dose.range)) return realizeAction(frame, locale, false, coverage, clause);
   // A preceding preparation already supplies the unchanged amount. Add the
   // live dose only when no independently rendered owner still supplies it.
-  const owner = clause.instructionGraph ? primaryDoseAmountOwner(clause.instructionGraph, clause, options) : undefined;
-  if (owner && owner !== sourceFrame && (
-      !primaryActionAmountConflicts(owner, dose) ||
-      clause.instructionGraph?.primaryAdministrationSpan &&
-        owner.span.end <= clause.instructionGraph.primaryAdministrationSpan.start))
+  if (owner && owner.action !== sourceFrame)
     return realizeAction(frame, locale, false, coverage, clause);
   const { value, range, unit, comparator } = dose;
   return realizeAction({
@@ -4626,10 +4629,10 @@ function primaryActionCoveredByCanonicalClause(
   frame: AdviceFrame,
   actions: readonly AdviceFrame[],
   clause: CanonicalSigClause,
-  selectedOwner?: AdviceFrame,
+  selectedOwner?: AdviceFrame | null,
   sourceFrame: AdviceFrame = frame
 ): boolean {
-  if (!actionMatchesCanonicalMethod(frame, clause)) return false;
+  if (selectedOwner === null || !actionMatchesCanonicalMethod(frame, clause)) return false;
   if (selectedOwner) {
     // An explicit primary source span owns the canonical dose, even when a
     // different earlier administration happens to use the same verb.
@@ -4659,11 +4662,10 @@ function primaryActionCoveredByCanonicalClause(
 
 /** The normalized and source-preserving primary selectors must honor the
  * same current dose, while leaving superseded graph/source data untouched. */
-function primaryActionAmountConflicts(
-  action: AdviceFrame, dose: CanonicalDoseExpr | undefined, removed = false
+function primaryAmountConflicts(
+  amount: AdviceArgument | undefined, dose: CanonicalDoseExpr | undefined, removed = false
 ): boolean {
-  return Boolean((dose || removed) && action.args.some(arg => arg.role === AdviceArgumentRole.Amount &&
-    arg.quantity && (!dose || !quantityCoveredByDose(arg, dose))));
+  return Boolean(amount?.quantity && (dose || removed) && (!dose || !quantityCoveredByDose(amount, dose)));
 }
 
 /** Locate an existing Amount label within its source nominal. */
@@ -4680,47 +4682,32 @@ function sourceAmountLabelOffset(text: string, label: string): number {
  * action's independent material/target. Numeric edits and forced localized
  * display use the same typed ownership. */
 function frameWithReconciledAmount(
-  frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false,
-  normalizeOwnedAmount = false
+  frame: AdviceFrame, sourceAmount: AdviceArgument,
+  currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false
 ): AdviceFrame {
   const replacement = replaceAtOwner && currentDose &&
     (currentDose.value !== undefined || currentDose.range) ? {
       value: currentDose.value, range: currentDose.range,
       unit: currentDose.unit, comparator: currentDose.comparator
     } : undefined;
-  const sourceAmounts = frame.args.filter(arg =>
-    arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-    (normalizeOwnedAmount || !quantityCoveredByDose(arg, currentDose)));
   const args: AdviceArgument[] = [];
   for (const arg of frame.args) {
     // Only the dose-bearing Amount belongs to the canonical dose. An
     // independent 100 mL mixing Substance or 5-minute Duration must never
     // disappear because the tablet amount changed.
-    if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-        (normalizeOwnedAmount || !quantityCoveredByDose(arg, currentDose))) {
+    if (arg === sourceAmount) {
       if (replacement) args.push({ ...arg, quantity: replacement, i18n: undefined });
       continue;
     }
     if (arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) {
       const text = arg.text ?? "";
-      let sourceAmount: AdviceArgument | undefined;
-      let labelOffset = -1;
-      for (const amount of sourceAmounts) {
-        const label = amount.text ?? "";
-        const at = sourceAmountLabelOffset(text, label);
-        const hasLabel = at >= 0;
-        // Disjoint source spans identify independent quantities even when
-        // their values and units happen to match.
-        const ownsSource = arg.span && amount.span
-          ? arg.span.start <= amount.span.start && arg.span.end >= amount.span.end
-          : !arg.relation && hasLabel;
-        if (ownsSource) {
-          sourceAmount = amount;
-          labelOffset = hasLabel ? at : -1;
-          break;
-        }
-      }
-      if (sourceAmount) {
+      const labelOffset = sourceAmountLabelOffset(text, sourceAmount.text ?? "");
+      // Disjoint source spans identify independent quantities even when
+      // their values and units happen to match.
+      const ownsSource = arg.span && sourceAmount.span
+        ? arg.span.start <= sourceAmount.span.start && arg.span.end >= sourceAmount.span.end
+        : !arg.relation && labelOffset >= 0;
+      if (ownsSource) {
         const remaining = labelOffset >= 0
           ? (text.slice(0, labelOffset) + " " +
               text.slice(labelOffset + sourceAmount.text.length)).replace(/^\s*of\s+/i, "").trim()
@@ -4745,58 +4732,80 @@ function frameWithReconciledAmount(
   return { ...frame, sourceText: "", args };
 }
 
-/** Identify which source-backed Amount belongs to the canonical dose.
- * An explicit HPSG primary span takes precedence. Imported action graphs
- * without that span use a matching unit/method, then the first ordered
- * administration amount. Later independent actions keep their own amounts.
- * No source text is parsed or changed to make this selection. */
-/** The source graph is immutable during realization. One pass establishes
- * amount ownership, honoring an explicitly registered dose-defining action
- * without rebuilding the institution's vocabulary on the default path.
- * Standard coded built-ins continue to use the original code registry. */
+type PrimaryInstructionOwnership = NonNullable<CanonicalInstructionGraph["primaryOwnership"]>;
+
+/** Resolve the selected source head and Amount once while HPSG/action facts
+ * and the original vocabulary are available. Older saved graphs reuse this
+ * conservative inference; an explicit binding never depends on edited values. */
+function inferPrimaryOwnership(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): PrimaryInstructionOwnership {
+  const primary = graph.primaryAdministrationSpan;
+  const canOwnDose = Boolean(clause.dose || clause.sourceProjectionVerified === false && primary);
+  let administrationActionIndex: number | undefined, overlap: number | undefined,
+    overlapArgument = -1, earliest: number | undefined, earliestArgument = -1,
+    earlier: number | undefined, earlierArgument = -1, earlierCount = 0;
+  for (let index = 0; index < graph.actions.length; index++) {
+    const action = graph.actions[index];
+    if (action.polarity === AdvicePolarity.Negate) continue;
+    const overlaps = Boolean(primary && action.span.start < primary.end && primary.start < action.span.end);
+    if (overlaps && administrationActionIndex === undefined) administrationActionIndex = index;
+    if (!canOwnDose) continue;
+    let amountIndex = -1, theme: AdviceArgument | undefined;
+    for (let argumentIndex = 0; argumentIndex < action.args.length; argumentIndex++) {
+      const argument = action.args[argumentIndex];
+      if (amountIndex < 0 && argument.role === AdviceArgumentRole.Amount && argument.quantity) amountIndex = argumentIndex;
+      if (!theme && (argument.role === AdviceArgumentRole.Theme || argument.role === AdviceArgumentRole.Object)) theme = argument;
+    }
+    if (amountIndex < 0) continue;
+    if (overlaps && overlap === undefined) { overlap = index; overlapArgument = amountIndex; }
+    if (primary && action.span.end > primary.start) continue;
+    const amount = action.args[amountIndex];
+    const ownsAmount = !theme || (theme.span && amount.span
+      ? theme.span.start <= amount.span.start && amount.span.end <= theme.span.end
+      : quantityCoveredByDose(theme, amount.quantity) || !theme.relation &&
+        sourceAmountLabelOffset(theme.text ?? "", amount.text ?? "") >= 0);
+    if (!ownsAmount) continue;
+    const definition = frameActionDefinition(action, options);
+    if ((!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
+        (earliest === undefined || action.span.start < graph.actions[earliest].span.start)) {
+      earliest = index; earliestArgument = amountIndex;
+    }
+    if (definition?.definesDose) { earlierCount++; earlier = index; earlierArgument = amountIndex; }
+  }
+  const doseAction = overlap ?? (earlierCount === 1 ? earlier : primary ? undefined : earliest);
+  const doseArgument = overlap !== undefined ? overlapArgument : earlierCount === 1 ? earlierArgument : earliestArgument;
+  // A saved graph with no selected head can supply a missing administration
+  // only from the same matching dose owner, never a later coincidental amount.
+  if (!primary && !clause.method && doseAction !== undefined &&
+      quantityCoveredByDose(graph.actions[doseAction].args[doseArgument], clause.dose))
+    administrationActionIndex = doseAction;
+  return {
+    ...(administrationActionIndex !== undefined ? { administrationActionIndex } : {}),
+    ...(doseAction !== undefined ? { dose: { actionIndex: doseAction, argumentIndex: doseArgument } } : {})
+  };
+}
+
+function primaryInstructionOwnership(
+  graph: CanonicalInstructionGraph,
+  clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
+  options?: Pick<ParseOptions, "instructionActionMap">
+): PrimaryInstructionOwnership {
+  return graph.primaryOwnership ?? inferPrimaryOwnership(graph, clause, options);
+}
+
 function primaryDoseAmountOwner(
   graph: CanonicalInstructionGraph,
   clause: Pick<CanonicalSigClause, "dose" | "method" | "sourceProjectionVerified">,
   options?: Pick<ParseOptions, "instructionActionMap">
-): AdviceFrame | undefined {
-  const primary=graph.primaryAdministrationSpan;
-  // An unverified imported graph is not evidence a structured dose was
-  // cleared. Without a live dose, an explicit primary span must establish
-  // that ownership before a graph amount can be removed.
-  if (!clause.dose && (clause.sourceProjectionVerified !== false || !primary)) return undefined;
-  let earliest:AdviceFrame|undefined,overlap:AdviceFrame|undefined;
-  let earlier:AdviceFrame|undefined,earlierCount=0;
-  for(const action of graph.actions) {
-    if(action.polarity===AdvicePolarity.Negate)continue;
-    let amount: AdviceArgument | undefined, theme: AdviceArgument | undefined;
-    for (const arg of action.args) {
-      if (!amount && arg.role === AdviceArgumentRole.Amount && arg.quantity) amount = arg;
-      if (!theme && (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) theme = arg;
-    }
-    if (!amount) continue;
-    const definition = frameActionDefinition(action, options);
-    if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
-      overlap=action;
-    if(!primary || action.span.end<=primary.start) {
-      // A separate quantified material is not the medication amount merely
-      // because it is the sole preparation, including saved spanless graphs.
-      // Dose-owning nominals retain their original Amount constituent after edits.
-      const ownsAmount = !theme || (theme.span && amount.span
-        ? theme.span.start <= amount.span.start && amount.span.end <= theme.span.end
-        : quantityCoveredByDose(theme, amount.quantity) || !theme.relation &&
-          sourceAmountLabelOffset(theme.text ?? "", amount.text ?? "") >= 0);
-      // Both spanless fallbacks respect that same independent-material evidence.
-      if (ownsAmount && (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
-          (!earliest || action.span.start < earliest.span.start)) earliest = action;
-      if (definition?.definesDose && ownsAmount) {
-        earlierCount++;earlier=action;
-      }
-    }
-  }
-  if(primary)return overlap??(earlierCount===1?earlier:undefined);
-  // With a live dose, a sole declared dose-defining action takes precedence
-  // over device preparation in a saved graph without a primary span.
-  return earlierCount === 1 ? earlier : earliest;
+): { action: AdviceFrame; argument: AdviceArgument } | undefined {
+  if (!clause.dose && clause.sourceProjectionVerified !== false) return undefined;
+  const owner = primaryInstructionOwnership(graph, clause, options).dose;
+  if (!owner) return undefined;
+  const action = graph.actions[owner.actionIndex];
+  return { action, argument: action.args[owner.argumentIndex] };
 }
 
 /** A sole typed preparation owns the amount before a later administration.
@@ -4809,7 +4818,7 @@ export function instructionGraphPreparationOwnsDose(
   if (!clause.dose || !graph || !primary || !graph.actions.length ||
       graph.actions[0].span.start >= primary.start) return false;
   const owner = primaryDoseAmountOwner(graph, clause, options);
-  return Boolean(owner && owner.span.end <= primary.start);
+  return Boolean(owner && owner.action.span.end <= primary.start);
 }
 
 /** Whole-source replay and action realization have the same amount owner.
@@ -4838,7 +4847,7 @@ export function instructionGraphSourceConflictsWithDose(
       if (evidence.lexicalCategory === "dose") return false;
     return true;
   }
-  return primaryActionAmountConflicts(owner, dose);
+  return primaryAmountConflicts(owner.argument, dose);
 }
 
 export function instructionGraphRichPrimaryAction(
@@ -4846,87 +4855,56 @@ export function instructionGraphRichPrimaryAction(
 ): AdviceFrame | undefined {
   const graph = clause.instructionGraph;
   if (!graph?.actions.length) return undefined;
-  const primary = graph.primaryAdministrationSpan;
-  const dose = clause.dose;
-  const matchesDose = (action: AdviceFrame): boolean => Boolean(
-    dose && action.args.some((arg) =>
-      arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, dose)
+  const index = primaryInstructionOwnership(graph, clause).administrationActionIndex;
+  const action = index === undefined ? undefined : graph.actions[index];
+  if (!action || action.polarity === AdvicePolarity.Negate) return undefined;
+  const hasCanonicalAdministration = Boolean(
+    clause.method || clause.route || clause.dose || clause.site ||
+    clause.schedule && (
+      clause.schedule.timingCode || clause.schedule.frequency !== undefined ||
+      clause.schedule.period !== undefined || clause.schedule.when?.length ||
+      clause.schedule.dayOfWeek?.length || clause.schedule.timeOfDay?.length ||
+      clause.schedule.activityTiming?.length
     )
   );
-  let fallback: AdviceFrame | undefined;
-  for (const action of graph.actions) {
-    if (action.polarity === AdvicePolarity.Negate) continue;
-    const overlapsPrimary = Boolean(
-      primary && action.span.start < primary.end && primary.start < action.span.end
-    );
-    const hasCanonicalAdministration = Boolean(
-      clause.method || clause.route || clause.dose || clause.site ||
-      clause.schedule && (
-        clause.schedule.timingCode || clause.schedule.frequency !== undefined ||
-        clause.schedule.period !== undefined || clause.schedule.when?.length ||
-        clause.schedule.dayOfWeek?.length || clause.schedule.timeOfDay?.length ||
-        clause.schedule.activityTiming?.length
-      )
-    );
-    if (hasCanonicalAdministration && primaryActionCoveredByCanonicalClause(action, graph.actions, clause)) {
-      continue;
-    }
-    if (!hasCanonicalAdministration) return undefined;
-    const suppliesMissingHead = Boolean(!clause.method && dose && matchesDose(action));
-    if (!overlapsPrimary && (primary || !suppliesMissingHead)) continue;
-    const rich = Boolean(
-      action.relation || action.args.some((arg) =>
-        [
-          AdviceArgumentRole.Duration, AdviceArgumentRole.Time, AdviceArgumentRole.Activity,
-          AdviceArgumentRole.Material, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-          AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
-        ].indexOf(arg.role) >= 0
-      )
-    );
-    // The selected source span continues to identify the SAME event after a
-    // method or dose edit. Its renderer applies current facts to a display copy
-    // and preserves independent adjuncts; another action cannot inherit it.
-    if (overlapsPrimary) {
-      if (rich || suppliesMissingHead) return action;
-      continue;
-    }
-    const definition = getMedicationInstructionAction(action.predicate.lemma);
-    if (!fallback && (!definition || definition.definesDose || definition.primaryAdministrationHead || definition.administrationMethod) &&
-      !primaryActionAmountConflicts(action, dose,
-      !dose && clause.sourceProjectionVerified === false) &&
-      (rich || suppliesMissingHead) && (!dose || matchesDose(action))) fallback = action;
-  }
-  return fallback;
+  if (!hasCanonicalAdministration || primaryActionCoveredByCanonicalClause(action, graph.actions, clause, action)) return undefined;
+  const rich = action.relation || action.args.some(arg => [
+    AdviceArgumentRole.Duration, AdviceArgumentRole.Time, AdviceArgumentRole.Activity,
+    AdviceArgumentRole.Material, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+    AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+  ].indexOf(arg.role) >= 0);
+  const suppliesMissingHead = !clause.method && clause.dose && action.args.some(arg =>
+    arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose));
+  return rich || suppliesMissingHead ? action : undefined;
 }
 
 export function instructionGraphRoundTripPrimaryAction(
   clause: CanonicalSigClause
 ): AdviceFrame | undefined {
   const graph = clause.instructionGraph;
-  const primary = graph?.primaryAdministrationSpan;
-  if (!graph || !primary) return undefined;
-  return graph.actions.find((action) => {
-    if (action.span.end <= primary.start || action.span.start >= primary.end) return false;
-    const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
-    const hasRichArgument = action.args.some((arg) =>
-      [
-        AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
-        AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
-        AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
-      ].indexOf(arg.role) >= 0 ||
-      ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
-        /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
-    );
-    // Source wording may be replayed only when its explicit Amount still
-    // agrees with the current canonical dose. Keep the graph unchanged for
-    // editing/provenance; it must not overwrite a clinician's new quantity.
-    const conflictingAmount = primaryActionAmountConflicts(action, clause.dose,
-      !clause.dose && clause.sourceProjectionVerified === false);
-    return !conflictingAmount && (!clause.method || actionMatchesCanonicalMethod(action, clause)) &&
-      (hasLocalRelation || hasRichArgument);
-  });
+  if (!graph) return undefined;
+  const ownership = primaryInstructionOwnership(graph, clause);
+  const index = ownership.administrationActionIndex;
+  const action = index === undefined ? undefined : graph.actions[index];
+  if (!action) return undefined;
+  const hasLocalRelation = relationHasGrammarFeature(action.relation, "roundtripRichRelation");
+  const hasRichArgument = action.args.some((arg) =>
+    [
+      AdviceArgumentRole.Time, AdviceArgumentRole.Duration, AdviceArgumentRole.Material,
+      AdviceArgumentRole.Activity, AdviceArgumentRole.Result, AdviceArgumentRole.Destination,
+      AdviceArgumentRole.Substance, AdviceArgumentRole.Manner
+    ].indexOf(arg.role) >= 0 ||
+    ((arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+      /\b(?:new|replacement|another|fresh)\b/i.test(arg.text))
+  );
+  // Compare the original bound argument, before any temporary display view
+  // filters/replaces its neighbors. Other amounts keep their separate meaning.
+  const amount = ownership.dose && ownership.dose.actionIndex === index ? action.args[ownership.dose.argumentIndex] : undefined;
+  const conflictingAmount = primaryAmountConflicts(amount, clause.dose,
+    !clause.dose && clause.sourceProjectionVerified === false);
+  return !conflictingAmount && (!clause.method || actionMatchesCanonicalMethod(action, clause)) &&
+    (hasLocalRelation || hasRichArgument) ? action : undefined;
 }
-
 
 export function instructionGraphPrimarySiteRelation(
   clause: CanonicalSigClause
@@ -5130,10 +5108,13 @@ export function realizeInstructionGraph(
     .filter(Boolean);
   const position = options?.position ?? "all";
   const primary = graph.primaryAdministrationSpan;
-  const amountOwner = options?.omitCanonicalAdministration
+  const doseOwner = options?.omitCanonicalAdministration
     ? primaryDoseAmountOwner(graph, options.omitCanonicalAdministration, options) : undefined;
-  const primaryAction = primary ? graph.actions.findIndex(frame =>
-    frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
+  const amountOwner = doseOwner?.action;
+  const primaryAction = graph.primaryOwnership
+    ? graph.primaryOwnership.administrationActionIndex ?? -1
+    : primary ? graph.actions.findIndex(frame =>
+      frame.span.start <= primary.start && primary.end <= frame.span.end) : -1;
   const temporalEdges = new Map<number, number[]>();
   for (const relation of graph.relations ?? []) {
     if (relation.fromActionIndex === undefined) continue;
@@ -5179,7 +5160,7 @@ export function realizeInstructionGraph(
       continue;
     }
     const ownsPrimary = primaryAction >= 0
-      ? sourceFrame === graph.actions[primaryAction] : sourceFrame === amountOwner;
+      ? actionIndex === primaryAction : !graph.primaryOwnership && sourceFrame === amountOwner;
     const frame = ownsPrimary && options?.omitCanonicalAdministration
       ? frameWithCanonicalPrimaryContext(sourceFrame, options.omitCanonicalAdministration) : sourceFrame;
     if (sourceFrame === amountOwner) displayedAmountOwner = frame;
@@ -5203,7 +5184,9 @@ export function realizeInstructionGraph(
       // including when an independent preparation supplied the dose.
       (!hasAmount || amountOwner === sourceFrame) &&
       primaryActionCoveredByCanonicalClause(frame, graph.actions, options.omitCanonicalAdministration,
-        primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined, sourceFrame)) {
+        graph.primaryOwnership ? primaryAction >= 0 ? graph.actions[primaryAction] : null
+          : primary ? !hasAmount && primaryAction >= 0 ? graph.actions[primaryAction] : amountOwner : undefined,
+        sourceFrame)) {
       // The administration sentence covers this action, not its graph-only
       // conditional relation. Keep the target without emitting the action twice.
       if (!options?.onlyWarnings &&
@@ -5249,13 +5232,13 @@ export function realizeInstructionGraph(
     const sourceFrame = conditionTargets.get(actionIndex)!;
     const currentDose = options?.omitCanonicalAdministration?.dose;
     const editedPrimary = Boolean(displayedAmountOwner === sourceFrame &&
-      primaryActionAmountConflicts(sourceFrame, currentDose,
+      primaryAmountConflicts(doseOwner?.argument, currentDose,
         !currentDose && options?.omitCanonicalAdministration?.sourceProjectionVerified === false));
     // The source dose owner keeps its role after an external amount edit.
     // A sole preparation before the primary action supplies the live amount
     // there; the later rich administration does not repeat or inherit it.
     const frame = editedPrimary
-      ? frameWithReconciledAmount(sourceFrame, currentDose,
+      ? frameWithReconciledAmount(sourceFrame, doseOwner!.argument, currentDose,
           Boolean(primary && amountOwner && amountOwner.span.end <= primary.start))
       : sourceFrame;
     if (editedPrimary && frame.args.length === 0 && options?.omitCanonicalAdministration &&
