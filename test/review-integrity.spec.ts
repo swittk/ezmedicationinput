@@ -1370,8 +1370,12 @@ describe("independent counseling entailment conservation in R5/R6", () => {
     const th = formatSig(toDosageDetails(rows), "long", { locale: "th" });
     expect(en).toMatch(/drink.*water/iu);
     expect(en).not.toMatch(/(?:take|use) the medication/iu);
-    expect(th).toContain("ดื่ม");
-    expect(th).not.toMatch(/[A-Za-z]/u);
+    // Saved R6 text has no agreement proof. Keep the supplied component
+    // wording separate from the fully localized current counseling.
+    expect(th.split("; ข้อความเดิม: ")).toEqual([
+      "ปัจจุบัน: ดื่มน้ำดื่มจำนวนมาก", "Drink plenty of water."
+    ]);
+    expect(th.split("; ข้อความเดิม: ")[0]).not.toMatch(/[A-Za-z]/u);
   });
 
   it.each([
