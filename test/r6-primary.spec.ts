@@ -7577,8 +7577,9 @@ describe("round68 current preview fields", () => {
     const r6 = courseToR6(native);
     for (const input of [row, native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
       const preview = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
-      expect(preview).toMatch(frequency === 1 ? /daily/i : /twice daily/i);
-      if (frequency === 1) expect(preview).not.toContain("twice daily");
+      expect(preview).toMatch(frequency === 1
+        ? /^(?:(?:Take|Use) )?1 tablet (?:once )?daily[.;]/i
+        : /^(?:(?:Take|Use) )?1 tablet twice daily[.;]/i);
       expect(preview.toLowerCase()).toContain("do not crush");
     }
     expect(row).toEqual(before);

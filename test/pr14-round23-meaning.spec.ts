@@ -5883,3 +5883,66 @@ it("keeps a distinct dose-only replacement instead of matching inside a larger c
     expect(authored).toBe("2 tablets");
   }
 });
+
+
+describe("round69 current structured preview ownership", () => {
+  it("retains both frequency bounds without inventing a period", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 2, frequencyMax: 3 } } };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))])
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toMatch(/1 tablet 2 to 3 times[.;]/);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it.each(["2026-12-10T09:00:00+07:00", "2026-12-10T02:00:00.125Z"])(
+    "formats the authored Buddhist civil date and exact bound time (%s)", end => {
+      const row = JSON.parse(JSON.stringify(parseSig("Take 1 tablet daily; do not crush").fhir[0])) as FhirDosage;
+      row.timing!.repeat!.boundsPeriod = { end, _end: { id: "authored-bound" } };
+      const before = JSON.stringify(row), wire = toDosageDetails([row]);
+      const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(wire))) as FhirDosage[];
+      for (const input of [row, wire, saved]) {
+        const text = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+        expect(text).toContain("10/12/2569 เวลา " + end.slice(11));
+        expect(text).not.toContain("2026-12-10");
+      }
+      expect(saved[0].timing?.repeat?.boundsPeriod).toEqual(row.timing!.repeat!.boundsPeriod);
+      expect(JSON.stringify(row)).toBe(before);
+    });
+
+  it.each([false, true])("uses the preferred standard timing coding for an offset (local first %s)", localFirst => {
+    const standard = { system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" };
+    const local = { system: "urn:clinic:timing", code: "QID", display: "Per clinic protocol" };
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        code: { coding: localFirst ? [local, standard] : [standard] },
+        repeat: { period: 1, periodUnit: FhirPeriodUnit.Day, startOffset: { value: 1, unit: "h" } }
+      }
+    }] }] };
+    const before = JSON.stringify(wire);
+    for (const input of [wire, JSON.parse(JSON.stringify(toFhirR5Dosages(wire)))]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("twice daily");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("วันละ 2 ครั้ง");
+    }
+    expect(JSON.stringify(wire)).toBe(before);
+  });
+
+  it("retains an opaque timing label beside an explicit offset frequency", () => {
+    const code = { coding: [{ system: "urn:clinic:timing", code: "QID", display: "Per clinic protocol",
+      extension: [{ url: "urn:clinic:note", valueString: "retain" }] }] };
+    const wire: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { code,
+        repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Week,
+          startOffset: { value: 1, unit: "h" } } }
+    }] }] };
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(wire)));
+    for (const input of [wire, rows]) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale });
+      expect(text).toContain("Per clinic protocol");
+      expect(text).toContain(locale === "en" ? "2 administrations per 1 week" : "2 ครั้งต่อช่วง 1 สัปดาห์");
+      expect(text).not.toMatch(/four times daily|วันละ 4 ครั้ง/);
+    }
+    expect(toDosageDetails(rows).step[0].component[0].timing?.code).toEqual(code);
+  });
+});

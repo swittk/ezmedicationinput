@@ -17,6 +17,7 @@ import type {
 } from "./course";
 import { measureOperator as getQuantityComparator, compareRegimenPositions, hasAmountRole } from "./course";
 import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compile";
+import { preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
 import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
@@ -892,12 +893,14 @@ export function formatCanonicalCourse(
           // the full-period frequency that this offset-only preview omits.
           const structuredCount = _frequency !== undefined || _frequencyMax !== undefined;
           const { code: timingCode, ...withoutCode } = display.schedule;
+          const coding = preferredTimingCoding(display.schedule);
+          const literalCode = coding !== undefined && !isPreviewTimingCoding(coding);
           const codeAgrees = !(_period === undefined && _periodMax !== undefined) &&
             timingCodeMatchesRecurrence(display.schedule.recurrence,
-              timingCode?.coding?.[0]?.code ?? timingCode?.text);
+              coding?.code ?? timingCode?.text);
           const independentText = independentTimingText(timingCode?.text, display.schedule.recurrence);
           display = { ...display, schedule: {
-            ...(structuredCount || !codeAgrees
+            ...(!literalCode && (structuredCount || !codeAgrees)
               ? { ...withoutCode, ...(independentText ? { code: { text: independentText } } : {}) }
               : display.schedule), recurrence: rest
           } };

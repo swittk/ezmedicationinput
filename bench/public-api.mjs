@@ -99,13 +99,14 @@ function checkpoint(complete = false) {
     renameSync(temporary, outputPath);
   }
 }
-checkpoint();
-// Report path resolution, imports and untimed fixture preparation together.
-try {
+// Validate module locations before replacing a previous report. Imports and
+// untimed fixture preparation still begin with an incomplete checkpoint.
 const baselineEntry = realpathSync(resolve(baselinePath));
 const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
 if (baselineEntry === candidateEntry)
   throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
+checkpoint();
+try {
 const baseline = await import(pathToFileURL(baselineEntry).href);
 const candidate = await import(pathToFileURL(candidateEntry).href);
 const emaComparatorQuantity = { extension: [{
@@ -300,6 +301,7 @@ add("nextDueDoses", "nextDueDoses/varied-calendars", (m, i) => {
   const d = variedDates[i % variedDates.length];
   return m.nextDueDoses(rows[0], { ...schedule, from: d, orderedAt: d });
 });
+cases[cases.length - 1].iterationCycle = variedDates.length;
 // A separate fresh workload advances the same ordinal in each build through
 // probes, warmup, calibration and measured rounds. Negative millisecond offsets
 // retain the morning dose and the existing 2026-27 calendar range.
@@ -824,6 +826,7 @@ function completeComplexRows(output) {
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
     if (repeat?.count !== undefined || repeat?.countMax !== undefined || repeat?.dayOfWeek?.length ||
+        repeat?.timeOfDay?.length ||
         (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2]) ||
         (repeat?.periodMax !== undefined && repeat.periodMax !== expected[3])) return false;
     // The final left-eye BID phase is ongoing. A standard repeat bound must
@@ -851,6 +854,10 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   weekdaysOnly.fhir[5].timing.repeat.dayOfWeek = ["mon", "tue", "wed", "thu", "fri"];
   if (completeComplexRows(weekdaysOnly))
     throw new Error("Six-row oracle accepted a weekday-restricted daily phase");
+  const clocked = structuredClone(ongoingBidControl);
+  clocked.fhir[5].timing.repeat.timeOfDay = ["06:00:00", "12:00:00"];
+  if (completeComplexRows(clocked))
+    throw new Error("Six-row oracle accepted fixed clocks in the unclocked BID phase");
   const qualifiedDose = structuredClone(ongoingBidControl);
   qualifiedDose.fhir[0].doseAndRate[0].doseQuantity.extension = [{
     url: "http://ema.europa.eu/fhir/extension/comparator",
@@ -1078,7 +1085,7 @@ for (const test of cases) {
       report.cases.push({ name: test.name, api: test.api, smoke: true, ...equivalence });
       continue;
     }
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < Math.max(12, test.iterationCycle ?? 1); i++) {
       if (async) {
         await test.run(baseline, i);
         await test.run(candidate, i);
@@ -1087,7 +1094,9 @@ for (const test of cases) {
         test.run(candidate, i);
       }
     }
-    const iterations = await calibratedIterations(test, [baseline, candidate], async);
+    const calibrated = await calibratedIterations(test, [baseline, candidate], async);
+    const iterations = test.iterationCycle
+      ? Math.ceil(calibrated / test.iterationCycle) * test.iterationCycle : calibrated;
     const a = [],
       b = [];
     for (let r = 0; r < rounds; r++) {
@@ -1167,11 +1176,13 @@ for (const test of candidateOnlyCases) {
       report.newApiSmokeChecks.push({ api, name, smoke: true });
       continue;
     }
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < Math.max(12, test.iterationCycle ?? 1); i++) {
       const warmup = test.run(candidate, i);
       if (async) await warmup;
     }
-    const iterations = await calibratedIterations(test, [candidate], async);
+    const calibrated = await calibratedIterations(test, [candidate], async);
+    const iterations = test.iterationCycle
+      ? Math.ceil(calibrated / test.iterationCycle) * test.iterationCycle : calibrated;
     const times = [];
     for (let r = 0; r < rounds; r++) {
       if (global.gc) global.gc();

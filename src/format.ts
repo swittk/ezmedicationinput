@@ -577,6 +577,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
       periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "daily";
+  if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency &&
+      periodUnit === undefined && period === undefined)
+    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times`;
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
       return "once";

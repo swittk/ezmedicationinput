@@ -1890,10 +1890,11 @@ function translateSiteThai(
 
 function formatIsoCalendarDateThai(value: string | undefined): string | undefined {
   if (!value) return undefined;
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(.+))?$/u);
   if (!match) return value;
   const buddhistYear = Number(match[1]) + 543;
-  return `${Number(match[3])}/${Number(match[2])}/${buddhistYear}`;
+  const date = `${Number(match[3])}/${Number(match[2])}/${buddhistYear}`;
+  return match[4] ? `${date} เวลา ${match[4]}` : date;
 }
 
 function describeCalendarBoundsThai(
