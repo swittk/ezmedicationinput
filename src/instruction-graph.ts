@@ -1283,7 +1283,9 @@ function quantifiedEntityArgument(
     const quantityStart = partIndexForAbsoluteSourceStart(parts, quantity.span.start, offset);
     const quantityEnd = partIndexAfterAbsoluteSourceEnd(parts, quantity.span.end, offset);
     if (quantityStart !== undefined && quantityStart > start) {
-      entity = argumentFromParts(parts, start, quantityStart, input, role, options);
+      const prefix = quantityStart === start + 1 ? key(parts[start]) : undefined;
+      const determinerOnly = prefix === "a" || prefix === "an" || prefix === "the";
+      if (!determinerOnly) entity = argumentFromParts(parts, start, quantityStart, input, role, options);
     }
     if (!entity && quantityEnd !== undefined && quantityEnd < end) {
       entity = argumentFromParts(parts, quantityEnd, end, input, role, options);

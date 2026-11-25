@@ -1127,6 +1127,17 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
                 onset.clause.schedule?.phaseStartReference) && !onset.hasDose && !onset.method) end = onsetEnd;
           }
         }
+        // A fronted onset and its comma-separated dose are one right daughter.
+        // Preserve that typed attachment before evaluating the phase boundary.
+        if (site.kind === 'sequence' && nextBoundary?.kind === 'comma') {
+          const prefix = evidence.probe(rightStart, end);
+          if (!prefix.hasHead && (prefix.clause.schedule?.treatmentStartOffsetDays !== undefined ||
+              prefix.clause.schedule?.phaseStartReference)) {
+            const administrationEnd = probeEnd(nextBoundary.rightIndex);
+            const full = evidence.probe(rightStart, administrationEnd);
+            if (full.complete && full.hasHead && full.hasDose) end = administrationEnd;
+          }
+        }
         // A prepared dose and its following administration form one right
         // daughter. The ordinary short probe stops at their internal connector;
         // extend by that one constituent only when selected HPSG ownership
@@ -1236,7 +1247,8 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
             proposals.push(keep('regimen.instruction-continuation', 500, 'right.type', 'instruction'));
           } else {
             const prefix = evidence.probe(start, site.start);
-            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule);
+            const fronted = !prefix.hasHead && (prefix.prn || prefix.hasSchedule ||
+              prefix.clause.schedule?.treatmentStartOffsetDays !== undefined || prefix.clause.schedule?.phaseStartReference);
             // A fronted adjunct belongs to its complete administration, even
             // when a later phase makes the broad one-clause probe incomplete.
             const bounded = fronted ? evidence.probe(start, probeEnd(site.rightIndex)) : undefined;

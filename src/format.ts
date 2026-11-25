@@ -1163,7 +1163,7 @@ function describeAdministrationDuration(
   const unit = schedule?.administrationDurationUnit;
   const max = schedule?.administrationDurationMax;
   if ((value === undefined && max === undefined) || !unit) return undefined;
-  const label = words.timeUnit(unit, value ?? max) ?? unit;
+  const label = words.timeUnit(unit, max ?? value) ?? unit;
   if (value === undefined) return `over up to ${stripTrailingZero(max!)} ${label}`;
   const lower = quantityComparatorText(schedule?.administrationDurationComparator, "en") + stripTrailingZero(value);
   return max !== undefined && max !== value

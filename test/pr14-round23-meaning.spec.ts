@@ -5652,10 +5652,12 @@ describe("round62 active range beside a scalar infusion carrier", () => {
       else expect(member.route).toBeUndefined();
       for (const locale of ["en", "th"]) {
         const short = formatCanonicalCourse(course, "short", { locale, realizationMode: "normalized" });
+        const activeUnitText = unit === "mg" && locale === "th" ? "มก." : unit;
+        const escapedUnit = activeUnitText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const completeRange = new RegExp("(?:^|[^0-9.])" + String(low).replace(/[.]/g, "[.]") +
-          "-" + String(high).replace(/[.]/g, "[.]") + "(?![0-9.])", "u");
+          "-" + String(high).replace(/[.]/g, "[.]") + " " + escapedUnit + "(?![\\p{L}\\p{N}])", "u");
         expect(short).toMatch(completeRange);
-        expect("1" + low + "-" + high).not.toMatch(completeRange);
+        expect("1" + low + "-" + high + " " + activeUnitText).not.toMatch(completeRange);
         expect(short).toMatch(/50 mL(?: normal saline)? \/ 1 h/);
         if (material.includes("normal saline")) expect(short).toContain("normal saline");
         expect(short).not.toMatch(/intranasal|ทางจมูก/);

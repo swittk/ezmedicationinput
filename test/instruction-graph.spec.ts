@@ -4559,7 +4559,7 @@ describe("round41 supported graph and clinical preview facts", () => {
 
   it.each([
     [{ duration: 1, durationUnit: "h" }, "over 1 hour", "1 ชั่วโมง"],
-    [{ duration: 1, durationMax: 2, durationUnit: "h" }, "over 1 to 2 hour", "1 ถึง 2 ชั่วโมง"],
+    [{ duration: 1, durationMax: 2, durationUnit: "h" }, "over 1 to 2 hours", "1 ถึง 2 ชั่วโมง"],
     [undefined, undefined, undefined]
   ] as const)("keeps graph-only administration duration facts: %j", (repeat, english, thai) => {
     const frame = parseInstructionActions("Wash hands")[0];
@@ -5009,6 +5009,18 @@ describe("round44 public vocabulary and parsed frame isolation", () => {
       }) },
       { role: "qualifier", text: "occlusive" }
     ];
+    const componentCoding = graph.actions.find(frame => frame.predicate.lemma === "cover")!.args
+      .find(arg => arg.conceptId === "occlusive_dressing")!.components!.find(component => component.coding)!.coding!;
+    const originalCode = componentCoding.code, originalDisplay = componentCoding.display;
+    try {
+      componentCoding.code = "local-edited-code";
+      componentCoding.display = "Local edited dressing";
+      expect(makeGraph().actions.find(frame => frame.predicate.lemma === "cover")!.args
+        .find(arg => arg.conceptId === "occlusive_dressing")!.components).toEqual(expected);
+    } finally {
+      componentCoding.code = originalCode;
+      componentCoding.display = originalDisplay;
+    }
     const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
     const reopened = parseInstructionGraphExtension(toFhirR5Dosages(toDosageDetails([row]))[0].extension)!;
     for (const current of [graph, makeGraph(), reopened]) {
@@ -5727,7 +5739,7 @@ describe("round 49 saved instruction ownership", () => {
     "Disperse 2 tablets in water, then swallow slowly with water",
     "Measure 5 mL of medication; swallow",
     "Draw up 2 mL, then inject"
-  ].flatMap(source => ["tab", "mg"].map(unit => ({ source, unit })) ))(
+  ].flatMap(source => (source.startsWith("Draw up") ? ["mL"] : ["tab", "mg"]).map(unit => ({ source, unit })) ))(
     "keeps an actual preparation dose owner after an external edit: $source / $unit",
     ({ source, unit }) => {
       // Disperse is the existing institution-configured procedure control.
@@ -5747,10 +5759,11 @@ describe("round 49 saved instruction ownership", () => {
         for (const realizationMode of ["normalized", "roundtrip"] as const) {
           const text = formatSig(input, "long", { ...options, locale: "en", realizationMode });
           const amountPattern = unit === "tab" ? /(?:^|[^0-9.,+-])3 tablets(?![\p{L}\p{N}])/gu
-            : /(?:^|[^0-9.,+-])3 mg(?![\p{L}\p{N}])/gu;
+            : unit === "mg" ? /(?:^|[^0-9.,+-])3 mg(?![\p{L}\p{N}])/gu
+              : /(?:^|[^0-9.,+-])3 mL(?![\p{L}\p{N}])/gu;
           expect(text.match(amountPattern)).toHaveLength(1);
           expect(text).toMatch(new RegExp("^" + source.split(" ")[0]));
-          const amount = unit === "tab" ? "3 tablets" : "3 mg";
+          const amount = unit === "tab" ? "3 tablets" : "3 " + unit;
           const preparation = text.split(/[.;]/u)[0];
           const administration = text.slice(preparation.length);
           const action = source.startsWith("Dissolve") ? /\bdrink\b/iu
@@ -5983,7 +5996,7 @@ describe("round55: current clinical facts and independent graph meaning", () => 
         expect(text.match(/before each dose/gu) ?? []).toHaveLength(temporal ? 1 : 0);
         const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
         expect(th).toContain("ด้วยนม");
-        if (negated) expect(th).toContain("ห้าม");
+        expect(th.includes("ห้าม")).toBe(negated);
         expect(th.match(/ก่อนยาแต่ละครั้ง/gu) ?? []).toHaveLength(temporal ? 1 : 0);
       }
       expect(JSON.stringify(row)).toBe(before);
@@ -7154,7 +7167,11 @@ describe("round63 instruction complement and saved coding ownership", () => {
       const coding = action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!;
       expect(coding._display?.id).toBe("clinic-label");
       if (opaque) expect(coding._display?.extension).toContainEqual({ url: "urn:test:display", valueInteger: 7 });
-      expect(coding._display?.extension?.some(item => item.url === "http://hl7.org/fhir/StructureDefinition/translation") ?? false).toBe(translated);
+      const translation = coding._display?.extension?.find(item => item.url === "http://hl7.org/fhir/StructureDefinition/translation");
+      if (translated) expect(translation?.extension).toEqual(expect.arrayContaining([
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "กลืน" }
+      ]));
+      else expect(translation).toBeUndefined();
     }
     expect(source).toEqual(before);
   });
@@ -7735,7 +7752,11 @@ describe("round68 fresh graph cadence authority", () => {
     for (const frequency of [1, 2]) {
       const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: clause.dose!.value, unit: clause.dose!.unit } }],
         timing: { repeat: { frequency, period: 1, periodUnit: "d" } },
+        // Plain Drink is carried by method; its redundant action is absent
+        // from the auxiliary graph. Preserve that submitted clinical head.
+        ...(source.startsWith("Dissolve") ? { method: fresh(parsed.fhir[0].method) } : {}),
         extension: [buildInstructionGraphExtension(clause.instructionGraph)!] };
+      if (source.startsWith("Dissolve")) expect(row.method).toMatchObject({ text: "Drink" });
       const before = JSON.stringify(row), native = importCanonicalCourse(row), r6 = toDosageDetails([row]);
       for (const input of [row, native, r6, fresh(toFhirR5Dosages(r6))]) {
         const preview = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
@@ -7745,8 +7766,13 @@ describe("round68 fresh graph cadence authority", () => {
           expect(preview).toContain("Swallow 1 tablet whole");
           expect(preview.toLowerCase()).toContain("do not crush");
         } else {
-          expect(preview).toContain("Dissolve 2 tablets");
-          expect(preview).toContain("100 mL water");
+          const drinkIndex = preview.search(/\bDrink\b/iu);
+          expect(drinkIndex).toBeGreaterThan(0);
+          const preparation = preview.slice(0, drinkIndex), administration = preview.slice(drinkIndex);
+          expect(preparation).toContain("Dissolve 2 tablets");
+          expect(preparation).toContain("100 mL water");
+          expect(preparation).not.toMatch(/once daily|twice daily/u);
+          expect(administration).toContain(frequency === 1 ? "once daily" : "twice daily");
         }
       }
       expect(JSON.stringify(row)).toBe(before);
@@ -7758,5 +7784,35 @@ describe("round68 fresh graph cadence authority", () => {
       : "Dissolve 2 tablets in 100 mL water. Drink the medication orally twice daily.";
     for (const verified of [parsed.fhir, fresh(parsed.fhir)])
       expect(formatSig(verified, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(verifiedPreview);
+  });
+});
+
+
+describe("round70 quantified vehicle nominal ownership", () => {
+  it.each([
+    { source: "Dilute 1 mL with a 100 mL bag of saline", nominal: "bag of saline", amount: 100 },
+    { source: "Dilute 1 mL with saline 100 mL", nominal: "saline", amount: 100 },
+    { source: "Dilute 1 mL to 10 mL", nominal: "mL", amount: 10 }
+  ])("keeps the complete vehicle beside its independent volume: $source", ({ source, nominal, amount }) => {
+    const parsed = parsePublicSig(source), graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const vehicle = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Destination)!;
+    expect(vehicle.normalized).toBe(nominal);
+    expect(vehicle.quantity).toEqual({ value: amount, unit: "mL" });
+    expect(source).toContain(vehicle.text);
+    expect(graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
+      .toEqual({ value: 1, unit: "mL" });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en).toContain("Dilute 1 mL");
+      expect(en).toContain(amount + " mL");
+      expect(th).toContain("เจือจาง 1 มิลลิลิตร");
+      expect(th).toContain(amount + " มิลลิลิตร");
+      if (nominal !== "mL") {
+        expect(en).toContain(nominal);
+        expect(th).toContain(nominal);
+      } else expect(en).toBe("Dilute 1 mL to 10 mL.");
+    }
   });
 });

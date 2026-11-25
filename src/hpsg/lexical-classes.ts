@@ -946,16 +946,17 @@ export function parseClockToken<T extends LexToken>(
   const meridiem = meridiemToken ? normalizeTokenLower(meridiemToken) : undefined;
   let hour: number;
   let minute = 0;
-  const compactMeridiem = lower.match(/^([0-9]{1,2})\s*(am|pm)$/);
+  const compactMeridiem = lower.match(/^([0-9]{1,2})(?:[:.]([0-9]{2}))?\s*(am|pm)$/);
   if (compactMeridiem) {
     hour = parseInt(compactMeridiem[1], 10);
-    if (hour < 1 || hour > 12) {
+    minute = compactMeridiem[2] === undefined ? 0 : parseInt(compactMeridiem[2], 10);
+    if (hour < 1 || hour > 12 || minute > 59) {
       return undefined;
     }
-    if (POST_MERIDIEM_TOKENS.has(compactMeridiem[2]) && hour !== 12) {
+    if (POST_MERIDIEM_TOKENS.has(compactMeridiem[3]) && hour !== 12) {
       hour += 12;
     }
-    if (ANTE_MERIDIEM_TOKENS.has(compactMeridiem[2]) && hour === 12) {
+    if (ANTE_MERIDIEM_TOKENS.has(compactMeridiem[3]) && hour === 12) {
       hour = 0;
     }
     return {

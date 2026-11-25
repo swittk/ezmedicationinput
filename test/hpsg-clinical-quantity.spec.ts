@@ -3188,7 +3188,8 @@ describe("round46 supported quantity and boundary ownership", () => {
     });
 
   it.each(["until the next morning", "until 8 AM the next morning", "until 08:00 the next morning",
-    "until 8am next morning", "until the next morning at 8 AM",
+    "until 8am next morning", "until 8:30am the next day", "until 8:30 am the next day",
+    "until 8:30pm the next day", "until 8:30 pm the next day", "until the next morning at 8 AM",
     "until the next morning at 08:00"])("retains the relative ending %s without turning it into an onset", ending => {
     const source = "Take 1 tablet every 6 hours " + ending;
     const parsed = parsePublicSig(source);
@@ -4026,4 +4027,15 @@ describe("round69 selected administration duration ownership", () => {
       expect(parsed.input).toBe(source);
     }
   });
+});
+
+
+describe("round70 compact minute clocks", () => {
+  it.each([["8:30am", "08:30:00"], ["8:30pm", "20:30:00"]])(
+    "retains the authored minute and meridiem in %s", (clock, expected) => {
+      const parsed = parsePublicSig("Take 1 tablet at " + clock);
+      expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual([expected]);
+      expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual([expected]);
+      expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.timeOfDay).toEqual([expected]);
+    });
 });

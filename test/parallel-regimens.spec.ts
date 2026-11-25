@@ -1614,15 +1614,11 @@ describe("round48 parallel duration display boundaries", () => {
       repeat.boundsRange = { low: quantity(1), high: quantity(9) };
     } else repeat.boundsDuration = { ...quantity(kind === "shorter" ? 2 : kind === "longer" ? 9 : kind === "qualified" ? 8 : 30),
       ...(kind === "qualified" ? { comparator: "<" } : {}) };
-    if (kind === "longer") {
-      const component = current.step[stage].component[member];
-      const origin = component.extension?.find((field: { url: string }) => field.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
-      if (origin) origin.valueQuantity = quantity(0);
-      else (component.extension ??= []).push({ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: quantity(0) });
-    }
     const cold = JSON.parse(JSON.stringify(toFhirR5Dosages(current)));
     for (const input of [importCanonicalCourse(current), current, cold]) {
       const before = JSON.stringify(input);
+      if (kind === "longer") expect(importCanonicalCourse(input).stages[stage].administrations[member].phaseOrigin)
+        .toMatchObject({ value: 0, unit: "d" });
       const preview = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
       const stages = preview.trim().split(/ (?=From )/u);
       expect(stages).toHaveLength(3);

@@ -1590,3 +1590,25 @@ describe("round69 prepared dose phase ownership", () => {
     expect(JSON.stringify([parsed.fhir, parsed.fhirNext])).toBe(original);
   });
 });
+
+
+describe("round70 fronted treatment-day onset", () => {
+  it.each([",", ""])("keeps day 11 on its successor across an optional comma (%s)", comma => {
+    const source = "Take 1 tablet daily at 08:00 for 7 days, then from day 11" + comma + " take 2 tablets";
+    const parsed = parsePublicSig(source), clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses.map(clause => clause.dose)).toEqual([{ value: 1, unit: "tab" }, { value: 2, unit: "tab" }]);
+    expect(clauses[0].schedule).toMatchObject({ duration: 7, durationUnit: "d", frequency: 1,
+      period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] });
+    expect(clauses[0].schedule?.treatmentStartOffsetDays).toBeUndefined();
+    expect(clauses[1].schedule).toMatchObject({ treatmentStartOffsetDays: 10, phaseStartReference: "treatment-day-start",
+      frequency: 1, period: 1, periodUnit: "d", timeOfDay: ["08:00:00"] });
+    expect(clauses[1].schedule?.duration).toBeUndefined();
+    const query = { orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z", timeZone: "UTC", limit: 9 };
+    const due = ["2026-12-01T08:00:00+00:00", "2026-12-02T08:00:00+00:00", "2026-12-03T08:00:00+00:00",
+      "2026-12-04T08:00:00+00:00", "2026-12-05T08:00:00+00:00", "2026-12-06T08:00:00+00:00",
+      "2026-12-07T08:00:00+00:00", "2026-12-11T08:00:00+00:00", "2026-12-12T08:00:00+00:00"];
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext))]) expect(nextDueDoses(input, query)).toEqual(due);
+  });
+});
