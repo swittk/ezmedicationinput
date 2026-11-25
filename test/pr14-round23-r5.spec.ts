@@ -6747,7 +6747,7 @@ describe("round77 independent advice and selected Time ownership", () => {
       toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction![0]]) {
       expect(instruction.text).toBe("do not lie down immediately");
       expect(instruction.coding).toBeUndefined();
-      expect(getPrimitiveTranslation(instruction._text, "th")).toBe("ห้ามนอนราบ ทันที");
+      expect(getPrimitiveTranslation(instruction._text, "th")).toBe("ห้ามนอนราบทันที");
     }
     expect(parsePublicSig(source).fhir[0].additionalInstruction![0]._text).toBeUndefined();
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
@@ -6904,5 +6904,48 @@ describe("round78 graph argument field metadata", () => {
       graph = persist(parseInstructionGraphExtension([persist(output)])!);
     }
     expect(marker).toEqual(original);
+  });
+});
+
+
+describe("round78 scoped additional-instruction translations", () => {
+  it.each([
+    { source: "If skin irritation occurs, do not apply the patch",
+      en: "If skin irritation occurs, do not apply patch", th: "If skin irritation occurs ห้ามทาแผ่นแปะ" },
+    { source: "Do not apply the patch if skin irritation occurs",
+      en: "Do not apply patch if skin irritation occurs", th: "ห้ามทาแผ่นแปะ if skin irritation occurs" },
+    { source: "หากมีอาการระคายเคือง ห้ามตัดแผ่นแปะ",
+      en: "หากมีอาการระคายเคือง, do not cut patch", th: "หากมีอาการระคายเคือง ห้ามตัดแผ่นแปะ" }
+  ])("keeps the complete condition and negation: $source", fixture => {
+    const parsed = parsePublicSig(fixture.source, { locale: "th" });
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.relations).toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 0 }));
+    expect(graph.actions[0].polarity).toBe("negate");
+    for (const instruction of [parsed.fhir[0].additionalInstruction![0], parsed.fhirNext.step![0].component[0].additionalInstruction![0],
+      toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction![0]]) {
+      expect(instruction.text).toBe(fixture.source);
+      expect(instruction.coding).toBeUndefined();
+      for (const locale of ["en", "th"] as const)
+        expect(getPrimitiveTranslation(instruction._text, locale)).toBe(fixture[locale]);
+    }
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext)])
+      expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(fixture.source);
+  });
+
+  it("keeps a second warning independent from the first warning's condition", () => {
+    const parsed = parsePublicSig("If skin irritation occurs, do not apply the patch; do not lie down immediately", { locale: "th" });
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.relations).toEqual([expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 0 })]);
+    for (const instructions of [parsed.fhir[0].additionalInstruction!, parsed.fhirNext.step![0].component[0].additionalInstruction!,
+      toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction!]) {
+      expect(instructions).toHaveLength(2);
+      expect(getPrimitiveTranslation(instructions[0]._text, "en")).toBe("If skin irritation occurs, do not apply patch");
+      expect(getPrimitiveTranslation(instructions[0]._text, "th")).toBe("If skin irritation occurs ห้ามทาแผ่นแปะ");
+      expect(instructions[1].text).toBe("do not lie down immediately");
+      expect(getPrimitiveTranslation(instructions[1]._text, "en")).toBe("Do not lie down immediately");
+      expect(getPrimitiveTranslation(instructions[1]._text, "th")).toBe("ห้ามนอนราบทันที");
+    }
   });
 });

@@ -109,7 +109,7 @@ describe("Thai formatter human-review follow-up", () => {
     expect(instruction.text).toBe("ห้ามตัดแผ่นแปะ");
     expect(instruction.coding).toBeUndefined();
     expect(getPrimitiveTranslations(instruction._text)).toEqual({
-      en: "Do not cut patch", th: "ห้ามตัด แผ่นแปะ"
+      en: "Do not cut patch", th: "ห้ามตัดแผ่นแปะ"
     });
     expect(parsed.longText).toBe("ห้ามตัดแผ่นแปะ.");
   });

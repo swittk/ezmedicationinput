@@ -9,9 +9,9 @@ import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
-  findAdditionalInstructionDefinitionByCoding,
-  realizeAdviceFramesText
+  findAdditionalInstructionDefinitionByCoding
 } from "./advice";
+import { realizeInstructionAction } from "./instruction-graph";
 import { localeKeys } from "./localization";
 import {
   buildBodySiteAdministrationTargetCountExtension,
@@ -1655,14 +1655,14 @@ export function serializeCanonicalContext(
     const text = instruction.text?.trim();
     if (!text) continue;
     let i18n = instruction.i18n;
-    if (options?.includeTranslationExtensions && !i18n && !instruction.coding?.code && instruction.frames?.length) {
+    if (options?.includeTranslationExtensions && !i18n && !instruction.coding?.code && instruction.frames?.length === 1) {
       const labels: Array<Record<string, string> | undefined> = [];
       for (const frame of instruction.frames) {
         labels.push(frame.predicate.i18n);
         for (const arg of frame.args) labels.push(arg.i18n);
       }
       for (const locale of localeKeys(...labels)) {
-        const translated = realizeAdviceFramesText(instruction.frames, locale);
+        const translated = realizeInstructionAction(instruction.frames[0], locale, clause.instructionGraph);
         if (translated) (i18n ??= {})[locale] = translated;
       }
     }

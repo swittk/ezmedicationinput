@@ -4179,8 +4179,21 @@ function realizeAction(
     : complete;
 }
 
-export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): string {
-  return realizeAction(frame, locale);
+/** Realize one selected action with its existing external graph scope, when supplied. */
+export function realizeInstructionAction(
+  frame: AdviceFrame, locale = "en", graph?: CanonicalInstructionGraph
+): string {
+  const text = realizeAction(frame, locale);
+  if (!graph?.relations?.length) return text;
+  const actionIndex = graph.actions.findIndex(action => action.span.start === frame.span.start &&
+    action.span.end === frame.span.end && action.predicate.lemma === frame.predicate.lemma);
+  const conditions: InstructionGraphPrimaryCondition[] = [];
+  for (const relation of graph.relations) {
+    if (relation.fromActionIndex !== undefined || relation.toActionIndex !== actionIndex) continue;
+    const condition = instructionGraphCondition(relation, frame, graph.sourceLocale ?? "en", locale);
+    if (condition) conditions.push(condition);
+  }
+  return attachInstructionGraphPrimaryConditions(text, conditions, locale);
 }
 
 /** A rich source action can carry its own Manner/Time but no Amount because a
@@ -5147,6 +5160,29 @@ export interface InstructionGraphPrimaryCondition {
   imperative: boolean;
 }
 
+/** Resolve the same typed external relation for complete graph or scoped
+ * instruction realization. Unknown condition wording stays source-preserved. */
+function instructionGraphCondition(
+  relation: CanonicalInstructionRelation, target: AdviceFrame,
+  sourceLocale: string, targetLocale: string
+): InstructionGraphPrimaryCondition | undefined {
+  if (!relation.text || !relation.span) return undefined;
+  const normalizedRelation = normalizedInstructionSurface(relation.text);
+  const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
+    const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
+    return Boolean(normalizedRelation && argSurface &&
+      (normalizedRelation.includes(argSurface) || argSurface.includes(normalizedRelation)));
+  });
+  if (representedByTarget) return undefined;
+  const text = localizeConditionRelationText(relation, sourceLocale, targetLocale);
+  return text ? {
+    text,
+    position: relation.span.end <= target.span.start ? "pre" : "post",
+    start: relation.span.start,
+    imperative: !target.modality && target.polarity !== AdvicePolarity.Negate
+  } : undefined;
+}
+
 /** Attach only conditions owned by that primary, before independent graph
  * actions/advice are composed. Ordinary clauses do not allocate this report. */
 export function attachInstructionGraphPrimaryConditions(
@@ -5375,15 +5411,8 @@ export function realizeInstructionGraph(
     const target = conditionTargets.get(relation.toActionIndex);
     if (!target || !relation.text || !relation.span ||
         !inRequestedPosition(relation.span.start, relation.span.end, relation.toActionIndex)) continue;
-    const normalizedRelation = normalizedInstructionSurface(relation.text);
-    const representedByTarget = target.relation === relation.kind && target.args.some((arg) => {
-      const argSurface = normalizedInstructionSurface(arg.text ?? arg.normalized ?? "");
-      return Boolean(
-        normalizedRelation && argSurface &&
-        (normalizedRelation.includes(argSurface) || argSurface.includes(normalizedRelation))
-      );
-    });
-    if (representedByTarget) continue;
+    const condition = instructionGraphCondition(relation, target, graph.sourceLocale ?? "en", locale);
+    if (!condition) continue;
     const currentCondition = options?.omitCanonicalAdministration?.clinicalAdjuncts?.condition;
     if (currentCondition && relation.toActionIndex === coveredPrimaryAction &&
         relationHasSemanticClass(relation.kind, "conditional")) {
@@ -5391,30 +5420,21 @@ export function realizeInstructionGraph(
       if (sourceBody && primaryConditionOwnsSource(currentCondition,
           normalizedInstructionSurface(sourceBody), relation.kind === AdviceRelation.Unless)) continue;
     }
-    const relationText = localizeConditionRelationText(
-      relation,
-      graph.sourceLocale ?? "en",
-      locale
-    );
-    if (relationText) {
-      if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
-          relationHasGrammarFeature(relation.kind, "conditionScope")) {
-        options.primaryConditions.push({
-          text: relationText,
-          position: relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post",
-          start: relation.span.start,
-          imperative: !target.modality && target.polarity !== AdvicePolarity.Negate
-        });
-        continue;
-      }
-      nodes.push({
-        start: relation.span.start,
-        end: relation.span.end,
-        text: relationText,
-        understood: false,
-        conditionTargetActionIndex: relation.toActionIndex
+    if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
+        relationHasGrammarFeature(relation.kind, "conditionScope")) {
+      options.primaryConditions.push({
+        ...condition,
+        position: relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"
       });
+      continue;
     }
+    nodes.push({
+      start: relation.span.start,
+      end: relation.span.end,
+      text: condition.text,
+      understood: false,
+      conditionTargetActionIndex: relation.toActionIndex
+    });
   }
   if (!options?.onlyWarnings) {
     for (const opaque of graph.opaqueSpans ?? []) {
