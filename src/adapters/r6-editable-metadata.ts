@@ -13,7 +13,7 @@ import { equalStructuredValues, hashStructuredValue } from "../stable-structure"
 import { boundaryFromR6 } from "./canonical-course";
 import { getAdministrationOffsetMinutes, getAnchoredCourseDuration, getTimingClocks } from "../fhir";
 import { getQuantityComparator, quantityForR5 as generalQuantityForR5, simpleQuantityForR5 } from "../fhir-quantity-operator";
-import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays } from "../dosage-course";
+import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL, encodeR6SourceMetadata, decodeR6SourceMetadata, compactProjectionFingerprint, DOSAGE_RECONCILIATION_SOURCE_URL, getDosageExcludedDates, getDosageExcludedWeekdays, getDosageCondition } from "../dosage-course";
 
 export const R6_DRAFT_STEPS_SOURCE_URL = "urn:ezmedicationinput:r6-draft-steps-source";
 export const R6_SINGLE_STEP_SAFETY_SOURCE_URL = "urn:ezmedicationinput:r6-single-step-safety-source";
@@ -189,6 +189,7 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
         const before = prior.component[member], after = current.component[member];
         // Getters return fresh arrays; weekday order cannot change completion.
         if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+            !equalStructuredValues(getDosageCondition(before), getDosageCondition(after)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
             !equalStructuredValues(draftMemberPhase(before), draftMemberPhase(after)) ||
             (getAdministrationOffsetMinutes({ modifierExtension: before.modifierExtension }) ?? 0) !==

@@ -1267,8 +1267,12 @@ function reconcileNativeRetainedCourse(
     const dosage = dosages[index];
     if (sourceCarrierIndices?.has(index)) {
       preserveRetainedMarkers = true;
-      if (dosage.id !== undefined || dosage._text !== undefined || dosage._sequence !== undefined || dosage.extension?.length)
+      // Unchanged wording already belongs to the retained course. A fresh
+      // carrier edit must remain recoverable beside its current annotations.
+      const editedText = dosage.text !== retained.renderedInstruction ? dosage.text : undefined;
+      if (editedText !== undefined || dosage.id !== undefined || dosage._text !== undefined || dosage._sequence !== undefined || dosage.extension?.length)
         sourceFragments.push(retainField("r5SourceCarrier", {
+          ...(editedText !== undefined ? { text: editedText } : {}),
           ...(dosage.id !== undefined ? { id: dosage.id } : {}),
           ...(dosage._text !== undefined ? { _text: dosage._text } : {}),
           ...(dosage._sequence !== undefined ? { _sequence: dosage._sequence } : {}),

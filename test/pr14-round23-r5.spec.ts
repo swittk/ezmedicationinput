@@ -11355,3 +11355,106 @@ describe("round64 declared format options", () => {
     expect(formatSigBatch(rows, "long", options)).toBe(formatSigBatch(rows, "long", expected));
   });
 });
+
+
+describe("round66 interchange review corrections", () => {
+  const contextCode = { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] };
+  const daily = { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] };
+
+  it.each([false, true])("retains current source-carrier text beside a live dose (annotated=%s)", annotated => {
+    const source: FhirR6DosageInstruction = { renderedInstruction: "Call clinic for dose" };
+    const carrier = persist(toFhirR5Dosages(source)[0]);
+    carrier.text = "Confirm dose with clinic before use";
+    if (annotated) carrier._text = { id: "current-source-text" };
+    let rows: FhirDosage[] = [carrier, { doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }];
+    for (let save = 0; save < 2; save++) {
+      const before = persist(rows), wire = toDosageDetails(rows);
+      expect(wire.step).toHaveLength(1);
+      expect(wire.step![0].component).toHaveLength(1);
+      expect(wire.step![0].component[0].doseAndRate).toEqual([{ doseQuantity: q(2) }]);
+      expect(wire.step![0].component[0].text).toBeUndefined();
+      const sources: unknown[] = [];
+      for (const marker of wire.extension ?? []) if (marker.url === DOSAGE_RECONCILIATION_SOURCE_URL)
+        for (const item of marker.extension ?? []) if (item.url === "r5SourceCarrier") sources.push(readRetainedField(item));
+      expect(sources).toContainEqual({ text: carrier.text, ...(annotated ? { _text: carrier._text } : {}) });
+      expect(rows).toEqual(before);
+      rows = persist(toFhirR5Dosages(wire));
+    }
+  });
+
+  it.each(["condition", "annotation"] as const)("retires only a completion-changing condition's outgoing pause (%s)", edit => {
+    const source: FhirR6DosageInstruction = { step: [
+      { id: "induction", component: [{ id: "initial", doseAndRate: [{ doseQuantity: q(1) }],
+        timing: { repeat: { ...daily, count: 2 } }, condition: [conditionToR6({ kind: "measurement",
+          name: "glucose", operation: "gt", value: 85, unit: "mg/dL", text: "Glucose above threshold" })] }] },
+      { id: "pause", end: { contextCode, offsetDuration: { value: 2, unit: "d" } }, component: [] },
+      { id: "maintenance", start: { contextCode, offsetDuration: { value: 3, unit: "d" } }, component: [{
+        id: "later", doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily } }] },
+    ] };
+    let wire = persist(r6Save(source));
+    const condition = wire.step![0].component[0].condition![0];
+    if (edit === "condition") condition.valueQuantity!.value = 95;
+    else condition.extension = [{ url: "urn:clinic:condition-note", valueString: "reviewed" }];
+    for (let save = 0; save < 2; save++) {
+      const before = persist(wire);
+      expect(fromDosageDetails(wire).course.step?.map(step => step.id)).toEqual(edit === "condition"
+        ? ["induction", "maintenance"] : ["induction", "pause", "maintenance"]);
+      expect(nextDueDoses(wire, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+        timeZone: "UTC", limit: 4, evaluateCondition: (condition, at) => condition.kind !== "measurement" ||
+          (at.startsWith("2026-01-02") ? 90 : 100) > condition.value })).toEqual([
+        "2026-01-01T09:00:00+00:00", edit === "condition" ? "2026-01-03T09:00:00+00:00" : "2026-01-02T09:00:00+00:00",
+        "2026-01-04T09:00:00+00:00", "2026-01-05T09:00:00+00:00",
+      ]);
+      expect(wire).toEqual(before);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
+  });
+
+  it.each(["left nostril", "left naris", "right nostril", "right naris"])(
+    "keeps authored %s specificity with a generic Naris code", text => {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "spray" } }],
+        site: { text, coding: [{ system: "http://snomed.info/sct", code: "1797002", display: "Naris" }] } };
+      const before = persist(row);
+      for (const input of [row, toDosageDetails([row])]) expect(formatSig(input, "long")).toContain(text);
+      expect(row).toEqual(before);
+      const changed = persist(row);
+      changed.site!.coding![0] = { system: "http://snomed.info/sct", code: "723609004", display: "Structure of right anterior naris" };
+      expect(formatSig(changed, "long")).toContain("right");
+      expect(changed.site!.text).toBe(text);
+    });
+
+  it("accepts native approximate Quantity extensions on R6 dosage conditions", () => {
+    const extension: FhirR6Extension = { url: "urn:clinic:threshold", valueQuantity: { value: 90, comparator: "~", unit: "mg/dL" } };
+    const condition: FhirR6DosageCondition = { code: { text: "glucose" }, extension: [extension],
+      valueQuantity: { value: 90, comparator: "~", unit: "mg/dL" } };
+    // @ts-expect-error R5 Element extensions retain strict R5 Quantity comparators.
+    const strict: FhirElement = { extension: [{ url: "urn:clinic:threshold", valueQuantity: { value: 90, comparator: "~" } }] };
+    void strict;
+    const source = course({ condition: [condition] });
+    expect(r6Save(source).step![0].component[0].condition).toEqual([condition]);
+    expect(toDosageDetails(persist(toFhirR5Dosages(source))).step![0].component[0].condition).toEqual([condition]);
+  });
+
+  it("retains complete spatial target Coding through the public parse-clone-build path", () => {
+    const url = "urn:ezmedicationinput:body-site-spatial-relation";
+    const target = { id: "authored-knee", system: "http://snomed.info/sct", code: "82169009", display: "Left knee",
+      version: "20260131", _display: { extension: [{ url: "urn:clinic:display-note", valueString: "retain" }] },
+      extension: [{ url: "urn:clinic:coding-note", valueBoolean: true }], clinicMetadata: { service: "wound care" } };
+    const source: FhirExtension = { url, extension: [
+      { url: "relationText", valueString: "below" },
+      { url: "target", valueCodeableConcept: { text: "left knee", coding: [target] } },
+    ] };
+    const before = persist(source);
+    const parsed = parseBodySiteSpatialRelationExtension({ extension: [source] })!;
+    expect(parsed.targetCoding).toEqual(target);
+    const cloned = cloneBodySiteSpatialRelation(parsed)!;
+    expect(buildBodySiteSpatialRelationExtension(cloned)).toEqual(source);
+    expect(buildBodySiteSpatialRelationExtension({ relationText: "below", targetText: "left knee", targetCoding: target })).toEqual(source);
+    const { system: _system, ...unqualified } = target;
+    expect(buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding: unqualified })!.extension![1]
+      .valueCodeableConcept!.coding).toEqual([target]);
+    expect(buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding: { code: "82169009" } })!.extension![1]
+      .valueCodeableConcept!.coding).toEqual([{ system: "http://snomed.info/sct", code: "82169009" }]);
+    expect(source).toEqual(before);
+  });
+});

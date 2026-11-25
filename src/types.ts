@@ -593,7 +593,7 @@ type DosageConditionValue = {
     Pick<FhirR6DosageConditionValues, K | Extract<keyof FhirR6DosageConditionValues, `_${K}`>> &
     Partial<Record<Exclude<keyof FhirR6DosageConditionValues, K | `_${K}`>, never>>
 }[DosageConditionValueField];
-export type FhirR6DosageCondition = FhirBackboneElement & {
+export type FhirR6DosageCondition = FhirR6BackboneElement & {
   code: FhirCodeableConcept;
   details?: FhirCodeableConcept;
   operation?: "eq" | "ne" | "in" | "nin" | "gt" | "lt" | "ge" | "le" | "sa" | "eb" | "ap";

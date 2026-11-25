@@ -54,11 +54,7 @@ function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | un
   if (!coding?.code) {
     return undefined;
   }
-  return {
-    system: coding.system ?? SNOMED_SYSTEM,
-    code: coding.code,
-    display: coding.display
-  };
+  return coding.system !== undefined ? coding : { ...coding, system: SNOMED_SYSTEM };
 }
 
 function firstCodingWithCode(concept: FhirCodeableConcept | undefined): FhirCoding | undefined {
@@ -180,11 +176,7 @@ export function parseBodySiteSpatialRelationExtension(
     relationCoding,
     targetText,
     targetCoding: targetCoding?.code
-      ? {
-        system: targetCoding.system,
-        code: targetCoding.code,
-        display: targetCoding.display
-      }
+      ? { ...targetCoding, code: targetCoding.code }
       : undefined,
     sourceText
   };

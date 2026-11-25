@@ -39,6 +39,8 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
 const BROADER_BODY_SITE_CODE: Readonly<Record<string, string>> = {
   "368588007": "89644007", // Entire left external auditory canal -> left ear.
   "368566007": "25577004", // Entire right external auditory canal -> right ear.
+  "723608007": "1797002", // Left anterior naris -> naris.
+  "723609004": "1797002", // Right anterior naris -> naris.
 };
 
 /** Compare exact stock site labels only. A lateralized label can refine its
