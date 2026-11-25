@@ -203,7 +203,7 @@ export const TIMING_ADMINISTRATION_DURATION_EXTENSION_URL =
 
 /** Decode one classified marker without flattening independent endpoints. */
 export function parseTimingAdministrationDuration(
-  extension: FhirExtension | undefined,
+  extension: FhirR6Extension | undefined,
   current?: Pick<FhirTimingRepeat, "duration" | "durationMax" | "durationUnit">
 ): (Partial<NonNullable<HpsgClinicalQuantityFeature["administrationDuration"]>> & {
   range?: import("./canonical/course").CanonicalRange;
@@ -366,7 +366,7 @@ export function getTimingEvents(timing: Pick<FhirTiming, "event"> | undefined): 
 /** Read the current wire clock field. A supplied core field, including an empty
  * array, owns its edit; the bridge is the clock field only when core is absent. */
 export function getTimingClocks(
-  repeat: Pick<FhirTimingRepeat, "timeOfDay" | "extension"> | undefined
+  repeat: Pick<FhirR6TimingRepeat, "timeOfDay" | "extension"> | undefined
 ): string[] | undefined {
   if (!repeat) return undefined;
   if (repeat.timeOfDay !== undefined) {
@@ -413,8 +413,8 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   const mixed = Boolean(repeat.when?.length && clocks?.length);
   if (!mixed && !repeat.extension?.length)
     return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
-  let markers: FhirExtension[] | undefined;
-  const kept: FhirExtension[] = [];
+  let markers: FhirR6Extension[] | undefined;
+  const kept: FhirR6Extension[] = [];
   let bridgeIndex = 0;
   let bridgeMetadata: FhirTimingRepeat["_timeOfDay"];
   let bridgeClocks: FhirTimingRepeat["timeOfDay"];
@@ -485,7 +485,7 @@ export const TIMING_CLOCK_WINDOW_EXTENSION_URL =
  * @returns Source clock endpoints and explicit endpoint inclusivity.
  */
 export function getTimingClockWindow(
-  repeat: FhirTimingRepeat | undefined
+  repeat: FhirR6TimingRepeat | undefined
 ): { start: string; end: string; endInclusive: boolean } | undefined {
   const parts = repeat?.extension?.find(part => part.url === TIMING_CLOCK_WINDOW_EXTENSION_URL)?.extension;
   if (!parts) return undefined;
@@ -503,10 +503,10 @@ export const TIMING_DAY_OF_MONTH_EXTENSION_URL =
 
 /** Retrieve bounded executable month-day selection without interpreting prose.
  * Unknown and malformed extensions remain in the original FHIR object.
- * @param repeat Original FHIR R5 Timing.repeat with optional standard extensions.
+ * @param repeat Original FHIR R5/R6 Timing.repeat with optional standard extensions.
  * @returns Sorted unique calendar days, or undefined when none are recognized.
  */
-export function getTimingMonthDays(repeat: FhirTimingRepeat | undefined): number[] | undefined {
+export function getTimingMonthDays(repeat: FhirR6TimingRepeat | undefined): number[] | undefined {
   const extensions = repeat?.extension;
   if (!extensions?.length) return undefined;
   const days: number[] = [];
@@ -527,7 +527,7 @@ export const TIMING_WEEKDAY_ORDINAL_EXTENSION_URL =
  * @returns The source weekday occurrence, including -1 for last, when valid.
  */
 export function getTimingWeekdayOrdinal(
-  repeat: FhirTimingRepeat | undefined
+  repeat: FhirR6TimingRepeat | undefined
 ): -1 | 1 | 2 | 3 | 4 | 5 | undefined {
   const value = repeat?.extension?.find(part => part.url === TIMING_WEEKDAY_ORDINAL_EXTENSION_URL)?.valueInteger;
   return value === -1 || value === 1 || value === 2 || value === 3 || value === 4 || value === 5
@@ -536,7 +536,7 @@ export function getTimingWeekdayOrdinal(
 
 /** Read an explicitly encoded daily event window without examining SIG text. */
 export function getTimingEventWindow(
-  repeat: FhirTimingRepeat | undefined
+  repeat: FhirR6TimingRepeat | undefined
 ): { start: EventTiming; end: EventTiming } | undefined {
   const extension = repeat?.extension?.find(part => part.url === TIMING_EVENT_WINDOW_EXTENSION_URL);
   if (!extension) return undefined;
@@ -839,7 +839,7 @@ function parseBodySiteRestrictionExtensions(
 }
 
 function timingOffsetExtensionValue(
-  repeat: FhirTimingRepeat | undefined,
+  repeat: FhirR6TimingRepeat | undefined,
   url: string
 ): number | undefined {
   const extension = repeat?.extension?.find((candidate) => candidate.url === url);
@@ -856,7 +856,7 @@ function timingOffsetExtension(url: string, minutes: number) {
 }
 
 export function getExactTimingOffsetMinutes(
-  repeat: FhirTimingRepeat | undefined
+  repeat: FhirR6TimingRepeat | undefined
 ): number | undefined {
   if (repeat?.offset !== undefined) return repeat.offset;
   return timingOffsetExtensionValue(repeat, TIMING_OFFSET_EXACT_EXTENSION_URL);
@@ -898,7 +898,7 @@ function buildActivityTimingExtension(
   return { url: TIMING_ACTIVITY_WINDOW_EXTENSION_URL, extension: children };
 }
 
-function activityTimingQuantityMinutes(extension: NonNullable<FhirTimingRepeat["extension"]>[number] | undefined): number | undefined {
+function activityTimingQuantityMinutes(extension: NonNullable<FhirR6TimingRepeat["extension"]>[number] | undefined): number | undefined {
   const value = extension?.valueQuantity?.value;
   const unit = extension?.valueQuantity?.code ?? extension?.valueQuantity?.unit;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
@@ -927,7 +927,7 @@ function buildOccurrenceCapExtension(cap: CanonicalOccurrenceCapExpr) {
 }
 
 export function getTimingOccurrenceCap(
-  repeat: FhirTimingRepeat | undefined
+  repeat: FhirR6TimingRepeat | undefined
 ): CanonicalOccurrenceCapExpr | undefined {
   const extension = repeat?.extension?.find(
     (candidate) => candidate.url === TIMING_OCCURRENCE_CAP_EXTENSION_URL
@@ -974,7 +974,7 @@ function canonicalDosePeriodMaximums(
 /** Read typed activity-event relations from Timing extensions without parsing
  * narrative instructions or inferring an activity's calendar instant.
  */
-export function parseActivityTimingExtensions(repeat: FhirTimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
+export function parseActivityTimingExtensions(repeat: FhirR6TimingRepeat | undefined): CanonicalActivityTimingExpr[] | undefined {
   const result: CanonicalActivityTimingExpr[] = [];
   for (const extension of repeat?.extension ?? []) {
     if (extension.url !== TIMING_ACTIVITY_WINDOW_EXTENSION_URL) continue;

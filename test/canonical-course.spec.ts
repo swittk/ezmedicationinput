@@ -120,7 +120,7 @@ describe("canonical course architecture", () => {
     ]) expect(forbiddenModuleSpecifiers(source)).toEqual(["../adapters/r5-import"]);
     expect(forbiddenModuleSpecifiers(`const text = 'from "../adapters/r5-import"';`)).toEqual([]);
     expect(forbiddenModuleSpecifiers(`const text = 'require("../adapters/r5-import")';`)).toEqual([]);
-    const wireModifierAccess = (text: string) => {
+    const wireBoundaryAccesses = (text: string) => {
       const source = ts.createSourceFile("boundary.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const accesses: string[] = [];
       const visit = (node: ts.Node) => {
@@ -132,6 +132,11 @@ describe("canonical course architecture", () => {
             (boundProperty && (ts.isIdentifier(boundProperty) || ts.isStringLiteralLike(boundProperty)) &&
              boundProperty.text === "modifierExtension"))
           accesses.push(node.getText(source));
+        if (ts.isCallExpression(node)) {
+          const callee = ts.isPropertyAccessExpression(node.expression) ? node.expression.name : node.expression;
+          if (ts.isIdentifier(callee) && ["toFhirR5Dosages", "fromR6Dosage", "toDosageDetails"].includes(callee.text))
+            accesses.push(node.getText(source));
+        }
         ts.forEachChild(node, visit);
       };
       visit(source);
@@ -139,11 +144,15 @@ describe("canonical course architecture", () => {
     };
     for (const access of ["row.modifierExtension", "row?.modifierExtension",
       'row["modifierExtension"]', 'row?.["modifierExtension"]'])
-      expect(wireModifierAccess("const modifiers = " + access + " ?? [];")).toEqual([access]);
+      expect(wireBoundaryAccesses("const modifiers = " + access + " ?? [];")).toEqual([access]);
     for (const binding of ["modifierExtension", "modifierExtension: markers", '"modifierExtension": markers'])
-      expect(wireModifierAccess("const { " + binding + " } = row;")).toEqual([binding]);
-    expect(wireModifierAccess('const text = "row.modifierExtension";')).toEqual([]);
-    expect(wireModifierAccess('const text = "{ modifierExtension: markers }";')).toEqual([]);
+      expect(wireBoundaryAccesses("const { " + binding + " } = row;")).toEqual([binding]);
+    expect(wireBoundaryAccesses('const text = "row.modifierExtension";')).toEqual([]);
+    expect(wireBoundaryAccesses('const text = "{ modifierExtension: markers }";')).toEqual([]);
+    for (const name of ["toFhirR5Dosages", "fromR6Dosage", "toDosageDetails"]) {
+      expect(wireBoundaryAccesses(name + "(rows);")).toEqual([name + "(rows)"]);
+      expect(wireBoundaryAccesses("// R5 clients use " + name + "(rows) at the adapter boundary.")).toEqual([]);
+    }
     for (const name of [
       "../src/execution/engine.ts",
       "../src/canonical/compile.ts",
@@ -151,10 +160,7 @@ describe("canonical course architecture", () => {
     ]) {
       const text = readFileSync(new URL(name, import.meta.url), "utf8");
       expect(forbiddenModuleSpecifiers(text)).toEqual([]);
-      expect(text).not.toMatch(
-        /\b(?:toFhirR5Dosages|fromR6Dosage|toDosageDetails)\s*\(/u
-      );
-      expect(wireModifierAccess(text)).toEqual([]);
+      expect(wireBoundaryAccesses(text)).toEqual([]);
     }
   });
   it("R5 import/export are independent native adapters, never complete R6 intermediate workflows",()=>{
@@ -1297,7 +1303,8 @@ it.each(["Take 1 tablet", "Dissolve 1 tablet in water"])("honors a freshly submi
   for (const realizationMode of ["roundtrip", "normalized"] as const) {
     const options = { locale: "en", realizationMode };
     for (const text of [formatSig(structuredClone(row), "long", options), fromFhirDosage(structuredClone(row), options).longText]) {
-      expect(text).toMatch(/(?<![\d.])2 tab(?:lets?)?\b/u);
+      expect(text).toMatch(head.startsWith("Take") ? /Take 1 tablet\b/u : /Dissolve 1 tablet in water\b/u);
+      expect(text).toContain("max per period: 2 tab / 1 d");
       expect(text).not.toMatch(/(?<![\d.])4 tab(?:lets?)?\b/u);
     }
   }

@@ -217,7 +217,7 @@ function ratio(
     ? r
     : { ...r, ...(r.numerator ? { numerator } : {}), ...(r.denominator ? { denominator } : {}) };
 }
-function offsetValue(repeat: { extension?: FhirExtension[] } | undefined, url: string): number | undefined {
+function offsetValue(repeat: { extension?: FhirR6Extension[] } | undefined, url: string): number | undefined {
   const value = repeat?.extension?.find((e) => e.url === url);
   return value?.valueInteger ?? value?.valueDecimal;
 }
@@ -264,13 +264,13 @@ function timingAnnotations(
     | "occurrenceDurationRange"
   > = { offset: r?.offset };
   let administrationDurationSeen = false;
-  let exact: FhirExtension | undefined,
-    month: FhirExtension[] | undefined,
-    activities: FhirExtension[] | undefined;
-  let weekday: FhirExtension | undefined,
-    cap: FhirExtension | undefined,
-    clock: FhirExtension | undefined,
-    event: FhirExtension | undefined;
+  let exact: FhirR6Extension | undefined,
+    month: FhirR6Extension[] | undefined,
+    activities: FhirR6Extension[] | undefined;
+  let weekday: FhirR6Extension | undefined,
+    cap: FhirR6Extension | undefined,
+    clock: FhirR6Extension | undefined,
+    event: FhirR6Extension | undefined;
   for (const e of r?.extension ?? [])
     switch (e.url) {
       case TIMING_ADDITIONAL_CLOCK_EXTENSION_URL:
@@ -1147,12 +1147,12 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
  * Unknown siblings and unedited richer source markers are preserved exactly.
  * The execution core never sees these annotations. */
 function replaceOwnedAnnotations(
-  before: readonly FhirExtension[] | undefined,
-  generated: readonly FhirExtension[] | undefined,
+  before: readonly FhirR6Extension[] | undefined,
+  generated: readonly FhirR6Extension[] | undefined,
   changed: ReadonlySet<string>
-): FhirExtension[] | undefined {
-  if (!changed.size) return before as FhirExtension[] | undefined;
-  const next: FhirExtension[] = [];
+): FhirR6Extension[] | undefined {
+  if (!changed.size) return before as FhirR6Extension[] | undefined;
+  const next: FhirR6Extension[] = [];
   for (const item of before ?? []) if (!changed.has(item.url)) next.push(item);
   for (const item of generated ?? []) if (changed.has(item.url)) next.push(item);
   return next.length ? next : undefined;

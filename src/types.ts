@@ -438,14 +438,14 @@ export interface FhirTimingRepeat extends FhirElement {
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
-export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration"> {
+export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "extension">, FhirR6Element {
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
   startOffset?: FhirSimpleQuantity;
   endOffset?: FhirSimpleQuantity;
 }
 
-export interface FhirR6Timing extends Omit<FhirTiming, "repeat"> {
+export interface FhirR6Timing extends Omit<FhirTiming, "repeat" | "extension" | "modifierExtension">, FhirR6BackboneElement {
   repeat?: FhirR6TimingRepeat;
 }
 

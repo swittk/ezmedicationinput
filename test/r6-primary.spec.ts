@@ -6654,7 +6654,7 @@ describe("review 27 external editing and batch course semantics", () => {
     const input: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{
       doseExpression: expression, rateQuantity: { value: 5, unit: "mL/h" }
     }] }] }] };
-    let rows = toFhirR5Dosages(input);
+    let rows: FhirDosage[] = structuredClone(toFhirR5Dosages(input));
     if (edit !== "first-id") rows[0].doseAndRate![0].rateQuantity!.value = 10;
     if (edit !== "rate") rows[0].doseAndRate![0].id = "new-slot-id";
     for (let save = 0; save < 3; save++) {
@@ -6666,6 +6666,7 @@ describe("review 27 external editing and batch course semantics", () => {
       });
       rows = toFhirR5Dosages(reopened);
     }
+    expect(input.step![0].component[0].doseAndRate![0].rateQuantity).toEqual({ value: 5, unit: "mL/h" });
   });
 
   it.each([false, true])("keeps repeating-course dose edits and actual header replacement=%s across three saves", replaceText => {
@@ -7247,12 +7248,12 @@ describe("round58 partial facts and independent timing text", () => {
     const parsed = parseSig("Take 1 tablet at 8 AM and 8 PM for 3 days, then take 2 tablets the next day at the same times");
     expect(parsed.meta.canonical.clauses[1].schedule?.count).toBeUndefined();
     expect(parsed.meta.canonical.clauses[1].schedule?.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
-    const options = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+    const options = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z", timeZone: "UTC", limit: 9 };
     const expected = [1, 2, 3, 4].flatMap(day =>
       ["08", "20"].map(hour => `2026-11-0${day}T${hour}:00:00+00:00`));
     for (const input of [parsed, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
       expect(nextDueDoses(input, options)).toEqual(expected);
-      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
         .toMatchObject({ totalUnits: 10, unit: "tab", quantityKind: "scheduled" });
     }
   });
@@ -7351,4 +7352,22 @@ describe("round62 independent timing concept text", () => {
     expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" }))
       .toBe("1 tab WK after dialysis");
   });
+});
+
+
+it("retains current-R6 approximate Quantity extensions on Timing elements", () => {
+  const timing: NonNullable<FhirR6Dosage["timing"]> = {
+    extension: [{ url: "urn:test:timing-note", valueQuantity: { value: 2, comparator: "~", unit: "mL" } }],
+    modifierExtension: [{ url: "urn:test:timing-modifier", valueQuantity: { value: 4, comparator: "~", unit: "h" } }],
+    repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      extension: [{ url: "urn:test:repeat-note", valueQuantity: { value: 3, comparator: "~", unit: "d" } }] },
+  };
+  const input: FhirR6DosageInstruction = { step: [{ component: [{
+    doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing,
+  }] }] };
+  const before = structuredClone(input);
+  const rows = toFhirR5Dosages(input);
+  for (const restored of [fromFhir(input).fhirNext, toDosageDetails(structuredClone(rows))])
+    expect(restored.step![0].component[0].timing).toEqual(timing);
+  expect(input).toEqual(before);
 });

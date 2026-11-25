@@ -1079,6 +1079,8 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     expect(replay).toContain("in the morning");
     expect(replay).not.toContain("bedtime");
     expect(parseSig(replay).meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(fromFhirDosage(row).fhir.text).toBe(row.text);
+    expect(toFhirR5Dosages(toDosageDetails([row]))[0].text).toBe(row.text);
     expect(JSON.stringify(row)).toBe(saved);
   });
 
@@ -5310,12 +5312,13 @@ describe("round60 typed meaning and interchange ownership", () => {
     return import("../src/instruction-graph").then(({ instructionGraphRichPrimaryAction }) => {
       expect(instructionGraphRichPrimaryAction(clause)?.predicate.lemma).toBe("drink");
       for (const locale of ["en", "th"]) {
-        const text = formatSig(courseFromAdministrations([administrationFromClause(clause)]),
+        const text = formatSig(courseFromAdministrations([administrationFromClause(clause)], source),
           "long", { locale, realizationMode: "normalized" });
         expect(text).toContain("slowly");
         expect(text).toContain(locale === "en" ? "once daily" : "วันละครั้ง");
       }
-      const spanless = fresh(clause); delete spanless.instructionGraph.primaryAdministrationSpan;
+      const { primaryAdministrationSpan, ...spanlessGraph } = fresh(clause.instructionGraph);
+      const spanless = { ...clause, instructionGraph: spanlessGraph };
       expect(instructionGraphRichPrimaryAction(spanless)?.predicate.lemma).toBe("measure");
       const mismatched = fresh(spanless); mismatched.dose.value = 7;
       expect(instructionGraphRichPrimaryAction(mismatched)).toBeUndefined();
@@ -5750,6 +5753,7 @@ describe("round62 review: typed grammar and partial display facts", () => {
     const control = parseSig("Infuse 2 " + unit.replace(/^U(?=\/)/u, "units")).meta.canonical.course;
     const amount = parsed.meta.canonical.course.stages[0].administrations[0].amounts;
     expect(amount).toEqual(control.stages[0].administrations[0].amounts);
+    expect(amount).toEqual([{ rate: { value: 2, unit: unit.includes("/kg/") ? "[iU]/kg/h" : "[iU]/h" } }]);
     expect(JSON.stringify(amount)).toContain("[iU]");
   });
 

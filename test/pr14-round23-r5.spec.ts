@@ -8213,7 +8213,7 @@ describe("round50 explicit interchange scope and primitive ownership", () => {
       expect(repeat.timeOfDay).toEqual(["08:00:00"]);
       expect(repeat._timeOfDay).toEqual(owner === "core" ? undefined : [bridgeNote]);
       const source = repeat.extension?.filter(item => item.url === DOSAGE_RECONCILIATION_SOURCE_URL)
-        .reduce<FhirExtension[]>((items, item) => items.concat(item.extension ?? []), []) ?? [];
+        .reduce<NonNullable<typeof repeat.extension>>((items, item) => items.concat(item.extension ?? []), []) ?? [];
       expect(source).toContainEqual(bridge);
       const originalCore = source.find(item => item.url === "_timeOfDay");
       expect(originalCore ? readRetainedField(originalCore) : undefined).toEqual(owner === "bridge" ? undefined : core);
