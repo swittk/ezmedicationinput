@@ -1098,7 +1098,7 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   // The compact calendar view requires a civil day. Native rendering keeps
   // authored year/month precision visible without assigning a missing date.
   for (const event of dosage.timing?.event ?? [])
-    if (/^\d{4}(?:-\d{2})?$/u.test(event)) return true;
+    if (event !== null && /^\d{4}(?:-\d{2})?$/u.test(event)) return true;
   // The native schedule owns independent Timing.code text. Keep that label
   // visible without promoting arbitrary prose into the compact lexical code.
   const timingLabel = dosage.timing?.code?.text;
