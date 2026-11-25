@@ -3465,6 +3465,15 @@ describe("round52 live site and partial-direction previews", () => {
 
   it.each([false, true])("keeps the condition and authored directions with live dose=%s", (liveDose) => {
     const authored = "Swallow 1 tablet whole";
+    const currentDirections = (preview: string, locale: "en" | "th") => {
+      const prefix = locale === "en" ? "Current: " : "ปัจจุบัน: ";
+      if (!preview.startsWith(prefix)) return preview;
+      const parts = preview.slice(prefix.length).split(locale === "en"
+        ? "; original directions: " : "; ข้อความเดิม: ");
+      expect(parts).toHaveLength(2);
+      expect(parts[1]).toBe(authored);
+      return parts[0];
+    };
     const completeThreshold = /\bSBP > 160(?!\d|\.\d)/u;
     const positiveThreshold = {
       en: /only if SBP > 160(?!\d|\.\d)/u,
@@ -3486,15 +3495,16 @@ describe("round52 live site and partial-direction previews", () => {
       const before = JSON.parse(JSON.stringify(input));
       for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
         const preview = formatSig(input, style, { locale, realizationMode: mode });
-        expect(preview).toMatch(positiveThreshold[locale]);
+        const current = currentDirections(preview, locale);
+        expect(current).toMatch(positiveThreshold[locale]);
         if (liveDose) {
           const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
             : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
           expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
           expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
-          expect(preview).toMatch(exactAmount);
-          expect(preview).not.toContain("1 tablet");
-          expect(preview).not.toContain("1 เม็ด");
+          expect(current).toMatch(exactAmount);
+          expect(current).not.toContain("1 tablet");
+          expect(current).not.toContain("1 เม็ด");
         } else expect(preview).toContain(authored);
       }
       expect(input).toEqual(before);
@@ -3526,15 +3536,16 @@ describe("round52 live site and partial-direction previews", () => {
         const before = structuredClone(input);
         for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
           const preview = formatSig(input, style, { locale, realizationMode: mode });
-          expect(preview).toMatch(positiveThreshold[locale]);
+          const current = currentDirections(preview, locale);
+          expect(current).toMatch(positiveThreshold[locale]);
           const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
             : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
           expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
           expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
-          expect(preview).toMatch(exactAmount);
-          expect(preview).not.toContain("1 tablet");
-          expect(preview).not.toContain("1 เม็ด");
-          if (style === "long") expect(preview).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
+          expect(current).toMatch(exactAmount);
+          expect(current).not.toContain("1 tablet");
+          expect(current).not.toContain("1 เม็ด");
+          if (style === "long") expect(current).toContain(locale === "en" ? "whole" : "ทั้งเม็ด");
         }
         expect(input).toEqual(before);
       }

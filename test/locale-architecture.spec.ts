@@ -254,22 +254,20 @@ describe("locale-extensible language architecture", () => {
 
 });
 
-describe("round54 constructor-owned surface segmenter callbacks", () => {
-  it.each(["g", "y", ""])("uses the normalized script receiver for an enumerable own callback (%s)", flags => {
-    class Segmenter {
-      locale = "round54-own-script-" + (flags || "plain");
-      script = new RegExp("[ⴰⴱ]", flags + "u");
-      segment: (input: string) => Array<{ segment: string; index: number }>;
-      constructor() {
-        this.segment = function (this: Segmenter, input: string) {
-          const segments: Array<{ segment: string; index: number }> = [];
-          for (let index = 0; index < input.length; index++)
-            if (this.script.test(input[index])) segments.push({ segment: input[index], index });
-          return segments;
-        };
+describe("round54 descriptor-owned surface segmenter callbacks", () => {
+  it.each(["g", "y", ""])("uses the normalized script receiver for a plain descriptor (%s)", flags => {
+    // Plain descriptors use their registered configuration through `this`;
+    // class callbacks instead retain their original receiver and private state.
+    const provider = {
+      locale: "round54-own-script-" + (flags || "plain"),
+      script: new RegExp("[ⴰⴱ]", flags + "u"),
+      segment(input: string) {
+        const segments: Array<{ segment: string; index: number }> = [];
+        for (let index = 0; index < input.length; index++)
+          if (this.script.test(input[index])) segments.push({ segment: input[index], index });
+        return segments;
       }
-    }
-    const provider = new Segmenter();
+    };
     registerMedicationSurfaceSegmenter(provider);
     const registered = listMedicationSurfaceSegmenters().find(value => value.locale === provider.locale)!;
     const expected = [{ segment: "ⴰ", index: 0 }, { segment: "ⴱ", index: 1 }];
