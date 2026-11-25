@@ -16,12 +16,16 @@ export type R5ParserTestResult = Omit<ParseBatchResult, "fhir" | "course"> & {
 function forHistoricalAssertions(value: ParseBatchResult): R5ParserTestResult {
   const { fhir: _dosages, course: _course, ...rest } = value;
   const row = value.items[0]?.fhir;
+  const fhir = row ? withDosageEditProvenance([row], row.text)[0] : {};
+  const items = value.items.slice();
+  if (items[0]) items[0] = { ...items[0], fhir };
   return {
     ...rest,
     // Historical fixtures intentionally expose only the FIRST clause here;
     // multi-clause tests must use items[] or the shipping .fhir array.
     // Keep that clause's parser-produced source agreement after a fresh save.
-    fhir: row ? withDosageEditProvenance([row], row.text)[0] : {},
+    fhir,
+    items,
     dosageDetails: value.fhirNext
   };
 }
