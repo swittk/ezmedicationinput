@@ -602,7 +602,7 @@ export type FhirR6DosageCondition = FhirR6BackboneElement & {
 } & DosageConditionValue;
 
 /** FHIR R6 DosageSafety.doseLimit.value[x] is a required choice. */
-export type FhirR6DoseLimit = FhirElement & {
+export type FhirR6DoseLimit = FhirR6Element & {
   scope: "dosage" | "period" | "administration" | "lifetime";
   period?: FhirR6Quantity;
   text?: string;
@@ -613,7 +613,7 @@ export type FhirR6DoseLimit = FhirElement & {
   | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never; _valueInteger?: never }
 );
 
-export interface FhirR6DosageSafety extends FhirBackboneElement {
+export interface FhirR6DosageSafety extends FhirR6BackboneElement {
   doseLimit?: FhirR6DoseLimit[];
   ifExceeded?: string;
 }
@@ -663,7 +663,7 @@ export interface FhirR6Dosage extends Omit<FhirDosage,
   safety?: FhirR6DosageSafety;
 }
 
-export interface FhirR6RelativeTime extends FhirBackboneElement {
+export interface FhirR6RelativeTime extends FhirR6BackboneElement {
   contextReference?: FhirReference;
   contextDefinition?: string;
   contextPath?: string;
@@ -673,7 +673,7 @@ export interface FhirR6RelativeTime extends FhirBackboneElement {
   text?: string;
 }
 
-export interface FhirR6DosageStep extends FhirElement {
+export interface FhirR6DosageStep extends FhirR6Element {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
@@ -738,7 +738,7 @@ export interface EzDosage extends Omit<FhirDosage, "doseAndRate"> {
  * individual dosage. Each step row addresses the usual R5 Dosage.sequence.
  * Step metadata is retained for editable R5 rows; R6 step is an Element.
  */
-export interface EzCourseStep extends FhirBackboneElement {
+export interface EzCourseStep extends FhirR6BackboneElement {
   /** R5 global sequence corresponding to this R6 step. */
   sequence: number;
   start?: FhirR6RelativeTime;

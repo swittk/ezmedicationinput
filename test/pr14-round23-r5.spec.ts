@@ -6,7 +6,7 @@ import {
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirRatio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6DosageInstructionInput,
-  type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep,
+  type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
@@ -11461,6 +11461,42 @@ describe("round66 interchange review corrections", () => {
       .valueCodeableConcept!.coding).toEqual([target]);
     expect(buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding: { code: "82169009" } })!.extension![1]
       .valueCodeableConcept!.coding).toEqual([{ system: "http://snomed.info/sct", code: "82169009" }]);
+    expect(source).toEqual(before);
+  });
+});
+
+
+describe("round67 native R6 Element extension typing", () => {
+  it("retains native Quantity extensions on steps, boundaries and safety wrappers", () => {
+    const measure: FhirR6Extension = { url: "urn:clinic:measured-margin", valueQuantity: {
+      id: "authored-margin", value: 2, comparator: "~", unit: "mg",
+      _value: { extension: [{ url: "urn:clinic:measurement-note", valueString: "authored approximation" }] },
+    } };
+    const note: FhirR6Extension = { url: "urn:clinic:unknown-policy-note", extension: [
+      { url: "reviewer", valueString: "prescriber" }, { url: "reviewed", valueBoolean: true },
+    ] };
+    const limit: FhirR6DoseLimit = { id: "daily-limit", scope: "period", valueQuantity: q(3),
+      period: { value: 1, unit: "d" }, extension: [measure, note] };
+    const safety: FhirR6DosageSafety = { id: "step-safety", extension: [measure, note],
+      modifierExtension: [measure], doseLimit: [limit] };
+    const start: FhirR6RelativeTime = { id: "start", contextCode: { coding: [
+      { system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" },
+    ] }, offsetDuration: { value: 1, unit: "d" }, extension: [measure, note], modifierExtension: [measure] };
+    const step: FhirR6DosageStep = { id: "initial", start, safety, extension: [measure, note],
+      component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] };
+    // @ts-expect-error Strict R5 Element extensions do not accept the R6 approximate comparator.
+    const strictR5: FhirElement = { extension: [measure] };
+    void strictR5;
+    const source: FhirR6DosageInstruction = { step: [step, { id: "later",
+      component: [{ doseAndRate: [{ doseQuantity: q(2) }] }] }] };
+    const before = persist(source);
+    let wire = r6Save(source);
+    for (let save = 0; save < 2; save++) {
+      expect(wire.step![0].extension).toEqual([measure, note]);
+      expect(wire.step![0].start).toEqual(start);
+      expect(wire.step![0].safety).toEqual(safety);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+    }
     expect(source).toEqual(before);
   });
 });

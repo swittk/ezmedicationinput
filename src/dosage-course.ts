@@ -73,14 +73,14 @@ const R5_STEP_MODIFIERS_R6_URL =
 export const R5_RATE_MODIFIERS_R6_URL =
   "urn:ezmedicationinput:StructureDefinition:r5-dose-and-rate-modifier-extensions";
 
-type ModifierWrapperOwner = { extension?: FhirExtension[]; modifierExtension?: FhirExtension[] };
+type ModifierWrapperOwner = { extension?: FhirR6Extension[]; modifierExtension?: FhirR6Extension[] };
 /** Project the editable modifier owner on an already-owned output fragment.
  * Step and doseAndRate share this Element boundary, including wrapper metadata. */
 export function projectR6ModifierWrapper(output: ModifierWrapperOwner, url: string): void {
   const { modifierExtension, extension } = output;
   delete output.modifierExtension;
   if (modifierExtension === undefined && !extension?.length) return;
-  let existing: FhirExtension | undefined, extensions: FhirExtension[] | undefined, existingIndex = -1;
+  let existing: FhirR6Extension | undefined, extensions: FhirR6Extension[] | undefined, existingIndex = -1;
   for (let index = 0; index < (extension?.length ?? 0); index++) {
     const item = extension![index];
     if (item.url !== url) extensions?.push(item);
@@ -110,7 +110,7 @@ export function projectR6ModifierWrapper(output: ModifierWrapperOwner, url: stri
 export function projectR5ModifierWrapper(output: ModifierWrapperOwner, url: string): void {
   const { extension } = output;
   if (!extension?.length) return;
-  let retained: FhirExtension | undefined, extensions: FhirExtension[] | undefined;
+  let retained: FhirR6Extension | undefined, extensions: FhirR6Extension[] | undefined;
   for (let index = 0; index < extension.length; index++) {
     const item = extension[index];
     if (item.url !== url) extensions?.push(item);
@@ -1094,7 +1094,7 @@ export function isRenderedInstructionMarker(extension:FhirExtension):boolean {
  * of disappearing when the editable baseline happens to be unchanged.
  * @param marker The source edit-provenance extension.
  */
-function hasOtherOwnField(value:FhirExtension,second:"extension"|"valueString"):boolean {
+function hasOtherOwnField(value:FhirR6Extension,second:"extension"|"valueString"):boolean {
   for(const key in value)if(key!=="url"&&key!==second&&Object.prototype.hasOwnProperty.call(value,key))return true;
   return false;
 }

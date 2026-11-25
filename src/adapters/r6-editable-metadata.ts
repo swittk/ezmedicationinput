@@ -336,7 +336,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
           // Only changed external modifier lists need matching. An unchanged
           // phase qualifier keeps its phase owner; new header qualifiers stay
           // on the header, and removed qualifiers are never revived.
-          const groups = new Map<number, Array<{ value: FhirExtension; count: number }>>();
+          const groups = new Map<number, Array<{ value: FhirR6Extension; count: number }>>();
           for (const value of original) {
             const hash = hashStructuredValue(value);
             let bucket = groups.get(hash);
@@ -345,7 +345,7 @@ export function retainedSingleStepSafety(input: FhirR6DosageInstructionInput): L
             if (group) group.count++;
             else bucket.push({ value, count: 1 });
           }
-          const retained: FhirExtension[] = [], added: FhirExtension[] = [];
+          const retained: FhirR6Extension[] = [], added: FhirR6Extension[] = [];
           for (const value of current.modifierExtension ?? []) {
             const group = groups.get(hashStructuredValue(value))?.find(item =>
               item.count > 0 && equalStructuredValues(item.value, value));
@@ -551,8 +551,8 @@ function reconcileSafetyScopes(
  * qualifiers attached to surviving limits, never to a superseded snapshot. */
 function reconcileScopedSafety(safety: FhirR6DosageSafety | undefined): void {
   if (!safety?.modifierExtension?.length) return;
-  let modifiers: FhirExtension[] | undefined;
-  let retired: FhirExtension[] | undefined;
+  let modifiers: FhirR6Extension[] | undefined;
+  let retired: FhirR6Extension[] | undefined;
   for (let index = 0; index < safety.modifierExtension.length; index++) {
     const marker = safety.modifierExtension[index];
     let replacement = marker;
