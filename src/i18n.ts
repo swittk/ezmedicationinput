@@ -68,6 +68,7 @@ import {
 } from "./instruction-graph";
 import {
   AdviceArgumentRole,
+  type AdviceFrame,
   AdviceForce,
   AdviceModality,
   AdvicePolarity,
@@ -2839,6 +2840,27 @@ function translateCoordinatedActivityWindowThai(text: string): string | undefine
   return `${relationTh}${leftTh}${connectorTh}${rightTh}`;
 }
 
+function realizeAdviceFramesThai(frames: AdviceFrame[]): string | undefined {
+  let localizedFrames: AdviceFrame[] | undefined;
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex++) {
+    const frame = frames[frameIndex];
+    let localizedFrame: AdviceFrame | undefined;
+    for (let index = 0; index < frame.args.length; index++) {
+      const argument = frame.args[index];
+      if (!argument.conceptId || argument.i18n?.th) continue;
+      const shared = resolveMedicationInstructionConcept(argument.text);
+      // An exact shared nominal can supply a missing locale facet. A contained
+      // noun must not erase an opaque qualification such as "cool water".
+      if (shared?.code !== argument.conceptId || shared.role !== argument.role || !shared.i18n?.th) continue;
+      localizedFrames ??= frames.slice();
+      localizedFrame ??= { ...frame, args: frame.args.slice() };
+      localizedFrame.args[index] = { ...argument, i18n: { ...shared.i18n, ...(argument.i18n ?? {}) } };
+      localizedFrames[frameIndex] = localizedFrame;
+    }
+  }
+  return realizeAdviceFramesText(localizedFrames ?? frames, "th");
+}
+
 function reconstructAdditionalInstructionThai(text: string): string | undefined {
   const parsed = parseAdditionalInstructions(text, { start: 0, end: text.length }, {
     defaultPredicate: "take",
@@ -2847,7 +2869,7 @@ function reconstructAdditionalInstructionThai(text: string): string | undefined 
   });
   for (const instruction of parsed) {
     if (!instruction.frames?.length) continue;
-    const realized = realizeAdviceFramesText(instruction.frames, "th");
+    const realized = realizeAdviceFramesThai(instruction.frames);
     if (realized && /[\u0E00-\u0E7F]/u.test(realized)) return realized;
   }
   return undefined;
@@ -2883,7 +2905,7 @@ function formatAdditionalInstructionsThai(clause: CanonicalSigClause): string | 
       continue;
     }
     let text = instruction.i18n?.th ??
-      (instruction.frames?.length ? realizeAdviceFramesText(instruction.frames, "th") : undefined) ??
+      (instruction.frames?.length ? realizeAdviceFramesThai(instruction.frames) : undefined) ??
       (instruction.text ? THAI_ADMINISTRATION_WINDOW_TRANSLATIONS.get(instruction.text.toLowerCase().trim()) : undefined) ??
       (instruction.text ? translateCoordinatedActivityWindowThai(instruction.text) : undefined) ??
       (instruction.text ? reconstructAdditionalInstructionThai(instruction.text) : undefined) ??

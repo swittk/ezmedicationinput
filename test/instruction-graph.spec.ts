@@ -7232,3 +7232,34 @@ describe("round65 structured cadence and action ownership", () => {
     expect(row).toEqual(before);
   });
 });
+
+describe("round65 composed meal-state ownership", () => {
+  it("uses registered water wording while retaining an opaque qualification", () => {
+    const plain = parseSig("Take 1 tablet with water");
+    expect(formatSig(plain.meta.canonical.course!, "long", { locale: "th" })).toContain("น้ำ");
+    const qualified = parseSig("Take 1 tablet with cool water");
+    expect(formatSig(qualified.meta.canonical.course!, "long", { locale: "th" })).toContain("cool water");
+  });
+  it.each(["empty stomach", "an empty stomach"])("retains coded %s and its independent water adjunct once", nominal => {
+    const source = "Take 1 tablet on " + nominal + " with water; wait 30 minutes before food, drink, or other meds";
+    const parsed = parseSig(source), clause = parsed.meta.canonical.clauses[0];
+    expect(clause.additionalInstructions?.some(instruction => instruction.coding?.code === "717154004")).toBe(true);
+    expect(clause.additionalInstructions?.flatMap(instruction => instruction.frames ?? []).flatMap(frame => frame.args))
+      .toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Substance, conceptId: "water" }));
+    const original = JSON.stringify([parsed.fhir, parsed.fhirNext]);
+    for (const value of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const en = formatSig(value, "long", { locale: "en" });
+      expect(en.match(/1 tablet/giu)).toHaveLength(1);
+      expect(en).toContain("empty stomach");
+      expect(en).toContain("water");
+      expect(en).toMatch(/wait 30 minutes before food, drink or other medicines/iu);
+      const th = formatSig(value, "long", { locale: "th" });
+      expect(th.match(/1 เม็ด/gu)).toHaveLength(1);
+      expect(th).toContain("ท้องว่าง");
+      expect(th).toContain("น้ำ");
+      expect(th).not.toMatch(/Take|tablet|stomach|water/iu);
+      expect(th).toContain("30 นาที");
+    }
+    expect(JSON.stringify([parsed.fhir, parsed.fhirNext])).toBe(original);
+  });
+});

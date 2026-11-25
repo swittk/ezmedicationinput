@@ -504,17 +504,13 @@ function parseInstructionCandidates(
       defaultForce: AdviceForce.Instruction,
       allowFreeTextFallback: true
     });
-    const instructions = parsed.map((instruction) => {
-      const thai = !instruction.coding?.code && instruction.frames?.length
-        ? realizeAdviceFramesText(instruction.frames, "th")
-        : undefined;
-      return {
-        text: instruction.text,
-        i18n: thai ? { th: thai } : undefined,
-        coding: instruction.coding,
-        frames: instruction.frames
-      };
-    });
+    // Keep typed advice here; locale realization uses its current lexical
+    // facets instead of caching a partially translated phrase in the grammar.
+    const instructions = parsed.map((instruction) => ({
+      text: instruction.text,
+      coding: instruction.coding,
+      frames: instruction.frames
+    }));
     const score = instructions.reduce((sum, instruction) =>
       sum + (instruction.coding?.code ? 4 : 0) + (instruction.frames?.length ? 2 : 0) + (instruction.text ? 1 : 0),
       0
@@ -963,6 +959,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
 
     const bodyStart = cursor;
     const bodyTokens: Token[] = [];
+    let completeInstructions: CanonicalAdditionalInstructionExpr[] | undefined;
     for (; cursor < context.limit; cursor += 1) {
       const token = context.tokens[cursor];
       if (!token || context.state.consumed.has(token.index)) {
@@ -984,6 +981,20 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       }
       if (bodyTokens.length && isScheduleLead(context, cursor)) {
         break;
+      }
+      // A complete coded adjunct and a following accompaniment are separate
+      // daughters ("on an empty stomach" + "with water"), not one nominal.
+      if (bodyRelation && bodyTokens.length && relationHasGrammarFeature(
+          resolveActionRelationSurface(normalizeTokenLower(token)), "accompanimentComplement")) {
+        const prefixRange = rangeFromTokens(bodyTokens);
+        if (prefixRange) {
+          const candidates = parseInstructionCandidates(
+            context.state.input.slice(prefixRange.start, prefixRange.end), prefixRange);
+          if (candidates.some(instruction => instruction.coding?.code)) {
+            completeInstructions = candidates;
+            break;
+          }
+        }
       }
       if (bodyTokens.length && bodyParsesAsStyleInstruction(context, bodyTokens)) {
         const lower = normalizeTokenLower(token);
@@ -1021,7 +1032,7 @@ export function instructionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const predicate = isMedicationAdministrationMethod(previousLower, context.options)
       ? previousLower
       : "apply";
-    const adviceInstructions = parseInstructionCandidates(text, range);
+    const adviceInstructions = completeInstructions ?? parseInstructionCandidates(text, range);
     const hasCodedAdvice = adviceInstructions.some((instruction) => Boolean(instruction.coding?.code));
     const typedInstruction = hasCodedAdvice
       ? undefined

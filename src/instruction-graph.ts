@@ -3389,6 +3389,18 @@ function reconcileComposedAdviceCoding(
     // is not evidence that its original, structurally parsed coding was false.
     // Only a real overlapping composed action can supersede that candidate.
     if (!semantic) return instruction;
+    // An opaque nominal in a larger action cannot disprove the same local
+    // constituent's typed lexical coding. Only a changed/scoped meaning may
+    // replace it with the whole action and its independent medication amount.
+    const retainsTypedNominal = instruction.frames?.some(provisional => {
+      const argument = provisional.args.length === 1 ? provisional.args[0] : undefined;
+      return argument?.conceptId && argument.normalized && provisional.polarity === semantic.polarity &&
+        provisional.modality === semantic.modality && provisional.relation === semantic.relation &&
+        semantic.span.start <= provisional.span.start && provisional.span.end <= semantic.span.end &&
+        semantic.args.some(candidate => candidate.role === AdviceArgumentRole.Object &&
+          !candidate.conceptId && candidate.normalized === argument.normalized);
+    });
+    if (retainsTypedNominal) return instruction;
     return {
       ...instruction,
       text: realizeInstructionAction(semantic, "en"),
