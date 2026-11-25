@@ -2932,7 +2932,7 @@ report rather than hidden. No universal or phone-performance claim. Full timing
 run preceded only the standalone normalized-offset metadata omission; clinical
 parity and final source tests cover the finished source.
 
-Evidence is in /tmp/ezmed-structured-extensions-20261023/RESULT.json and its
+Evidence is in private validation results and its
 referenced test/comparison reports. The original untracked probe remains untouched.
 
 
@@ -3012,8 +3012,8 @@ BID 1.718 -> 1.745 (+1.6%); site relative 2.932 -> 3.107 (+6.0%); eye taper
 The compound-guard overhead is explicitly under investigation rather than
 concealed behind the mostly stable ordinary case.
 
-Local evidence: /tmp/ezmed-adversarial-semantics-final-20261024.json and
-/tmp/ezmed-final-performance-20261024.json on the development host. No package
+Local evidence: private validation records and
+private performance records on the development host. No package
 version change, publication, push, or merge in this checkpoint.
 
 
@@ -3037,7 +3037,7 @@ procedure3.165->3.450(+9.0%), compound guard4.173->3.643(-12.7%),
 event alternatives5.961->3.169(-46.8%). This resolves the measured avoidable
 compound-guard regression; it is not a claim that every case is faster or that
 mobile behavior has been benchmarked. Both pre/post optimization reports are
-retained under /tmp/ezmed-final-performance[-optimized]-20261024.json.
+retained under private performance records.
 
 
 ### 2026-10-24 14:26 — scoped conditions, counseling recovery and integrated checkpoint
@@ -3152,8 +3152,8 @@ still require suitable phase anchors; both editable stages remain in the
 parser/FHIR outputs. No unrelated scheduling or broad grammar redesign was
 included. External HL7 validation and remote review are not claimed.
 
-Local evidence: /tmp/ezmed-finalfix-freeze-20261024.json,
-/tmp/ezmed-finalfix-perf-20261024.json, and the three final worker handoffs.
+Local evidence: private validation results,
+private performance records, and the three final worker handoffs.
 No package version change, push, merge, publication, or consumer deployment.
 
 
@@ -3195,8 +3195,8 @@ Permanent regression oracles were added **only to already CodeRabbit-reviewed
 test files** (body-site grammar, instruction graph, advanced composition).
 Initial four site tests and one opaque-action test were RED before changes
 and GREEN after; final source suite **2476/2476** across 45 test files PASS
-(process proc-ecbca4a9-52db-4066-ac65-b21b32e19e2d).
-Latest npm run test:dist (process proc-153c154e-ea30-4f83-8665-3a564d036152)
+(validation record retained privately).
+Latest npm run test:dist (validation record retained privately)
 PASS: ESM/CJS, tsc declarations and packaged **4/4**.
 Direct rebuilt-package Thai formatting checked through default R5, R6,
 strict R5 conversion for sites and conditional course-end advice.
@@ -3253,9 +3253,9 @@ clinical semantics, retained tests and HPSG architecture. No original
 assertions were weakened and no new skip/todo was introduced.
 
 Final tracked-source gates after the last rinse correction:
-- Node22 source test proc-cf9269b2-038c-44db-8d81-6e69358320a3:
+- Node22 source test:
   44 suites 2623/2623 PASS.
-- Final npm run test:dist proc-b85d40d1-f347-4b76-be00-c52276dbda53:
+- Final npm run test:dist:
   ESM/CJS build, TypeScript declarations and packaged 4/4 PASS.
 - Final packaged 54 close variants / 55 real-world smoke checked; zero throws
   and all previously identified supported-domain semantic failures corrected.
@@ -3264,7 +3264,7 @@ Final tracked-source gates after the last rinse correction:
   EXACT100 reviewable files. No new runtime src JSON.parse/JSON.stringify or
   classes. Original untracked test/__tmp_open_semantic_probe.ts untouched.
 - Paired warmed host baseline0615241 versus current Node22, in
-  /tmp/ezmed-realworld-final-perf-20261024.json:
+  private performance records:
   routine English BID2.519 -> 2.669ms, routine Thai numeric2.816->2.900,
   Thai spelled cadence5.531->4.754, undelimited eyes3.335->3.040,
   Thai phase13.915->7.097, established eye taper4.026->4.002,
@@ -3314,9 +3314,9 @@ Previously-RED and historical test assertions were retained; no broad raw
 formatter shortcut, invented clinical parser, refusal gate, new classes, or
 production JSON.parse/JSON.stringify introduced. Final Node22 canonical full
 source: 44 suites and 2750/2750 PASS, process
-proc-e81b122c-acb7-44e4-9a70-09d02a31a336.
+the recorded validation run.
 Final npm run test:dist: ESM/CJS build and TypeScript declarations PASS,
-packaged exports 4/4 PASS, process proc-d0ac0588-6b85-4255-868a-3afbb4fcc90d.
+packaged exports 4/4 PASS.
 Current downstream consumer adapter worktree left unchanged: EZMed R5+
 interop 28/28 PASS and direct five current EZMed0.2 -> downstream adapter -> FHIR R5
 round-trips preserve doses, sites, routes, conditions, choice membership,
@@ -3329,7 +3329,7 @@ frequency and NIGHT versus EVE/HS. Independent legacy source-corpus
 0.1.x semantic equivalence).
 
 Host-only paired performance medians vs immutable 0615241 baseline in
-/tmp/ezmed-realworld-final-perf-20261024.json: English BID 2.543 ->
+private performance records: English BID 2.543 ->
 2.898ms (+13.9%), Thai numeric 2.786 -> 3.126 (+12.2%), Thai word
 frequency 4.939 -> 5.339 (+8.1%), independent eyes 3.187 -> 3.359
 (+5.4%), Thai complex taper 13.971 -> 7.992 (-42.8%), established
@@ -3387,9 +3387,9 @@ not claim unrestricted clinical language coverage.
   not outscore or overwrite the primary dose. Minimum delay is not made exact.
 
 Final official Node 22 source gate: 44 suites, 2861/2861 PASS
-(proc-85953e48-f74e-4bae-9ad5-a025b1eeef3f). Final ESM/CJS build and TypeScript
-declaration generation PASS (proc-bd3efb92-acd3-4d70-9c7c-f339ef574308), built
-exports 4/4 PASS (proc-0ba5eb2e-ca53-45bf-b797-5c274231b722). All original
+(validation record retained privately). Final ESM/CJS build and TypeScript
+declaration generation PASS (validation record retained privately), built
+exports 4/4 PASS (validation record retained privately). All original
 parallel-regimen, Thai-relative-instruction and clinical correctness assertions
 are retained; no acceptance gate was weakened to make these results green.
 
@@ -3563,8 +3563,8 @@ not a claim to understand every possible instruction.
   warnings or refusal gates.
 
 Final frozen source gate: Node 22, 44 suites, 3148/3148 PASS at 10:22:40 Bangkok
-(proc-9038ed88-0454-4b67-ab88-c0d19a1d7dce). Prior matching full pass was
-proc-50857362-2b5c-4b8b-9ad3-59997fe84b4a. TypeScript, ESM/CJS and declarations
+(validation record retained privately). Prior matching full pass was
+the recorded validation run. TypeScript, ESM/CJS and declarations
 passed; packaged export checks passed 4/4. The source/test fingerprint used
 for the final gate is d213bc2c849ebfbf745f3059244319e6411ab567f801c09690a0aa426745a697.
 
@@ -4411,7 +4411,7 @@ Validation: 44 source suites passed 3837/3837; ESM/CJS and TypeScript declaratio
 - Finding: long-form English formatted each coded additional instruction by repeatedly running composedCodedWarningActionSources against the same instruction graph (up to three times), and Thai repeated it in two places. These repeat the same small but nontrivial frame-matching scan on clinician mobile previews. This is a reasonable performance cleanup, not a new clinical safety rule.
 - Fix: in each existing English/Thai long renderer, compute sources once in additional-instruction order, keep their exact result arrays beside the already-produced combined source list, and reuse by the unchanged instruction index in the entailment and graph-ownership decisions. No global or cross-parse cache, stale data, extra source scan, FHIR changes, dependency, or parser pass. The usual absence of additional instructions still means zero matcher calls.
 - Verification: previous and revised 850-iteration hot-path spot benchmarks are noisy. English "avoid alcohol" 0.094 -> 0.076 ms/format and "may cause drowsiness" 0.037 -> 0.029; some examples were flat or slightly slower within test variation, so no broad speed claim. The number of full matcher calls per coded instruction drops from up to three to one, while Thai drops from two to one. All 748 focused warning/graph/review/OPD tests passed, then the complete 44 test files 3860/3860 passed; ESM/CJS and TypeScript declaration build passed, packaged exports 4/4 passed, and git diff --check was clean.
-- Package preflight only: npm pack --dry-run emitted the expected 0.2.0-ez.0 package (dist CJS/ESM and declarations). Registry latest remains 0.1.67. No merge, publish, bump or Shinebright dependency mutation has been performed in this loop. Keep all changes inside PR #10; unrelated test/__tmp_open_semantic_probe.ts remains untouched.
+- Package preflight only: npm pack --dry-run emitted the expected 0.2.0-ez.0 package (dist CJS/ESM and declarations). Registry latest remains 0.1.67. No merge, publish, bump or external consumer dependency mutation has been performed in this loop. Keep all changes inside PR #10; unrelated test/__tmp_open_semantic_probe.ts remains untouched.
 
 
 ## 2026-11-14 — PR #13 CodeRabbit review: current-R6 meaning with R5-safe persistence
@@ -4450,7 +4450,7 @@ against AGENTS.md, DIRECTIONALITY.md, and the existing bridge/edit decisions.
 **Independent oracles:** reviewed bridge extension shapes and round-trip bytes,
 native R6 and R5 edit precedence, numeric dose/rate replacement, concept-only
 site metadata, source-less display, and execution dates/supply for two cycles.
-The exact downstream dosage converter and in-memory medication usage-map save/
+The exact downstream dosage converter and in-memory medication storage save/
 reload retained 1/2/4 dosage rows unchanged across routine, Thai, and staged
 courses. No application source, persistence schema, or deployment was changed.
 
@@ -4501,7 +4501,7 @@ No HPSG grammar, R5 API, runtime dependency, app schema or migration changed.
 **Validation:** existing R6 suite 205/205 (including three new tests),
 all 44 source suites 3871/3871 PASS, ES6 ESM/CJS + TypeScript declarations
 build PASS, packaged ESM/CJS exports 4/4 PASS; diff check clean.
-The downstream existing dosage adapter and medication usage-map round-trip
+The downstream existing dosage adapter and medication storage round-trip
 preserved all 1/2/4 dosage rows byte-independent and structurally equal for
 ordinary, Thai and staged cases, with no changed application source.
 Matched host-side alternating medians (seven sets of 75 parses, vs the exact
@@ -4589,7 +4589,7 @@ current-R6 text-only import with no step, a live R5 site correction with
 retained original R6 site provenance, and exact 08:00/20:00 timestamps and
 42 tablets per 28-day active/rest cycle through native R6/R5/imported
 representations. The actual downstream R5 dosage converter and
-medication-usage-map reconstruction retained 1/2/4 rows unchanged for
+medication-storage reconstruction retained 1/2/4 rows unchanged for
 ordinary, Thai and staged examples.
 
 Validation: 44 source test files 3877/3877 PASS; ES6 ESM/CJS
@@ -4640,7 +4640,7 @@ legacy-R6 compatibility path or ordinary-parser cost was introduced.
 
 Independent assertions added only to the existing R6 test file; the three
 regressions reproduce meaningful prior errors and test edits, rendered
-language, exact dates, native R6 and R5 bridge round-trip. The existing downstream dosage converter and medication usage-map
+language, exact dates, native R6 and R5 bridge round-trip. The existing downstream dosage converter and medication storage
 round-trip were verified read-only to keep 1/2/4 clinical dosage rows
 unchanged in ordinary, Thai and staged inputs, without editing application code.
 
@@ -4692,7 +4692,7 @@ FHIR clock behavior. Existing tests cover fall-back clock preservation.
 
 Validation: 44 source suites **3882/3882** passed, ES6 ESM/CJS and TS
 declaration build passed, and packaged exports **4/4** passed. A read-only
-actual downstream R5 dosage converter and in-memory usage-map round trip
+actual downstream R5 dosage converter and in-memory storage round trip
 retained ordinary/Thai/staged 1/2/4 dosage rows unchanged.
 Seven alternating warm host median microbenchmarks versus frozen pre-review
 6d8e864 (microseconds): routine 1633.4 -> 1525.7, Thai 6191.9 -> 6101.0,
@@ -4767,7 +4767,7 @@ DST offset active windows, monthly return to the original clock,
 R6 Duration/Safety comparator codec, and historical expression recovery.
 Focused R6 suite 223/223, all 44 source suites 3889/3889,
 ES6 ESM/CJS + TS declaration build PASS, packaged exports 4/4 PASS.
-The existing downstream strict R5 dosage converter and in-memory usage-map
+The existing downstream strict R5 dosage converter and in-memory storage
 round-trip retained 1/2/4 ordinary/Thai/staged dosage rows unchanged.
 
 Paired host-only microbenchmark versus frozen pre-review 7c17914 (seven
@@ -4845,7 +4845,7 @@ qualified anonymous doses can still be distinguished via their
 standard extension; no guess needed. Dose/rate edits, reordering,
 Ratio, unrelated metadata, external R5 imports, legacy source decode,
 and unknown EMA codes retain their intended semantics. The actual
-compiled downstream R5 usage-map save/reopen path retains 1/2/4
+compiled downstream R5 storage save/reopen path retains 1/2/4
 ordinary/Thai/staged rows and three qualified examples exactly.
 
 Final gate: 44 source suites 3910/3910 PASS, ES6 ESM/CJS/TS build PASS,
@@ -4902,7 +4902,7 @@ pass is needed; the preexisting typed course marker codec is reused.
 Focused test now also covers source-only id, custom extension and
 safety, text edits, downstream-normalized empty arrays and a real
 new dose. The actual compiled downstream R5 dosage converter and
-usage-map save/reopen preserve source-only text, id, custom extensions
+storage save/reopen preserve source-only text, id, custom extensions
 and a zero-step R6 structure byte-for-byte for this case.
 The branch must never claim that a passing test suite proves
 mathematical absence of all possible future data-loss bugs; the
@@ -6110,9 +6110,9 @@ explicitly reproduced failures before the code changes. Family tests
 cover independent low/high EMA comparators, anchored duration with
 absolute start, native R6 item and whole-course partial rates in
 EN/TH, explicit later primary omission plus full canonical format.
-No Shinebright source/storage change. Read-only consumer smoke:
+No external consumer source/storage change. Read-only consumer smoke:
 strict R5 -> existing editable converter -> in-memory medication
-usage-map save/reopen preserved original one/two/four dosage rows and
+storage save/reopen preserved original one/two/four dosage rows and
 sequences (ordinary, Thai and staged instructions).
 
 Verification for this revision: ES6 ESM/CJS and declarations build
@@ -6167,7 +6167,7 @@ migration.
    on or after the component start; independent components keep their
    own cap; repeating cycle tails are not forcibly clipped. R5 scalar
    and array views bearing a component marker route through the same
-   R6 course execution without changing normal R5 rows or Shinebright.
+   R6 course execution without changing normal R5 rows or external consumer.
    No extra whole-SIG parse, per-cycle generalized validation or global
    deduplication was added.
 
@@ -6189,7 +6189,7 @@ normal NY winter and spring DST, native R6 / strict R5 array /
 strict R5 scalar / imported parsed batch; concurrent components
 with unlike 1d/3d caps; two-day repeating cycles; and no-marker
 control. Ordinary saved R5 editable dosages and the actual
-read-only Shinebright usage-map conversion/reopen retained one,
+read-only external consumer storage conversion/reopen retained one,
 two, and four dosage rows with exact unchanged sequences.
 
 Verification: npm run build PASS (ES6, ESM/CJS and declarations);
@@ -6280,12 +6280,12 @@ typed HPSG clinical quantities, rich instruction graph, and schedule
 families, with direct failed oracles recorded before the changes.
 Validation: npm run build PASS (ES6 ESM/CJS, declarations);
 npm test **4188/4188 in 44/44 suites**; npm run test:dist **4/4**;
-git diff --check PASS. Read-only Shinebright adapter:
-R5 -> editable DosageType -> in-memory persisted medication usage ->
+git diff --check PASS. Read-only external consumer adapter:
+R5 -> editable dosage -> in-memory persisted medication usage ->
 reopened dosage preserves 1/2/4 rows and sequences exactly; consumer
 source/database untouched.
 
-Paired warm HPSERVER medians against immutable pre-review 97d2d23,
+Paired warm validation host medians against immutable pre-review 97d2d23,
 seven alternating batches: ordinary SIG 1663.8->1653.0 us (-0.6%),
 Thai SIG 6125.1->6214.8 us (+1.5%), ocular taper
 6841.5->6895.8 us (+0.8%), glued fraction 842.7->859.8 us
@@ -6294,7 +6294,7 @@ ordinary R6 scheduling 648.0->627.5 us (-3.2%).
 Shared-host timing noise limits interpretation: no consistent
 hot-path regression, no new whole-SIG pass or repeated routine
 array scan. No package publication, master merge, review
-re-request, agents or Shinebright migration.
+re-request, agents or external consumer migration.
 
 
 ## 2026-11-16 — PR #13 review: point-vs-boundary clock ownership for implicit successors
@@ -6362,10 +6362,10 @@ build PASS; npm test **4193/4193 source tests, 44/44 suites**;
 npm run test:dist **4/4**; git diff --check PASS.
 Focused R6/schedule/family suites 697/697 before the two extra DST
 tests; both DST tests passed independently and in the full suite.
-No Shinebright source/test/DB changes, package publication, master
+No external consumer source/test/DB changes, package publication, master
 merge, or review re-request.
 
-Alternating seven-batch, warmed HPSERVER median microseconds versus
+Alternating seven-batch, warmed validation host median microseconds versus
 immutable dccc528 (shared host; numbers NOT a hardware benchmark):
 ordinary SIG 1398.6 -> 1450.7 (+3.7%), Thai SIG 5900.7 -> 5638.0
 (-4.5%), independent ocular taper 6148.8 -> 6160.2 (+0.2%),
@@ -6384,7 +6384,7 @@ against AGENTS.md, DIRECTIONALITY.md and the preceding phase-clock and
 R5/R6 semantic-preservation diaries. All five inline findings were
 independently reproduced on prior PR HEAD e134fcb, including a zero-
 stage index that exhausted a Vitest worker's heap. No new schema,
-independent parser, Shinebright change or R6-legacy compatibility
+independent parser, external consumer change or R6-legacy compatibility
 mechanism was authorized.
 
 - **Explicit empty stages / unbounded stage synthesis:** A R5 carrier
@@ -6476,7 +6476,7 @@ npm run test:dist **4/4 PASS**, diff check clean. After a small
 consolidation of the identical finite-count predicate across the
 four execution consumers, TypeScript and all 22 focused/relevant
 tests were rerun green. Baseline is exact e134fcb, warm paired
-seven-batch HPSERVER medians, microseconds per operation:
+seven-batch validation host medians, microseconds per operation:
 ordinary parser 1667.4 -> 1623.6 (-2.6%),
 Thai parser 6201.0 -> 6061.3 (-2.3%),
 ophthalmic taper 6403.7 -> 6170.8 (-3.6%),
@@ -6781,7 +6781,7 @@ the measured cold import time and retained heap did not regress.
 These are same-host measurements, not mobile hardware guarantees.
 
 Do NOT manually request another CodeRabbit review, merge/publish
-packages, alter Shinebright or original PR #13. Update only the
+packages, alter external consumer or original PR #13. Update only the
 existing stacked PR #14 after a final green source/dist gate.
 
 
@@ -8177,7 +8177,7 @@ Baseline artifact SHA-256 values:
 - Master: `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`.
 - Previous PR: `50f378d1c9ac1c41d6a43e41485f8cc54af7a3cb07e93c3963f8e2effe299541`.
 
-Raw samples, logs and profiler data are retained under /tmp/ezmed14-round23-*;
+Raw samples, logs and profiler data are retained under private validation records;
 this committed section contains the dispositions, validation totals, exact build
 identities, all remaining flags and the relevant numerical evidence.
 No top-level GitHub comment or new full-review request is authorized.
@@ -8520,12 +8520,12 @@ Result: 6 files passed, 401 tests passed:
 Source typecheck: npx tsc --noEmit --declaration false --target es2020 -> exit 0.
 git diff --check -> no output.
 Logs:
-- /tmp/ezmed14-round24-execution-red.log
-- /tmp/ezmed14-round24-execution-focused1.log
-- /tmp/ezmed14-round24-execution-targeted2.log
-- /tmp/ezmed14-round24-execution-focused3.log
-- /tmp/ezmed14-round24-execution-final-tests.log
-- /tmp/ezmed14-round24-execution-final-typecheck.log
+- private execution validation records
+- private execution validation records
+- private execution validation records
+- private execution validation records
+- private execution validation records
+- private type-check results
 
 No remaining demonstrated failure in the bounded assigned execution families. No optional benchmark or build was run; coordinator owns the performance gate and consolidated DIARY.
 
@@ -8539,7 +8539,7 @@ A read-only review of root's compile/index/regimen/benchmark changes identified 
 Product gate for additional regression work:
 - Literal "1 day to 1 week" and "at least 7 days" source probes did not populate the relevant full duration structures in the current parser. Those probes were removed rather than turning unsupported natural phrases into new requirements or adding internal editing fixtures.
 - Kept two ordinary supported public-source controls in schedule-family-audit.spec.ts: a new 1–7-day continuation applies that range to both the retained 1-tablet breakfast dose and changed 0.5-tablet dinner dose; a predecessor 7–14-day range remains intact while both successor components receive exactly 3 days. R5 and current R6 values and meal timing are asserted independently.
-- Focused follow-up: 2 tests passed, 202 skipped (204 total in that file). Log: /tmp/ezmed14-round24-continuation-window-tests.log. No build, benchmark, or other tests were run for this follow-up.
+- Focused follow-up: 2 tests passed, 202 skipped (204 total in that file). Log: private validation records. No build, benchmark, or other tests were run for this follow-up.
 - The earlier six-suite 401/401 result remains the completed broad focused run; these two added controls passed separately afterward.
 
 No additional concrete defect was identified in the reviewed comparator/source-timing capture, fractional shared course boundary, scalar/rate carry, or sequential async handling. Source and owned tests are refrozen; coordinator retains the final integration/performance gates.
@@ -8644,7 +8644,7 @@ unchangedR6SourceDisplay no longer takes its zero-step saved-text shortcut when 
 Final focused command (before root's planned test-file consolidation):
 ./node_modules/.bin/vitest run test/pr14-round23-r5.spec.ts test/pr14-round21-r5.spec.ts test/pr14-round20-r5.spec.ts test/pr14-round21-boundaries.spec.ts test/r6-primary.spec.ts --reporter=dot
 
-Result: 5/5 files, 526/526 tests passed. Per file: round20-r5 29; round21-r5 13; round21-boundaries 35; round23-r5 55; r6-primary 394. Final log: /tmp/ezmed14-round24-r5-final-tests.log.
+Result: 5/5 files, 526/526 tests passed. Per file: round20-r5 29; round21-r5 13; round21-boundaries 35; round23-r5 55; r6-primary 394. Final log: private interchange validation records.
 
 Source tsc --noEmit -p tsconfig.json: exit 0.
 Maintained npm run test:types (round21-boundaries + round23-r5): exit 0.
@@ -8841,7 +8841,7 @@ Parent/execution reported targeted meal/clock splitting retaining inherited BID 
 - Final current meaning suite: 52/52 passed, including all new supported route fixtures, current Thai clock, typed saved Time, retained quantities and graph immutability.
 - Other five suites passed in the final broad run: instruction-graph 301, clinical quantity 202, multiclause 32, round21 meaning 47, locale architecture 11.
 - Strict tsc on test/pr14-round23-meaning.spec.ts plus source dependencies passed in the final broad run. The last route condition simplification introduces no new types; parent's complete gate will rerun it.
-- Logs: /tmp/ezmed14-round24-meaning-tests.log, /tmp/ezmed14-round24-meaning-final.log, /tmp/ezmed14-round24-meaning-typecheck.log.
+- Logs: private grammar validation records, private grammar validation records, private type-check results.
 - No production build, benchmark, GitHub comment/reply, push or commit from this worker.
 
 Parent integration result after freeze: 4,775 source tests across 60 suites and 4 distribution tests passed; strict test types and declaration build passed. Runtime artifact was frozen and benchmark started. No worker tests, builds, or source edits were run after that notification.
@@ -9142,7 +9142,7 @@ The five-day supply oracle remains 7 tablets (2 loading + 5 maintenance). Pass.
   - test/schedule-family-audit.spec.ts: 204
   - test/pr14-followup-clinical.spec.ts: 16
 - Command: npx vitest run test/pr14-round21-execution.spec.ts test/pr14-followup-clinical.spec.ts test/schedule-family-audit.spec.ts
-- Final log: /tmp/ezmed14-round25-execution-final.log
+- Final log: private execution validation records
 - Source typecheck after final production edit: npx tsc --noEmit --declaration false --target es2020 => exit 0. Later edits were tests only.
 - No build or benchmark was run by this worker. Root owns full integration and the fresh master <=4% public API gate.
 - No remaining reproduced defect in the bounded families checked here. This is not an assertion that every unrelated execution family was audited. Existing source retention and partial-data semantics were preserved.
@@ -9160,7 +9160,7 @@ Exact red fixture and clinical oracle:
 - Query starts09:15.
 - Maintenance must start Jan 1 10:00, with Jan 2 10:00 next, and four-hour supply2 tablets.
 - Prior frozen source instead returned Jan 2 andJan 3 10:00. Count1 control passed.
-- Red log: /tmp/ezmed14-round25-execution-second-history-red.log.
+- Red log: private execution validation records.
 
 Narrow final fix: move the history-only collect request into the beginning of deferred emitNext, so every resume drains buffered actual history before asking for a nominal opportunity. Initial entry now calls emitNext normally. The existing per-phase array/cursor remains the owner; applicable history is still selected once, there is no added history scan or new queue. Quota exhaustion still ends the phase after its final accepted actual. If there is no applicable recorded history or nominal clock, the existing window-end fallback remains.
 
@@ -9176,13 +9176,13 @@ Integration review also questioned whether !normalizedCalendarInterval could let
 
 Compared the pre-change sequential seek using the unchanged addCalendarMonths implementation with current public nextDueDoses for2 administrations per1.5months and per0.1years. Both reject on the first calendar step with the same "Unable to resolve monthly advancement" error: a non-integral calendar month cannot be resolved by the existing date constructor. No valid interval is obtained for direct seek, so this is not a supported-input regression introduced by the optimization. Whole-month-normalized fractional years (e.g.0.25a=3mo) already remain on the calendar branch.
 
-Two temporary comparison probes passed and were removed; no new unsupported fractional-calendar contract was codified and no calendar classification or semantics were changed. Log: /tmp/ezmed14-round25-fractional-calendar-comparison.log.
+Two temporary comparison probes passed and were removed; no new unsupported fractional-calendar contract was codified and no calendar classification or semantics were changed. Log: private validation records.
 
 #### Focused post-addendum verification and freeze
 
 - **328/328 focused tests pass** after the final source change: round21 execution108; schedule-family204; clinical-followup16.
 - Command: npx vitest run test/pr14-round21-execution.spec.ts test/pr14-followup-clinical.spec.ts test/schedule-family-audit.spec.ts
-- Log: /tmp/ezmed14-round25-execution-final-history.log
+- Log: private execution validation records
 - Source typecheck after the final production change: npx tsc --noEmit --declaration false --target es2020 => exit0.
 - No running test processes. All owned source and tests are frozen again. Root owns final full source/dist/type/build validation and fresh-master performance.
 
@@ -9259,11 +9259,11 @@ Focused checks completed, 670 cases across six suites (runs at the stated shared
 A broad optional strict compilation of these historical test files was attempted and exposed existing optional R6 step accesses and old helper return-shape mismatches; it is not the repository's required targeted test:types gate. No broad optional test cleanup was made. Newly added optional step accesses use non-null assertions where the fixture/output is explicitly checked. Root owns the required type gates, full suite, distribution build, and performance gate.
 
 Logs:
-- /tmp/ezmed14-round25-meaning-tests.log
-- /tmp/ezmed14-round25-meaning-final-tests.log
-- /tmp/ezmed14-round25-meaning-family-tests.log
-- /tmp/ezmed14-round25-meaning-source-types.log
-- /tmp/ezmed14-round25-rate-cue-probe.log
+- private grammar validation records
+- private grammar validation records
+- private grammar validation records
+- private grammar validation records
+- private validation records
 
 ### Changed paths in this worker
 
@@ -9293,7 +9293,7 @@ Requirement gate: the exact review repro deletes CanonicalAdministration.predica
 
 Supported external control: setDosageCondition(externalR5Row, undefined) removes the owned condition modifier. Converting that row to R6 and importing again leaves predicate absent, while the untouched original source remains intact. A remaining calendar modifier is still supplied meaning; absence of only another representation is not a license to discard it.
 
-Typed owner: existing external condition bridge and public edit helper. Cost: zero runtime changes. Independent evidence: /tmp/ezmed14-round25-r5-gates.log records unsupportedNativeMutationRevives=true and supportedExternalClearRevives=false. Parent agreed to narrow rejection rather than general internal hardening.
+Typed owner: existing external condition bridge and public edit helper. Cost: zero runtime changes. Independent evidence: private interchange validation records records unsupportedNativeMutationRevives=true and supportedExternalClearRevives=false. Parent agreed to narrow rejection rather than general internal hardening.
 
 #### 12 — Fixed invalid strict Ratio source representation
 
@@ -9333,7 +9333,7 @@ Review correction: valid period caps ALONE already produce quantityKind='maximum
 
 Requirement gate: the repro adds step.safety to a single-step R6 instruction while retaining a previous lifted-header snapshot. That violates the pinned single-step contract. The explicit public fromFhir importer already rejects this with a dosdet-2 TypeError. No competing precedence is needed for invalid input accepted only through unguarded internal helpers.
 
-Independent controls: /tmp/ezmed14-round25-r5-gates.log records the exact public guard error. Editing the valid live HEADER safety from count4 to count3 is accepted by fromFhir, and native course safety reads count3. Therefore valid external edits keep current authority. Natural typed owner remains the existing current-version boundary guard; zero runtime changes. No broad revalidation on every helper/conversion path.
+Independent controls: private interchange validation records records the exact public guard error. Editing the valid live HEADER safety from count4 to count3 is accepted by fromFhir, and native course safety reads count3. Therefore valid external edits keep current authority. Natural typed owner remains the existing current-version boundary guard; zero runtime changes. No broad revalidation on every helper/conversion path.
 
 #### 27 — Fixed annotated step modifier wrapper loss
 
@@ -9388,10 +9388,10 @@ Independent oracle: <100mg and valid extension-only comparator primitive inputs 
 
 ### Validation and freeze
 
-- Focused R5 suites: test/pr14-round20-r5.spec.ts (29), test/pr14-round21-r5.spec.ts (13), test/pr14-round23-r5.spec.ts (67): 109/109 passed. Log /tmp/ezmed14-round25-r5-focused.log.
+- Focused R5 suites: test/pr14-round20-r5.spec.ts (29), test/pr14-round21-r5.spec.ts (13), test/pr14-round23-r5.spec.ts (67): 109/109 passed. Log private interchange validation records.
 - Source TypeScript `tsc --noEmit -p tsconfig.json`: passed after all substantive source changes.
 - Maintained `npm run test:types`: passed, covering round21 boundaries and round23 R5 negative/public-input checks.
-- Gate and omitted-draft probe: /tmp/ezmed14-round25-r5-gates.ts and .log; outputs #2 supported clear false, #23 public guard rejection plus valid header count3, #21 omitted core with one restored draft.
+- Gate and omitted-draft probe: private interchange validation records and .log; outputs #2 supported clear false, #23 public guard rejection plus valid header count3, #21 omitted core with one restored draft.
 - The final post-focused one-line correction was `projected: output.step ?? []` in r6-editable-metadata.ts; separately probed after applying, and root notified before full validation.
 - Source/tests frozen. Parent owns integrated tests, full build, fresh-master performance gates, committed diary, and original-thread dispositions.
 
@@ -9716,7 +9716,7 @@ Times are separate batch medians in microseconds; percentage change is the media
 
 New-API scenarios measured: getEmaQuantityComparator, native/import-R6, native/import-R5, native/project-both, native/format-administration, native/format-course, native/project-editable-R5.
 
-Reproduction uses the committed bench/public-api.mjs with the frozen master path, --rounds 21 --target-ms 35, and the exact five-name confirmation set with --rounds 41 --target-ms 100. Complete raw samples and log manifests are retained in /tmp/ezmed14-round25-master-full.json, /tmp/ezmed14-round25-master-confirm.json, /tmp/ezmed14-round25-previous-smoke.json and /tmp/ezmed14-round25-validation.json; the complete per-case outcomes and all finding gates are committed here.
+Reproduction uses the committed bench/public-api.mjs with the frozen master path, --rounds 21 --target-ms 35, and the exact five-name confirmation set with --rounds 41 --target-ms 100. Complete raw samples and log manifests are retained in private performance records, private performance records, private validation records and private validation records; the complete per-case outcomes and all finding gates are committed here.
 
 <!-- /round25-validation -->
 
@@ -11509,7 +11509,7 @@ All 49 review items have an explicit disposition below. One alleged public negat
 - **Cost:** Relax only source-anonymous one-slot guard; retain source-ID mismatch and multi-slot ambiguity checks.
 - **Preservation:** Keep expression annotations, newly authored id and current rate over three saves.
 - **Independent oracle:** Anonymous expression+5mL/h survives first-id, rate and combined edits; known-ID replacement remains protected.
-- **Disposition:** fix confirmed family sibling; /tmp/ezmed14-round27-single-slot-id-probe.log
+- **Disposition:** fix confirmed family sibling; private validation records
 
 #### R27-S5. Fresh ParseResult.items rows and persisted batch rows honor maximum edits, insertions and removals.
 
@@ -11519,8 +11519,8 @@ All 49 review items have an explicit disposition below. One alleged public negat
 - **Cost:** Capture the existing bounded fresh external-row proof once per emitted item, including initially uncapped items so later cap insertion is detectable; no maximum observation for uncapped rows, no retained graph traversal, and no native-object defensive copy. Verify ordinary parse/format cost in the per-scenario gate.
 - **Preservation:** Keep original authored row text and each current FHIR maximum; do not conflate items[0].fhir with batch.fhir[0].
 - **Independent oracle:** Take and Dissolve fresh item rows honor numerator4->2; initially uncapped Take gains max4/day in both previews; deleting an existing cap removes it. Defaulted doses retain the previous graph-authorship policy.
-- **Disposition:** fix confirmed family sibling; /tmp/ezmed14-round27-fresh-item-cap-probe.log fails before change
-- **Verification:** The first integration exposed ordinary Take items had no proof at all because capture was graph-only. A final insertion probe confirmed initial cap-free items also require baseline ownership; removal already worked. Evidence: /tmp/ezmed14-round27-fresh-cap-add-remove-probe.log.
+- **Disposition:** fix confirmed family sibling; private validation records fails before change
+- **Verification:** The first integration exposed ordinary Take items had no proof at all because capture was graph-only. A final insertion probe confirmed initial cap-free items also require baseline ownership; removal already worked. Evidence: private validation records.
 
 #### R27-S6. A next-day successor after a count-limited phase starts on the local date following the predecessor's final occupied day, even when ordering time shifts completion.
 
@@ -11791,7 +11791,7 @@ Original-thread replies follow the validated push. No top-level comment or full-
 
 **Disposition:** All 39 item IDs inventoried; three rejected on owner/product grounds (not blindly implemented), the remainder corrected with existing typed clinical owners or stronger test oracles.
 
-**Source validation:** 56 source suites and **5202/5202** tests passed; ES6 build/declarations and packaged exports **4/4** passed; diff whitespace check clean. The existing downstream R5 dosage converter and medication usage-map in-memory save/reload retained **1/2/4/3** dosage rows for ordinary, Thai, staged and independent-eye directions. No storage migration.
+**Source validation:** 56 source suites and **5202/5202** tests passed; ES6 build/declarations and packaged exports **4/4** passed; diff whitespace check clean. The existing downstream R5 dosage converter and medication storage in-memory save/reload retained **1/2/4/3** dosage rows for ordinary, Thai, staged and independent-eye directions. No storage migration.
 
 **Performance:** 117/117 existing public functions covered, plus independent measurement of the six new native exports. Across 181 cases, the initial 21-round all-public comparison passed 172 comparable cases, left 7 non-equivalent-work cases for clinical oracles, and flagged 2 small helpers for long confirmation. The 71-round, 140-ms paired confirmation passed both: getDosageExcludedWeekdays 0.07277 to 0.07170 us (-0.08% drift-adjusted); setDosageAlternativeChoice 0.08655 to 0.05459 us (-36.07%). Thus **174/174 comparable scenarios have no reproduced >4% regression**. Non-equivalent work remains visible, not disguised as a passing timing comparison. Prior failed-before reports and benchmark controls remain in local evidence.
 
@@ -13084,43 +13084,43 @@ Disposition: **28 fixes, three strengthened oracles, two documentation clarifica
 
 Requirement: Supported external R5 scalar infusion duration replacement, followed by an R6 core-duration clear. Harm: A retired approximately60-minute duration became active again after deleting current45-minute core duration. Owner: Existing typed duration-marker reconciliation in adapters/canonical-course.ts; applies to R5 provenance only for a changed actual duration marker. Cost: One marker read; non-duration and unchanged R5 markers return before reconciliation sets/serialization. No second parser or ordinary syntax work. Preservation: Displaced marker wrapper, original approximate quantity and unknown note remain under inert reconciliation source. Unedited marker-only control remains active. Oracle: Control~60min; replaced exact45min; subsequent clear has no active duration. Both R5 and R6 outputs retain source ID/note.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#1: old marker survived alongside45; deletion restored60/~.
+Evidence: private validation records: old marker survived alongside45; deletion restored60/~.
 
 **#2 — fixed (major): Use a phase ID for lifted phase safety.**
 
 Requirement: A lifted sole-phase policy belongs to that phase even when one identified component moves to another phase. Harm: Component-ID fallback transferred the two-tablet induction cap to maintenance and removed induction's cap. Owner: liftSingleStepSafety assigns an ID to an anonymous wire phase; authored phase IDs remain untouched. Cost: Removes the component-ID collection walk from new lifting. Existing fingerprint runs only to supply missing phase ID. Preservation: Both component identities and authored policy data remain; phase ID persists through saves. Independent maintenance receives no cap. Oracle: Induction keeps2-tab administration cap; moved A remains A; maintenance has no phase cap.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#2: [null,[2]] for induction/maintenance.
+Evidence: private validation records: [null,[2]] for induction/maintenance.
 
 **#3 — fixed (major): Include the dose/rate slot role in the saved replay proof.**
 
 Requirement: Persisted editable R5 dose/rate roles can be changed in place after a preview. Harm: Warm replay proof returnedtrue after ordered→calculated while the cold persisted fingerprint returnedfalse. Owner: SourceDoseObservation captures the role with existing clinical concept observer inside the existing slot walk. Cost: No source graph hash on unchanged previews; each slot adds a clinical concept observation/comparison, absent roles are a constant-time branch. Preservation: Current role, dose and raw text remain in the wire. Coding version-only equivalence keeps existing persisted fingerprint policy. Oracle: Warm and cold proofs agree after role code/system/text/removal; quantity remains1tab and source text remains recoverable. Version-only change remains equivalent in both and is exported.
 
-Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#3: initialtrue,warmtrue,coldfalse.
+Evidence: private validation records: initialtrue,warmtrue,coldfalse.
 
 **#4 — fixed (major): Allow a verified DST gap to move a civil boundary past midnight.**
 
 Requirement: Civil supply windows must resolve valid time-zone gaps, including forward gaps crossing midnight, without moving prescribed exact dose clocks. Harm: One civil day from March27 2026 23:30 in America/Nuuk threw invalid-horizon, although the intended boundary resolves to March29 01:30Z. Owner: execution/calendar.ts calendarBoundaryDate verifies a valid requested calendar tuple and an actual forward offset discontinuity. It applies the established pre-gap offset even when the adjusted clock is on the next date; makeZonedDate remains exact. Cost: Additional tuple/offset checks occur only after exact resolution fails. Ordinary calendar/dose clocks retain the existing fast path; no medication or wire logic. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Nuuk boundary = 2026-03-29T01:30Z, daily09:00 supply = 1 tab, missing exact March28 23:30 is skipped. New York02:30 gap still advances to07:30Z; invalid Feb30/hour24 remain null.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: invalid-horizon; current: 1 tab; exact boundary/clock assertions in schedule-family-audit.spec.ts
+Evidence: artifact: private execution validation records; reviewed: invalid-horizon; current: 1 tab; exact boundary/clock assertions in schedule-family-audit.spec.ts
 
 **#5 — fixed (major): Do not charge pre-window explicit events against the count.**
 
 Requirement: Count history begins at the later of the authored eligibility window and treatment order for an equivalent scalar administration; a one-member wire wrapper must preserve that semantics. Harm: Jan1 explicit event outside a Jan2 window spent count1, deleting the eligible Jan2 event. Window-only regular recurrence also reset count history; exhausted one-stage course supply could throw an invented invalid-stage-order. Owner: The existing shared exact-event/count paths now receive a bounds start even without orderedAt. Existing proven scalar-course dispatch is shared by scheduling and supply, so one-administration wrappers use the same calendar/order semantics without a phase planner. Existing course aggregation/qualification still owns total fields, rounding and safety explanations. Cost: Constant boundary selection, scalar shape proof and one scalar call. Removes phase planning for equivalent one-member wrappers; no extra grammar pass, array walk, generic validation, cloned input, or new boundary algorithm. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Count1 with Jan2 start and Jan1/2/3 explicit events yields Jan2 09:00 +1 tab, then no Jan3 dose/0 supply. Same oracle for daily recurrence. OrderJan2 noon yields Jan3 09:00 +1 tab over2 days. Plain R5,[R5],native,R6,coldR5 tested. Independent multi-track absolute calendars before the relative track anchor remain unchanged.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: Explicit Jan2 event lost: due[], supply0.; relatedArtifact: /tmp/ezmed14-round39-execution-family-before.json; related: Finished calendar R6 course threw invalid-stage-order; scalar regular recurrence incorrectly supplied another1tab.; current: All exact count/window/origin oracles in schedule-family-audit.spec.ts.
+Evidence: artifact: private execution validation records; reviewed: Explicit Jan2 event lost: due[], supply0.; relatedArtifact: private execution validation records; related: Finished calendar R6 course threw invalid-stage-order; scalar regular recurrence incorrectly supplied another1tab.; current: All exact count/window/origin oracles in schedule-family-audit.spec.ts.
 
 **#6 — fixed (major): Exclude pre-order doses from unfiltered supply counts.**
 
 Requirement: The unfiltered supply counter must exclude administrations before the treatment order, consistently with due scheduling. Harm: Daily09:00, orderedJan2 midnight, queriedJan1: supply incorrectly reported1tab while due scheduling beganJan2. Owner: calculateTotalUnitsSingle clamps countFrom once to effective order/window start before every count path. Existing scalar-course shape proof extends the same semantics to equivalent wrappers. Cost: One Date comparison before enumeration, not a per-dose check or extra array traversal. Removed the now-redundant capacity branch re-clamp. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Jan1 supply0 and first dueJan2 09:00; Jan2 supply1. PlainR5,[R5],native,R6,coldR5 retain same values and source JSON unchanged.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: pre-order supply1, dueJan2; current supply0 and order-day1.
+Evidence: artifact: private execution validation records; reviewed: pre-order supply1, dueJan2; current supply0 and order-day1.
 
 **#7 — fixed (major): Check newly added `EzDosage.safety` before reusing parser text.**
 
 Requirement: Supported EzDosage.safety additions to a fresh parser row must affect preview. Harm: The fast source path reused uncapped parser wording after an added2-tab maximum. Owner: sourceDisplayEdit guard now sees live safety and reaches the existing maxima proof. Cost: One property check in existing guard; no new safety walk or clone. Preservation: Original parser text stays untouched; live typed limits and original dose remain. Oracle: One tablet daily plus2-tab administration/period/lifetime maximum in current preview.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#7: uncapped old wording.
+Evidence: private validation records: uncapped old wording.
 
 **#8 — fixed (major): Render each independent temporal adjunct.**
 
@@ -13138,7 +13138,7 @@ Evidence: Reviewed and prior silently drop the graph-only condition. Master reta
 
 Requirement: Supported public parallel eye regimens retain authored civil-day successors. Private native-builder mutation has no support contract. Harm: No reproduced public clinical error. The reported elapsed overlap requires assigning authored treatment offsets without the phaseStartReference produced by both HPSG onset producers. Owner: No parallel-course.ts production change. Source-authored day/week onsets carry treatment-day-start and take existing per-member partial-track handling before elapsed global phase selection. External FHIR imports bypass the parser-only builder. Cost: Zero production runtime cost. Expanded independent public controls only. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: OD QIDx7d then2dropsBIDx1d from day5,6,8 or10 retains successor and4drops/day. Day8 adjacent transition exact; day10 leaves day8/9 gap with0supply and next due day10. Reviewed/prior already pass.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: Day5,8,10 due08:00/20:00 and supply4 already correct.
+Evidence: artifact: private execution validation records; reviewed: Day5,8,10 due08:00/20:00 and supply4 already correct.
 
 **#11 — fixed (major): Use the probe’s actual start to locate the maximum-dose slash.**
 
@@ -13150,13 +13150,13 @@ Evidence: Reviewed496cbc1 passes unindented but fails indented3rows; prior a6ed 
 
 Requirement: An independently authored treatment-day onset remains the successor's owner even when NEXT also has a dated predecessor fallback. Harm: A compatible public 'from day2 ... next morning' successor after an end date lost its authored offset and instead retained a derived calendar date plus a zero-displacement civil anchor. Owner: scopeSequentialPhaseSemantics now honors authoredOffset before every predecessor-derived fallback, rather than only the contextual-predecessor branch. Cost: One reordered boolean condition in the existing evidence branch; no added evidence walk, grammar production, reparsing or metadata. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Three public word orders retain day2/civil offset1 and predecessor Nov25 end; native,R6,coldR5 preserve offset, dueNov26 08:00 +2tab when orderedNov25. Omitting independent onset still derives Nov26. The review's day10/next-morning dual-offset private combination is not itself used as a grammar acceptance fixture.
 
-Evidence: artifact: /tmp/ezmed14-round39-onset-before.json; reviewed: Native stage start had treatment-day-start but no displacement; successor schedule had boundsStartNov26 and missing authored offset.; currentArtifact: /tmp/ezmed14-round39-onset-current.json
+Evidence: artifact: private validation records; reviewed: Native stage start had treatment-day-start but no displacement; successor schedule had boundsStartNov26 and missing authored offset.; currentArtifact: private validation records
 
 **#13 — fixed (major): Handle positional primitive metadata on `Timing.event` as well as `timeOfDay`.**
 
 Requirement: Valid R5/current-R6 primitive arrays may include null event positions owned by positional metadata. Harm: Scheduler called match onnull rather than returning authored timestamps; public type excluded valid positions. Owner: FhirTiming wire types permit null positions; getTimingEvents separates executable strings at import; timingToWire retains original wire positions; calendarEventFromFhir ignores metadata-only position. Cost: One linear event-value extraction with no allocation when no null; original wire array reused on export, no deep event matching/editor contract. Preservation: Both event positions and matching _event metadata remain byte-for-byte in R5/R6 projections. Oracle: Exactly Dec1 and Dec2 08:00UTC due; metadata-only slot schedules nothing; null positions at beginning/middle/end survive repeated saves.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#13 null.match error. Stable legacy API comparison additionally shows reviewed/prior/exact-master all throw.
+Evidence: private validation records null.match error. Stable legacy API comparison additionally shows reviewed/prior/exact-master all throw.
 
 **#14 — fixed (major): Recognize annotated UCUM time codes without rewriting the quantity.**
 
@@ -13174,7 +13174,7 @@ Evidence: Reviewed and prior mark the metric range per administration target. Ma
 
 Requirement: A maximum-supply projection may use an upper count quota, but only an exact authored count completes an implicit loading phase. Harm: Weekly loading count1–2 plus rolling cap silently became exact2 for supply, opening10tab maintenance and returning62tab for week1 instead of2. Owner: prepareMaximumSupplyTiming no longer rewrites count/countMax into an exact upper count. Existing repeatOccurrenceCap admits the maximum quota, while finiteCompletionCount retains authored completion semantics. Cost: Removes an allocation and semantic rewrite. Existing quota/completion owners perform their established work. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Weekly range1–2 yields loading08:00 on days1/2 and8/9, supply2 in7d and4 in14d, with and without a rolling cap. Exactcount2 opens maintenance day2 noon and requires62tab week1. Source JSON unchanged.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-before.json; reviewed: due loading only but supply62; current supply2.
+Evidence: artifact: private execution validation records; reviewed: due loading only but supply62; current supply2.
 
 **#17 — fixed (major): Do not show `QHS` beside an edited morning schedule.**
 
@@ -13192,13 +13192,13 @@ Evidence: Reviewed, prior and exact master all reduce the ordinary input to Mix 
 
 Requirement: A live lower duration added to an existing upper-only range is an endpoint edit, not replacement of the whole range. Harm: An exact90min scalar replaced saved high2h, erasing the active range upper endpoint. Owner: parseTimingAdministrationDuration reconciles live lower and upper independently; native and clause import prefer the resulting existing range. Cost: Extends existing marker read and endpoint construction; scalar path stays unchanged when no range exists. Preservation: 90min remains90min and2hours remains2hours with original high ID/code/annotations; marker ID remains. No storage conversion. Oracle: Canonical active range low90min/high2hours, no exact scalar; both endpoints remain in R5/currentR6 saves.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#19: exact90min and range dropped.
+Evidence: private validation records: exact90min and range dropped.
 
 **#20 — fixed (minor): Keep live route coding when reopening a historical R5 row.**
 
 Requirement: A supported historical R5 row's live route coding system/version additions must remain current while retaining unrelated R6-only fields. Harm: Relaxed identity equivalence reused the saved component and discarded the newly supplied coding system/version. Owner: Historical row reuse uses exact structured equality of existing live projections; earlier relaxed identity matching is unchanged. Cost: Uses the existing projection comparison location; no second row matching walk or new clone. Preservation: Live route system/version retained; unchanged historical2h startOffset survives; untouched control remains lossless. Oracle: Exact supplied urn:clinical-routes and version2026 plus original2h startOffset after every save.
 
-Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#20 route contained code only despite live system/version.
+Evidence: private validation records route contained code only despite live system/version.
 
 **#21 — documented (minor): Document the benchmark baseline prerequisites.**
 
@@ -13210,31 +13210,31 @@ Evidence: No runtime defect; documentation omitted prerequisites.
 
 Requirement: Supported external course-count clear is required and already correct; the proposed helper change targets private native count/provenance divergence. Harm: No demonstrated external-input loss: public fromDosageDetails course.modifierExtension=[] already clears active count and retains authored marker as source. Owner: Existing R5 course-header edit reconciliation, not private CanonicalCourse mutation repair. Cost: No production change or extra retention mechanism added. Preservation: The public clear retains three-cycles ID and authored note across R5/R6 saves. Oracle: After external clear getCourseCycleCount undefined; source still includes original three-cycles ID/note through3 saves.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#22 already active[] and retainedtrue.
+Evidence: private validation records already active[] and retainedtrue.
 
 **#23 — fixed (minor): Do not reactivate an earlier comparator annotation when its code returns.**
 
 Requirement: External R5 EMA operator edits may replace, remove and later re-add an operator without restoring its old primitive annotation. Harm: The old < primitive ID was reactivated after <→>→< saves even though the clinician did not restore it. Owner: quantityFromR5 classifies current projection primitive sources and wraps displaced ones as inactive source during its existing export preparation loop. Cost: Lazily allocated set only for rare primitive source records; same existing extension classification and output walks, no recursive source scan. Preservation: Old annotations remain nested source; immediate unchanged current primitive and explicitly newly supplied primitive still restore losslessly. Oracle: Current< and original2tab stay active; original-operator remains only in source after >, equality or removal and subsequent<.
 
-Evidence: /tmp/ezmed14-round39-interchange-owner-before.json#23 and#23public show original ID reactivated.
+Evidence: private validation records and#23public show original ID reactivated.
 
 **#24 — declined (minor): Keep removed cycle-day children as inactive source.**
 
 Requirement: Current external cycle-day markers and supplied annotations must be preserved; native cycleDays editing against stale private provenance is not supported. Harm: Review gives only private constraint/previous-marker divergence, no public external-input failure. An external marker with a removed child correctly exposes only its remaining day. Owner: getCycleDayConstraint reads the live external marker; no native editor/removed-child history inference added. Cost: No production cost or private reconciliation architecture added. Preservation: Every remaining authored child, marker ID and unknown sibling is retained. Data already removed from an external input is not invented. Oracle: External current marker has day1 only, same first-day ID and independent annotation; day3 is not active.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#24 current external edit already preserves current marker.
+Evidence: private validation records current external edit already preserves current marker.
 
 **#25 — fixed (minor): Keep metadata-only clock slots in the active timing arrays.**
 
 Requirement: When event anchors are removed, metadata-only additional-clock positions must remain active: preserve an unchanged source bridge in R5, expand positional primitive arrays in current R6. Authored core arrays remain core in either target. Harm: Reviewed code retired metadata-only bridge slots into inactive history while promoting only valued clocks. Initial round39 correction fixed active metadata but promoted null core slots into R5 and exposed an existing downstream inability; root integration now preserves the active R5 source vocabulary. Owner: Existing getTimingClocks/timingAnnotations classification and projectTimingClocks bridge loop separate executable values from wire positions. administrationToWire passes its existing R5/R6 target; no public option or downstream change. Cost: No additional extension walk or array allocation for the integration fix. Existing bridgeClocks.length and bridgeIndex identify metadata-only slots; current no-extension fast return remains. Preservation: R5 unchanged bridge retains exact active carrier wrappers, values, primitive metadata and independently authored _timeOfDay; R6 emits null placeholders plus correctly aligned primitive metadata. Authored core positions remain unchanged. No source metadata or placeholders dropped for storage. Oracle: First/last/only metadata positions: first R5 projection keeps exact active carriers, R6 has explicit positional null arrays; following core-array saves retain arrays in both targets. Three public JSON R5 saves assert exact carrier IDs, metadata, independent companion and executable clocks [08:00] or []. Existing exact due timestamps remain unchanged.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#25 only08:00/morning active, metadata-only slot lost from active arrays.
+Evidence: private validation records only08:00/morning active, metadata-only slot lost from active arrays.
 
 **#26 — fixed (minor): Assert the edited application scope in the preview.**
 
 Requirement: Current target count must be visible in preview, but metric-dose total/per-site semantics must follow existing unit-scope contract. Harm: Old preview omitted current3-site count. Review's proposed1g each would additionally multiply a metric total without typed authority. Owner: Meaning lane's existing EN/TH site realization owners; this lane strengthens existing R5 external-count oracle. Cost: Uses already-resolved site definition and locale renderer; no new scans in this lane. Preservation: Current1g remains total,3sites visible,2g/day maximum remains and raw original text stays retained. Oracle: Preview has1g, across3sites, max2g/1d, excludes old2lesions and1g each; separate source-text equality remains.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#26: Use1g once daily to lesions; max2g/1d, missing3.
+Evidence: private validation records: Use1g once daily to lesions; max2g/1d, missing3.
 
 **#27 — oracle-strengthened (minor): Assert the unit for each number-word dose and rate.**
 
@@ -13252,7 +13252,7 @@ Evidence: HEAD types.ts inspection: independent optional properties allow both v
 
 Requirement: Metadata-only R6 header is valid but structurally indistinguishable from metadata-only R5 Dosage. Harm: Generic version inference cannot choose safely; classifying all shared Element shapes as R6 would break supported R5. Owner: Existing documented fromFhir dedicated current-R6 entrypoint; clarify importCanonicalCourse JSDoc, no new public option. Cost: No dispatch change, extra runtime work or API surface. Preservation: Dedicated R6 retains header ID/extension and zero stages; R5 transport reopens header; generic metadata-only R5 stays a component. Oracle: Dedicated fromFhir returns exact input header and empty native stages; generic same-shape input remains R5.
 
-Evidence: /tmp/ezmed14-round39-interchange-before.json#29 dedicated path already correct; README104-106 already states ambiguity.
+Evidence: private validation records dedicated path already correct; README104-106 already states ambiguity.
 
 **#30 — fixed (minor): Keep existing surface matches ahead of custom code matches.**
 
@@ -13264,7 +13264,7 @@ Evidence: Reviewer historical claim that the previous implementation resolved th
 
 Requirement: Public mixed civil/elapsed origins must survive schedule, supply, interchange and long preview. Internal redundant metadata alone does not justify new defensive work. Harm: A real source can have mixed member onsets of equal value, but every affected member already owns its explicit origin and bypasses the nominal shared fallback. No incorrect public result was found. Owner: No parallel-course.ts change. courseFromPartialParallel reads each member onsetReference/onsetDays first. Existing mixed-basis guards already prevent shared end/cutoff inference. Cost: Zero production runtime cost. One public preservation oracle covers the meaningful interface boundary. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: After3d+1d pause, OD2drops08:00 fromday5 keeps civiloffset4; separate OD1drop22:00 keeps elapsedoffset4. Native,R6,coldR5,R5→R6 retain those exact different bases. Noon order still yields day5 08:00/09:00/22:00 and5drops before noon. EN/TH long previews distinguish day5 from4days after treatment start.
 
-Evidence: artifact: /tmp/ezmed14-round39-mixed-origin-before.json; reviewed: All four representations already retain exact origins and both distinct long-preview phrases.; publicExecutionArtifact: /tmp/ezmed14-round39-onset-before.json
+Evidence: artifact: private validation records; reviewed: All four representations already retain exact origins and both distinct long-preview phrases.; publicExecutionArtifact: private validation records
 
 **#32 — oracle-strengthened (minor): Check the qualifier in the infusion preview.**
 
@@ -13288,7 +13288,7 @@ Evidence: Prior a6ed and exactmaster correctly retain gauge rate; reviewed496cbc
 
 Requirement: The day5 successor oracle must verify its real dose, due time and supply, not only predecessor output. A licensed onset-only dose continuation inherits its one complete predecessor cadence. Harm: Stronger assertions exposed a production gap: latest reviewed output kept the day5 two-tablet phase but omitted its daily recurrence, yielding due[] and timing-required for supply in native/R6/coldR5. Owner: The existing regimen.treatment-relative-phase-onset license now reuses the established recurrence-inheritance owner, only for a single complete antecedent and no local recurrence. No duration/count/calendar bounds inherited. Original stronger oracle retained. Cost: Constant typed rule/single-antecedent gate; recurrence copy happens only for that licensed onset-only construction using the existing field-copy path. No source regex, parser pass, new file, generic cache or broad array scan. Preservation: Every fix retains authored source, values, units, labels, qualifiers and endpoints; no wire normalization, native edit lifecycle, downstream changes, new files, commits or GitHub operations. Oracle: Both postposed/fronted '2 tablets fromday5' retain1tab daily first4d, then Jan5 09:00 and2tab one-day supply in native,R6,coldR5. Twice-daily and08:00/20:00 controls inherit both clocks and need4tab/day. Second phase does not inherit prior4d duration.
 
-Evidence: artifact: /tmp/ezmed14-round39-execution-family-before.json; reviewed: Both forms: due[], supply timing-required in all3 representations.; currentArtifact: /tmp/ezmed14-round39-execution-family-current.json
+Evidence: artifact: private execution validation records; reviewed: Both forms: due[], supply timing-required in all3 representations.; currentArtifact: private execution validation records
 
 **#36 — fixed (minor): Localize recognized infusion-duration units in the Thai long preview.**
 
@@ -13306,7 +13306,7 @@ Evidence: Production already correct; test-only strengthening.
 
 Requirement: Duplicated import aliases can be removed without disturbing consolidated test scope or assertions. Harm: Maintenance duplication only; no clinical defect. Owner: Existing test imports extended with missing names, preserved fixture block stays isolated. Cost: No production/runtime cost. Preservation: Preserved r521 body is byte-identical; all assertions/cases remain and strict gate includes suite. Oracle: SHA256 before/after 2fc9f262c4a39b903d8b3c23c7f9e02f92a73b2b7559115b7fca20a072cc9bcd.
 
-Evidence: /tmp/ezmed14-round39-interchange-import-cleanup.json
+Evidence: private validation records
 
 Primary unit-reference check: UCUM specification §6 (https://ucum.org/ucum) defines annotations as not changing the underlying unit. This is used only for interpretation; authored quantities remain intact.
 
@@ -13364,7 +13364,7 @@ The PR remains at 100 changed paths. GitHub access is CLI-only. Delivery targets
 
 Reviewed commit: `81ab17be01c981a62a26b33d6eb21854d5e9cffb`. Review 6011864663 and overflow comments 7078089171 / 7078089688 contain 53 findings (25 Major, 23 Minor, 5 Trivial), with zero new inline-root discussions. Final dispositions: **16 runtime fixes, nine oracle improvements, one documentation update, one import cleanup, and 26 declines/deferrals**.
 
-The owner's [initial scope correction](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078410416) withdrew catheter/device recognition, ambiguous minute abbreviation and manufactured custom-action collision work. The later [refactor-only directive](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078752389), mirrored in local AgentBoard #38, applies to every current finding. It supersedes the earlier broader acceptance ledger. This PR centralizes established medication SIG semantics and current R5/R6 interoperability; it does not expand English understanding, device specifications or speculative editor histories.
+The owner's [initial scope correction](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078410416) withdrew catheter/device recognition, ambiguous minute abbreviation and manufactured custom-action collision work. The later [refactor-only directive](https://github.com/swittk/ezmedicationinput/pull/14#issuecomment-7078752389) applies to every current finding. It supersedes the earlier broader acceptance ledger. This PR centralizes established medication SIG semantics and current R5/R6 interoperability; it does not expand English understanding, device specifications or speculative editor histories.
 
 All three named expansions were removed. A final check against actual master additionally found device-specific code inherited from round39: a gauge lexical set/export/import and a next-token lookup in the existing bounded cue scan. It was small extra work, not zero impact, so the hook and its six fixtures were removed across the full PR. Reassessment against actual master deferred **22 more proposed fixes** and removed **50 newly added test cases** tied to them. All unrelated pre-existing test cases remain. The subsequent full-PR device check also removes six unsupported gauge/catheter cases introduced in round39, as explicitly requested by the owner. Pre-existing supported defects are recorded as deferred work, not declared invalid input and not used as merge blockers. No further feature audit or full-review request was started.
 
@@ -13609,7 +13609,7 @@ Final validation figures are appended from the fresh source/build/storage report
 - The remaining attempted input retains the established raw core timeOfDay null consumer limitation, also present on actual master and earlier builds. It was not trimmed or normalized to manufacture a pass.
 - The original Thai parallel instruction remains two shipping R5 rows; the English taper remains four.
 - The PR remains at **100 changed paths**, with no new repository files this round.
-- Local AgentBoard thread27 received a corrective supplement and scope updates; the original handoff messages were not reposted.
+- The private review discussion received a corrective supplement and scope updates; the original handoff messages were not reposted.
 
 
 Source SHA-256: 361d864ab3f166305fe370637dcd45d20db0c6bb213a4755e8592f930b4114f7. Built ESM SHA-256: f605d10a4e70feb21da491be5f8a2475c0947bc9379b499291fd15b6dffa2452. Exact-master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
@@ -13649,14 +13649,14 @@ Representative accepted measurements (microseconds per call):
 
 All 53 dispositions and gate evidence are retained under ezmed14-round40: ledger.json, source-final.log, dist-final.log, storage-check.json, consolidation-proof.json, benchmark-oracle-amendment.json, benchmark-oracle-controls.json, master-full.json, master-confirm.json (when needed), and performance-accepted.json.
 
-Delivery completes the existing master merge and uses a normal push to the existing PR branch. GitHub access is CLI-only. This review has no new inline roots; no replacement top-level comment or full-review request is created. The local AgentBoard thread carries the handoff and scope state.
+Delivery completes the existing master merge and uses a normal push to the existing PR branch. GitHub access is CLI-only. This review has no new inline roots; no replacement top-level comment or full-review request is created. The private review notes carry the handoff and scope state.
 
 
 ## PR14 round41
 
 The owner explicitly resumed the loop on 2026-11-22: fix broken supported behavior, including pre-existing correctness defects, and reject speculative malformed-input, internal-mutation and feature-expansion work. This changes the previous round's disposition for the 18 supported findings listed below; the historical record above remains intact. The latest review is 6012495942 on 947a5ff. All 13 inline findings,17 body minor findings and one import nitpick were assessed: **30 addressed, one rejected**.
 
-Root performed the preview fixes and integration, using three ChatGPT collaboration workers for execution, grammar and interop in isolated worktrees. No HPSERVER Codex/Gemini CLI workers were started. Root independently reviewed worker diffs; execution independently reviewed grammar and grammar reviewed root's formatting. That review caught an omitted explicit-daily infusion division: two 50 mL portions were still scheduled once daily. Final projection now uses the authored daily schedule for cardinality; the rate denominator never creates a recurrence.
+Root performed the preview fixes and integration, using three ChatGPT collaboration workers for execution, grammar and interop in isolated worktrees. No validation host Codex/Gemini CLI workers were started. Root independently reviewed worker diffs; execution independently reviewed grammar and grammar reviewed root's formatting. That review caught an omitted explicit-daily infusion division: two 50 mL portions were still scheduled once daily. Final projection now uses the authored daily schedule for cardinality; the rate denominator never creates a recurrence.
 
 ### Scope and invariants
 
@@ -13723,7 +13723,7 @@ Prior findings **11,18,22,29,30,34,36,37** remain rejected: new gauge-device gra
 - The daily divided-infusion neighbor now supplies 100 mL/day or 20 mg/day as authored. Finite count 2 and explicit twice-daily controls remain correct.
 - The PR remains at **100 changed paths**, with no new repository file this round.
 
-Frozen source, build, storage, causal and per-finding evidence is retained in /tmp/ezmed14-round41-*, including the ledger, four lane notes, independent review probes and complete test logs. Performance results and review-thread delivery follow below after their gates complete.
+Frozen source, build, storage, causal and per-finding evidence is retained in private validation records, including the ledger, four lane notes, independent review probes and complete test logs. Performance results and review-thread delivery follow below after their gates complete.
 
 
 ### Final performance gate
@@ -13765,7 +13765,7 @@ The owner's resumed loop authorizes the normal review cycle for this work. Deliv
 
 Reviewed head: f80ddd67700c763b4d48179e099e3989acb5626b. CodeRabbit review: [6013055979](https://github.com/swittk/ezmedicationinput/pull/14#pullrequestreview-6013055979). Frozen source candidate: 63359bb3414e4290b4c5cd83306c8109f007aeef. Comparison base remains actual pinned master 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb.
 
-The owner's renewed instruction is to continue the review/fix/full-review loop, fixing supported behavior including pre-existing defects and rejecting hypothetical malformed-input defenses or new feature demands. That newer instruction authorizes this review cycle over the older no-additional-review note. Work used the coordinator's own ChatGPT grammar, execution and interchange workers in isolated worktrees. The coordinator implemented the graph/formatting lane, independently reviewed ownership and public fixtures, integrated the commits, and ran all final gates. No HPSERVER Codex/Gemini workers were launched.
+The owner's renewed instruction is to continue the review/fix/full-review loop, fixing supported behavior including pre-existing defects and rejecting hypothetical malformed-input defenses or new feature demands. That newer instruction authorizes this review cycle over the older no-additional-review note. Work used the coordinator's own ChatGPT grammar, execution and interchange workers in isolated worktrees. The coordinator implemented the graph/formatting lane, independently reviewed ownership and public fixtures, integrated the commits, and ran all final gates. No validation host Codex/Gemini workers were launched.
 
 The boundary remains native clinical courses with R5/R6 adapters: public .fhir is R5 and .fhirNext remains pinned to R6 Snapshot 1. Authored values, independent endpoint units, original source and opaque metadata stay intact. There is no active-prescription normalization, public/native edit framework, downstream application/database migration, merge, release or deployment.
 
@@ -13826,7 +13826,7 @@ Pinned-master checks identify I1/I2/I4/I8/I9/I10/I11/I14 and B1/B2/B6/B10/B16 re
 
 - 6,457/6,457 source tests pass across all 48 existing test files, including strict ES6 type checking. The previous round had 6,394 tests; every prior file remains and none loses test cases.
 - Four distribution tests pass after ESM/CommonJS/declaration builds.
-- The actual Shinebright converter and storage save/reopen path preserves full JSON exactly for 64 cases out of 65 attempts, including all 48 previously preserved cases and 16 new cases. The remaining raw core timeOfDay [null,08:00:00] case reproduces the same existing downstream RangeError. Its input was passed directly, without trimming, normalization or downstream edits.
+- The actual external consumer converter and storage save/reopen path preserves full JSON exactly for 64 cases out of 65 attempts, including all 48 previously preserved cases and 16 new cases. The remaining raw core timeOfDay [null,08:00:00] case reproduces the same existing downstream RangeError. Its input was passed directly, without trimming, normalization or downstream edits.
 - The PR remains at exactly 100 changed paths. All regression cases use existing files.
 - Source and candidate build are frozen throughout measurement; all worker source/test/build processes finished before benchmarking.
 
@@ -13835,7 +13835,7 @@ Candidate ESM SHA-256: 9ea037f7468d09eef9936fae50f7ec3a5dadb9134f712886d4be371a3
 Pinned master ESM SHA-256: a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2.
 Unchanged benchmark SHA-256: 10aae1e96f04edeefdd53471f1508998897f30ce34e99d7ab042fa97d109f1fb; git blob 42a4c7b898a778a092be550cd454d6bf39041879.
 
-Evidence remains in /tmp/ezmed14-round42-*: lane notes and before/after/master probes, public ownership and onset probes, exact converter/storage report, source/dist logs, gate manifest, and full paired benchmark data.
+Evidence remains in private validation records: lane notes and before/after/master probes, public ownership and onset probes, exact converter/storage report, source/dist logs, gate manifest, and full paired benchmark data.
 
 
 ### Final performance gate
@@ -13877,7 +13877,7 @@ Delivery follows the authorized loop: normal push to the existing PR14 branch, i
 
 ## 2026-11-23 — PR14 full-review round43
 
-Review 6013421346 examined 92b64d6. It contains 8 inline findings and 16 body-only findings. Twenty-one are addressed; three are rejected at the supported-behavior boundary. Root performed source implementation, integration and independent review, using our own execution, grammar and interchange workers. No HPSERVER AI workers or downstream application edits were used.
+Review 6013421346 examined 92b64d6. It contains 8 inline findings and 16 body-only findings. Twenty-one are addressed; three are rejected at the supported-behavior boundary. Root performed source implementation, integration and independent review, using our own execution, grammar and interchange workers. No validation host AI workers or downstream application edits were used.
 
 ### Finding disposition
 
@@ -13926,7 +13926,7 @@ Pinned-master evidence classifies I1, B1, B2 and graph-only R6 loss as demonstra
 
 - Source 6,513/6,513 across all 48 existing files, including strict ES6 type checking. Round42 had 6,457 tests; no prior file or case count was reduced.
 - ESM, CommonJS and declaration builds pass; all four distribution tests pass.
-- Actual Shinebright converter plus storage save/reopen preserves full JSON exactly for 74 cases out of 75 attempts, including all 64 previously preserved cases and ten new round43 cases. The remaining raw core timeOfDay [null,08:00:00] reproduces the same existing downstream RangeError. Input is passed directly, with no trimming, normalization or downstream change.
+- Actual external consumer converter plus storage save/reopen preserves full JSON exactly for 74 cases out of 75 attempts, including all 64 previously preserved cases and ten new round43 cases. The remaining raw core timeOfDay [null,08:00:00] reproduces the same existing downstream RangeError. Input is passed directly, with no trimming, normalization or downstream change.
 - Exactly 100 changed PR paths; all new regressions use existing files.
 - The initial integrated source runs exposed the two production-neighbor regressions above and then the phaseStart precedence mistake. All were corrected before the final passing gate. A bracket error in the temporary storage fixture script stopped that runner before execution; correcting the script did not alter source/build artifacts. The passing source/build results were retained only after exact head/source-hash verification.
 - All source/test/build worker processes finished before measurement.
@@ -13964,7 +13964,7 @@ Highest accepted equivalent-scenario change: **+3.548%** for **listAdviceRelatio
 | fromFhirDosage/en | -11.572% |
 | calculateTotalUnits/scalar | -85.713% |
 
-Source, candidate build, pinned master build and benchmark source hashes were independently rechecked after measurement and all match the frozen manifest. Full data, raw paired samples, process exits, command manifests, lane/independent-review notes and storage evidence remain under /tmp/ezmed14-round43-*.
+Source, candidate build, pinned master build and benchmark source hashes were independently rechecked after measurement and all match the frozen manifest. Full data, raw paired samples, process exits, command manifests, lane/independent-review notes and storage evidence remain under private validation records.
 
 
 ### Review delivery
@@ -14017,7 +14017,7 @@ Supported clinician input, valid existing interchange and advertised public API 
 
 ### Public evidence and integration
 
-Root implemented the course-preview fixes, locale-facet correction and benchmark clinical oracle, integrated all work, and independently reviewed worker changes. Its own execution, grammar and interop workers used isolated worktrees and AgentBoard claims. No HPSERVER AI worker was used. Independent worker audits of the root course changes and interop boundary changes found no concrete supported defect.
+Root implemented the course-preview fixes, locale-facet correction and benchmark clinical oracle, integrated all work, and independently reviewed worker changes. Its own execution, grammar and interop workers used isolated worktrees and work claims. No validation host AI worker was used. Independent worker audits of the root course changes and interop boundary changes found no concrete supported defect.
 
 The public course oracle preserves one choice across the 2-to-1 and 4-to-3 tablet tapers even when the second stage lists branches in a different order. Both R6 and saved R5 retain stage timing and branch identity in English and Thai. For A at days 0–2, B at days 4–6, and a successor ending at day 8, the preview retains a B-only 0–4 pause and describes the shared successor relative to the selected predecessor. Execution controls give A's successor doses on January 3/4 and B's doses on January 5/6. Pinned master also displayed per-stage choices and the false global pause; these are supported baseline defects, not newly invented semantics.
 
@@ -14047,7 +14047,7 @@ All 174 equivalent scenarios meet the individual +4% ceiling; the largest accept
 | Pinned master ESM | a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2 |
 | Benchmark harness | 93d2ffc5ef68d719c3d34d66d1194723c59ea7779414220891103d14e52d53f4 |
 
-An independent own-worker audit recomputed every paired-log ratio, median, spread and acceptance flag from all 181 full-run cases and exactly the five 72-pair confirmations. The accepted 169 full-run plus five confirmation cases match the gate summary. The source/build/harness hashes are unchanged through the final measurements. The benchmark-only diff strengthens the existing Thai clinical equivalence oracle; timing, sampling, fixture inventory, confirmation policy and threshold are unchanged. Raw full, confirmation, source, dist, storage and manifest reports are retained under /tmp/ezmed14-round44-*. The rejected pre-optimization gate is retained separately.
+An independent own-worker audit recomputed every paired-log ratio, median, spread and acceptance flag from all 181 full-run cases and exactly the five 72-pair confirmations. The accepted 169 full-run plus five confirmation cases match the gate summary. The source/build/harness hashes are unchanged through the final measurements. The benchmark-only diff strengthens the existing Thai clinical equivalence oracle; timing, sampling, fixture inventory, confirmation policy and threshold are unchanged. Raw full, confirmation, source, dist, storage and manifest reports are retained under private validation records. The rejected pre-optimization gate is retained separately.
 
 | First-pass flag | Full sweep | Prescribed confirmation |
 |---|---:|---:|
@@ -14064,14 +14064,14 @@ The delivery retains one individual reply per original round 44 inline thread, w
 
 ### Confirmed performance failures before optimization
 
-The complete gate at source 30a1617 rejected four equivalent scenarios after the prescribed confirmation: formatParseBatch/staged +16.017857%, getMedicationInstructionConcept +1482.762509%, resolveMedicationInstructionConcept +804.712106%, and listMedicationInstructionConcepts +1412.637569%. Those failed reports are retained under /tmp/ezmed14-round44-pre-optimization-*. No cases were reclassified and no threshold was relaxed. Independent source and frozen-dist inspection confirmed that pinned master already clones all three public concept API results. The copy implementation's spread-and-override descriptors were the bounded optimization target; authored custom Coding metadata and detached values remain required. The staged fixture returns cached text and never runs the new branch-preview code, so its direct multistage return was restored before native metadata inspection. Final acceptance is established by the fresh unchanged full gate at the optimized source recorded above.
+The complete gate at source 30a1617 rejected four equivalent scenarios after the prescribed confirmation: formatParseBatch/staged +16.017857%, getMedicationInstructionConcept +1482.762509%, resolveMedicationInstructionConcept +804.712106%, and listMedicationInstructionConcepts +1412.637569%. Those failed reports are retained under private validation records. No cases were reclassified and no threshold was relaxed. Independent source and frozen-dist inspection confirmed that pinned master already clones all three public concept API results. The copy implementation's spread-and-override descriptors were the bounded optimization target; authored custom Coding metadata and detached values remain required. The staged fixture returns cached text and never runs the new branch-preview code, so its direct multistage return was restored before native metadata inspection. Final acceptance is established by the fresh unchanged full gate at the optimized source recorded above.
 
 The bounded optimization is committed at 428709ab2f8fbc19bff70b18290fbafbb8029c72. Bundled catalog initialization/public copies now use the original direct typed Coding fields (including version); custom vocabulary and escaped parsed components retain the metadata-preserving copier. The already-fresh custom public resolution is returned directly, matching master. The staged formatter keeps a small cached-text return with an explicit optional-array check and moves unchanged remaining logic to a private helper. Independent execution/grammar reviews found no supported semantic or metadata loss. All four targeted scenarios pass the diagnostic at candidate ESM 4d6ba419d2951bfb4032541c0d984981e579cab4a75272f9055e0ec24a7e50f6; this diagnostic does not replace the fresh complete gate.
 
 
 ## 2026-11-23 — PR14 full-review round45
 
-The actual full review 6014345996 examined delivery 4bec29cfa1f635ea1937f88e1aa81103d4db9070 and contained 13 inline plus 15 body findings. The owner renewed the loop and scope rule: fix broken supported behavior, including baseline defects; reject hypothetical malformed/internal-state defenses and expansions. Work used the coordinator's own execution, grammar and interop workers with isolated worktrees. HPSERVER supplied ordinary execution only.
+The actual full review 6014345996 examined delivery 4bec29cfa1f635ea1937f88e1aa81103d4db9070 and contained 13 inline plus 15 body findings. The owner renewed the loop and scope rule: fix broken supported behavior, including baseline defects; reject hypothetical malformed/internal-state defenses and expansions. Work used the coordinator's own execution, grammar and interop workers with isolated worktrees. validation host supplied ordinary execution only.
 
 The pinned contract remains public .fhir as R5 and .fhirNext as R6 Snapshot 1, preserving authored numeric values, independent endpoint units, raw source and opaque annotations. No native authoring API, new clinical model, general ambiguity machinery, downstream app/database edits, release or merge is included.
 
@@ -14114,7 +14114,7 @@ The baseline is pinned at 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. Evidence dis
 
 The coordinator implemented I3/I11/I12/B5, strengthened B4/B9, independently inspected every worker source diff, integrated all lanes and prepared the actual converter/storage fixtures. Own-worker cross-reviews inspected execution, grammar and the benchmark methodology. The integrated source retained 99 changed PR paths.
 
-The first frozen source run at 2946e3076bb9929f8a5f23dc75b4a82849095ef7 passed 6609 of 6610 cases and correctly rejected one integration regression: the first I12 comparison dropped the existing before-bedtime qualifier from the Thai shampoo/overnight procedure. That test was not weakened. The existing EventTiming Before Sleep = HS meaning is retained in the comparison, while after-sleep cannot claim HS. All 543 instruction/outpatient cases then passed. Initial failed evidence remains under /tmp/ezmed14-round45-before-bedtime-correction-*. No dist or timing work ran in that rejected gate. The unchanged corrected source then produced a complete successful 6610/6610 report but Node v24.14.1 aborted afterward in the native CJS lexer (exit 134, v8::ToLocalChecked Empty MaybeLocal). That process was not accepted. Its report and crash log are retained under /tmp/ezmed14-round45-native-abort-*, and the exact unchanged gate was restarted to obtain a clean process result.
+The first frozen source run at 2946e3076bb9929f8a5f23dc75b4a82849095ef7 passed 6609 of 6610 cases and correctly rejected one integration regression: the first I12 comparison dropped the existing before-bedtime qualifier from the Thai shampoo/overnight procedure. That test was not weakened. The existing EventTiming Before Sleep = HS meaning is retained in the comparison, while after-sleep cannot claim HS. All 543 instruction/outpatient cases then passed. Initial failed evidence remains under private validation records. No dist or timing work ran in that rejected gate. The unchanged corrected source then produced a complete successful 6610/6610 report but Node v24.14.1 aborted afterward in the native CJS lexer (exit 134, v8::ToLocalChecked Empty MaybeLocal). That process was not accepted. Its report and crash log are retained under private validation records, and the exact unchanged gate was restarted to obtain a clean process result.
 
 ### Validation and frozen evidence
 
@@ -14122,7 +14122,7 @@ Frozen source: 252f545b2b8d69b39175f277924e028ccabe9e3f.
 
 - Required strict ES6 source/type gate and 6610/6610 source cases across 48 existing files pass with a clean process exit. All prior per-file counts remain; 43 cases were added.
 - ESM/CommonJS/declaration build and 4/4 distribution tests pass.
-- Actual Shinebright converter/storage: 98 complete-input attempts, 97 exact full-JSON save/reopen preservations. The sole established downstream limitation remains raw timeOfDay:[null,"08:00:00"] raising Invalid FHIR timeOfDay: null. The input is passed directly without trimming, conversion or downstream edits.
+- Actual external consumer converter/storage: 98 complete-input attempts, 97 exact full-JSON save/reopen preservations. The sole established downstream limitation remains raw timeOfDay:[null,"08:00:00"] raising Invalid FHIR timeOfDay: null. The input is passed directly without trimming, conversion or downstream edits.
 - PR scope: 99 paths against pinned master; diff check passes.
 
 | Frozen evidence | SHA-256 |
@@ -14154,9 +14154,9 @@ All 177 equivalent scenarios meet the individual +4% ceiling. The largest accept
 | buildSnomedBodySiteTopographicalModifierPostcoordinationCode | 7.668% | -1.006% |
 | registerSigLocalization | 7.879% | -0.833% |
 
-The source, candidate ESM, pinned master ESM and benchmark harness remain unchanged through both runs. All 181 previous name/API pairs remain in order, and the same seven inequivalences remain recorded without performance verdicts. The full report confirms matching fresh-calendar preparation sequences. Raw source, distribution, storage, full/confirmation timings and frozen manifests are retained under /tmp/ezmed14-round45-*.
+The source, candidate ESM, pinned master ESM and benchmark harness remain unchanged through both runs. All 181 previous name/API pairs remain in order, and the same seven inequivalences remain recorded without performance verdicts. The full report confirms matching fresh-calendar preparation sequences. Raw source, distribution, storage, full/confirmation timings and frozen manifests are retained under private validation records.
 
-Independent own-worker audit recomputed every raw median, paired-log ratio, spread and acceptance flag for all 184 full cases and exactly 8 confirmations. It verified the actual successful managed-process exit, all frozen artifact digests, all prior test-file counts, the unchanged exclusions and the three added workloads. The fresh-calendar sequences match at 3,025 calls in 38 blocks per build, with contiguous ordinals and independently derived dates; the measured portion uses 22 batches of 128 calls. All 2,561 audit checks pass. The audit performed no additional tests, builds or benchmark runs; its report is retained as /tmp/ezmed14-round45-independent-audit.json.
+Independent own-worker audit recomputed every raw median, paired-log ratio, spread and acceptance flag for all 184 full cases and exactly 8 confirmations. It verified the actual successful managed-process exit, all frozen artifact digests, all prior test-file counts, the unchanged exclusions and the three added workloads. The fresh-calendar sequences match at 3,025 calls in 38 blocks per build, with contiguous ordinals and independently derived dates; the measured portion uses 22 batches of 128 calls. All 2,561 audit checks pass. The audit performed no additional tests, builds or benchmark runs; its report is retained as private validation review.
 
 ### Review delivery
 
@@ -14170,7 +14170,7 @@ Actual CodeRabbit full review [6014710956](https://github.com/swittk/ezmedicatio
 
 The established contract remains: `.fhir` is R5, `.fhirNext` is pinned R6 Snapshot 1, and the native clinical course is private/unstable. Public producer output passed unchanged to an existing read-only formatter is a supported route. Authored numeric values, independently authored endpoint units, raw text and opaque metadata stay intact. Unknown duration units remain uninterpreted.
 
-Root implemented and independently reviewed substantial source/test changes. Three own ChatGPT workers handled execution, grammar and interoperability in separate worktrees; no HPSERVER Codex/Gemini workers were used. Ordinary host execution provided repository access. Findings were checked through supported public routes and against frozen master where that route exists; focused controls preceded integration. Full gates below run on the integrated source, followed by independent raw-artifact audit.
+Root implemented and independently reviewed substantial source/test changes. Three own ChatGPT workers handled execution, grammar and interoperability in separate worktrees; no validation host Codex/Gemini workers were used. Ordinary host execution provided repository access. Findings were checked through supported public routes and against frozen master where that route exists; focused controls preceded integration. Full gates below run on the integrated source, followed by independent raw-artifact audit.
 
 ### Complete disposition ledger
 
@@ -14224,7 +14224,7 @@ Own-worker review caught a zero-stage source-authority interaction before delive
 
 Root source review then identified a distinct receiver/completion role within the same existing pause ownership path. An ordinary public edit of the middle phase’s duration from seven to eight days incorrectly erased both pauses. A public reproduction confirmed the loss immediately and across three cold saves. The bounded correction tracks the existing completion-timing comparison separately and applies it only when the phase is the relevant pause’s predecessor. Existing identity, boundary, member and uniqueness comparisons remain unchanged. The incoming pause survives, the outgoing pause retires, the eight-day duration and live day-28 boundary remain, and all prior cases are retained.
 
-The first full source run reported 6,666/6,671 passes with five obsolete oracles, and was not accepted. Two assertions expected an unknown duration’s value to disappear; they now require value 30, an unresolved unit, exact original marker and no invented core duration. Three Q4H period-range assertions expected two-hour events despite admitting the coded four-hour cadence; they now require 00:00/04:00/08:00, retain the uncoded 00:00/02:00/04:00 control and the independent maximum supply of 12. An independent six-observation public probe confirmed those distinctions. Production source was unchanged by this test-only reconciliation; the complete mandatory gates were rerun. The failed run is archived under `/tmp/ezmed14-round46-before-oracle-reconciliation-*`.
+The first full source run reported 6,666/6,671 passes with five obsolete oracles, and was not accepted. Two assertions expected an unknown duration’s value to disappear; they now require value 30, an unresolved unit, exact original marker and no invented core duration. Three Q4H period-range assertions expected two-hour events despite admitting the coded four-hour cadence; they now require 00:00/04:00/08:00, retain the uncoded 00:00/02:00/04:00 control and the independent maximum supply of 12. An independent six-observation public probe confirmed those distinctions. Production source was unchanged by this test-only reconciliation; the complete mandatory gates were rerun. The failed run is archived under private validation records.
 
 ### Frozen validation
 
@@ -14236,7 +14236,7 @@ Delivery head is a subsequent DIARY-only commit.
 |---|---|
 | Source suite and strict ES6 checks | 6,671/6,671 assertions across 48 files, zero failed or skipped |
 | ESM/CommonJS/declarations and distribution suite | Build passed; all 4 distribution tests passed |
-| Actual converter and UsageMap save/reopen | 113 attempted; 111 exact complete-JSON cases; two explicitly unpreserved pre-existing downstream limitations |
+| Actual converter and storage save/reopen | 113 attempted; 111 exact complete-JSON cases; two explicitly unpreserved pre-existing downstream limitations |
 | Test retention | All prior files and per-file case counts retained |
 | Public API benchmark | 117/117 functions, 184 unchanged paired scenarios |
 | Individual equivalent-work ceiling | All 177 scenarios at or below +4%; same 7 exclusions |
@@ -14250,15 +14250,15 @@ The complete sweep used 22 rounds at a 35 ms target. Exactly the seven equivalen
 
 The same 184 ordered scenario/API pairs, 117 public functions and seven prior exclusions remain. The benchmark harness is unchanged: SHA-256 `8fb212370ecf3071cb7d7cfc9a386e808ea6ecab97e7577ca87f8fd6e274582e`, git blob `2a33a7684392f31136874df72a450b421ff3e21e`. Baseline ESM remains `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2`. Calibration, pair order, paired-log statistic, fresh-calendar preparation and the per-equivalent-case 4% ceiling are unchanged. No averaging or reclassification is used.
 
-Actual converter and UsageMap save/reopen attempted all 113 complete R5 fixtures: 111 preserve exact JSON, and two explicitly remain `preserved:false`. The established raw core `timeOfDay` null case still throws `Invalid FHIR timeOfDay: null`. The new unit-only scalar case exposes an additional pre-existing downstream loss: `doseAndRate[0].doseQuantity:{unit:'tab'}` becomes `doseAndRate:[{}]`. The initial strict storage gate failed and remains archived; its failure is not counted as a pass.
+Actual converter and storage save/reopen attempted all 113 complete R5 fixtures: 111 preserve exact JSON, and two explicitly remain `preserved:false`. The established raw core `timeOfDay` null case still throws `Invalid FHIR timeOfDay: null`. The new unit-only scalar case exposes an additional pre-existing downstream loss: `doseAndRate[0].doseQuantity:{unit:'tab'}` becomes `doseAndRate:[{}]`. The initial strict storage gate failed and remains archived; its failure is not counted as a pass.
 
-An independent ten-record comparison of direct raw R5, frozen current and pinned master locates that scalar loss specifically in the actual unchanged Shinebright converter's export. Import retains both the original quantity and its editable alias, but export requires a non-null numeric `dose.value`. That guard originates in downstream commit `81f7c743b03573d1165012698690d11b51fea023`, dated October 20. All five corresponding unit-only range controls preserve exactly through their existing metadata-only-range branch. Root's complete diagnostic also passes the scalar through actual UsageMap storage and confirms the same single-field loss, with all other text, timing, sequence and extension fields intact.
+An independent ten-record comparison of direct raw R5, frozen current and pinned master locates that scalar loss specifically in the actual unchanged external consumer converter's export. Import retains both the original quantity and its editable alias, but export requires a non-null numeric scalar amount. The same guard exists in the unchanged external converter. All five corresponding unit-only range controls preserve exactly through their existing metadata-only-range branch. Root's complete diagnostic also passes the scalar through actual storage storage and confirms the same single-field loss, with all other text, timing, sequence and extension fields intact.
 
-The final storage report preserves original, converter and saved snapshots for that loss; its narrow assertion recognizes only the demonstrated field removal. Complete inputs are still passed directly and checked unchanged. Nothing is trimmed, normalized or given an invented value. Both losses remain visible as downstream limitations, and repairing Shinebright is rejected as outside this PR. All 98 prior storage fixtures are retained, with fifteen supported current cases added. The source and distribution results are reused only at the identical frozen head/source digest while the corrected scratch harness reruns storage and performance; all prior source files and per-file test counts remain.
+The final storage report preserves original, converter and saved snapshots for that loss; its narrow assertion recognizes only the demonstrated field removal. Complete inputs are still passed directly and checked unchanged. Nothing is trimmed, normalized or given an invented value. Both losses remain visible as downstream limitations, and repairing external consumer is rejected as outside this PR. All 98 prior storage fixtures are retained, with fifteen supported current cases added. The source and distribution results are reused only at the identical frozen head/source digest while the corrected scratch harness reruns storage and performance; all prior source files and per-file test counts remain.
 
 ### Evidence and review loop
 
-Round artifacts use `/tmp/ezmed14-round46-*`: full disposition ledger; root/execution/grammar/interop notes; public before/master/after probes; source/dist reports; actual storage check; benchmark manifest, full and exact-flag confirmation reports; independent raw audit; and original-thread reply/verification records. The preliminary execution reproduction’s native Node abort is retained as failed before-fix evidence, never as a passing gate.
+Round artifacts use private validation records: full disposition ledger; root/execution/grammar/interop notes; public before/master/after probes; source/dist reports; actual storage check; benchmark manifest, full and exact-flag confirmation reports; independent raw audit; and original-thread reply/verification records. The preliminary execution reproduction’s native Node abort is retained as failed before-fix evidence, never as a passing gate.
 
 The nine original inline threads are mapped directly. The twenty body findings are recorded above and in their related original-thread replies, not a replacement top-level findings summary. The pre-delivery paginated audit covers 255 threads with exactly these nine unresolved. After normal push, root verifies the head, posts individual evidence-based replies, resolves the original threads, freshly audits every thread, updates the PR body and requests the exact `@coderabbitai full review`. The loop waits for the actual review on the delivered head. No merge, release, publication or deployment is performed.
 
@@ -14270,7 +14270,7 @@ Actual full review records [6015104645](https://github.com/swittk/ezmedicationin
 
 The accepted scope remains supported public behavior, including bugs already present on pinned master. `.fhir` is R5, `.fhirNext` is pinned R6 Snapshot 1, and the native clinical course remains private/unstable. Public producer/read-only formatter and saved public graph/wire workflows are supported. Authored values, independently authored endpoint units, source text and opaque metadata remain intact. No new clinical model, grammar vocabulary, native editor contract, generic malformed-input defense, unit conversion, downstream application repair or performance exclusion is added.
 
-Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no HPSERVER Codex/Gemini workers were launched. Supported public routes were compared against exact reviewed and frozen master artifacts before repairs. Focused tests and independent clinical oracles preceded integration. The mandatory integrated gates and independent raw-artifact audit below are complete; focused worker results are not substituted for final validation.
+Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no validation host Codex/Gemini workers were launched. Supported public routes were compared against exact reviewed and frozen master artifacts before repairs. Focused tests and independent clinical oracles preceded integration. The mandatory integrated gates and independent raw-artifact audit below are complete; focused worker results are not substituted for final validation.
 
 ### Complete disposition ledger
 
@@ -14344,7 +14344,7 @@ The independent fresh-calendar audit verified 3,025 calls and 38 blocks for each
 |---|---|
 | Full source suite and strict ES6 checks | 6,730/6,730 across 48 files; no skipped or failed assertions; strict ES6 type gate passed |
 | ESM/CommonJS/declarations build and distribution suite | ESM/CommonJS/declarations build and 4/4 distribution tests passed |
-| Actual converter and UsageMap save/reopen | 140 attempted; 138 exact complete-JSON round-trips; the same two demonstrated downstream limitations remain explicitly preserved:false |
+| Actual converter and storage save/reopen | 140 attempted; 138 exact complete-JSON round-trips; the same two demonstrated downstream limitations remain explicitly preserved:false |
 | Prior test files and per-file case retention | All 48 prior files and per-file floors retained; 59 assertions added to the prior 6,671 |
 | Public API and scenario coverage | All 184 prior ordered scenario/API pairs, 117/117 functions, 177 equivalent cases and the same seven non-equivalent cases retained |
 | Individual equivalent-work performance ceiling | All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.561% for `buildBodySiteSpatialRelationExtensions`. The full 184-case sweep used 22 rounds at 35 ms; exactly 9 first-pass flags received the single prescribed 72-round, 140 ms candidate-first confirmation. The independent raw-artifact audit passed 2,611 checks. |
@@ -14358,21 +14358,21 @@ All results above come from the completed integrated run and independent audit. 
 
 The first integrated source gate at `1f45a7b8460ab63c0e56605c16bf5f9dbfef9e1c` reported **6,729 passed out of 6,730 assertions, with one failure**. It remains an unaccepted attempt. The existing review-integrity case “retains unfamiliar children on recognized course and edit markers even without clinical edits” compared an annotated restoration with a pristine source step array.
 
-The independent public probe establishes the sole difference: the exact original annotated display is now retained in the existing inert source envelope at `step[0].component[0].extension`. Adding precisely that expected archive makes the full step array equal; all active clinical fields, top-level audit/signer annotations, normalized preview, cold-save result and original input remain exact. This is the preservation required by B8, not changed clinical meaning. Evidence is `/tmp/ezmed14-round47-integrity-annotation-probe.json` and `-cause.json`.
+The independent public probe establishes the sole difference: the exact original annotated display is now retained in the existing inert source envelope at `step[0].component[0].extension`. Adding precisely that expected archive makes the full step array equal; all active clinical fields, top-level audit/signer annotations, normalized preview, cold-save result and original input remain exact. This is the preservation required by B8, not changed clinical meaning. Evidence is private validation records and `-cause.json`.
 
 Root's test-only commit `7649c1056b0e5458bdc69db9d505260551287995` explicitly requires that exact archive and retains full step equality and all original assertions. Production source did not change: its digest remains `21436811d9c540f32864b21d0f236c7bc28d8d61c29cfb28048e44f0fb9ea80c`. The focused verification command exceeded the host's ten-second lifetime; although its JSON reports one passed and 221 skipped assertions, that command is **not counted as a passing gate**.
 
-Attempt 1 stopped at its source failure: **no build, storage run or timing run was executed**. Its archived evidence remains `/tmp/ezmed14-round47-attempt1-gates.json`, `-source-final.json` and `-source-final.log`. A new complete attempt started at 00:07:49 UTC on the corrected frozen head. The complete second attempt passed source, distribution, storage and performance gates; its terminal result and frozen artifacts passed the independent audit reported above.
+Attempt 1 stopped at its source failure: **no build, storage run or timing run was executed**. Its archived evidence remains private validation results, `-source-final.json` and `-source-final.log`. A new complete attempt started at 00:07:49 UTC on the corrected frozen head. The complete second attempt passed source, distribution, storage and performance gates; its terminal result and frozen artifacts passed the independent audit reported above.
 
 ### Unchanged downstream storage limitations
 
 The two previously demonstrated downstream losses remain explicit `preserved:false` cases. A raw core `timeOfDay` null still raises `Invalid FHIR timeOfDay: null`. A unit-only scalar `doseQuantity: {unit: 'tab'}` remains present on actual converter import but is removed by its unchanged numeric-value-dependent export, leaving an empty doseAndRate entry. Existing unit-only range controls preserve exactly. These losses were independently attributed through direct raw R5, frozen current and pinned master paths in the prior round. Neither is repaired here.
 
-The completed storage run passed complete original inputs through the actual converter and UsageMap save/reopen, retaining original/converter/saved snapshots. Inputs are not trimmed, normalized or given invented values to hide a loss. The unchanged downstream application remains outside this PR.
+The completed storage run passed complete original inputs through the actual converter and storage save/reopen, retaining original/converter/saved snapshots. Inputs are not trimmed, normalized or given invented values to hide a loss. The unchanged downstream application remains outside this PR.
 
 ### Evidence and original-thread delivery
 
-Round artifacts use `/tmp/ezmed14-round47-*`: both actual review records, the 31-item disposition ledger, root/worker notes, public before/master/after evidence, frozen wire fixtures, focused reports, and the completed integrated source/dist/storage/performance/audit artifacts. Initial test-only oracle/API corrections remain archived separately; failed preliminary checks are not counted as passing gates.
+Round artifacts use private validation records: both actual review records, the 31-item disposition ledger, root/worker notes, public before/master/after evidence, frozen wire fixtures, focused reports, and the completed integrated source/dist/storage/performance/audit artifacts. Initial test-only oracle/API corrections remain archived separately; failed preliminary checks are not counted as passing gates.
 
 All eight original inline IDs are mapped to actual GraphQL threads. The pre-delivery paginated audit has 263 total threads and exactly these eight unresolved. The twenty-three body findings are covered in the related original-thread replies and the full ledger above, with no replacement top-level findings comment. After the mandatory gates and normal push, root verifies the delivered head, replies and resolves each original thread, audits all threads again, updates the PR body and requests the exact `@coderabbitai full review`. The loop waits for an actual full review on that delivered head. No merge, release or deployment is claimed or performed .
 
@@ -14384,7 +14384,7 @@ Actual full review [6015461452](https://github.com/swittk/ezmedicationinput/pull
 
 The user authorized continuation after recovery, with independently scoped own ChatGPT workers and strict product boundaries: fix demonstrated supported correctness, reject code expansion and unsupported ambiguous or malformed input. The same contract remains: `.fhir` is R5; `.fhirNext` is the pinned supported R6 Snapshot 1; the native clinical representation is private and unstable. Public producer/read-only formatter and saved public graph/wire workflows remain supported. Current structured edits govern meaning, while authored values, independently authored endpoint units, original source, and opaque metadata remain recoverable. No native editor, new persisted schema, unit conversion, generic recovery framework, downstream application repair, or additional parser pass is introduced.
 
-Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no HPSERVER Codex or Gemini workers were launched. Each scope compared supported public inputs with the frozen reviewed artifact and pinned master before production changes. Root judged the fixes and rejections, integrated exact owned-file commits, and retained responsibility for full gates, actual storage, performance, original-thread replies, and delivery.
+Root and three own ChatGPT workers used separate worktrees and ordinary repository execution; no validation host Codex or Gemini workers were launched. Each scope compared supported public inputs with the frozen reviewed artifact and pinned master before production changes. Root judged the fixes and rejections, integrated exact owned-file commits, and retained responsibility for full gates, actual storage, performance, original-thread replies, and delivery.
 
 | Owner | Independent scope |
 |---|---|
@@ -14426,7 +14426,7 @@ Root and three own ChatGPT workers used separate worktrees and ordinary reposito
 
 ### Baseline distinctions and bounded implementation
 
-The I1 rejection retains the explicit round 29 decision in `/tmp/ezmed14-round29-legacy-count-evidence.json`. What is byte-identical is the unversioned compact course/count modifier metadata, not the complete R5 rows: dose, unit, text, and source fields can differ. There is no lossless scope discriminator in that metadata. I2 instead uses an unambiguous current edit that explicitly supplies both scopes; it does not add an origin-guessing policy.
+The I1 rejection retains the explicit round 29 decision in private validation records. What is byte-identical is the unversioned compact course/count modifier metadata, not the complete R5 rows: dose, unit, text, and source fields can differ. There is no lossless scope discriminator in that metadata. I2 instead uses an unambiguous current edit that explicitly supplies both scopes; it does not add an origin-guessing policy.
 
 For I6, frozen `parseSig("Infuse 100 mL, no more than 50 mL over 1h")` already retains the 100 mL dose and 50 mL/hour cap, with no administration duration. Pinned master keeps the dose but does not recognize that maximum. The ordinary `over .5h` sibling is a real reviewed regression: the maximum displaced the intended dose and became an invented infusion. The fix is confined to the existing maximum-period attached-number reader. B14 likewise extends only the existing numeric suffix pattern; master also mishandles the leading-decimal denominator.
 
@@ -14450,7 +14450,7 @@ I9 does not reject graph-codec use: those codecs are public. It rejects an incom
 | Unchanged benchmark harness | `50a8f63f826f47376551ca893d11966905ba094ddbbd01db6cd45af5e43e7b82` |
 | Benchmark harness Git blob | `27e224c197414522bd8f6cda6efaab39d113f244` |
 
-The production-source digest is SHA-256 over sorted tracked `src` paths, each followed by NUL, its contents, and NUL. Integration and build records are `/tmp/ezmed14-round48-integration.json` and `/tmp/ezmed14-round48-gates.json`. Source remained unchanged across the completed correctness gates.
+The production-source digest is SHA-256 over sorted tracked `src` paths, each followed by NUL, its contents, and NUL. Integration and build records are private validation records and private validation results. Source remained unchanged across the completed correctness gates.
 
 ### Completed correctness gates and pending delivery gates
 
@@ -14458,18 +14458,18 @@ The production-source digest is SHA-256 over sorted tracked `src` paths, each fo
 |---|---|
 | Full source suite and strict ES6 types | 6,796/6,796 tests across 48 files; no failures or skipped cases; strict ES6 gate passed |
 | Packaged ESM/CommonJS/declarations | Build and 4/4 distribution tests passed |
-| Actual converter and UsageMap save/reopen | 190 attempted; 188 exact complete-JSON round-trips; exactly the same two explicit downstream limitations |
+| Actual converter and storage save/reopen | 190 attempted; 188 exact complete-JSON round-trips; exactly the same two explicit downstream limitations |
 | Prior test files and per-file floors | All 48 prior files and their case floors retained; 66 tests added to the prior 6,730 |
 | Storage case retention | All 140 prior cases retained unchanged, plus 50 new cases |
 | Benchmark coverage and method | Required inventory remains 184 ordered scenario/API pairs, 117 public functions, 177 equivalent cases, and the same seven non-equivalent exclusions |
 | Individual equivalent-case performance | All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.761290556% for `getSuggestLocaleAdapter`. The full 184-case sweep used 22 rounds at 35 ms; exactly eight first-pass flags each received the single prescribed 72-round, 140 ms candidate-first confirmation. |
 | Changed PR paths and whitespace | 99 changed PR paths; `git diff --check` passed |
 | Independent raw-artifact audit | Passed 3,414 independent checks on completed frozen raw artifacts and terminal process metadata. |
-| Delivery and fresh thread audit | Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in `/tmp/ezmed14-round48-delivery.json` and AgentBoard thread 27. |
+| Delivery and fresh thread audit | Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in private delivery records. |
 
 ### Initial failed source gate and bounded integration repairs
 
-The first integrated source gate at `99d3976b809d5250f017e6664572dfe482f4479f` reported **6,783 passed out of 6,787, with four failures**. It stopped at source: no distribution build, actual storage run, or performance measurement was executed for that attempt. Its source digest was `f0a609a5389df2ddafc889c57834dc6fdc345311465689322bd8cb898a591088`. The failed report remains archived under `/tmp/ezmed14-round48-attempt1-*` and is not counted as passing validation.
+The first integrated source gate at `99d3976b809d5250f017e6664572dfe482f4479f` reported **6,783 passed out of 6,787, with four failures**. It stopped at source: no distribution build, actual storage run, or performance measurement was executed for that attempt. Its source digest was retained privately. The failed report remains archived in private archived work and is not counted as passing validation.
 
 All four failures followed the required preservation of authored parallel durations. One old internal assertion still required the authored upper endpoint's duration unit to be stripped; root replaced that expectation with the exact original endpoint/unit, retaining the existing clinical execution assertions. One unchanged-projection preview repeated the original one-month duration under a later day-seven-to-month-one heading, which could read as a restarted course. The existing read-only display copy now suppresses only a scalar duration whose phase origin and existing position comparison prove it covers the stage window. It retains first-stage `1wk` wording under a derived `7d` heading and leaves shorter edits, ranges, qualifiers, and incomparable calendar bounds visible. Native data, wire quantities, and the exact old preview oracle remain unchanged.
 
@@ -14479,38 +14479,38 @@ The bounded follow-ups are integrated as `f6e3caba71bb27c54ed5fdc3ca8e1a502eaf0b
 
 ### Actual storage and unchanged downstream limitations
 
-The completed actual-converter and UsageMap run retains all 140 round 47 cases and adds 50: 12 interop, 10 grammar, nine execution, 12 root, four duration-display controls, and three source-agreement compaction controls. The exact inventory and fixture hashes are in `/tmp/ezmed14-round48-storage-case-manifest.json`.
+The completed actual-converter and storage run retains all 140 round 47 cases and adds 50: 12 interop, 10 grammar, nine execution, 12 root, four duration-display controls, and three source-agreement compaction controls. The exact inventory and fixture hashes are in private storage case inventory.
 
 The same two historical losses remain explicitly `preserved: false`:
 
 - `primitive-clock-position` passes the raw `timeOfDay: [null, "08:00:00"]` and positional primitive metadata directly to the unchanged downstream converter. It still reports `Invalid FHIR timeOfDay: null`.
 - `r46-unit-only-quantity-cadence` retains `doseQuantity: { unit: "tab" }` at converter import, then loses that scalar quantity through the existing numeric-value-dependent export, leaving an empty `doseAndRate` entry. Its value is not invented to make storage pass. Existing unit-only range controls preserve exactly.
 
-These limitations remain attributed to the unchanged downstream application using the prior direct-raw, pinned-master, and current evidence. Neither is repaired in this PR. All 190 records retain full original, converter, saved, and post-call input snapshots, with error details where the converter cannot complete, in `/tmp/ezmed14-round48-storage-raw-snapshots.json`. The original input is checked unchanged. No source field or opaque metadata is trimmed or normalized to conceal a difference. The round 46 failed attempt and scalar-loss attribution remain available in `/tmp/ezmed14-round46-before-storage-diagnosis-storage-final.log` and `/tmp/ezmed14-round46-storage-unit-only-audit.json`.
+These limitations remain attributed to the unchanged downstream application using the prior direct-raw, pinned-master, and current evidence. Neither is repaired in this PR. All 190 records retain full original, converter, saved, and post-call input snapshots, with error details where the converter cannot complete, in private storage snapshots. The original input is checked unchanged. No source field or opaque metadata is trimmed or normalized to conceal a difference. The round 46 failed attempt and scalar-loss attribution remain available in private storage validation records and private storage validation records.
 
 ### Exact performance methodology
 
 The benchmark harness is unchanged from round 47. Its existing prepared-drink and staged-batch clinical oracles, all 184 ordered scenario/API pairs, all 117 public APIs, the 177 equivalent scenarios, and the same seven exclusions remain mandatory. No new exemption or cross-scenario averaging can conceal a slower equivalent case.
 
-The prescribed full sweep uses 22 rounds at a 35 ms target with baseline first. Exactly the first-pass flagged cases may receive one 72-round, 140 ms candidate-first confirmation; optional remeasurement is excluded. Paired-log statistics, fresh-calendar preparation, contiguous raw ordinals, and the individual **+4% ceiling** are unchanged. Source, candidate ESM, baseline ESM, and harness hashes are pinned in `/tmp/ezmed14-round48-benchmark-manifest.json`. Correctness results do not certify performance or substitute for the independent raw-artifact audit.
+The prescribed full sweep uses 22 rounds at a 35 ms target with baseline first. Exactly the first-pass flagged cases may receive one 72-round, 140 ms candidate-first confirmation; optional remeasurement is excluded. Paired-log statistics, fresh-calendar preparation, contiguous raw ordinals, and the individual **+4% ceiling** are unchanged. Source, candidate ESM, baseline ESM, and harness hashes are pinned in private performance records. Correctness results do not certify performance or substitute for the independent raw-artifact audit.
 
 Performance result: All 177 equivalent cases meet their individual +4% ceiling. Worst accepted change: +3.761290556% for `getSuggestLocaleAdapter`. The full 184-case sweep used 22 rounds at 35 ms; exactly eight first-pass flags each received the single prescribed 72-round, 140 ms candidate-first confirmation.
 
 Independent raw-artifact audit counts and status: Passed 3,414 independent checks on completed frozen raw artifacts and terminal process metadata.
 
-The independent fresh-calendar audit verified 3,025 calls and 38 blocks for each build, including 2,816 measured calls (22 × 128). The complete validated record is `/tmp/ezmed14-round48-validated-summary.json`.
+The independent fresh-calendar audit verified 3,025 calls and 38 blocks for each build, including 2,816 measured calls (22 × 128). The complete validated record is private validation results.
 
 ### Evidence and original-thread delivery
 
-The complete current finding set, public before/master/after evidence, lane notes, raw wire fixtures, and gate results are retained under `/tmp/ezmed14-round48-*`. The source and distribution reports are `-source-final.json` and `-dist-final.json`; the completed actual save/reopen report is `-storage-check.json`, with full snapshots in `-storage-raw-snapshots.json`. Worker focused runs are supporting evidence and do not replace integrated gates.
+The complete current finding set, public before/master/after evidence, lane notes, raw wire fixtures, and gate results are retained under private validation records. The source and distribution reports are `-source-final.json` and `-dist-final.json`; the completed actual save/reopen report is `-storage-check.json`, with full snapshots in `-storage-raw-snapshots.json`. Worker focused runs are supporting evidence and do not replace integrated gates.
 
-The independent reply-content audit in `/tmp/ezmed14-round48-reply-plan-audit.json` approves all 26 findings mapped exactly once to the 12 actual original comment/thread IDs. All 14 review-body items retain their actual title, hash, and review provenance; they have no separate GitHub thread. The audit also verifies the precise I1 metadata distinction and the space in I6's actual `over 1h` input. The audited reply plan SHA-256 is `6cb608242bc37257b9e84b2777c1bb7b9354da8e9d671fcc7ef97996403d3adc`. At the content audit it was `readyToPost: false`; root adds the completed gate summary and verifies the documentation-only delivery head before posting.
+The independent reply-content audit in private review records approves all 26 findings mapped exactly once to the 12 actual original comment/thread IDs. All 14 review-body items retain their actual title, hash, and review provenance; they have no separate GitHub thread. The audit also verifies the precise I1 metadata distinction and the space in I6's actual `over 1h` input. The audited reply plan SHA-256 is retained privately. At the content audit it was `readyToPost: false`; root adds the completed gate summary and verifies the documentation-only delivery head before posting.
 
 The pre-delivery paginated thread snapshot contains 275 threads, with exactly the 12 round 48 originals unresolved and no older unresolved thread. B1–B5 belong with I2; B12/B13 with I3; B6 with I4; B11 with I5; B7/B14 with I6; B9 with I11; and B8/B10 with I12. Root replies in those original threads, preserving explicit body-item provenance, rather than posting a replacement top-level findings dump.
 
-Delivery head: Documentation-only child of validated source `f3c522ceb96bbcfe3557cfdef731332798fe46b4`; the exact pushed commit is recorded in `/tmp/ezmed14-round48-delivery.json`.
+Delivery head: Documentation-only child of validated source `f3c522ceb96bbcfe3557cfdef731332798fe46b4`; the exact pushed commit is recorded in private delivery record.
 
-Delivery, original-thread replies/resolutions, and fresh paginated audit status: Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in `/tmp/ezmed14-round48-delivery.json` and AgentBoard thread 27.
+Delivery, original-thread replies/resolutions, and fresh paginated audit status: Pending at this documentation checkpoint. The verified push, original-thread replies/resolutions, final thread audit, and next full-review request will be recorded in private delivery records.
 
 With the mandatory performance and independent audit gates complete, root verifies a normal push and the delivered head, posts and resolves the original threads, audits all threads again, updates the PR body, and requests the exact `@coderabbitai full review`. The loop waits for an actual full review on that head. No merge, release, or deployment is claimed or performed.
 
@@ -14524,7 +14524,7 @@ The implementation ledger has **23 addressed findings and six explicit rejection
 
 The user authorized the ongoing review loop with independently scoped ChatGPT workers, while retaining the product gate: fix supported clinical/data-preservation defects; reject scope expansion, manufactured collisions, ambiguous input policies, and speculative defensive machinery. The current contract remains that `.fhir` is R5 and `.fhirNext` is the pinned supported R6 Snapshot 1. The native clinical representation is private and unstable; parser/projection outputs are immutable by caller contract. Current externally edited R5/R6 values are supported at import boundaries. Independently authored quantities and endpoint units, original source, and opaque metadata remain recoverable. No native editor, extra parser pass, new unresolved-night-limit model, device/gauge expansion, generic recovery framework, or downstream application repair is introduced.
 
-Root and three ChatGPT workers used isolated worktrees and ordinary HPSERVER repository execution. No host Codex/Gemini worker was launched. Each production finding was judged against a selected public result and the frozen reviewed build/pinned master. Root owned integration, independent engineering review, actual downstream storage, frozen gates, performance, and eventual GitHub delivery.
+Root and three ChatGPT workers used isolated worktrees and ordinary validation host repository execution. No host Codex/Gemini worker was launched. Each production finding was judged against a selected public result and the frozen reviewed build/pinned master. Root owned integration, independent engineering review, actual downstream storage, frozen gates, performance, and eventual GitHub delivery.
 
 | Owner | Independent scope |
 |---|---|
@@ -14614,17 +14614,17 @@ The integrated production commits are `0dd1e2a0a730a6b0e053cf7a6141eeb5a29a0d87`
 | Pinned master | `7d628239dc1cb5695c5fe1d8b9150682fe4d1adb` |
 | Baseline ESM | `a1e143ee413b7a519ac5f99d591ef950cee92574f0b3995f366314181f96c0f2` |
 | Unchanged benchmark harness | `50a8f63f826f47376551ca893d11966905ba094ddbbd01db6cd45af5e43e7b82` |
-| Root-revised reply-draft snapshot | `41273d575b683a9392a04bc1bce2f457037669155e05b1bac306eeab918df20f` |
+| Root-revised reply-draft snapshot | retained privately |
 
-The source digest uses sorted tracked src paths followed by NUL, file contents and NUL. Attempt3's archived freeze, configuration, runner, build hashes and actual managed-process terminal are retained under `/tmp/ezmed14-round49-attempt3`. The attempt 3 runner SHA is `9f5456dbb10c5290f199c476b0ed007d8b408f7ebe0c457d1ad58a97b1513c06`; its archived configuration SHA is `d12a304e65767242c10f351c4f7b841b3db9e1e8e116acda513e1161c9be2388`. Attempt 4 uses its separately verified configuration, runner, checker and completed results below.
+The source digest uses sorted tracked src paths followed by NUL, file contents and NUL. Attempt3's archived freeze, configuration, runner, build hashes and actual managed-process terminal are retained in private archived work. The attempt 3 runner SHA is retained privately; its archived configuration SHA is retained privately. Attempt 4 uses its separately verified configuration, runner, checker and completed results below.
 
 ### Three failed integrated attempts and bounded follow-ups
 
 | Attempt | Frozen head | Observed stages and stopping point | Preserved archive |
 |---|---|---|---|
-| 1 | `b0c0ec33b4748bc36f68ecae4d50c73e62e683b5` | Strict ES6 exited 0; source had 6,870 passing cases and one failure in the old Thai active-MORN expectation. It stopped before build, distribution, actual storage or timing. | `/tmp/ezmed14-round49-attempt1/archive-manifest.json`; `/tmp/ezmed14-round49-attempt1/ezmed14-round49-gates.json`; archived source report and managed terminal |
-| 2 | `780eaee1f31ce1f5636604e4cab20514bd1e7025` | Strict ES6, 6,871 source cases across 48 files, build and 4 distribution tests succeeded. Actual storage completed the 190 prior cases, then rejected the first new I1 fixture for a malformed Extension with both valueString and nested extension. No timing ran. | `/tmp/ezmed14-round49-attempt2/archive-manifest.json`; `/tmp/ezmed14-round49-attempt2/ezmed14-round49-storage-final.log`; full original fixture groups, source/dist reports and managed terminal |
-| 3 | `a96704e530a1a688329db03bce5d58610af2a77c` | Strict ES6, 6,871 source cases across 48 files, build and 4 distribution tests succeeded again. Actual storage stopped when the downstream export dropped I10's unvalued annotated low range endpoint. No timing ran. | `/tmp/ezmed14-round49-attempt3/archive-manifest.json`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-storage-final.log`; complete input groups, partial storage snapshots and actual managed terminal |
+| 1 | `b0c0ec33b4748bc36f68ecae4d50c73e62e683b5` | Strict ES6 exited 0; source had 6,870 passing cases and one failure in the old Thai active-MORN expectation. It stopped before build, distribution, actual storage or timing. | private validation records; private validation results; archived source report and managed terminal |
+| 2 | `780eaee1f31ce1f5636604e4cab20514bd1e7025` | Strict ES6, 6,871 source cases across 48 files, build and 4 distribution tests succeeded. Actual storage completed the 190 prior cases, then rejected the first new I1 fixture for a malformed Extension with both valueString and nested extension. No timing ran. | private validation records; private storage validation records; full original fixture groups, source/dist reports and managed terminal |
+| 3 | `a96704e530a1a688329db03bce5d58610af2a77c` | Strict ES6, 6,871 source cases across 48 files, build and 4 distribution tests succeeded again. Actual storage stopped when the downstream export dropped I10's unvalued annotated low range endpoint. No timing ran. | private validation records; private storage validation records; complete input groups, partial storage snapshots and actual managed terminal |
 
 These attempts ended with a failed integrated runner. Successful preceding stages are historical observations, not a completed final correctness verdict. The archived `ezmed14-round49-gates.json`, `ezmed14-round49-source-final.json`, `ezmed14-round49-dist-final.json` where present, `ezmed14-round49-runner-terminal.json`, and their respective managed-process terminal snapshots retain their actual statuses. No failed attempt is silently overwritten or counted as completed acceptance.
 
@@ -14634,13 +14634,13 @@ Worker follow-up `e2730f678bcd16d6a24161a365ec96c3f955ecec`, integrated as `780e
 
 **Valid I1 fixture correction after attempt 2.** The original producer itself placed both valueString and extension on one urn:clinic:member-policy Extension before any package call. The unchanged downstream converter correctly rejected that invalid payload. All original inputs and six complete fixture groups were archived before correction. Worker commit `8ff0575a4d8fb5c3230d09be325d033ae2047c8d`, integrated as `a96704e530a1a688329db03bce5d58610af2a77c`, updates only the existing test/fixture construction to put the annotation on _valueString.extension. Policy value, ID, and note remain; this is a fresh valid producer, not preprocessing or sanitizing a submitted raw case.
 
-Only the four I1 unchanged/dose/delete/replace inputs were regenerated. The other 21 interop input objects and other five fixture groups remain unchanged. All four valid cases retain their original complete raw input; dose/delete/replace reproduce the reviewed defect and master/current preserve the live policy through three cold saves. The focused four tests execute successfully, and all four actual converter/UsageMap observations are exact. The diagnostic checks all 89 new fixtures for the Extension exclusivity rule and records no remaining violation. Preliminary scratch constant-lookup and Vitest-summary-counter diagnostics remain in the worker notes; filtered tests are counted from raw assertionResults, not misleading aggregate counters. No production or downstream code changed.
+Only the four I1 unchanged/dose/delete/replace inputs were regenerated. The other 21 interop input objects and other five fixture groups remain unchanged. All four valid cases retain their original complete raw input; dose/delete/replace reproduce the reviewed defect and master/current preserve the live policy through three cold saves. The focused four tests execute successfully, and all four actual converter/storage observations are exact. The diagnostic checks all 89 new fixtures for the Extension exclusivity rule and records no remaining violation. Preliminary scratch constant-lookup and Vitest-summary-counter diagnostics remain in the worker notes; filtered tests are counted from raw assertionResults, not misleading aggregate counters. No production or downstream code changed.
 
 ### Actual downstream storage diagnosis after attempt 3
 
 Attempt3's first affected case is `r49-execution-I10-upper-only-independent`. Its original low endpoint is `{ id: "unvalued-low", unit: "mg", _unit: { id: "low-unit" } }`; the independent high endpoint is a valued 1 g quantity with its own annotations. The actual converter export omits the complete low endpoint. That input is kept intact, and the failed assertion remains archived.
 
-A subsequent **diagnostic, not a final gate**, sends all 89 new raw fixtures through the actual converter and UsageMap save/reopen. It records 86 exact cases, three losses, zero errors, and unchanged inputs. The three cases are:
+A subsequent **diagnostic, not a final gate**, sends all 89 new raw fixtures through the actual converter and storage save/reopen. It records 86 exact cases, three losses, zero errors, and unchanged inputs. The three cases are:
 
 | Case | Exact observed downstream difference |
 |---|---|
@@ -14650,28 +14650,28 @@ A subsequent **diagnostic, not a final gate**, sends all 89 new raw fixtures thr
 
 The same losses occur when complete raw inputs are passed directly to the downstream converter and after public interchange through pinned master, reviewed, or candidate builds. The package preserves the complete active doseAndRate endpoint objects in direct R5, current R6 and cold R5 for all three. Its whole-row direct/cold comparison is not byte-identical because it adds `sequence: 1`; that addition is recorded and is not misreported as whole-row identity. Candidate normalized preview fixes the upper unit from 1 mg to 1 g independently of the downstream storage limitation.
 
-The loss boundary is the unchanged downstream file `/home/server/Documents/Projects/shinebright/packages/data-logic/utils/convertFHIRToSBDosageType.ts`: import retains the original range and creates simple dose/doseMax aliases; export reconstructs endpoints only when those aliases have numeric values. The existing metadata-only-range preservation branch applies when both endpoints lack values, so it does not protect these one-valued/one-unvalued cases. Original endpoint objects remain exact in imported Shinebright values and after UsageMap reopening; direct converter export and UsageMap-to-FHIR export show the same loss. The converter's package imports are type-only, and the direct-raw experiment isolates the boundary without an EZMedicationInput runtime transformation.
+The loss boundary is the unchanged external converter: import retains the original range and creates editable lower and upper amounts; export reconstructs endpoints only when those editable amounts have numeric values. The existing metadata-only-range preservation branch applies when both endpoints lack values, so it does not protect these one-valued/one-unvalued cases. Original endpoint objects remain exact in imported external consumer values and after storage reopening; direct converter export and storage-to-FHIR export show the same loss. The converter's package imports are type-only, and the direct-raw experiment isolates the boundary without an EZMedicationInput runtime transformation.
 
 The two previously documented affected cases remain distinct: `primitive-clock-position` reports the existing invalid-null time error, and `r46-unit-only-quantity-cadence` loses a unit-only scalar through numeric-value-dependent export. The three newly demonstrated range cases are additional explicit limitations, not preservation successes. The independently reviewed full-run expectation was 274 exact out of 279 total with five named affected cases. Attempt 4 subsequently observed that exact accounting after the complete rerun; the five affected cases remain explicitly non-preserved. The gate must retain each full original fixture and compare only the exact diagnosed difference; no blanket exemption, endpoint trimming, unit rewrite, invented amount, or broader loss allowance is authorized.
 
-Provenance qualification: the initial diagnostic summary's fields labeled round48Sha256 actually came from the pre-freeze round 49 draft configuration. The correction is explicit in `/tmp/ezmed14-round49-execution-storage-diagnostic-diagnosis.json`. Current converter/UsageMap pins are unchanged from pre-freeze. Only the converter's historical hash is separately confirmed from the actual `/tmp/ezmed14-round46-storage-unit-only-audit.json`; there is no separate historical UsageMap hash claim. All direct-raw and package-build comparisons, original/imported/converted/UsageMap/reopened/saved snapshots, and post-call input snapshots remain in the diagnostic raw file.
+Provenance qualification: the initial diagnostic summary's fields labeled round48Sha256 actually came from the pre-freeze round 49 draft configuration. The correction is explicit in private storage validation records. Current converter/storage pins are unchanged from pre-freeze. Only the converter's historical hash is separately confirmed from the actual private storage validation records; there is no separate historical storage hash claim. All direct-raw and package-build comparisons, original/imported/converted/storage/reopened/saved snapshots, and post-call input snapshots remain in the diagnostic raw file.
 
-A separate read-only review completed 665 checks of the diagnostic raw artifacts and fixed expectations, in `/tmp/ezmed14-round49-storage-range-independent-review.json` (SHA-256 `14e3d4eb8130a98d85a44fef1f3c48a35cecdd55cdf2d94e32b5397cc8b73f12`). It confirms the three exact differences, preservation of active package endpoint objects, unchanged complete inputs, and the lower-only case's loss of lower-bound semantics. It explicitly remains a diagnostic review, not a final gate audit.
+A separate read-only review completed 665 checks of the diagnostic raw artifacts and fixed expectations, in private storage validation records (SHA-256 retained privately). It confirms the three exact differences, preservation of active package endpoint objects, unchanged complete inputs, and the lower-only case's loss of lower-bound semantics. It explicitly remains a diagnostic review, not a final gate audit.
 
-The fixed three-case manifest is `/tmp/ezmed14-round49-storage-range-limitations.json`, SHA-256 `15245b763db4b5176569fcf730d1527004da312c3804bc1119383dc4464a3f55`. Its checker contract retains the two complete prior limitation records unchanged, compares complete original/converted/saved objects against fixed expectations, keeps all three new cases marked non-exact and preserved:false, and fails on any unlisted difference. All 89 new raw fixtures remain unchanged.
+The fixed three-case manifest is private storage validation records, SHA-256 retained privately. Its checker contract retains the two complete prior limitation records unchanged, compares complete original/converted/saved objects against fixed expectations, keeps all three new cases marked non-exact and preserved:false, and fails on any unlisted difference. All 89 new raw fixtures remain unchanged.
 
 Root launched full attempt 4 at 11:46:14 UTC on the same clean `a96704e530a1a688329db03bce5d58610af2a77c` head and unchanged source digest. Its correctness phase has now completed: strict ES6, all 6,871 source cases across 48 files, build, all four distribution cases, actual storage, and whitespace checking succeeded. The full actual storage run attempted all 279 cases, retained all 190 prior cases and 89 new cases, and recorded exactly 274 complete-JSON preservations plus the five named limitations. All 279 original inputs were checked unchanged. At that intermediate point correctnessPass was true and performance was still active. The subsequently completed gate record has allPass:true and the managed process exited 0. Final raw-artifact audit: `PASS: 4071 independent raw-artifact checks; actual managed exit 0; source, build, fixtures, complete storage snapshots, raw timing and inventory verified`.
 
 ### Completed integrated validation
 
-The three failed integrated attempts stopped before timing; the separate 89-case diagnostic measures preservation, not performance. Attempt 4 subsequently completed the unchanged full benchmark and its one prescribed confirmation. Actual managed process proc-103c9426-5209-4e71-ace2-16bf9e668696 exited 0 at 2026-11-23T11:55:45.634Z (18:55:45 Bangkok), without a timeout. The completed artifacts and independent audit, not focused-worker results, certify this checkpoint.
+The three failed integrated attempts stopped before timing; the separate 89-case diagnostic measures preservation, not performance. Attempt 4 subsequently completed the unchanged full benchmark and its one prescribed confirmation. Actual managed process exited 0 at 2026-11-23T11:55:45.634Z (18:55:45 Bangkok), without a timeout. The completed artifacts and independent audit, not focused-worker results, certify this checkpoint.
 
 | Mandatory final gate | Observed result |
 |---|---|
 | Final source/test/documentation heads and source/build pins | `Validated a96704e530a1a688329db03bce5d58610af2a77c; tracked-src e9318951e175b4b2ce3effa499964afbb845b6acb071f54fa1da28b1e744bde7; ESM 2225533f9bbdf4a0ca19be4ce40af2ebb77a2c735d75b796094fb228cac3b40d; delivery adds DIARY.md only` |
 | Strict ES6 and complete source suite with retained per-file floors | Strict ES6 succeeded; 6,871/6,871 source cases across 48 files, no failures; prior per-file floors retained |
 | Packaged ESM/CommonJS/declarations and distribution tests | Build succeeded; 4/4 distribution tests |
-| Actual converter and UsageMap save/reopen, full original inputs and precise affected-case list | 279 attempted; 274 exact; five explicit non-preserved cases described above; all original inputs unchanged |
+| Actual converter and storage save/reopen, full original inputs and precise affected-case list | 279 attempted; 274 exact; five explicit non-preserved cases described above; all original inputs unchanged |
 | Independent review of newly diagnosed downstream losses | 665 diagnostic checks verified the fixed three-case manifest and attribution; this is separate from the completed final raw-artifact audit |
 | Prior case retention and complete storage manifest | All 190 prior storage cases retained; 89 new cases; 279 raw snapshots checked |
 | Per-equivalent-case performance | `177/177 equivalent cases within +4%; 184 scenarios / 117 APIs / seven unchanged exclusions; five initial flags, one exact confirmation; worst setDosageExcludedWeekdays +3.936374%` |
@@ -14705,13 +14705,13 @@ The unchanged benchmark harness remains pinned at `50a8f63f826f47376551ca893d119
 
 Fresh-calendar accounting retains 3,025 calls and 38 complete preparation blocks per build, including 2,816 measured calls and the same [4, 64, 128] calibration sizes. The five confirmation cases contain no fresh-calendar workload. The final independent auditor recomputed all 184 full cases and all five confirmation cases, checked every equivalent scenario against +4%, and reconciled the complete source-test identities and approved strengthened relative-end title mapping.
 
-PASS: 4071 independent raw-artifact checks; actual managed exit 0; source, build, fixtures, complete storage snapshots, raw timing and inventory verified. The auditor output was persisted and freshly read before any repository documentation edit. Runner SHA-256 92ca6eb2ead643e4f29ae6fdd2171c43bfa1536a8cff08b68def69c9f4d76c66; config SHA-256 665e44020dc28279d695264f91c2e767f44e6b93dad9d0dfe91558482ef8e398; storage checker SHA-256 19d8c394497b203fc500c07791e5f09ff1e8ebe0bb69ac5d51a74177d3c5f4c6.
+PASS: 4071 independent raw-artifact checks; actual managed exit 0; source, build, fixtures, complete storage snapshots, raw timing and inventory verified. The auditor output was persisted and freshly read before any repository documentation edit. The runner, configuration, and storage-checker fingerprints are retained privately.
 
 The independent reply content audit passed 109/109 checks for the 15 original threads and all 29 findings. Its initial stale mutable-ledger hash failure is preserved separately; the source-evidence reference now points to the byte-identical immutable initial ledger, while the current status ledger remains separately identified. No reply body was altered to correct that provenance reference.
 
 The final root public preview probe on this exact ESM observed 276 outputs from 23 complete fixtures across R5/R6/cold R5, EN/TH and both realization modes, with unchanged inputs. The I13 configured Disperse options remain explicitly recorded in the provenance supplement.
 
-Completed evidence: /tmp/ezmed14-round49-validated-summary.json; /tmp/ezmed14-round49-gate-process-terminal.json; /tmp/ezmed14-round49-master-full.json; /tmp/ezmed14-round49-master-confirm.json; /tmp/ezmed14-round49-performance-gate.json; /tmp/ezmed14-round49-independent-audit.json; /tmp/ezmed14-round49-reply-content-audit.json; /tmp/ezmed14-round49-reply-content-audit-initial.json; /tmp/ezmed14-round49-root-ledger-initial.json; /tmp/ezmed14-round49-root-public-after.json; /tmp/ezmed14-round49-execution-I13-family-probe-provenance.json.
+Completed evidence: private validation results; private process-completion record; private performance records; private performance records; private performance records; private validation review; private review records; private review records; private review ledger; private validation records; private execution validation records.
 
 ### Evidence and original-thread delivery preparation
 
@@ -14737,43 +14737,43 @@ All fifteen reply targets come from the actual GitHub thread map, not guessed ID
 
 The complete collection and source evidence are:
 
-- **Project contract and settled decisions:** `/home/server/Documents/Projects/ezmedicationinput-review-20261118/AGENTS.md`; `/home/server/Documents/Projects/ezmedicationinput-review-20261118/DIRECTIONALITY.md`; `/home/server/Documents/Projects/ezmedicationinput-review-20261118/README.md`; `/home/server/Documents/Projects/ezmedicationinput-review-20261118/DIARY.md`.
+- **Project contract and settled decisions:** AGENTS.md; DIRECTIONALITY.md; README.md; DIARY.md.
 
-- **Actual review and complete collection:** `/tmp/ezmed14-round49-review-6019829863.json`; `/tmp/ezmed14-round49-review-6019829863-comments.json`; `/tmp/ezmed14-round49-review-6019829863-body.md`; `/tmp/ezmed14-round49-collected-inline.json`; `/tmp/ezmed14-round49-collected-body-items.json`; `/tmp/ezmed14-round49-collected-collection.json`.
+- **Actual review and complete collection:** private review records; private review records; private review records; private validation records; private validation records; private validation records.
 
-- **Original-thread provenance and current reply draft:** `/tmp/ezmed14-round49-thread-map.json`; `/tmp/ezmed14-round49-threads-before.json`; `/tmp/ezmed14-round49-root-ledger.json`; `/tmp/ezmed14-round49-reply-root-draft.json`; `/tmp/ezmed14-round49-reply-draft-coverage.json`.
+- **Original-thread provenance and current reply draft:** private validation records; private validation records; private review ledger; private review records; private review records.
 
-- **Grammar I4–I9/I14 and B7/B8/B10–B12:** `/tmp/ezmed14-round49-grammar-handoff.json`; `/tmp/ezmed14-round49-grammar-before.json`; `/tmp/ezmed14-round49-grammar-master.json`; `/tmp/ezmed14-round49-grammar-after.json`; `/tmp/ezmed14-round49-grammar-checks.json`; `/tmp/ezmed14-round49-grammar-gates.json`; `/tmp/ezmed14-round49-grammar-storage-fixtures.json`.
+- **Grammar I4–I9/I14 and B7/B8/B10–B12:** private grammar validation records; private grammar validation records; private grammar validation records; private grammar validation records; private grammar validation records; private grammar validation records; private storage validation records.
 
-- **Interop I2/I3/B3/B14 and original lane notes; valid I1 proof below supersedes the original malformed I1 inputs:** `/tmp/ezmed14-round49-interop-notes.json`; `/tmp/ezmed14-round49-interop-public-proof-final.json`; `/tmp/ezmed14-round49-interop-profile-before.json`; `/tmp/ezmed14-round49-interop-gates-final.json`; `/tmp/ezmed14-round49-interop-storage-fixtures.json`.
+- **Interop I2/I3/B3/B14 and original lane notes; valid I1 proof below supersedes the original malformed I1 inputs:** private interchange validation records; private interchange validation records; private interchange validation records; private interchange validation records; private storage validation records.
 
-- **Corrected valid I1 producer, unchanged raw cases and actual storage:** `/tmp/ezmed14-round49-interop-i1-fixture-correction-notes.json`; `/tmp/ezmed14-round49-interop-i1-fixture-correction-manifest.json`; `/tmp/ezmed14-round49-interop-i1-valid-public-proof.json`; `/tmp/ezmed14-round49-interop-i1-valid-storage-fixtures.json`; `/tmp/ezmed14-round49-interop-i1-valid-storage-proof.json`; `/tmp/ezmed14-round49-interop-i1-all89-extension-rule-qa.json`.
+- **Corrected valid I1 producer, unchanged raw cases and actual storage:** private interchange validation records; private interchange validation records; private interchange validation records; private storage validation records; private storage validation records; private interchange validation records.
 
-- **Execution I10/I15/B1/B5/B13 and original public comparisons:** `/tmp/ezmed14-round49-execution-notes.json`; `/tmp/ezmed14-round49-execution-public-before.json`; `/tmp/ezmed14-round49-execution-public-after.json`; `/tmp/ezmed14-round49-execution-condition-probe.json`; `/tmp/ezmed14-round49-execution-terminal-processes.json`; `/tmp/ezmed14-round49-execution-storage-fixtures.json`.
+- **Execution I10/I15/B1/B5/B13 and original public comparisons:** private execution validation records; private execution validation records; private execution validation records; private execution validation records; private process-completion record; private storage validation records.
 
-- **B5 long primary guard follow-up:** `/tmp/ezmed14-round49-interop-b5-notes.json`; `/tmp/ezmed14-round49-interop-b5-public-proof-final.json`; `/tmp/ezmed14-round49-interop-b5-gates.json`; `/tmp/ezmed14-round49-interop-b5-storage-fixtures.json`.
+- **B5 long primary guard follow-up:** private interchange validation records; private interchange validation records; private interchange validation records; private storage validation records.
 
-- **Root I11/I12/I13/B2/B4/B6/B9 and focused integration observations:** `/tmp/ezmed14-round49-root-public-before.json`; `/tmp/ezmed14-round49-root-intermediate-public.json`; `/tmp/ezmed14-round49-root-condition-fixtures.json`; `/tmp/ezmed14-round49-root-focus2-status.json`; `/tmp/ezmed14-round49-root-focus4.json`; `/tmp/ezmed14-round49-root-types-final-status.json`; `/tmp/ezmed14-round49-root-storage-fixtures.json`.
+- **Root I11/I12/I13/B2/B4/B6/B9 and focused integration observations:** private validation records; private validation records; private validation records; private validation records; private validation records; private validation records; private storage validation records.
 
-- **Independent I2 set-order audit and complete raw fixtures:** `/tmp/ezmed14-round49-grammar-cross-review.json`; `/tmp/ezmed14-round49-grammar-interop-weekday-order-proof.json`; `/tmp/ezmed14-round49-grammar-interop-date-order-proof.json`; `/tmp/ezmed14-round49-grammar-interop-reorder-storage-fixtures.json`.
+- **Independent I2 set-order audit and complete raw fixtures:** private review records; private grammar validation records; private grammar validation records; private storage validation records.
 
-- **Thai I9 test-only follow-up, exact frozen public result and terminal evidence:** `/tmp/ezmed14-round49-grammar-morning-handoff.json`; `/tmp/ezmed14-round49-grammar-morning-frozen.json`; `/tmp/ezmed14-round49-grammar-morning-reviewed.json`; `/tmp/ezmed14-round49-grammar-morning-master.json`; `/tmp/ezmed14-round49-grammar-morning-focused.json`; `/tmp/ezmed14-round49-grammar-morning-managed-process.json`.
+- **Thai I9 test-only follow-up, exact frozen public result and terminal evidence:** private grammar validation records; private grammar validation records; private review records; private grammar validation records; private grammar validation records; private process-completion record.
 
-- **New range-limit diagnosis, full source snapshots and corrected provenance:** `/tmp/ezmed14-round49-execution-storage-diagnostic-summary.json`; `/tmp/ezmed14-round49-execution-storage-diagnostic-raw.json`; `/tmp/ezmed14-round49-execution-storage-diagnostic-diagnosis.json`; `/tmp/ezmed14-round49-execution-storage-diagnostic-terminal.json`; `/tmp/ezmed14-round49-execution-storage-diagnostic-managed-process.json`; `/tmp/ezmed14-round46-storage-unit-only-audit.json`.
+- **New range-limit diagnosis, full source snapshots and corrected provenance:** private storage validation records; private storage validation records; private storage validation records; private storage validation records; private storage validation records; private storage validation records.
 
-- **Exact fixed downstream expectations and independent diagnostic review:** `/tmp/ezmed14-round49-storage-range-limitations.json`; `/tmp/ezmed14-round49-storage-range-independent-review.json`.
+- **Exact fixed downstream expectations and independent diagnostic review:** private storage validation records; private storage validation records.
 
-- **Failed attempt 1 archive:** `/tmp/ezmed14-round49-attempt1/archive-manifest.json`; `/tmp/ezmed14-round49-attempt1/ezmed14-round49-gates.json`; `/tmp/ezmed14-round49-attempt1/ezmed14-round49-source-final.json`; `/tmp/ezmed14-round49-attempt1/managed-process-terminal.json`.
+- **Failed attempt 1 archive:** private validation records; private validation results; private source-test results; private process-completion record.
 
-- **Failed attempt 2 archive:** `/tmp/ezmed14-round49-attempt2/archive-manifest.json`; `/tmp/ezmed14-round49-attempt2/ezmed14-round49-gates.json`; `/tmp/ezmed14-round49-attempt2/ezmed14-round49-storage-final.log`; `/tmp/ezmed14-round49-attempt2/ezmed14-round49-storage-raw-snapshots.json`; `/tmp/ezmed14-round49-attempt2/managed-process-terminal.json`.
+- **Failed attempt 2 archive:** private validation records; private validation results; private storage validation records; private storage snapshots; private process-completion record.
 
-- **Failed attempt 3 archive:** `/tmp/ezmed14-round49-attempt3/archive-manifest.json`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-gates.json`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-source-final.json`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-dist-final.json`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-storage-final.log`; `/tmp/ezmed14-round49-attempt3/ezmed14-round49-storage-raw-snapshots.json`; `/tmp/ezmed14-round49-attempt3/managed-terminal.json`.
+- **Failed attempt 3 archive:** private validation records; private validation results; private source-test results; private distribution-test results; private storage validation records; private storage snapshots; private process-completion record.
 
-- **Current freeze and gate definitions:** `/tmp/ezmed14-round49-source-freeze.json`; `/tmp/ezmed14-round49-gate-config.json`; `/tmp/ezmed14-round49-run-gates.py`; `/tmp/ezmed14-round49-storage-check.mts`.
+- **Current freeze and gate definitions:** private source snapshot; private validation configuration; private validation runner; private storage validation records.
 
-- **Attempt 4 completed correctness evidence:** `/tmp/ezmed14-round49-gates.json`; `/tmp/ezmed14-round49-source-final.json`; `/tmp/ezmed14-round49-dist-final.json`; `/tmp/ezmed14-round49-storage-case-manifest.json`; `/tmp/ezmed14-round49-storage-raw-snapshots.json`.
+- **Attempt 4 completed correctness evidence:** private validation results; private source-test results; private distribution-test results; private storage case inventory; private storage snapshots.
 
-This entry is the documentation checkpoint immediately before the normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head a96704e530a1a688329db03bce5d58610af2a77c. Its assigned SHA, actual push, reply IDs, resolutions, fresh all-thread audit, updated PR description and next full-review request are recorded in /tmp/ezmed14-round49-delivery.json and AgentBoard thread 27 after those actions occur.
+This entry is the documentation checkpoint immediately before the normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head a96704e530a1a688329db03bce5d58610af2a77c. Its assigned SHA, actual push, reply IDs, resolutions, fresh all-thread audit, updated PR description and next full-review request are recorded in private delivery records after those actions occur.
 
 
 ## 2026-11-23 — PR #14 round 50: scoped corrections and preserved boundaries
@@ -14786,11 +14786,11 @@ The owner authorized continuing the actual review loop until no accepted in-scop
 
 The work keeps one scoped HPSG-to-native compilation, native execution and realization, and independent sibling R5/R6 boundary adapters. The native course is private and immutable by caller contract. Externally edited FHIR remains supported. .fhir remains R5; .fhirNext follows pinned R6 Snapshot 1. No native mutation/editor workflow, new locale framework, prescription normalization, downstream application modification, merge, release, or deployment is introduced.
 
-Master comparison remains 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. The integration worktree is /home/server/Documents/Projects/ezmedicationinput-review-20261118 on fix/pr14-family-review-20261118; push target is refactor/canonical-course-20261116. Worker branches and prior artifacts remain intact.
+Master comparison remains 7d628239dc1cb5695c5fe1d8b9150682fe4d1adb. The integration worktree is repository worktree on fix/pr14-family-review-20261118; push target is refactor/canonical-course-20261116. Worker branches and prior artifacts remain intact.
 
 ### Completed verification
 
-All gates passed on source/test head 69c03459061b4dfba186fb1671ec941847309b09, source SHA-256 4827b482846187bbd7c97bb23bd7151e1aeedfccd6ffbc477d7b225b8e8055ae, and ESM SHA-256 e568c4ac2d93f57cb8123ab15ec77a075688e394584d840f0b3cf988a0d0d619. Actual managed process proc-c61620f0-86ce-43cb-874d-c05687dc7471 exited 0 without timeout at 2026-11-23T13:45:25.331Z, after 640,306 ms. The independent audit passed 4,768 checks and its own managed process exited 0.
+All gates passed on source/test head 69c03459061b4dfba186fb1671ec941847309b09, source SHA-256 retained privately, and ESM SHA-256 e568c4ac2d93f57cb8123ab15ec77a075688e394584d840f0b3cf988a0d0d619. Actual managed process exited 0 without timeout at 2026-11-23T13:45:25.331Z, after 640,306 ms. The independent audit passed 4,768 checks and its own managed process exited 0.
 
 | Gate | Completed result |
 |---|---|
@@ -14813,7 +14813,7 @@ Fresh-calendar accounting matches across both builds: 3,025 calls, 38 preparatio
 
 Three isolated ChatGPT lanes handled quantity/grammar, current interchange, and execution/quota ownership. Root owned track completion, preview/action cases, overlapping tests, integration, actual storage, performance acceptance, original-thread replies, and the source-generation versus imported-marker correction. Independent cross-reviews checked each sensitive owner and the final raw gate evidence.
 
-Integration receipt: /tmp/ezmed14-round50-integrated-commits.json. Validated source/test head: 69c03459061b4dfba186fb1671ec941847309b09. Production source SHA-256: 4827b482846187bbd7c97bb23bd7151e1aeedfccd6ffbc477d7b225b8e8055ae.
+Integration receipt: private validation records. Validated source/test head: 69c03459061b4dfba186fb1671ec941847309b09. Production source SHA-256: retained privately.
 
 ### Findings and decisions
 
@@ -14839,7 +14839,7 @@ The trailing-draft receiver exception now applies only when no receiver exists i
 
 Action: fix. Source: https://github.com/swittk/ezmedicationinput/pull/14#discussion_r4665915056.
 
-The partial-parallel compiler now uses the existing phasePredecessors edges for an implicit successor after an exact finite phase, connecting every member of that immediately preceding phase in the same track. Execution carries the existing accepted completion point and exclusive fence through that edge. It does not borrow another eye's completion or invent an absolute origin. The original right-eye count-three case supplies 17 drops over five days with the independent left-eye BID track; reversing tracks gives the same result, the q12h control gives 9 over two days, and the coordinated predecessor control gives 23 over six days. Approximate durations remain unresolved. The existing exact pause chain keeps its original source and no-absolute-origin checks, with stronger actual-date oracles: five loading doses, two pause days, three days at two drops, then three drops; 41 drops over 12 days, November 30 total 4 and December 1 total 5. Reviewed code threw for these implicit successors; master also undercounted the initial cases, so its output was not adopted as the expected result. During integrated storage verification, the newly emitted predecessor identity exposed an existing codec combination of valueQuantity with child extensions. The real converter rejected it. The codec now uses its existing typed-start envelope when a newly generated dependency identity requires children, just as it already does for an end boundary. The complete corrected row survives actual converter and UsageMap storage unchanged; clinical dates, quantities, and dependency identities are preserved. The failing output and the correction evidence remain archived. The first complete source run exposed an existing legacy-marker preservation oracle. Promotion is now limited to fresh syntax-generated markers; imported scalar markers retain their original active representation through three cold saves. The unchanged legacy test passes, and the complete new generated storage row remains exact. The failed full run is archived; no test or supplied fixture was weakened.
+The partial-parallel compiler now uses the existing phasePredecessors edges for an implicit successor after an exact finite phase, connecting every member of that immediately preceding phase in the same track. Execution carries the existing accepted completion point and exclusive fence through that edge. It does not borrow another eye's completion or invent an absolute origin. The original right-eye count-three case supplies 17 drops over five days with the independent left-eye BID track; reversing tracks gives the same result, the q12h control gives 9 over two days, and the coordinated predecessor control gives 23 over six days. Approximate durations remain unresolved. The existing exact pause chain keeps its original source and no-absolute-origin checks, with stronger actual-date oracles: five loading doses, two pause days, three days at two drops, then three drops; 41 drops over 12 days, November 30 total 4 and December 1 total 5. Reviewed code threw for these implicit successors; master also undercounted the initial cases, so its output was not adopted as the expected result. During integrated storage verification, the newly emitted predecessor identity exposed an existing codec combination of valueQuantity with child extensions. The real converter rejected it. The codec now uses its existing typed-start envelope when a newly generated dependency identity requires children, just as it already does for an end boundary. The complete corrected row survives actual converter and storage storage unchanged; clinical dates, quantities, and dependency identities are preserved. The failing output and the correction evidence remain archived. The first complete source run exposed an existing legacy-marker preservation oracle. Promotion is now limited to fresh syntax-generated markers; imported scalar markers retain their original active representation through three cold saves. The unchanged legacy test passes, and the complete new generated storage row remains exact. The failed full run is archived; no test or supplied fixture was weakened.
 
 #### I5 — Keep an unchanged partial period limit when another maximum changes.
 
@@ -15019,7 +15019,7 @@ The current normalized English and Thai paths retain the complete restriction pr
 
 4. The execution lane retained its initial simple comparison and misplaced scalar-admission attempts, including the actual 76-pass/1-fail result. The final status handoff remains with the existing quota owners; 77 targeted cases and 108 public observations passed. No fixture or clinical oracle was weakened.
 
-5. The interop lane's first focused run passed all 1,181 cases, but strict ES6 exited 2 on three new test-only enum/padding/flattening expressions. Those tests were corrected without a production change; 20 affected cases and strict ES6 then passed. The original outputs remain at /tmp/ezmed14-round50-interop-attempt1/. Final integrated source gates supersede the lane-only results.
+5. The interop lane's first focused run passed all 1,181 cases, but strict ES6 exited 2 on three new test-only enum/padding/flattening expressions. Those tests were corrected without a production change; 20 affected cases and strict ES6 then passed. The original outputs remain at private validation records. Final integrated source gates supersede the lane-only results.
 
 ### Preservation and performance accounting
 
@@ -15033,46 +15033,46 @@ The package's three-save preservation proof for supplied legacy value-plus-child
 
 ### Evidence inventory
 
-| Evidence | HPSERVER artifact | SHA-256 |
-|---|---|---|
-| Current ledger and original review provenance | /tmp/ezmed14-round50-root-ledger.json | 656267249c9ebe6cc9c4694e2eb37ad4058b62f2bb2769ee06c8c4277cd4d5ff |
-| Final validation summary | /tmp/ezmed14-round50-validated-summary.json | 3dc6e9ddb27c96d20ac413610abdb7ab23fd3b654200af24caa9689766291468 |
-| Managed full gate terminal | /tmp/ezmed14-round50-gate-process-terminal.json | cb4716c852eb6476bfbff7f7fd81ae6ed3763bce3b9172c67d5e24740d4921b7 |
-| Frozen configuration | /tmp/ezmed14-round50-gate-config.json | d4bba3da569df907f0d19a854c8853ecbed6e5315896b35f00d44e73021a2049 |
-| Runner | /tmp/ezmed14-round50-run-gates.py | cba6ab883d76d38e9e81d97d86b19031ca0cc20521eebf41d94795a5c65b5b42 |
-| Production source freeze | /tmp/ezmed14-round50-source-freeze.json | 78e708dbffdf6f668990d0e0a916930583900d16381b03f263a27a54ef12b8cb |
-| Built-artifact and correctness results | /tmp/ezmed14-round50-gates.json | 05d12a111c7f838d26fdd2214dd2a8848aca38ef8eb314ba77733d0d60eb825a |
-| Independent raw audit | /tmp/ezmed14-round50-independent-audit.json | 1baff0c57f35283cb8b2969de34d1e931371d513e55103a849db82eb2090d468 |
-| Independent audit terminal | /tmp/ezmed14-round50-independent-audit-run-terminal.json | 3b67c1ae48fb85b52081a0463461fb6adbb8f4935e462330191bdb202f19fd03 |
-| Independent audit pins | /tmp/ezmed14-round50-independent-audit-pins.json | 908155b9fadcc09781b21ef63dc9a7fff270f700d5ca6af4fa6e2b2d0b7b427b |
-| Actual storage checker | /tmp/ezmed14-round50-storage-check.mts | 28e14d83a118176792a03409de913638f9355e8ee22f6c273580a914e4995c43 |
-| Complete storage case manifest | /tmp/ezmed14-round50-storage-case-manifest.json | eb862efa4cfba562c09635cc8e7c55f9f9243be3bcfca7ff79f8223e28f32663 |
-| Complete raw storage snapshots | /tmp/ezmed14-round50-storage-raw-snapshots.json | 38608456397192b46e39fd9b9e7c16cdeba4015ae18b913817f5a61c8d093831 |
-| Full benchmark samples | /tmp/ezmed14-round50-master-full.json | 86962ae625dba2eb47653b1eea3120c725d3cc9ddbef33f77442077945ddfe67 |
-| Only prescribed confirmation samples | /tmp/ezmed14-round50-master-confirm.json | ca646f782b32e60b57330490ce083ada74b7f25c42ba59519284df49a2bd0a90 |
-| Final per-case performance result | /tmp/ezmed14-round50-performance-gate.json | b250a4d33cbfe9d44721815c6659fadc8cc89284efd6b46cb6670908b692f9c5 |
-| Final ESM public replay | /tmp/ezmed14-round50-root-dist-verification.json | f83159d58326659270347d0ad2cdd80ba7d0092c69206e97837ecedf43332841 |
-| Narrowed generated/imported marker review | /tmp/ezmed14-round50-root-phase-identity-independent-review-v2.json | 11338e65a6f1494eb69ac396c84d0009218c3589e1283390395bef608dde4374 |
-| Legacy preservation and generated storage | /tmp/ezmed14-round50-root-legacy-phase-gates.json | 05af8215a23ca060284f86569fdd6e071fc604c1ff91f2f320259a68f73d9391 |
-| Actual legacy follow-up terminal | /tmp/ezmed14-round50-root-legacy-phase-terminal.json | bae75be4a03eab5f46ef3eb1b3f6d8fa8a63944e2eb0e507b9e0e49a50da5c7b |
-| New fixture extension QA | /tmp/ezmed14-round50-new-fixtures-extension-qa.json | 7ef490ffb3df9928be683ae8f9f8eadd3eedf35e4bda2e411513156ce3f0a2e4 |
-| Interop handoff | /tmp/ezmed14-round50-interop-handoff.json | 4bbc1c2b12bddd1b53090bb3f98eb9d536e8a273cd8962b8c13ccdf72c11a53f |
-| Execution handoff | /tmp/ezmed14-round50-execution-notes.json | 90559d8965eb367d4bb63e255230b92f1e53441652d60220a70ef79f68708c91 |
-| Grammar handoff | /tmp/ezmed14-round50-grammar-handoff.json | 41790385ffbb06395f2b88ebe9376c469d84305dac7f0f2d6a9a1fc09c6595bf |
-| Interop independent audit | /tmp/ezmed14-round50-interop-independent-execution-audit.json | 6e5669570c87842afff72d7cca3f885dfedb7ebd00517df2182337994db113cf |
-| Execution independent audit | /tmp/ezmed14-round50-execution-independent-audit.json | 683f07b78ce92a9fddda2739c5342f8407634e3ee450a71389ee659c7976ca71 |
-| I4 independent phase review | /tmp/ezmed14-round50-root-I4-independent-review-v2.json | 0255ac03291cf7d86627e7b2455c68359f0752e1dca644fda18ee3767b7ee7a4 |
-| Preview/action independent review | /tmp/ezmed14-round50-root-preview-independent-review.json | c306310fb8228ccd49af41dcb2a4819cfea24d3a86d3743e74b93eed49bfc35a |
-| Fresh original-thread snapshot | /tmp/ezmed14-round50-threads-at-delivery.json | a49ac46fefd9a2cb651c0f540a16bf31f130cc14536595d5caf9d95d0a2b2d86 |
-| Source integration commits | /tmp/ezmed14-round50-integrated-commits.json | a18b0566d6f469adc30c30cbad7ff592ead23a44e240480a09ff770dcbb37e5c |
+| Evidence | Availability |
+|---|---|
+| Current ledger and original review provenance | Retained privately |
+| Final validation summary | Retained privately |
+| Managed full gate terminal | Retained privately |
+| Frozen configuration | Retained privately |
+| Runner | Retained privately |
+| Production source freeze | Retained privately |
+| Built-artifact and correctness results | Retained privately |
+| Independent raw audit | Retained privately |
+| Independent audit terminal | Retained privately |
+| Independent audit pins | Retained privately |
+| Actual storage checker | Retained privately |
+| Complete storage case manifest | Retained privately |
+| Complete raw storage snapshots | Retained privately |
+| Full benchmark samples | Retained privately |
+| Only prescribed confirmation samples | Retained privately |
+| Final per-case performance result | Retained privately |
+| Final ESM public replay | Retained privately |
+| Narrowed generated/imported marker review | Retained privately |
+| Legacy preservation and generated storage | Retained privately |
+| Actual legacy follow-up terminal | Retained privately |
+| New fixture extension QA | Retained privately |
+| Interop handoff | Retained privately |
+| Execution handoff | Retained privately |
+| Grammar handoff | Retained privately |
+| Interop independent audit | Retained privately |
+| Execution independent audit | Retained privately |
+| I4 independent phase review | Retained privately |
+| Preview/action independent review | Retained privately |
+| Fresh original-thread snapshot | Retained privately |
+| Source integration commits | Retained privately |
 
-Failed full attempt: /tmp/ezmed14-round50-attempt1/archive-manifest.json. Earlier focused/corrective archives: /tmp/ezmed14-round50-root-focused-attempt1/, /tmp/ezmed14-round50-root-phase-identity-attempt1/, /tmp/ezmed14-round50-interop-attempt1/, and the execution lane's preserved failed-admission artifacts. The original malformed generated root fixture and initial gate preparation remain archived; final supplied root fixture SHA-256 is 917ce695130da7da8abd23623f6b89a625adfa56370dd429325e7ec525f967c1.
+Failed full attempt: private validation records. Earlier focused/corrective archives: private validation records, private validation records, private validation records, and the execution lane's preserved failed-admission artifacts. The original malformed generated root fixture and initial gate preparation remain archived; final supplied root fixture SHA-256 is retained privately.
 
-Final reply-template content audit: /tmp/ezmed14-round50-reply-final-template-audit.json; SHA-256 73582f19757a92ba17a7b5aea44048beff4dfab42c525264e359b69a9395332b. All 211 checks passed. All 32 original records, 15 thread/comment IDs, scope decisions and final validation claims match the cited evidence. Only literal delivery SHA and short-SHA bindings remain for root verification after the DIARY-only child is assigned.
+Final reply-template content audit: private review records; SHA-256 retained privately. All 211 checks passed. All 32 original records, 15 thread/comment IDs, scope decisions and final validation claims match the cited evidence. Only literal delivery SHA and short-SHA bindings remain for root verification after the DIARY-only child is assigned.
 
 ### Delivery boundary
 
-This entry is the documentation checkpoint before normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head 69c03459061b4dfba186fb1671ec941847309b09. Its assigned SHA, actual push, original reply IDs and resolutions, fresh paginated audit, updated PR description with preserved introduction/live bot notes, and next actual full-review request are recorded in /tmp/ezmed14-round50-delivery.json and AgentBoard thread 27 after those actions occur.
+This entry is the documentation checkpoint before normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head 69c03459061b4dfba186fb1671ec941847309b09. Its assigned SHA, actual push, original reply IDs and resolutions, fresh paginated audit, updated PR description with preserved introduction/live bot notes, and next actual full-review request are recorded in private delivery records after those actions occur.
 
 
 ## 2026-11-23 — PR #14 round 51: supported clinical corrections, preservation and fixed performance gate
@@ -15343,14 +15343,14 @@ The initial B11 scratch probe mixed an extra unmeasured supply calculation into 
 
 Two failed integrated attempts remain failed:
 
-1. proc-e444b1c5-f8d8-483a-b999-49a35a57910a ended at 15:17:52.236Z with overall exit 1. Although the source assertion JSON reported all 7,009 cases passed, Node v24.14.1 aborted in its native CJS lexer with source child exit -6. No build, storage or timing stage ran. The original report, stderr and actual terminal are archived under /tmp/ezmed14-round51-attempt1/. A clean identical-source rerun was justified by that runtime abort, without swallowing the failed exit.
-2. proc-ce1c0f9d-0e97-4908-9b9f-86272caea19e ended at 15:29:53.581Z with exit 1. Correctness and storage passed, but registerMedicationLexerLocalePack remained +4.175143276658866% after the one prescribed confirmation, above the fixed +4% per-scenario limit. This candidate was rejected. Its raw full/confirmation samples, exact emitted candidate and all 107 build artifacts are preserved under /tmp/ezmed14-round51-attempt2/. There was no additional acceptance retry on that unchanged candidate.
+1. The validation run ended at 15:17:52.236Z with overall exit 1. Although the source assertion JSON reported all 7,009 cases passed, Node v24.14.1 aborted in its native CJS lexer with source child exit -6. No build, storage or timing stage ran. The original report, stderr and actual terminal are archived under private validation records. A clean identical-source rerun was justified by that runtime abort, without swallowing the failed exit.
+2. The validation run ended at 15:29:53.581Z with exit 1. Correctness and storage passed, but registerMedicationLexerLocalePack remained +4.175143276658866% after the one prescribed confirmation, above the fixed +4% per-scenario limit. This candidate was rejected. Its raw full/confirmation samples, exact emitted candidate and all 107 build artifacts are preserved under private validation records. There was no additional acceptance retry on that unchanged candidate.
 
 The bounded c650d162 follow-up changes only the existing src/localization.ts prefix extraction and the existing locale test. The same normalizer runs once; indexOf/slice yields the same first component as split("-", 1)[0] for all supported string/undefined inputs, including leading/repeated separators and normalized regional tags. Independent review verified semantic equivalence. src/lexer/locale.ts remains byte-identical to pinned master, so the evidence does not isolate a newly introduced registration cost. No cache, registry identity, defensive-validation or lexicon policy changed. One diagnostic against the archived failed candidate showed -11.598335719828267%; it was not pinned-master or full acceptance. The subsequent complete frozen gate provides acceptance, and registration measured -17.96863853026005% against pinned master in that final full run.
 
 ### Completed frozen verification
 
-The actual managed gate process proc-8e380e01-feac-4b4c-a3c2-5cac23d0f3ef ran from 15:35:49.523Z to 15:43:44.603Z and exited 0 without timeout. Its source/test head was c650d162558c7e19db15fe013ee5620722851e3b. Root independently queried the actual terminal; the independent auditor separately queried and verified that process. The auditor process proc-f9796bf2-3fb4-4d4a-9fd4-d0636aae6831 ran from 15:47:43.601Z to 15:47:45.155Z and exited 0 on its first actual invocation. All 5,314 audit checks passed.
+The actual managed gate process ran from 15:35:49.523Z to 15:43:44.603Z and exited 0 without timeout. Its source/test head was c650d162558c7e19db15fe013ee5620722851e3b. Root independently queried the actual terminal; the independent auditor separately queried and verified that process. The auditor process ran from 15:47:43.601Z to 15:47:45.155Z and exited 0 on its first actual invocation. All 5,314 audit checks passed.
 
 | Gate | Actual result |
 |---|---|
@@ -15359,7 +15359,7 @@ The actual managed gate process proc-8e380e01-feac-4b4c-a3c2-5cac23d0f3ef ran fr
 | Prior source identities | All 6,952 retained with multiplicity; 57 additions |
 | Build and distribution | 107 emitted files pinned; all four original distribution test identities passed |
 | Scope / whitespace | 100 changed paths; git diff --check passed |
-| Downstream converter / UsageMap | 536 complete cases; 531 exact; same five complete historical limitations |
+| Downstream converter / storage | 536 complete cases; 531 exact; same five complete historical limitations |
 | Inherited storage | All 399 complete original results and snapshots unchanged; all 120 inherited suppliedFixture records intact |
 | New storage | 137 complete current inputs, 62 R5 and 75 R6; all input/inputAfter objects retained |
 | Full performance | Same 184 ordered pairs / 117 APIs; all 177 equivalent pairs within +4%; same seven exclusions |
@@ -15377,57 +15377,57 @@ The five downstream limitations are preserved as losses: primitive-clock-positio
 
 ### Review coverage and evidence pins
 
-Actual review 6023483400 selected 95 files and filtered five established paths. It explicitly reports that test/pr14-round23-r5.spec.ts was not fully reviewed because of a per-file size limit. The cap and omitted regions are not disclosed. Its current 768 source cases passed, but executed tests do not establish complete bot inspection. The existing file layout and review configuration are retained; no splitting or scope expansion was performed merely to satisfy the bot. Current evidence is /tmp/ezmed14-round51-review-coverage.json, rather than assuming the old round50 warning describes this new review.
+Actual review 6023483400 selected 95 files and filtered five established paths. It explicitly reports that test/pr14-round23-r5.spec.ts was not fully reviewed because of a per-file size limit. The cap and omitted regions are not disclosed. Its current 768 source cases passed, but executed tests do not establish complete bot inspection. The existing file layout and review configuration are retained; no splitting or scope expansion was performed merely to satisfy the bot. Current evidence is private review records, rather than assuming the old round50 warning describes this new review.
 
 A fresh GitHub snapshot at 15:47:02.992201Z paginated all 318 threads across four pages on reviewed head 7b5e069. Exactly the 13 expected original round51 threads were unresolved; no unexpected unresolved thread was found. Original replies, resolution and a fresh post-delivery audit remain root-owned actions.
 
-| Evidence | HPSERVER path | SHA-256 |
-|---|---|---|
-| validated-summary.json | /tmp/ezmed14-round51-validated-summary.json | da69c368c8c528d901017044cbc06f46f51c9e947f4b4cf87e5863c28e210920 |
-| root-ledger.json | /tmp/ezmed14-round51-root-ledger.json | c46ffed42ebf49d24bd4a8bbe188473d64aea83ebdb1a7df827b9f4da12c1e6e |
-| root-notes.json | /tmp/ezmed14-round51-root-notes.json | 241e8b9c68b30a9706d1425d2db2c7f51a4fd562ad42bd849494c4d85a23515e |
-| reply-final-template.json | /tmp/ezmed14-round51-reply-final-template.json | 091c4b178d257afc68886fe091118817677c4d85b7b49678594d739c7f762834 |
-| gate-process-terminal.json | /tmp/ezmed14-round51-gate-process-terminal.json | 9cc60f49ac9a8e8841e66fd0dea1d75b388226eb32d902c2a797bae1a9f77701 |
-| gate-config.json | /tmp/ezmed14-round51-gate-config.json | e7407296c59e931f4caef689057019ae0551f7ebd63eff4da44d016721709528 |
-| run-gates.py | /tmp/ezmed14-round51-run-gates.py | 501493d935d8f54242761eca8ea966cc1933e428d38706d23dd9a739e519a907 |
-| source-freeze.json | /tmp/ezmed14-round51-source-freeze.json | 7ecb68c88995e736a83bf280ac181431bb9719193a54f3b1dbfae891b072efd8 |
-| gates.json | /tmp/ezmed14-round51-gates.json | a01b13c7a146cd358cca5eaef489f096d24a734a696450d8abc6e25a527bc8e0 |
-| source-final.json | /tmp/ezmed14-round51-source-final.json | d6fbe77c8b8f9b8a78b90521e825c404f6081983d8df353de9e2243a2fafc118 |
-| dist-final.json | /tmp/ezmed14-round51-dist-final.json | 4cc497f08eaa77eb3d079eea37ad13558f0a45219726aac3ceabb3b641a5bdd9 |
-| independent-audit.json | /tmp/ezmed14-round51-independent-audit.json | f5c95ba48a69d361a51f797f80f9532a661dae57c77b0cb9740504d3f8e5c87d |
-| independent-audit-run-terminal.json | /tmp/ezmed14-round51-independent-audit-run-terminal.json | 791da3e566453070cfbd6658bbdb99628d688d6970cd7a844a6f9b6fc6b9a5df |
-| independent-audit-pins.json | /tmp/ezmed14-round51-independent-audit-pins.json | bb02ffc1f356db38c6b65c96da1d007bb1f254bf83b86e515a06efc11b4a43c3 |
-| independent-audit-handoff.json | /tmp/ezmed14-round51-independent-audit-handoff.json | ebcac25ab0ca164e6273eddd86d51ba0bbdc2b72d88aa5dbde3f38ba446148d5 |
-| storage-check.mts | /tmp/ezmed14-round51-storage-check.mts | a98449ed6f449f4b94d09308eb981f0682ca1328b0e2dea25faa75c168cdb262 |
-| storage-case-manifest.json | /tmp/ezmed14-round51-storage-case-manifest.json | 78fa5fa15314e0eb4a861e2ba6c7bce78d4ad9107b96bf7f8388feb9caf081b4 |
-| storage-raw-snapshots.json | /tmp/ezmed14-round51-storage-raw-snapshots.json | 3417b13245c95ec744f94d9591bfb1be8620b65096a2f770347ebba9e3b41dad |
-| master-full.json | /tmp/ezmed14-round51-master-full.json | 58e55e81f9c51b2c5b18e2bfca36a6e22d9ee9cd7eac1c8d44dac24a4ad053b3 |
-| master-confirm.json | /tmp/ezmed14-round51-master-confirm.json | 7ce977f7f6bea39a787cad401d8ed800bbe5dafb672f71da6910b17474c7d8bd |
-| performance-gate.json | /tmp/ezmed14-round51-performance-gate.json | 2e9cd92507ec811f08b4e415133e4a3269a535921ff5779cefa4d311612e35c8 |
-| root-final-dist.json | /tmp/ezmed14-round51-root-final-dist.json | 7b333b23d2ad55c8b148cc51007d6b6c691847b60e30c03068a45eb41f3ccd0a |
-| root-final-dist-audit.json | /tmp/ezmed14-round51-root-final-dist-audit.json | 50a1e31a9e3fe79aabb224d73eb20e1d277fd7a2595260402d410b2fadb37fd0 |
-| root-independent-review.json | /tmp/ezmed14-round51-root-independent-review.json | afd61c0e6a1098fc3155cd1fbc52cc7d20a89bdc5fcb9919ce959b5c37346499 |
-| benchmark-scope-independent.json | /tmp/ezmed14-round51-benchmark-scope-independent.json | 336c08eba560fc6fb51cd7aecf6b53ef9fc98f93f5d9a1e197e1a5594da8b0a5 |
-| root-benchmark-measured-operation-proof.json | /tmp/ezmed14-round51-root-benchmark-measured-operation-proof.json | ca0760f64682b974b74509ad699ad980accf07aedc14a7395dc270f6a90d68ae |
-| performance-failure-review.json | /tmp/ezmed14-round51-performance-failure-review.json | d4e3afd3d712e2850f022e75a63c939df8f9d9b136bc7cac5fade1cc217f2d5d |
-| locale-performance-proposal-review.json | /tmp/ezmed14-round51-locale-performance-proposal-review.json | 6b867605ccda2bccf023810e9a81d130f355707424051cabb0675ac42721ba24 |
-| locale-performance-notes.json | /tmp/ezmed14-round51-locale-performance-notes.json | 05ff279f0cd9ad77ceb0f10cf7db5e397c1cacf352708d037a0b3721fe7757f7 |
-| locale-performance-terminal.json | /tmp/ezmed14-round51-locale-performance-terminal.json | f6c1ed20d9c76acc7346835d71a913511c7736f2218826fd1d0b115380075cca |
-| review-coverage.json | /tmp/ezmed14-round51-review-coverage.json | bf67a0ee1c3472d95954c045e91d4460e17d3b2fa359557a745e99f3bd907a35 |
-| threads-at-delivery.json | /tmp/ezmed14-round51-threads-at-delivery.json | 43d482709e72b120458de30ba35adc999f12b7ef157194f47a4ac918c775022c |
-| interop-handoff.json | /tmp/ezmed14-round51-interop-handoff.json | 8d98a4e85281365bd5b5a009556c02d11ced2fe24ae6385876b3e2212b0a352d |
-| execution-notes.json | /tmp/ezmed14-round51-execution-notes.json | 2a5fe2b38d961c229384fa7090816aba835902ea07f48394f55281d1c652655f |
-| grammar-notes.json | /tmp/ezmed14-round51-grammar-notes.json | 278ff39414e780fc69b0aa065cea2540723a332cedc1fe1731d0c30a3c815894 |
+| Evidence | Availability |
+|---|---|
+| validated-summary.json | Retained privately |
+| root-ledger.json | Retained privately |
+| root-notes.json | Retained privately |
+| reply-final-template.json | Retained privately |
+| gate-process-terminal.json | Retained privately |
+| gate-config.json | Retained privately |
+| run-gates.py | Retained privately |
+| source-freeze.json | Retained privately |
+| gates.json | Retained privately |
+| source-final.json | Retained privately |
+| dist-final.json | Retained privately |
+| independent-audit.json | Retained privately |
+| independent-audit-run-terminal.json | Retained privately |
+| independent-audit-pins.json | Retained privately |
+| independent-audit-handoff.json | Retained privately |
+| storage-check.mts | Retained privately |
+| storage-case-manifest.json | Retained privately |
+| storage-raw-snapshots.json | Retained privately |
+| master-full.json | Retained privately |
+| master-confirm.json | Retained privately |
+| performance-gate.json | Retained privately |
+| root-final-dist.json | Retained privately |
+| root-final-dist-audit.json | Retained privately |
+| root-independent-review.json | Retained privately |
+| benchmark-scope-independent.json | Retained privately |
+| root-benchmark-measured-operation-proof.json | Retained privately |
+| performance-failure-review.json | Retained privately |
+| locale-performance-proposal-review.json | Retained privately |
+| locale-performance-notes.json | Retained privately |
+| locale-performance-terminal.json | Retained privately |
+| review-coverage.json | Retained privately |
+| threads-at-delivery.json | Retained privately |
+| interop-handoff.json | Retained privately |
+| execution-notes.json | Retained privately |
+| grammar-notes.json | Retained privately |
 
-The immutable failed-attempt manifests are /tmp/ezmed14-round51-attempt1/archive-manifest.json (SHA-256 3e0c01f91f437d243424d6990db3fa1cd47a0a94e4af3113ebcb121c3222747b) and /tmp/ezmed14-round51-attempt2/archive-manifest.json (SHA-256 d9faa506dff534819816d109a3ad194051c0aabf7f018cb4a1e5bfb21b23d7cc). No prior evidence is superseded silently.
+The immutable failed-attempt manifests are private validation records (SHA-256 retained privately) and private validation records (SHA-256 retained privately). No prior evidence is superseded silently.
 
-Final reply-template content audit: /tmp/ezmed14-round51-reply-final-template-audit.json; SHA-256 c94181a0a5a21c1da9c71d05d8349726fcd6409ca95050611f1f4751b1ef75d0. All 537 checks passed. All 27 original records, 13 thread/comment IDs, five scope rejections and final validation claims match the cited evidence. Only literal delivery SHA and short-SHA bindings remain for root verification after the DIARY-only child is assigned.
+Final reply-template content audit: private review records; SHA-256 retained privately. All 537 checks passed. All 27 original records, 13 thread/comment IDs, five scope rejections and final validation claims match the cited evidence. Only literal delivery SHA and short-SHA bindings remain for root verification after the DIARY-only child is assigned.
 
-Independent PR/DIARY prose review: /tmp/ezmed14-round51-pr-content-independent-review.json, SHA-256 27ce8046081958bcf921170cf7126281106374798fe224be74ae79687e16cdb7. It approved 15 substantive checks and all 35 evidence rows in the unbound templates; final binding changes only the approved actual values. The reply-audit helper's first reports and failed process are retained in the final audit's auditMechanicsCorrection record: dictionary key counting and a tuple/list JSON reread mismatch were corrected in audit mechanics only. Actual corrected audit process proc-3bbee8c5-cd3f-40f4-8a48-54ba7029f511 exited 0; its actual terminal is /tmp/ezmed14-round51-reply-final-template-audit-terminal.json, SHA-256 f7dc35b76e10d8b30bbf0efa774c639e92f52d7f25ac0cbaf52ef9403c90deb8.
+Independent PR/DIARY prose review: private review records, SHA-256 retained privately. It approved 15 substantive checks and all 35 evidence rows in the unbound templates; final binding changes only the approved actual values. The reply-audit helper's first reports and failed process are retained in the final audit's auditMechanicsCorrection record: dictionary key counting and a tuple/list JSON reread mismatch were corrected in audit mechanics only. Actual corrected audit process exited 0; its actual terminal is private process-completion record, SHA-256 retained privately.
 
 ### Delivery boundary
 
-This append-only entry is the documentation checkpoint before normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head c650d162558c7e19db15fe013ee5620722851e3b. Its assigned SHA, actual push, original reply IDs and resolutions, fresh paginated audit, updated PR description with preserved introduction/live bot notes, and next actual full-review request are recorded in /tmp/ezmed14-round51-delivery.json and AgentBoard thread 27 after those actions occur. Acknowledgment or an automatically skipped review check is not a completed full review and cannot establish that the next review is clear.
+This append-only entry is the documentation checkpoint before normal push and original-thread delivery. The delivery commit is a DIARY-only child of validated source/test head c650d162558c7e19db15fe013ee5620722851e3b. Its assigned SHA, actual push, original reply IDs and resolutions, fresh paginated audit, updated PR description with preserved introduction/live bot notes, and next actual full-review request are recorded in private delivery records after those actions occur. Acknowledgment or an automatically skipped review check is not a completed full review and cannot establish that the next review is clear.
 
 
 ## 2026-11-24 Bangkok — PR #14 round 52: scoped correctness and preserved integration
@@ -15438,7 +15438,7 @@ This append-only entry is the documentation checkpoint before normal push and or
 
 The owner authorized continuing the review loop until no accepted in-scope findings remain: fix real supported correctness errors, reject code expansion and contradictory or nonconventional wording requirements, and use independently scoped ChatGPT subworkers with root integration. This does not authorize merge, release, deployment or downstream code changes.
 
-Round51 was delivered at 4123b02a5260febbf8ecfe7d6b5c11ddc20acfcd. The actual completed full review produced 6025467903 at 2026-11-23 16:38:36 UTC (23:38:36 Bangkok) and 6025472974 at 16:38:55 UTC (23:38:55 Bangkok), both against that head. Check 137830367213 completed successfully. Root collected and read the actual review bodies, outside-diff findings and original threads using HPSERVER CLI.
+Round51 was delivered at 4123b02a5260febbf8ecfe7d6b5c11ddc20acfcd. The actual completed full review produced 6025467903 at 2026-11-23 16:38:36 UTC (23:38:36 Bangkok) and 6025472974 at 16:38:55 UTC (23:38:55 Bangkok), both against that head. Check 137830367213 completed successfully. Root collected and read the actual review bodies, outside-diff findings and original threads using validation host CLI.
 
 There are seven original inline comments and 37 review-body occurrences. The latter reduce to 22 unique body findings: seven outside-diff entries and 15 minor/nitpick entries repeated exactly between the two review objects. All 29 distinct findings are accounted for: 17 fixes, nine test-only improvements, and three explicit scope rejections. Body findings retain their original review/hash provenance and are answered in related original threads; no fabricated inline thread was substituted.
 
@@ -15485,7 +15485,7 @@ HPSG meaning compiles into the private canonical course; formatting, execution a
 
 The native parse-batch course remains authoritative. Already passed or returned object instances are immutable by caller contract. Fresh independently supplied or persisted R5/current-R6 values and complete public graph-codec inputs remain supported. Current clinical fields in those fresh values must not be overwritten by stale source replay.
 
-Owner decisions #235–237 require safe pruning of snapshot/revalidation machinery whose sole purpose is detecting later in-place mutation of the same consumed object. The completed removal and retained first-read/provenance checks are recorded below. This is separate from the measured B22 clone regression. B4 remains rejected. The owner’s public correction is comment 7116146120 and must not be duplicated.
+The owner's immutable-caller decisions require safe pruning of snapshot/revalidation machinery whose sole purpose is detecting later in-place mutation of the same consumed object. The completed removal and retained first-read/provenance checks are recorded below. This is separate from the measured B22 clone regression. B4 remains rejected. The owner’s public correction is comment 7116146120 and must not be duplicated.
 
 Removed SourceReplayProof/capturedReplayProof/unchangedReplayProof and their nested clinical observation snapshots. Removed FreshDoseProof/sameFreshDose and the synthetic restoration branch that only served edits to a returned parser instance. SAVED_PROJECTION_MATCHES now memoizes the initial source-fingerprint comparison for each immutable submitted identity, including false results. The parser-origin marker retains only defaulted/clocks/events/site ownership flags. Fresh independently supplied rows still compare their current fields with their saved projection fingerprint; source/text fingerprints, source agreement, retained R5/R6 fields, unknown metadata and save/reopen behavior remain. Existing mutation-focused tests now submit a newly constructed or persisted value; clinical expected results are retained, and removed private-observer tests are replaced with public import/display controls. Exact reviewed identity maps bind the preserved prior and already-integrated test inventories.
 
@@ -15495,21 +15495,21 @@ Explicitly rejected malformed-caller policies must not be presented as guarantee
 
 Root implemented I3–I6 in 883aad2. Interop 38853a5 was integrated as 93c9426, grammar f8ed9b1 as 049357f, and execution cadc3ba as 005ce88. All scoped source and final test diffs were reviewed by root. The coordinated format-course/index/r6-primary edits integrated without conflict. The PR remains at 100 changed paths.
 
-The first integrated full gate on 005ce88 exited 1: strict types passed, then 7,067 source cases passed and nine prior cases failed. Build, storage and performance did not execute. The complete report, original configuration/freeze and actual terminal are preserved at /tmp/ezmed14-round52-attempt1; no failure was relabeled as a pass.
+The first integrated full gate on 005ce88 exited 1: strict types passed, then 7,067 source cases passed and nine prior cases failed. Build, storage and performance did not execute. The complete report, original configuration/freeze and actual terminal are preserved at private archived work; no failure was relabeled as a pass.
 
 The failure exposed two overbroad changes. First, the new plain-direction fallback also routed existing instruction graphs through whole-course replay, losing four historical graph meanings and three Thai saved-Mix realizations. Root retained the old route-qualified branch and restricted the new fallback to rows lacking the existing graph extension owner. Second, B3 excluded the unquantified Object text “1 tablet of amoxicillin,” causing the later Drink 5 mL to become the primary amount. Root factored and reused the already-established bounded source Amount-label lookup from frameWithReconciledAmount, with precise containing spans taking precedence. This restores the actual medication owner while leaving independently measured water and later drinks intact. Neither change reparses source or rewrites the graph.
 
-The refinement is committed at 3b5cda28f564134e7bea37092194b51e04e9866d. Only src/index.ts and src/instruction-graph.ts changed. All 1,472 affected/new assertions and strict types passed in actual process proc-8a872e5d-7916-4fc0-8828-2edc78c5fef6, exit 0. No prior oracle or test identity changed for this refinement. The earlier static review missed the routing interaction; its initial report and corrected independent review are both retained.
+The refinement is committed at 3b5cda28f564134e7bea37092194b51e04e9866d. Only src/index.ts and src/instruction-graph.ts changed. All 1,472 affected/new assertions and strict types passed in actual process, exit 0. No prior oracle or test identity changed for this refinement. The earlier static review missed the routing interaction; its initial report and corrected independent review are both retained.
 
-The second full gate, proc-c083f010-5a3f-41d7-89ee-aabab95bb55d, exited 1 after strict ES6, 7,076 source cases, four distribution cases, all 107 build artifacts and storage 694/689 passed. The sole remaining performance failure was cloneBodySiteSpatialRelation after its prescribed confirmation. Attempt2 remains archived at /tmp/ezmed14-round52-attempt2. Several later B22 diagnostics also failed and remain preserved. The final real-source candidate-first 72 x 140ms clone diagnostic completed with exit 0 at +1.203182%; it remains diagnostic evidence. Acceptance is determined by the full combined gate and independent audit below.
+The second full gate exited 1 after strict ES6, 7,076 source cases, four distribution cases, all 107 build artifacts and storage 694/689 passed. The sole remaining performance failure was cloneBodySiteSpatialRelation after its prescribed confirmation. Attempt2 remains archived at private archived work. Several later B22 diagnostics also failed and remain preserved. The final real-source candidate-first 72 x 140ms clone diagnostic completed with exit 0 at +1.203182%; it remains diagnostic evidence. Acceptance is determined by the full combined gate and independent audit below.
 
-Decision #232 preserves all authored Coding fields and detaches standard FHIR primitive companions, extension content and i18n. Arbitrary opaque custom metadata remains preserved under the existing immutable-caller contract. The new clinicNote deep-isolation assertion exceeded that contract and is replaced only with scoped preservation and standard-metadata detachment checks. The exact case mappings below account for the owner-approved changes under decisions #235–237. The implemented clone and final performance result are independently verified; no benchmark change, extra acceptance retry or performance waiver was used.
+The owner's spatial-clone decision preserves all authored Coding fields and detaches standard FHIR primitive companions, extension content and i18n. Arbitrary opaque custom metadata remains preserved under the existing immutable-caller contract. The new clinicNote deep-isolation assertion exceeded that contract and is replaced only with scoped preservation and standard-metadata detachment checks. The exact case mappings below account for the owner-approved changes under the immutable-caller decisions. The implemented clone and final performance result are independently verified; no benchmark change, extra acceptance retry or performance waiver was used.
 
 Worker development attempts also remain honest evidence: interop's earlier strict typing/ES6 corrections and invalid R5-to-R6-only probe calls; grammar's four newly added treatment-start assertions corrected to the existing treatment-day-start contract and invalid scratch API calls; execution's three focused attempts correcting new quantity/boundary assertions and an introduced undefined/null type mismatch. Existing clinical test expectations were retained except the expressly accepted B7 default-callback assertion that incorrectly required the BP guard after the hold advice; its identity and independent checks remain.
 
 ### Final verification
 
-Validated candidate: `afb1b8ac5f1e79a890141b34cd58f44b83abd240`. Actual process `proc-748e17b1-1a91-4262-af68-54c5ae0be95c` exited 0 without timeout.
+Validated candidate: `afb1b8ac5f1e79a890141b34cd58f44b83abd240`. Actual process exited 0 without timeout.
 
 | Gate | Result |
 |---|---|
@@ -15531,7 +15531,7 @@ The same five losses are a null-clock converter rejection, an unvalued scalar lo
 
 The unchanged public harness completed the full 22×35ms baseline-first alternating run, followed by one prescribed candidate-first 72×140ms confirmation run covering exactly three initial flags. All 177 equivalent pairs pass individually; the seven existing non-equivalent pairs are unchanged. The worst accepted pair is `buildSnomedBodySiteLateralityPostcoordinationCode` at +3.968334%. `cloneBodySiteSpatialRelation` is -18.648799% from the accepted full result. No aggregate waiver, changed exclusion, benchmark edit or additional acceptance retry was used.
 
-The independent audit passed 6,779 checks, independently queried the actual managed terminal, recomputed accepted ratios from raw paired samples, checked calendar invocation accounting, and verified source/build/config/input hashes. Audit SHA-256: `0b8204cff4c4ee6cdb583343d7d692c3f6560543fcd0f8862b9128db5568fde0`. Source SHA-256: `c7977e15e277f03f612dff9356153c69b428f47f88325380d26ff50066137f0a`; candidate ESM SHA-256: `5eec4b4b1cfd5de1b1dc167e86eaf81666cef37a0479d37735e78c5bcd9b5a43`.
+The independent audit passed 6,779 checks, independently queried the actual managed terminal, recomputed accepted ratios from raw paired samples, checked calendar invocation accounting, and verified source/build/config/input hashes. The audit fingerprint is retained privately. Source SHA-256: `c7977e15e277f03f612dff9356153c69b428f47f88325380d26ff50066137f0a`; candidate ESM SHA-256: `5eec4b4b1cfd5de1b1dc167e86eaf81666cef37a0479d37735e78c5bcd9b5a43`.
 
 All four prior distribution test identities and all 107 distribution artifacts remain present. The unchanged benchmark covers 117 public APIs and all 184 original scenario/API pairs.
 
@@ -15555,34 +15555,34 @@ Seven original destinations and body-item routing:
 
 ### Evidence and delivery boundary
 
-Historical decisions and evidence remain in AgentBoard thread 27, the round-52 root ledger and lane handoffs, /tmp/ezmed14-round52-attempt1 and attempt2, and the preserved clone diagnostics. The takeover preserved the original dirty files and patch under /tmp/ezmed14-round52-takeover-20261124. Gate and source-freeze hashes from a failed candidate are not final acceptance pins.
+Historical decisions and evidence remain in private review notes, the round-52 root ledger and lane handoffs, private archived work and attempt2, and the preserved clone diagnostics. The takeover preserved the original dirty files and patch in private archived work. Gate and source-freeze hashes from a failed candidate are not final acceptance pins.
 
-- `/tmp/ezmed14-round52-gate-config.json` — SHA-256 `6932c0a858aa02eedd54d1df413e4a8d3c9853f7c048cffa42503f57698cb79a`
-- `/tmp/ezmed14-round52-source-freeze.json` — SHA-256 `825c015d79fe1553f907c3a68fc355765f5653312ab2b2fed049f39838c70d8d`
-- `/tmp/ezmed14-round52-takeover-audit-run-gates-v4.py` — SHA-256 `45ad99d64357b0593220a10ac7368b71092c2d4f1249336832decc4c547c134b`
-- `/tmp/ezmed14-round52-gates.json` — SHA-256 `c7d148309c6fd9e9d76fac2d49ab1ce793643278183045f7dd3727f97a4f0e53`
-- `/tmp/ezmed14-round52-source-final.json` — SHA-256 `eaf4617b2ad70569d3029c2130dceee80cecef9899bd0e523df495e48fcf4563`
-- `/tmp/ezmed14-round52-dist-final.json` — SHA-256 `d2f6dac5dd0f140e6f8d2b1ae12604958980f17a0c437a3357a96047bf955e41`
-- `/tmp/ezmed14-round52-storage-check.json` — SHA-256 `aca9f4ecbc8f64c38c99bdf67513eeaa6dafb7b7af8205cd86f6ae4d9f8107e1`
-- `/tmp/ezmed14-round52-storage-raw-snapshots.json` — SHA-256 `b65e33b7d61940d284a4f73e04009a493287d87cca5145a25fe575db49550b45`
-- `/tmp/ezmed14-round52-performance-gate.json` — SHA-256 `d8af4188eccb7353f36da2a8f25dd453b98102f8286d5f556d97e4cb171432a5`
-- `/tmp/ezmed14-round52-master-full.json` — SHA-256 `a230bb3871ec85330e589d09ef623cde466a439d027940cf1ad06d7dc0ea6e77`
-- `/tmp/ezmed14-round52-independent-audit.json` — SHA-256 `0b8204cff4c4ee6cdb583343d7d692c3f6560543fcd0f8862b9128db5568fde0`
-- `/tmp/ezmed14-round52-mutation-prune-test-identity-map.json` — SHA-256 `f2775c5ea6ebb6f8d8263008d6bf3054ce498d2ce11f44d41c3ca342fcc5a0ed`
-- `/tmp/ezmed14-round52-r5-scope-identity-map.json` — SHA-256 `f9793c422a48b75d6643f57b03cad3d73376f13556a2ccc84f0e5e2f364c087b`
-- `/tmp/ezmed14-round52-meaning-scope-identity-map.json` — SHA-256 `c290f460b26417ad1fd8ffa88b146b4cefb4d6d5dc1398b6069a8baece1f58ff`
+- private validation configuration — retained privately.
+- private source snapshot — retained privately.
+- private validation runner — retained privately.
+- private validation results — retained privately.
+- private source-test results — retained privately.
+- private distribution-test results — retained privately.
+- private storage validation records — retained privately.
+- private storage snapshots — retained privately.
+- private performance records — retained privately.
+- private performance records — retained privately.
+- private validation review — retained privately.
+- private test-retention records — retained privately.
+- private test-retention records — retained privately.
+- private test-retention records — retained privately.
 
-- `/tmp/ezmed14-round52-master-confirm.json` — SHA-256 `561037a55147b74694ed48f65e191679f9f552baebfb42acf2b13b1198a06ff2`
-- `/tmp/ezmed14-round52-takeover-managed-terminal.json` — SHA-256 `4b59b623065ece7569484e8aa0e40b126fe993dfb8e75cd7c9bdc7d9412972a2`
-- `/tmp/ezmed14-round52-takeover-audit-pins.json` — SHA-256 `1a891db7eaf50ce3c0fac96e16f315d676c8649a3ebbeed5f69f27ebeb2ea25a`
-- `/tmp/ezmed14-round52-takeover-audit-execution-terminal.json` — SHA-256 `b89c49a06a4f4f8d33aa1c974552ac58beaae491f2a2e83a8ad78ad713990469`
+- private performance records — retained privately.
+- private process-completion record — retained privately.
+- private validation review — retained privately.
+- private process-completion record — retained privately.
 
 This verified entry is appended as a DIARY-only child of the validated source commit. Normal push, replies in the seven original threads, a fresh resolution audit, PR description update and the next full review are subsequent delivery actions. No merge, publishing or deployment is authorized.
 
 
 ## 2026-11-24 — PR #14 round 53: supported corrections and complete validation
 
-The original takeover files and all integrated work remain preserved. AgentBoard thread 27 remains the scope authority; caller-misuse prevention is excluded. No completed review round was restarted.
+The original takeover files and all integrated work remain preserved. The owner's recorded instructions remain the scope authority; caller-misuse prevention is excluded. No completed review round was restarted.
 
 ## Round 53 changes
 
@@ -15616,11 +15616,11 @@ The 18 review-body test cards and the earlier F1 follow-up correct fixture ident
 
 B7's proposed exclusive-choice type-hardening campaign addresses invalid caller construction and remains outside the owner contract. B11 requests a new catch-up or warning policy. Moving the independently authored successor to preserve the missed first dose would change calendar meaning; neither policy was added. The prior pure-event THEN decision remains settled. No direct native mutation API, same-instance mutation detection, source-observer snapshot framework, or downstream application change was introduced.
 
-Round 52 remains delivered and integrated, including the B22 clone correction and the removal of unsupported same-instance observation machinery. Its complete validation, rejected scope requests and failed attempts remain recorded in the diary and AgentBoard thread 27.
+Round 52 remains delivered and integrated, including the B22 clone correction and the removal of unsupported same-instance observation machinery. Its complete validation, rejected scope requests and failed attempts remain recorded in the diary and private review notes.
 
 ## Verification and compatibility
 
-Actual managed process `proc-7d54dde2-7f29-4ab5-bd54-ce41673641c8` exited 0 without timeout on the frozen validated source. The delivery commit changes only DIARY.md after that validated commit.
+Actual managed process exited 0 without timeout on the frozen validated source. The delivery commit changes only DIARY.md after that validated commit.
 
 | Gate | Result |
 |---|---|
@@ -15644,7 +15644,7 @@ The fixed full run used 22 samples x 35 ms, baseline first. Exactly 5 initially 
 | findSymptomDefinitionByCoding | +7.958967832940% | +0.065122686402% |
 
 
-The independent audit verified the actual managed terminal, complete test identities, source/build/configuration/input hashes, unchanged historical storage records and accepted performance ratios recomputed from raw paired samples. Audit: `c85cb49becb0aa5daaf18447183b8afda2f2941c785f83af6b7fce3efad0525e`. Source SHA-256: `8d9cefc17c1d2d6a5b6b16d22959551d54454e83462a85cb01cb6650e9aa0d62`. Candidate ESM SHA-256: `3de3695fe41b43442ed91c29f8f7f099fe90c3c3dde880399c849ffc2adc85ce`.
+The independent audit verified the actual managed terminal, complete test identities, source/build/configuration/input hashes, unchanged historical storage records and accepted performance ratios recomputed from raw paired samples. The audit fingerprint is retained privately. Source SHA-256: `8d9cefc17c1d2d6a5b6b16d22959551d54454e83462a85cb01cb6650e9aa0d62`. Candidate ESM SHA-256: `3de3695fe41b43442ed91c29f8f7f099fe90c3c3dde880399c849ffc2adc85ce`.
 
 ### Storage fidelity and explicit external limitations
 
@@ -15652,9 +15652,9 @@ All 694 historical complete result/snapshot records and all 415 historical suppl
 
 The five historical losses remain explicit: null-clock converter rejection, an unvalued scalar loss, two unvalued lower-endpoint losses, and a lower-only range collapsed to a scalar. The historical round49 manifest retains its original accounting and full payloads.
 
-Eight new cases demonstrate a separate pre-existing external loss: the unchanged Shinebright converter and UsageMap omit the active top-level `Dosage._text` companion, including a primitive ID, an unrelated annotation and, when present, an authored Thai translation. The loss occurs on raw R5 inputs that bypass EZMedicationInput and on fresh annotated exports from pinned master, the actual reviewed build and the candidate. The package itself preserves current primitive annotations and archives stale complete wording/translation through repeated fresh imports and exports.
+Eight new cases demonstrate a separate pre-existing external loss: the unchanged external consumer converter and storage omit the active top-level `Dosage._text` companion, including a primitive ID, an unrelated annotation and, when present, an authored Thai translation. The loss occurs on raw R5 inputs that bypass EZMedicationInput and on fresh annotated exports from pinned master, the actual reviewed build and the candidate. The package itself preserves current primitive annotations and archives stale complete wording/translation through repeated fresh imports and exports.
 
-Following AgentBoard #191–194 and #261, those eight exact original/converted/saved outcomes are pinned in a finite manifest and are explicitly `preserved:false`; they are not counted among the 787 exact cases. Every unlisted or changed loss fails. No generic text-field exemption, authored-data normalization or downstream code change was used. The complete original failed attempt is preserved. Its six parser-generated empty-array losses were corrected at the producer and are exact in the final gate; the original failing inputs remain archived.
+Following the owner's instructions, those eight exact original/converted/saved outcomes are pinned in a finite manifest and are explicitly `preserved:false`; they are not counted among the 787 exact cases. Every unlisted or changed loss fails. No generic text-field exemption, authored-data normalization or downstream code change was used. The complete original failed attempt is preserved. Its six parser-generated empty-array losses were corrected at the producer and are exact in the final gate; the original failing inputs remain archived.
 
 The first complete round53 attempt passed strict types, all 7,139 source cases, build and four dist tests, then stopped in storage. The second attempt passed strict types and 7,138 source cases but found the old internal empty-array expectation; it stopped before build, storage or performance. Both failed attempts are preserved and are not acceptance evidence. After correcting that single representation assertion, the candidate was frozen and independently verified through the complete gate. No performance benchmark ran in either failed attempt.
 
@@ -15712,28 +15712,28 @@ This verified entry is appended as a DIARY-only immediate child of the validated
 
 ### Final evidence pins
 
-| Evidence | SHA-256 |
+| Evidence | Availability |
 |---|---|
-| `/tmp/ezmed14-round53-gates.json` | `91b8dff9416f1aa0583fb314378be1f58c841eddf3031589c19badb67f36927a` |
-| `/tmp/ezmed14-round53-source-freeze.json` | `ae6f55083588a289b431bc902b89e3c44f28e805ae54501ffa881143bacae60c` |
-| `/tmp/ezmed14-round53-gate-config.json` | `33b51a8ced9cc05a4c08333c5591d8a2af8cc5d463d657e23689538fccde39b3` |
-| `/tmp/ezmed14-round53-source-final.json` | `992c4b1186d31f226fdc26a6edaf42ec5bba695342d0e84e85211d6f2935e273` |
-| `/tmp/ezmed14-round53-dist-final.json` | `63e9e12a39f6c271d06b7b82d981b8c4884ad7f5a3d9778d05e405f9b11919eb` |
-| `/tmp/ezmed14-round53-storage-check.json` | `7ea9399fcf046087d03238d0f4cdc3e3558fac21930445e3545119859f4fc795` |
-| `/tmp/ezmed14-round53-storage-raw-snapshots.json` | `de2e6f38e89d95bf955ee06c15e66ca624c2096c9ea52a82ee876a034fab7585` |
-| `/tmp/ezmed14-round53-performance-gate.json` | `f7a2d5cc175d03ce0b47f46d11be370476ac0f9af581fce25723faf3fdfa2cb6` |
-| `/tmp/ezmed14-round53-master-full.json` | `2b45cf04da467a5c8f0671bcff2bf12fb73131173aeaaf3551cdb6b912c43c6d` |
-| `/tmp/ezmed14-round53-independent-audit.json` | `c85cb49becb0aa5daaf18447183b8afda2f2941c785f83af6b7fce3efad0525e` |
-| `/tmp/ezmed14-round53-takeover-managed-terminal.json` | `c1792523d9c5c86de4e8d91a390f2429a75fc8dfed9a4c2b779f60509c388588` |
-| `/tmp/ezmed14-round53-takeover-audit-pins.json` | `21b384d69ea2f7e24ec04dad22692c28a26c40d18d15f2968caf3251f957a741` |
-| `/tmp/ezmed14-round53-new-source-identities.json` | `fb664e1960f1930c27e7ce9ecae7a71ff3bd042a8152f43ee020f76fd7d49f90` |
-| `/tmp/ezmed14-round53-storage-text-limitations.json` | `69a490e61a087f41decc3052d0259069f5b2cde6a9247bebd6aa8fc10e471151` |
-| `/tmp/ezmed14-round53-takeover-audit-text-companion-proof-v3.json` | `1f95af175322cfb9a995a27014e6f231ba72e620a0469754439fe7f60a65176d` |
-| `/tmp/ezmed14-round53-root-storage-recapture-independent-review.json` | `0ea054be57020b31aa6c342f96af222e77471cf43792f902a47fd61afc8252ed` |
-| `/tmp/ezmed14-round53-storage-text-limitations-independent-policy-review.json` | `1b33cc113d51dae117a2e9147ae64dd95795f9a8f6d3a18a9c3542f425fc58e9` |
-| `/tmp/ezmed14-round53-master-confirm.json` | `e8f7e8e5d948ee4203b78a55068bb225a6670d5336f7c3415f5844e45dfffe85` |
+| validation results | Retained privately |
+| source snapshot | Retained privately |
+| validation configuration | Retained privately |
+| source-test results | Retained privately |
+| distribution-test results | Retained privately |
+| storage validation records | Retained privately |
+| storage snapshots | Retained privately |
+| performance records | Retained privately |
+| performance records | Retained privately |
+| validation review | Retained privately |
+| process-completion record | Retained privately |
+| validation review | Retained privately |
+| validation records | Retained privately |
+| storage validation records | Retained privately |
+| validation review | Retained privately |
+| storage validation records | Retained privately |
+| storage validation records | Retained privately |
+| performance records | Retained privately |
 
-Attempt1 archive SHA-256: 6f2618d221a0d7b907be487c1a80dcae8e9bdd1f59dcd109ca05d02cd6a04238. Attempt2 archive SHA-256: 5a8256fb4194c2e989929ccbd2f411c13af0b278db89e216f5ba59c947875510. Both complete archives remain under their round53 attempt directories.
+Both complete attempt archives and their fingerprints remain retained privately.
 
 
 ## 2026-11-25 — PR #14 round 60: resumed existing lanes from accepted 0c57a38
@@ -15772,7 +15772,7 @@ its existing 100 paths.
 
 ### Scope and evidence discipline
 
-Owner decisions #1377 and #1443–1444 remain controlling: no reverse-render
+The owner's directionality and scope decisions remain controlling: no reverse-render
 comparison, second NLP pass, understructured-input repair obligation, caller
 mutation defense, or public native editor. Round-59 B25 is out of scope,
 not deferred work. Unknown FHIR remains recoverable and inert.
