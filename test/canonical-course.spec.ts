@@ -3511,3 +3511,82 @@ describe("round66 source meaning and authored metadata", () => {
       .toMatchObject({ event: [event], _event: [{ id: "authored-precision" }] });
   });
 });
+
+
+describe("round68 numeric member safety qualification", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const quantity = (value: number, unit: string) => ({ value, unit, code: unit, system: "http://unitsofmeasure.org" });
+  const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+    timeZone: "UTC", durationValue: 2, durationUnit: FhirPeriodUnit.Day, patientWeightKg: 70 };
+  const liquidCourse = (): FhirR6DosageInstruction => ({ step: [
+    { component: [{ id: "liquid-phase", doseAndRate: [{ doseQuantity: quantity(5, "mL") }],
+      timing: { repeat: { count: 3, frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "14:00:00", "20:00:00"] } },
+      safety: { id: "safety-source", doseLimit: [{ id: "daily-cap", scope: "period",
+        valueQuantity: quantity(3, "mg/kg"), period: quantity(1, "d"), text: "daily limit" }] },
+      extension: [{ url: "https://example.org/liquid-note", valueString: "retain source" }],
+    }] },
+    { component: [{ doseAndRate: [{ doseQuantity: quantity(1, "mL") }],
+      timing: { repeat: { count: 1, timeOfDay: ["09:00:00"] } },
+    }] },
+  ] });
+  const views = (source: FhirR6DosageInstruction) => {
+    const r5 = fresh(toFhirR5Dosages(fresh(source)));
+    const native = courseFromR6(fresh(source)), r6 = courseToR6(fresh(native));
+    return [r5, native, r6, fresh(toFhirR5Dosages(fresh(r6)))];
+  };
+  const savedRows = (dosage: ReturnType<typeof views>[number]) => {
+    const wire = !Array.isArray(dosage) && "stages" in dosage
+      ? courseToR6(fresh(dosage)) : fresh(dosage);
+    return fresh(toFhirR5Dosages(wire));
+  };
+
+  it.each([
+    { strength: "20 mg/mL" },
+    { strengthRatio: { numerator: quantity(20, "mg"), denominator: quantity(1, "mL") } },
+  ])("keeps exact counted liquid supply scheduled with numeric safety only (%j)", context => {
+    const source = liquidCourse(), before = fresh(source);
+    for (const dosage of views(source)) {
+      const original = fresh(dosage);
+      expect(calculateTotalUnits({ dosage, ...query, context }))
+        .toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, durationValue: 1, context }))
+        .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "scheduled" });
+      expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, from: "2026-12-02T00:00:00Z",
+        durationValue: 1, context }))
+        .toMatchObject({ totalUnits: 6, unit: "mL", quantityKind: "scheduled" });
+      const saved = toDosageDetails(savedRows(dosage)).step[0].component[0];
+      expect(saved.safety).toEqual(source.step[0].component[0].safety);
+      expect(saved.extension).toContainEqual(source.step[0].component[0].extension![0]);
+      expect(dosage).toEqual(original);
+    }
+    expect(source).toEqual(before);
+  });
+
+  it.each(["wrapper extension", "limit extension", "response", "expression", "count", "dosage scope"] as const)(
+    "retains the unevaluated safety qualification and metadata for %s", variant => {
+      const source = liquidCourse(), safety = source.step[0].component[0].safety!;
+      if (variant === "wrapper extension") safety.extension = [
+        { url: "https://example.org/safety-rule", valueString: "retained rule" },
+      ];
+      else if (variant === "limit extension") safety.doseLimit![0].extension = [
+        { url: "https://example.org/limit-rule", valueString: "retained rule" },
+      ];
+      else if (variant === "response") safety.ifExceeded = "Call the clinic";
+      else safety.doseLimit!.push(variant === "expression"
+        ? { scope: "administration", valueExpression: { language: "text/fhirpath", expression: "%patient.weight * 2" } }
+        : variant === "count" ? { scope: "administration", valueInteger: 2 }
+        : { scope: "dosage", valueQuantity: quantity(20, "mL") });
+      const before = fresh(source);
+      for (const dosage of views(source)) {
+        const original = fresh(dosage);
+        const result = calculateTotalUnits({ dosage, ...query, context: { strength: "20 mg/mL" } });
+        expect(result).toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "maximum" });
+        expect(result.explanation).toContain("safety");
+        expect(toDosageDetails(savedRows(dosage)).step[0].component[0].safety)
+          .toEqual(safety);
+        expect(dosage).toEqual(original);
+      }
+      expect(source).toEqual(before);
+    });
+});

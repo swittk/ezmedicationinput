@@ -440,13 +440,30 @@ export function boundaryFromR6(b: FhirR6RelativeTime | undefined): CanonicalBoun
     provenance: record(b),
   };
 }
+/** Member quantity limits have their own typed owner. Any other safety
+ * content retains the existing unevaluated-policy qualification. */
+function onlyOwnedMemberQuantityLimits(safety: FhirR6DosageSafety): boolean {
+  if (!safety.doseLimit?.length) return false;
+  for (const field of Object.keys(safety))
+    if (field !== "doseLimit" && field !== "id") return false;
+  for (const limit of safety.doseLimit) {
+    if (limit.valueQuantity?.value === undefined ||
+        (limit.scope !== "period" && limit.scope !== "administration" && limit.scope !== "lifetime"))
+      return false;
+    for (const field of Object.keys(limit))
+      if (field !== "scope" && field !== "valueQuantity" && field !== "period" &&
+          field !== "text" && field !== "id") return false;
+  }
+  return true;
+}
+
 /** Every understood safety rule is typed. Unknown element metadata stays
  * only on the retained external source object, never in an executable bag. */
 export function safetyFromWire(
   safety: FhirR6DosageSafety | undefined,
   includeLimits = false
 ): CanonicalSafety | undefined {
-  if (!safety) return undefined;
+  if (!safety || !includeLimits && onlyOwnedMemberQuantityLimits(safety)) return undefined;
   return {
     ...(safety.ifExceeded !== undefined ? { ifExceeded: safety.ifExceeded } : {}),
     ...(includeLimits && safety.doseLimit
