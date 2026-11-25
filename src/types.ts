@@ -642,7 +642,11 @@ export interface FhirReference extends FhirElement {
 }
 
 /** Native R6 Reference annotations use native R6 Extension values. */
-export interface FhirR6Reference extends Omit<FhirReference, "extension">, FhirR6Element {}
+export interface FhirR6Reference extends Omit<FhirReference, "extension" | "identifier">, FhirR6Element {
+  identifier?: Omit<NonNullable<FhirReference["identifier"]>, "extension" | "assigner"> & FhirR6Element & {
+    assigner?: FhirR6Reference;
+  };
+}
 
 /** CodeableReference fields with R5-compatible Element metadata. */
 export interface FhirCodeableReference extends FhirElement {

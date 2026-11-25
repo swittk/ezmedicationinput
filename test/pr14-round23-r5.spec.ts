@@ -6,7 +6,7 @@ import {
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirRatio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
   type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6DosageInstructionInput,
-  type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
+  type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
   buildBodySiteSpatialRelationExtension, parseBodySiteSpatialRelationExtension,
@@ -12077,5 +12077,28 @@ describe("round72 reviewed interchange source families", () => {
       id: coding.id, userSelected: false, _code: coding._code, extension: [note],
     }));
     expect(options).toEqual(before);
+  });
+});
+
+describe("round73 native Reference identifier annotations", () => {
+  it.each(["identifier", "assigner"] as const)("keeps native R6 Quantity annotations on %s", owner => {
+    const note: FhirR6Extension = { url: "urn:clinic:reference-note", valueQuantity: { value: 2, comparator: "~" } };
+    const reference: FhirR6Reference = { identifier: {
+      system: "urn:clinic:orders", value: "order-A",
+      ...(owner === "identifier" ? { extension: [note] } : { assigner: { reference: "Organization/clinic", extension: [note] } }),
+    } };
+    const ordinary: FhirR6Reference = { identifier: { system: "urn:clinic:orders", value: "order-B",
+      assigner: { reference: "Organization/clinic" } } };
+    // @ts-expect-error R5 Identifier annotations retain the R5 Quantity comparator set.
+    const r5Identifier: FhirReference = { identifier: { extension: [note] } };
+    // @ts-expect-error R5 Identifier.assigner remains an R5 Reference.
+    const r5Assigner: FhirReference = { identifier: { assigner: { extension: [note] } } };
+    void ordinary; void r5Identifier; void r5Assigner;
+    const source: FhirR6DosageInstruction = { step: [{ start: { contextReference: reference },
+      component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] }] };
+    const before = persist(source), projected = projectCanonicalCourse(importCanonicalCourse(source));
+    expect(projected.fhirNext.step![0].start!.contextReference).toEqual(reference);
+    expect(toDosageDetails(persist(projected.fhir)).step![0].start!.contextReference).toEqual(reference);
+    expect(source).toEqual(before);
   });
 });
