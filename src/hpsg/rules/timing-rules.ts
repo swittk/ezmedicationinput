@@ -2637,8 +2637,8 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const maximum = maximumDosePerPeriodAt(context, start);
     if (!maximum) return [];
     const { tokens: matched, amount, unit, period } = maximum;
-    const rateHead = period.unitDenominator && volumeOrMassTerm(amount, unit) &&
-      !("daypart" in period) && clinicalRatePeriodUnit(period.periodUnit)
+    const rateHead = period.unitDenominator && !("daypart" in period) &&
+      clinicalRatePeriodUnit(period.periodUnit) && volumeOrMassTerm(amount, unit)
       ? clinicalRateHeadAt(context, start, start + matched.length, true) : undefined;
     // The earlier clinical quantity rule already owns a licensed rate, including
     // its external AT marker. That same constituent cannot also be a dose cap.
