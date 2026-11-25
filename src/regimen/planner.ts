@@ -1150,8 +1150,12 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
               prefix.clause.instructionGraph?.primaryOwnership?.dose) {
             const administrationEnd = probeEnd(nextBoundary.rightIndex);
             const full = evidence.probe(rightStart, administrationEnd);
-            if (full.complete && full.method && full.hasSchedule &&
-                instructionGraphPreparationOwnsDose(full.clause, options)) end = administrationEnd;
+            if (full.complete && full.method && instructionGraphPreparationOwnsDose(full.clause, options)) {
+              // An untimed prepared successor still has its own dose and head
+              // after a complete administration; its cadence stays unspecified.
+              const left = full.hasSchedule ? undefined : evidence.probe(start, site.start);
+              if (full.hasSchedule || left?.complete && left.method) end = administrationEnd;
+            }
           }
         }
         const rightUnit = hasUnit(site.rightIndex, end);

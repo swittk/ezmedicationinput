@@ -1612,3 +1612,54 @@ describe("round70 fronted treatment-day onset", () => {
       JSON.parse(JSON.stringify(parsed.fhirNext))]) expect(nextDueDoses(input, query)).toEqual(due);
   });
 });
+
+
+describe("round71 prepared successor without an authored cadence", () => {
+  it.each([
+    "Dissolve 1 tablet in 30 mL water, then drink daily for 3 days, then dissolve 2 tablets in 60 mL water, then drink",
+    "ละลาย1เม็ดในน้ำ30มล. แล้วดื่มวันละครั้งนาน3วัน จากนั้นละลาย2เม็ดในน้ำ60มล. แล้วดื่ม"
+  ])("keeps both prepared dose owners without inventing successor timing: %s", source => {
+    const parsed = parsePublicSig(source, { context: { dosageForm: "effervescent tablet" } });
+    const clauses = parsed.meta.canonical.clauses;
+    expect(clauses).toHaveLength(2);
+    expect(clauses.map(clause => clause.dose)).toEqual([{ value: 1, unit: "tab" }, { value: 2, unit: "tab" }]);
+    expect(clauses.map(clause => clause.method?.text)).toEqual(["Drink", "Drink"]);
+    expect(clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", duration: 3, durationUnit: "d" });
+    expect(clauses[1].schedule).toBeUndefined();
+    expect(parsed.meta.canonical.course?.instruction).toBe(source);
+    const rows: typeof parsed.fhir = JSON.parse(JSON.stringify(parsed.fhir));
+    const r6: typeof parsed.fhirNext = JSON.parse(JSON.stringify(parsed.fhirNext));
+    expect(rows).toHaveLength(2);
+    expect(r6.step).toHaveLength(2);
+    expect(rows.map(row => row.doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(r6.step!.map(step => step.component[0].doseAndRate?.[0]?.doseQuantity?.value)).toEqual([1, 2]);
+    expect(rows[1].timing?.repeat).toBeUndefined();
+    expect(r6.step![1].component[0].timing?.repeat).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, rows, r6]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(locale === "en" ? /\b1 tablet\b/gu : /(?:^|[^0-9.,+-])1 เม็ด/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /\b2 tablets\b/gu : /(?:^|[^0-9.,+-])2 เม็ด/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /\b30 mL\b/gu : /(?:^|[^0-9.,+-])30 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /\b60 mL\b/gu : /(?:^|[^0-9.,+-])60 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(2);
+        expect(text.match(locale === "en" ? /once daily/gu : /วันละครั้ง/gu)).toHaveLength(1);
+      }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("matches the ordinary untimed successor and preserves a single preparation workflow", () => {
+    const plain = parsePublicSig("Take 1 tablet daily for 3 days, then take 2 tablets");
+    expect(plain.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    expect(plain.meta.canonical.clauses[1].schedule).toBeUndefined();
+    const single = parsePublicSig("Dissolve 1 tablet in 30 mL water, then drink", {
+      context: { dosageForm: "effervescent tablet" }
+    });
+    expect(single.meta.canonical.clauses).toHaveLength(1);
+    expect(single.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(single.meta.canonical.clauses[0].method?.text).toBe("Drink");
+    expect(single.meta.canonical.clauses[0].schedule).toBeUndefined();
+  });
+});
