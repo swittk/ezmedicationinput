@@ -4147,7 +4147,7 @@ export function realizeRichPrimaryWithCanonicalDose(
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
     const definition = resolveMedicationInstructionActionForMethod(method, options);
-    const sourceDefinition = getMedicationInstructionAction(frame.predicate.lemma, options);
+    const sourceDefinition = frameActionDefinition(frame, options);
     const sourceRealizer = frame.predicate.realizer ?? sourceDefinition?.realizer ?? "default";
     // The edited head keeps the source frame's typed argument realization,
     // including both the live amount and any independent physical result.
@@ -4436,13 +4436,13 @@ function actionMatchesCanonicalMethod(
 ): boolean {
   const method = clause.method;
   if (!method) return false;
-  const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
+  const definition = frameActionDefinition(frame, options);
   // Distinct authored actions may share an administration code (Apply/Reapply).
   // Compare declared identities; an unknown custom source cannot be treated as
   // a different default action merely because its local lemma is unfamiliar.
   if (definition && method.text?.trim()) {
     const current = resolveMedicationInstructionActionForMethod(method, options, true);
-    if (current) return current.code === definition.code;
+    if (current) return current.code === definition.code && current.display === definition.display;
   }
   if (method.coding?.code) {
     if (frame.predicate.codings?.some((coding) => codingEquivalent(coding, method.coding))) return true;

@@ -7854,3 +7854,33 @@ describe("round70 quantified vehicle nominal ownership", () => {
     }
   });
 });
+
+
+describe("round71 current method identity across shared action codes", () => {
+  it.each([false, true])("honors a fresh Chew method and its selected bound manners (reversed %s)", reversed => {
+    const swallow = { ...getMedicationInstructionAction("swallow")!, code: "clinic-ingest", aliases: [],
+      methodBoundMannerConcepts: ["whole"] };
+    const chew = { ...getMedicationInstructionAction("chew")!, code: "clinic-ingest", aliases: [] };
+    const options: ParseOptions = { instructionActionMap: reversed ? { chew, swallow } : { swallow, chew } };
+    const source = "Swallow 1 tablet whole", parsed = parsePublicSig(source, options);
+    const original = JSON.stringify(parsed.fhir);
+    const row = JSON.parse(original)[0] as FhirDosage;
+    row.method = JSON.parse(JSON.stringify(parsePublicSig("Chew 1 tablet", options).fhir[0].method));
+    expect(row.method?.coding?.[0].code).toBe("738992009");
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    const saved = JSON.parse(JSON.stringify(toFhirR5Dosages(r6))) as FhirDosage[];
+    for (const input of [row, r6, saved])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { ...options, locale: "en", realizationMode }))
+          .toBe("Chew 1 tablet orally.");
+        expect(formatSig(input, "long", { ...options, locale: "th", realizationMode }))
+          .toBe("เคี้ยว 1 เม็ด.");
+      }
+    expect(JSON.stringify(row)).toBe(before);
+    expect(saved[0].method).toEqual(row.method);
+    expect(JSON.stringify(saved)).toContain(source);
+    expect(JSON.stringify(parsed.fhir)).toBe(original);
+    expect(formatSig(parsed.fhir, "long", { ...options, locale: "en", realizationMode: "normalized" }))
+      .toBe("Swallow 1 tablet whole.");
+  });
+});
