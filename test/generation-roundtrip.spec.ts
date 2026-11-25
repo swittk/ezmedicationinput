@@ -595,7 +595,7 @@ describe("round49 endpoint units and normalized conditions", () => {
 
   it.each(["en", "th"] as const)("normalizes the verified condition in %s while retaining roundtrip source", locale => {
     const source = "Take 1 tablet BID only if BP >160, otherwise hold";
-    const row = parseSig(source).fhir;
+    const row = parsePublicSig(source).fhir[0];
     const saved = JSON.stringify(row);
     const short = locale === "en" ? "1 tab PO BID only if BP > 160."
       : "1 เม็ด PO วันละ 2 ครั้ง เฉพาะเมื่อ BP > 160.";
@@ -615,11 +615,12 @@ describe("round49 endpoint units and normalized conditions", () => {
       expect(imported.longText).toBe(dose + " " + condition + (locale === "en" ? ". Otherwise hold." : ". otherwise hold."));
       expect(dosage.text).toBe(source);
     }
-    // Only the verified original row owns exact source replay. The strict cold
-    // form already uses structured realization when its source proof differs.
-    for (const style of ["short", "long"] as const)
-      expect(formatSig(row, style, { locale, realizationMode: "roundtrip" })).toBe(source);
-    expect(fromFhirDosage(row, { locale, realizationMode: "roundtrip" }).longText).toBe(source);
+    // Public parser agreement remains available after ordinary JSON persistence.
+    for (const savedRow of [row, JSON.parse(JSON.stringify(row))]) {
+      for (const style of ["short", "long"] as const)
+        expect(formatSig(savedRow, style, { locale, realizationMode: "roundtrip" })).toBe(source);
+      expect(fromFhirDosage(savedRow, { locale, realizationMode: "roundtrip" }).longText).toBe(source);
+    }
     expect(JSON.stringify(row)).toBe(saved);
   });
 });
@@ -722,10 +723,13 @@ describe("round63 imported member preview ownership", () => {
     const complete = fresh(parsePublicSig(source).fhir);
     const normalized = formatSigBatch(complete, "long", { locale: "en", realizationMode: "normalized" });
     expect(formatSigBatch(complete, "long", { locale: "en" })).toBe(normalized);
-    expect(normalized).toMatch(/7 days/u);
-    expect(normalized).toMatch(/1 month/u);
-    expect(normalized).toMatch(/right eye/u);
-    expect(normalized).toMatch(/left eye/u);
+    expect(normalized).toBe(
+      "From treatment start until 7 days after treatment start: Instill 1 drop every 2 hours in the right eye; " +
+      "Instill 1 drop four times daily for 1 month in the left eye. " +
+      "From 7 days after treatment start until 1 month after treatment start: Instill 1 drop four times daily in the right eye; " +
+      "Instill 1 drop four times daily in the left eye. " +
+      "From 1 month after treatment start onward: Instill 1 drop four times daily in the right eye; " +
+      "Instill 1 drop twice daily in the left eye.");
     expect(formatSigBatch(complete, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
   });
 });
@@ -745,8 +749,10 @@ describe("round74 incomplete Thai frequency bounds", () => {
     for (const input of [source, rows, JSON.parse(JSON.stringify(toDosageDetails(rows)))])
       for (const style of ["short", "long"] as const) {
         const text = formatSig(input, style, { locale: "th", realizationMode: "normalized" });
-        expect(text).toContain(expected);
-        expect(text).not.toMatch(/วัน|สัปดาห์|เดือน|ปี/u);
+        const exact = style === "short" ? "1 เม็ด " + expected : "ใช้ครั้งละ 1 เม็ด " + expected + ".";
+        expect(text).toBe(exact);
+        expect(text).not.toMatch(/วัน|สัปดาห์|เดือน|ปี|ชั่วโมง|นาที/u);
+        expect(style === "short" ? "1 เม็ด 12 ครั้ง" : "ใช้ครั้งละ 1 เม็ด 12 ครั้ง.").not.toBe(exact);
       }
     expect(JSON.stringify(source)).toBe(before);
     expect(toDosageDetails(rows).step![0].component[0].timing?.repeat).toEqual(repeat);

@@ -1966,28 +1966,30 @@ function describeDayOfWeekThai(schedule: CanonicalScheduleExpr | undefined): str
 }
 
 function formatDurationShortThai(schedule: CanonicalScheduleExpr): string | undefined {
+  const durationUnit = schedule.durationUnit ?? schedule.durationUnitLabel;
+  const durationMaxUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel;
   if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
-      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (schedule.durationUnit ?? "");
-    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (schedule.durationMaxUnit ?? "");
+      (!durationUnit || !durationMaxUnit)) {
+    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
+    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (durationMaxUnit ?? "");
     return `x${low} – ${high}`;
   }
-  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit ?? "";
+  const upperUnit = durationMaxUnit ?? durationUnit ?? "";
   if (schedule.duration === undefined)
     return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || upperUnit !== schedule.durationUnit ||
+      (schedule.durationMax !== schedule.duration || upperUnit !== durationUnit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
+    const lowerUnit = upperUnit !== durationUnit ? durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
-  return `x${lowerBound}${base}${schedule.durationUnit ?? ""}`;
+  return `x${lowerBound}${base}${durationUnit ?? ""}`;
 }
 
 function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -2006,24 +2008,28 @@ function describeOccurrenceCapThai(schedule: CanonicalScheduleExpr | undefined):
 function describeDurationThai(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (schedule?.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
       (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const endpoint = (value: number, unit: string | undefined, comparator: string | undefined): string =>
-      (comparator ?? "") + stripTrailingZero(value) + (unit ? " " + (words.timeUnit(unit, value) ?? unit) : "");
-    return `เป็นเวลา ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxComparator)}`;
+    const endpoint = (value: number, unit: string | undefined, authoredUnit: string | undefined, comparator: string | undefined): string => {
+      const label = unit ? words.timeUnit(unit, value) ?? authoredUnit ?? unit : authoredUnit;
+      return (comparator ?? "") + stripTrailingZero(value) + (label ? " " + label : "");
+    };
+    return `เป็นเวลา ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationUnitLabel, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxUnitLabel, schedule.durationMaxComparator)}`;
   }
-  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationUnitLabel && !schedule.durationIsRange) {
     return undefined;
   }
-  const unit = schedule.durationUnit ?? "";
-  const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (value: number | undefined, endpointUnit = unit): string => endpointUnit ? words.timeUnit(endpointUnit, value) ?? endpointUnit : "";
+  const unit = schedule.durationUnit ?? schedule.durationUnitLabel ?? "";
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel ?? unit;
+  const upperUnitCode = schedule.durationMaxUnit ?? schedule.durationUnit;
+  const label = (value: number | undefined, endpointUnit = unit, unitCode = schedule.durationUnit): string =>
+    unitCode ? words.timeUnit(unitCode, value) ?? endpointUnit : endpointUnit;
   if (schedule.duration === undefined)
-    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit)}`.trim();
+    return `เป็นเวลา ${schedule.durationMaxComparator ?? "ไม่เกิน "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
-    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`.trim();
+    return `เป็นเวลา ${lower}${lowerUnit} ถึง ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? "อย่างน้อย " : "";

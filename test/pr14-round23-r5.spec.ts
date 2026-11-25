@@ -12501,3 +12501,103 @@ describe("round75 opaque temporal unit ownership", () => {
     }
   });
 });
+
+
+describe("round76 shared current preview owners", () => {
+  it.each(["scalar", "range"] as const)("preserves local %s course-duration labels in the clause projection", kind => {
+    const low = { id: "local-duration", value: 2, unit: "half-hour blocks", system: "urn:clinic:duration", code: "h",
+      extension: [{ url: "urn:clinic:duration-note", valueString: "authored local interval" }] };
+    const high = { ...low, value: 3, unit: "session blocks", code: "d" };
+    const raw = course({ timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      ...(kind === "scalar" ? { boundsDuration: low } : { boundsRange: { low, high } }) } } });
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [persist(raw), rows, rows[0]]) {
+      const before = persist(input), native = importCanonicalCourse(input);
+      for (const value of [input, native]) for (const locale of ["en", "th"] as const) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("2 half-hour blocks");
+        expect(text).not.toMatch(/for 2 hours|2 ชั่วโมง/u);
+        if (kind === "range") { expect(text).toContain("3 session blocks"); expect(text).not.toMatch(/3 days|3 วัน/u); }
+      }
+      const repeat = projectCanonicalCourse(native).fhirNext.step![0].component[0].timing!.repeat!;
+      if (kind === "scalar") expect(repeat.boundsDuration).toEqual(low);
+      else expect(repeat.boundsRange).toEqual({ low, high });
+      expect(input).toEqual(before);
+    }
+  });
+
+  it.each([undefined, "h"])("keeps a local code opaque even when its authored label is %s", unit => {
+    const bound = { value: 2, system: "urn:clinic:duration", code: "h", ...(unit ? { unit } : {}) };
+    const raw = course({ timing: { repeat: { boundsDuration: bound } } });
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
+      expect(formatSig(input, "long", { locale })).toContain("2 h");
+      expect(formatSig(input, "long", { locale })).not.toMatch(/hours|ชั่วโมง/u);
+      expect(formatSig(input, "short", { locale })).toContain("x2h");
+    }
+  });
+
+  it("uses the same quantity identity for administration-duration range labels", () => {
+    const range = { low: { value: 2, system: "urn:clinic:duration", code: "h", unit: "half-hour blocks" },
+      high: { value: 3, system: "urn:clinic:duration", code: "d", unit: "session blocks" } };
+    const raw = course({ timing: { repeat: { extension: [{ url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL,
+      valueRange: range }] } } });
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
+      const rendered = formatSig(input, "long", { locale });
+      expect(rendered).toContain("2 half-hour blocks");
+      expect(rendered).toContain("3 session blocks");
+      expect(rendered).not.toMatch(/2 hours|3 days|2 ชั่วโมง|3 วัน/u);
+    }
+    expect(importCanonicalCourse(raw).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange).toEqual(range);
+  });
+
+  it.each([false, true])("keeps member-only directions next to an independent warning, matching header=%s", matchingHeader => {
+    const text = "Swallow 1 tablet whole";
+    const graph = parseSig("Do not crush").meta.canonical.clauses[0].instructionGraph!;
+    const raw: FhirR6DosageInstruction = { ...(matchingHeader ? { renderedInstruction: text } : {}), step: [{ component: [{
+      text, extension: [buildInstructionGraphExtension(graph)!],
+    }] }] };
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [persist(raw), rows, rows[0], importCanonicalCourse(persist(raw))]) {
+      for (const locale of ["en", "th"] as const) for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const output = formatSig(input, "long", { locale, realizationMode });
+        expect(output.split(text)).toHaveLength(2);
+        expect(output).toMatch(locale === "en" ? /do not crush/iu : /ห้ามบด/u);
+      }
+    }
+    const saved = projectCanonicalCourse(importCanonicalCourse(persist(raw))).fhirNext;
+    expect(saved.step![0].component[0].text).toBe(text);
+    expect(saved.step![0].component[0].doseAndRate).toBeUndefined();
+  });
+
+  it("renders an upper frequency without inventing a recurrence period", () => {
+    for (const daily of [false, true]) {
+      const raw = course({ timing: { repeat: { frequencyMax: 2,
+        ...(daily ? { period: 1, periodUnit: FhirPeriodUnit.Day } : {}) } } });
+      const rows = persist(toFhirR5Dosages(persist(raw)));
+      for (const input of [persist(raw), rows, rows[0], importCanonicalCourse(persist(raw))]) {
+        expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toBe(
+          daily ? "Use 1 tablet up to 2 times daily." : "Use 1 tablet up to 2 times.");
+      }
+      const repeat = projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.step![0].component[0].timing!.repeat!;
+      expect(repeat.frequencyMax).toBe(2); expect(repeat.frequency).toBeUndefined();
+      expect(repeat.period).toBe(daily ? 1 : undefined);
+    }
+  });
+
+  it.each(["doseExpression", "rateExpression"] as const)("routes retained %s to the existing unevaluated preview", field => {
+    const formula = { language: "text/fhirpath", expression: "%patient.weight * 2" };
+    const raw = course({ doseAndRate: [{ [field]: formula }] });
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    expect((rows[0].doseAndRate![0] as FhirR6DoseAndRate)[field]).toBeUndefined();
+    for (const row of [rows[0], persist(rows[0])]) {
+      expect(formatSig(row, "long", { locale: "en", realizationMode: "normalized" })).toContain(formula.expression);
+      expect(fromFhirDosage(row, { locale: "en", realizationMode: "normalized" }).longText).toContain(formula.expression);
+      const native = importCanonicalCourse(row).stages[0].administrations[0];
+      expect(native.amounts![0][field === "doseExpression" ? "expression" : "rateExpression"]).toEqual(formula);
+      expect(native.amounts![0].quantity).toBeUndefined();
+    }
+    expect(formatSig(raw, "long", { locale: "en", realizationMode: "normalized" })).toContain(formula.expression);
+  });
+});

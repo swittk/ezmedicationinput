@@ -3498,10 +3498,12 @@ describe("round52 live site and partial-direction previews", () => {
         const current = currentDirections(preview, locale);
         expect(current).toMatch(positiveThreshold[locale]);
         if (liveDose) {
-          const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
-            : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
+          const exactAmount = locale === "en" ? /^(?:(?:Use|Swallow) )?2 (?:tablets|tab)(?: PO| whole)? only if SBP > 160[.]?$/u
+            : /^(?:(?:ใช้ครั้งละ|ใช้|กลืน)\s*)?2 เม็ด(?: PO| ?ทั้งเม็ด)? เฉพาะเมื่อ SBP > 160[.]?$/u;
           expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
           expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
+          expect(locale === "en" ? "Use 2 tablets or 3 tablets only if SBP > 160."
+            : "ใช้ครั้งละ 2 เม็ด หรือ 3 เม็ด เฉพาะเมื่อ SBP > 160.").not.toMatch(exactAmount);
           expect(current).toMatch(exactAmount);
           expect(current).not.toContain("1 tablet");
           expect(current).not.toContain("1 เม็ด");
@@ -3538,10 +3540,12 @@ describe("round52 live site and partial-direction previews", () => {
           const preview = formatSig(input, style, { locale, realizationMode: mode });
           const current = currentDirections(preview, locale);
           expect(current).toMatch(positiveThreshold[locale]);
-          const exactAmount = locale === "en" ? /(?:^|(?:Use|Swallow) )2 (?:tablets|tab)\b/u
-            : /(?:^|(?:ใช้ครั้งละ|ใช้|กลืน)\s*)2 เม็ด/u;
+          const exactAmount = locale === "en" ? /^(?:(?:Use|Swallow) )?2 (?:tablets|tab)(?: PO| whole)? only if SBP > 160[.]?$/u
+            : /^(?:(?:ใช้ครั้งละ|ใช้|กลืน)\s*)?2 เม็ด(?: PO| ?ทั้งเม็ด)? เฉพาะเมื่อ SBP > 160[.]?$/u;
           expect(locale === "en" ? "Use 12 tablets" : "ใช้ครั้งละ 12 เม็ด").not.toMatch(exactAmount);
           expect(locale === "en" ? "Use 1–2 tablets" : "ใช้ครั้งละ 1–2 เม็ด").not.toMatch(exactAmount);
+          expect(locale === "en" ? "Use 2 tablets or 3 tablets only if SBP > 160."
+            : "ใช้ครั้งละ 2 เม็ด หรือ 3 เม็ด เฉพาะเมื่อ SBP > 160.").not.toMatch(exactAmount);
           expect(current).toMatch(exactAmount);
           expect(current).not.toContain("1 tablet");
           expect(current).not.toContain("1 เม็ด");

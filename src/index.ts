@@ -94,7 +94,7 @@ import {
   getDosageSourceTextAgreement,
   getDosageSourceOwnership,
   getDosageSourceTextFingerprint, dosageTextFingerprint,
-  DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+  DOSAGE_DETAILS_R5_URL, DOSAGE_CONDITION_R5_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL, R5_EXPRESSION_SLOT_SOURCE_URL,
   DOSAGE_EXCLUDED_DATES_R5_URL, DOSAGE_EXCLUDED_WEEKDAYS_R5_URL,
   getDosageAlternativeChoice, setDosageAlternativeChoice,
   getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays
@@ -136,7 +136,7 @@ import {
 import { parseSigSegments } from "./hpsg/segmenter";
 import { cloneBodySiteSpatialRelation } from "./body-site-spatial";
 import { cloneExtensions, cloneI18nRecord } from "./fhir-translations";
-import { getDoseUnitSemantics } from "./unit-lexicon";
+import { getDoseUnitSemantics, getQuantityDurationUnit } from "./unit-lexicon";
 import {
   applyInstructionSemanticResolvers,
   applyInstructionSemanticResolversAsync
@@ -1102,10 +1102,12 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
   const timingLabel = dosage.timing?.code?.text;
   if (timingLabel && independentTimingText(timingLabel, dosage.timing?.repeat) &&
       !preferredTimingCoding(dosage.timing!)?.code) return true;
-  // A compact R5 decoder cannot lend one range endpoint's unit to another.
+  // Native quantities retain opaque duration units and independent endpoints.
+  const duration = dosage.timing?.repeat?.boundsDuration;
   const durationRange = dosage.timing?.repeat?.boundsRange;
-  if (durationRange?.low?.value !== undefined && !(durationRange.low.code ?? durationRange.low.unit) ||
-      durationRange?.high?.value !== undefined && !(durationRange.high.code ?? durationRange.high.unit)) return true;
+  if (duration?.value !== undefined && !getQuantityDurationUnit(duration) ||
+      durationRange?.low?.value !== undefined && !getQuantityDurationUnit(durationRange.low) ||
+      durationRange?.high?.value !== undefined && !getQuantityDurationUnit(durationRange.high)) return true;
   const missingSite = !dosage.site?.text && !dosage.site?.coding?.some(coding => coding.code);
   if (missingSite && dosage.siteReference?.display) return true;
   if (dosage.modifierExtension?.some(extension => extension.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL ||
@@ -1118,12 +1120,9 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
             field.valueCodeableReference?.reference?.display)))))
     return true;
   const primary = dosage.doseAndRate?.[0];
-  // With no structured dose or method, authored text may be the only
-  // directions. Preserve the existing graph realizer when that owner exists;
-  // the native fallback retains plain directions beside partial facts.
-  if (!primary && !dosage.method && dosage.text?.trim() &&
-      (dosage.route || !dosage.extension?.some(extension =>
-        extension.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL))) return true;
+  // Native source ownership preserves directions beside independent advice.
+  if (!primary && !dosage.method && dosage.text?.trim()) return true;
+  if (primary?.extension?.some(extension => extension.url === R5_EXPRESSION_SLOT_SOURCE_URL)) return true;
   if ((dosage.doseAndRate?.length ?? 0) > 1 || hasAmountRole(primary?.type)) return true;
   if ((primary?.rateQuantity || primary?.rateRatio || primary?.doseExpression || primary?.rateExpression) &&
       !dosage.text?.trim()) return true;

@@ -166,10 +166,35 @@ describe("canonical course architecture", () => {
   it("R5 import/export are independent native adapters, never complete R6 intermediate workflows",()=>{
     const writer=readFileSync(new URL("../src/adapters/r5-course.ts",import.meta.url),"utf8");
     const reader=readFileSync(new URL("../src/adapters/r5-import.ts",import.meta.url),"utf8");
-    for(const source of [writer,reader])
-      expect(source).not.toMatch(/\b(?:courseToR6|projectCourseToR6|courseFromR6|administrationToR6|fromR6Dosage|toDosageDetails)\s*\(/u);
-    expect(writer).toMatch(/administrationToR5\s*\(/u);
-    expect(reader).toMatch(/administrationFromR5\s*\(/u);
+    const calledFunctions = (text: string): string[] => {
+      const source = ts.createSourceFile("adapter.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+      const imports = new Map<string, string>(), namespaces = new Set<string>(), calls: string[] = [];
+      for (const statement of source.statements) {
+        if (!ts.isImportDeclaration(statement)) continue;
+        const bindings = statement.importClause?.namedBindings;
+        if (bindings && ts.isNamedImports(bindings))
+          for (const binding of bindings.elements) imports.set(binding.name.text, (binding.propertyName ?? binding.name).text);
+        else if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text);
+      }
+      const visit = (node: ts.Node): void => {
+        if (ts.isCallExpression(node)) {
+          const callee = node.expression;
+          if (ts.isIdentifier(callee)) calls.push(imports.get(callee.text) ?? callee.text);
+          else if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && namespaces.has(callee.expression.text))
+            calls.push(callee.name.text);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      return calls;
+    };
+    expect(calledFunctions('import { courseToR6 as lower } from "./canonical-course"; lower(course);')).toEqual(["courseToR6"]);
+    expect(calledFunctions('import * as adapter from "./canonical-course"; adapter.courseToR6(course);')).toEqual(["courseToR6"]);
+    expect(calledFunctions('// courseToR6(course) is forbidden here.')).toEqual([]);
+    const forbidden = new Set(["courseToR6", "projectCourseToR6", "courseFromR6", "administrationToR6", "fromR6Dosage", "toDosageDetails"]);
+    for (const source of [writer, reader]) expect(calledFunctions(source).filter(name => forbidden.has(name))).toEqual([]);
+    expect(calledFunctions(writer)).toContain("administrationToR5");
+    expect(calledFunctions(reader)).toContain("administrationFromR5");
   });
   it("the original public scheduling file is only an input adapter, not a second engine", () => {
     const text = readFileSync(new URL("../src/schedule.ts", import.meta.url), "utf8");

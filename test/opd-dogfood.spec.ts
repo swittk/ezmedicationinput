@@ -37,6 +37,7 @@ describe("OPD clinician dogfood grammar", () => {
     expect(reopened.meta.canonical.clauses[0]?.schedule?.count).toBeUndefined();
     expect(reopened.meta.canonical.clauses[0]?.schedule).toMatchObject({ countMax: 3 });
     expect(reopened.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(reopened.fhir.timing?.repeat?.countMax).toBe(3);
     expect(reopened.fhir.timing?.repeat?._count).toEqual({ extension: [{
       url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
     }] });

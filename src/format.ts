@@ -1,6 +1,6 @@
 import { TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { INTERVAL_UNIT_TOKENS_DATA } from "./hpsg/lexical-classes";
-import { getDoseUnitKind } from "./unit-lexicon";
+import { getDoseUnitKind, getQuantityDurationUnit } from "./unit-lexicon";
 import { ENGLISH_DAY_NAMES, joinLocalizedList } from "./locales/course/types";
 import { ENGLISH_COURSE } from "./locales/course/en";
 import type { CourseLanguage } from "./locales/course/types";
@@ -579,9 +579,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
   }
   if (frequency === undefined && frequencyMax === undefined && period === 1 &&
       periodUnit === FhirPeriodUnit.Day && !rangedPeriod) return "daily";
-  if (frequency !== undefined && frequencyMax !== undefined && frequencyMax !== frequency &&
+  if (frequencyMax !== undefined && frequencyMax !== frequency &&
       periodUnit === undefined && period === undefined)
-    return `${stripTrailingZero(frequency)} to ${stripTrailingZero(frequencyMax)} times`;
+    return countPrefix.trim();
   if (frequency && periodUnit === undefined && period === undefined) {
     if (frequency === 1) {
       return "once";
@@ -1081,28 +1081,30 @@ function describeDayOfWeek(schedule: CanonicalScheduleExpr | undefined): string 
 }
 
 function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefined {
+  const durationUnit = schedule.durationUnit ?? schedule.durationUnitLabel;
+  const durationMaxUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel;
   if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
-      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (schedule.durationUnit ?? "");
-    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (schedule.durationMaxUnit ?? "");
+      (!durationUnit || !durationMaxUnit)) {
+    const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
+    const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (durationMaxUnit ?? "");
     return `x${low} – ${high}`;
   }
-  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
+  if ((schedule.duration === undefined && schedule.durationMax === undefined) || !durationUnit && !schedule.durationIsRange) {
     return undefined;
   }
-  const upperUnit = schedule.durationMaxUnit ?? schedule.durationUnit ?? "";
+  const upperUnit = durationMaxUnit ?? durationUnit ?? "";
   if (schedule.duration === undefined)
     return `x${schedule.durationMaxComparator ?? "<="}${stripTrailingZero(schedule.durationMax!)}${upperUnit}`;
   const base = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
-      (schedule.durationMax !== schedule.duration || upperUnit !== schedule.durationUnit ||
+      (schedule.durationMax !== schedule.duration || upperUnit !== durationUnit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
-    const lowerUnit = upperUnit !== schedule.durationUnit ? schedule.durationUnit : "";
+    const lowerUnit = upperUnit !== durationUnit ? durationUnit : "";
     return `x${base}${lowerUnit}-${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)}${upperUnit}`;
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? ">=" : "";
-  return `x${lowerBound}${base}${schedule.durationUnit ?? ""}`;
+  return `x${lowerBound}${base}${durationUnit ?? ""}`;
 }
 
 function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefined): string | undefined {
@@ -1121,24 +1123,28 @@ function describeOccurrenceCapEnglish(schedule: CanonicalScheduleExpr | undefine
 function describeDuration(schedule: CanonicalScheduleExpr | undefined, words: CourseLanguage): string | undefined {
   if (schedule?.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
       (!schedule.durationUnit || !schedule.durationMaxUnit)) {
-    const endpoint = (value: number, unit: string | undefined, comparator: string | undefined): string =>
-      (comparator ?? "") + stripTrailingZero(value) + (unit ? " " + (words.timeUnit(unit, value) ?? unit) : "");
-    return `for ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxComparator)}`;
+    const endpoint = (value: number, unit: string | undefined, authoredUnit: string | undefined, comparator: string | undefined): string => {
+      const label = unit ? words.timeUnit(unit, value) ?? authoredUnit ?? unit : authoredUnit;
+      return (comparator ?? "") + stripTrailingZero(value) + (label ? " " + label : "");
+    };
+    return `for ${endpoint(schedule.duration, schedule.durationUnit, schedule.durationUnitLabel, schedule.durationComparator)} – ${endpoint(schedule.durationMax, schedule.durationMaxUnit, schedule.durationMaxUnitLabel, schedule.durationMaxComparator)}`;
   }
-  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationIsRange) {
+  if (!schedule || (schedule.duration === undefined && schedule.durationMax === undefined) || !schedule.durationUnit && !schedule.durationUnitLabel && !schedule.durationIsRange) {
     return undefined;
   }
-  const unit = schedule.durationUnit ?? "";
-  const upperUnit = schedule.durationMaxUnit ?? unit;
-  const label = (value: number, endpointUnit = unit): string => endpointUnit ? words.timeUnit(endpointUnit, value) ?? endpointUnit : "";
+  const unit = schedule.durationUnit ?? schedule.durationUnitLabel ?? "";
+  const upperUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel ?? unit;
+  const upperUnitCode = schedule.durationMaxUnit ?? schedule.durationUnit;
+  const label = (value: number, endpointUnit = unit, unitCode = schedule.durationUnit): string =>
+    unitCode ? words.timeUnit(unitCode, value) ?? endpointUnit : endpointUnit;
   if (schedule.duration === undefined)
-    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit)}`.trim();
+    return `for ${schedule.durationMaxComparator ?? "up to "}${stripTrailingZero(schedule.durationMax!)} ${label(schedule.durationMax!, upperUnit, upperUnitCode)}`.trim();
   const lower = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration);
   if (schedule.durationMax !== undefined &&
       (schedule.durationMax !== schedule.duration || upperUnit !== unit ||
         schedule.durationComparator !== undefined || schedule.durationMaxComparator !== undefined)) {
     const lowerUnit = upperUnit !== unit ? " " + label(schedule.duration) : "";
-    return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit)}`.trim();
+    return `for ${lower}${lowerUnit} to ${schedule.durationMaxComparator ?? ""}${stripTrailingZero(schedule.durationMax)} ${label(schedule.durationMax, upperUnit, upperUnitCode)}`.trim();
   }
   const lowerBound = schedule.durationIsRange && schedule.durationMax === undefined &&
     (!schedule.durationComparator || schedule.durationComparator === "~") ? "at least " : "";
@@ -1152,8 +1158,9 @@ function describeAdministrationDuration(
   if (range) {
     const endpoint = (quantity: NonNullable<typeof range.low>): string => {
       const unit = quantity.code ?? quantity.unit ?? "";
+      const recognizedUnit = short ? undefined : getQuantityDurationUnit(quantity);
       const label = short ? quantity.unit ?? unit :
-        words.timeUnit(unit, quantity.value) ?? quantity.unit ?? unit;
+        (recognizedUnit && words.timeUnit(recognizedUnit, quantity.value)) || quantity.unit || unit;
       return (short ? quantity.comparator ?? "" : quantityComparatorText(quantity.comparator, "en")) +
         (quantity.value === undefined ? "" : stripTrailingZero(quantity.value)) + (short ? "" : " ") + label;
     };

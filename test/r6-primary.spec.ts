@@ -7194,7 +7194,9 @@ describe("round58 partial facts and independent timing text", () => {
           expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
           if (kind !== "structured dose") expect(rendered).toContain("Apply a thin layer");
           else expect(rendered).not.toContain("Apply a thin layer");
-          if (kind === "structured dose") expect(rendered).toContain("2");
+          if (kind === "structured dose") expect(rendered).toBe(locale === "en"
+            ? style === "short" ? "2 g to the left forearm" : "Use 2 g to the left forearm."
+            : style === "short" ? "2 g ที่ปลายแขนซ้าย" : "ใช้ครั้งละ 2 g ที่ปลายแขนซ้าย.");
         }
       expect(input).toEqual(before);
       expect(toDosageDetails(rows)).toEqual(input);

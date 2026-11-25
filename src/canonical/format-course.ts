@@ -690,7 +690,6 @@ function formatCanonicalBase(
   const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
   const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
-    (source.schedule || source.route || source.target || source.siteReference || source.method || source.predicate || source.asNeeded) &&
     !administrationOwnsSourceDirections(source, clause.instructionGraph, a.text);
   if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
   const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate

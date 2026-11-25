@@ -25,6 +25,7 @@ import {
 import { SNOMED_SYSTEM } from "../snomed";
 import { FHIR_GTS_TIMING_CODES, FHIR_GTS_TIMING_SYSTEM, preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import type { RouteCode } from "../types";
+import { getQuantityDurationUnit } from "../unit-lexicon";
 
 const quantity = (
   value: number | undefined,
@@ -573,9 +574,11 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     schedule.administrationDurationRange=r?.occurrenceDurationRange;
     schedule.duration=length?.value??range?.low?.value;schedule.durationMax=range?.high?.value;
     schedule.durationIsRange=range ? true : undefined;
-    schedule.durationUnit=(length?.code??length?.unit??(range?.low?.value !== undefined
-      ? range.low.code??range.low.unit : range?.high?.code??range?.high?.unit)) as typeof schedule.durationUnit;
-    schedule.durationMaxUnit=(range?.high?.code??range?.high?.unit) as typeof schedule.durationMaxUnit;
+    const duration = length ?? (range?.low?.value !== undefined ? range.low : range?.high);
+    schedule.durationUnit=getQuantityDurationUnit(duration);
+    schedule.durationMaxUnit=getQuantityDurationUnit(range?.high);
+    schedule.durationUnitLabel=duration?.unit ?? (!schedule.durationUnit ? duration?.code : undefined);
+    schedule.durationMaxUnitLabel=range?.high?.unit ?? (!schedule.durationMaxUnit ? range?.high?.code : undefined);
     schedule.durationComparator=length?.comparator??range?.low?.comparator;
     schedule.durationMaxComparator=range?.high?.comparator;
     schedule.boundsStart=r?.calendarWindow?.start;schedule.boundsEnd=r?.calendarWindow?.end;
