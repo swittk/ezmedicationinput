@@ -33,6 +33,9 @@ function runNode(args: string[], code: string): {
   getTimingOccurrenceCapType?: string;
   occurrenceCapMax?: number;
   roundTripText?: string;
+  currentText?: string;
+  originalComponentText?: string;
+  roundTripDoseCount?: number;
   roundTripSiteCode?: string;
   roundTripFrequency?: number;
   roundTripAnchors?: string[];
@@ -169,12 +172,25 @@ describe("published package entrypoints", () => {
           locale: "th",
           realizationMode: "roundtrip"
         });
-        const reparsed = mod.parseSig(roundTripText, { locale: "th" });
+        // Independently submitted R6 wording has no saved agreement proof.
+        // Reparse the current clinical SIG, not its labeled original strings.
+        const current = JSON.parse(JSON.stringify(parsed.fhirNext));
+        delete current.renderedInstruction;
+        for (const step of current.step ?? [])
+          for (const component of step.component ?? []) delete component.text;
+        const currentText = mod.formatSig(current, "long", {
+          locale: "th",
+          realizationMode: "roundtrip"
+        });
+        const reparsed = mod.parseSig(currentText, { locale: "th" });
         process.stdout.write(JSON.stringify({
           parseSigType: typeof mod.parseSig,
           formatSigType: typeof mod.formatSig,
           roundTripText,
+          currentText,
           originalInstruction: parsed.fhirNext.renderedInstruction,
+          originalComponentText: parsed.fhirNext.step[0]?.component[0]?.text,
+          roundTripDoseCount: reparsed.fhirNext.step[0]?.component[0]?.doseAndRate?.length ?? 0,
           roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
           roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
           roundTripAnchors: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.when,
@@ -182,8 +198,14 @@ describe("published package entrypoints", () => {
         }));
       `
     );
-    expect(result.roundTripText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.currentText).toBe("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา.");
+    expect(result.roundTripText?.split("; ข้อความเดิม: ")[0])
+      .toContain("หยอดวันละ 4 ครั้ง เช้า, เที่ยง, เย็น และ ก่อนนอน ที่ตาขวา");
     expect(result.originalInstruction).toBe("หยอดตาขวาวันละ 4 ครั้ง เช้า กลางวัน เย็น ก่อนนอน");
+    expect(result.originalComponentText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
+    expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalComponentText);
+    expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalInstruction);
+    expect(result.roundTripDoseCount).toBe(0);
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);
     expect(result.roundTripAnchors).toEqual(["MORN", "NOON", "EVE", "HS"]);
