@@ -443,8 +443,10 @@ export function resolveMedicationInstructionSeparableAction(
   options?: ParseOptions
 ): MedicationInstructionActionDefinition | undefined {
   const normalizedLead = normalizeActionSurface(lead);
-  const normalizedParticle = normalizeActionSurface(particle);
   const map = options?.instructionActionMap;
+  const builtin = DEFAULT_SEPARABLE_BY_LEAD.get(normalizedLead);
+  if (!map && !builtin) return undefined;
+  const normalizedParticle = normalizeActionSurface(particle);
   if (map) {
     for (const surface of Object.keys(map)) {
       const input = map[surface];
@@ -455,7 +457,7 @@ export function resolveMedicationInstructionSeparableAction(
       }
     }
   }
-  return DEFAULT_SEPARABLE_BY_LEAD.get(normalizedLead)?.get(normalizedParticle);
+  return builtin?.get(normalizedParticle);
 }
 
 export function medicationInstructionActionIsSafetyScopeTarget(
