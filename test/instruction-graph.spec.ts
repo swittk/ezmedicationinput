@@ -7974,3 +7974,44 @@ describe("round73 selected negated site attachment", () => {
     expect(JSON.stringify(saved)).toContain(source);
   });
 });
+
+describe("round73 registered Time beside an oral procedure duration", () => {
+  it.each([false, true])("keeps the built-in mouth-rinsing amount, duration and accepted Time (%s)", timed => {
+    const source = "Mouthwash fifteen millilitres thirty seconds" + (timed ? " lights-out" : "");
+    const requests: string[] = [];
+    const parsed = parsePublicSig(source, { unitMap: { s: "s" }, instructionSemanticResolvers: request => {
+      requests.push(request.sourceText);
+      if (request.sourceText !== source) return undefined;
+      return { actions: [{ action: "rinse_mouth", range: { start: 0, end: source.length }, args: [
+        { role: AdviceArgumentRole.Amount, range: { start: 10, end: 28 }, quantity: { value: 15, unit: "mL" } },
+        { role: AdviceArgumentRole.Duration, range: { start: 29, end: 43 }, quantity: { value: 30, unit: "s" } },
+        ...(timed ? [{ role: AdviceArgumentRole.Time, range: { start: 44, end: source.length }, concept: "bedtime" }] : [])
+      ] }] };
+    } });
+    expect(requests).toContain(source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.predicate.realizer).toBe("amount-duration");
+    expect(frame.args).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 15, unit: "mL" } }),
+      expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 30, unit: "s" } })
+    ]));
+    if (timed) expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, conceptId: "bedtime" }));
+    const before = JSON.stringify(parsed.fhir), r6 = toDosageDetails(parsed.fhir);
+    for (const input of [JSON.parse(before), JSON.parse(JSON.stringify(r6)), JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Rinse mouth 15 mL for 30 seconds" + (timed ? " at bedtime." : "."));
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("บ้วนปาก 15 มิลลิลิตร นาน 30 วินาที" + (timed ? "ก่อนนอน." : "."));
+    }
+    expect(JSON.stringify(parsed.fhir)).toBe(before);
+  });
+});
+
+it("round73 retains the schedule-owned bedtime beside a gargling duration", () => {
+  const parsed = parsePublicSig("Gargle 10 mL for 30 seconds at bedtime");
+  expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual([EventTiming["Before Sleep"]]);
+  expect(formatSig(parsed.fhir, "long", { locale: "en", realizationMode: "normalized" }))
+    .toBe("Gargle 10 mL for 30 seconds at bedtime.");
+  expect(formatSig(parsed.fhir, "long", { locale: "th", realizationMode: "normalized" }))
+    .toBe("กลั้วคอ 10 มิลลิลิตร นาน 30 วินาที ก่อนนอน.");
+});

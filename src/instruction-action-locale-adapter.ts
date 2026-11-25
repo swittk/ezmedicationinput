@@ -344,7 +344,12 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
         ? localizeAdviceRelation(c.frame.relation, c.locale) : undefined;
       const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
-      return relation && relationTarget ? `${base} ${relation} ${relationTarget}` : base;
+      const body = relation && relationTarget ? `${base} ${relation} ${relationTarget}` : base;
+      const time = c.time && (c.timeRelation && !relationHasGrammarFeature(c.timeRelation, "directTimeRealization")
+        ? `${localizeAdviceRelation(c.timeRelation, c.locale) ?? c.timeRelation} ${c.time}`
+        : englishDirectTime(c.time));
+      if (c.timeWasRendered !== undefined && time) c.timeWasRendered = true;
+      return time ? `${body} ${time}` : body;
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
@@ -519,7 +524,12 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       const relation = relationHasGrammarFeature(c.frame.relation, "activityFallback")
         ? localizeAdviceRelation(c.frame.relation, c.locale) : undefined;
       const base = `${c.label}${c.amount ? ` ${c.amount}` : ""}${c.duration ? ` นาน ${c.duration}` : ""}`;
-      return relation && relationTarget ? `${base}${relation}${relationTarget}` : base;
+      const body = relation && relationTarget ? `${base}${relation}${relationTarget}` : base;
+      const time = c.time && (c.timeRelation && !relationHasGrammarFeature(c.timeRelation, "directTimeRealization")
+        ? `${localizeAdviceRelation(c.timeRelation, c.locale) ?? c.timeRelation}${c.time}`
+        : thaiDirectTime(c.time));
+      if (c.timeWasRendered !== undefined && time) c.timeWasRendered = true;
+      return time ? `${body}${time}` : body;
     }
     case "object-duration": {
       const object = c.theme ?? c.site;
