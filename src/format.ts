@@ -1233,9 +1233,12 @@ export function independentTimingText(
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
        recurrence.period !== undefined || recurrence.periodMax !== undefined ||
        recurrence.periodUnit !== undefined)) return undefined;
-  // The existing compact interval family is cadence shorthand too, even
-  // when a particular numeric interval has no static abbreviation entry.
-  return isCompactIntervalTimingCode(code) ? undefined : code;
+  // Compact interval shorthand yields only when a typed cadence replaces it.
+  // Otherwise retain the existing code when no preview descriptor expands it.
+  return isCompactIntervalTimingCode(code) && recurrence &&
+    (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
+     recurrence.period !== undefined || recurrence.periodMax !== undefined ||
+     recurrence.periodUnit !== undefined) ? undefined : code;
 }
 
 export function timingCodeMatchesRecurrence(

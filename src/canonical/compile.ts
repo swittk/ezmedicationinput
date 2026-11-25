@@ -336,6 +336,7 @@ export function courseFromPartialParallel(
       const phaseStart = administrations.length;
       let predecessors: number[] | undefined;
       let finitePredecessors: boolean | undefined;
+      let datedReplacement = false;
       for (const item of phase.members) {
         let dependsOnPrevious = false;
         const a = administrationFromClause(item.clause, clauseTexts[item.member], 1);
@@ -392,8 +393,10 @@ export function courseFromPartialParallel(
         // A dated replacement still belongs to this track even when its
         // predecessor began earlier. Execution owns the successor's local
         // clock boundary; the compiler retains only the selected relation.
-        if (!dependsOnPrevious && index > 0 && priorEnd > priorStart && administrationHasDatedClockStart(a))
+        if (index > 0 && priorEnd > priorStart && administrationHasDatedClockStart(a)) {
           dependsOnPrevious = true;
+          datedReplacement = true;
+        }
         if (dependsOnPrevious) {
           if (!predecessors) {
             predecessors = [];
@@ -406,6 +409,15 @@ export function courseFromPartialParallel(
           a.phasePredecessors = predecessors;
         }
         administrations.push(a);
+      }
+      // Undated members of this selected replacement share its predecessor
+      // dependency. Their own clocks remain local to the resolved phase floor.
+      if (datedReplacement && predecessors) for (let member = phaseStart; member < administrations.length; member++) {
+        const a = administrations[member];
+        if (a.phaseStart?.anchor === "unresolved") {
+          a.phaseStart = undefined;
+          a.phasePredecessors = predecessors;
+        }
       }
       priorStart = phaseStart;
       priorEnd = administrations.length;
@@ -777,7 +789,9 @@ export function courseFromAdministrations(
         if (!candidate) for (const event of timing?.explicitEvents ?? [])
           if (nextStart === undefined || event < nextStart) nextStart = event;
       }
-      const clockBoundary = administrations.length === 1 && administrationHasDatedClockStart(administrations[0]);
+      const clockBoundary = administrations.some(administrationHasDatedClockStart) &&
+        administrations.every(a => !a.schedule?.recurrence?.calendarWindow?.start && !a.schedule?.explicitEvents?.length ||
+          administrationHasDatedClockStart(a));
       const cutoff = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
       if (cutoff) previous.administrations = previous.administrations.map(administration => {
         const timing = administration.schedule, recurrence = timing?.recurrence;

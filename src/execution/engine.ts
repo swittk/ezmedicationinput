@@ -158,7 +158,7 @@ function courseFromCanonicalRows(rows: readonly CanonicalAdministration[]): Cano
   const groups = new Map<number, CanonicalAdministration[]>();
   for (const row of rows) {
     const sequence = row.stageOrdinal ?? 1;
-    if (!Number.isInteger(sequence) || sequence < 1) throw new Error("Invalid FHIR Dosage.sequence");
+    if (!Number.isInteger(sequence)) throw new Error("Invalid FHIR Dosage.sequence");
     let list = groups.get(sequence);
     if (!list) groups.set(sequence, (list = []));
     list.push(row);
@@ -2892,11 +2892,19 @@ function treatmentStepWindow(
     completionPoint = latest.point;
   }
   const nextStage = course.stages[nextStageIndex];
-  if (!nextStage?.start && nextStage?.administrations.length === 1) {
+  if (!nextStage?.start && nextStage?.administrations.length) {
     let opening = administrations[0]?.eligibleFrom ?? start;
     for (let member = 1; member < administrations.length; member++)
       if (administrations[member].eligibleFrom < opening) opening = administrations[member].eligibleFrom;
-    const replacement = datedClockSuccessorBoundary(nextStage.administrations[0], opening, timeZone, options);
+    let replacement: Date | undefined;
+    for (const successor of nextStage.administrations) {
+      // Undated concurrent members inherit the phase opening, not an invented
+      // calendar start. Every authored date must retain its explicit clock.
+      if (!successor.schedule?.recurrence?.calendarWindow?.start && !successor.schedule?.explicitEvents?.length) continue;
+      const boundary = datedClockSuccessorBoundary(successor, opening, timeZone, options);
+      if (!boundary) { replacement = undefined; break; }
+      if (!replacement || boundary < replacement) replacement = boundary;
+    }
     if (replacement && (!end || replacement < end)) {
       end = replacement;
       completionPoint = undefined;
@@ -5136,8 +5144,9 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     const expanded = resolveExplicitClockEntries(repeat, config, enforceDayFilter);
     const includesImmediate = arrayIncludes(whenCodes, TimingEvent.Immediate);
     if (includesImmediate) {
-      const immediateSource = orderedAt ?? from;
-      if ((!orderedAt || orderedAt >= from) && (!courseEnd || immediateSource < courseEnd)) {
+      const immediateOrder = orderedAt ? effectiveOrderedAt : null;
+      const immediateSource = immediateOrder ?? from;
+      if ((!immediateOrder || immediateOrder >= from) && (!courseEnd || immediateSource < courseEnd)) {
         const instantIso = formatZonedIso(immediateSource, timeZone);
         if (!seen.has(instantIso)) {
           seen.add(instantIso);

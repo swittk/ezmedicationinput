@@ -5388,3 +5388,41 @@ describe("phase-local supplied count ownership", () => {
     expect(courseToR5(course)[1].extension).toContainEqual(note);
   });
 });
+
+
+describe("authored immediate start and integer sequence execution", () => {
+  it.each([true, false])("uses the authored start for an immediate dose with an earlier order (%s)", explicitOrder => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { count: 1, when: [EventTiming.Immediate],
+        boundsPeriod: { start: "2026-12-05T08:00:00Z" } } } };
+    const options = { from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3,
+      ...(explicitOrder ? { orderedAt: "2026-12-04T00:00:00Z" } : {}) };
+    for (const dosage of [row, [row], { step: [{ component: [row] }] }]) {
+      expect(nextDueDoses(dosage, options)).toEqual(["2026-12-05T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+  });
+
+  it("keeps single-row and array supply for an authored zero sequence", () => {
+    const row: FhirDosage = { sequence: 0, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } };
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 1 };
+    for (const dosage of [row, [row]]) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-01T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(1);
+    }
+    expect(row.sequence).toBe(0);
+  });
+
+  it.each([-2, 0, 1])("orders distinct integer sequences and keeps equal values concurrent (%s)", first => {
+    const row = (sequence: number, value: number): FhirDosage => ({ sequence,
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } });
+    const dosage = [row(first + 2, 4), row(first, 1), row(first, 2)];
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 4 };
+    expect(nextDueDoses(dosage, query)).toEqual([
+      "2026-01-01T09:00:00+00:00", "2026-01-01T09:00:00+00:00", "2026-01-02T09:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(7);
+    expect(dosage.map(item => item.sequence)).toEqual([first + 2, first, first]);
+  });
+});

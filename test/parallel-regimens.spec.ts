@@ -5165,3 +5165,21 @@ it.each([false, true])("round79 dated clock replacement retains an undated prede
     .toBeUndefined();
   expect(JSON.stringify(parsed)).toBe(before);
 });
+
+
+describe("dated replacement with several target members", () => {
+  it.each([false, true])("keeps the morning predecessor before the evening replacement (%s)", independent => {
+    const parsed = parseSig("From 4 December 2026, instill 1 drop in both eyes daily at 08:00, then from 5 December 2026 instill 2 drops in the right eye and 1 drop in the left eye daily at 20:00" + (independent ? "; instill 1 drop OS daily at 10:00 starting 2026-12-05" : ""));
+    const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+    const query = { orderedAt: "2026-12-04T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+      expect(nextDueDoses(dosage, query)).toEqual(independent ? [
+        "2026-12-05T08:00:00+00:00", "2026-12-05T10:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00"] : [
+        "2026-12-05T08:00:00+00:00", "2026-12-05T20:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-06T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: independent ? 6 : 5, unit: "drop" });
+    }
+  });
+});

@@ -5294,3 +5294,34 @@ describe("round47 public retained-field preservation", () => {
   });
 });
 }
+
+
+describe("counted predecessor rolling-limit completion", () => {
+  it.each([false, true])("keeps the current maintenance boundary when the induction limit changes (%s)", changed => {
+    const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+    const end = { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event",
+      code: "treatment-start" }] }, offsetDuration: { value: 1, unit: "d" } };
+    const note = { url: "urn:clinical:pause-note", valueString: "planned pause" };
+    const source: FhirR6DosageInstruction = { step: [
+      { id: "induction", component: [{ id: "loading", doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { count: 2, frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 2, unit: "tab" }, period: { value: 1, unit: "d" } }] } }] },
+      { id: "pause", end, component: [], extension: [note] },
+      { id: "maintenance", component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } } }] }
+    ] };
+    const wire = fresh(projectCanonicalCourse(importCanonicalCourse(source)).fhirNext);
+    if (changed) wire.step![0].component[0].safety!.doseLimit![0].valueQuantity!.value = 1;
+    const view = fromDosageDetails(wire).course;
+    expect(view.step?.map(step => step.id)).toEqual(changed
+      ? ["induction", "maintenance"] : ["induction", "pause", "maintenance"]);
+    expect(view.step?.find(step => step.id === "maintenance")?.start).toEqual(changed ? end : undefined);
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 3 };
+    expect(nextDueDoses(wire, query)).toEqual(changed
+      ? ["2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00", "2026-01-02T08:00:00+00:00"]
+      : ["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00", "2026-01-02T08:00:00+00:00"]);
+    const saved = fresh(toDosageDetails(toFhirR5Dosages(wire)));
+    expect(fromDosageDetails(saved).course.step?.map(step => step.id)).toEqual(view.step?.map(step => step.id));
+    expect(JSON.stringify(saved)).toContain("planned pause");
+  });
+});

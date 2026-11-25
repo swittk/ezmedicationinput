@@ -6023,3 +6023,24 @@ describe("coded container quantity identity", () => {
     expect(toFhirR5Dosages(fresh(r6))[0].doseAndRate?.[0]?.doseQuantity).toEqual(quantity);
   });
 });
+
+
+describe("onset-only inheritance from a one-time clock", () => {
+  it.each([{ recurring: false, bounded: false }, { recurring: true, bounded: false }, { recurring: true, bounded: true }])(
+    "inherits only an established recurring cadence ($recurring, bounded=$bounded)", ({ recurring, bounded }) => {
+    const parsed = parseSig("Take 1 tablet " + (recurring ? "daily" : "once") +
+      " at 08:00" + (bounded ? " for 1 dose" : "") + ", then from day 3 take 2 tablets");
+    if (bounded) expect(parsed.meta.canonical.course!.stages[0].administrations[0].schedule?.recurrence)
+      .toMatchObject({ count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day });
+    const successor = parsed.meta.canonical.course!.stages[1].administrations[0];
+    expect(successor.amounts?.[0].quantity?.value).toBe(2);
+    expect(successor.schedule?.recurrence?.clocks).toEqual(recurring ? ["08:00:00"] : undefined);
+    for (const dosage of [JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(member.schedule?.recurrence?.clocks).toEqual(recurring ? ["08:00:00"] : undefined);
+    }
+    if (recurring) expect(nextDueDoses(parsed, { orderedAt: "2026-01-01T00:00:00Z",
+      from: "2026-01-03T00:00:00Z", timeZone: "UTC", limit: 2 })).toEqual([
+        "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
+  });
+});

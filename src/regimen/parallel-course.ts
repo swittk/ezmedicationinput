@@ -127,18 +127,19 @@ function calendarPhaseMembers(
   nextClauses: readonly CanonicalSigClause[] | undefined
 ): CanonicalParallelComponent[] | string {
   let nextStart: string | undefined;
+  let clockBoundary = true;
   for (const clause of nextClauses ?? []) {
     const value = calendarPhaseStart(clause);
     if (value && (nextStart === undefined || value < nextStart)) nextStart = value;
+    const schedule = clause.schedule;
+    // Every authored date keeps its explicit clock; undated concurrent
+    // members still receive their phase opening during execution.
+    if (value && !(schedule?.boundsStart?.length === 10 && schedule.timeOfDay?.length &&
+        !schedule.when?.length && !clause.prn?.enabled &&
+        !clause.clinicalAdjuncts?.condition && !clause.clinicalAdjuncts?.calendarDayCondition))
+      clockBoundary = false;
   }
   if (nextClauses?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
-  const successor = nextClauses?.length === 1 ? nextClauses[0] : undefined;
-  const nextSchedule = successor?.schedule;
-  // A selected explicit clock requires a zoned execution boundary. Keep the
-  // track unresolved here instead of discarding that clock with a day cutoff.
-  const clockBoundary = nextSchedule?.boundsStart?.length === 10 && nextSchedule.timeOfDay?.length &&
-    !nextSchedule.when?.length && !successor?.prn?.enabled &&
-    !successor?.clinicalAdjuncts?.condition && !successor?.clinicalAdjuncts?.calendarDayCondition;
   const inferredEnd = nextStart && !clockBoundary ? precedingCalendarDay(nextStart) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {

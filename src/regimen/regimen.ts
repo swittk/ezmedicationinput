@@ -694,7 +694,8 @@ export function scopeSequentialPhaseSemantics(
         (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
       );
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
-        !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule);
+        !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule) &&
+        (shared?.count !== 1 || cadenceKeys.some(key => cadence[key] !== undefined)) && hasRecurringSchedule(shared);
       if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && sharedCadence && shared) {
         // A timing anaphor or licensed onset-only dose continuation inherits
         // recurrence, not the preceding phase's duration, count or dates.

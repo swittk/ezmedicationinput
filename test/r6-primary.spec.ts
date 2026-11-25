@@ -7646,3 +7646,25 @@ describe("round68 current preview fields", () => {
       }
   });
 });
+
+
+describe("code-only compact interval previews", () => {
+  it.each(["Q36H", "Q1.5H", "Q36-48H"])("retains %s when no typed recurrence replaces it", code => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ code }] } },
+    }] }] };
+    for (const dosage of [input, JSON.parse(JSON.stringify(toFhirR5Dosages(input)))])
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
+        expect(formatSig(dosage, style, { locale, realizationMode: "normalized" }).split(code)).toHaveLength(2);
+  });
+
+  it("keeps the established Q6H wording", () => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ code: "Q6H" }] } },
+    }] }] };
+    expect(formatSig(input, "long", { locale: "en" })).toContain("every 6 hours");
+    expect(formatSig(input, "long", { locale: "th" })).toContain("ทุก 6 ชั่วโมง");
+  });
+});
