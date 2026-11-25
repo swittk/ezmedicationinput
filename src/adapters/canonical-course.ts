@@ -1297,7 +1297,12 @@ function updateNativeTimingAnnotations(
       administrationChanges.add(ANCHORED_COURSE_DURATION_EXTENSION_URL);
   }
   if (!changes.size && !administrationChanges.size) return target;
-  const generated = serializeCanonicalSchedule(clauseForAdministration(a).schedule);
+  const currentClause = clauseForAdministration(a);
+  // The shared serializer keeps a recognized carrier duration on its existing
+  // Ratio denominator while retaining a distinct authored timing duration.
+  const clinicalQuantity = currentClause.clinicalQuantity ?? (raw.doseAndRate?.[0]?.rateRatio
+    ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined);
+  const generated = serializeCanonicalSchedule(currentClause.schedule, undefined, clinicalQuantity);
   if (durationMarker && changes.has(TIMING_ADMINISTRATION_DURATION_EXTENSION_URL)) {
     const marker = generated.timing?.repeat?.extension?.find(item =>
       item.url === TIMING_ADMINISTRATION_DURATION_EXTENSION_URL);
