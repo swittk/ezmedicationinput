@@ -1,3 +1,4 @@
+import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
 import { parseMedicationDateListAt, type MedicationDateListMatch } from "../../date-interpretation";
 import { inferMedicationLocale } from "../../locale-detection";
@@ -3612,7 +3613,7 @@ export function finiteTreatmentPauseAt(
   context: HpsgClauseContext, frame: AdviceFrame, start: number
 ): { actionEnd: number; duration: HpsgSign; pause: { durationDays: number; range: { start: number; end: number } } } | undefined {
   if (frame.polarity === AdvicePolarity.Negate) return undefined;
-  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = frameActionDefinition(frame, context.options);
   if (definition?.semanticClass !== "stop" &&
       definition?.argumentParserConfig?.medicationConditionEffect !== "withhold") return undefined;
   const actionEnd = courseActionEnd(context.state.input, context.tokens, start, "stop", context.options);

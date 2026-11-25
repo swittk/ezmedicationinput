@@ -641,7 +641,9 @@ export function scopeSequentialPhaseSemantics(
         }
       }
       const recipientHasRate = isAdministrationRate(clause.clinicalQuantity);
-      if (sharedMethod && !clause.method && (!recipientHasRate || priorHasRate)) {
+      const routeCompatible = !clause.route ||
+        prior.every(index => equalStructuredValues(states[index]?.primaryClause.route, clause.route));
+      if (sharedMethod && !clause.method && routeCompatible && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         fields.push('method');
       }

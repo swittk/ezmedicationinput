@@ -2,7 +2,7 @@ import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
   calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
-  lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages
+  lintSig, nextDueDoses, toDosageDetails, toFhirR5Dosages, getMedicationInstructionAction, parseSig as parsePublicSig
 } from '../src/index';
 import { canonicalToFhir } from '../src/fhir';
 import { shiftCanonicalSigClauses } from '../src/ir';
@@ -1478,6 +1478,39 @@ describe("round65 selected procedural comma ownership", () => {
       const wait = actions?.find(action => action.predicate.lemma === "wait");
       expect(wait?.args).toContainEqual(expect.objectContaining({ role: "duration", quantity: { value: 30, unit: "min" } }));
       expect(parsed.longText).toMatch(/wait 30 minutes before food, drink or other medicines/iu);
+    }
+  });
+});
+
+
+describe("round68 selected withholding and successor route ownership", () => {
+  it.each([false, true])("retains the selected Hold pause despite a distinct configured code collision (%s)", configured => {
+    const options = configured ? { instructionActionMap: { "custom-mix": {
+      ...getMedicationInstructionAction("mix")!, code: "hold", display: "Custom mix", aliases: []
+    } } } : undefined;
+    const parsed = parsePublicSig("Take 1 tablet daily for 3 days, then hold for 2 days, then resume 1 tablet daily", options);
+    expect(parsed.meta.canonical.clauses[1].schedule?.treatmentStartOffsetDays).toBe(5);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 5 };
+    for (const input of [parsed.meta.canonical.course, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))])
+      expect(nextDueDoses(input, query)).toEqual([
+        "2026-12-01T09:00:00+00:00", "2026-12-02T09:00:00+00:00", "2026-12-03T09:00:00+00:00",
+        "2026-12-06T09:00:00+00:00", "2026-12-07T09:00:00+00:00"
+      ]);
+  });
+
+  it.each(["PO", "IV", ""])("inherits an injection method only with a compatible successor route: %s", route => {
+    const parsed = parsePublicSig("Inject 5 mg IV daily for 2 days, then 10 mg " + route + " from day 3");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    const successor = parsed.meta.canonical.clauses[1];
+    expect(successor.dose).toEqual({ value: 10, unit: "mg" });
+    expect(successor.route?.code).toBe(route === "PO" ? "26643006" : "47625008");
+    expect(successor.schedule).toMatchObject({ treatmentStartOffsetDays: 2, frequency: 1, period: 1, periodUnit: "d" });
+    if (route === "PO") expect(successor.method).toBeUndefined();
+    else expect(successor.method?.text).toBe("Inject");
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(rows[1].route?.coding?.[0].code).toBe(route === "PO" ? "26643006" : "47625008");
+      if (route === "PO") expect(rows[1].method).toBeUndefined();
+      else expect(rows[1].method?.coding?.[0].code).toBe("740685003");
     }
   });
 });

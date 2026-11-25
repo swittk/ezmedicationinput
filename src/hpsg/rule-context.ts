@@ -344,7 +344,7 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
   // explicitly bounded dimensional suffix inside the maximum construction.
   const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
   const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
-  const hybridValue = compactUnitPeriod && /^\d+$/u.test(compactUnitPeriod[2])
+  const hybridValue = compactUnitPeriod && /^\d+(?:\.\d+)?$/u.test(compactUnitPeriod[2])
     ? Number(compactUnitPeriod[2]) : undefined;
   const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[cursor + 2] : undefined;
   const hybridUnit = followingUnit && !context.state?.consumed.has(followingUnit.index)

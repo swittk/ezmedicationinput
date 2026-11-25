@@ -167,7 +167,7 @@ function massTerm(value: number, raw: string): HpsgDimensionalQuantityTerm | und
   if (normalized === "mg" || normalized === "g") {
     return { value, unit: normalized, dimension: "mass" };
   }
-  if (/^(?:u|iu|unit|units)$/u.test(normalized)) {
+  if (/^(?:u|iu|\[iu\]|unit|units)$/u.test(normalized)) {
     return { value, unit: "[iU]", dimension: "biologic-activity" };
   }
   return undefined;
