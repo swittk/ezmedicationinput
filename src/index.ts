@@ -68,7 +68,7 @@ function markOriginalGraphSource(
     if (sourceOwnership?.site !== undefined) clause.sourceHasStructuredSite = sourceOwnership.site;
   }
   if (options?.realizationMode !== "roundtrip" && clause.dose) return;
-  const verified = fresh && !fresh.defaulted ? true : dosageMatchesSavedProjection(dosage);
+  const verified = fresh && !fresh.defaulted ? true : dosageMatchesSavedProjection(dosage) === true;
   // A matching dose cannot revive source text that the native import has
   // already rejected, including an explicit text clear.
   clause.sourceProjectionVerified = clause.sourceProjectionVerified !== false && verified;

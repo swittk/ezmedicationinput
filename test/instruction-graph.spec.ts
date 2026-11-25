@@ -7722,3 +7722,41 @@ describe("round68 graph relation metadata and precise realization", () => {
       }
   });
 });
+
+
+describe("round68 fresh graph cadence authority", () => {
+  const fresh = <T>(input: T): T => JSON.parse(JSON.stringify(input));
+  it.each([
+    "Swallow 1 tablet whole twice daily; do not crush",
+    "Dissolve 2 tablets in 100 mL water, then drink twice daily"
+  ])("keeps live cadence over unverified graph wording while preserving verified source: %s", source => {
+    const parsed = parsePublicSig(source), clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph?.primaryOwnership?.dose).toBeDefined();
+    for (const frequency of [1, 2]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: clause.dose!.value, unit: clause.dose!.unit } }],
+        timing: { repeat: { frequency, period: 1, periodUnit: "d" } },
+        extension: [buildInstructionGraphExtension(clause.instructionGraph)!] };
+      const before = JSON.stringify(row), native = importCanonicalCourse(row), r6 = toDosageDetails([row]);
+      for (const input of [row, native, r6, fresh(toFhirR5Dosages(r6))]) {
+        const preview = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
+        expect(preview).toContain(frequency === 1 ? "once daily" : "twice daily");
+        if (frequency === 1) expect(preview).not.toContain("twice daily");
+        if (source.startsWith("Swallow")) {
+          expect(preview).toContain("Swallow 1 tablet whole");
+          expect(preview.toLowerCase()).toContain("do not crush");
+        } else {
+          expect(preview).toContain("Dissolve 2 tablets");
+          expect(preview).toContain("100 mL water");
+        }
+      }
+      expect(JSON.stringify(row)).toBe(before);
+      expect(JSON.stringify(r6)).toContain(source);
+    }
+    // Positive fingerprints retain the existing roundtrip preview: exact
+    // Swallow source or the preparation's explicit administration wording.
+    const verifiedPreview = source.startsWith("Swallow") ? source
+      : "Dissolve 2 tablets in 100 mL water. Drink the medication orally twice daily.";
+    for (const verified of [parsed.fhir, fresh(parsed.fhir)])
+      expect(formatSig(verified, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(verifiedPreview);
+  });
+});

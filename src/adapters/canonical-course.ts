@@ -1,3 +1,4 @@
+import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
 import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
@@ -675,12 +676,13 @@ function baseAdministration(
   const choice = choiceMarker ? getDosageAlternativeChoice({ modifierExtension: [choiceMarker] }) : undefined;
   let weekdaysMarker: FhirR6Extension | undefined;
   let sourceFields: ReturnType<typeof sourceOwnership>;
-  let hasCarrierMaterial = false;
+  let hasCarrierMaterial = false, hasInstructionGraph = false;
   for (const e of raw.extension ?? []) {
     if (e.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL && !weekdaysMarker) weekdaysMarker = e;
     else if (e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL && sourceFields === undefined)
       sourceFields = sourceOwnership(e);
     else if (e.url === INFUSION_CARRIER_MATERIAL_EXTENSION_URL) hasCarrierMaterial = true;
+    else if (e.url === MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL) hasInstructionGraph = true;
   }
   const amounts: CanonicalAmount[] | undefined = raw.doseAndRate ? [] : undefined;
   for (const value of raw.doseAndRate ?? [])
@@ -688,7 +690,7 @@ function baseAdministration(
   let sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
   const carrier = raw.doseAndRate?.[0]?.rateRatio && (sourceContext || format === "r5" && hasCarrierMaterial)
     ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined;
-  if (format === "r5" && (sourceContext || sourceFields?.clocks || carrier?.carrierMaterial) &&
+  if (format === "r5" && (sourceContext || hasInstructionGraph || sourceFields?.clocks || carrier?.carrierMaterial) &&
       sourceTextVerified !== false && raw.extension?.length) {
     const matches = dosageMatchesSavedProjection(input);
     if (matches === false) {
@@ -698,9 +700,9 @@ function baseAdministration(
       if (raw.text === undefined || originalText === undefined || originalText === dosageTextFingerprint(input))
         sourceTextVerified = false;
     } else if (matches === undefined && sourceTextVerified === undefined &&
-        carrier?.carrierMaterial && !getFreshDoseSource(input)) {
-      // A cold standalone carrier has no source agreement to certify on save.
-      // Preserve its text, while its current typed material owns the preview.
+        (hasInstructionGraph || carrier?.carrierMaterial) && !getFreshDoseSource(input)) {
+      // A saved graph or carrier without positive source agreement cannot
+      // certify its old wording. Keep it as provenance while live facts render.
       sourceTextVerified = false;
     }
   }
