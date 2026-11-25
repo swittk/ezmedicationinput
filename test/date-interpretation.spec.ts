@@ -1664,5 +1664,35 @@ it("retains non-enumerable own calendar resolver callbacks", () => {
     const parsed = parseBatch(source, options);
     expect(parsed.fhir[0].timing?.event).toEqual(["2026-09-28"]);
     expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
+    const event = parsed.meta.canonical.clauses[0].schedule!.calendarEvents![0];
+    expect(event).toMatchObject({ calendar: resolver.id, calendarYear: 3026, isoDate: "2026-09-28" });
+    expect(Boolean(event.inferredYear)).toBe(!source.endsWith("3026"));
+  }
+});
+
+
+it.each([false, true])("round74 retains own calendar callback receivers (enumerable %s)", enumerable => {
+  class Calendar {
+    id = enumerable ? "round74-calendar-enum" : "round74-calendar-hidden";
+    #offset = 1000;
+    constructor() {
+      Object.defineProperty(this, "resolveYear", { value: this.resolveYear, enumerable });
+      Object.defineProperty(this, "calendarYearFromIsoYear", { value: this.calendarYearFromIsoYear, enumerable });
+    }
+    toIsoYear(year: number) { return year - this.#offset; }
+    resolveYear(year: number, digits: number) {
+      return digits === 4 && year >= 3000
+        ? { isoYear: this.toIsoYear(year), calendarYear: year, inferredYear: false } : undefined;
+    }
+    calendarYearFromIsoYear(year: number) { return year + this.#offset; }
+  }
+  const resolver = new Calendar(); registerMedicationDateResolver(resolver);
+  const options: ParseOptions = { datePolicy: { calendars: [resolver.id], referenceDate: REFERENCE_DATE } };
+  for (const source of ["take 1 tablet on 28/9/3026", "take 1 tablet on 28/9"]) {
+    const parsed = parseBatch(source, options), event = parsed.meta.canonical.clauses[0].schedule!.calendarEvents![0];
+    expect(event).toMatchObject({ calendar: resolver.id, calendarYear: 3026, isoDate: "2026-09-28" });
+    expect(Boolean(event.inferredYear)).toBe(!source.endsWith("3026"));
+    expect(parsed.fhir[0].timing?.event).toEqual(["2026-09-28"]);
+    expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
   }
 });

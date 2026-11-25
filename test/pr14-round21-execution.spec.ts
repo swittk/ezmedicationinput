@@ -2597,6 +2597,24 @@ describe("round34 execution boundary regressions", () => {
     ]);
   });
 
+  it.each(versions)("resolves Vienna authored clocks to the first fold instant (%s)", version => {
+    const member = dose();
+    member.schedule!.recurrence = { frequency: 1, period: 1, periodUnit: Unit.Day, clocks: ["02:30:00"] };
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [member] }] };
+    const input = wire(course, version), before = JSON.stringify(input);
+    const query = { orderedAt: "2026-10-25T00:00:00Z", from: "2026-10-25T00:00:00Z", timeZone: "Europe/Vienna" };
+    expect(nextDueDoses(input, { ...query, limit: 2 })).toEqual([
+      "2026-10-25T02:30:00+02:00", "2026-10-26T02:30:00+01:00"
+    ]);
+    expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(1);
+    expect(nextDueDoses(input, { ...query, from: "2026-10-25T01:00:00Z", limit: 1 }))
+      .toEqual(["2026-10-26T02:30:00+01:00"]);
+    const gap = { orderedAt: "2026-03-29T00:00:00Z", from: "2026-03-29T00:00:00Z", timeZone: "Europe/Vienna" };
+    expect(nextDueDoses(input, { ...gap, limit: 1 })).toEqual(["2026-03-30T02:30:00+02:00"]);
+    expect(calculateTotalUnits({ dosage: input, ...gap, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+    expect(JSON.stringify(input)).toBe(before);
+  });
+
   it.each(versions)("repeats a clamped civil month from the resolved prior exclusive end (%s)", version => {
     const maintenance = dose(2);
     maintenance.schedule!.recurrence!.courseLength = { value: 2, unit: "d" };

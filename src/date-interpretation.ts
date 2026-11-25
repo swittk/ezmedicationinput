@@ -99,12 +99,10 @@ export function registerMedicationDateResolver(resolver: MedicationDateResolver)
   normalized.id = id;
   const prototype = Object.getPrototypeOf(resolver);
   if (prototype !== Object.prototype && prototype !== null) {
-    // Own methods already run against the copied configuration. Prototype
-    // methods need the original instance for private fields.
-    if (!Object.prototype.hasOwnProperty.call(resolver, "resolveYear"))
-      normalized.resolveYear = resolver.resolveYear.bind(resolver);
-    if (!Object.prototype.hasOwnProperty.call(resolver, "calendarYearFromIsoYear"))
-      normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
+    // Class callbacks retain prototype helpers and private state even when
+    // the constructor exposes them as own properties.
+    normalized.resolveYear = resolver.resolveYear.bind(resolver);
+    normalized.calendarYearFromIsoYear = resolver.calendarYearFromIsoYear?.bind(resolver);
   }
   DATE_RESOLVERS.set(id, normalized);
 }

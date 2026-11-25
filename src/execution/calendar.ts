@@ -258,13 +258,12 @@ export function makeZonedDate(
   day: number,
   hour: number,
   minute: number,
-  second: number,
-  preferEarlier = false
+  second: number
 ): Date | null {
   const initialUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-  // A date boundary owns the first occurrence of midnight in a fold.
+  // Authored clocks and date boundaries own the first occurrence in a fold.
   // Seed from the preceding civil day without adding another offset lookup.
-  let candidate = new Date(initialUtc - (preferEarlier ? 86400000 : 0));
+  let candidate = new Date(initialUtc - 86400000);
   const offset = getOffset(candidate, timeZone);
   candidate = new Date(initialUtc - offset * SECONDS_PER_MINUTE * 1000);
   let parts = getTimeParts(candidate, timeZone);
@@ -299,8 +298,7 @@ export function calendarBoundaryDate(
   minute: number,
   second: number
 ): Date | null {
-  const exact = makeZonedDate(timeZone, year, month, day, hour, minute, second,
-    hour === 0 && minute === 0 && second === 0);
+  const exact = makeZonedDate(timeZone, year, month, day, hour, minute, second);
   if (exact) return exact;
   const wallUtc = Date.UTC(year, month - 1, day, hour, minute, second);
   const wall = new Date(wallUtc);

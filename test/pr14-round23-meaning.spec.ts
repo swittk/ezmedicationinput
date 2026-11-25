@@ -6025,3 +6025,39 @@ describe("round73 logical event identity", () => {
     }
   });
 });
+
+
+describe("round74 class callback receivers", () => {
+  it.each([false, true])("retains private state in an own detector callback (enumerable %s)", enumerable => {
+    const locale = enumerable ? "round74enum" : "round74hidden", marker = "__" + locale + "__";
+    class Detector {
+      locale = locale;
+      priority = 1500;
+      #marker = marker;
+      constructor() { Object.defineProperty(this, "test", { value: this.test, enumerable }); }
+      test(text: string) { return text === this.#marker; }
+    }
+    registerMedicationLocaleDetector(new Detector());
+    expect(inferMedicationLocale(marker)).toBe(locale);
+    expect(inferMedicationLocale("ordinary English")).toBe("en");
+  });
+
+  it.each([false, true])("retains private state in an own segment callback (enumerable %s)", enumerable => {
+    const locale = enumerable ? "round74segmentenum" : "round74segmenthidden";
+    class Segmenter {
+      locale = locale;
+      script = /[ⴲⴳ]/gu;
+      #size = 1;
+      constructor() { Object.defineProperty(this, "segment", { value: this.segment, enumerable }); }
+      *segment(input: string) {
+        for (let index = 0; index < input.length; index += this.#size)
+          yield { segment: input.slice(index, index + this.#size), index };
+      }
+    }
+    registerMedicationSurfaceSegmenter(new Segmenter());
+    const registered = listMedicationSurfaceSegmenters().find(item => item.locale === locale)!;
+    expect([...registered.segment("ⴲⴳ")]).toEqual([{ segment: "ⴲ", index: 0 }, { segment: "ⴳ", index: 1 }]);
+    expect(registered.script.global).toBe(false);
+    expect(registered.script.sticky).toBe(false);
+  });
+});
