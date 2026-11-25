@@ -421,7 +421,8 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "duration": {
       const object = c.theme ?? (suppressSite(c) ? undefined : c.site);
-      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}`;
+      const time = realizeTimeArgument(c);
+      return `${c.label}${object ? ` ${object}` : ""}${c.duration ? ` for ${c.duration}` : ""}${time ? ` ${time}` : ""}`;
     }
     case "duration-activity": {
       const target = c.activity ?? c.substance ?? c.result;
@@ -588,7 +589,8 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       // as a qualifier; retain its full translated label, including laterality.
       const qualifier = !c.theme && object &&
         medicationInstructionActionLocaleRealizerConfig(c.realizerConfig, c.locale)?.suppressSiteConcepts?.length;
-      return `${c.label}${qualifier ? ` (${object})` : thaiAsciiSeparated(object)}${c.duration ? ` ${c.duration}` : ""}`;
+      const time = realizeTimeArgument(c);
+      return `${c.label}${qualifier ? ` (${object})` : thaiAsciiSeparated(object)}${c.duration ? ` ${c.duration}` : ""}${time ?? ""}`;
     }
     case "duration-activity": {
       const target = c.activity ?? c.substance ?? c.result;

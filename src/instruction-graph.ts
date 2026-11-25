@@ -1016,16 +1016,6 @@ function parseDurationArgument(
   return undefined;
 }
 
-function parseBareDurationArgument(
-  parts: Lexeme[],
-  start: number,
-  endExclusive: number,
-  input: string,
-  offset: number
-): AdviceArgument | undefined {
-  return durationArgumentAt(parts, start, endExclusive, input, offset);
-}
-
 function partIndexAfterAbsoluteSourceEnd(
   parts: Lexeme[],
   sourceEnd: number,
@@ -1296,7 +1286,8 @@ const OBJECT_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
       : undefined;
   return { args: parsedArgs(
     objectEnd > argumentStart
-      ? argumentFromParts(parts, argumentStart, objectEnd, input, AdviceArgumentRole.Object, options)
+      ? argumentFromParts(parts, argumentStart, objectEnd, input,
+        c.definition.argumentParser === "bare-duration" ? undefined : AdviceArgumentRole.Object, options)
       : undefined,
     duration,
     localTime
@@ -1602,14 +1593,8 @@ const DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
     c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
   )) };
 };
-const BARE_DURATION_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const parsed = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
-  return { args: parsedArgs(parsed, parsed ? undefined : argumentFromParts(
-    c.parts, c.argumentStart, c.segmentEnd, c.input, undefined, c.options
-  )) };
-};
 const DURATION_ACTIVITY_ARGUMENT_PARSER: ActionArgumentParser = (c) => {
-  const duration = parseBareDurationArgument(c.parts, c.argumentStart, c.segmentEnd, c.input, c.offset) ?? c.duration;
+  const duration = c.duration;
   let localTime: AdviceArgument | undefined;
   const adjunctEnd = c.relIndex >= c.argumentStart ? c.relIndex : c.segmentEnd;
   for (let index = c.argumentStart; index < adjunctEnd; index += 1) {
@@ -1689,7 +1674,8 @@ const ACTION_ARGUMENT_PARSERS: Record<MedicationInstructionActionArgumentParser,
   site: SITE_ARGUMENT_PARSER,
   "site-relation": SITE_RELATION_ARGUMENT_PARSER,
   duration: DURATION_ARGUMENT_PARSER,
-  "bare-duration": BARE_DURATION_ARGUMENT_PARSER,
+  // A bare duration still retains its preceding typed target and local Time.
+  "bare-duration": OBJECT_DURATION_ARGUMENT_PARSER,
   "preposed-duration": PREPOSED_DURATION_ARGUMENT_PARSER,
   "duration-activity": DURATION_ACTIVITY_ARGUMENT_PARSER,
   activity: ACTIVITY_ARGUMENT_PARSER

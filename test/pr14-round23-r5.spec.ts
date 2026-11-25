@@ -6601,3 +6601,44 @@ describe("round76 typed action complements in normalized previews", () => {
     }
   });
 });
+
+
+describe("round77 procedure target beside duration and time", () => {
+  const current = (value: string, locale: "en" | "th") => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "")
+    .replace(/\.$/u, "");
+  it.each([
+    { source: "Close right eye for 1 minute after each dose", side: "right", code: "1290032005", duration: 1,
+      event: "each dose", relation: AdviceRelation.After,
+      en: "Close the right eye for 1 minute after each dose", th: "หลับตา (ตาขวา) 1 นาทีหลังการให้ยาแต่ละครั้ง" },
+    { source: "Close left eye 1 minute", side: "left", code: "1290031003", duration: 1,
+      event: undefined, relation: undefined,
+      en: "Close the left eye for 1 minute", th: "หลับตา (ตาซ้าย) 1 นาที" },
+    { source: "Close right eye at bedtime", side: "right", code: "1290032005", duration: undefined,
+      event: "bedtime", relation: AdviceRelation.On,
+      en: "Close the right eye at bedtime", th: "หลับตา (ตาขวา)ก่อนนอน" },
+  ])("retains the selected eye with independent complements: $source", fixture => {
+    const parsed = parsePublicSig(fixture.source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.predicate.lemma).toBe("close");
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Site)).toMatchObject({
+      conceptId: fixture.side + " eye", coding: { code: fixture.code }
+    });
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Duration)?.quantity)
+      .toEqual(fixture.duration === undefined ? undefined : { value: fixture.duration, unit: "min" });
+    const time = frame.args.find(arg => arg.role === AdviceArgumentRole.Time);
+    expect(time?.normalized).toBe(fixture.event);
+    expect(time?.relation ?? frame.relation).toBe(fixture.relation);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext),
+      persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const)
+        expect(current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale)).toBe(fixture[locale]);
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toBeUndefined();
+      expect(administration.syntax!.instructionGraph!.sourceText).toBe(fixture.source);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+});
