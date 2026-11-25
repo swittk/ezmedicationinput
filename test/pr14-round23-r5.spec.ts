@@ -6139,6 +6139,20 @@ describe("round76 shared current preview owners", () => {
     expect(importCanonicalCourse(raw).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange).toEqual(range);
   });
 
+  it("keeps opaque and standard duration endpoints separate in short previews", () => {
+    const raw = course({ timing: { repeat: { boundsRange: {
+      low: { value: 2, unit: "h", system: "urn:clinic:duration", code: "h" },
+      high: { value: 3, unit: "h", system: "http://unitsofmeasure.org", code: "h" },
+    } } } });
+    const rows = persist(toFhirR5Dosages(persist(raw)));
+    for (const input of [raw, rows, rows[0]]) for (const locale of ["en", "th"] as const) {
+      expect(formatSig(input, "short", { locale })).toContain("x2h – 3h");
+      expect(formatSig(input, "short", { locale })).not.toContain("x2-3h");
+    }
+    expect(projectCanonicalCourse(importCanonicalCourse(raw)).fhirNext.step![0].component[0].timing!.repeat!.boundsRange)
+      .toEqual(raw.step![0].component[0].timing!.repeat!.boundsRange);
+  });
+
   it.each([false, true])("keeps member-only directions next to an independent warning, matching header=%s", matchingHeader => {
     const text = "Swallow 1 tablet whole";
     const graph = parseSig("Do not crush").meta.canonical.clauses[0].instructionGraph!;

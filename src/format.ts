@@ -1084,7 +1084,7 @@ function formatDurationShort(schedule: CanonicalScheduleExpr): string | undefine
   const durationUnit = schedule.durationUnit ?? schedule.durationUnitLabel;
   const durationMaxUnit = schedule.durationMaxUnit ?? schedule.durationMaxUnitLabel;
   if (schedule.durationIsRange && schedule.duration !== undefined && schedule.durationMax !== undefined &&
-      (!durationUnit || !durationMaxUnit)) {
+      (!schedule.durationUnit || !schedule.durationMaxUnit)) {
     const low = (schedule.durationComparator ?? "") + stripTrailingZero(schedule.duration) + (durationUnit ?? "");
     const high = (schedule.durationMaxComparator ?? "") + stripTrailingZero(schedule.durationMax) + (durationMaxUnit ?? "");
     return `x${low} – ${high}`;
