@@ -375,6 +375,8 @@ function restoreComponentDelta(
       if (!old) continue;
       const baseline = local.baseline?.doseAndRate?.[sourceIndex];
       const live = row.doseAndRate?.[i];
+      const expressionSlot = baseline?.expressionSlot
+        ? live?.extension?.find(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL) : undefined;
       const unchangedDose = !!(
         baseline?.dose !== undefined &&
         (old.doseExpression || old.doseQuantity?.comparator || old.doseRange) &&
@@ -417,8 +419,10 @@ function restoreComponentDelta(
       if (old.doseExpression) {
         if (unchangedDose && baseline?.doseExpression === undefined &&
             !Object.prototype.hasOwnProperty.call(live, "doseExpression"))
-          entry.expression = old.doseExpression;
-        else if (!equalStructuredValues(entry.expression, old.doseExpression)) supersededExpression = true;
+          entry.expression = expressionSlot
+            ? expressionSlot.extension?.find(item => item.url === "doseExpression")?.valueExpression
+            : old.doseExpression;
+        if (!equalStructuredValues(entry.expression, old.doseExpression)) supersededExpression = true;
       }
       if (old.doseQuantity?.comparator) {
         if (
@@ -446,8 +450,10 @@ function restoreComponentDelta(
       if (old.rateExpression) {
         if (unchangedRate && baseline?.rateExpression === undefined &&
             !Object.prototype.hasOwnProperty.call(live, "rateExpression"))
-          entry.rateExpression = old.rateExpression;
-        else if (!equalStructuredValues(entry.rateExpression, old.rateExpression))
+          entry.rateExpression = expressionSlot
+            ? expressionSlot.extension?.find(item => item.url === "rateExpression")?.valueExpression
+            : old.rateExpression;
+        if (!equalStructuredValues(entry.rateExpression, old.rateExpression))
           supersededExpression = true;
       }
       if (old.rateQuantity?.comparator) {
@@ -483,17 +489,28 @@ function restoreComponentDelta(
         }
       }
       // A strict R5 expression-only slot needs an extension to satisfy
-      // ele-1. The row delta now owns its exact expressions, either restored
-      // above or retained in superseded source history. Consume only that
-      // duplicate generated annotation; unknown source children stay inert.
+      // ele-1. Consume its duplicate generated annotation. A carrier displaced
+      // by current structured fields stays intact only as inert source history.
       const extensions = entry.provenance?.extension as FhirExtension[] | undefined;
       if (extensions?.length && (old.doseExpression || old.rateExpression)) {
         const restored = { url: R5_EXPRESSION_SLOT_SOURCE_URL, extension: [
           ...(old.doseExpression ? [{ url: "doseExpression", valueExpression: old.doseExpression }] : []),
           ...(old.rateExpression ? [{ url: "rateExpression", valueExpression: old.rateExpression }] : [])
         ] };
-        const kept = extensions.filter(item => !equalStructuredValues(item, restored));
-        if (kept.length !== extensions.length) {
+        const kept: FhirExtension[] = [];
+        let changed = false;
+        for (const item of extensions) {
+          if (equalStructuredValues(item, restored)) {
+            changed = true;
+          } else if (item === expressionSlot && (
+            !equalStructuredValues(item.extension?.find(child => child.url === "doseExpression")?.valueExpression, entry.expression) ||
+            !equalStructuredValues(item.extension?.find(child => child.url === "rateExpression")?.valueExpression, entry.rateExpression)
+          )) {
+            kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
+            changed = true;
+          } else kept.push(item);
+        }
+        if (changed) {
           entry.provenance = { ...entry.provenance };
           if (kept.length) entry.provenance.extension = kept;
           else delete entry.provenance.extension;

@@ -11621,3 +11621,37 @@ describe("round68 current interchange ownership", () => {
     expect(source).toEqual(before);
   });
 });
+
+
+describe("round68 live R5 expression carrier", () => {
+  it.each(["doseExpression", "rateExpression"] as const)("reads the current %s owner through fresh saves", field => {
+    const original = { language: "text/fhirpath", expression: "%patient.weight" };
+    const replacement = { language: "text/fhirpath", expression: "%patient.weight * 2" };
+    const lifted = { language: "text/fhirpath", expression: "%patient.weight * 3" };
+    const note: FhirExtension = { url: "urn:clinic:slot-note", valueString: "keep current slot annotation" };
+    for (const edit of ["unchanged", "replace", "remove", "lifted"] as const) {
+      const source = course({ doseAndRate: [field === "doseExpression" ? { doseExpression: original } : { rateExpression: original }] });
+      let rows: EzDosage[] = persist(toFhirR5Dosages(source));
+      const entry = rows[0].doseAndRate![0];
+      const slot = entry.extension!.find(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL)!;
+      slot.id = "current-expression-slot";
+      slot.extension!.push({ url: "urn:clinic:expression-note", valueString: "retain carrier metadata" });
+      (entry.extension ??= []).push(note);
+      if (edit === "replace" || edit === "lifted") slot.extension!.find(item => item.url === field)!.valueExpression = replacement;
+      if (edit === "remove") entry.extension = entry.extension!.filter(item => item.url !== R5_EXPRESSION_SLOT_SOURCE_URL);
+      if (edit === "lifted") entry[field] = lifted;
+      const expected = edit === "unchanged" ? original : edit === "replace" ? replacement : edit === "lifted" ? lifted : undefined;
+      for (let save = 0; save < 2; save++) {
+        const before = persist(rows), wire = toDosageDetails(rows);
+        const actual = wire.step![0].component[0].doseAndRate![0];
+        expect(actual[field], edit + " save " + save).toEqual(expected);
+        expect(actual.extension).toContainEqual(note);
+        if (edit !== "remove") expect(actual.extension?.reduce<FhirExtension[]>((all, item) =>
+          all.concat(item.url === DOSAGE_RECONCILIATION_SOURCE_URL ? item.extension ?? [] : [item]), []
+        )).toContainEqual(slot);
+        expect(rows).toEqual(before);
+        rows = persist(toFhirR5Dosages(wire));
+      }
+    }
+  });
+});
