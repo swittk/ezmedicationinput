@@ -228,7 +228,9 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   }
   add(nested, sourceRelation);
   if (argument.sourceExtensions) addFieldSources(nested, argument.sourceExtensions);
-  return { url: "argument", ...(argument.sourceId !== undefined ? { id: argument.sourceId } : {}), extension: nested };
+  const result: FhirExtension = { url: "argument", extension: nested };
+  if (argument.sourceId !== undefined) result.id = argument.sourceId;
+  return result;
 }
 
 function buildActionExtension(frame: AdviceFrame): FhirExtension {
