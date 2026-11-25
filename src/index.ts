@@ -35,12 +35,6 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string | { authored: s
     dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)));
 }
 
-/** The native text-only owner may already lead the generated clauses.
- * Reuse their exact joining convention; a quantity substring is not that owner. */
-function authoredClauseAlreadyRendered(rendered: string, authored: string): boolean {
-  return rendered === authored || rendered.startsWith(joinGeneratedClauses([authored, ""]));
-}
-
 /** Source wording is authoritative only when the live dose still matches its
  * original source. Direct parser rows carry ownership flags; serialized
  * R5 rows use their existing persisted edit fingerprint. A failed match must
@@ -1197,10 +1191,12 @@ export function formatSig(
     const administration = course.stages.find(stage => stage.administrations.length)?.administrations[0];
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
-    const rendered = formatCanonicalCourse(course, style, options ?? {});
-    if (typeof edit === "object" && options?.realizationMode === "roundtrip" && !authoredClauseAlreadyRendered(rendered, edit.authored)) {
-      const words = resolveCourseLanguage(options.locale, options.i18n);
-      return words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), edit.authored);
+    const authored = typeof edit === "object" && options?.realizationMode === "roundtrip"
+      ? { text: edit.authored, rendered: false } : undefined;
+    const rendered = formatCanonicalCourse(course, style, options ?? {}, undefined, authored);
+    if (authored && !authored.rendered) {
+      const words = resolveCourseLanguage(options?.locale, options?.i18n);
+      return words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), authored.text);
     }
     return rendered;
   }
@@ -1310,8 +1306,12 @@ function formatParseBatchContents(
   batch:ParseBatchResult,style:"short"|"long",separator:string,
   wireSteps:ParseBatchResult["fhirNext"]["step"]
 ):string {
-  const steps=batch.meta.canonical.course?.stages??wireSteps;
-  if(steps&&steps.length>1)return style==="short"?batch.shortText:batch.longText;
+  const course=batch.meta.canonical.course,steps=course?.stages??wireSteps;
+  const whole=style==="short"?batch.shortText:batch.longText;
+  // Preserve the imported renderer's selected directions without repeating
+  // its clinical-fact classification or replacing independent item joining.
+  if(course?.provenance?.format==="r6"&&course.instruction&&whole===course.instruction)return whole;
+  if(steps&&steps.length>1)return whole;
   if(batch.fhirNext.repeatCycle||batch.fhirNext.safety||batch.meta.canonical.course?.cycleCount!==undefined)
     return style==="short"?batch.shortText:batch.longText;
   for(const step of steps??[])if(step.start||step.end||step.count!==undefined||step.safety)
@@ -1502,12 +1502,15 @@ function fromFhirDosageInternal(
     getDosageExcludedDates(dosage).length > 0 ||
     getDosageExcludedWeekdays(dosage).length > 0;
   const exactSource = replacementText ?? maximumDoseSource ?? (!unverified && guarded && dosage.text ? dosage.text : undefined);
-  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled)
-    : nativeCourse ? formatCanonicalCourse(nativeCourse, "short", options) : suppressMaximumDisplay
+  const authored = typeof edit === "object" && options?.realizationMode === "roundtrip" ? edit.authored : undefined;
+  const shortAuthored = authored ? { text: authored, rendered: false } : undefined;
+  const longAuthored = authored ? { text: authored, rendered: false } : undefined;
+  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled, shortAuthored)
+    : nativeCourse ? formatCanonicalCourse(nativeCourse, "short", options, undefined, shortAuthored) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options));
-  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled)
-    : nativeCourse ? formatCanonicalCourse(nativeCourse, "long", options) : suppressMaximumDisplay
+  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled, longAuthored)
+    : nativeCourse ? formatCanonicalCourse(nativeCourse, "long", options, undefined, longAuthored) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options));
   if (!exactSource && !nativeCourse) {
@@ -1533,9 +1536,9 @@ function fromFhirDosageInternal(
     // The explicit replacement is independently authored prose. Current
     // structured fields remain the directions; do not certify or parse it.
     const words = resolveCourseLanguage(options.locale, options.i18n, localization);
-    if (!authoredClauseAlreadyRendered(shortText, edit.authored))
+    if (!shortAuthored?.rendered)
       shortText = words.withAuthoredDirections(shortText.replace(/\.\s*$/u, ""), edit.authored);
-    if (!authoredClauseAlreadyRendered(computedLong, edit.authored))
+    if (!longAuthored?.rendered)
       computedLong = words.withAuthoredDirections(computedLong.replace(/\.\s*$/u, ""), edit.authored);
   }
   const longText = computedLong || dosage.text || "";

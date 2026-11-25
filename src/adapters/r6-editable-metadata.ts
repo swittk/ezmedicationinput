@@ -73,7 +73,7 @@ export function retainDraftSteps(
  * every remaining recurrence field, including known and unfamiliar extensions. */
 function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undefined {
   if (!timing) return undefined;
-  const { id: _id, _timeOfDay: _clocks, ...repeat } = timing.repeat ?? {};
+  const { id: _id, _timeOfDay: _clocks, boundsRange, ...repeat } = timing.repeat ?? {};
   const clocks = getTimingClocks(timing.repeat);
   if (clocks?.length) repeat.timeOfDay = clocks;
   else delete repeat.timeOfDay;
@@ -91,7 +91,9 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
     const { id: _periodId, _start, _end, ...period } = repeat.boundsPeriod;
     repeat.boundsPeriod = period;
   }
-  return { event: getTimingEvents(timing), code: timing.code, repeat: timing.repeat ? repeat : undefined };
+  return { event: getTimingEvents(timing), code: timing.code, repeat: timing.repeat
+    ? boundsRange ? { ...repeat, boundsRange: draftCompletionRange(boundsRange) } : repeat
+    : undefined };
 }
 /** Compare existing clinical quantity choices without treating Element IDs or
  * primitive annotations as a new completion. Original quantities stay untouched. */
@@ -188,7 +190,8 @@ function matchingDraftOwnership(active: FhirR6DosageStep[], saved: FhirR6DosageS
       if (!prior.end && index <= lastDraftPredecessor) {
         const before = prior.component[member], after = current.component[member];
         // Getters return fresh arrays; weekday order cannot change completion.
-        if (!equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
+        if ((before.asNeeded === true) !== (after.asNeeded === true) ||
+            !equalStructuredValues(draftCompletionTiming(before.timing), draftCompletionTiming(after.timing)) ||
             !equalStructuredValues(getDosageCondition(before), getDosageCondition(after)) ||
             !equalStructuredValues(draftAnchoredLength(before), draftAnchoredLength(after)) ||
             !equalStructuredValues(draftMemberPhase(before), draftMemberPhase(after)) ||

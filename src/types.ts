@@ -669,7 +669,7 @@ export interface FhirR6Dosage extends Omit<FhirDosage,
 }
 
 export interface FhirR6RelativeTime extends FhirR6BackboneElement {
-  contextReference?: FhirReference;
+  contextReference?: FhirR6Reference;
   contextDefinition?: string;
   contextPath?: string;
   contextCode?: FhirCodeableConcept;
@@ -714,6 +714,7 @@ export interface FhirDosage extends FhirBackboneElement {
   additionalInstruction?: FhirCodeableConcept[];
   /** FHIR R5 spelling. */
   asNeeded?: boolean;
+  _asNeeded?: FhirPrimitiveElement;
   asNeededFor?: FhirCodeableConcept[];
   doseAndRate?: FhirDoseAndRate[];
   maxDosePerPeriod?: FhirRatio[];

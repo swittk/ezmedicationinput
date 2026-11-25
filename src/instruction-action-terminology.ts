@@ -180,17 +180,20 @@ function flattenLocaleAliases(aliases: Record<string, string[]> | undefined): st
 }
 
 function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
-  return coding
-    ? {
-      system: coding.system,
-      version: coding.version,
-      code: coding.code,
-      display: coding.display,
-      extension: coding.extension?.map((extension) => ({ ...extension })),
-      _display: coding._display ? { ...coding._display } : undefined,
-      i18n: coding.i18n ? { ...coding.i18n } : undefined
+  if (!coding) return undefined;
+  const source = coding as FhirCoding & Record<string, unknown>;
+  const result: FhirCoding & Record<string, unknown> = {}, fields: Record<string, unknown> = result;
+  for (const key in source) {
+    const value = source[key];
+    switch (key) {
+      case "extension": result.extension = coding.extension?.map(extension => ({ ...extension })); break;
+      case "_system": case "_version": case "_code": case "_display": case "_userSelected": case "i18n":
+        fields[key] = value ? { ...(value as object) } : value;
+        break;
+      default: result[key] = value; break;
     }
-    : undefined;
+  }
+  return result;
 }
 
 /** Preserve coded constituents separately from equivalent whole-action codings. */

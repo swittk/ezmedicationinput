@@ -598,6 +598,12 @@ function amountLabel(amount: CanonicalAmount, kind: "dose" | "rate" | "rateRange
   return source ? words.amountRoleLabel(kind, undefined, source) : ordinary;
 }
 
+/** Transient renderer result for callers retaining independently authored text. */
+interface AuthoredDirectionsState {
+  text: string;
+  rendered: boolean;
+}
+
 /** Common clause preview; whole-course composition adds rich rates/expressions
  * without routing them through a more restrictive interchange version. */
 function formatCanonicalBase(
@@ -606,11 +612,13 @@ function formatCanonicalBase(
   options?: FormatOptions,
   compiled?: CanonicalSigClause,
   environment?: CourseFormatEnvironment,
-  source: CanonicalAdministration = a
+  source: CanonicalAdministration = a,
+  authored?: AuthoredDirectionsState
 ): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
   const authoredDirectionsOnly = a.text?.trim() && !administrationHasClinicalFacts(source, false, false, false);
+  if (authoredDirectionsOnly && authored && authored.text === a.text) authored.rendered = true;
   if (authoredDirectionsOnly && !a.limits?.length && !a.safety?.ifExceeded &&
       !a.additionalInstructions?.length && !a.patientInstruction) return a.text!;
   const env = environment ?? courseEnvironment(options),
@@ -636,7 +644,10 @@ function formatCanonicalBase(
     a.excludedWeekdays?.length;
   if (source.provenance?.format !== "r6" && source.provenance?.sourceTextVerified !== false &&
       options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
-      a.text?.trim() && (maxima || rich)) return a.text;
+      a.text?.trim() && (maxima || rich)) {
+    if (authored && authored.text === a.text) authored.rendered = true;
+    return a.text;
+  }
   // A structured import already built this exact scoped clause for item
   // metadata. Reuse it for both item and whole-course EN/TH previews instead
   // of reconstructing the same dose/timing from native fields five times.
@@ -649,6 +660,7 @@ function formatCanonicalBase(
   const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
     (source.schedule || source.route || source.target || source.siteReference || source.predicate || source.asNeeded) &&
     !administrationHasAmountFacts(source) && !source.method && !clause.instructionGraph?.actions.length;
+  if ((authoredQualifiers || partialAuthoredDirections) && authored && authored.text === a.text) authored.rendered = true;
   const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
     : clause;
@@ -732,7 +744,8 @@ export function formatCanonicalAdministration(
   a: CanonicalAdministration,
   style: "short" | "long" = "long",
   options?: FormatOptions,
-  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
+  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>,
+  authored?: AuthoredDirectionsState
 ): string {
   // A component's authored source is distinct from a course-wide instruction.
   if (
@@ -745,13 +758,16 @@ export function formatCanonicalAdministration(
         (v) =>
           v.quantity?.comparator || v.rate || v.rateRatio || v.rateRange || v.expression || v.rateExpression
       ))
-  )
+  ) {
+    if (authored && authored.text === a.text) authored.rendered = true;
     return a.text;
+  }
   return formatCanonicalCourse(
     { kind: "course", stages: [{ administrations: [a] }] },
     style,
     options,
-    compiled
+    compiled,
+    authored
   );
 }
 
@@ -759,22 +775,28 @@ export function formatCanonicalCourse(
   oneOrCourse: CanonicalCourse,
   style: "short" | "long" = "long",
   options?: FormatBatchOptions,
-  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>
+  compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>,
+  authored?: AuthoredDirectionsState
 ): string {
   // R6 imports preserve original text for interchange. Without an agreement
   // proof it cannot override independently editable structured dose/timing.
   // Parser-owned native courses and reconciled R5 imports retain source mode.
   const sourceReplayAllowed = oneOrCourse.provenance?.format !== "r6" &&
     oneOrCourse.provenance?.sourceTextVerified !== false;
-  if (!sourceReplayAllowed && oneOrCourse.instruction && !courseHasClinicalFacts(oneOrCourse))
+  if (!sourceReplayAllowed && oneOrCourse.instruction && !courseHasClinicalFacts(oneOrCourse)) {
+    if (authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
     return oneOrCourse.instruction;
+  }
   if (
     sourceReplayAllowed && oneOrCourse.instruction &&
     (options === undefined ||
       options.realizationMode === "roundtrip" ||
       (oneOrCourse.stages.length === 0 && !courseHasClinicalFacts(oneOrCourse)) ||
       (options.realizationMode !== "normalized" && prefersSourceInstruction(oneOrCourse)))
-  ) return oneOrCourse.instruction;
+  ) {
+    if (authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
+    return oneOrCourse.instruction;
+  }
   if (oneOrCourse.stages.length === 0 && !oneOrCourse.safety?.limits?.length &&
       !oneOrCourse.safety?.ifExceeded && !oneOrCourse.cycleInterval &&
       oneOrCourse.cycleCount === undefined) return "";
@@ -791,6 +813,7 @@ export function formatCanonicalCourse(
     // but can also contain an older cap. Label it beside current structured
     // facts using the same source/current distinction as timing-only members.
     const rendered = appendDoseLimits(repetition, oneOrCourse.safety?.limits, words, "course", oneOrCourse.safety?.ifExceeded);
+    if (oneOrCourse.instruction && authored && authored.text === oneOrCourse.instruction) authored.rendered = true;
     return oneOrCourse.instruction ? words.withAuthoredDirections(rendered, oneOrCourse.instruction) : rendered;
   }
   const only = oneOrCourse.stages.length === 1 ? oneOrCourse.stages[0] : undefined;
@@ -820,7 +843,7 @@ export function formatCanonicalCourse(
       !amount?.rateExpression
     ) {
       let rendered = formatCanonicalBase(
-        administration, style, options, compiled?.get(administration), environment
+        administration, style, options, compiled?.get(administration), environment, administration, authored
       );
       if (only.safety)
         rendered = appendDoseLimits(rendered, only.safety.limits, words, "stage", only.safety.ifExceeded);
@@ -937,7 +960,8 @@ export function formatCanonicalCourse(
           hasOffsets ? { ...options, includeTimesPerDaySummary: false } : options,
           display === component ? compiled?.get(component) : undefined,
           environment,
-          component
+          component,
+          authored
         );
         const expressions: string[] = [];
         if (hasOffsets && repeat) {

@@ -3413,7 +3413,16 @@ describe("round64 independent endpoint and authored direction ownership", () => 
       : field === "rateRatio" ? /(?:^|[^\d.])5 mL \/ 1 h\b/u
       : /(?:^|[^\d.])5–10 mL\/h\b/u;
     expect(text).toMatch(completeRate);
-    expect(text).not.toContain("30 minutes");
+    const saved = toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(valued))));
+    expect(saved.step![0].component[0].text).toBe("Infuse over 30 minutes");
+    const replaced: FhirR6DosageInstruction = { step: [{ component: [{
+      ...valued.step![0].component[0], timing: { repeat: { duration: 60, durationUnit: FhirPeriodUnit.Minute } },
+    }] }] };
+    const current = formatSig(replaced, "long", options);
+    expect(current).toMatch(completeRate);
+    expect(current).toContain("over 60 minutes");
+    expect(toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(replaced))))
+      .step![0].component[0].timing!.repeat!.duration).toBe(60);
   });
 
   it("supplies only a primitive companion for a missing R5 period minimum", () => {

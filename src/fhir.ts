@@ -1468,6 +1468,17 @@ function appendWarning(warnings: string[] | undefined, warning: string | undefin
   return warnings;
 }
 
+/** Match graph warning text against current native or clause instructions. */
+export function instructionTextRepresented(text: string, instructions: readonly { text?: string }[] | undefined): boolean {
+  const normalized = text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+  for (const instruction of instructions ?? []) {
+    if (!instruction.text?.trim()) continue;
+    const candidate = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
+    if (candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)) return true;
+  }
+  return false;
+}
+
 /** Shared FHIR terminology/source serializer for BOTH output versions.
  * This serializes coded context only; no course, dose or scheduling semantics
  * are read back from this interchange object. R5/R6 adapters own their own
@@ -1644,12 +1655,7 @@ export function serializeCanonicalContext(
     if (action.polarity !== AdvicePolarity.Negate) continue;
     const text = action.sourceText.trim();
     if (!text) continue;
-    const normalized = text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-    const alreadyRepresented = additionalInstructions.some((instruction) => {
-      const candidate = instruction.text.toLowerCase().replace(/[\s,;:.()]+/g, " ").trim();
-      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate);
-    });
-    if (!alreadyRepresented) additionalInstructions.push({ text, coding: undefined });
+    if (!instructionTextRepresented(text, additionalInstructions)) additionalInstructions.push({ text, coding: undefined });
   }
   if (additionalInstructions.length) {
     dosage.additionalInstruction = [];
