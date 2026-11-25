@@ -11,9 +11,10 @@ import type { CanonicalCourse, CanonicalAdministration } from "./canonical/cours
 import { hasAmountRole } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
 import { getDoseQuantityUnit } from "./maps";
-/** Replacement wording is replayable only while its saved clinical projection
- * still agrees. Structured edits use live facts; the exact text stays on wire. */
-function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
+/** Replacement wording replays alone only while its clinical projection agrees.
+ * Structured edits own current directions; explicitly replaced prose can be
+ * shown separately in roundtrip mode without certifying its clinical meaning. */
+function sourceDisplayEdit(dosage: FhirDosage): boolean | string | { authored: string } {
   // Parser rows are immutable by caller contract. Fresh external submissions
   // have no identity marker and verify their supplied fields below.
   if (getFreshDoseSource(dosage)) return false;
@@ -21,7 +22,9 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const originalText = getDosageSourceTextFingerprint(dosage);
   const textChanged = originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   const matches = dosageMatchesSavedProjection(dosage);
-  if (textChanged) return matches === true && dosage.text?.trim() ? dosage.text : true;
+  if (textChanged) return dosage.text?.trim()
+    ? matches === true ? dosage.text : { authored: dosage.text }
+    : true;
   // A persisted standalone item can have no source fingerprint. Its explicit
   // live guards and carrier material own clinical display; unverified narrative is provenance.
   return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
@@ -1186,7 +1189,12 @@ export function formatSig(
     const administration = course.stages.find(stage => stage.administrations.length)?.administrations[0];
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
-    return formatCanonicalCourse(course, style, options ?? {});
+    const rendered = formatCanonicalCourse(course, style, options ?? {});
+    if (typeof edit === "object" && options?.realizationMode === "roundtrip") {
+      const words = resolveCourseLanguage(options.locale, options.i18n);
+      return words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), edit.authored);
+    }
+    return rendered;
   }
   if (needsNativeR5Preview(dosage, options))
     return formatCanonicalCourse(courseFromR5([dosage], undefined, undefined, undefined, true), style, options ?? {});
@@ -1512,6 +1520,13 @@ function fromFhirDosageInternal(
     const words=resolveCourseLanguage(options?.locale,options?.i18n,localization);
     shortText = appendSourceLessRateRanges(shortText, dosage, words);
     computedLong = appendSourceLessRateRanges(computedLong, dosage, words);
+  }
+  if (typeof edit === "object" && options?.realizationMode === "roundtrip") {
+    // The explicit replacement is independently authored prose. Current
+    // structured fields remain the directions; do not certify or parse it.
+    const words = resolveCourseLanguage(options.locale, options.i18n, localization);
+    shortText = words.withAuthoredDirections(shortText.replace(/\.\s*$/u, ""), edit.authored);
+    computedLong = words.withAuthoredDirections(computedLong.replace(/\.\s*$/u, ""), edit.authored);
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];

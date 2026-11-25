@@ -1075,6 +1075,7 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     const saved = JSON.stringify(row);
     const replay = formatSig(row, "long", { realizationMode: "roundtrip" });
     expect(replay).toContain("in the morning");
+    expect(replay).toContain("after discussion with the clinician");
     expect(replay).not.toContain("bedtime");
     expect(parseSig(replay).meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
     expect(fromFhirDosage(row).fhir.text).toBe(row.text);
@@ -5831,5 +5832,32 @@ describe("round62 review: typed grammar and partial display facts", () => {
     const input: FhirR6DosageInstruction = { step: [{ component: [{ method: { coding: [coding] } }] }] };
     for (const value of views(input)) for (const style of ["short", "long"] as const)
       expect(formatSig(value, style, { ...options, locale: "th", realizationMode: "normalized" })).toContain("จิบอย่างระมัดระวัง");
+  });
+});
+
+
+describe("round66 explicit replacement directions", () => {
+  it("keeps current dose and timing authoritative beside contradictory replacement prose", () => {
+    const original = parseSig("Swallow 1 tablet whole at bedtime").fhir[0];
+    const current = JSON.parse(JSON.stringify(original)) as FhirDosage;
+    current.doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
+    current.timing!.repeat!.when = [EventTiming.Morning];
+    const replacement = "Swallow 1 tablet whole at bedtime after discussion with the clinician.";
+    const edited = { ...current, text: replacement };
+    for (const locale of ["en", "th"] as const) {
+      const options = { locale, realizationMode: "roundtrip" as const };
+      const label = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+      for (const text of [formatSig(edited, "long", options), fromFhirDosage(edited, options).longText]) {
+        const [currentText, authored] = text.split(label);
+        expect(currentText).toContain(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(currentText).toContain(locale === "en" ? "in the morning" : "เช้า");
+        expect(currentText).not.toMatch(/1 tablet|bedtime|ก่อนนอน/u);
+        expect(authored).toBe(replacement);
+      }
+      const normalized = formatSig(edited, "long", { locale, realizationMode: "normalized" });
+      expect(normalized).not.toContain("discussion with the clinician");
+      expect(formatSig(current, "long", options)).not.toContain(label);
+      expect(formatSig(current, "long", options)).not.toMatch(/1 tablet|bedtime|ก่อนนอน/u);
+    }
   });
 });
