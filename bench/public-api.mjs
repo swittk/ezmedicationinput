@@ -104,8 +104,16 @@ function checkpoint(complete = false) {
   }
 }
 checkpoint();
-const baseline = await import(pathToFileURL(baselineEntry).href);
-const candidate = await import(pathToFileURL(candidateEntry).href);
+let baseline, candidate;
+try {
+  baseline = await import(pathToFileURL(baselineEntry).href);
+  candidate = await import(pathToFileURL(candidateEntry).href);
+} catch (error) {
+  report.phase = "setup-error";
+  report.errors.push({ name: "setup", error: String(error.stack ?? error) });
+  checkpoint();
+  throw error;
+}
 const emaComparatorQuantity = { extension: [{
   url: candidate.EMA_QUANTITY_COMPARATOR_EXTENSION_URL,
   valueCoding: { system: candidate.EMA_QUANTITY_OPERATOR_SYSTEM, code: "100000000055" },
@@ -248,14 +256,15 @@ for (const locale of ["en", "th"]) {
 // Source-preserving formatting has its own clinical ownership and performance
 // boundary. A graph-backed authored dose must be retained when unchanged but
 // never replayed after the R5 dosage quantity is edited.
-const authoredGraphRow = baseline.parseSig("ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา", { locale: "th" })
-  .fhir[0];
+const authoredGraphSource = "ล้างมือก่อนหยอดตา หยอดตาขวา 1 หยด แล้วหลับตา";
+const authoredGraphRow = baseline.parseSig(authoredGraphSource, { locale: "th" }).fhir[0];
 const copiedAuthoredGraphRow = structuredClone(authoredGraphRow);
 const editedGraphRow = structuredClone(authoredGraphRow);
 if (!editedGraphRow?.doseAndRate?.[0]?.doseQuantity)
   throw new Error("Authoritative roundtrip benchmark requires the parsed quantity");
 editedGraphRow.doseAndRate[0].doseQuantity.value = 2;
-const amountlessGraphRow = baseline.parseSig("ผสมน้ำแล้วดื่ม", { locale: "th" }).fhir[0];
+const amountlessGraphSource = "ผสมน้ำแล้วดื่ม";
+const amountlessGraphRow = baseline.parseSig(amountlessGraphSource, { locale: "th" }).fhir[0];
 const addedDoseRow = { ...amountlessGraphRow, doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
 add("formatSig", "formatSig/R5-roundtrip-unchanged-thai", (m) =>
   m.formatSig(copiedAuthoredGraphRow, "long", { locale: "th", realizationMode: "roundtrip" })
@@ -273,12 +282,11 @@ add("formatParseBatch", "formatParseBatch/staged", (m) => m.formatParseBatch(par
 // Keep the shared legacy batches above, and also measure each build's usual
 // parse-then-format path. Parsing these fixtures is outside all timed work.
 for (const key of ["ordinary", "staged"]) {
-  const ownBatch = new Map([
-    [baseline, parsed[key]],
-    [candidate, candidate.parseSig(S[key])],
-  ]);
+  const ownBatch = new Map([[baseline, parsed[key]]]);
   add("formatParseBatch", "formatParseBatch/" + key + "-own-batch", (m) =>
     m.formatParseBatch(ownBatch.get(m), "long"));
+  // Prepare only selected fixtures, before probing or measuring the formatter.
+  cases[cases.length - 1].setup = () => ownBatch.set(candidate, candidate.parseSig(S[key]));
 }
 for (const [name, input] of [
   ["scalar", rows[0]],
@@ -718,8 +726,10 @@ function requireParallelSchedule(output) {
 const equivalenceOracles = new Map([
   ["nextDueDoses/scalar", completeScalarSchedule],
   ["nextDueDoses/parallel-array", requireParallelSchedule],
-  ["formatSig/R5-roundtrip-edited-thai", completeThaiRightEyeDose],
-  ["formatSig/R5-roundtrip-added-dose-thai", completeThaiPreparedDrink],
+  ["formatSig/R5-roundtrip-edited-thai", output =>
+    verifiedPreviewOrSource(output, completeThaiRightEyeDose(output), authoredGraphSource)],
+  ["formatSig/R5-roundtrip-added-dose-thai", output =>
+    verifiedPreviewOrSource(output, completeThaiPreparedDrink(output), amountlessGraphSource)],
   ["formatParseBatch/staged-own-batch", completeStagedBatch],
 ]);
 // Source-bearing R6 fixtures used to return the saved input verbatim. The
@@ -850,6 +860,11 @@ function verifiedPreviewOrSource(output, current, savedSource) {
   throw new Error("Preview is neither the independent current preview nor the saved-source fixture");
 }
 const equivalenceDetails = new Map();
+for (const name of ["formatSig/R5-roundtrip-edited-thai", "formatSig/R5-roundtrip-added-dose-thai"])
+  equivalenceDetails.set(name, {
+    classification: "different-clinical-output",
+    reason: "Baseline replays the exact former source instead of rendering the edited dose; raw timings retained without a regression verdict",
+  });
 const sourcePreviewDifference = {
   classification: "different-preview-work",
   reason: "Baseline replays saved source instead of generating the requested current-field preview; raw timings retained without a regression verdict",
@@ -975,6 +990,7 @@ for (const test of cases) {
     continue;
   }
   try {
+    test.setup?.();
     // Complete each probe before starting the next. A rejected baseline
     // must not leave an already-started candidate promise unhandled.
     let left = test.run(baseline, 0);
@@ -985,13 +1001,10 @@ for (const test of cases) {
     const oracle = equivalenceOracles.get(test.name);
     if (oracle && !oracle(right)) throw new Error("Candidate failed the independent clinical preview oracle");
     const equivalentWork = !oracle || oracle(left);
-    if (test.name === "nextDueDoses/scalar" && !equivalentWork)
-      throw new Error("Baseline failed the independent scalar schedule oracle");
+    if (!equivalentWork && !equivalenceDetails.has(test.name))
+      throw new Error("Baseline failed the independent clinical oracle for " + test.name);
     const equivalence = { equivalentWork, ...(equivalentWork ? {} : {
-      ...(equivalenceDetails.get(test.name) ?? {
-        classification: "different-clinical-output",
-        reason: "Baseline does not render the edited dose; raw timings retained without a regression verdict",
-      }),
+      ...equivalenceDetails.get(test.name),
       output: { baseline: left, candidate: right },
     }) };
     if (smoke) {
@@ -1065,6 +1078,7 @@ for (const test of cases) {
 for (const test of candidateOnlyCases) {
   const { api, name } = test;
   try {
+    test.setup?.();
     const probe = test.run(candidate, 0);
     const async = !!probe?.then;
     const output = async ? await probe : probe;
