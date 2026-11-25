@@ -5331,3 +5331,58 @@ describe("round35 execution cap and history oracles", () => {
   });
 });
 }
+
+
+describe("phase-local supplied count ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const forms = (course: CanonicalCourse) => [course, fresh(courseToR5(course)),
+    fresh(courseToR6(course)), fresh(toFhirR5Dosages(courseToR6(course)))];
+  const infusion = (dated: boolean) => parsePublicSig("Infuse 100 mL over 2 hours" +
+    (dated ? " starting 2026-11-22 at 08:00" : "") + ", then infuse 50 mL over 1 hour")
+    .meta.canonical.course!;
+
+  it.each([false, true])("preserves single-administration completion with an explicit zero count (%s)", dated => {
+    const query = { orderedAt: dated ? "2026-11-22T00:00:00Z" : "2026-11-22T08:00:00Z",
+      from: "2026-11-22T08:00:00Z", timeZone: "UTC", priorCount: 0, limit: 4 };
+    for (const dosage of forms(infusion(dated))) {
+      expect(nextDueDoses(dosage, query)).toEqual([
+        "2026-11-22T08:00:00+00:00", "2026-11-22T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 150, unit: "mL" });
+    }
+  });
+
+  it.each([{ dated: false, hour: "09" }, { dated: true, hour: "09" }, { dated: true, hour: "10" }])(
+    "does not charge recorded loading use to a future infusion ($dated at $hour)", ({ dated, hour }) => {
+    const query = { orderedAt: dated ? "2026-11-22T00:00:00Z" : "2026-11-22T08:00:00Z",
+      from: "2026-11-22T" + hour + ":00:00Z", timeZone: "UTC", priorCount: 1,
+      priorDoseTimes: ["2026-11-22T08:00:00Z"], limit: 4 };
+    for (const dosage of forms(infusion(dated))) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-11-22T10:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 50, unit: "mL" });
+    }
+  });
+
+  it.each([false, true])("keeps the future finite course's entire scalar or ranged allowance (%s)", ranged => {
+    const note = { url: "urn:clinical:phase-history", valueString: "Retain the authored phase" };
+    const amount = (value: number) => ranged
+      ? { doseRange: { low: { value, unit: "tab" }, high: { value: value * 2, unit: "tab" } } }
+      : { doseQuantity: { value, unit: "tab" } };
+    const rows: FhirDosage[] = [1, 2].map(value => ({ sequence: value, extension: [note],
+      doseAndRate: [amount(value)], timing: { repeat: { count: 2,
+        frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"] } } }));
+    const course = importCanonicalCourse(fresh(rows));
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-02T00:00:00Z",
+      timeZone: "UTC", priorCount: 1, priorDoseTimes: ["2026-01-01T09:00:00Z"], limit: 5 };
+    for (const options of [query, { from: query.from, timeZone: "UTC", priorCount: 1, limit: 5 }]) {
+      for (const dosage of forms(course)) {
+        expect(nextDueDoses(dosage, options)).toEqual([
+          "2026-01-02T09:00:00+00:00", "2026-01-03T09:00:00+00:00", "2026-01-04T09:00:00+00:00"]);
+        expect(calculateTotalUnits({ dosage, ...options, durationValue: 4, durationUnit: Unit.Day }))
+          .toMatchObject({ totalUnits: ranged ? 10 : 5, unit: "tab" });
+      }
+    }
+    expect(courseToR5(course)[1].extension).toContainEqual(note);
+  });
+});

@@ -2485,6 +2485,7 @@ interface ResolvedAdministrationWindow {
   endExclusive: Date | null;
   completionPoint?: Date;
   countEligibilityStart?: Date;
+  priorCount?: number;
   capClock?: TreatmentWallClock;
   completionPending?: boolean;
   /** Only dependency-bearing stages can resolve members out of source order. */
@@ -2585,6 +2586,14 @@ function resolveAdministrationWindow(
     repeatOccurrenceCap(recurrence) !== undefined
       ? countFloor
       : undefined;
+  const countOrigin = countEligibilityStart ?? durationOrigin;
+  // Supplied consumption predates the query. A later phase cannot inherit
+  // another phase's consumed count before it opens. The first query's fallback
+  // origin alone does not prove a new phase and retains its supplied count.
+  const priorCount = options?.priorCount !== undefined &&
+    (index > 0 || ownPredecessor || countOrigin > anchor) && countOrigin >= coerceDate(options.from, "from")
+    ? 0 : options?.priorCount;
+  const countOptions = priorCount === options?.priorCount ? options : { ...options!, priorCount };
   let endExclusive = earlierDate(
     resolveRepeatDurationCapEnd(administration, cadence.origin, timeZone,
       delay ? getTimeParts(cadence.origin, timeZone)
@@ -2628,11 +2637,11 @@ function resolveAdministrationWindow(
       administration,
       {
         recurrenceOrigin: cadence.origin,
-        eligibleFrom: countEligibilityStart ?? durationOrigin,
+        eligibleFrom: countOrigin,
         endExclusive: earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd ?? null : null),
         countEligibilityStart,
       },
-      options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
+      countOptions ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
       timeZone
     );
     if (completion) {
@@ -2650,6 +2659,7 @@ function resolveAdministrationWindow(
     endExclusive,
     completionPoint,
     countEligibilityStart,
+    priorCount,
     capClock: cadence.capClock,
     ...(deferCount ? { completionPending: true } : {}),
   };
@@ -3411,7 +3421,7 @@ function scheduleTreatmentRelativeCourse(
             end: eventQueryEnd }
           : undefined;
         const localOptions = {
-          ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin,
+          ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin, priorCount: member.priorCount,
           ...(eventStatus ? { explicitEventStatus: eventStatus } : {}),
           ...(collect ? { priorDoseTimes: undefined } : rollingUsage
             ? { priorDoseTimes: rollingPriorTimes(rollingUsage, key, options.priorDoseTimes) } : {}),
@@ -8065,6 +8075,7 @@ function calculateCourseTotalUnits(
         dosage: bounded,
         from: begin > queryStart ? begin : queryStart,
         orderedAt: member.recurrenceOrigin,
+        priorCount: member.priorCount,
         roundToMultiple: undefined,
         ...(rollingUsage && !weighted ? { priorDoseTimes: rollingPriorTimes(
           rollingUsage, key, options.priorDoseTimes
@@ -8431,7 +8442,7 @@ function finiteAdministrationCompletion(
   const remaining = count - used;
   if (remaining <= 0) return undefined;
   const future = options.priorCount !== undefined || !!actual.length || !!dosage.asNeeded;
-  const probe = future ? {
+  const probe = future && !isSingleAdministrationRepeat(executionRepeat ?? {}, dosage.schedule?.explicitEvents) ? {
     ...local, schedule: { ...local.schedule, recurrence: { ...executionRepeat, count: undefined, countMax: undefined } },
   } : local;
   const due = nextDueDoses(probe, {
