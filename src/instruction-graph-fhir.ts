@@ -87,21 +87,15 @@ function wireCoding(value: FhirCoding): FhirCoding {
       };
     } else displayPrimitive = merged;
   }
-  // One typed wire value, not a chain of optional fragment objects and
-  // transpiled spread-descriptor walks for every Coding in an action graph.
-  const result:FhirCoding={};
-  if(value.id!==undefined)result.id=value.id;
-  if(value.system!==undefined)result.system=value.system;
-  if(value._system!==undefined)result._system=value._system;
-  if(value.version!==undefined)result.version=value.version;
-  if(value._version!==undefined)result._version=value._version;
-  if(value.code!==undefined)result.code=value.code;
-  if(value._code!==undefined)result._code=value._code;
-  if(value.display!==undefined)result.display=value.display;
-  if(value.userSelected!==undefined)result.userSelected=value.userSelected;
-  if(value._userSelected!==undefined)result._userSelected=value._userSelected;
-  if(value.extension?.length)result.extension=value.extension;
-  if(displayPrimitive)result._display=displayPrimitive;
+  // Keep supplied Coding fields, including unknown wire annotations, while
+  // the translated display primitive remains the only rewritten field.
+  const source = value as FhirCoding & Record<string, unknown>;
+  const result: FhirCoding & Record<string, unknown> = {};
+  for (const key in source) {
+    if (key === "i18n" || key === "_display" || (key === "extension" && !value.extension?.length)) continue;
+    if (source[key] !== undefined) result[key] = source[key];
+  }
+  if (displayPrimitive) result._display = displayPrimitive;
   return result;
 }
 
@@ -154,7 +148,12 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       { url: "text", valueString: component.text }
     ];
     add(parts, valueCoding("coding", component.coding));
-    if (component.sourceExtensions) parts.push(...component.sourceExtensions);
+    for (const source of component.sourceExtensions ?? []) {
+      const index = source.url === "role" ? 0 : source.url === "text" ? 1
+        : source.url === "coding" && component.coding ? 2 : -1;
+      if (index >= 0) parts[index] = { ...source, ...parts[index] };
+      else parts.push(source.url === "coding" && source.valueCoding ? { ...source, url: "sourceCoding" } : source);
+    }
     nested.push({ ...(component.sourceId ? { id: component.sourceId } : {}), url: "component", extension: parts });
   }
   if (argument.span) {
@@ -371,15 +370,27 @@ function parseTranslationNode(extension:FhirExtension):{locale?:string;text?:str
   }
   return {locale:locale?.valueCode,text:text?.valueString};
 }
+function hasFieldMetadata(field: FhirExtension, valueKey: string): boolean {
+  for (const key in field) if (key !== "url" && key !== valueKey) return true;
+  return false;
+}
+
+function hasCodingMetadata(coding: FhirCoding | undefined): boolean {
+  if (!coding) return false;
+  for (const key in coding) {
+    switch (key) {
+      case "system": case "version": case "code": case "display": case "userSelected": case "i18n": break;
+      default: return true;
+    }
+  }
+  return false;
+}
+
 /** Keep only recognized-field metadata; the typed quantity owns its value. */
 function quantityFieldMetadata(field: FhirExtension | undefined, valueKey: "valueDecimal" | "valueString") {
-  if (!field) return undefined;
-  for (const key in field) {
-    if (key === "url" || key === valueKey) continue;
-    const { url: _url, valueDecimal: _decimal, valueString: _string, ...metadata } = field;
-    return metadata;
-  }
-  return undefined;
+  if (!field || !hasFieldMetadata(field, valueKey)) return undefined;
+  const { url: _url, valueDecimal: _decimal, valueString: _string, ...metadata } = field;
+  return metadata;
 }
 
 function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefined {
@@ -406,9 +417,18 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
       let componentRole:FhirExtension|undefined,componentText:FhirExtension|undefined,componentCoding:FhirExtension|undefined;
       let componentSource:FhirExtension[]|undefined;
       for(const part of entry.extension??[])switch(part.url){
-        case "role":if(!componentRole)componentRole=part;break;
-        case "text":if(!componentText)componentText=part;break;
-        case "coding":if(!componentCoding)componentCoding=part;break;
+        case "role":
+          if (!componentRole) componentRole = part;
+          if (hasFieldMetadata(part, "valueCode")) (componentSource ??= []).push(part);
+          break;
+        case "text":
+          if (!componentText) componentText = part;
+          if (hasFieldMetadata(part, "valueString")) (componentSource ??= []).push(part);
+          break;
+        case "coding":
+          if (!componentCoding) componentCoding = part;
+          if (hasFieldMetadata(part, "valueCoding") || hasCodingMetadata(part.valueCoding)) (componentSource ??= []).push(part);
+          break;
         default:(componentSource??=[]).push(part);break;
       }
       const value=componentRole?.valueCode,body=componentText?.valueString;

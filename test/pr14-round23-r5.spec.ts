@@ -11829,3 +11829,65 @@ describe("round70 source-less native timing projection", () => {
     expect(native).toEqual(before);
   });
 });
+
+describe("round71 recognized graph component annotations", () => {
+  it.each([false, true])("retains field annotations and unknown Coding data (coding child ID %s)", codingChildId => {
+    const parsed = parseSig("Apply ointment then cover with occlusive dressing");
+    const marker = buildInstructionGraphExtension(parsed.meta.canonical.clauses[0].instructionGraph!)!;
+    const component = (wire: FhirExtension) => {
+      const action = wire.extension!.find(item => item.url === "action" &&
+        item.extension?.some(field => field.url === "predicateLemma" && field.valueString === "cover"))!;
+      const argument = action.extension!.find(item => item.url === "argument" &&
+        item.extension?.some(field => field.url === "conceptId" && field.valueString === "occlusive_dressing"))!;
+      return argument.extension!.find(item => item.url === "component" &&
+        item.extension?.some(field => field.url === "role" && field.valueCode === "head"))!;
+    };
+    const note: FhirExtension = { url: "urn:clinic:component-note", valueString: "retain authored annotations" };
+    const head = component(marker), role = head.extension!.find(item => item.url === "role")!,
+      text = head.extension!.find(item => item.url === "text")!, coding = head.extension!.find(item => item.url === "coding")!;
+    role.id = "role-element";
+    role._valueCode = { id: "role-value", extension: [note] };
+    text.id = "text-element";
+    text._valueString = { id: "text-value", extension: [note] };
+    if (codingChildId) coding.id = "coding-element";
+    Object.assign(coding.valueCoding!, { id: "coding-value", extension: [note], clinicSource: { revision: "authored" } });
+    const before = persist(marker), expected = persist(head);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      const supplied = persist(current), suppliedBefore = persist(supplied);
+      const decoded = parseInstructionGraphExtension([supplied])!;
+      const decodedBefore = persist(decoded);
+      current = buildInstructionGraphExtension(decoded)!;
+      expect(component(current)).toEqual(expected);
+      expect(supplied).toEqual(suppliedBefore);
+      expect(decoded).toEqual(decodedBefore);
+    }
+    const row = persist(parsed.fhir[0]);
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== marker.url), marker];
+    const rowBefore = persist(row), wire = toDosageDetails([row]);
+    const saved = toFhirR5Dosages(persist(wire));
+    const savedMarker = saved[0].extension!.find(item => item.url === marker.url)!;
+    expect(component(savedMarker)).toEqual(expected);
+    expect(row).toEqual(rowBefore);
+
+    const decoded = parseInstructionGraphExtension([persist(marker)])!, edited = persist(decoded);
+    const editedComponent = edited.actions.find(action => action.predicate.lemma === "cover")!.args
+      .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!;
+    delete editedComponent.coding;
+    const editedBefore = persist(edited);
+    current = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = component(current).extension!;
+      expect(fields.find(item => item.url === "coding")).toBeUndefined();
+      expect(fields.find(item => item.url === "sourceCoding")).toEqual({ ...coding, url: "sourceCoding" });
+      const fresh = parseInstructionGraphExtension([persist(current)])!;
+      expect(fresh.actions.find(action => action.predicate.lemma === "cover")!.args
+        .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!.coding).toBeUndefined();
+      current = buildInstructionGraphExtension(fresh)!;
+    }
+    expect(edited).toEqual(editedBefore);
+    expect(decoded.actions.find(action => action.predicate.lemma === "cover")!.args
+      .find(argument => argument.conceptId === "occlusive_dressing")!.components!.find(item => item.role === "head")!.coding).toEqual(coding.valueCoding);
+    expect(marker).toEqual(before);
+  });
+});
