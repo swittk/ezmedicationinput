@@ -6261,14 +6261,14 @@ describe("round61 equivalent civil infusion endpoints", () => {
             valueRange: range,
           }] } },
         }] }, { component: [{ doseAndRate: [{ doseQuantity: { value: 50, unit: "mL" } }],
-          timing: { repeat: { count: 1, timeOfDay: ["22:00:00"] } },
+          timing: { repeat: { count: 1, timeOfDay: ["08:30:00"] } },
         }] }],
       });
       const input = version === "native" ? course
         : freshExecutionInput(version === "R5" ? courseToR5(course) : courseToR6(course));
       const before = JSON.stringify(input);
       const expected = variant.exact
-        ? ["2026-03-01T08:00:00-05:00", "2026-03-08T22:00:00-04:00"]
+        ? ["2026-03-01T08:00:00-05:00", "2026-03-08T08:30:00-04:00"]
         : ["2026-03-01T08:00:00-05:00"];
       expect(nextDueDoses(input, query)).toEqual(expected);
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: Unit.Day }).totalUnits)
@@ -6853,4 +6853,74 @@ describe("round75 duration identity in execution", () => {
       }
     }
   );
+});
+
+
+describe("round76 partial-event selectors and supply qualifications", () => {
+  const versions = (course: CanonicalCourse) => {
+    const projected = projectCanonicalCourse(course);
+    return [course, freshExecutionInput(projected.fhir), freshExecutionInput(projected.fhirNext),
+      freshExecutionInput(toDosageDetails(projected.fhir))];
+  };
+
+  it.each([false, true])("applies month-day membership to possible partial dates without choosing one (clock=%s)", clock => {
+    const course = courseFromR6({ step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { event: ["2026-11"], repeat: {
+        ...(clock ? { timeOfDay: ["09:00:00"] } : {}),
+        extension: [{ url: "http://hl7.org/fhir/StructureDefinition/timing-dayOfMonth", valuePositiveInt: 15 }],
+      } },
+    }] }] });
+    for (const input of versions(course)) {
+      const before = JSON.stringify(input);
+      const query = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-16T00:00:00Z", timeZone: "UTC" };
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(0);
+      expect(() => calculateTotalUnits({ dosage: input, ...query, from: "2026-11-15T00:00:00Z",
+        durationValue: 1, durationUnit: Unit.Day })).toThrow(/resolved administration date/u);
+      expect(nextDueDoses(input, { ...query, from: "2026-11-01T00:00:00Z", limit: 2 })).toEqual([]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("retains normalized-weight supply meaning through course aggregation (known=%s)", known => {
+    const member: CanonicalAdministration = { ...dose(), amounts: [{ quantity: { value: 1, unit: "mg/kg" } }] };
+    const patientWeightKg = known ? 70 : undefined;
+    const scalar = supply(member, 1, { patientWeightKg });
+    expect(scalar).toMatchObject({ totalUnits: known ? 70 : 1, unit: known ? "mg" : "mg/kg" });
+    expect(scalar.quantityKind ?? "scheduled").toBe("scheduled");
+    for (const input of versions({ kind: "course", stages: [{ administrations: [member] }] })) {
+      const before = JSON.stringify(input);
+      const result = calculateTotalUnits({ dosage: input, ...options, patientWeightKg, durationValue: 1, durationUnit: Unit.Day });
+      expect(result).toMatchObject({ totalUnits: scalar.totalUnits, unit: scalar.unit });
+      expect(result.quantityKind ?? "scheduled").toBe("scheduled");
+      if (known) expect(result.explanation ?? "").not.toContain("provide patientWeightKg");
+      else expect(result.explanation).toContain("provide patientWeightKg for an absolute quantity");
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([false, true])("keeps qualified-cap supply policy while resolving a finite phase completion (event=%s)", event => {
+    const member: CanonicalAdministration = { ...dose(),
+      schedule: event ? { explicitEvents: ["2026-01-01T09:00:00Z"], recurrence: { count: 1 } }
+        : { recurrence: { count: 1, clocks: ["09:00:00"] } },
+      limits: [{ scope: "period", amount: { value: 1, unit: "tab" },
+        period: { value: 24, unit: "h", comparator: "<=", id: "authored-cap-period" } }],
+    };
+    const scalar = supply(member, 1);
+    expect(scalar).toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "maximum" });
+    expect(scalar.explanation).toContain("could not be applied");
+    const course: CanonicalCourse = { kind: "course", stages: [{
+      start: relative(0), end: relative(1), administrations: [member],
+    }] };
+    for (const input of versions(course)) {
+      const before = JSON.stringify(input);
+      const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day });
+      expect(result).toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "maximum" });
+      expect(result.explanation).toContain("could not be applied");
+      expect(() => nextDueDoses(input, { ...options, limit: 1 })).toThrow(/unresolved inequality/u);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].limits?.[0].period)
+        .toMatchObject({ value: 24, unit: "h", comparator: "<=", id: "authored-cap-period" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
 });

@@ -606,6 +606,17 @@ export function scopeSequentialPhaseSemantics(
       schedule?.offsetMin === shared?.offsetMin &&
       schedule?.offsetMax === shared?.offsetMax
     );
+    // The complete recurrence needs one unambiguous antecedent, independently
+    // of whether the predecessor members happen to share their clock anchors.
+    const cadence = {
+      frequency: shared?.frequency, frequencyMax: shared?.frequencyMax,
+      period: shared?.period, periodMax: shared?.periodMax, periodUnit: shared?.periodUnit,
+      timingCode: shared?.timingCode, dayOfWeek: shared?.dayOfWeek,
+      dayOfMonth: shared?.dayOfMonth, weekdayOrdinal: shared?.weekdayOrdinal
+    };
+    const cadenceKeys = Object.keys(cadence) as (keyof typeof cadence)[];
+    const sharedCadence = schedules.every(schedule => cadenceKeys.every(key =>
+      equalStructuredValues(schedule?.[key], cadence[key])));
     // The target-transition construction may carry an omitted administration
     // method only when the entire predecessor phase agrees on the typed head.
     const sourceMethods = prior.map(index => states[index]?.primaryClause.method);
@@ -672,21 +683,28 @@ export function scopeSequentialPhaseSemantics(
           delete schedule.boundsEnd;
         fields.push('method');
       }
+      // A local cadence owns which inherited clock lists remain compatible.
+      // Both the timing anaphor and ordinary anchor ellipsis use this decision
+      // before copying clocks or consuming the source timing reference.
+      const donorClockCount = shared?.timeOfDay?.length ?? 0;
+      const matchesSuccessorCadence = schedule?.frequency === undefined || (
+        schedule.frequency === donorClockCount &&
+        (schedule.period === undefined || schedule.period === 1) &&
+        (schedule.periodUnit === undefined || schedule.periodUnit === 'd') &&
+        (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
+      );
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
         !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule);
-      if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && shared) {
+      if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && sharedCadence && shared) {
         // A timing anaphor or licensed onset-only dose continuation inherits
         // recurrence, not the preceding phase's duration, count or dates.
         // The onset-only construction has one complete cadence antecedent.
         // Explicit local cadence/anchors remain local.
         const hasLocalAnchor = Boolean(schedule.clockWindow || schedule.eventWindow || schedule.activityTiming?.length);
         const recurrence = {
-          frequency: shared.frequency, frequencyMax: shared.frequencyMax,
-          period: shared.period, periodMax: shared.periodMax, periodUnit: shared.periodUnit,
-          timingCode: shared.timingCode, dayOfWeek: shared.dayOfWeek,
-          dayOfMonth: shared.dayOfMonth, weekdayOrdinal: shared.weekdayOrdinal,
+          ...cadence,
           when: hasLocalAnchor ? undefined : shared.when?.filter(event => event !== SequenceEventTiming.Immediate),
-          timeOfDay: hasLocalAnchor ? undefined : shared.timeOfDay,
+          timeOfDay: hasLocalAnchor || !matchesSuccessorCadence ? undefined : shared.timeOfDay,
           clockWindow: hasLocalAnchor ? undefined : shared.clockWindow,
           eventWindow: hasLocalAnchor ? undefined : shared.eventWindow,
           activityTiming: hasLocalAnchor ? undefined : shared.activityTiming,
@@ -748,17 +766,6 @@ export function scopeSequentialPhaseSemantics(
           schedule.when = recurringAnchors;
           fields.push('when');
         }
-        // A newly explicit cadence cannot inherit an incompatible number
-        // of exact clock anchors from the preceding phase. In particular,
-        // QID -> TID does not license guessing which three of four times to
-        // keep. The original source still accompanies the editable schedule.
-        const donorClockCount = shared?.timeOfDay?.length ?? 0;
-        const matchesSuccessorCadence = schedule.frequency === undefined || (
-          schedule.frequency === donorClockCount &&
-          (schedule.period === undefined || schedule.period === 1) &&
-          (schedule.periodUnit === undefined || schedule.periodUnit === 'd') &&
-          (schedule.frequencyMax === undefined || schedule.frequencyMax === donorClockCount)
-        );
         if (shared?.timeOfDay?.length && matchesSuccessorCadence) {
           schedule.timeOfDay = [...shared.timeOfDay];
           fields.push('timeOfDay');

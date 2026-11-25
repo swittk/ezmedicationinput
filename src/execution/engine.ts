@@ -985,19 +985,22 @@ function exactTimingEventOccurrences(
         const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
         partialEvent = !start || !end;
         if (start && end) {
-          if (!expanded.length) partialEvent = end > begin &&
+          if (!expanded.length && !calendarDays) partialEvent = end > begin &&
             (!queryEnd || start < queryEnd && begin < queryEnd);
-          else for (const entry of expanded) {
-            const opening = entry.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
-            const closing = entry.dayShift ? addLocalDays(end, entry.dayShift, timeZone) : end;
+          else for (const entry of expanded.length ? expanded : [undefined]) {
+            const opening = entry?.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
+            const closing = entry?.dayShift ? addLocalDays(end, entry.dayShift, timeZone) : end;
             const stop = earlierDate(closing, queryEnd)!;
             let day = begin > opening ? startOfLocalDay(begin, timeZone) : opening;
             // Test possibility only: these clocks never become a selected
             // event date or spend a count. Reuse exact-event local resolution,
             // including skipped clocks, before declaring a window disjoint.
             while (day < stop) {
-              const possible = makeZonedDateFromDay(day, timeZone, entry.time);
-              if (possible && possible >= begin && possible < stop) { partialEvent = true; break; }
+              const possible = entry ? makeZonedDateFromDay(day, timeZone, entry.time) : day;
+              if (possible && (entry ? possible >= begin : stop > begin) && possible < stop &&
+                  matchesCalendarDaySelection(possible, calendarDays, timeZone)) {
+                partialEvent = true; break;
+              }
               day = addLocalDays(day, 1, timeZone);
             }
             if (partialEvent) break;
@@ -2689,7 +2692,7 @@ function sameDayDatedSuccessorBoundary(
     ...options, from: bounds.start, orderedAt: bounds.nominalStart, timeZone: zone, limit: 1,
     // This is the independently authored phase opening, not the next query
     // opportunity after prior use. History still belongs to actual execution.
-    priorCount: undefined, priorDoseTimes: undefined, quantityEstimation: undefined,
+    priorCount: undefined, priorDoseTimes: undefined, candidateOnly: true,
     countEligibilityStart: undefined, countedActualTimes: undefined,
     prnOpportunityFrom: undefined, explicitEventStatus: undefined, roundingLimits: undefined,
   } as PhaseCountOptions)[0];
@@ -3392,7 +3395,7 @@ function scheduleTreatmentRelativeCourse(
             schedule: { ...original.schedule, recurrence: executionRepeat },
           } : {}),
         };
-        const eventStatus = collect && (options as PhaseCountOptions).quantityEstimation &&
+        const eventStatus = collect && requiresCompleteSupplyTiming(options) &&
           original.schedule?.explicitEvents?.length
           ? quota.explicitEventStatus = { possible: false, from: eventQueryFrom ?? from, end: eventQueryEnd }
           : undefined;
@@ -4406,11 +4409,17 @@ type PhaseCountOptions = NextDueDoseOptions & {
   countedActualTimes?: ReadonlySet<number>;
   /** Numeric supply has an explanation field for retained unevaluated caps. */
   quantityEstimation?: true;
+  /** Boundary probes need candidates, not query-level incomplete-timing diagnostics. */
+  candidateOnly?: true;
   /** Completion/range callers decide completeness after their own count admission. */
   explicitEventStatus?: ExplicitEventStatus;
   /** Only rounded course supply collects one remaining ceiling per contributing member. */
   roundingLimits?: Map<string, { remaining: number | undefined; unit: string | undefined }>;
 };
+function requiresCompleteSupplyTiming(options: NextDueDoseOptions): boolean {
+  const phase = options as PhaseCountOptions;
+  return phase.quantityEstimation === true && !phase.candidateOnly;
+}
 /** Nonoverlapping cycle replay has at most one opportunity per member at
  * an instant. Reuse the scalar pre-admission filter; overlapping cycles keep
  * their identity-aware chronological ledger and distinct coincident doses. */
@@ -4550,7 +4559,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       },
     };
     const eventStatus: ExplicitEventStatus | undefined = one.schedule?.explicitEvents?.length &&
-      (options as PhaseCountOptions).quantityEstimation && !(options as PhaseCountOptions).explicitEventStatus
+      requiresCompleteSupplyTiming(options) && !(options as PhaseCountOptions).explicitEventStatus
       ? { possible: false, from: requestedFrom } : undefined;
     const candidates = nextDueDoses(uncapped, {
       ...options,
@@ -5004,7 +5013,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
       Math.floor(limit),
       priorCount,
       priorCountInput === undefined && !dosage.asNeeded,
-      (options as PhaseCountOptions).quantityEstimation === true,
+      requiresCompleteSupplyTiming(options),
       (options as PhaseCountOptions).explicitEventStatus
     );
     if (exactEvents !== undefined) {
@@ -5029,7 +5038,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     );
   }
   if (!timing || !repeat) {
-    if ((options as PhaseCountOptions).quantityEstimation)
+    if (requiresCompleteSupplyTiming(options))
       throw new MedicationQuantityCalculationError("timing-required",
         "The dosage has no executable frequency or dosing time for supply calculation.");
     return [];
@@ -5301,7 +5310,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
   }
   // Candidate-only scheduling may remain empty when cadence is incomplete.
   // Numeric supply must distinguish that unknown plan from an executed zero.
-  if ((options as PhaseCountOptions).quantityEstimation)
+  if (requiresCompleteSupplyTiming(options))
     throw new MedicationQuantityCalculationError("timing-required",
       "The dosage has no executable frequency or dosing time for supply calculation.");
   return [];
@@ -6936,7 +6945,7 @@ function sumCourseUnits(
     totalUnits,
     ...(commonUnit ? { unit: commonUnit } : {}),
     quantityKind: maximum ? "maximum" : "scheduled",
-    ...(maximum
+    ...(maximum || details.length
       ? {
           explanation:
             [...new Set(details)].join(" ") ||
@@ -8347,7 +8356,7 @@ function explicitAdministrationCompletion(
   });
   const eventStatus: ExplicitEventStatus = { possible: false, end: cycleEnd };
   const due = nextDueDoses(raw, { ...options, from: eligibleFrom, orderedAt: start,
-    quantityEstimation: undefined, explicitEventStatus: eventStatus,
+    candidateOnly: true, explicitEventStatus: eventStatus,
     priorCount: undefined, priorDoseTimes: undefined, limit: 10000 } as PhaseCountOptions);
   const count = repeat ? repeatOccurrenceCap(repeat) : undefined;
   // The sorted probe can include later absolute events. Only this cycle's
@@ -8411,7 +8420,7 @@ function finiteAdministrationCompletion(
   } : local;
   const due = nextDueDoses(probe, {
     ...options,
-    quantityEstimation: undefined,
+    candidateOnly: true,
     from: future && queryFrom > eligibleFrom ? queryFrom : eligibleFrom,
     orderedAt: start,
     priorCount: undefined,

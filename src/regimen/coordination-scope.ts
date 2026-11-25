@@ -942,46 +942,6 @@ export interface TimingAnchorCompositionResult {
 }
 
 /**
- * A sequential phase may inherit predecessor anchors only while its local
- * recurrence leaves them compatible. If a successor explicitly changes the
- * daily frequency, a differently sized predecessor clock list is no longer
- * a valid ellipsis. The predecessor retains its clocks and source evidence;
- * only the derived recipient copy is withdrawn.
- */
-function removeConflictingInheritedClockLists(states: readonly ParserState[]): void {
-  for (const state of states) {
-    const clause = state.primaryClause;
-    const schedule = clause.schedule;
-    if (!schedule?.timeOfDay?.length || schedule.frequency === undefined ||
-        schedule.frequency === schedule.timeOfDay.length) continue;
-    const inheritedBySequence = schedule.evidence?.some(item =>
-      item.rule === 'regimen.sequence.whole-predecessor-phase'
-    );
-    if (!inheritedBySequence) continue;
-    const localFrequencyEvidence = schedule.evidence?.some(item =>
-      (item.scheduleFields?.indexOf("frequency") ?? -1) >= 0 &&
-      item.spans.some(span => span.start >= 0 && span.end <= state.input.length)
-    );
-    if (!localFrequencyEvidence) continue;
-    const localClockEvidence = schedule.evidence?.some(item =>
-      item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
-      item.spans.some(span => span.start >= 0 && span.end <= state.input.length)
-    );
-    if (localClockEvidence) continue;
-    delete schedule.timeOfDay;
-    schedule.evidence = schedule.evidence?.filter(item =>
-      !(item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
-        item.spans.every(span => span.end <= 0 || span.start >= state.input.length))
-    );
-    appendEvidence(schedule.evidence ?? (schedule.evidence = []), {
-      rule: 'hpsg.cx.regimen.explicit-frequency-resets-inherited-clocks',
-      spans: [],
-      note: 'The successor explicit frequency conflicts with the predecessor clock count, so the derived clock-list ellipsis is not licensed.'
-    });
-  }
-}
-
-/**
  * Compose equivalent typed administration daughters before FHIR lowering.
  * Only clock/event anchors may differ; every other schedule and administration
  * feature must already unify, so independent routes, sites and phases survive.
@@ -992,7 +952,6 @@ export function composeCoordinatedTimingAnchors(
   segments: readonly HpsgSigSegment[],
   source: string
 ): TimingAnchorCompositionResult {
-  removeConflictingInheritedClockLists(states);
   const absorbed = new Set<number>();
   const applications: TimingAnchorCompositionApplication[] = [];
   let recipientIndex = 0;
