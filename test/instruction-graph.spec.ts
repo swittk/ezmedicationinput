@@ -7530,3 +7530,42 @@ describe("round67 review timing and graph preservation", () => {
     expect(marker).toEqual(original);
   });
 });
+
+
+describe("round67 relation Coding follows current action linkage", () => {
+  it.each([
+    [AdviceRelation.Before, true], [AdviceRelation.After, true],
+    [AdviceRelation.Before, false], [AdviceRelation.After, false]
+  ] as const)("reselects %s Coding when the saved linked state %s changes", (kind, linked) => {
+    const actions = parseInstructionActions("Wash hands then apply cream");
+    const marker = buildInstructionGraphExtension({ sourceText: "", actions, relations: [{ kind,
+      ...(linked ? { fromActionIndex: 0 } : {}), toActionIndex: 1,
+      text: linked ? kind + " applying cream" : kind + " meals"
+    }] })!;
+    const fields = marker.extension!.find(field => field.url === "graphRelation")!.extension!;
+    const sourceCoding = fields.find(field => field.url === "kindCoding")?.valueCoding;
+    if (sourceCoding) {
+      sourceCoding.id = "authored-relation";
+      sourceCoding.extension = [{ url: "https://example.org/source-note", valueString: "retain source annotation" }];
+    }
+    const before = JSON.parse(JSON.stringify(marker));
+    const decoded = parseInstructionGraphExtension([marker])!;
+    const changed = JSON.parse(JSON.stringify(decoded)) as typeof decoded;
+    if (linked) delete changed.relations![0].fromActionIndex;
+    else changed.relations![0].fromActionIndex = 0;
+    changed.relations![0].text = linked ? kind + " meals" : kind + " applying cream";
+    const rebuilt = buildInstructionGraphExtension(changed)!;
+    const actual = rebuilt.extension!.find(field => field.url === "graphRelation")!.extension!;
+    const activeCoding = actual.find(field => field.url === "kindCoding")?.valueCoding;
+    if (!linked) expect(activeCoding).toEqual({ system: "http://hl7.org/fhir/action-relationship-type",
+      code: kind, display: kind === AdviceRelation.Before ? "Before" : "After" });
+    else expect(activeCoding).toEqual({ system: "http://snomed.info/sct",
+      code: kind === AdviceRelation.Before ? "421718005" : "255234002",
+      display: kind === AdviceRelation.Before ? "Before - dosing instruction fragment" : "After" });
+    if (sourceCoding) expect(actual.find(field => field.url === "sourceKindCoding")?.valueCoding).toEqual(sourceCoding);
+    const reopened = parseInstructionGraphExtension([rebuilt])!.relations![0];
+    expect(reopened.kind).toBe(kind);
+    expect(reopened.fromActionIndex).toBe(linked ? undefined : 0);
+    expect(marker).toEqual(before);
+  });
+});

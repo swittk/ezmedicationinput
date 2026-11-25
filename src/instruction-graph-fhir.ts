@@ -301,12 +301,14 @@ export function buildInstructionGraphExtension(
   for (const relation of graph.relations ?? []) {
     const relationNested: FhirExtension[] = [];
     const sourceCoding = relation.sourceKindCoding;
-    const currentCoding = sourceCoding && getGraphRelationByCoding(sourceCoding) === relation.kind;
+    const linkedActions = (relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
+      relation.fromActionIndex !== undefined;
+    const currentCoding = sourceCoding && getGraphRelationByCoding(sourceCoding) === relation.kind &&
+      (sourceCoding.system === "http://hl7.org/fhir/action-relationship-type") === linkedActions;
     // Formal before/after codes apply to explicitly linked actions, not
     // "before food", "after a symptom", or other unlinked textual adjuncts.
     if (currentCoding) add(relationNested, valueCoding("kindCoding", sourceCoding));
-    else if ((relation.kind === AdviceRelation.Before || relation.kind === AdviceRelation.After) &&
-        relation.fromActionIndex !== undefined) {
+    else if (linkedActions) {
       add(relationNested, valueCoding("kindCoding", {
         system: "http://hl7.org/fhir/action-relationship-type",
         code: relation.kind,
