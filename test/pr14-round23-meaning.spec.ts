@@ -5152,6 +5152,7 @@ describe("round59 partial facts and complete authored directions", () => {
         expect(rendered).toContain((locale === "en" ? "original directions: " : "ข้อความเดิม: ") +
           "Swallow 1 tablet whole " + (locale === "en" ? "only if " : "เฉพาะเมื่อ ") + "SBP > 160.");
         expect(rendered).toContain(style === "short" ? "x<=2" : locale === "en" ? "up to 2 doses" : "ไม่เกิน 2 ครั้ง");
+        if (style === "long") expect(rendered.match(/SBP > 160/gu)).toHaveLength(1);
         if (advice && style === "long") {
           expect(rendered).toContain("Otherwise hold");
           expect(rendered).not.toMatch(/Otherwise hold\.? (?:only if|เฉพาะเมื่อ)/u);
@@ -5687,4 +5688,143 @@ describe("round62 active range beside a scalar infusion carrier", () => {
       expect(clause.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
       expect(clause.clinicalQuantity).toBeUndefined();
     });
+});
+
+
+describe("round62 review: typed grammar and partial display facts", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (input: FhirR6DosageInstruction) => [fresh(input), importCanonicalCourse(fresh(input)),
+    fresh(toFhirR5Dosages(input)), fresh(toDosageDetails(fresh(toFhirR5Dosages(input))))];
+
+  it.each([undefined, "Clinic route"])("keeps an unknown authored route display without changing its Coding: %s", text => {
+    const route = { ...(text ? { text } : {}), coding: [{ system: "https://example.test/routes", code: "local-im",
+      display: "Intramuscular", extension: [{ url: "https://example.test/route-note", valueString: "retain" }] }] };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ route,
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }] }] }] };
+    for (const value of views(input)) {
+      const before = fresh(value);
+      for (const locale of ["en", "th"]) {
+        expect(formatSig(value, "long", { locale, realizationMode: "normalized" })).toContain(
+          text ?? (locale === "en" ? "intramuscular" : "เข้ากล้ามเนื้อ"));
+      }
+      expect(projectCanonicalCourse(importCanonicalCourse(value)).fhirNext.step![0].component[0].route).toEqual(route);
+      expect(value).toEqual(before);
+    }
+  });
+
+  it.each(["increase by 1 the next day", "Take 1 tablet daily; increase by 1 the next day"])(
+    "keeps the next-day lexical onset after a non-clock adjustment numeral: %s", async source => {
+      const { nextDayOnsetAt } = await import("../src/hpsg/lexical-classes");
+      const tokens = tokenize(source), start = tokens.findIndex(token => token.lower === "the");
+      expect(nextDayOnsetAt(tokens, start, tokens.length)).toMatchObject({ headIndex: start + 2, tokenEnd: start + 3 });
+      expect(parseSig(source).input).toBe(source);
+    });
+
+  it.each(["by 08:00 the next day", "until 8 AM next day"])(
+    "keeps an actual end-governor clock out of next-day onset: %s", async source => {
+      const { nextDayOnsetAt } = await import("../src/hpsg/lexical-classes");
+      const tokens = tokenize(source), start = tokens.findIndex(token => token.lower === "the" || token.lower === "next");
+      expect(nextDayOnsetAt(tokens, start, tokens.length)).toBeUndefined();
+    });
+
+  it.each([false, true])("keeps explicit clock divisions finite unless a daily cadence is supplied: %s", daily => {
+    const source = "Infuse 100 mL at 30 mL/hr" + (daily ? " daily" : "") + " in 2 divided doses at 08:00 and 20:00";
+    const parsed = parseSig(source), query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+      timeZone: "UTC", limit: 6 };
+    const expected = (daily ? [1, 2, 3] : [1]).flatMap(day => [8, 20].map(hour =>
+      `2026-01-0${day}T${String(hour).padStart(2, "0")}:00:00+00:00`));
+    for (const value of [parsed.meta.canonical.course, ...views(parsed.fhirNext)]) {
+      const member = importCanonicalCourse(value).stages[0].administrations[0];
+      expect(member.amounts![0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(member.schedule?.recurrence?.count).toBe(daily ? undefined : 2);
+      expect(nextDueDoses(value, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: daily ? 300 : 100, unit: "mL" });
+    }
+  });
+
+  it.each(["U/hr", "units/hr", "U/kg/hr", "units/kg/hr"])("structures a registered biologic activity rate alias: %s", unit => {
+    const parsed = parseSig("Infuse 2 " + unit), clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity).toBeDefined();
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    const control = parseSig("Infuse 2 " + unit.replace(/^U(?=\/)/u, "units")).meta.canonical.course;
+    const amount = parsed.meta.canonical.course.stages[0].administrations[0].amounts;
+    expect(amount).toEqual(control.stages[0].administrations[0].amounts);
+    expect(JSON.stringify(amount)).toContain("[iU]");
+  });
+
+  it("retains a non-enumerable plain segment callback on its normalized receiver", () => {
+    const provider: MedicationSurfaceSegmenter = { locale: "round62-descriptor", script: /[ⴵⴶ]/gyu,
+      *segment(input) {
+        expect(this.script.global).toBe(false);
+        expect(this.script.sticky).toBe(false);
+        for (let index = 0; index < input.length; index++) yield { segment: input[index], index };
+      } };
+    Object.defineProperty(provider, "segment", { value: provider.segment, enumerable: false });
+    registerMedicationSurfaceSegmenter(provider);
+    const stored = listMedicationSurfaceSegmenters().find(item => item.locale === provider.locale)!;
+    for (let repeat = 0; repeat < 2; repeat++) {
+      expect([...stored.segment("ⴵⴶ")]).toEqual([{ segment: "ⴵ", index: 0 }, { segment: "ⴶ", index: 1 }]);
+      expect(tokenize("ⴵⴶ").map(token => token.lower)).toEqual(["ⴵ", "ⴶ"]);
+    }
+  });
+
+  it("retains a non-enumerable already-bound detector callback", () => {
+    class Detector implements MedicationLocaleDetector {
+      locale = "round62bound";
+      priority = 1001;
+      #marker = "__round62_bound_locale__";
+      test!: MedicationLocaleDetector["test"];
+      constructor() {
+        Object.defineProperty(this, "test", { enumerable: false, value: ((text: string) => text === this.#marker).bind(this) });
+      }
+    }
+    registerMedicationLocaleDetector(new Detector());
+    expect(inferMedicationLocale("__round62_bound_locale__")).toBe("round62bound");
+    expect(inferMedicationLocale("ordinary English")).toBe("en");
+    expect(inferMedicationLocale("ภาษาไทย")).toBe("th");
+  });
+
+  it.each([undefined, 0, 2])("keeps duration annotations without inventing a medication direction: %s", lowValue => {
+    const annotation = { url: "https://example.test/duration-note", valueString: "retain" };
+    const range = { low: { id: "low", extension: [annotation], ...(lowValue === undefined ? {} : { value: lowValue, unit: "h", code: "h" }) },
+      high: { id: "high", extension: [annotation] } };
+    const marker = { url: TIMING_ADMINISTRATION_DURATION_EXTENSION_URL, valueRange: range };
+    const row: FhirDosage = { timing: { repeat: { extension: [marker] } },
+      extension: [buildInstructionGraphExtension(parseSig("Do not crush").meta.canonical.clauses[0].instructionGraph!)!] };
+    for (const value of [fresh(row), ...views(toDosageDetails([row]))]) {
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        if (lowValue === undefined) expect(text).toBe(locale === "en" ? "Do not crush." : "ห้ามบด.");
+        else expect(text).toContain(locale === "en" ? `at least ${lowValue} hours` : `อย่างน้อย ${lowValue} ชั่วโมง`);
+      }
+      expect(projectCanonicalCourse(importCanonicalCourse(value)).fhir[0].timing?.repeat?.extension).toContainEqual(marker);
+    }
+  });
+
+  it("keeps raw dose directions beside a sole PRN flag without extracting a dose", () => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ text: "Take 1 tablet for headache", asNeeded: true }] }] };
+    for (const value of views(input)) for (const locale of ["en", "th"]) {
+      const member = importCanonicalCourse(value).stages[0].administrations[0];
+      expect(member.amounts).toBeUndefined();
+      for (const style of ["short", "long"] as const) {
+        const text = formatSig(value, style, { locale, realizationMode: "normalized" });
+        expect(text).toContain("Take 1 tablet for headache");
+        expect(text).toContain(locale === "en" ? style === "short" ? "PRN" : "as needed" : "เมื่อจำเป็น");
+      }
+    }
+    const changed = fresh(input);
+    changed.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+    expect(formatSig(changed, "long", { locale: "en", realizationMode: "normalized" })).toContain("2 tablets");
+    expect(formatSig(changed, "long", { locale: "en", realizationMode: "normalized" })).not.toContain("1 tablet");
+  });
+
+  it("uses the configured Thai verb for a method-only short preview", () => {
+    const coding = { system: "https://example.test/methods", code: "sip-carefully" };
+    const options: ParseOptions = { instructionActionMap: { "sip carefully": { code: "sip-carefully", display: "Sip carefully",
+      i18n: { th: "จิบอย่างระมัดระวัง" }, administrationMethod: coding } } };
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ method: { coding: [coding] } }] }] };
+    for (const value of views(input)) for (const style of ["short", "long"] as const)
+      expect(formatSig(value, style, { ...options, locale: "th", realizationMode: "normalized" })).toContain("จิบอย่างระมัดระวัง");
+  });
 });

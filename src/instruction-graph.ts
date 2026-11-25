@@ -1196,20 +1196,18 @@ const AMOUNT_MATERIAL_DESTINATION_ARGUMENT_PARSER: ActionArgumentParser = (c) =>
       const first = parts[bounds.start], last = parts[bounds.endExclusive - 1];
       pushArgument(args, { ...clock, relation: targetRelation,
         ...(first && last ? { span: { start: offset + first.sourceStart, end: offset + last.sourceEnd } } : {}) });
-      // The clock is complete; a following condition retains its own boundary.
-      tailRelationIndex = targetEnd < segmentEnd ? targetEnd : undefined;
-      break;
+    } else {
+      const nominal = argumentFromParts(
+        parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
+      );
+      const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
+        nominal?.role ?? AdviceArgumentRole.Destination, options);
+      const target = quantified?.quantity ? quantified : nominal;
+      // Each local complement owns its relation, independently of noun role:
+      // saline WITH water TO 100 mL retains both targets.
+      if (target) target.relation = targetRelation;
+      pushArgument(args, target);
     }
-    const nominal = argumentFromParts(
-      parts, targetIndex + 1, targetEnd, input, AdviceArgumentRole.Destination, options
-    );
-    const quantified = quantifiedEntityArgument(parts, targetIndex + 1, targetEnd, input, offset,
-      nominal?.role ?? AdviceArgumentRole.Destination, options);
-    const target = quantified?.quantity ? quantified : nominal;
-    // Each local complement owns its relation, independently of noun role:
-    // saline WITH water TO 100 mL retains both targets.
-    if (target) target.relation = targetRelation;
-    pushArgument(args, target);
     if (targetEnd >= segmentEnd) break;
     targetIndex = targetEnd;
     targetRelation = actionArgumentRelation(key(parts[targetIndex]));
@@ -2494,10 +2492,12 @@ export function frameActionDefinition(
   options?: ParseOptions
 ): ActionDefinition | undefined {
   const definition = getMedicationInstructionAction(frame.predicate.lemma, options);
-  if (!options?.instructionActionMap || !getMedicationInstructionAction(frame.predicate.lemma)) return definition;
+  if (!options?.instructionActionMap) return definition;
   // A stored code can collide with a different configured lexical surface.
-  // Reuse the selected frame's typed wording/coding before a code-only fallback;
-  // deliberate lexical overrides still resolve to their configured definition.
+  // The frame's selected wording distinguishes definitions sharing that code.
+  const named = frame.predicate.display
+    ? resolveMedicationInstructionAction(frame.predicate.display, options) : undefined;
+  if (named?.code === frame.predicate.lemma) return named;
   const selected = resolveMedicationInstructionActionForMethod({
     text: frame.predicate.display, coding: frame.predicate.codings?.[0]
   }, options);
@@ -3245,7 +3245,7 @@ function promoteDoseFromDefiningAction(
   let first: AdviceArgument["quantity"];
   for (const action of actions) {
     if (action.polarity === AdvicePolarity.Negate ||
-        !getMedicationInstructionAction(action.predicate.lemma, options)?.definesDose) continue;
+        !frameActionDefinition(action, options)?.definesDose) continue;
     const quantity = action.args.find(arg =>
       arg.role === AdviceArgumentRole.Amount && arg.quantity)?.quantity;
     if (!quantity) continue;
@@ -3308,7 +3308,7 @@ function doseDefiningPrimarySpan(
   let doseOwner: AdviceFrame | undefined;
   for (const frame of frames) {
     if (frame.polarity === AdvicePolarity.Negate ||
-        !getMedicationInstructionAction(frame.predicate.lemma, options)?.definesDose ||
+        !frameActionDefinition(frame, options)?.definesDose ||
         !frame.args.some(arg => arg.role === AdviceArgumentRole.Amount && quantityCoveredByDose(arg, clause.dose))) continue;
     if (doseOwner) return undefined;
     doseOwner = frame;
@@ -3924,12 +3924,16 @@ const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
   const material = materialValue
     ? joinLocalizedTokens(c.locale, [c.amount ? profile.materialPrefix || undefined : undefined, materialValue])
     : undefined;
-  const text = renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
+  let text = renderLocaleTemplate(profile.amountMaterialDestinationTemplate, {
     label: c.label,
     amount: c.amount,
     material,
     destination: destination ? `${profile.tokenSeparator}${destination}` : undefined
   });
+  if (c.duration) {
+    const duration = joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration]);
+    text = `${text}${text ? profile.quantitySeparator : ""}${duration}`;
+  }
   // The selected Time has its locale phrase, independently of the destinations.
   if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
   return c.time ? joinLocalizedTokens(c.locale, [text, c.time]) : text;
@@ -4487,10 +4491,12 @@ function frameWithCanonicalPrimaryContext(frame: AdviceFrame, clause: CanonicalS
       const event = ownsEvents ? argumentEventTiming(arg) : undefined;
       // A newly added structured clock does not take ownership of an
       // independent graph time. Identical clocks need only one display.
-      const mirrorsClock = clock && !(arg.relation ?? frame.relation) && hasClocks && schedule!.timeOfDay!.some(time =>
+      const clockRelation = arg.relation ?? frame.relation;
+      const directClock = clock && (!clockRelation || relationHasGrammarFeature(clockRelation, "directTimeRealization"));
+      const mirrorsClock = directClock && hasClocks && schedule!.timeOfDay!.some(time =>
         (time.length === 5 ? time + ":00" : time.replace(/\.0+$/u, "")) ===
         (arg.normalized!.length === 5 ? arg.normalized + ":00" : arg.normalized!.replace(/\.0+$/u, "")));
-      if (clock && (ownsClocks || mirrorsClock) || event &&
+      if (directClock && (ownsClocks || mirrorsClock) || event &&
           (hasOffset || !timeArgumentCoveredBySchedule(frame, arg, clause, event))) {
         changed = true;
         continue;

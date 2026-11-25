@@ -539,8 +539,8 @@ function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number):
   // The lexical gate only locates its governor; the end rule parses the clock.
   const clock = tokens[before - 1];
   if (previous && MERIDIEM_TOKENS.has(previous.canonical ?? previous.lower) &&
-      clock && (clock.kind === LexKind.Number || clock.kind === LexKind.TimeLike)) before -= 2;
-  else if (previous?.kind === LexKind.TimeLike || previous?.kind === LexKind.Number) before--;
+      parseClockToken(clock, previous)) before -= 2;
+  else if (parseClockToken(previous)) before--;
   const governor = tokens[before];
   return Boolean(governor && RELATIVE_TIME_END_LEADS.has(governor.canonical ?? governor.lower));
 }
@@ -909,4 +909,82 @@ export function doseComparatorNumberAt(
   // "two thirds". Keep those tokens within the qualified quantity head.
   const fraction = fractionalDoseNumberAt(tokens, numericIndex, limit, value);
   return { comparator, ...(fraction ?? { value, numericIndex }) };
+}
+
+export function normalizeTokenLower(token: LexToken): string {
+  return (token.canonical ?? token.lower).replace(/[{};]/g, "").replace(/^\.+|\.+$/g, "");
+}
+
+function pad2(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+export function parseClockToken<T extends LexToken>(
+  token: T | undefined,
+  meridiemToken?: T | undefined
+): { value: string; tokens: T[] } | undefined {
+  if (!token) {
+    return undefined;
+  }
+  let lower = normalizeTokenLower(token);
+  if (lower.startsWith("@")) {
+    lower = lower.slice(1);
+  }
+  if (token.derived && token.sourceText?.includes("/") && /^[0-9]+(?:\.[0-9]+)?$/.test(lower)) {
+    return undefined;
+  }
+  const meridiem = meridiemToken ? normalizeTokenLower(meridiemToken) : undefined;
+  let hour: number;
+  let minute = 0;
+  const compactMeridiem = lower.match(/^([0-9]{1,2})\s*(am|pm)$/);
+  if (compactMeridiem) {
+    hour = parseInt(compactMeridiem[1], 10);
+    if (hour < 1 || hour > 12) {
+      return undefined;
+    }
+    if (POST_MERIDIEM_TOKENS.has(compactMeridiem[2]) && hour !== 12) {
+      hour += 12;
+    }
+    if (ANTE_MERIDIEM_TOKENS.has(compactMeridiem[2]) && hour === 12) {
+      hour = 0;
+    }
+    return {
+      value: `${pad2(hour)}:${pad2(minute)}:00`,
+      tokens: [token]
+    };
+  }
+  const clock = lower.match(/^([0-9]{1,2})[:.]([0-9]{2})$/);
+  if (clock) {
+    hour = parseInt(clock[1], 10);
+    minute = parseInt(clock[2], 10);
+  } else if (/^[0-9]{1,2}$/.test(lower) && meridiem && MERIDIEM_TOKENS.has(meridiem)) {
+    hour = parseInt(lower, 10);
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+    return undefined;
+  }
+  if (meridiem && MERIDIEM_TOKENS.has(meridiem)) {
+    if (hour < 1 || hour > 12) {
+      return undefined;
+    }
+    if (POST_MERIDIEM_TOKENS.has(meridiem) && hour !== 12) {
+      hour += 12;
+    }
+    if (ANTE_MERIDIEM_TOKENS.has(meridiem) && hour === 12) {
+      hour = 0;
+    }
+    return {
+      value: `${pad2(hour)}:${pad2(minute)}:00`,
+      tokens: [token, meridiemToken as T]
+    };
+  }
+  if (hour < 0 || hour > 23) {
+    return undefined;
+  }
+  return {
+    value: `${pad2(hour)}:${pad2(minute)}:00`,
+    tokens: [token]
+  };
 }

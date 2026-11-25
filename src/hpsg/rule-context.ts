@@ -9,8 +9,10 @@ import {
 import {
   ANTE_MERIDIEM_TOKENS,
   MERIDIEM_TOKENS,
-  POST_MERIDIEM_TOKENS
+  POST_MERIDIEM_TOKENS,
+  normalizeTokenLower
 } from "./lexical-classes";
+export { normalizeTokenLower, parseClockToken } from "./lexical-classes";
 import { HpsgLexicalRule, HpsgSign } from "./signature";
 import { HpsgProjectionDeps } from "./projection";
 import { HpsgUnificationContext } from "./unification";
@@ -85,10 +87,6 @@ export function sourceRangeOverlapsContextDate(
   return false;
 }
 
-export function normalizeTokenLower(token: Token): string {
-  return (token.canonical ?? token.lower).replace(/[{};]/g, "").replace(/^\.+|\.+$/g, "");
-}
-
 export function isPunctuation(lower: string): boolean {
   return !lower || /^[;:(),.]+$/.test(lower) || lower === "!" || lower === "?";
 }
@@ -107,80 +105,6 @@ export function isAnteMeridiemLower(lower: string): boolean {
 
 export function isPostMeridiemLower(lower: string): boolean {
   return POST_MERIDIEM_TOKENS.has(lower);
-}
-
-function pad2(value: number): string {
-  return value < 10 ? `0${value}` : String(value);
-}
-
-export function parseClockToken(
-  token: Token | undefined,
-  meridiemToken?: Token | undefined
-): { value: string; tokens: Token[] } | undefined {
-  if (!token) {
-    return undefined;
-  }
-  let lower = normalizeTokenLower(token);
-  if (lower.startsWith("@")) {
-    lower = lower.slice(1);
-  }
-  if (token.derived && token.sourceText?.includes("/") && /^[0-9]+(?:\.[0-9]+)?$/.test(lower)) {
-    return undefined;
-  }
-  const meridiem = meridiemToken ? normalizeTokenLower(meridiemToken) : undefined;
-  let hour: number;
-  let minute = 0;
-  const compactMeridiem = lower.match(/^([0-9]{1,2})\s*(am|pm)$/);
-  if (compactMeridiem) {
-    hour = parseInt(compactMeridiem[1], 10);
-    if (hour < 1 || hour > 12) {
-      return undefined;
-    }
-    if (isPostMeridiemLower(compactMeridiem[2]) && hour !== 12) {
-      hour += 12;
-    }
-    if (isAnteMeridiemLower(compactMeridiem[2]) && hour === 12) {
-      hour = 0;
-    }
-    return {
-      value: `${pad2(hour)}:${pad2(minute)}:00`,
-      tokens: [token]
-    };
-  }
-  const clock = lower.match(/^([0-9]{1,2})[:.]([0-9]{2})$/);
-  if (clock) {
-    hour = parseInt(clock[1], 10);
-    minute = parseInt(clock[2], 10);
-  } else if (/^[0-9]{1,2}$/.test(lower) && meridiem && isAmPmLower(meridiem)) {
-    hour = parseInt(lower, 10);
-  } else {
-    return undefined;
-  }
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || minute < 0 || minute > 59) {
-    return undefined;
-  }
-  if (meridiem && isAmPmLower(meridiem)) {
-    if (hour < 1 || hour > 12) {
-      return undefined;
-    }
-    if (isPostMeridiemLower(meridiem) && hour !== 12) {
-      hour += 12;
-    }
-    if (isAnteMeridiemLower(meridiem) && hour === 12) {
-      hour = 0;
-    }
-    return {
-      value: `${pad2(hour)}:${pad2(minute)}:00`,
-      tokens: [token, meridiemToken as Token]
-    };
-  }
-  if (hour < 0 || hour > 23) {
-    return undefined;
-  }
-  return {
-    value: `${pad2(hour)}:${pad2(minute)}:00`,
-    tokens: [token]
-  };
 }
 
 export function tokensAvailable(

@@ -168,7 +168,7 @@ function frameDose(
   context: HpsgClauseContext,
   frame: AdviceFrame
 ): AdviceArgument["quantity"] {
-  const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = frameActionDefinition(frame, context.options);
   if (!definition?.definesDose) return undefined;
   const amount = frame.args.find((arg) => arg.role === AdviceArgumentRole.Amount && arg.quantity);
   if (!amount?.quantity) return undefined;

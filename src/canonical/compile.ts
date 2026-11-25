@@ -597,8 +597,10 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     if(routeCode)break;
   }
   if(a.route){
-    const same=routeCode===base?.route?.code&&a.route.text===base?.route?.text;
-    result.route=Object.assign({},same?base?.route:undefined,{code:routeCode,text:a.route.text});
+    const routeText = a.route.text ?? (!routeCode
+      ? a.route.coding?.find(coding => coding.display)?.display : undefined);
+    const same=routeCode===base?.route?.code&&routeText===base?.route?.text;
+    result.route=Object.assign({},same?base?.route:undefined,{code:routeCode,text:routeText});
   }else result.route=undefined;
   let targetCode:NonNullable<NonNullable<typeof a.target>["coding"]>[number]|undefined;
   // Match the interchange decoder's site priority while retaining the full

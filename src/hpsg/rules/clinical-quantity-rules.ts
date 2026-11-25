@@ -801,8 +801,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   }
   if (rangedNumber) return [];
   const accepts = (candidate: string) =>
-    /^(?:mcg|ug|mg|g|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-    /^(?:ml|l|mcg|ug|mg|g|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
+    /^(?:mcg|ug|mg|g|u|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
+    /^(?:ml|l|mcg|ug|mg|g|u|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
   );

@@ -24,6 +24,7 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
     if (!Object.prototype.hasOwnProperty.call(detector, "test"))
       normalized.test = detector.test.bind(detector);
   }
+  normalized.test = normalized.test ?? detector.test;
   const previous = DETECTOR_INDEX.get(locale),
     priority = normalized.priority ?? 0;
   if (previous) {

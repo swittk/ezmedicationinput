@@ -2097,10 +2097,12 @@ export function deserializeCanonicalContext(
   if (routeCoding?.code) {
     routeCode = ROUTE_BY_SNOMED[routeCoding.code as SNOMEDCTRouteCodes];
   }
-  if (routeCode || dosage.route?.text) {
+  const routeText = dosage.route?.text ?? (!routeCode
+    ? dosage.route?.coding?.find(coding => coding.display)?.display : undefined);
+  if (routeCode || routeText) {
     clause.route = {
       code: routeCode,
-      text: dosage.route?.text ?? (routeCode ? ROUTE_TEXT[routeCode] : undefined)
+      text: routeText ?? (routeCode ? ROUTE_TEXT[routeCode] : undefined)
     };
   }
 

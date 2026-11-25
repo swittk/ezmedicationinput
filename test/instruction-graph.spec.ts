@@ -5091,13 +5091,14 @@ describe("round45 saved instruction meaning", () => {
     expect(parsePublicSig(source).longText).toContain(companion);
   });
 
-  it("keeps the accepted duration and container with a configured procedural realizer", () => {
+  it.each(["container-activity", "amount-material-destination"] as const)(
+    "keeps the accepted duration and container with a configured procedural realizer: %s", realizer => {
     const source = "Agitate bottle ten seconds", requests: string[] = [];
     const options: ParseOptions = {
       unitMap: { s: "s" },
       instructionActionMap: {
         "clinic-agitation": { code: "clinic-agitation", semanticClass: "prepare",
-          display: "Agitate", i18n: { th: "เขย่า" }, procedural: true, realizer: "container-activity" }
+          display: "Agitate", i18n: { th: "เขย่า" }, procedural: true, realizer }
       },
       instructionSemanticResolvers: request => {
         requests.push(request.sourceText);
@@ -5111,17 +5112,19 @@ describe("round45 saved instruction meaning", () => {
     const parsed = parsePublicSig(source, options);
     expect(requests).toContain(source);
     const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
-    expect(action.predicate.realizer).toBe("container-activity");
+    expect(action.predicate.realizer).toBe(realizer);
     expect(action.args).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: AdviceArgumentRole.Container, conceptId: "bottle" }),
       expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 10, unit: "s" } })
     ]));
     const r6 = toDosageDetails(parsed.fhir), before = JSON.stringify(parsed.fhir);
     for (const input of [parsed.fhir, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
-        .toContain("Agitate bottle for 10 seconds");
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toContain("เขย่าขวดเป็นเวลา 10 วินาที");
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(english).toContain("Agitate bottle for 10 seconds");
+      expect(english.match(/10 seconds/gu)).toHaveLength(1);
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(thai).toContain(realizer === "container-activity" ? "เขย่าขวดเป็นเวลา 10 วินาที" : "เขย่าขวด 10 วินาที");
+      expect(thai.match(/10 วินาที/gu)).toHaveLength(1);
     }
     expect(JSON.stringify(parsed.fhir)).toBe(before);
   });
@@ -6779,6 +6782,92 @@ describe("round59 graph argument fidelity and current action coverage", () => {
 });
 
 
+describe("round62 selected action ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([["mix", false], ["mix", true], ["clinic-mix", false], ["clinic-mix", true]] as const)(
+    "retains the selected procedure dose with shared code %s (selected first %s)", (code, selectedFirst) => {
+    const selected = { code, display: "Disperse", semanticClass: "procedure",
+      procedural: true, acceptsAmount: true, definesDose: true,
+      argumentParser: "amount-material-destination" as const, realizer: "amount-material-destination" as const };
+    const other = { ...getMedicationInstructionAction("mix")!, code, display: "Blend",
+      aliases: [], definesDose: false };
+    const options: ParseOptions = { instructionActionMap: selectedFirst
+      ? { disperse: selected, blend: other } : { blend: other, disperse: selected } };
+    const beforeOptions = JSON.stringify(options);
+    const parsed = parsePublicSig("Disperse 2 tablets in water", options);
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 2, unit: "tab" });
+    expect(clause.instructionGraph!.actions).toHaveLength(1);
+    const action = clause.instructionGraph!.actions[0];
+    expect(action.predicate).toMatchObject({ lemma: code, display: "Disperse", semanticClass: "procedure" });
+    if (code === "clinic-mix") expect(clause.evidence.some(item => item.rule === "hpsg.lex.patientInstruction.procedure")).toBe(true);
+    expect(action.args.filter(arg => arg.role === AdviceArgumentRole.Amount).map(arg => arg.quantity))
+      .toEqual([{ value: 2, unit: "tab" }]);
+    const values = [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
+      fresh(toDosageDetails(fresh(parsed.fhir)))];
+    for (const input of values) {
+      const before = JSON.stringify(input), course = importCanonicalCourse(input);
+      expect(course.stages).toHaveLength(1);
+      expect(course.stages[0].administrations).toHaveLength(1);
+      expect(course.stages[0].administrations[0].amounts).toMatchObject([
+        { quantity: { value: 2, unit: "tab" } },
+      ]);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]])
+      expect(row.doseAndRate).toMatchObject([{ doseQuantity: { value: 2, unit: "tab" } }]);
+    expect(parsed.longText).toBe("Disperse 2 tablets in water.");
+    expect(JSON.stringify(options)).toBe(beforeOptions);
+  });
+
+  it.each(["none", "minimal", "procedure"] as const)(
+    "keeps the built-in dose's pain onset beside an independent call (%s custom collision)", kind => {
+      const options: ParseOptions | undefined = kind === "none" ? undefined : { instructionActionMap: {
+        "custom-mix": kind === "minimal"
+          ? { code: "take", display: "Custom mix", procedural: true, definesDose: false }
+          : { ...getMedicationInstructionAction("mix")!, code: "take", display: "Custom mix",
+            aliases: [], procedural: true, definesDose: false,
+            primaryAdministrationHead: false, administrationMethod: undefined },
+      } };
+      const beforeOptions = JSON.stringify(options);
+      const parsed = parsePublicSig("Take 1 tablet at onset of pain, call your doctor", options);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ value: 1, unit: "tab" });
+      expect(clause.prn).toMatchObject({ enabled: true, reason: {
+        text: "pain", triggerPhase: "onset",
+        coding: { system: "http://snomed.info/sct", code: "22253000", display: "Pain" },
+      } });
+      expect(clause.instructionGraph!.actions).toHaveLength(1);
+      const call = clause.instructionGraph!.actions[0];
+      expect(call.predicate.lemma).toBe("call");
+      expect(call.relation).toBeUndefined();
+      expect(call.args).toEqual([{ role: AdviceArgumentRole.Object, text: "your doctor", normalized: "your doctor" }]);
+      const values = [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext),
+        fresh(toDosageDetails(fresh(parsed.fhir)))];
+      for (const input of values) {
+        const before = JSON.stringify(input), course = importCanonicalCourse(input);
+        expect(course.stages).toHaveLength(1);
+        expect(course.stages[0].administrations).toHaveLength(1);
+        expect(course.stages[0].administrations[0]).toMatchObject({
+          amounts: [{ quantity: { value: 1, unit: "tab" } }], asNeeded: true,
+        });
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+        expect(row.doseAndRate).toMatchObject([{ doseQuantity: { value: 1, unit: "tab" } }]);
+        expect(row.asNeeded).toBe(true);
+        expect(row.asNeededFor).toMatchObject([{ text: "pain",
+          coding: [{ system: "http://snomed.info/sct", code: "22253000", display: "Pain" }],
+          extension: [{ url: "urn:ezmedicationinput:StructureDefinition:medication-prn-trigger-phase", valueCode: "onset" }],
+        }]);
+      }
+      expect(parsed.longText).toBe("Take 1 tablet orally at onset of pain; then call your doctor.");
+      expect(JSON.stringify(options)).toBe(beforeOptions);
+    });
+});
+
 describe("round59 stored action codes keep their selected lexical meaning", () => {
   const configured = { ...getMedicationInstructionAction("mix")!, code: "take", aliases: [],
     display: "Custom mix", procedural: true, definesDose: false };
@@ -6841,4 +6930,82 @@ describe("round61 independent Time relation coverage", () => {
       }
       expect(JSON.stringify(graph)).toBe(before);
     });
+});
+
+
+describe("round62 review: instruction argument ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (row: FhirDosage) => {
+    const r6 = fresh(toDosageDetails([fresh(row)]));
+    return [fresh(row), r6, fresh(toFhirR5Dosages(r6))];
+  };
+
+  it.each(["Dilute 1 mL at 08:00 with saline to 10 mL", "Dilute 1 mL with saline to 10 mL at 08:00"])(
+    "keeps material and destination complements on either side of a clock: %s", source => {
+      const frame = parseInstructionActions(source)[0];
+      expect(frame.args).toEqual(expect.arrayContaining([
+        expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: expect.objectContaining({ value: 1, unit: "mL" }) }),
+        expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "08:00:00" }),
+        expect.objectContaining({ relation: AdviceRelation.With }),
+        expect.objectContaining({ relation: AdviceRelation.To, quantity: expect.objectContaining({ value: 10, unit: "mL" }) })
+      ]));
+      const graph = { sourceText: "", sourceLocale: "en", actions: [{ ...fresh(frame), sourceText: "" }] };
+      const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+      for (const value of views(row)) for (const locale of ["en", "th"]) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text.match(locale === "en" ? /(?:^|[^0-9])1 mL/gu : /(?:^|[^0-9])1 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(locale === "en" ? /10 mL/gu : /10 มิลลิลิตร/gu)).toHaveLength(1);
+        expect(text.match(/08:00/gu)).toHaveLength(1);
+        expect(text.match(/saline/gu)).toHaveLength(1);
+      }
+    });
+
+  it.each([false, true])("selects exact case-sensitive saved proposal codes independently of map order: %s", reverse => {
+    const lower = { code: "clinic-rinse", display: "Rinse gently", semanticClass: "prepare", procedural: true };
+    const upper = { code: "CLINIC-RINSE", display: "Rinse thoroughly", semanticClass: "prepare", procedural: true };
+    const source = "Agitate bottle";
+    for (const [code, display] of [["clinic-rinse", "Rinse gently"], ["CLINIC-RINSE", "Rinse thoroughly"]]) {
+      const options: ParseOptions = {
+        instructionActionMap: reverse ? { thorough: upper, gentle: lower } : { gentle: lower, thorough: upper },
+        instructionSemanticResolvers: request => request.sourceText === source ? { actions: [{
+          action: code, range: { start: 0, end: source.length },
+          args: [{ role: AdviceArgumentRole.Container, range: { start: 8, end: 14 }, concept: "bottle" }]
+        }] } : undefined
+      };
+      const parsed = parsePublicSig(source, options);
+      const action = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+      expect(action.predicate).toMatchObject({ lemma: code, display });
+      expect(action.predicate.codings).toContainEqual(expect.objectContaining({ code }));
+      const saved = parseInstructionGraphExtension([buildInstructionGraphExtension({
+        sourceText: "", sourceLocale: "en", actions: [fresh(action)]
+      })!])!;
+      expect(saved.actions[0].predicate.lemma).toBe(code);
+      expect(realizeInstructionGraph(saved, "en")).toContain(display);
+    }
+  });
+
+  it("retires a neutral edited clock while preserving a directional clock constraint", () => {
+    const source = "Swallow 1 tablet slowly with water at 10:00";
+    const parsed = parsePublicSig(source), original = fresh(parsed.fhir[0]);
+    const graph = fresh(parsed.meta.canonical.clauses[0].instructionGraph!);
+    const primary = graph.actions.find(action => action.predicate.lemma === "swallow")!;
+    expect(primary.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "10:00:00" }));
+    primary.args.push({ role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00", relation: AdviceRelation.After });
+    const marker = buildInstructionGraphExtension(graph)!;
+    original.extension = [...(original.extension ?? []).filter(extension => extension.url !== marker.url), marker];
+    const saved = fresh(withDosageEditProvenance([original], source)[0]);
+    saved.timing!.repeat!.timeOfDay = ["11:00:00"];
+    const before = fresh(saved);
+    for (const value of views(saved)) for (const locale of ["en", "th"]) {
+      const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+      expect(text.match(locale === "en" ? /after 08:00/gu : /หลัง08:00/gu)).toHaveLength(1);
+      expect(text.match(/11:00/gu)).toHaveLength(1);
+      expect(text).not.toContain("10:00");
+      expect(importCanonicalCourse(value).stages[0].administrations[0].amounts![0].quantity)
+        .toMatchObject({ value: 1, unit: "tab" });
+      expect(text).toContain("1 tablet slowly");
+    }
+    expect(saved).toEqual(before);
+    expect(saved.extension).toContainEqual(marker);
+  });
 });

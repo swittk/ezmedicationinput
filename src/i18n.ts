@@ -348,7 +348,7 @@ function createThaiLocalization(): SigLocalization {
         : style === "short" ? formatDoseThaiShort(dose) : formatDoseThaiLong(dose);
       return amount && scope ? (scope.site?.perTargetI18n?.th ?? "แต่ละจุด") + " " + amount : amount;
     },
-    formatShort: ({ clause, course }) => formatShortThai(clause, course),
+    formatShort: ({ clause, course, resolvedMethod }) => formatShortThai(clause, course, resolvedMethod),
     formatLong: ({
       clause,
       course,
@@ -2158,7 +2158,8 @@ function formatAsNeededThai(
   return reason ? `${lead}${reason}` : `${lead}จำเป็น`;
 }
 
-function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THAI_COURSE): string {
+function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THAI_COURSE,
+  resolvedMethod?: MedicationInstructionActionDefinition): string {
   const schedule = scheduleOf(clause);
   const parts: string[] = [];
   const dose = formatDoseThaiShort(clause.dose);
@@ -2258,7 +2259,8 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   if (asNeeded) {
     parts.push(asNeeded);
   }
-  if (!parts.length && clause.method) parts.push(resolveThaiMethodVerb(clause, resolveRouteGrammarThai(clause)));
+  if (!parts.length && clause.method)
+    parts.push(resolveThaiMethodVerb(clause, resolveRouteGrammarThai(clause), resolvedMethod));
   return parts.filter(Boolean).join(" ");
 }
 

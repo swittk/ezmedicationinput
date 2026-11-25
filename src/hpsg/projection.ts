@@ -268,7 +268,7 @@ function cloneSiteRestrictions(
   }));
 }
 
-function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolean {
+function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, clockSlotsRepeat = true): boolean {
   return Boolean(schedule && (
     schedule.frequency !== undefined ||
     schedule.frequencyMax !== undefined ||
@@ -276,7 +276,7 @@ function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined): boolea
     schedule.periodMax !== undefined ||
     schedule.dayOfWeek?.length ||
     schedule.when?.length ||
-    schedule.timeOfDay?.length ||
+    clockSlotsRepeat && schedule.timeOfDay?.length ||
     schedule.dayOfMonth?.length ||
     schedule.calendarEvents?.length ||
     schedule.weekdayOrdinal !== undefined ||
@@ -669,7 +669,8 @@ export function projectHpsgSignToState(
       target.frequency = dividedCount;
       target.timingCode = undefined;
     }
-    if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
+    if (!hasRecurringSchedule(schedule, dividedCount === undefined) &&
+        !hasRecurringSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
         (dividedCount !== undefined || target.timingReference !== "previous") &&
         target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;

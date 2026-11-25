@@ -517,7 +517,7 @@ export function resolveMedicationInstructionAction(
   const target = normalizeActionSurface(surface);
   const builtin = DEFAULT_BY_ALIAS.get(target);
   const map = options?.instructionActionMap;
-  let codeFallback: string | undefined;
+  let exactCode: string | undefined, codeFallback: string | undefined;
   if (map) {
     // A proposal may name either a surface or a saved code. Surfaces keep
     // their lexical meaning across the complete vocabulary; a code match
@@ -526,13 +526,15 @@ export function resolveMedicationInstructionAction(
       const input = map[configuredSurface];
       if (customDefinitionMatchesSurface(configuredSurface, input, target))
         return normalizeCustomDefinition(configuredSurface, input);
-      if (includeCode && !builtin && codeFallback === undefined) {
+      if (includeCode && !builtin) {
         const code = input.code?.trim() || normalizeActionSurface(configuredSurface).replace(/\s+/g, "-");
-        if (normalizeActionSurface(code) === target) codeFallback = configuredSurface;
+        if (code === surface.trim()) exactCode ??= configuredSurface;
+        else if (normalizeActionSurface(code) === target) codeFallback ??= configuredSurface;
       }
     }
   }
-  return builtin ?? (codeFallback !== undefined ? normalizeCustomDefinition(codeFallback, map![codeFallback]) : undefined);
+  const savedCode = exactCode ?? codeFallback;
+  return builtin ?? (savedCode !== undefined ? normalizeCustomDefinition(savedCode, map![savedCode]) : undefined);
 }
 
 /** The package lookup accepts saved codes as well as registered surfaces.

@@ -639,7 +639,10 @@ function formatCanonicalBase(
   // the administration and must not acquire that guard. Do not parse the text.
   const authoredQualifiers = (a.predicate || a.excludedDates?.length || a.excludedWeekdays?.length) && a.text?.trim() &&
     !canonicalClauseHasAdministrationSemantics(clause) && !clause.instructionGraph?.actions.length;
-  const displayClause = authoredQualifiers && a.predicate
+  const partialAuthoredDirections = !authoredQualifiers && a.text?.trim() &&
+    (source.schedule || source.route || source.target || source.siteReference || source.predicate || source.asNeeded) &&
+    !administrationHasAmountFacts(source) && !source.method && !clause.instructionGraph?.actions.length;
+  const displayClause = (authoredQualifiers || partialAuthoredDirections && style === "long") && a.predicate
     ? Object.assign({}, clause, { clinicalAdjuncts: Object.assign({}, clause.clinicalAdjuncts, { condition: undefined }) })
     : clause;
   let rendered = formatCanonicalClause(displayClause, style, env.localization, options);
@@ -651,10 +654,9 @@ function formatCanonicalBase(
   // Partial route, timing or guard facts cannot replace source-only
   // directions. A typed method or graph retains its established owner;
   // do not infer missing semantics by comparing localized renderings.
-  if (!authoredQualifiers && a.text?.trim() && (source.schedule || source.route || source.target || source.siteReference || source.predicate) && !administrationHasAmountFacts(source) && !source.method &&
-      !clause.instructionGraph?.actions.length)
+  if (partialAuthoredDirections)
     rendered = words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""),
-      a.predicate && style === "long" ? appendMedicationConditionText(a.text, a.predicate, options, env) : a.text);
+      a.predicate && style === "long" ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!);
   if (a.predicate && style !== "long" && !authoredQualifiers)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
   if (a.limits?.length || a.safety?.ifExceeded)
