@@ -3584,10 +3584,34 @@ describe("round68 numeric member safety qualification", () => {
         const result = calculateTotalUnits({ dosage, ...query, context: { strength: "20 mg/mL" } });
         expect(result).toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "maximum" });
         expect(result.explanation).toContain("safety");
+        expect(result.explanation?.match(/R6 safety details/gu)).toHaveLength(1);
         expect(toDosageDetails(savedRows(dosage)).step[0].component[0].safety)
           .toEqual(safety);
         expect(dosage).toEqual(original);
       }
       expect(source).toEqual(before);
     });
+  it("explains a freshly cleared numeric maximum once without applying its stale value", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: quantity(1, "tab") }],
+      timing: { repeat: { frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      safety: { doseLimit: [{ scope: "period", valueQuantity: quantity(2, "tab"), period: quantity(1, "d") }] }
+    }] }] };
+    const limit = source.step[0].component[0].safety!.doseLimit![0];
+    delete limit.valueQuantity!.value;
+    limit.valueQuantity!._value = { extension: [{
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    }] };
+    for (const dosage of views(source)) {
+      const original = fresh(dosage);
+      const result = calculateTotalUnits({ dosage, ...query });
+      expect(result).toMatchObject({ totalUnits: 6, unit: "tab", quantityKind: "maximum" });
+      expect(result.explanation).toContain("unevaluable maximum-dose constraint");
+      expect(result.explanation?.match(/R6 safety details/gu)).toHaveLength(1);
+      expect(toDosageDetails(savedRows(dosage)).step[0].component[0].safety)
+        .toEqual(source.step[0].component[0].safety);
+      expect(dosage).toEqual(original);
+    }
+  });
+
 });

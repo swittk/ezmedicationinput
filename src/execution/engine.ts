@@ -7377,9 +7377,7 @@ function calculateTotalUnitsSingle(
   if (unevaluatedMaximumDose)
     maximumExplanations.push("an unevaluable maximum-dose constraint was retained but could not be applied");
   if (hasUnevaluatedSafety(dosage.safety))
-    maximumExplanations.push(
-      "R6 safety details not expressible as numeric calendar limits were retained but not evaluated"
-    );
+    maximumExplanations.push(UNEVALUATED_SAFETY_NOTE);
   else if (dosage.safety?.maximaDeclared)
     maximumExplanations.push("the course retains declared maximum-dose limits");
   if (unresolvedOneTimeActivity)
@@ -7995,6 +7993,9 @@ function calculateCourseTotalUnits(
   if (assumptions.length) result.explanation = [result.explanation, ...assumptions].filter(Boolean).join(" ");
   return qualifyCourseSupply(course, result);
 }
+const UNEVALUATED_SAFETY_NOTE =
+  "R6 safety details not expressible as numeric calendar limits were retained but not evaluated";
+
 /** Declared numeric maxima keep their existing upper-supply policy without
  * claiming that their separately owned limits were not evaluated. */
 function hasUnevaluatedSafety(safety: CanonicalAdministration["safety"]): boolean {
@@ -8018,7 +8019,9 @@ function qualifyCourseSupply(course: CanonicalCourse, result: TotalUnitsResult):
   }
   if (!hasPartialSafety)
     return hasSafety && result.quantityKind !== "maximum" ? { ...result, quantityKind: "maximum" } : result;
-  const note = "R6 safety details that are not numeric calendar limits were retained but not evaluated.";
+  if (result.explanation?.includes(UNEVALUATED_SAFETY_NOTE))
+    return result.quantityKind === "maximum" ? result : { ...result, quantityKind: "maximum" };
+  const note = `${UNEVALUATED_SAFETY_NOTE}.`;
   return {
     ...result,
     quantityKind: "maximum",
