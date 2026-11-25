@@ -1035,7 +1035,7 @@ function refinedDefaultCadenceSynsem(
 ): HpsgSynsem | undefined {
   const cadence = cadenceSign.synsem.head.schedule;
   const explicit = explicitSign.synsem.head.schedule;
-  if (!cadence || !explicit || cadence.frequency !== 1 || explicit.frequency === undefined) return undefined;
+  if (!cadence || !explicit || cadence.frequency !== 1) return undefined;
   if (cadence.period === 1 && cadence.periodUnit === FhirPeriodUnit.Week && cadence.dayOfWeek?.length &&
       explicit.period !== undefined && explicit.periodUnit !== undefined &&
       (explicit.frequency !== 1 || !schedulePeriodMatches(cadence, explicit)) &&
@@ -1056,7 +1056,7 @@ function refinedDefaultCadenceSynsem(
       }
     };
   }
-  if (explicit.frequency === 1 || !hasDailyFrequencyDefaultEvidence(cadenceSign) ||
+  if (explicit.frequency === undefined || explicit.frequency === 1 || !hasDailyFrequencyDefaultEvidence(cadenceSign) ||
       !schedulePeriodMatches(cadence, explicit)) return undefined;
   return {
     ...cadenceSign.synsem,

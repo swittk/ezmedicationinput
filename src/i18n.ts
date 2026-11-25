@@ -1264,6 +1264,12 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
   if (frequency && periodUnit === FhirPeriodUnit.Day && (!period || period === 1) && !rangedPeriod) {
     return TH_TIMES_PER_DAY[frequency] ?? `วันละ ${stripTrailingZero(frequency)} ครั้ง`;
   }
+  if (periodUnit === FhirPeriodUnit.Second && period) {
+    const unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit;
+    const interval = periodMax !== undefined && periodMax !== period
+      ? `${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)}` : stripTrailingZero(period);
+    return `${countPrefix}ทุก ${interval} ${unit}`;
+  }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
       return `${countPrefix}ทุก ${stripTrailingZero(period)} ถึง ${stripTrailingZero(periodMax)} นาที`;

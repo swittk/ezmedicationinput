@@ -348,7 +348,7 @@ function activeDoseInCarrierOverTime(
   while (cursor - materialStart < 3 && available(context, cursor)) {
     const token = context.tokens[cursor];
     const word = normalizeTokenLower(token);
-    if (INFUSION_DURATION_LEADS.has(word) ||
+    if (INFUSION_DURATION_LEADS.has(word) || SITE_TRAILING_INSTRUCTION_WORDS.has(word) ||
         (getRouteMeaning(token)?.code === RouteCode["Intravenous route"] &&
           available(context, cursor + 1) &&
           (INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[cursor + 1])) ||
@@ -357,14 +357,17 @@ function activeDoseInCarrierOverTime(
     cursor++;
   }
   const materialEnd = cursor;
+  const mannerStart = cursor;
+  while (available(context, cursor) &&
+      SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+  const routeIndex = cursor;
   const routeToken = context.tokens[cursor];
   const markedIV = Boolean(routeToken && available(context, cursor) &&
     getRouteMeaning(routeToken)?.code === RouteCode["Intravenous route"]);
   if (markedIV) cursor++;
   // Manner modifiers are independent daughters, not carrier material. Leave
   // their tokens available to the existing instruction lexicon.
-  const mannerStart = cursor;
-  while (markedIV && available(context, cursor) &&
+  while (available(context, cursor) &&
       SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
   const mannerEnd = cursor;
   const overToken = context.tokens[cursor];
@@ -398,7 +401,7 @@ function activeDoseInCarrierOverTime(
     context,
     "hpsg.lex.clinicalQuantity.activeDoseInCarrierOverTime",
     Array.from({ length: durationEnd - start }, (_, offset) => start + offset)
-      .filter(index => index < mannerStart || index >= mannerEnd),
+      .filter(index => index < mannerStart || index >= mannerEnd || markedIV && index === routeIndex),
     clinicalQuantity,
     activeRange ? { range: activeRange, unit: activeDose.unit } : clinicalQuantity.projectedDose,
     { sourceRanges: [{

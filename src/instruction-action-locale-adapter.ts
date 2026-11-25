@@ -134,11 +134,22 @@ function renderEnglishRelationDuration(c: InstructionActionRealizationInput): st
   return `${c.label}${object ? ` ${object}` : ""}`;
 }
 
+function additionalMixCompanion(c: InstructionActionRealizationInput, arg: AdviceArgument) {
+  const amount = arg.quantity ? c.translateQuantity(arg.quantity) : undefined;
+  const quantityOnly = arg.quantity && !arg.conceptId && !arg.coding && !arg.codings?.length &&
+    arg.normalized === arg.quantity.unit;
+  const text = !quantityOnly || !amount
+    ? arg.quantity && !amount ? arg.text || arg.normalized : c.translateArgumentConcept(arg)
+    : undefined;
+  return { amount, text };
+}
+
 /** Typed ownership is shared; each locale only orders the resolved words. */
 function mixArgumentContent(c: InstructionActionRealizationInput) {
   let themeArg: AdviceArgument | undefined, substanceArg: AdviceArgument | undefined,
     unmarkedSubstance: AdviceArgument | undefined, unmarkedNominal: AdviceArgument | undefined,
     nominalThemeArg: AdviceArgument | undefined, amountArg: AdviceArgument | undefined;
+  let additionalCompanions: AdviceArgument[] | undefined;
   for (const arg of c.frame.args) {
     const nominal = arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Container;
     const material = arg.role === AdviceArgumentRole.Substance || arg.role === AdviceArgumentRole.Material;
@@ -155,11 +166,11 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
         else unmarkedNominal ??= arg;
       }
     }
-    if (!substanceArg && companion && (material || nominal || arg.role === AdviceArgumentRole.Theme))
-      substanceArg = arg;
-    else if (!unmarkedSubstance && material && !arg.relation) unmarkedSubstance = arg;
+    if (companion && (material || nominal || arg.role === AdviceArgumentRole.Theme)) {
+      if (!substanceArg) substanceArg = arg;
+      else (additionalCompanions ??= []).push(arg);
+    } else if (!unmarkedSubstance && material && !arg.relation) unmarkedSubstance = arg;
     if (!amountArg && arg.role === AdviceArgumentRole.Amount) amountArg = arg;
-    if (themeArg && substanceArg && amountArg) break;
   }
   // Typed Theme wins over an earlier nominal fallback. With a real Theme,
   // the first unmarked nominal remains available as the legacy vehicle.
@@ -232,7 +243,7 @@ function mixArgumentContent(c: InstructionActionRealizationInput) {
   const primaryAmount = (themeArg || hasSeparateVehicle) && !amountAlreadyInTheme ? c.amount : undefined;
   const substanceAmount = substanceArg?.quantity ? substanceQuantity
     : themeArg || hasSeparateVehicle || amountAlreadyInTheme ? undefined : c.amount;
-  return { theme, themeAmount, substance, substanceArg, amountArg,
+  return { theme, themeAmount, substance, substanceArg, amountArg, additionalCompanions,
     coextensiveAmount, primaryAmount, substanceAmount };
 }
 
@@ -255,7 +266,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     case "theme-destination-amount":
       return `${c.label}${c.theme ? ` ${c.theme}` : ""}${c.amount ? ` ${c.amount}` : ""}${c.destination ? ` into ${c.destination}` : ""}`;
     case "mix-substance": {
-      const { theme, themeAmount, substance, substanceArg, amountArg,
+      const { theme, themeAmount, substance, substanceArg, amountArg, additionalCompanions,
         coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme
         ? ` ${primaryAmount ? `${primaryAmount} of ` : ""}${coextensiveAmount ?? (themeAmount ? `${themeAmount} of ${theme}` : theme)}`
@@ -274,7 +285,13 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
         (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
         ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : "at";
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
+      let companionsText = "";
+      if (additionalCompanions) for (const arg of additionalCompanions) {
+        const { amount, text } = additionalMixCompanion(c, arg);
+        const relation = localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation;
+        if (amount || text) companionsText += ` ${relation} ${amount ?? ""}${amount && text ? " " : ""}${text ?? ""}`;
+      }
+      return `${c.label}${themeText}${substance || substanceAmount ? ` ${materialRelation} ${amountText}${substance ?? ""}` : ""}${companionsText}${c.time ? ` ${timeRelation} ${c.time}` : ""}`;
     }
     case "site-relation": {
       const object = c.site ?? c.theme ?? c.container;
@@ -418,7 +435,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     case "theme-destination-amount":
       return `${c.label}${c.theme ?? ""}${c.destination ? `ลง${c.destination}` : ""}${c.amount ? ` ${c.amount}` : ""}`;
     case "mix-substance": {
-      const { theme, themeAmount, substance, substanceArg, amountArg,
+      const { theme, themeAmount, substance, substanceArg, amountArg, additionalCompanions,
         coextensiveAmount, primaryAmount, substanceAmount } = mixArgumentContent(c);
       const themeText = theme ? (coextensiveAmount ??
         `${theme}${themeAmount ? ` ${themeAmount}` : ""}${primaryAmount ? ` ${primaryAmount}` : ""}`) : primaryAmount ?? coextensiveAmount ?? themeAmount ?? "";
@@ -436,7 +453,15 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
         (relationHasSemanticClass(timeSemanticRelation, "temporal") || timeSemanticRelation === AdviceRelation.In)
         ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation : " เวลา ";
       if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-      return `${c.label}${themeText}${substanceText}${c.time ? `${timeRelation}${c.time}` : ""}`;
+      let companionsText = "";
+      if (additionalCompanions) for (const arg of additionalCompanions) {
+        const { amount, text } = additionalMixCompanion(c, arg);
+        const relation = arg.relation === AdviceRelation.Without ? "โดยไม่ใช้"
+          : relationHasSemanticClass(arg.relation, "locative")
+            ? localizeAdviceRelation(arg.relation!, c.locale) ?? arg.relation : "กับ";
+        if (amount || text) companionsText += `${relation}${text ?? ""}${text && amount ? " " : ""}${amount ?? ""}`;
+      }
+      return `${c.label}${themeText}${substanceText}${companionsText}${c.time ? `${timeRelation}${c.time}` : ""}`;
     }
     case "site-relation": {
       const object = c.site ?? c.theme ?? c.container;

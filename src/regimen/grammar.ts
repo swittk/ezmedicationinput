@@ -418,7 +418,7 @@ export const CONSTRUCTIONS: readonly Construction[] = [
   { id: 'regimen.treatment-relative-phase-onset', priority: 805, relation: 'sequence',
     semanticLicense: 'dose-continuation', constraints: [
       coordinationOrSequence, conjunctionOrSequence,
-      constraint('right.explicit-phase-onset-only', f => !f.right.hasSchedule &&
+      constraint('right.explicit-phase-onset-only', f => !f.right.hasSchedule && !f.right.clause.prn?.enabled &&
         (f.right.clause.schedule?.treatmentStartOffsetDays !== undefined ||
          Boolean(f.right.clause.schedule?.phaseStartReference))),
       constraint('left.complete-administration', f => f.left.complete && f.left.hasDose && f.left.hasSchedule),

@@ -5573,25 +5573,28 @@ describe("time-based schedules", () => {
     const cases = [
       {
         input: "1 tab with breakfast, with lunch, and at 9 am, 5 pm",
+        when: ["CM", "CD"],
         clocks: ["09:00:00", "17:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหารเช้า, พร้อมอาหารกลางวัน และ เวลา 09:00, 17:00."
       },
       {
         input: "1 tab with meals and @ 10:00",
+        when: ["C"],
         clocks: ["10:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด พร้อมอาหาร และ เวลา 10:00."
       },
       {
         input: "1 tab ac and @ 8:00",
+        when: ["AC"],
         clocks: ["08:00:00"],
         expected: "ใช้ครั้งละ 1 เม็ด ก่อนอาหาร และ เวลา 08:00."
       }
     ];
 
-    for (const { input, expected, clocks } of cases) {
+    for (const { input, expected, clocks, when } of cases) {
       const result = parseSig(input, { locale: "th" });
       expect(result.longText).toBe(expected);
-      expect(result.fhir.timing?.repeat?.when?.length).toBeGreaterThan(0);
+      expect(result.fhir.timing?.repeat?.when).toEqual(when);
       expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(clocks);
       expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
       expect(result.warnings).toEqual([]);

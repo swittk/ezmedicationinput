@@ -1605,9 +1605,10 @@ describe("explicit cadence with distributive weekday selectors", () => {
       due: ["2026-11-23T08:00:00+00:00", "2026-11-27T08:00:00+00:00"] }
   ])("retains standalone or explicitly authored weekly cadence: $source", ({ source, days, frequency, due }) => {
     const parsed = parseBatch(source, { locale: "th" });
-    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
-      frequency, period: 1, periodUnit: "wk", dayOfWeek: days, timeOfDay: ["08:00:00"]
-    });
+    const expected = { frequency, period: 1, periodUnit: "wk", dayOfWeek: days, timeOfDay: ["08:00:00"] };
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(expected);
+    expect(parsed.fhir[0].timing?.repeat).toMatchObject(expected);
+    expect(parsed.fhirNext.step![0].component[0].timing?.repeat).toMatchObject(expected);
     expect(parsed.meta.leftoverText).toBeUndefined();
     for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
       expect(nextDueDoses(input, { ...query, limit: due.length })).toEqual(due);
@@ -1615,4 +1616,22 @@ describe("explicit cadence with distributive weekday selectors", () => {
         durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: due.length, unit: "tab" });
     }
   });
+});
+
+
+it.each([
+  "รับประทาน 1 เม็ด ทุกวันจันทร์ ทุก 6 ถึง 8 ชั่วโมง",
+  "รับประทาน 1 เม็ด ทุก 6 ถึง 8 ชั่วโมง ทุกวันจันทร์"
+])("round65 retains a period-only interval beside the weekday restriction: %s", source => {
+  const expected = { period: 6, periodMax: 8, periodUnit: "h", dayOfWeek: ["mon"] };
+  const sign = parseRawHpsgSign(source, { locale: "th" }).sign;
+  expect(sign.synsem.head.schedule).toMatchObject(expected);
+  expect(sign.synsem.head.schedule?.frequency).toBeUndefined();
+  const parsed = parseBatch(source, { locale: "th" });
+  expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject(expected);
+  expect(parsed.meta.leftoverText).toBeUndefined();
+  for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+    expect(row.timing?.repeat).toMatchObject(expected);
+    expect(row.timing?.repeat?.frequency).toBeUndefined();
+  }
 });

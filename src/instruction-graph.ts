@@ -3804,8 +3804,11 @@ const DEFAULT_ACTION_REALIZER = (
   const activityPhrase = activityRelation && c.activity
     ? joinLocalizedTokens(c.locale, [activityRelation, c.activity])
     : undefined;
-  const locativeRelation = c.site && c.frame.relation && relationHasSemanticClass(c.frame.relation, "locative")
-    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
+  const siteArgument = objectArg?.role === AdviceArgumentRole.Site ? objectArg
+    : c.site ? c.frame.args.find(arg => arg.role === AdviceArgumentRole.Site) : undefined;
+  const siteRelation = siteArgument?.relation ?? c.frame.relation;
+  const locativeRelation = c.site && siteRelation && relationHasSemanticClass(siteRelation, "locative")
+    ? localizeAdviceRelation(siteRelation, c.locale) ?? siteRelation
     : undefined;
   const resultRelation = c.result && c.frame.relation
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation
@@ -4858,7 +4861,7 @@ export function instructionGraphRichPrimaryAction(
     }
     if (!hasCanonicalAdministration) return undefined;
     const suppliesMissingHead = Boolean(!clause.method && dose && matchesDose(action));
-    if (!overlapsPrimary && !suppliesMissingHead) continue;
+    if (!overlapsPrimary && (primary || !suppliesMissingHead)) continue;
     const rich = Boolean(
       action.relation || action.args.some((arg) =>
         [

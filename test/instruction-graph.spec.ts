@@ -2569,7 +2569,7 @@ describe("review 2026-11-16 19h: incomplete graph quantities do not invent amoun
   it.each(["en", "th"] as const)(
     "uses recognizable source argument text for a comparator-only quantity in %s", locale => {
       const graph = parseInstructionActions("Dissolve 2 tablets in water, then drink slowly");
-      const frame = graph.find(a => a.predicate.lemma === "dissolve")!;
+      const frame = structuredClone(graph.find(a => a.predicate.lemma === "dissolve")!);
       const amount = frame.args.find(a => a.role === AdviceArgumentRole.Amount)!;
       amount.quantity = { comparator: "<=", unit: "mg" };
       const original = JSON.stringify(frame);
@@ -2792,7 +2792,7 @@ describe("round29 action scope and external graph preservation", () => {
     });
 
   it("keeps a partial mixing amount as source text in both locale realizers", () => {
-    const frame = parseInstructionActions("Mix with 100 mL water")[0];
+    const frame = structuredClone(parseInstructionActions("Mix with 100 mL water")[0]);
     const substance = frame.args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
     substance.text = "about 100 mL water";
     substance.quantity = { comparator: "~", unit: "mL" };
@@ -7074,18 +7074,27 @@ describe("round62 review: instruction argument ownership", () => {
 describe("round63 instruction complement and saved coding ownership", () => {
   const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
   it.each([
-    ["Dilute before 08:00 to 10 mL", undefined],
-    ["Dilute 1 mL before 08:00 to 10 mL", 1],
-    ["Dilute before 08:00 with 100 mL saline to 10 mL", undefined]
-  ] as const)("keeps complement quantities outside the head Amount: %s", (source, expected) => {
+    ["Dilute before 08:00 to 10 mL", undefined, undefined],
+    ["Dilute 1 mL before 08:00 to 10 mL", 1, undefined],
+    ["Dilute before 08:00 with 100 mL saline to 10 mL", undefined, 100]
+  ] as const)("keeps complement quantities outside the head Amount: %s", (source, expected, vehicle) => {
     const frame = parseInstructionActions(source)[0];
     const amounts = frame.args.filter(arg => arg.role === AdviceArgumentRole.Amount);
     expect(amounts.map(arg => arg.quantity?.value)).toEqual(expected === undefined ? [] : [expected]);
     expect(frame.args).toContainEqual(expect.objectContaining({
       role: AdviceArgumentRole.Destination, quantity: expect.objectContaining({ value: 10, unit: "mL" })
     }));
+    const beforeTime = frame.args.filter(arg => arg.role === AdviceArgumentRole.Time && arg.relation === AdviceRelation.Before);
+    expect(beforeTime).toHaveLength(1);
+    expect(beforeTime[0].text).toBe("08:00");
     const rendered = realizeInstructionAction({ ...frame, sourceText: "" }, "en");
     expect(rendered.match(/10 mL/gu)).toHaveLength(1);
+    expect(rendered.match(/before 08:00/gu)).toHaveLength(1);
+    if (vehicle !== undefined) {
+      expect(frame.args).toContainEqual(expect.objectContaining({ relation: AdviceRelation.With,
+        quantity: expect.objectContaining({ value: vehicle, unit: "mL" }) }));
+      expect(rendered.match(/100 mL/gu)).toHaveLength(1);
+    }
     if (expected !== undefined) expect(rendered.match(/(?:^|[^0-9])1 mL/gu)).toHaveLength(1);
   });
 
@@ -7145,5 +7154,81 @@ describe("round63 instruction complement and saved coding ownership", () => {
     const value = buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!;
     const action = value.extension!.find(item => item.url === "action")!;
     expect(action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!._display).toBeUndefined();
+  });
+});
+
+
+describe("round65 structured cadence and action ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([undefined, 90])("retains frequency and authored seconds in both locale previews (%s)", periodMax => {
+    const repeat = { frequency: 2, period: 60, ...(periodMax ? { periodMax } : {}), periodUnit: "s" as const };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "mL" } }], timing: { repeat } };
+    const r6 = toDosageDetails([row]);
+    for (const input of [row, fresh(r6), importCanonicalCourse(row)]) {
+      const before = fresh(input);
+      expect(formatSig(input, "long", { locale: "en" }))
+        .toContain(periodMax ? "twice every 60 to 90 seconds" : "twice every 60 seconds");
+      for (const style of ["short", "long"] as const)
+        expect(formatSig(input, style, { locale: "th" }))
+          .toContain(periodMax ? "2 ครั้ง ทุก 60 ถึง 90 วินาที" : "2 ครั้ง ทุก 60 วินาที");
+      expect(input).toEqual(before);
+    }
+    expect(row.timing!.repeat).toEqual(repeat);
+    expect(r6.step![0].component[0].timing!.repeat).toEqual(repeat);
+  });
+
+  it.each([false, true])("keeps a mixing vehicle and container in either saved argument order (%s)", reverse => {
+    const frame = fresh(parseInstructionActions("Mix powder with water")[0]);
+    frame.sourceText = "";
+    frame.args = [
+      { role: AdviceArgumentRole.Theme, text: "powder", normalized: "powder", i18n: { en: "the powder", th: "ผงยา" } },
+      { role: AdviceArgumentRole.Substance, text: "water", normalized: "water", i18n: { en: "water", th: "น้ำ" },
+        relation: AdviceRelation.With, quantity: { value: 100, unit: "mL" } },
+      { role: AdviceArgumentRole.Container, text: "cup", normalized: "cup", i18n: { en: "a cup", th: "ถ้วย" }, relation: AdviceRelation.In }
+    ];
+    if (reverse) [frame.args[1], frame.args[2]] = [frame.args[2], frame.args[1]];
+    const marker = buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
+    const before = fresh(marker), reopened = parseInstructionGraphExtension([fresh(marker)])!.actions[0];
+    const en = realizeInstructionAction(reopened, "en"), th = realizeInstructionAction(reopened, "th");
+    expect(en).toContain("the powder");
+    expect(en.match(/with 100 mL water/gu)).toHaveLength(1);
+    expect(en.match(/in a cup/gu)).toHaveLength(1);
+    expect(th).toContain("ผงยา");
+    expect(th).toContain("น้ำ 100 มิลลิลิตร");
+    expect(th).toContain("ในถ้วย");
+    expect(marker).toEqual(before);
+  });
+
+  it("keeps a selected site's relation beside an independent application instrument", () => {
+    const frame = fresh(parseInstructionActions("Apply cream")[0]);
+    frame.sourceText = ""; frame.relation = AdviceRelation.With; frame.predicate.realizer = "default";
+    frame.args = [
+      { role: AdviceArgumentRole.Theme, text: "cream", normalized: "cream", i18n: { en: "the cream", th: "ครีม" } },
+      { role: AdviceArgumentRole.Site, text: "rash", normalized: "rash", i18n: { en: "the rash", th: "ผื่น" }, relation: AdviceRelation.To },
+      { role: AdviceArgumentRole.Material, text: "cotton swab", normalized: "cotton swab", i18n: { en: "a cotton swab", th: "สำลี" }, relation: AdviceRelation.With }
+    ];
+    const marker = buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!;
+    const before = fresh(marker), reopened = parseInstructionGraphExtension([fresh(marker)])!.actions[0];
+    const en = realizeInstructionAction(reopened, "en"), th = realizeInstructionAction(reopened, "th");
+    expect(en).toContain("the cream"); expect(en).toContain("to the rash"); expect(en).toContain("with a cotton swab");
+    expect(th).toContain("ครีม"); expect(th).toContain("ผื่น"); expect(th).toContain("สำลี");
+    expect(marker).toEqual(before);
+  });
+
+  it("does not replace an explicit primary with a later equal-valued independent action", () => {
+    const source = "Take 1 tablet, then drink 5 mL with water";
+    const actions = parseInstructionActions(source);
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en",
+      primaryAdministrationSpan: actions[0].span, actions })!;
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 5, unit: "mL" } }], extension: [marker] };
+    const before = fresh(row), imported = fromFhirDosage(row);
+    expect(instructionGraphRichPrimaryAction(imported.meta.canonical.clauses[0])).toBeUndefined();
+    for (const input of [row, fresh(toDosageDetails([row]))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text.match(/5 mL/gu)).toHaveLength(2);
+      expect(text.toLowerCase()).toContain("drink 5 ml with water");
+      expect(text).not.toContain("1 tablet");
+    }
+    expect(row).toEqual(before);
   });
 });

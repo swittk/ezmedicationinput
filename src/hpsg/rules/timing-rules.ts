@@ -2760,7 +2760,12 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     // explicitly bounded dimensional suffix inside the maximum construction.
     const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
     const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
-    const compactPeriodSurface = compactAmount?.rawUnit ?? compactUnitPeriod?.[2];
+    const hybridValue = compactUnitPeriod && /^\d+$/u.test(compactUnitPeriod[2])
+      ? Number(compactUnitPeriod[2]) : undefined;
+    const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[cursor + 2] : undefined;
+    const hybridUnit = followingUnit && !context.state.consumed.has(followingUnit.index)
+      ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
+    const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
     const compactPeriodUnit = compactPeriodSurface ? mapIntervalUnit(compactPeriodSurface) : undefined;
     if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return [];
     const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
@@ -2771,7 +2776,7 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
       ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
         ? { tokens: [], daypart: true }
-        : { tokens: [], period: compactAmount?.value ?? 1, periodUnit: compactPeriodUnit }
+        : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit }
       : undefined;
     const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
     if (!period) return [];

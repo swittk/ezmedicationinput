@@ -466,6 +466,12 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
     }
     return `${stripTrailingZero(frequency)} times daily`;
   }
+  if (periodUnit === FhirPeriodUnit.Second && period) {
+    const unit = words.timeUnit(periodUnit, periodMax ?? period) ?? periodUnit;
+    const interval = periodMax !== undefined && periodMax !== period
+      ? `${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)}` : stripTrailingZero(period);
+    return `${countPrefix}every ${interval} ${unit}`;
+  }
   if (periodUnit === FhirPeriodUnit.Minute && period) {
     if (periodMax && periodMax !== period) {
       return `${countPrefix}every ${stripTrailingZero(period)} to ${stripTrailingZero(periodMax)} minutes`;

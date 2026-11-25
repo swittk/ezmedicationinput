@@ -1,3 +1,4 @@
+import { parseSigSegments as parseHpsgSegments } from "../src/hpsg/segmenter";
 import { describe, expect, it } from 'vitest';
 import {
   calculateTotalUnits, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays,
@@ -1452,5 +1453,27 @@ describe("Thai QOD cadence and excluded-day lexical separation", () => {
       );
     }
     expect(parsed.fhir.text).toContain(source.slice(-10).trim());
+  });
+});
+
+
+describe("round65 selected procedural comma ownership", () => {
+  it("keeps a built-in procedural predecessor despite a custom code collision", () => {
+    const source = "Rinse the skin, apply 1 g to the rash";
+    const options = { instructionActionMap: { flush: { code: "rinse", procedural: false, display: "Flush" } } };
+    for (const supplied of [undefined, options])
+      expect(parseHpsgSegments(source, supplied)).toEqual([{ text: source, start: 0, end: source.length }]);
+  });
+  it("keeps an internal wait-argument comma despite a custom code collision", () => {
+    const source = "Take 1 tablet on empty stomach with water; wait 30 minutes before food, drink, or other meds";
+    const options = { instructionActionMap: { delay: { code: "wait", procedural: false, display: "Delay" } } };
+    for (const supplied of [undefined, options]) {
+      const plan = createBoundaryPlan(source, supplied);
+      expect(plan.claims.some(claim => claim.kind === "procedural-argument")).toBe(true);
+      expect(plan.segments).toEqual([{ text: source, start: 0, end: source.length }]);
+      const parsed = parseSig(source, supplied);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(parsed.meta.canonical.clauses[0].instructionGraph?.actions.some(action => action.predicate.lemma === "drink")).toBe(false);
+    }
   });
 });

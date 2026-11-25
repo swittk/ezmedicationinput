@@ -788,7 +788,7 @@ export function planBoundaries(input: string, options?: ParseOptions, experiment
       if (site.kind !== 'comma' ||
           explicitDoseLexicalEnd(tokens, site.rightIndex, options) !== undefined) continue;
       const internal = actionFrames.some(frame => {
-        const action = getMedicationInstructionAction(frame.predicate.lemma, options);
+        const action = frameActionDefinition(frame, options);
         // An administration frame may retain an opaque text argument while
         // HPSG licenses several complete schedule daughters within it. That
         // text is not a nominal-list constituent and cannot veto their seams.

@@ -3749,6 +3749,7 @@ describe("round63 local timing and quantity ownership", () => {
       expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
       expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
       expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+      expect(parsed.longText).toMatch(/\brinse[;.]?\s+immediately\b/iu);
     }
     const immediate = parsePublicSig("Infuse 1 mL immediately", options);
     expect(immediate.meta.canonical.clauses[0].schedule?.when).toContain(EventTiming.Immediate);
@@ -3768,9 +3769,10 @@ describe("round63 inherited next-day positions", () => {
     const query = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z",
       timeZone: "UTC", limit: 9 };
     const due = nextDueDoses(parsed, query);
-    expect(due).toHaveLength(daily ? 9 : 8);
-    expect(due[7]).toBe("2026-11-04T20:00:00+00:00");
-    if (daily) expect(due[8]).toBe("2026-11-05T08:00:00+00:00");
+    const expected = [1, 2, 3, 4].flatMap(day =>
+      ["08:00", "20:00"].map(clock => `2026-11-0${day}T${clock}:00+00:00`));
+    if (daily) expected.push("2026-11-05T08:00:00+00:00");
+    expect(due).toEqual(expected);
     expect(calculateTotalUnits({ dosage: parsed, ...query, durationValue: 5, durationUnit: "d" }).totalUnits)
       .toBe(daily ? 14 : 10);
   });
@@ -3795,5 +3797,42 @@ describe("round63 paired clock qualifiers", () => {
       expect(calculateTotalUnits({ dosage: value, ...query, durationValue: 2, durationUnit: "d" }).totalUnits)
         .toBe(independentMorning ? 6 : 4);
     }
+  });
+});
+
+
+describe("round65 supported quantity and successor ownership", () => {
+  it.each(["saline slowly IV", "saline IV slowly"])("keeps manner separate from carrier material: %s", phrase => {
+    const parsed = parsePublicSig("Infuse 20 mg in about 100 mL " + phrase + " over 30 minutes");
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.clinicalQuantity?.carrierMaterial?.text).toBe("saline");
+    expect(clause.dose).toEqual({ value: 20, unit: "mg" });
+    expect(clause.clinicalQuantity?.rateNumerator).toEqual({ value: 100, unit: "mL", comparator: "~" });
+    expect(clause.schedule).toMatchObject({ administrationDuration: 30, administrationDurationUnit: "min" });
+    expect(parsed.longText).toContain("slowly");
+  });
+  it.each(["tablets/24 hours", "tablets / 24 hours", "tablets/24h"])("retains the complete maximum period in %s", period => {
+    const source = "Take 1 tablet daily, max 2 " + period;
+    const parsed = parsePublicSig(source), schedule = parsed.meta.canonical.clauses[0].schedule!;
+    expect(schedule.maxDosePerPeriod).toEqual([{ amount: 2, unit: "tab", period: 24, periodUnit: "h" }]);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    expect(schedule.evidence?.find(item => item.rule === "hpsg.lex.schedule.maximumDosePerPeriod")?.spans)
+      .toContainEqual({ start: source.indexOf("max"), end: source.length, text: source.slice(source.indexOf("max")) });
+    expect(parsed.fhir[0].maxDosePerPeriod).toMatchObject([{ numerator: { value: 2, unit: "tab" }, denominator: { value: 24, unit: "h" } }]);
+  });
+  it.each([false, true])("keeps an onset-only PRN successor free of unstated recurrence (%s)", prn => {
+    const parsed = parsePublicSig("Take 1 tablet daily for 3 days, then from day 4 take 2 tablets" +
+      (prn ? " as needed for pain" : ""));
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    const clause = parsed.meta.canonical.clauses[1];
+    expect(clause.dose).toEqual({ value: 2, unit: "tab" });
+    expect(clause.schedule).toMatchObject({ treatmentStartOffsetDays: 3, phaseStartReference: "treatment-day-start" });
+    expect(clause.schedule?.frequency).toBe(prn ? undefined : 1);
+    expect(clause.schedule?.period).toBe(prn ? undefined : 1);
+    expect(clause.schedule?.periodUnit).toBe(prn ? undefined : "d");
+    expect(clause.schedule?.timingCode).toBeUndefined();
+    if (prn) expect(clause.prn).toMatchObject({ enabled: true, reason: { text: "pain" } });
+    for (const row of [parsed.fhir[1], parsed.fhirNext.step![1].component[0]])
+      expect(row.timing?.repeat?.frequency).toBe(prn ? undefined : 1);
   });
 });
