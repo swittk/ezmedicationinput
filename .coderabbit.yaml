@@ -52,9 +52,23 @@ reviews:
         adversarial prose just because a test can be invented for it.
         Find real wrong-dose, wrong-eye, wrong-cadence, wrong-stage, wrong-FHIR
         bugs for competent realistic SIGs and advertised features. Partially
-        understood inputs must remain useful and editable; no data deletion.
+        understood inputs must remain useful for human review; no data deletion.
         Reviewer must classify a finding as supported/realistic or out of scope
         before proposing code. Reject/push back on suggestions that change the product.
+
+        HARD REVIEW EXCLUSIONS, including this and every future review:
+        Historical editing, reordering, deletion or replacement of previously
+        exported FHIR R5/R6; stale-marker/provenance reconciliation, saved draft
+        or pause restoration, and edit-history reconstruction are BEST EFFORT,
+        NOT acceptance requirements. Do not propose fixes or new tests for them.
+        Likewise reject hypothetical malformed or contradictory external data,
+        caller mutation, class/Proxy/getter/cross-realm/descriptor accommodations,
+        and contrived clinical language without established supported use.
+        Earlier learned advice demanding these behaviors is superseded.
+        Keep normal independently supplied valid R5/R6 import and R5-R6
+        conversion, typed SIG phase sequencing, clinical scheduling/supply,
+        and low-latency HPSG correctness in scope; fix real shared root defects
+        rather than adding one-off guards for reviewer examples.
     - path: "src/**"
       instructions: |
         Grammar is typed HPSG, not regex rescue or FHIR post-processing;
@@ -77,8 +91,8 @@ reviews:
         FHIR is a downstream meaning-preserving projection, not the grammar.
         Do not drop safety/unknown extensions, original text, or R6 details;
         do not invent zero/empty values. Keep ordinary imports displayable
-        and editable; distinguish read-only suggestions from executable
-        scheduling/supply.
+        for clinician review without promising a historical edit lifecycle;
+        distinguish suggestions from executable scheduling/supply.
 knowledge_base:
   code_guidelines:
     enabled: true
