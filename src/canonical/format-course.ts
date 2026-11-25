@@ -573,8 +573,8 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
     !!r.activityTiming?.length || !!r.occurrenceCap || !!r.clockWindow || !!r.eventWindow ||
     !!r.startOffset || !!r.endOffset);
 }
-/** Primary source owners and a complete graph of these same directions can
- * own their wording; unrelated ancillary advice cannot supply a missing dose. */
+/** Current amount owners and a complete graph of these same directions can
+ * own their wording; a head or ancillary advice cannot supply a missing dose. */
 function administrationOwnsSourceDirections(
   administration: CanonicalAdministration,
   graph: CanonicalSigClause["instructionGraph"],
@@ -582,9 +582,7 @@ function administrationOwnsSourceDirections(
 ): boolean {
   if (administrationHasAmountFacts(administration)) return true;
   if (!graph?.actions.length) return false;
-  const owner = graph.primaryOwnership;
-  if (owner ? owner.administrationActionIndex !== undefined || owner.dose !== undefined
-      : graph.primaryAdministrationSpan !== undefined) return true;
+  if (graph.primaryOwnership?.dose !== undefined) return true;
   return sourceText !== undefined && graph.sourceText === sourceText && graph.coverage?.complete === true;
 }
 function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {

@@ -12355,6 +12355,25 @@ describe("round74 ancillary advice and independent authored directions", () => {
     expect(source).toEqual(original);
   });
 
+  it("keeps independent header dose directions beside a graph-owned administration head", () => {
+    const graph = parseSig("Swallow slowly with water at 10:00").meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.primaryOwnership).toEqual({ administrationActionIndex: 0 });
+    expect(graph.primaryOwnership?.dose).toBeUndefined();
+    const source: FhirR6DosageInstruction = { renderedInstruction: header, step: [{ component: [{
+      timing, extension: [buildInstructionGraphExtension(graph)!],
+    }] }] };
+    const before = persist(source);
+    for (const input of [importCanonicalCourse(persist(source)), persist(source), persist(toFhirR5Dosages(source))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "roundtrip" });
+        expect(text.split(header).length - 1).toBe(1);
+        expect(text).toMatch(locale === "en" ? /twice daily/iu : /วันละ ?2/u);
+        expect(text).toMatch(locale === "en" ? /swallow.*water/iu : /กลืน.*น้ำ/u);
+      }
+    }
+    expect(source).toEqual(before);
+  });
+
   it.each([false, true])("shares source ownership for a fresh R5 member beside ancillary advice (current dose %s)", dose => {
     const graph = parseSig("Shake well").meta.canonical.clauses[0].instructionGraph!;
     const source: FhirDosage = { text: header, timing, extension: [buildInstructionGraphExtension(graph)!],
@@ -12372,6 +12391,24 @@ describe("round74 ancillary advice and independent authored directions", () => {
       }
     }
     expect(source).toEqual(before);
+  });
+
+  it("keeps a complete graph authoritative for the same authored directions", () => {
+    const instruction = "Shake well";
+    const graph = parseSig(instruction).meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.coverage?.complete).toBe(true);
+    const source: FhirR6DosageInstruction = { renderedInstruction: instruction, step: [{ component: [{
+      timing, extension: [buildInstructionGraphExtension(graph)!],
+    }] }] };
+    for (const input of [importCanonicalCourse(persist(source)), persist(source), persist(toFhirR5Dosages(source))]) {
+      const english = formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" });
+      expect(english.match(/shake well/giu)).toHaveLength(1);
+      expect(english).toMatch(/twice daily/iu);
+      expect(english).not.toContain("original directions");
+      const thai = formatSig(input, "long", { locale: "th", realizationMode: "roundtrip" });
+      expect(thai).toMatch(/เขย่า/u);
+      expect(thai).not.toContain(instruction);
+    }
   });
 
   it("keeps the current structured amount authoritative beside a different course header", () => {
