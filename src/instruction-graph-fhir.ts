@@ -140,10 +140,26 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   }
   if (argument.quantity) {
     const quantity: FhirExtension[] = [];
-    add(quantity, valueDecimal("value", argument.quantity.value));
-    add(quantity, valueDecimal("low", argument.quantity.range?.low));
-    add(quantity, valueDecimal("high", argument.quantity.range?.high));
-    add(quantity, valueString("unit", argument.quantity.unit));
+    if (argument.quantity.fieldMetadata) {
+      for (const [name, value] of [
+        ["value", argument.quantity.value], ["low", argument.quantity.range?.low],
+        ["high", argument.quantity.range?.high], ["unit", argument.quantity.unit]
+      ] as const) {
+        const metadata = argument.quantity.fieldMetadata[name];
+        if (value === undefined && !metadata) continue;
+        const field: FhirExtension = { ...metadata, url: name };
+        if (value !== undefined) {
+          if (name === "unit") field.valueString = value;
+          else field.valueDecimal = value;
+        }
+        quantity.push(field);
+      }
+    } else {
+      add(quantity, valueDecimal("value", argument.quantity.value));
+      add(quantity, valueDecimal("low", argument.quantity.range?.low));
+      add(quantity, valueDecimal("high", argument.quantity.range?.high));
+      add(quantity, valueString("unit", argument.quantity.unit));
+    }
     // Use the published EMA Coding for an operator, not a private graph code.
     // Exact graph quantities keep their existing wire shape.
     if (argument.quantity.comparator || argument.quantity.comparatorElement || argument.quantity.comparatorExtensions?.length) {
@@ -303,6 +319,17 @@ function parseTranslationNode(extension:FhirExtension):{locale?:string;text?:str
   }
   return {locale:locale?.valueCode,text:text?.valueString};
 }
+/** Keep only recognized-field metadata; the typed quantity owns its value. */
+function quantityFieldMetadata(field: FhirExtension | undefined, valueKey: "valueDecimal" | "valueString") {
+  if (!field) return undefined;
+  for (const key in field) {
+    if (key === "url" || key === valueKey) continue;
+    const { url: _url, valueDecimal: _decimal, valueString: _string, ...metadata } = field;
+    return metadata;
+  }
+  return undefined;
+}
+
 function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefined {
   let role:FhirExtension|undefined,text:FhirExtension|undefined,relation:FhirExtension|undefined,
     relationCoding:FhirExtension|undefined,normalized:FhirExtension|undefined,concept:FhirExtension|undefined,
@@ -360,13 +387,19 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
         (comparatorExtensions??=[]).push(field);break;
     }
     const amount=value?.valueDecimal,lower=low?.valueDecimal,upper=high?.valueDecimal,units=unit?.valueString;
+    const valueMetadata=quantityFieldMetadata(value,"valueDecimal"),lowMetadata=quantityFieldMetadata(low,"valueDecimal"),
+      highMetadata=quantityFieldMetadata(high,"valueDecimal"),unitMetadata=quantityFieldMetadata(unit,"valueString");
+    const fieldMetadata=valueMetadata||lowMetadata||highMetadata||unitMetadata ? {
+      ...(valueMetadata?{value:valueMetadata}:{}),...(lowMetadata?{low:lowMetadata}:{}),
+      ...(highMetadata?{high:highMetadata}:{}),...(unitMetadata?{unit:unitMetadata}:{})
+    } : undefined;
     const current=comparatorExtensions?quantityFromWire({extension:comparatorExtensions}):undefined;
     const comparator=current?.comparator,comparatorElement=current?._comparator;
     comparatorExtensions=current?.extension;
-    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorElement||comparatorExtensions?.length)
+    if(amount!==undefined||lower!==undefined||upper!==undefined||units!==undefined||comparator!==undefined||comparatorElement||comparatorExtensions?.length||fieldMetadata)
       result.quantity={value:amount,range:lower!==undefined||upper!==undefined?{low:lower,high:upper}:undefined,
         unit:units,...(comparator?{comparator}:{}),...(comparatorElement?{comparatorElement}:{}),
-        ...(comparatorExtensions?{comparatorExtensions}:{})};
+        ...(comparatorExtensions?{comparatorExtensions}:{}),...(fieldMetadata?{fieldMetadata}:{})};
   }
   if(i18n)result.i18n=i18n;
   return result;

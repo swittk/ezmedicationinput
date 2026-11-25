@@ -35,6 +35,12 @@ export function normalizeAdministrationTargetCount(value: number | undefined): n
     ? Math.trunc(value) : undefined;
 }
 
+/** Declared anatomical refinements, independent of their localized labels. */
+const BROADER_BODY_SITE_CODE: Readonly<Record<string, string>> = {
+  "368588007": "89644007", // Entire left external auditory canal -> left ear.
+  "368566007": "25577004", // Entire right external auditory canal -> right ear.
+};
+
 /** Compare exact stock site labels only. A lateralized label can refine its
  * registered unqualified anatomy; a different code alone is not a conflict. */
 export function bodySiteTextConflictsWithCoding(text: string, coding: FhirCoding | undefined): boolean {
@@ -42,6 +48,7 @@ export function bodySiteTextConflictsWithCoding(text: string, coding: FhirCoding
   const textCode = definition?.coding;
   if (!textCode?.code || !coding?.code || textCode.code === coding.code ||
       (textCode.system ?? SNOMED_SYSTEM) !== (coding.system ?? SNOMED_SYSTEM)) return false;
+  if (BROADER_BODY_SITE_CODE[textCode.code] === coding.code) return false;
   const canonical = definition.text;
   const unqualified = canonical?.replace(/^(?:left|right|both) /u, "");
   if (unqualified && unqualified !== canonical) {

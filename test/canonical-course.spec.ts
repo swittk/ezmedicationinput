@@ -1065,11 +1065,11 @@ describe("review 26 external display ownership", () => {
     } }] };
     const expectedDoseAndRate = structuredClone(row.doseAndRate);
     const text = formatSig(row, "long", { locale });
-    expect(text).toContain("<5");
+    expect(text).toMatch(/2–<5 mg(?:$|[.;])/u);
     expect(row.doseAndRate).toEqual(expectedDoseAndRate);
     const reopened = fromFhirDosage(row, { locale });
     expect(reopened.longText).toBe(text);
-    expect(reopened.shortText).toContain("<5");
+    expect(reopened.shortText).toMatch(/2–<5 mg(?:$|[.;])/u);
     expect(row.doseAndRate).toEqual(expectedDoseAndRate);
     expect(reopened.fhir.doseAndRate).toEqual(expectedDoseAndRate);
   });

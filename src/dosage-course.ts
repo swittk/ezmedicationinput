@@ -1669,7 +1669,8 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     const currentText = dosageTextFingerprint(row);
     const sourceText = original?.textFingerprint ?? currentText;
     const localReplay = row.text !== undefined && Boolean(row.maxDosePerPeriod?.length ||
-      row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety);
+      row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety ||
+      getTimingClocks(row.timing?.repeat)?.length);
     const baseline: FhirExtension[] = [{ url: "textFingerprint", valueString: currentText }];
     // The containing marker already owns the default; retain only a row's
     // explicit override here. Local row markers still own independent edits.

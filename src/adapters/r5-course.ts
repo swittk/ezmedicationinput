@@ -349,11 +349,14 @@ export function projectNativeR5Course(
       const retainedSequence = strict.extension?.find(
         (e) => e.url === DOSAGE_RETAINED_R5_SEQUENCE_URL
       );
-      if (retainedSequence?.valueDecimal !== undefined && Number.isFinite(retainedSequence.valueDecimal) &&
+      const retainedPhaseMatches = retainedSequence && (retainedSequence.valueDecimal === undefined
+        ? stageIndex === 0
+        : Number.isFinite(retainedSequence.valueDecimal) &&
           (Number.isInteger(retainedSequence.valueDecimal) && retainedSequence.valueDecimal >= 1
-            ? retainedSequence.valueDecimal : 1) === stageIndex + 1)
+            ? retainedSequence.valueDecimal : 1) === stageIndex + 1);
+      if (retainedPhaseMatches && retainedSequence.valueDecimal !== undefined)
         strict.sequence = retainedSequence.valueDecimal;
-      if (retainedSequence?._valueDecimal !== undefined && strict._sequence === undefined)
+      if (retainedPhaseMatches && retainedSequence._valueDecimal !== undefined && strict._sequence === undefined)
         strict._sequence = retainedSequence._valueDecimal;
       let hasExpressions = false;
       // Only dual strict/editable previews need this classification. A

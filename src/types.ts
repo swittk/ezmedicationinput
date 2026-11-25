@@ -55,10 +55,12 @@ export interface FhirExtension {
   valueTiming?: FhirTiming;
 }
 
-/** R6 Extension Quantity values include the native approximate comparator. */
-export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity"> {
+/** R6 Extension values retain their native Quantity and Timing contracts. */
+export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming"> {
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
+  valueRatio?: FhirR6Ratio;
+  valueTiming?: FhirR6Timing;
 }
 
 export interface FhirR6Element extends Omit<FhirElement, "extension"> {
@@ -1006,6 +1008,9 @@ export interface AdviceArgument {
     comparatorElement?: FhirElement;
     /** Original wire operator annotations; the current comparator owns meaning. */
     comparatorExtensions?: FhirExtension[];
+    /** Primitive child annotations; current typed values own quantity meaning. */
+    fieldMetadata?: Partial<Record<"value" | "low" | "high" | "unit",
+      Omit<FhirExtension, "url" | "valueDecimal" | "valueString">>>;
   };
   span?: TextRange;
 }

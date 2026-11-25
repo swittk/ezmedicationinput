@@ -416,7 +416,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
     const after = toDosageDetails(updated);
     expect(after.step[0].component[0].doseAndRate![0].doseQuantity?.value).toBe(2);
     expect(after.renderedInstruction).toBe("2 tablets PO BID");
-    expect(formatSig(after, "long")).toContain("2 tablets");
+    expect(formatSig(after, "long")).toBe("Take 2 tablets orally twice daily.");
     const resaved = toFhirR5Dosages(updated);
     const liveInstruction = resaved[0].extension?.find(e =>
       e.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL)?.extension

@@ -84,8 +84,8 @@ function draftCompletionTiming(timing: FhirR6Timing | undefined): object | undef
     const { id: _durationId, _value, _unit, _code, _system, _comparator, ...duration } = repeat.boundsDuration;
     repeat.boundsDuration = duration;
   }
-  if (repeat.boundsPeriod?.id !== undefined) {
-    const { id: _periodId, ...period } = repeat.boundsPeriod;
+  if (repeat.boundsPeriod) {
+    const { id: _periodId, _start, _end, ...period } = repeat.boundsPeriod;
     repeat.boundsPeriod = period;
   }
   return { event: timing.event, code: timing.code, repeat: timing.repeat ? repeat : undefined };

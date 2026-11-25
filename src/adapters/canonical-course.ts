@@ -685,7 +685,7 @@ function baseAdministration(
   let sourceTextVerified = format === "r6" ? false : getDosageSourceTextAgreement(raw);
   const carrier = raw.doseAndRate?.[0]?.rateRatio && (sourceContext || format === "r5" && hasCarrierMaterial)
     ? clinicalCarrierQuantityFromFhir(raw as FhirDosage) : undefined;
-  if (format === "r5" && (sourceContext || carrier?.carrierMaterial) &&
+  if (format === "r5" && (sourceContext || sourceFields?.clocks || carrier?.carrierMaterial) &&
       sourceTextVerified !== false && raw.extension?.length) {
     const matches = dosageMatchesSavedProjection(input);
     if (matches === false) {

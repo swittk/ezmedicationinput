@@ -1018,10 +1018,14 @@ function reconcileNativeCompactCourse(
     const restored = local ? restoreComponentDelta(dosage, local.value, warnings, sourceContext) : undefined;
     // The outer course baseline may know that this historical row's text is
     // stale even when the historical subset has no copy of that baseline.
-    const historicalMember = historical && dosage !== dosages[index]
-      ? { ...historical, text: dosage.text,
-        provenance: { ...historical.provenance!, sourceTextVerified: false } }
-      : historical;
+    let historicalMember = historical;
+    if (historical && dosage !== dosages[index]) {
+      const data = { ...historical.provenance!.data };
+      if (dosage._text !== undefined) data._text = dosage._text;
+      else delete data._text;
+      historicalMember = { ...historical, text: dosage.text,
+        provenance: { ...historical.provenance!, data, sourceTextVerified: false } };
+    }
     const liveComponent = restored?.dosage ?? historicalMember ??
       administrationFromR5(dosage, sourceContext);
     const component =
@@ -1078,7 +1082,8 @@ function reconcileNativeCompactCourse(
     if (missingPredecessor && step.administrations.length &&
         (step.start?.anchor === "previous-phase-next-day" ||
           step.administrations.some(a => a.phaseStart?.anchor === "previous-phase-next-day" ||
-            !step.start && a.phaseStart === undefined && !a.schedule?.recurrence?.calendarWindow?.start)))
+            !step.start && a.phaseStart === undefined && a.phaseOrigin === undefined &&
+            !a.schedule?.recurrence?.calendarWindow?.start)))
       missing.add("predecessor");
     if (step.start || step.end || step.administrations.length) missingPredecessor = false;
   }
