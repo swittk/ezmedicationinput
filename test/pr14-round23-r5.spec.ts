@@ -10406,6 +10406,44 @@ describe("round60 interoperability ownership", () => {
       }
     });
 
+  it.each(["before", "after"] as const)(
+    "retains an annotated source carrier %s a separate live dose row", position => {
+      const annotation = { id: "source-sequence", extension: [note, {
+        url: "urn:clinic:sequence-detail", extension: [{ url: "reviewer", valueString: "prescriber" }],
+      }] };
+      const liveAnnotation = { id: "live-sequence", extension: [note] };
+      for (const persisted of [false, true]) {
+        const source: FhirR6DosageInstruction = {
+          id: "mixed-empty-course", renderedInstruction: "Clinician source-only instruction", extension: [note],
+        };
+        const carrier: FhirDosage = { ...toFhirR5Dosages(source)[0], _sequence: annotation };
+        const live: FhirDosage = {
+          sequence: 1, _sequence: liveAnnotation,
+          doseAndRate: [{ doseQuantity: q(2) }], timing: { repeat: daily },
+        };
+        let rows = position === "before" ? [carrier, live] : [live, carrier];
+        if (persisted) rows = persist(rows);
+        for (let save = 0; save < 2; save++) {
+          const before = structuredClone(rows), actual = toDosageDetails(rows);
+          for (const wire of [actual, r6Save(actual)]) {
+            expect(wire.extension).toContainEqual(note);
+            expect(wire.step).toHaveLength(1);
+            expect(wire.step![0].component).toHaveLength(1);
+            const member = wire.step![0].component[0];
+            expect(member.doseAndRate).toEqual([{ doseQuantity: q(2) }]);
+            expect(member.timing).toEqual({ repeat: daily });
+            expect(member.extension).toContainEqual({
+              url: DOSAGE_RETAINED_R5_SEQUENCE_URL, valueDecimal: 1, _valueDecimal: liveAnnotation,
+            });
+            expect(retiredSources(wire).filter(item => item.url === "r5SourceCarrier").map(readRetainedField))
+              .toContainEqual({ _sequence: annotation });
+          }
+          expect(rows).toEqual(before);
+          rows = persist(toFhirR5Dosages(actual));
+        }
+      }
+    });
+
   it.each(["unchanged", "annotation", "phase end"] as const)(
     "keeps an implicit pause only with its unchanged member completion (%s)", edit => {
       const source: FhirR6DosageInstruction = { step: [
