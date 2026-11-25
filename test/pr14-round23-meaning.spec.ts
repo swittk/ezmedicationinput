@@ -5991,3 +5991,37 @@ describe("round72 hourly and coded-event previews", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 });
+
+
+describe("round73 logical event identity", () => {
+  it.each(["start", "end"] as const)("retains a logical event identifier on %s boundaries", boundary => {
+    const identifier = { system: "urn:clinic:appointment", value: "APPOINTMENT-481",
+      extension: [{ url: "urn:clinic:event-note", valueString: "retain" }] };
+    for (const variant of ["logical", "physical", "display"] as const) {
+      const reference = { identifier,
+        ...(variant !== "logical" ? { reference: "Appointment/481" } : {}),
+        ...(variant === "display" ? { display: "Scheduled procedure" } : {}) };
+      const relative = { contextReference: reference,
+        offsetDuration: { value: -2, unit: "h", code: "h", system: "http://unitsofmeasure.org" } };
+      const source: FhirR6DosageInstruction = { step: [{ [boundary]: relative,
+        component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+          timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } }] }] };
+      const before = JSON.stringify(source), rows = JSON.parse(JSON.stringify(toFhirR5Dosages(source)));
+      const expected = variant === "display" ? "Scheduled procedure"
+        : variant === "physical" ? "Appointment/481" : "APPOINTMENT-481";
+      for (const input of [source, rows]) for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale });
+        expect(text).toContain(expected);
+        expect(text).toContain(locale === "en" ? "2 hours before" : "2 ชั่วโมงก่อน");
+        expect(text).toContain(locale === "en" ? "Timing requires review" : "ต้องตรวจสอบช่วงเวลา");
+        if (variant !== "logical") expect(text).not.toContain("APPOINTMENT-481");
+        if (variant === "display") expect(text).not.toContain("Appointment/481");
+      }
+      for (const input of [source, rows]) expect(() => nextDueDoses(input, {
+        orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 2
+      })).toThrow(/Unsupported R6 step RelativeTime/);
+      expect(toDosageDetails(rows).step[0][boundary]).toEqual(relative);
+      expect(JSON.stringify(source)).toBe(before);
+    }
+  });
+});

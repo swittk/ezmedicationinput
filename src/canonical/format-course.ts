@@ -260,7 +260,7 @@ function boundaryEventText(
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase
     : context ??
     boundary.contextReference?.display ?? boundary.contextReference?.reference ??
-    boundary.contextDefinition ?? boundary.contextPath;
+    boundary.contextReference?.identifier?.value ?? boundary.contextDefinition ?? boundary.contextPath;
   const quantity = boundary.displacement;
   if (quantity) {
     const before = quantity.value !== undefined && quantity.value < 0 && !getQuantityComparator(quantity);
