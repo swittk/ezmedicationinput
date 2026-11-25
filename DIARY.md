@@ -16045,3 +16045,40 @@ call differences of about 0.7–2.5 microseconds were assessed against their
 ordinary call frequency; graph encoding improved by about 57%. Oversized test
 groups were redistributed without changing their clinical assertions. The
 changed-path count remains 100. Detailed review dispositions remain separate.
+
+
+## 2026-11-25 — Conditional procedures and faithful partial directions
+
+Current structured rates, guards and timing remain separate from independently
+authored directions. Literal timing and month-day recurrence survive long
+previews; clock-only batches retain their application instructions. Partial
+ratios do not acquire an amount from a time denominator, and rates without a
+current occurrence duration retain the original infusion directions. Current
+facts are assembled before their separate original-text label. Boolean
+conditions recognize their standard or established systemless identity in any
+coding position while explicit foreign identifiers remain opaque.
+
+Selected procedures retain sites, duration, result actions and temporal
+complements under their existing condition owner. Independent advice does not
+acquire an administration guard. Disjunctive meal wording remains complete,
+and requested translations use the existing locale realizers. Clocked endings,
+leading decimal tokens and approximate duration bounds preserve their scope.
+
+Namespace-aware quantity owners resolve weighted doses without interpreting
+foreign codes as standard units. Unresolved upper course durations remain
+unresolved, and counted-history origins and partial-event status respect actual
+eligibility. Quantity annotations, graph argument fields and wrapper identities
+survive fresh interchange; clearing annotated text emits no empty active FHIR
+string. Existing source metadata preserves independent fields without new
+verification markers.
+
+Validation passed 8,662 source tests, including configured strict TypeScript,
+the build and four distribution tests. A final allocation-only codec change
+also passed 1,368 affected tests, the build and all four distribution tests.
+Twenty-one representative paired workloads and a focused graph/action pair
+found no meaningful regression above 4%. Direct optional ID assignment removed
+the measured graph-encoder allocation cost. The remaining small fast-call
+difference was about 0.6 microseconds and was assessed against ordinary call
+frequency and measurement spread. Every clinical test was retained while
+consolidating modules to keep the changed-path count at 100. Detailed review
+dispositions remain separate.
