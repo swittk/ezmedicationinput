@@ -3,6 +3,8 @@
  * Display stays separate from executable interpretation: unknown expressions
  * and boundaries remain visible without inventing values or event dates. */
 import type { FormatBatchOptions, FormatOptions, MedicationCondition, FhirDayOfWeek, CanonicalSigClause, CanonicalDoseExpr } from "../types";
+import { AdviceArgumentRole, AdvicePolarity } from "../types";
+import { buildAdditionalInstructionFramesFromCoding } from "../advice";
 import type {
   CanonicalCourse,
   CanonicalBoundary,
@@ -550,6 +552,17 @@ function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
         amount.rateRange?.low?.value !== undefined || amount.rateRange?.high?.value !== undefined ||
         amount.rateRatio?.numerator?.value !== undefined || amount.rateRatio?.denominator?.value !== undefined ||
         amount.rateExpression) return true;
+  // Coded qualitative amounts use the same typed administration templates
+  // as clause realization. Unrelated advice cannot replace source-only dose
+  // wording, and opaque text never supplies an amount here.
+  for (const instruction of a.additionalInstructions ?? []) for (const coding of instruction.coding ?? []) {
+    if (!coding.code) continue;
+    const frames = buildAdditionalInstructionFramesFromCoding(coding.system ?? "http://snomed.info/sct", coding.code);
+    for (const frame of frames ?? []) {
+      if (frame.predicate.semanticClass !== "administration" || frame.polarity === AdvicePolarity.Negate) continue;
+      for (const argument of frame.args) if (argument.role === AdviceArgumentRole.Amount) return true;
+    }
+  }
   return false;
 }
 function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true, includeAdvice = true): boolean {

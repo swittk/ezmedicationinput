@@ -5069,19 +5069,44 @@ describe("round59 partial facts and complete authored directions", () => {
         for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const)
           expect(formatSig(value, style, { locale, realizationMode: "normalized" })).toContain(row.text!);
       // Existing HPSG interpretation owns the qualifier when it is structured.
-      const typed = parseSig("apply a thin layer twice daily").items[0].fhir;
+      const typed = parseSig("apply a thin layer twice daily").fhir[0];
       expect(typed.additionalInstruction?.some(instruction =>
         instruction.coding?.some(coding => coding.code === "420162004"))).toBe(true);
-      for (const value of [fresh(typed), ...views(fresh(toDosageDetails([fresh(typed)])))]) {
-        const [current, original] = formatSig(value, "long", { realizationMode: "normalized" })
-          .split("; original directions: ");
-        expect(current).toMatch(/^(?:Current: )?Apply a thin layer topically twice daily\.?$/u);
-        if (original !== undefined) expect(original).toBe(typed.text);
-      }
+      for (const value of [fresh(typed), ...views(fresh(toDosageDetails([fresh(typed)])))])
+        expect(formatSig(value, "long", { realizationMode: "normalized" }))
+          .toBe("Apply a thin layer topically twice daily.");
       expect(input.step![0].component[0].doseAndRate).toBeUndefined();
       expect(input.step![0].component[0].route).toEqual(row.route);
       expect(row).toEqual(before);
     }
+  });
+
+  it.each([
+    ["apply a thin layer twice daily", "420162004", "thin layer", "บางๆ"],
+    ["apply thickly twice daily", "246703001", "thickly", "หนาๆ"],
+    ["apply sparingly twice daily", "420883007", "sparingly", "เพียงเล็กน้อย"],
+    ["apply liberally twice daily", "419125005", "liberally", "อย่างทั่วถึง"]
+  ] as const)("keeps a coded qualitative amount as current directions: %s", (source, code, english, thai) => {
+    const parsed = parseSig(source), before = JSON.stringify(parsed);
+    expect(parsed.fhir[0].additionalInstruction?.some(instruction =>
+      instruction.coding?.some(coding => coding.code === code))).toBe(true);
+    const native = parsed.meta.canonical.course!;
+    for (const locale of ["en", "th"]) {
+      const options = { locale, realizationMode: "normalized" as const };
+      const outputs = [formatCanonicalCourse(native, "long", options),
+        ...[fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]
+          .map(value => formatSig(value, "long", options))];
+      for (const current of outputs) {
+        expect(current).toContain(locale === "en" ? english : thai);
+        expect(current).toContain(locale === "en" ? "twice daily" : "วันละ 2 ครั้ง");
+        expect(current).not.toMatch(/Current:|original directions:|ปัจจุบัน:|ข้อความเดิม:/u);
+      }
+    }
+    const changed = fresh(parsed.fhir);
+    changed[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "g" } }];
+    const current = formatSig(changed, "long", { realizationMode: "normalized" }).split("; original directions: ")[0];
+    expect(current).toMatch(/(?:^|[^0-9])2 (?:g|grams)\b/u);
+    expect(JSON.stringify(parsed)).toBe(before);
   });
 
   it.each(["after dialysis", "BID", "twice daily"])("retains only independent offset timing text %s", text => {
