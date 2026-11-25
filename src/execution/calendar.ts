@@ -263,13 +263,13 @@ export function makeZonedDate(
   const initialUtc = Date.UTC(year, month - 1, day, hour, minute, second);
   // Authored clocks and date boundaries own the first occurrence in a fold.
   // Seed from the preceding civil day without adding another offset lookup.
-  let candidate = new Date(initialUtc - 86400000);
+  const candidate = new Date(initialUtc - 86400000);
   const offset = getOffset(candidate, timeZone);
-  candidate = new Date(initialUtc - offset * SECONDS_PER_MINUTE * 1000);
+  candidate.setTime(initialUtc - offset * SECONDS_PER_MINUTE * 1000);
   let parts = getTimeParts(candidate, timeZone);
   const recalculatedOffset = offsetFromTimeParts(candidate, parts);
   if (recalculatedOffset !== offset) {
-    candidate = new Date(initialUtc - recalculatedOffset * SECONDS_PER_MINUTE * 1000);
+    candidate.setTime(initialUtc - recalculatedOffset * SECONDS_PER_MINUTE * 1000);
     parts = getTimeParts(candidate, timeZone);
   }
   if (
