@@ -5945,3 +5945,41 @@ describe("round79 reviewed cap, cadence and consumed-count ownership", () => {
     }
   });
 });
+
+
+describe("coded target quantity identity", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["opaque local drop", { system: "urn:clinic:medication-units", code: "drop" }, false],
+    ["opaque local tablet", { system: "urn:clinic:medication-units", code: "tab" }, false],
+    ["authored drop", { system: "urn:clinic:medication-units", code: "local-dose", unit: "drop" }, true],
+    ["standard drop", { system: "http://standardterms.edqm.eu", code: "15022000" }, true],
+    ["systemless drop", { code: "drop" }, true],
+  ] as const)("uses known unit identity for target counts and estimates: %s", (_label, identity, known) => {
+    const quantity = { value: 1, ...identity, extension: [
+      { url: "urn:clinic:dose-note", valueString: "Retain the supplied dose identity" },
+    ] };
+    const row: FhirDosage = {
+      doseAndRate: [{ doseQuantity: quantity }],
+      site: { text: "both eyes", coding: [
+        { system: "http://snomed.info/sct", code: "40638003", display: "Structure of both eyes" },
+      ] },
+      timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "12:00:00", "16:00:00", "20:00:00"] } },
+    };
+    const r6 = toDosageDetails([fresh(row)]);
+    for (const dosage of [fresh(row), importCanonicalCourse(fresh(row)), fresh(r6),
+      fresh(toFhirR5Dosages(fresh(r6)))]) {
+      const before = fresh(dosage);
+      const result = calculateTotalUnits({ dosage, orderedAt: "2026-11-22T00:00:00Z",
+        from: "2026-11-22T00:00:00Z", timeZone: "UTC",
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+      expect(result.totalUnits).toBe(known ? 8 : 4);
+      expect(result.unit).toBe(known ? "drop" : identity.code);
+      if (known) expect(result.totalApproximateQuantity).toMatchObject({ value: 0.4, unit: "mL" });
+      else expect(result.totalApproximateQuantity).toBeUndefined();
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(r6))[0].doseAndRate?.[0]?.doseQuantity).toEqual(quantity);
+  });
+});

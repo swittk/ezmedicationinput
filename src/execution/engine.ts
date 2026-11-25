@@ -214,7 +214,7 @@ function getAdministrationTargetMultiplier(
   const amount = dosage.amounts?.[0];
   const high = amount?.range?.high;
   const doseUnit = getDoseQuantityUnit(amount?.quantity ??
-    (high?.value !== undefined && Number.isFinite(high.value) && high.value > 0 ? high : amount?.range?.low));
+    (high?.value !== undefined && Number.isFinite(high.value) && high.value > 0 ? high : amount?.range?.low), false);
   if (!doseUnitSupportsPerTargetMultiplication(doseUnit, context)) {
     return 1;
   }
@@ -7535,7 +7535,7 @@ function calculateTotalUnitsSingle(
   const containerUnit = context?.containerUnit;
   const packageUnit = context?.packageUnit;
   const doseUnit = doseUnitForLimits;
-  const unitSemantics = getDoseUnitSemantics(doseUnit, context);
+  const unitSemantics = getDoseUnitSemantics(getDoseQuantityUnit(doseForLimits, false), context);
   if (unitSemantics?.approximateQuantity) {
     const approximation = unitSemantics.approximateQuantity;
     result.totalApproximateQuantity = {
