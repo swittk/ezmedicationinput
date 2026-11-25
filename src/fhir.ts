@@ -79,7 +79,7 @@ import {
 } from "./types";
 import { objectValues } from "./utils/object";
 import { arrayIncludes } from "./utils/array";
-import { cloneStructuredValue, equalStructuredValues } from "./stable-structure";
+import { equalStructuredValues } from "./stable-structure";
 import { FHIR_GTS_TIMING_SYSTEM, FHIR_GTS_TIMING_CODES, preferredTimingCoding } from "./timing-summary";
 
 /** Known modifier: an independent cadence is restricted by unresolved cycle days. */
@@ -2148,7 +2148,8 @@ export function deserializeCanonicalContext(
     const methodText = compatibleText ? authoredText : action?.display ?? authoredText ?? methodCoding?.display;
     clause.method = {
       text: methodText,
-      _text: methodText === dosage.method?.text ? cloneStructuredValue(dosage.method?._text) : undefined,
+      // Wire primitive metadata is immutable and can be retained intact.
+      _text: methodText === dosage.method?.text ? dosage.method?._text : undefined,
       coding: methodCoding?.code
         ? {
           code: methodCoding.code,
