@@ -1484,6 +1484,21 @@ describe("round65 selected procedural comma ownership", () => {
 
 
 describe("round68 selected withholding and successor route ownership", () => {
+  it("does not inherit an injection method onto an oral successor when its predecessor omitted the route", () => {
+    const parsed = parsePublicSig("Inject 5 mg daily for 2 days, then 10 mg PO from day 3");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[0].method?.text).toBe("Inject");
+    expect(parsed.meta.canonical.clauses[0].route).toBeUndefined();
+    const successor = parsed.meta.canonical.clauses[1];
+    expect(successor.dose).toEqual({ value: 10, unit: "mg" });
+    expect(successor.route?.code).toBe("26643006");
+    expect(successor.method).toBeUndefined();
+    for (const rows of [parsed.fhir, toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(rows[1].route?.coding?.[0].code).toBe("26643006");
+      expect(rows[1].method).toBeUndefined();
+    }
+  });
+
   it.each([false, true])("retains the selected Hold pause despite a distinct configured code collision (%s)", configured => {
     const options = configured ? { instructionActionMap: { "custom-mix": {
       ...getMedicationInstructionAction("mix")!, code: "hold", display: "Custom mix", aliases: []

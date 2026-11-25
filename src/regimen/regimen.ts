@@ -641,8 +641,16 @@ export function scopeSequentialPhaseSemantics(
         }
       }
       const recipientHasRate = isAdministrationRate(clause.clinicalQuantity);
-      const routeCompatible = !clause.route ||
-        prior.every(index => equalStructuredValues(states[index]?.primaryClause.route, clause.route));
+      const recipientRoute = clause.route;
+      const routeCompatible = !recipientRoute || prior.every(index => {
+        const priorRoute = states[index]?.primaryClause.route;
+        // A continued administration rate can refine an omitted route. Other
+        // explicit routes need a shared antecedent; evidence rebasing does not
+        // change that route's clinical identity.
+        return priorRoute ? (priorRoute.code && recipientRoute.code
+          ? priorRoute.code === recipientRoute.code
+          : priorRoute.text === recipientRoute.text) : priorHasRate && recipientHasRate;
+      });
       if (sharedMethod && !clause.method && routeCompatible && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
         fields.push('method');
