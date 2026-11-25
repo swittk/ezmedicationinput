@@ -4596,7 +4596,11 @@ describe("round 53: saved graph and calendar realization ownership", () => {
         const exported = toFhirR5Dosages(input);
         expect(exported[0].extension).toContainEqual(annotation);
         expect(parseInstructionGraphExtension(exported[0].extension)?.relations)
-          .toEqual(graph.relations);
+          .toEqual(graph.relations!.map(relation => ({
+            ...relation,
+            sourceKindCoding: { system: "http://snomed.info/sct", code: "421803000",
+              display: "If - dosing instruction fragment" },
+          })));
         expect(JSON.stringify(input)).toBe(inputSaved);
       }
       expect(JSON.stringify(current)).toBe(saved);
