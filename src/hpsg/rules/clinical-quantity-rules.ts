@@ -211,6 +211,9 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
   for (let index = before - 1; index >= first; index -= 1) {
     const token = context.tokens[index];
     const lower = normalizeTokenLower(token);
+    // An explicit oral route keeps a generic GIVE/ADMINISTER head from
+    // licensing a flow-rate reading of its later cumulative limit.
+    if (getRouteMeaning(token)?.code === RouteCode["Oral route"]) return false;
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
     if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount || allowPrecedingDose;
@@ -596,6 +599,21 @@ function weightQuantity(
   });
 }
 
+/** Shared lexical rate-head ownership, including a local route or AT marker. */
+export function clinicalRateHeadAt(
+  context: HpsgClauseContext, phraseStart: number, end: number, allowPrecedingDose = false
+): { licensed: boolean; marker: number | undefined } {
+  const cue = context.tokens[phraseStart - 1]?.original === ","
+    ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
+  const marker = separateRateMarker(context, phraseStart);
+  const next = context.tokens[end];
+  const after = next?.original === "," ? context.tokens[end + 1] : next;
+  return { marker, licensed: marker !== undefined || context.tokens[phraseStart].lower.startsWith("@") ||
+    getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
+    getRouteMeaning(after)?.code === RouteCode["Intravenous route"] ||
+    hasAdministrationCue(context, phraseStart, allowPrecedingDose) };
+}
+
 function fixedRate(
   context: HpsgClauseContext,
   start: number,
@@ -608,19 +626,6 @@ function fixedRate(
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
   const denominatorUnit = timeUnit(parts[1]);
-  const cue = context.tokens[phraseStart - 1]?.original === ","
-    ? context.tokens[phraseStart - 2] : context.tokens[phraseStart - 1];
-  const hasSeparateRateMarker = separateRateMarker(context, phraseStart) !== undefined;
-  // AT inside an inclusive comparator does not license an infusion rate.
-  // A separate marker, infusion route or administration head owns that role.
-  const hasRateMarker = hasSeparateRateMarker ||
-    context.tokens[phraseStart].lower.startsWith("@");
-  // The neighboring IV route licenses a verb-free infusion instruction.
-  // Route meaning is shared with the lexical route rule, including synonyms.
-  const next = context.tokens[expression.end];
-  const after = next?.original === "," ? context.tokens[expression.end + 1] : next;
-  const hasInfusionRoute = getRouteMeaning(cue)?.code === RouteCode["Intravenous route"] ||
-    getRouteMeaning(after)?.code === RouteCode["Intravenous route"];
   // A bare/approximate per-time rate can complete the preceding volume,
   // with or without a comma. A qualified limit still needs its own marker
   // or local head; the earlier volume cannot lend the administration cue.
@@ -629,11 +634,10 @@ function fixedRate(
   // A clause-initial rate with its own elapsed duration is a complete typed
   // complement. The selected sequential construction owns its omitted method.
   const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
-  if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasInfusionRoute && !completeRateComplement &&
-       !hasAdministrationCue(context, phraseStart, completesVolume))) return undefined;
+  const head = clinicalRateHeadAt(context, phraseStart, expression.end, completesVolume);
+  if (!numerator || !denominatorUnit || (!completeRateComplement && !head.licensed)) return undefined;
   const indices = [
-    ...(hasSeparateRateMarker ? [phraseStart - 1] : []),
+    ...(head.marker !== undefined ? [head.marker] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
   ];
   if (duration) indices.push(...duration.indices);

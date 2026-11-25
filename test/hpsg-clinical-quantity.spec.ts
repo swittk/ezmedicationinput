@@ -2741,15 +2741,14 @@ describe("round38 complete authored duration and maximum constituents", () => {
       expect(rendered?.extension?.find(item => item.url === "instruction")?.valueString).toBe(source);
     }
     if (source.startsWith("Infuse")) {
-      expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
-        .toEqual([{ amount: 50, unit: "mL", period: 1, periodUnit: "h" }]);
-      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]])
-        expect(row.maxDosePerPeriod).toMatchObject([{
-          numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
-        }]);
-      expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
-        scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value: 1, unit: "h" }
-      }]);
+      expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod).toBeUndefined();
+      for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
+        expect(row.maxDosePerPeriod).toBeUndefined();
+        expect(row.additionalInstruction?.map(instruction => instruction.text)).toContain("no more than 50 mL/hr");
+      }
+      expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toBeUndefined();
+      for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext]) for (const locale of ["en", "th"])
+        expect(formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase()).toContain("no more than 50 ml/hr");
     }
     for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
       const dose = row.doseAndRate?.[0];
@@ -2762,16 +2761,16 @@ describe("round38 complete authored duration and maximum constituents", () => {
   });
 
   it.each(["Infuse", "Run", "Administer", "Give"])(
-    "does not lend %s across a completed volume to a following rate limit", head => {
+    "preserves the completed %s rate and a separate unsupported rate ceiling", head => {
       const parsed = parsePublicSig(head + " 20 mL over 1 h, no more than 50 mL/hr");
       expect(parsed.fhir[0].doseAndRate?.[0].doseQuantity).toMatchObject({ value: 20, unit: "mL" });
       expect(parsed.fhir[0].doseAndRate?.[0].rateRatio).toMatchObject({
         numerator: { value: 20, unit: "mL" }, denominator: { value: 1, unit: "h" }
       });
       expect(parsed.fhir[0].doseAndRate?.[0].rateQuantity).toBeUndefined();
-      expect(parsed.fhir[0].maxDosePerPeriod?.[0]).toMatchObject({
-        numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
-      });
+      expect(parsed.fhir[0].maxDosePerPeriod).toBeUndefined();
+      expect(parsed.fhir[0].additionalInstruction?.map(instruction => instruction.text)).toContain("no more than 50 mL/hr");
+      expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toBeUndefined();
       const control = parsePublicSig(head + " no more than 50 mL/hr");
       expect(control.fhir[0].doseAndRate?.[0].rateQuantity).toMatchObject({ value: 50, unit: "mL/h" });
       expect(getQuantityComparator(control.fhir[0].doseAndRate?.[0].rateQuantity)).toBe("<=");
@@ -3156,19 +3155,26 @@ describe("round45 authored volume and rate ownership", () => {
     expect(parsed.input).toBe(input);
   });
 
-  it("keeps the completed IV volume ahead of its trailing rate maximum", () => {
-    const parsed = parsePublicSig("Infuse 100 mL IV, no more than 50 mL/hr");
-    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) {
-      expect(row.doseAndRate).toEqual([{
-        doseQuantity: { value: 100, unit: "mL", code: "mL", system: "http://unitsofmeasure.org" }
-      }]);
-      expect(row.maxDosePerPeriod).toMatchObject([{
-        numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" }
-      }]);
+  it("keeps the completed IV volume beside its typed rate ceiling", () => {
+    const source = "Infuse 100 mL IV, no more than 50 mL/hr", parsed = parsePublicSig(source);
+    const reopened = toDosageDetails(JSON.parse(JSON.stringify(parsed.fhir)));
+    for (const row of [parsed.fhir[0], parsed.fhirNext.step[0].component[0],
+      toFhirR5Dosages(parsed.fhirNext)[0], reopened.step[0].component[0]]) {
+      expect(row.doseAndRate).toHaveLength(1);
+      expect(row.doseAndRate![0].doseQuantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(row.doseAndRate![0].rateQuantity).toMatchObject({ value: 50, unit: "mL/h" });
+      expect(getQuantityComparator(row.doseAndRate![0].rateQuantity)).toBe("<=");
+      expect(row.doseAndRate![0].rateRatio).toBeUndefined();
     }
-    expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toMatchObject([{
-      scope: "period", valueQuantity: { value: 50, unit: "mL" }, period: { value: 1, unit: "h" }
-    }]);
+    for (const row of [parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]]) expect(row.maxDosePerPeriod).toBeUndefined();
+    expect(parsed.fhirNext.step[0].component[0].safety?.doseLimit).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext, reopened]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(member.amounts?.[0].rate).toMatchObject({ value: 50, unit: "mL/h", comparator: "<=" });
+      expect(member.limits).toBeUndefined();
+    }
+    expect(parsed.input).toBe(source);
     const control = parsePublicSig("IV, at most 50 mL/hr");
     expect(control.fhir[0].doseAndRate![0].doseQuantity).toBeUndefined();
     expect(control.fhir[0].doseAndRate![0].rateQuantity).toMatchObject({ value: 50, unit: "mL/h" });
@@ -4148,12 +4154,17 @@ describe("round72 reviewed quantity and onset ownership", () => {
     expect(route.route?.code).toBe("26643006");
   });
 
-  it.each(["mL/.5 hours", "mL/0.5 hours", "mL/.5h"])("retains the fractional maximum period in %s", units => {
-    const parsed = parsePublicSig("Infuse 100 mL, no more than 50 " + units);
+  it.each(["mL/.5 hours", "mL/0.5 hours", "mL/.5h"])("retains the unsupported fractional rate ceiling in %s", units => {
+    const constraint = "no more than 50 " + units, parsed = parsePublicSig("Infuse 100 mL, " + constraint);
     for (const dosage of views(parsed)) {
-      const limit = importCanonicalCourse(dosage).stages[0].administrations[0].limits?.[0];
-      expect(limit).toMatchObject({ scope: "period", amount: { value: 50, unit: "mL" }, period: { value: 0.5, unit: "h" } });
+      const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+      expect(member.amounts?.[0].rate).toBeUndefined();
+      expect(member.limits).toBeUndefined();
+      for (const locale of ["en", "th"])
+        expect(formatSig(dosage, "long", { locale, realizationMode: "normalized" }).toLowerCase()).toContain(constraint.toLowerCase());
     }
+    expect(parsed.fhir[0].additionalInstruction?.map(instruction => instruction.text)).toContain(constraint);
   });
 });
 
@@ -4260,3 +4271,16 @@ describe("round76 lexical quantity ownership", () => {
     expect(parsed.meta.canonical.clauses[0].schedule?.timeOfDay).toEqual(["20:00:00"]);
   });
 });
+
+
+it.each([["mL/hour", 1], ["mL/.5 hours", 0.5]] as const)(
+  "round76 keeps an oral cumulative maximum with its authored %s period", (unit, period) => {
+    const parsed = parsePublicSig("Take 5 mL as needed, no more than 10 " + unit);
+    for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 5, unit: "mL" });
+      expect(member.amounts?.[0].rate).toBeUndefined();
+      expect(member.limits).toMatchObject([{ scope: "period", amount: { value: 10, unit: "mL" }, period: { value: period, unit: "h" } }]);
+    }
+  });

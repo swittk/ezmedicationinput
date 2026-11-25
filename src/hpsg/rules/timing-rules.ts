@@ -1,3 +1,4 @@
+import { clinicalRateHeadAt } from "./clinical-quantity-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
 import { parseMedicationDateListAt, type MedicationDateListMatch } from "../../date-interpretation";
@@ -2634,12 +2635,19 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const maximum = maximumDosePerPeriodAt(context, start);
     if (!maximum) return [];
     const { tokens: matched, amount, unit, period } = maximum;
-    if ("daypart" in period) {
-      // Own the complete maximum constituent without turning its daypart into
-      // either an elapsed cap, another administration event, or course duration.
+    const rateHead = period.unitDenominator
+      ? clinicalRateHeadAt(context, start, start + matched.length, true) : undefined;
+    // The earlier clinical quantity rule already owns a licensed rate, including
+    // its external AT marker. That same constituent cannot also be a dose cap.
+    for (const sign of context.clinicalCache.quantityLookahead?.get(rateHead?.marker ?? start) ?? [])
+      if (sign.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity") return [];
+    const rateConstraint = rateHead?.licensed;
+    if ("daypart" in period || rateConstraint) {
+      // Unsupported dimensional constraints and dayparts retain their complete
+      // authored instruction without inventing a rate or cumulative limit.
       const text = context.state.input.slice(matched[0].sourceStart, matched[matched.length - 1].sourceEnd);
       return [lexicalSign({
-        type: "instruction-sign", rule: "hpsg.lex.instruction.maximumPerDaypart",
+        type: "instruction-sign", rule: rateConstraint ? "hpsg.lex.instruction.rateConstraint" : "hpsg.lex.instruction.maximumPerDaypart",
         tokens: matched, synsem: {
           head: {}, valence: { instructions: [{ text }] }, cont: { clauseKind: "administration" }
         }, score: 35 + matched.length

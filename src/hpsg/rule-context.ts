@@ -240,9 +240,10 @@ export function occurrenceCapPeriodAt(
   return undefined;
 }
 
-type MaximumDosePeriod =
+type MaximumDosePeriod = (
   | { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit }
-  | { tokens: Token[]; daypart: true };
+  | { tokens: Token[]; daypart: true }
+) & { unitDenominator?: boolean };
 
 function maximumDosePeriodAt(
   context: MaximumDoseLexicalContext,
@@ -269,12 +270,13 @@ function maximumDosePeriodAt(
   if (!value || context.state?.consumed.has(value.index)) return undefined;
   const lower = normalizeTokenLower(value);
   const bareUnit = mapIntervalUnit(lower);
+  const unitDenominator = connectorLower === "/" || connectorLower === "per" || connectorLower === "a";
   // An article supplies the same one-unit interval as PER, A or /.
   // Explicit numeric periods use the single number/unit reader below.
-  if (bareUnit && (article || connectorLower === "/" || connectorLower === "per" || connectorLower === "a")) {
+  if (bareUnit && (article || unitDenominator)) {
     const tokens = context.tokens.slice(start, cursor + 1);
     return DAYPART_INTERVAL_TOKENS.has(lower)
-      ? { tokens, daypart: true } : { tokens, period: 1, periodUnit: bareUnit };
+      ? { tokens, daypart: true, unitDenominator } : { tokens, period: 1, periodUnit: bareUnit, unitDenominator };
   }
   const attached = value.kind !== LexKind.Number
     ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
@@ -286,7 +288,7 @@ function maximumDosePeriodAt(
   if (amount === undefined || amount <= 0 || !periodUnit) return undefined;
   const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
   return DAYPART_INTERVAL_TOKENS.has(unitLower!)
-    ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
+    ? { tokens, daypart: true, unitDenominator } : { tokens, period: amount, periodUnit, unitDenominator };
 
 }
 
@@ -348,8 +350,8 @@ export function maximumDosePerPeriodAt(context: MaximumDoseLexicalContext, start
 
   const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
     ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
-      ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true }
-      : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit }
+      ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true, unitDenominator: true }
+      : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit, unitDenominator: true }
     : undefined;
   const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
   if (!period) return undefined;
