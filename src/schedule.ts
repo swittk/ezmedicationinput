@@ -21,34 +21,11 @@ export function nextDueDoses(
 ): string[] {
   if (Array.isArray(input) && input.length === 0) return [];
   if (options.limit !== undefined && options.limit <= 0) return [];
-  // Capture declared options once; recursive capped scheduling must keep
-  // prototype-backed getters as well as ordinary own properties.
-  return executeDue(inputToCanonical(input), {
-    from: options.from, orderedAt: options.orderedAt, limit: options.limit,
-    priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
-    timeZone: options.timeZone, config: options.config,
-    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition?.bind(options),
-    eventClock: options.eventClock, mealOffsets: options.mealOffsets,
-    frequencyDefaults: options.frequencyDefaults,
-  });
+  return executeDue(inputToCanonical(input), options);
 }
 export function calculateTotalUnits(options: TotalUnitsOptions | CanonicalSupplyOptions): TotalUnitsResult {
   if (!options || !options.dosage)
     throw new MedicationQuantityCalculationError("missing-regimen",
       "A medication dosage or complete treatment course is required for supply calculation.");
-  // Read the declared options directly, including prototype-backed getters.
-  // This boundary already needs one normalized object; a fixed typed snapshot
-  // preserves that public input contract without an enumeration/spread pass.
-  return executeSupply({
-    dosage: inputToCanonical(options.dosage),
-    from: options.from, orderedAt: options.orderedAt,
-    timeZone: options.timeZone, config: options.config,
-    durationValue: options.durationValue, durationUnit: options.durationUnit,
-    context: options.context, patientWeightKg: options.patientWeightKg,
-    roundToMultiple: options.roundToMultiple, limit: options.limit,
-    priorCount: options.priorCount, priorDoseTimes: options.priorDoseTimes,
-    alternativeChoices: options.alternativeChoices, evaluateCondition: options.evaluateCondition?.bind(options),
-    eventClock: options.eventClock, mealOffsets: options.mealOffsets,
-    frequencyDefaults: options.frequencyDefaults,
-  });
+  return executeSupply({ ...options, dosage: inputToCanonical(options.dosage) });
 }

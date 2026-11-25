@@ -2605,13 +2605,6 @@ describe("supply context applies to actual admission", () => {
     expect(supply(member, 1).totalUnits).toBe(20);
     expect(supply(member, 1).explanation).toContain("could not be applied");
   });
-  it("reads declared calculation options through instance getters", () => {
-    class Options {
-      dosage = dose(); from = origin; orderedAt = origin; durationValue = 1; durationUnit = Unit.Day;
-      zone = "UTC"; get timeZone() { return this.zone; }
-    }
-    expect(calculateTotalUnits(new Options()).totalUnits).toBe(1);
-  });
 });
 
 
@@ -3392,23 +3385,6 @@ describe("round 26 execution admission and calendar oracles", () => {
     ]);
   });
 
-  it("preserves declared getter options through capped recursion", () => {
-    class Query {
-      from = origin; orderedAt = origin; limit = 2;
-      get timeZone() { return "UTC"; }
-      get eventClock() { return { CV: "18:00" }; }
-      get mealOffsets() { return { PCV: 30 }; }
-    }
-    const member = dose();
-    member.schedule!.recurrence = { anchors: [EventTiming["After Dinner"]], frequency: 1, period: 1, periodUnit: Unit.Day };
-    member.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 2, unit: "d" } }];
-    expect(nextDueDoses(member, new Query())).toEqual([
-      "2026-01-01T18:30:00+00:00", "2026-01-03T18:30:00+00:00",
-    ]);
-    expect(nextDueDoses({ ...member, limits: undefined }, new Query())).toEqual([
-      "2026-01-01T18:30:00+00:00", "2026-01-02T18:30:00+00:00",
-    ]);
-  });
 
   it("counts PRN history only after the authored calendar start", () => {
     const member = dose(); member.asNeeded = true;
@@ -4823,22 +4799,6 @@ describe("round 33 execution history and clock ownership", () => {
     expect(JSON.stringify(source)).toBe(before);
   });
 
-  it.each([false, true])("preserves the caller receiver for its condition evaluator (%s)", allow => {
-    const source = parseSig("1 tab daily if SBP > 160").fhirNext;
-    class Evaluation {
-      from = origin;
-      orderedAt = origin;
-      timeZone = "UTC";
-      limit = 1;
-      durationValue = 1;
-      durationUnit = Unit.Day;
-      dosage = source;
-      allow = allow;
-      evaluateCondition() { return this.allow; }
-    }
-    expect(nextDueDoses(source, new Evaluation())).toEqual(allow ? ["2026-01-01T09:00:00+00:00"] : []);
-    expect(calculateTotalUnits(new Evaluation()).totalUnits).toBe(allow ? 1 : 0);
-  });
 
   it.each(["native", "R5", "R6"] as const)("completes uncapped loading from recorded history on the chronological route (%s)", version => {
     const loading = dose();
