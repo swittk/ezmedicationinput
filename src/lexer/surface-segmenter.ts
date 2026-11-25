@@ -28,6 +28,7 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
     if (!Object.prototype.propertyIsEnumerable.call(segmenter, "segment"))
       normalized.segment = segmenter.segment.bind(segmenter);
   }
+  normalized.locale = normalized.locale ?? segmenter.locale;
   const locale = normalized.locale;
   const existing=SEGMENTER_INDEX.get(locale);
   if(existing!==undefined)SEGMENTERS[existing]=normalized;

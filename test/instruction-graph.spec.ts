@@ -2178,7 +2178,7 @@ describe("source-owned action amounts remain editable across the whole graph", (
   it("does not confuse a later identical-unit amount with an edited primary amount", () => {
     const source = "Take 1 tablet, then take 2 tablets";
     const actions = parseInstructionActions(source);
-    const clause = parsePublicSig("Take 2 tablets").meta.canonical.clauses[0];
+    const clause = { ...parsePublicSig("Take 2 tablets").meta.canonical.clauses[0] };
     clause.dose = { value: 2, unit: "tab" };
     const graph = { sourceText: source, sourceLocale: "en", actions };
     const text = realizeInstructionGraph(graph, "en", {
@@ -2246,7 +2246,7 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
   ] as const)("preserves separately quantified arguments after editing the primary amount: %s",
     (source, amount, unit, retained, removed) => {
       const parsed = parsePublicSig(source);
-      const clause = parsed.meta.canonical.clauses[0];
+      const clause = { ...parsed.meta.canonical.clauses[0] };
       const graph = clause.instructionGraph?.actions.length
         ? clause.instructionGraph
         : { sourceText: source, sourceLocale: "en",
@@ -2334,7 +2334,7 @@ describe("adversarial independent graph quantity and dose-owner edits", () => {
     const source = "Take 1 tablet, then drink 5 mL";
     const graph = { sourceText: source, sourceLocale: "en",
       actions: parseInstructionActions(source) };
-    const clause = parsePublicSig("Take 3 mL").meta.canonical.clauses[0];
+    const clause = { ...parsePublicSig("Take 3 mL").meta.canonical.clauses[0] };
     clause.dose = { value: 3, unit: "mL" };
     const unchanged = JSON.stringify(graph);
     const text = realizeInstructionGraph(graph, "en", {
@@ -2350,7 +2350,7 @@ describe("review 17: original action ownership and source quantity mirrors", () 
   it("removes a superseded Theme quantity, not its medication name or independent mixing volume", () => {
     const source = "Dissolve 2 tablets of amoxicillin in 100 mL water";
     const parsed = parsePublicSig(source);
-    const clause = parsed.meta.canonical.clauses[0];
+    const clause = { ...parsed.meta.canonical.clauses[0] };
     const graph = clause.instructionGraph!;
     const sourceGraph = JSON.stringify(graph);
     const original = graph.actions[0];
@@ -2383,7 +2383,7 @@ describe("review 17: original action ownership and source quantity mirrors", () 
       actions: parseInstructionActions(source) };
     expect(graph.actions).toHaveLength(2);
     const saved = JSON.stringify(graph);
-    const clause = parsePublicSig("Take 1 tablet").meta.canonical.clauses[0];
+    const clause = { ...parsePublicSig("Take 1 tablet").meta.canonical.clauses[0] };
     const changed = parsePublicSig("Drink 5 mL").meta.canonical.clauses[0];
     clause.dose = changed.dose;
     clause.method = changed.method;
@@ -2542,7 +2542,7 @@ describe("November 16 rich amountless primary remains dose-editable", () => {
     drink.args = [{ role: AdviceArgumentRole.Manner, text: "slowly", normalized: "slowly" }];
     const graph = { sourceText: source, sourceLocale: "en", actions,
       primaryAdministrationSpan: { ...drink.span } };
-    const clause = parsePublicSig("Drink 2 tablets").meta.canonical.clauses[0];
+    const clause = { ...parsePublicSig("Drink 2 tablets").meta.canonical.clauses[0] };
     clause.dose = { value: 3, unit: "tab" };
     clause.instructionGraph = graph;
     expect(instructionGraphRichPrimaryAction(clause)).toBeDefined();
@@ -6030,14 +6030,14 @@ describe("round55: current clinical facts and independent graph meaning", () => 
           expect(text).not.toMatch(locale === "en" ? /only if\s+nausea/iu : /เฉพาะเมื่อ\s*nausea/u);
         } else {
           expect(text.match(/140/gu)).toHaveLength(1);
-          expect(text.match(/160/gu) ?? []).toHaveLength(variant === "any" || variant === "opposite unless" ? 1 : 0);
+          expect(text.match(/160/gu) ?? []).toHaveLength(variant === "opposite unless" ? 1 : 0);
           if (variant === "not") {
             expect(text).toContain(locale === "en" ? "unless" : "เว้นแต่");
             expect(text).not.toContain(locale === "en" ? "only if" : "เฉพาะเมื่อ");
           } else if (variant === "all" || variant === "any") {
             const conjunction = locale === "en" ? (variant === "all" ? "and" : "or")
               : (variant === "all" ? "และ" : "หรือ");
-            expect(text).toMatch(new RegExp("140\\s+" + conjunction + "\\s+awake", "u"));
+            expect(text).toMatch(new RegExp("systolic BP > 140\\s+" + conjunction + "\\s+awake", "u"));
           }
         }
       }
@@ -6813,4 +6813,32 @@ describe("round59 stored action codes keep their selected lexical meaning", () =
     })!])!;
     expect(realizeInstructionGraph(savedGraph, "en")).toContain("Custom mix with water");
   });
+});
+
+
+describe("round61 independent Time relation coverage", () => {
+  it.each([AdviceRelation.Until, AdviceRelation.During, AdviceRelation.In, AdviceRelation.On, undefined])(
+    "retains the scheduled morning beside an independent %s relation", relation => {
+      const original = parseInstructionActions("Hold the eyelid")[0];
+      const frame = { ...original, args: [...original.args, {
+        role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning,
+        relation, i18n: { en: "morning", th: "ตอนเช้า" }
+      }] };
+      const graph = { sourceText: "", sourceLocale: "en", actions: [frame], primaryAdministrationSpan: frame.span };
+      const clause = { ...parsePublicSig("in the morning").meta.canonical.clauses[0],
+        sourceHasStructuredEvents: false, instructionGraph: graph };
+      const before = JSON.stringify(graph);
+      const coversPoint = relation === undefined || relation === AdviceRelation.In || relation === AdviceRelation.On;
+      for (const locale of ["en", "th"]) {
+        const coverage = { singleScheduledEvent: false };
+        const text = realizeRichPrimaryWithCanonicalDose(frame, clause, locale, undefined, coverage);
+        expect(text).toContain(locale === "en" ? "morning" : "เช้า");
+        expect(coverage.singleScheduledEvent).toBe(coversPoint);
+        const preview = formatCanonicalClause(clause, "long", resolveSigLocalization(locale), { realizationMode: "normalized" });
+        expect(preview.match(locale === "en" ? /morning/gu : /เช้า/gu)).toHaveLength(coversPoint ? 1 : 2);
+        if (relation === AdviceRelation.Until) expect(text).toContain(locale === "en" ? "until" : "จนกว่า");
+        if (relation === AdviceRelation.During) expect(text).toContain(locale === "en" ? "during" : "ระหว่าง");
+      }
+      expect(JSON.stringify(graph)).toBe(before);
+    });
 });

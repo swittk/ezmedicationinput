@@ -17,7 +17,8 @@ import {
   DOSE_FRACTION_WORDS,
   DOSE_FRACTION_DENOMINATOR_WORDS,
   DOSE_UNIT_CONNECTORS,
-  MEDICATION_OBJECT_FILLERS
+  MEDICATION_OBJECT_FILLERS,
+  SITE_TRAILING_INSTRUCTION_WORDS
 } from "../lexical-classes";
 import {
   HpsgClinicalQuantityFeature,
@@ -340,7 +341,8 @@ function activeDoseInCarrierOverTime(
     if (INFUSION_DURATION_LEADS.has(word) ||
         (getRouteMeaning(token)?.code === RouteCode["Intravenous route"] &&
           available(context, cursor + 1) &&
-          INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[cursor + 1]))) ||
+          (INFUSION_DURATION_LEADS.has(normalizeTokenLower(context.tokens[cursor + 1])) ||
+            SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(context.tokens[cursor + 1])))) ||
         token.kind !== LexKind.Word) break;
     cursor++;
   }
@@ -349,6 +351,12 @@ function activeDoseInCarrierOverTime(
   const markedIV = Boolean(routeToken && available(context, cursor) &&
     getRouteMeaning(routeToken)?.code === RouteCode["Intravenous route"]);
   if (markedIV) cursor++;
+  // Manner modifiers are independent daughters, not carrier material. Leave
+  // their tokens available to the existing instruction lexicon.
+  const mannerStart = cursor;
+  while (markedIV && available(context, cursor) &&
+      SITE_TRAILING_INSTRUCTION_WORDS.has(normalizeTokenLower(context.tokens[cursor]))) cursor++;
+  const mannerEnd = cursor;
   const overToken = context.tokens[cursor];
   if (!overToken || !INFUSION_DURATION_LEADS.has(normalizeTokenLower(overToken))) return undefined;
   const duration = infusionDurationAt(context, cursor + 1);
@@ -379,7 +387,8 @@ function activeDoseInCarrierOverTime(
   return clinicalSign(
     context,
     "hpsg.lex.clinicalQuantity.activeDoseInCarrierOverTime",
-    Array.from({ length: durationEnd - start }, (_, offset) => start + offset),
+    Array.from({ length: durationEnd - start }, (_, offset) => start + offset)
+      .filter(index => index < mannerStart || index >= mannerEnd),
     clinicalQuantity,
     clinicalQuantity.projectedDose,
     { sourceRanges: [{

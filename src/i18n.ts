@@ -2258,6 +2258,7 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
   if (asNeeded) {
     parts.push(asNeeded);
   }
+  if (!parts.length && clause.method) parts.push(resolveThaiMethodVerb(clause, resolveRouteGrammarThai(clause)));
   return parts.filter(Boolean).join(" ");
 }
 
@@ -2777,7 +2778,7 @@ function formatLongThai(
   );
   const graphCanStandAlone = Boolean(
     !richPrimaryGraphAction && !hasExplicitMethod && wholeGraphInstruction && clause.instructionGraph?.actions.length &&
-    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+    !clause.prn?.enabled && !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
   );
   if (graphCanStandAlone) {
     const text = [directInstruction, graphInstructionText, fallbackPatientInstruction]

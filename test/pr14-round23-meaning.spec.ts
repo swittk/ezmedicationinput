@@ -394,7 +394,7 @@ describe("round 23: authored Thai PRN wording precedes terminology fallback", ()
 
 describe("round 23: authored PRN wording retains its onset context", () => {
   it.each(["reason", "coding"] as const)("preserves a custom %s translation at symptom onset", owner => {
-    const clause = parseSig("Take 1 tablet at onset of migraine").meta.canonical.clauses[0];
+    const clause = { ...parseSig("Take 1 tablet at onset of migraine").meta.canonical.clauses[0] };
     const custom = "มีอาการเตือนไมเกรนเฉพาะของผู้ป่วย";
     const reason = {
       text: "patient-specific migraine prodrome",
@@ -1075,7 +1075,10 @@ describe("round 26: known timing and quantity stay attached to their clinical ow
     row.timing!.repeat!.when = [EventTiming.Morning];
     row.text = "Swallow 1 tablet whole in the morning after discussion with the clinician.";
     const saved = JSON.stringify(row);
-    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    const replay = formatSig(row, "long", { realizationMode: "roundtrip" });
+    expect(replay).toContain("in the morning");
+    expect(replay).not.toContain("bedtime");
+    expect(parseSig(replay).meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
     expect(JSON.stringify(row)).toBe(saved);
   });
 
@@ -2558,7 +2561,7 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     frame.args = [amount, { role: AdviceArgumentRole.Manner, text: "slowly",
       normalized: "slowly", i18n: { th: "ช้าๆ" } }];
     const snapshot = JSON.stringify(frame);
-    const clause = parseSig("Take at most 2 tablets").meta.canonical.clauses[0];
+    const clause = { ...parseSig("Take at most 2 tablets").meta.canonical.clauses[0] };
     expect(clause.dose).toMatchObject({ value: 2, unit: "tab", comparator: "<=" });
     clause.instructionGraph = { sourceText: "Take the prescribed amount slowly",
       sourceLocale: "en", actions: [frame], primaryAdministrationSpan: { ...frame.span } };
@@ -2572,7 +2575,7 @@ describe("review family: instruction graphs use live quantity and timing", () =>
     const source = "Take 1 tablet, then dissolve 2 tablets in water";
     const actions = parseInstructionActions(source);
     const graph = { sourceText: source, sourceLocale: "en", actions };
-    const clause = parseSig("Take 3 tablets").meta.canonical.clauses[0];
+    const clause = { ...parseSig("Take 3 tablets").meta.canonical.clauses[0] };
     clause.instructionGraph = graph;
     const snapshot = JSON.stringify(graph);
     expect(instructionGraphSourceConflictsWithDose(clause)).toBe(true);
@@ -5040,6 +5043,9 @@ describe("round59 partial facts and complete authored directions", () => {
           // Owner decision1377 defers inferring this untyped qualifier beside
           // a bare method. Keep the original fixture and text in wire/source.
           expect(rendered).not.toContain("Apply a thin layer");
+          expect(rendered.trim()).not.toBe("");
+          if (style === "long" || !hasSite && !hasRoute)
+            expect(rendered).toMatch(locale === "en" ? /apply/iu : /ทา/u);
           if (hasSite) expect(rendered).toContain(locale === "en" ? "left forearm" : "ปลายแขนซ้าย");
         }
       expect(input.step![0].component[0].text).toBe(row.text);
@@ -5095,9 +5101,11 @@ describe("round59 partial facts and complete authored directions", () => {
     }
     for (const style of ["short", "long"] as const) {
       expect(formatSig(row, style, { locale: "en" })).toBe(formatSig(row, style, { locale: "en", realizationMode: "normalized" }));
-      expect(formatSig(row, style, { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
+      const replay = formatSig(row, style, { locale: "en", realizationMode: "roundtrip" });
+      expect(parseSig(replay).meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
     }
-    expect(fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText).toBe(row.text);
+    expect(parseSig(fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText)
+      .meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
     const saved = fresh(toFhirR5Dosages(toDosageDetails([row])));
     expect(saved[0].text).toBe(row.text);
     expect(saved[0].doseAndRate![0].doseQuantity!.value).toBe(2);
@@ -5321,6 +5329,7 @@ describe("round60 typed meaning and interchange ownership", () => {
     for (const input of [wire, toDosageDetails(fresh(rows))]) {
       expect(formatSig(input, "short", { realizationMode: "normalized" })).toBe(source);
       expect(formatSig(input, "long", { realizationMode: "normalized" })).toBe(source);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].asNeeded).toBe(false);
     }
     expect(JSON.stringify(wire)).toBe(before);
     const current: FhirR6DosageInstruction = { step: [{ component: [{ ...row,
@@ -5428,5 +5437,166 @@ describe("round61 complete carrier quantity daughters", () => {
       rateRatio: { numerator: { value: 0.5, unit: "L" }, denominator: { value: 4, unit: "h" } } }]);
     expect(member.target).toBeUndefined();
     expect(parsed.meta.leftoverText).toBeUndefined();
+  });
+});
+
+
+describe("round61 supported grammar and display ownership", () => {
+  const saved = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const views = (value: FhirR6DosageInstruction) => [value, saved(value),
+    saved(toFhirR5Dosages(value)), saved(toDosageDetails(saved(toFhirR5Dosages(value))))];
+
+  it("inherits all authored infusion clocks without inventing a singleton", () => {
+    const source = "Infuse 100 mL at 08:00 and 20:00 daily for 3 days, then infuse 50 mL over 1 hour at the same times for 2 days";
+    const parsed = parseSig(source), second = parsed.meta.canonical.clauses[1];
+    expect(second.schedule).toMatchObject({ timeOfDay: ["08:00:00", "20:00:00"],
+      duration: 2, durationUnit: "d", administrationDuration: 1, administrationDurationUnit: "h" });
+    expect(second.schedule?.count).toBeUndefined();
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z", timeZone: "UTC", limit: 20 };
+    const expected = [1, 2, 3, 4, 5].flatMap(day => [8, 20].map(hour =>
+      `2026-01-0${day}T${String(hour).padStart(2, "0")}:00:00+00:00`));
+    for (const input of [parsed.meta.canonical.course!, ...views(parsed.fhirNext)]) {
+      const before = JSON.stringify(input);
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 6, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: 800, unit: "mL" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(parseSig("Infuse 50 mL over 1 hour").meta.canonical.clauses[0].schedule?.count).toBe(1);
+  });
+
+  it.each(["IV slowly", "IV gently", "IV", "IV solution"])(
+    "keeps carrier material and route daughters separate: %s", phrase => {
+      const parsed = parseSig(`Infuse 2 mg in 50 mL ${phrase} over 1 hour`);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ value: 2, unit: "mg" });
+      expect(clause.clinicalQuantity).toMatchObject({ rateNumerator: { value: 50, unit: "mL" },
+        administrationDuration: { value: 1, unit: "h" } });
+      expect(clause.clinicalQuantity?.carrierMaterial?.text).toBe(phrase === "IV solution" ? phrase : undefined);
+      expect(clause.route?.code).toBe(phrase === "IV solution" ? undefined : RouteCode["Intravenous route"]);
+      for (const input of views(parsed.fhirNext)) {
+        const before = JSON.stringify(input), member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts).toMatchObject([{ quantity: { value: 2, unit: "mg" },
+          rateRatio: { numerator: { value: 50, unit: "mL" }, denominator: { value: 1, unit: "h" } } }]);
+        if (phrase !== "IV solution") expect(toFhirR5Dosages(input)[0].route?.coding?.[0].code)
+          .toBe(RouteCode["Intravenous route"]);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+    });
+
+  it.each(["Infuse 20 to 40 mg in 2 divided doses at 0.1 mg/kg/hr",
+    "Infuse 20 to 40 mg at 0.1 mg/kg/hr in 2 divided doses"])(
+    "divides the authored total range independently from its weight-based rate: %s", source => {
+      const parsed = parseSig(source), clause = parsed.meta.canonical.clauses[0];
+      expect(clause.dose).toEqual({ range: { low: 10, high: 20 }, unit: "mg" });
+      expect(clause.schedule?.count).toBe(2);
+      expect(clause.schedule?.frequency).toBeUndefined();
+      expect(clause.clinicalQuantity).toMatchObject({ representation: "rate-quantity", dividedDoseCount: 2,
+        numerator: { value: 0.1, unit: "mg" }, requiresPatientWeight: true });
+      for (const input of [parsed.meta.canonical.course!, ...views(parsed.fhirNext)]) {
+        const before = JSON.stringify(input);
+        expect(importCanonicalCourse(input).stages[0].administrations[0].amounts).toMatchObject([{
+          range: { low: { value: 10, unit: "mg" }, high: { value: 20, unit: "mg" } },
+          rate: { value: 0.1, unit: "mg/kg/h" }
+        }]);
+        expect(JSON.stringify(input)).toBe(before);
+      }
+      const daily = parseSig("Give 20 mg/kg/day in 2 divided doses").meta.canonical.clauses[0];
+      expect(daily.dose).toEqual({ value: 10, unit: "mg/kg" });
+      expect(daily.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+      expect(daily.clinicalQuantity?.dailyTotal).toBe(true);
+    });
+
+  it("retains distinct descriptor locales and the normalized callback receiver", () => {
+    const providers = [
+      { locale: "round61-script-a", script: /[ⵤⵥ]/gu, char: "ⵤ" },
+      { locale: "round61-script-b", script: /[ꙮ꙯]/yu, char: "ꙮ" }
+    ];
+    for (const input of providers) {
+      const provider: MedicationSurfaceSegmenter = { locale: input.locale, script: input.script,
+        *segment(text: string) { if (this.script.test(text[0])) yield { segment: text, index: 0 }; } };
+      Object.defineProperty(provider, "locale", { value: input.locale, enumerable: false });
+      registerMedicationSurfaceSegmenter(provider);
+    }
+    for (const input of providers) {
+      const registered = listMedicationSurfaceSegmenters().find(value => value.locale === input.locale)!;
+      expect(registered).toBeDefined();
+      expect(registered.script.global || registered.script.sticky).toBe(false);
+      expect([...registered.segment(input.char)]).toEqual([{ segment: input.char, index: 0 }]);
+      expect(splitMedicationScriptRuns("A" + input.char + "B").map(run => run.text)).toEqual(["A", input.char, "B"]);
+    }
+  });
+
+  it("keeps source-only directions with independent warning and dose cap", () => {
+    const row: FhirDosage = { text: "Swallow 1 tablet whole every morning",
+      additionalInstruction: [{ text: "Do not crush" }], maxDosePerAdministration: { value: 2, unit: "tab" } };
+    const original = saved(row);
+    for (const input of [row, ...views(toDosageDetails([saved(row)]))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      expect(text).toContain(row.text);
+      expect(text).toContain("Do not crush");
+      expect(text).toContain("max per administration: 2 tab");
+      expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" })).toContain(row.text);
+    }
+    const edited = { ...saved(row), doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }] };
+    expect(formatSig(edited, "long", { locale: "en" })).toContain("2 tablets");
+    expect(formatSig(edited, "long", { locale: "en" })).not.toContain("Swallow 1 tablet");
+    expect(row).toEqual(original);
+  });
+
+  it.each([false, true])("keeps live PRN beside a retained graph warning: %s", needed => {
+    const graph = parseSig("Do not crush").meta.canonical.clauses[0].instructionGraph!;
+    const input: FhirR6DosageInstruction = { step: [{ component: [{ asNeeded: needed,
+      extension: [buildInstructionGraphExtension(graph)!] }] }] };
+    for (const wire of views(input)) for (const locale of ["en", "th"]) {
+      const before = JSON.stringify(wire), text = formatSig(wire, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "Do not crush" : "ห้ามบด");
+      if (needed) expect(text).toContain(locale === "en" ? "as needed" : "เมื่อจำเป็น");
+      else expect(text).toBe(locale === "en" ? "Do not crush." : "ห้ามบด.");
+      expect(importCanonicalCourse(wire).stages[0].administrations[0].asNeeded).toBe(needed);
+      expect(JSON.stringify(wire)).toBe(before);
+    }
+  });
+
+  it("classifies conditions by the selected action definition despite a configured code collision", () => {
+    const options: ParseOptions = { instructionActionMap: { "clinic warning": {
+      code: "rinse", display: "Clinic warning", semanticClass: "procedure", procedural: false, safetyScopeTarget: true
+    } } };
+    const source = "If dizzy, rinse the skin", parsed = parseSig(source, options);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.additionalInstructions).toBeUndefined();
+    expect(clause.patientInstruction).toBe("rinse the skin");
+    expect(clause.instructionGraph?.relations?.some(relation => relation.kind === AdviceRelation.If)).toBe(true);
+    expect(parseSig("If dizzy, clinic warning", options).meta.canonical.clauses[0].additionalInstructions)
+      .toMatchObject([{ text: "If dizzy, clinic warning" }]);
+    for (const input of views(parsed.fhirNext)) {
+      const text = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(/if dizzy/iu);
+      expect(text).toMatch(/rinse the skin/iu);
+    }
+  });
+
+  it.each([1, 2, undefined])("shows a supplied partial frequency without inventing a period: %s", frequency => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        ...(frequency === undefined ? {} : { repeat: { frequency } })
+      } }] }] };
+    for (const wire of views(input)) {
+      const text = formatSig(wire, "short", { locale: "en", realizationMode: "normalized" });
+      expect(text).toBe(frequency === 1 ? "1 tab 1x" : "1 tab BID");
+      if (frequency === 1) expect(text).not.toContain("/d");
+    }
+  });
+
+  it("replays replacement wording when the saved clinical projection still agrees", () => {
+    const row = saved(parseSig("Take 2 tablets daily").fhir[0]);
+    row.text = "Take 2 tablets daily with water";
+    const before = saved(row);
+    expect(formatSig(row, "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    expect(fromFhirDosage(row, { realizationMode: "roundtrip" }).longText).toBe(row.text);
+    expect(parseSig(formatSig(row, "long", { realizationMode: "roundtrip" })).meta.canonical.clauses[0].dose)
+      .toMatchObject({ value: 2, unit: "tab" });
+    expect(row).toEqual(before);
   });
 });

@@ -7,7 +7,7 @@ import {
   MedicationDateListMatch,
   parseMedicationDateListAt
 } from "../../date-interpretation";
-import { medicationInstructionActionIsSafetyScopeTarget, resolveMedicationInstructionAction, getMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionAction, getMedicationInstructionAction } from "../../instruction-action-terminology";
 import { resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { parseMedicationGuard, scopeMedicationGuardSign } from "../constructions";
 import {
@@ -682,10 +682,12 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
 }
 
 function isSafetyTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
-  // Semantic frames carry saved codes; lexical frames can still carry surfaces.
-  return frame.polarity === AdvicePolarity.Negate ||
-    getMedicationInstructionAction(frame.predicate.lemma, context.options)?.safetyScopeTarget === true ||
-    medicationInstructionActionIsSafetyScopeTarget(frame.predicate.lemma, context.options);
+  if (frame.polarity === AdvicePolarity.Negate) return true;
+  // Selected identity owns code collisions; unresolved lexical frames can
+  // still carry a surface rather than a saved predicate code.
+  const definition = frameActionDefinition(frame, context.options) ??
+    resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  return definition?.safetyScopeTarget === true;
 }
 
 function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {

@@ -958,6 +958,11 @@ function removeConflictingInheritedClockLists(states: readonly ParserState[]): v
       item.rule === 'regimen.sequence.whole-predecessor-phase'
     );
     if (!inheritedBySequence) continue;
+    const localFrequencyEvidence = schedule.evidence?.some(item =>
+      (item.scheduleFields?.indexOf("frequency") ?? -1) >= 0 &&
+      item.spans.some(span => span.start >= 0 && span.end <= state.input.length)
+    );
+    if (!localFrequencyEvidence) continue;
     const localClockEvidence = schedule.evidence?.some(item =>
       item.scheduleFields?.indexOf('timeOfDay') !== -1 &&
       item.spans.some(span => span.start >= 0 && span.end <= state.input.length)

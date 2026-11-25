@@ -670,6 +670,7 @@ export function projectHpsgSignToState(
     }
     if (!hasRecurringSchedule(schedule) && !hasRecurringSchedule(target) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
+        (dividedCount !== undefined || target.timingReference !== "previous") &&
         target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;
   }
 

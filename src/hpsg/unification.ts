@@ -427,6 +427,7 @@ function mergeDose(
     // independent infusion rate unchanged, whichever daughter arrives first.
     const dividedWeightTotal = clinicalQuantity.representation === "rate-quantity" &&
       clinicalQuantity.requiresPatientWeight && !clinicalQuantity.projectedDose && value === undefined &&
+      range === undefined &&
       !clinicalQuantity.administrationDuration;
     const independentRate = clinicalQuantity.representation === "rate-quantity" && !dividedWeightTotal;
     const activeDose = clinicalQuantity.projectedDose ??

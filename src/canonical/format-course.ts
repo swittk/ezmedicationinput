@@ -545,11 +545,12 @@ function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
         amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
   return false;
 }
-function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true): boolean {
+function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true, includeAdvice = true): boolean {
   if (administrationHasAmountFacts(a)) return true;
   if (a.asNeeded === true || a.target || a.targetCount !== undefined || a.siteReference ||
-      a.route || a.method || a.predicate || a.calendarPredicate || a.patientInstruction || a.syntax?.instructionGraph?.actions.length ||
-      a.additionalInstructions?.length || a.excludedDates?.length || a.excludedWeekdays?.length ||
+      a.route || a.method || a.predicate || a.calendarPredicate || a.syntax?.instructionGraph?.actions.length ||
+      (includeAdvice && (a.patientInstruction || a.additionalInstructions?.length)) ||
+      a.excludedDates?.length || a.excludedWeekdays?.length ||
       (includeSafety && (a.limits?.length || safetyHasClinicalFacts(a.safety))) || a.choice || a.phaseOrigin ||
       (includeMemberBounds && (a.phaseStart || a.phaseEnd)) || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
@@ -602,12 +603,16 @@ function formatCanonicalBase(
 ): string {
   // Member bounds and safety limits qualify the directions; they cannot
   // replace the only authored dose, manner and cadence.
-  const authoredDirectionsOnly = a.text?.trim() && !administrationHasClinicalFacts(source, false, false);
-  if (authoredDirectionsOnly && !a.limits?.length && !a.safety?.ifExceeded) return a.text!;
+  const authoredDirectionsOnly = a.text?.trim() && !administrationHasClinicalFacts(source, false, false, false);
+  if (authoredDirectionsOnly && !a.limits?.length && !a.safety?.ifExceeded &&
+      !a.additionalInstructions?.length && !a.patientInstruction) return a.text!;
   const env = environment ?? courseEnvironment(options),
     words = env.words;
-  if (authoredDirectionsOnly)
-    return appendDoseLimits(a.text!, a.limits, words, undefined, a.safety?.ifExceeded);
+  if (authoredDirectionsOnly) {
+    const advice = a.additionalInstructions?.length || a.patientInstruction
+      ? formatCanonicalClause(compiled ?? clauseForAdministration(a, options), style, env.localization, options) : "";
+    return appendDoseLimits(joinGeneratedClauses([a.text!, advice]), a.limits, words, undefined, a.safety?.ifExceeded);
+  }
   const primary = a.amounts?.[0];
   const maxima = Boolean(a.limits?.length);
   const rich =

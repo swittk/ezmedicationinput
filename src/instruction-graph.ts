@@ -4451,10 +4451,11 @@ function timeArgumentCoveredBySchedule(
     ? MEAL_TIMING_BY_RELATION.get(relation as "before" | "after" | "with")
     : undefined;
   // HS already encodes before sleep, so retain that authored qualifier.
-  // Other unmapped relations cannot claim the bare event: after sleep does
-  // not establish the bedtime event.
+  // Declared direct-time heads (IN/ON) preserve the event point. Other
+  // unmapped relations, such as UNTIL or AFTER sleep, do not claim it.
   const related = relation === "before" && timing === EventTiming["Before Sleep"]
-    ? timing : relationMapping ? relationMapping.get(timing) : timing;
+    ? timing : relationMapping ? relationMapping.get(timing)
+    : !relation || relationHasGrammarFeature(relation, "directTimeRealization") ? timing : undefined;
   return related !== undefined && clause.schedule.when.indexOf(related) >= 0;
 }
 
@@ -4965,7 +4966,7 @@ function conditionRelationBody(text: string, kind: AdviceRelation): string | und
 }
 
 /** Retained predicate text identifies its source mirror without parsing the
- * graph again. An alternative only owns an atom when every allowed path does. */
+ * graph again. Ownership survives edits to the enclosing Boolean operator. */
 function primaryConditionOwnsSource(
   condition: MedicationCondition, source: string, negative: boolean, negated = false
 ): boolean {
@@ -4974,8 +4975,7 @@ function primaryConditionOwnsSource(
   if ("conditions" in condition) {
     if (!condition.conditions.length) return false;
     const owns = (child: MedicationCondition) => primaryConditionOwnsSource(child, source, negative, negated);
-    return (condition.kind === "any") !== negated
-      ? condition.conditions.every(owns) : condition.conditions.some(owns);
+    return condition.conditions.some(owns);
   }
   const negativeLeaf = negated !== (condition.kind === "state" && !condition.expected);
   return negative === negativeLeaf && normalizedInstructionSurface(condition.text) === source;

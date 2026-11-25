@@ -1318,6 +1318,13 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
         : stripTrailingZero(frequency!);
       parts.push(`${count}x/${qualifier}${schedule.periodUnit}`);
     } else parts.push(`Q${qualifier}${schedule.periodUnit.toUpperCase()}`);
+  } else if (schedule.frequency !== undefined || schedule.frequencyMax !== undefined) {
+    const frequency = schedule.frequency, maximum = schedule.frequencyMax;
+    const count = maximum !== undefined && maximum !== frequency
+      ? frequency === undefined ? `<=${stripTrailingZero(maximum)}`
+        : `${stripTrailingZero(frequency)}-${stripTrailingZero(maximum)}`
+      : stripTrailingZero(frequency!);
+    parts.push(`${count}x`);
   }
   if (timingText) parts.push(timingText);
   if (schedule.when?.length) {
@@ -1386,6 +1393,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
       parts.push("PRN");
     }
   }
+  if (!parts.length && clause.method) parts.push(resolveMethodVerb(clause, resolveRouteGrammar(clause)));
   return parts.filter(Boolean).join(" ");
 }
 
@@ -1899,7 +1907,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   const graphCanStandAlone = Boolean(
     !richPrimaryGraphAction && !hasExplicitMethod && trailingInstructionText &&
     clause.instructionGraph?.actions.length &&
-    !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
+    !clause.prn?.enabled && !clause.route && !clause.site && !hasAdministrationTiming && graphRepresentsDose && !primaryConditions?.length
   );
   if (graphCanStandAlone) return condition
     ? appendClinicalConditionText(trailingInstructionText as string, condition, words)

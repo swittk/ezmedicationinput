@@ -5001,10 +5001,12 @@ describe("topical product forms and workflow", () => {
         coding: coding ? [coding] : undefined
       }
     };
+    const original = structuredClone(dosage);
     const fromFhir = fromFhirDosage(dosage, { locale: "th" });
     expect(fromFhir.longText).toBe("ทาซ้ำทุก 2 ชั่วโมง.");
-    expect(fromFhir.fhir).toEqual(dosage);
-    expect(fromFhir.meta.canonical.clauses[0].rawText).toBe(dosage.text);
+    expect(fromFhir.fhir).toEqual(original);
+    expect(dosage).toEqual(original);
+    expect(fromFhir.meta.canonical.clauses[0].rawText).toBe(original.text);
     // The current method owns the localized preview. The complete original
     // product wording remains source data; no reverse rendering infers it.
     const currentOnly = fromFhirDosage({ ...dosage, text: undefined }, { locale: "th" });

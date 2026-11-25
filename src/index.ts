@@ -11,8 +11,8 @@ import type { CanonicalCourse, CanonicalAdministration } from "./canonical/cours
 import { hasAmountRole } from "./canonical/course";
 import { cloneStructuredValue } from "./stable-structure";
 import { getDoseQuantityUnit } from "./maps";
-/** Source edits are separate from clinical edits: replacement clinician text
- * owns roundtrip display, while a clear or stale projection uses live facts. */
+/** Replacement wording is replayable only while its saved clinical projection
+ * still agrees. Structured edits use live facts; the exact text stays on wire. */
 function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   // Parser rows are immutable by caller contract. Fresh external submissions
   // have no identity marker and verify their supplied fields below.
@@ -20,8 +20,8 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string {
   const first = (dosage as EzDosage).doseAndRate?.[0];
   const originalText = getDosageSourceTextFingerprint(dosage);
   const textChanged = originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
-  if (textChanged) return dosage.text?.trim() ? dosage.text : true;
   const matches = dosageMatchesSavedProjection(dosage);
+  if (textChanged) return matches === true && dosage.text?.trim() ? dosage.text : true;
   // A persisted standalone item can have no source fingerprint. Its explicit
   // live guards and carrier material own clinical display; unverified narrative is provenance.
   return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
