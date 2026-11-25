@@ -1058,7 +1058,7 @@ export interface AdviceArgument {
   i18n?: Record<string, string>;
   /** Original FHIR Element identity of the argument wrapper. */
   sourceId?: string;
-  /** Unrecognized imported argument children, retained as non-executable FHIR data. */
+  /** Imported field annotations and unknown argument children, retained as FHIR data. */
   sourceExtensions?: FhirExtension[];
   quantity?: {
     value?: number;

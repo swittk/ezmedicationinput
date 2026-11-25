@@ -6869,3 +6869,40 @@ describe("round78 configured spatial Coding", () => {
     expect(targetCoding.extension).toEqual([note]);
   });
 });
+
+describe("round78 graph argument field metadata", () => {
+  it.each([false, true])("preserves recognized field annotations while the current role wins (edited=%s)", edited => {
+    const source = "Take 1 tablet with 100 mL water";
+    const marker = persist(buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source),
+    })!);
+    const action = marker.extension!.find(item => item.url === "action")!;
+    const argument = action.extension!.filter(item => item.url === "argument").find(item =>
+      item.extension!.some(field => field.url === "quantity" && field.extension!.some(child =>
+        child.url === "unit" && child.valueString === "mL")))!;
+    argument.id = "water-argument";
+    argument.extension!.push({ url: "urn:clinic:argument-note", valueString: "retain" });
+    const role = argument.extension!.find(item => item.url === "role")!;
+    role.id = "role-owner";
+    role._valueCode = { id: "role-value", extension: [{ url: "urn:clinic:role-note", valueString: "retain" }] };
+    const text = argument.extension!.find(item => item.url === "text")!;
+    text.id = "text-owner";
+    text._valueString = { id: "text-value", extension: [{ url: "urn:clinic:text-note", valueString: "retain" }] };
+    const original = persist(marker);
+    let graph = persist(parseInstructionGraphExtension([marker])!);
+    const current = graph.actions[0].args.find(item => item.quantity?.unit === "mL")!;
+    if (edited) current.role = AdviceArgumentRole.Destination;
+    const expected = persist(argument);
+    if (edited) expected.extension!.find(item => item.url === "role")!.valueCode = AdviceArgumentRole.Destination;
+    for (let save = 0; save < 2; save++) {
+      const before = persist(graph), output = buildInstructionGraphExtension(graph)!;
+      const saved = output.extension!.find(item => item.url === "action")!.extension!
+        .find(item => item.url === "argument" && item.id === "water-argument")!;
+      expect(saved).toEqual(expected);
+      expect(saved.extension!.filter(item => item.url === "role")).toHaveLength(1);
+      expect(graph).toEqual(before);
+      graph = persist(parseInstructionGraphExtension([persist(output)])!);
+    }
+    expect(marker).toEqual(original);
+  });
+});

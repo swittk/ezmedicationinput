@@ -123,7 +123,7 @@ function addRelation(
 }
 
 /** Merge annotations on component fields while current typed values stay active. */
-function addComponentSource(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
+function addFieldSources(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
   for (const source of sources ?? []) {
     let index = -1;
     if (source.url === "role" || source.url === "text" || source.url === "coding") {
@@ -160,7 +160,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       { url: "text", valueString: component.text }
     ];
     add(parts, valueCoding("coding", component.coding));
-    addComponentSource(parts, component.sourceExtensions);
+    addFieldSources(parts, component.sourceExtensions);
     nested.push({ ...(component.sourceId ? { id: component.sourceId } : {}), url: "component", extension: parts });
   }
   if (argument.span) {
@@ -227,7 +227,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
     });
   }
   add(nested, sourceRelation);
-  if (argument.sourceExtensions) nested.push(...argument.sourceExtensions);
+  addFieldSources(nested, argument.sourceExtensions);
   return { url: "argument", ...(argument.sourceId !== undefined ? { id: argument.sourceId } : {}), extension: nested };
 }
 
@@ -285,7 +285,7 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
       { url: "role", valueCode: part.role },
       { url: "coding", valueCoding: wireCoding(part.coding) }
     ];
-    addComponentSource(parts, part.sourceExtensions);
+    addFieldSources(parts, part.sourceExtensions);
     nested.push({ ...(part.sourceId ? { id: part.sourceId } : {}), url: "predicateComponent", extension: parts });
   }
   add(nested, valueInteger("spanStart", frame.span.start));
@@ -426,8 +426,14 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
   const codings:FhirCoding[]=[],components:NonNullable<AdviceArgument["components"]>=[];
   let i18n:Record<string,string>|undefined,sourceExtensions:FhirExtension[]|undefined;
   for(const entry of extension.extension??[])switch(entry.url){
-    case "role":if(!role)role=entry;break;
-    case "text":if(!text)text=entry;break;
+    case "role":
+      if(!role)role=entry;
+      if(hasFieldMetadata(entry,"valueCode"))(sourceExtensions??=[]).push(entry);
+      break;
+    case "text":
+      if(!text)text=entry;
+      if(hasFieldMetadata(entry,"valueString"))(sourceExtensions??=[]).push(entry);
+      break;
     case "relation":if(!relation)relation=entry;break;
     case "relationCoding":if(!relationCoding)relationCoding=entry;break;
     case "normalized":if(!normalized)normalized=entry;break;
