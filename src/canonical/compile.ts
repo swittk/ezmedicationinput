@@ -469,9 +469,6 @@ function calendarEventsForAdministration(a: CanonicalAdministration): CanonicalC
 function additionalInstructionsForAdministration(a: CanonicalAdministration): CanonicalSigClause["additionalInstructions"] {
   if (!a.additionalInstructions) return undefined;
   const source = a.syntax?.additionalInstructions;
-  let byIdentity: Map<string, NonNullable<typeof source>[number]> | undefined;
-  const identity = (text: string | undefined, coding: NonNullable<typeof source>[number]["coding"]) =>
-    JSON.stringify([text, coding?.code, coding?.system ?? "http://snomed.info/sct", coding?.display, coding?.version]);
   const matches = (instruction: NonNullable<typeof a.additionalInstructions>[number],
     original: NonNullable<typeof source>[number] | undefined) => {
     const code = instruction.coding?.find((entry) => entry.code);
@@ -483,14 +480,9 @@ function additionalInstructionsForAdministration(a: CanonicalAdministration): Ca
     const original = source?.[index];
     if (matches(instruction, original)) return original!;
     // Reordering/removing an earlier instruction must not attach its source
-    // language evidence to another instruction. Build this lookup only after
-    // the ordinary same-order path has failed.
-    if (source?.length && !byIdentity) {
-      byIdentity = new Map();
-      for (const item of source) byIdentity.set(identity(item.text, item.coding), item);
-    }
-    const reordered = byIdentity?.get(identity(instruction.text, instruction.coding?.find(entry => entry.code)));
-    if (matches(instruction, reordered)) return reordered!;
+    // language evidence to another instruction. Compare typed identities only
+    // after the ordinary same-order path has failed.
+    for (const item of source ?? []) if (matches(instruction, item)) return item;
     return { text: instruction.text, coding: instruction.coding?.find((entry) => entry.code) };
   });
 }
