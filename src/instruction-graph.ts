@@ -3751,11 +3751,9 @@ function hasUntranslatedThaiArgument(frame: AdviceFrame, locale: string): boolea
   });
 }
 
-function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
-  const fallback = getMedicationInstructionAction(frame.predicate.lemma);
-  // A selected custom head may share a default code without sharing its label.
-  // Only matching default wording can supply a missing locale translation.
-  const definition = !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
+function actionLabel(
+  frame: AdviceFrame, locale: string, definition: ActionDefinition | undefined, roundtripSafe = false
+): string {
   const selectedLabel = localizedValue(frame.predicate.i18n, locale);
   // Stock roundtrip wording may refine its normal label, but cannot replace
   // a different translation already selected and retained in the frame.
@@ -4042,9 +4040,12 @@ function realizeAction(
     const arg = firstArguments[role];
     return arg ? translatedArgument(arg, locale) : undefined;
   };
-  const label = actionLabel(frame, locale, roundtripSafe);
+  const fallback = getMedicationInstructionAction(frame.predicate.lemma);
+  // A selected custom head may share a default code without sharing its
+  // wording or attachment. Its persisted realizer and configuration own both.
+  const definition = !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
+  const label = actionLabel(frame, locale, definition, roundtripSafe);
   const amount = first(AdviceArgumentRole.Amount);
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
   const realizerKey = frame.predicate.realizer ?? definition?.realizer ?? "default";
   const defaultArguments = realizerKey === "default" ? defaultActionArguments(frame) : undefined;
   const objectArg = defaultArguments?.objectArg;

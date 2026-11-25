@@ -7951,3 +7951,26 @@ it("round72 keeps authored priming before the freshly edited administration", ()
   expect(JSON.stringify(row)).toBe(before);
   expect(JSON.stringify(r6)).toContain(source);
 });
+
+
+describe("round73 selected negated site attachment", () => {
+  it.each(["clinic-wash", "apply"])("keeps Wash attachment when its registered code is %s", code => {
+    const definition = { ...getMedicationInstructionAction("wash")!, code };
+    const options: ParseOptions = { instructionActionMap: { wash: definition }, locale: "th" };
+    const source = "ห้ามล้างผิวหนัง", parsed = parsePublicSig(source, options);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    expect(graph.actions[0].predicate).toMatchObject({ display: "Wash", semanticClass: "cleanse",
+      realizer: "site-relation", realizerConfig: { locales: { en: { directSiteObject: true } } } });
+    expect(graph.actions[0].args[0].coding?.code).toBe("181469002");
+    const before = JSON.stringify(parsed.fhir);
+    const r6 = toDosageDetails(parsed.fhir), saved = JSON.parse(JSON.stringify(toFhirR5Dosages(r6)));
+    for (const input of [parsed.fhir, r6, saved]) {
+      expect(formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" }))
+        .toMatch(/^Do not wash the /u);
+      expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" }))
+        .toBe("ห้ามล้างผิวหนัง.");
+    }
+    expect(JSON.stringify(parsed.fhir)).toBe(before);
+    expect(JSON.stringify(saved)).toContain(source);
+  });
+});
