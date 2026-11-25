@@ -5109,6 +5109,8 @@ describe("round59 partial facts and complete authored directions", () => {
     const saved = fresh(toFhirR5Dosages(toDosageDetails([row])));
     expect(saved[0].text).toBe(row.text);
     expect(saved[0].doseAndRate![0].doseQuantity!.value).toBe(2);
+    expect(parseSig(formatSig(saved[0], "long", { realizationMode: "roundtrip" }))
+      .meta.canonical.clauses[0].dose).toMatchObject({ value: 2, unit: "tab" });
     expect(saved[0].extension).toContainEqual(note);
     expect(row).toEqual(before);
   });

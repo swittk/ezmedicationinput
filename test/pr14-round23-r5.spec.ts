@@ -311,9 +311,27 @@ describe("round23 external R6 wording across R5", () => {
     const replacement = "Take 1 tablet every morning with the prescribed infusion.";
     rows[0].text = replacement;
     for (let save = 0; save < 3; save++) {
+      const submitted = persist(rows);
       expect(dosageMatchesSavedProjection(rows[0])).toBe(false);
       expect(rows[0].text).toBe(replacement);
-      expect(formatSig(rows[0], "long", { locale: "en", realizationMode: "roundtrip" })).toBe(replacement);
+      expect(rows[0].doseAndRate).toMatchObject([{
+        doseQuantity: { value: 1, unit: "tab" },
+        rateQuantity: { value: 5, unit: "mL/h" }
+      }]);
+      expect(rows[0].timing?.repeat).toMatchObject({
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day
+      });
+      // Replacement text is preserved, but the unverified clinical projection
+      // cannot certify source replay over the current structured rate.
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const expected = "Take 1 tablet orally once daily; Rate: 5 mL/h";
+        expect(formatSig(rows[0], "long", { locale: "en", realizationMode })).toBe(expected);
+        const imported = fromFhirDosage(rows[0], { locale: "en", realizationMode });
+        expect(imported.longText).toBe(expected);
+        expect(imported.fhir).toEqual(submitted[0]);
+        expect(imported.meta.canonical.clauses[0].rawText).toBe(replacement);
+      }
+      expect(rows).toEqual(submitted);
       rows = persist(toFhirR5Dosages(rows));
     }
   });
@@ -326,11 +344,33 @@ describe("round23 external R6 wording across R5", () => {
     const rows = persist(toFhirR5Dosages(source));
     rows[1].doseAndRate![0].doseQuantity!.value = 2;
     rows[1].text = "Take 2 tablets orally each morning with the prescribed infusion.";
-    expect(formatSig(rows[1], "long", { locale: "en", realizationMode: "roundtrip" })).toBe(rows[1].text);
+    const submitted = persist(rows);
+    expect(dosageMatchesSavedProjection(rows[1])).toBe(false);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const expected = "Take 2 tablets orally once daily; Rate: 5 mL/h";
+      expect(formatSig(rows[1], "long", { locale: "en", realizationMode })).toBe(expected);
+      const imported = fromFhirDosage(rows[1], { locale: "en", realizationMode });
+      expect(imported.longText).toBe(expected);
+      expect(imported.fhir).toEqual(submitted[1]);
+      expect(imported.meta.canonical.clauses[0].rawText).toBe(rows[1].text);
+    }
     const current = toDosageDetails(rows);
+    expect(current.step![0].component).toHaveLength(2);
+    for (const [index, value] of [1, 2].entries()) {
+      const member = current.step![0].component[index];
+      expect(member.doseAndRate).toEqual(submitted[index].doseAndRate);
+      expect(member.doseAndRate).toMatchObject([{
+        doseQuantity: { value, unit: "tab" },
+        rateQuantity: { value: 5, unit: "mL/h" }
+      }]);
+      expect(member.timing).toEqual(submitted[index].timing);
+      expect(member.timing?.repeat).toMatchObject({
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day
+      });
+    }
     expect(current.step![0].component[1].text).toBe(rows[1].text);
-    expect(current.step![0].component[1].doseAndRate![0].doseQuantity!.value).toBe(2);
     expect(JSON.stringify(current)).toContain("Take 1 tablet orally daily.");
+    expect(rows).toEqual(submitted);
   });
 
   it("keeps fromDosageDetails wording unverified through persisted R6 and R5 crossings", () => {
@@ -6929,21 +6969,35 @@ describe("round44 interop ownership", () => {
     row.extension!.find(e => e.url === carrierUrl)!.extension!.find(e => e.url === "material")!.valueString = "dextrose";
     row.text = "Use the dextrose carrier per the agreed infusion plan";
     const authored = persist(row);
-    expect(formatSig(row, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
-    expect(fromFhirDosage(row, { locale: "en", realizationMode: "roundtrip" }).longText).toBe(row.text);
-    const normalized = formatSig(row, "long", { locale: "en", realizationMode: "normalized" });
-    expect(normalized).toContain("dextrose");
-    expect(normalized).toContain("20 mg");
-    expect(normalized).toContain("100 mL");
-    expect(normalized).not.toContain("saline");
+    expect(dosageMatchesSavedProjection(row)).toBe(false);
+    const expected = "Infuse 20 mg once over 2 hours; max per period: 100 mg / 1 d; Rate: 100 mL dextrose / 2 h";
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      expect(formatSig(row, "long", { locale: "en", realizationMode })).toBe(expected);
+      const imported = fromFhirDosage(row, { locale: "en", realizationMode });
+      expect(imported.longText).toBe(expected);
+      expect(imported.fhir).toEqual(authored);
+      expect(imported.meta.canonical.clauses[0].rawText).toBe(row.text);
+    }
     const saved = persist(toFhirR5Dosages([row]))[0];
+    const savedSnapshot = persist(saved);
     expect(saved.text).toBe(row.text);
-    expect(formatSig(saved, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(row.text);
-    const savedNormalized = formatSig(saved, "long", { locale: "en", realizationMode: "normalized" });
-    expect(savedNormalized).toContain("dextrose");
-    expect(savedNormalized).toContain("20 mg");
-    expect(savedNormalized).toContain("100 mL");
-    expect(savedNormalized).not.toContain("saline");
+    expect(saved.extension!.find(e => e.url === carrierUrl))
+      .toEqual(authored.extension!.find(e => e.url === carrierUrl));
+    expect(saved.doseAndRate).toEqual(authored.doseAndRate);
+    expect(saved.timing).toEqual(authored.timing);
+    expect(saved.maxDosePerPeriod).toEqual(authored.maxDosePerPeriod);
+    // The saved row has a new baseline matching its current clinical fields.
+    // Verified roundtrip can replay it; normalized still states every live fact.
+    expect(dosageMatchesSavedProjection(saved)).toBe(true);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const preview = realizationMode === "roundtrip" ? row.text : expected;
+      expect(formatSig(saved, "long", { locale: "en", realizationMode })).toBe(preview);
+      const imported = fromFhirDosage(saved, { locale: "en", realizationMode });
+      expect(imported.longText).toBe(preview);
+      expect(imported.fhir).toEqual(savedSnapshot);
+      expect(imported.meta.canonical.clauses[0].rawText).toBe(row.text);
+    }
+    expect(saved).toEqual(savedSnapshot);
     expect(row).toEqual(authored);
   });
 

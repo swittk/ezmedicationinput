@@ -181,17 +181,26 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       };
       const unchanged = JSON.parse(JSON.stringify(original));
       const imported = fromFhirDosage(original, { realizationMode: "roundtrip" });
-      expect(original.modifierExtension).toEqual(unchanged.modifierExtension);
+      expect(original).toEqual(unchanged);
+      expect(imported.fhir).toEqual(unchanged);
+      expect(imported.fhir.doseAndRate).toMatchObject([{
+        doseQuantity: { value: 1, unit: "tab" }
+      }]);
+      expect(imported.fhir.timing?.repeat).toMatchObject({
+        frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day
+      });
       expect(imported.fhir.doseAndRate).toEqual(original.doseAndRate);
       expect(imported.fhir.timing).toEqual(original.timing);
       expect(imported.fhir.modifierExtension).toEqual([modifier]);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
-      expect(imported.longText).toBe(text);
+      // The modifier changes the clinical projection, so even roundtrip
+      // renders structured facts while preserving the complete source.
+      expect(imported.longText).toBe("Use 1 tablet twice daily.");
       for (const value of [1, 2]) {
         const current = JSON.parse(JSON.stringify(original)) as FhirDosage;
         current.doseAndRate![0].doseQuantity!.value = value;
         const expected = JSON.parse(JSON.stringify(current));
-        for (const mode of [undefined, "normalized"] as const) {
+        for (const mode of [undefined, "normalized", "roundtrip"] as const) {
           const submitted = JSON.parse(JSON.stringify(current)) as FhirDosage;
           const normalized = fromFhirDosage(submitted,
             mode === undefined ? undefined : { realizationMode: mode });
