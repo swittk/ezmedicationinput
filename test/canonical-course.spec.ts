@@ -959,8 +959,10 @@ describe("saved R5 source replay observes all live timing values", () => {
     const original = formatSig(row, "long", options);
     const edited = structuredClone(row);
     edited.timing.repeat.timeOfDay[1] = "22:00:00";
-    expect(formatSig(edited, "long", options)).toContain("10:00 pm");
-    expect(formatSig(edited, "long", options)).not.toContain("8:00 pm");
+    const editedText = formatSig(edited, "long", options);
+    expect(editedText.split("; original directions:")[0]).toContain("10:00 pm");
+    expect(editedText.split("; original directions:")[0]).not.toContain("8:00 pm");
+    expect(editedText).toContain("original directions: " + row.text);
     const restored = structuredClone(edited);
     restored.timing.repeat.timeOfDay[1] = "20:00:00";
     expect(formatSig(restored, "long", options)).toBe(original);

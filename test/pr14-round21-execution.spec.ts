@@ -2571,6 +2571,40 @@ it("round33 supplies half a tablet from a spaced Thai fraction", () => {
     expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(3.5);
 });
 
+describe("round74 duration terminology ownership", () => {
+  it.each([
+    [{ value: 60, code: "S", system: "http://unitsofmeasure.org" }, true],
+    [{ value: 60, code: "s", system: "urn:clinic:duration" }, true],
+    [{ value: 60, code: "s", system: "http://unitsofmeasure.org" }, false],
+    [{ value: 60, unit: "SECONDS" }, false],
+    [{ value: 10, unit: "hours" }, true]
+  ] as const)("preserves the course-length unit identity %j", (quantity, admitted) => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day,
+        timeOfDay: ["09:00:00"], boundsDuration: quantity } }
+    }] }] };
+    const rows = toFhirR5Dosages(source), before = JSON.stringify(source);
+    for (const input of [source, rows, courseFromR6(source)]) {
+      expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(admitted ? ["2026-01-01T09:00:00+00:00"] : []);
+      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }).totalUnits)
+        .toBe(admitted ? 1 : 0);
+    }
+    expect(toDosageDetails(rows).step[0].component[0].timing!.repeat!.boundsDuration).toEqual(quantity);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+
+  it.each(["S", "s"])("keeps an unknown coded repeat cycle unresolved (%s)", code => {
+    const source: FhirR6DosageInstruction = { repeatCycle: { value: 60, code,
+      system: code === "S" ? "http://unitsofmeasure.org" : "urn:clinic:duration" },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: { count: 1 } } }] }] };
+    for (const input of [source, toFhirR5Dosages(source), courseFromR6(source)]) {
+      expect(() => nextDueDoses(input, { ...options, limit: 2 })).toThrow(/cycle/i);
+      expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day })).toThrow(/cycle/i);
+    }
+  });
+});
+
 describe("round34 execution boundary regressions", () => {
   const versions = ["native", "R5", "R6"] as const;
   const wire = (course: CanonicalCourse, version: typeof versions[number]) =>

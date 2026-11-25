@@ -48,6 +48,16 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
   Q1H: 1, Q2H: 2, Q3H: 3, Q4H: 4, Q6H: 6, Q8H: 8
 };
 
+/** Human previews also recognize existing SIG shorthand without treating it
+ * as a standard FHIR timing identity or changing its structured projection. */
+export function hourlyTimingPreviewPeriod(code: string): number | undefined {
+  const standard = TIMING_CODE_HOURLY_PERIODS[code.toUpperCase()];
+  if (standard !== undefined) return standard;
+  const descriptor = TIMING_ABBREVIATIONS[code.toLowerCase()];
+  return descriptor?.periodUnit === FhirPeriodUnit.Hour && (descriptor.frequency ?? 1) === 1
+    ? descriptor.period : undefined;
+}
+
 export interface TimingSummaryOptions {
   /** Scoped vocabulary in the original parse/format request. Do not build
    * any second registry or retain it on the canonical clinical course. */

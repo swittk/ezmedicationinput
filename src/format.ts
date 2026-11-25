@@ -65,7 +65,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
-  TIMING_CODE_HOURLY_PERIODS,
+  hourlyTimingPreviewPeriod,
   TIMING_CODE_DAILY_FREQUENCIES,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
@@ -557,7 +557,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
     return `${countPrefix}every ${stripTrailingZero(period)} years`;
   }
   if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
-    const hourlyPeriod = TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()];
+    const hourlyPeriod = hourlyTimingPreviewPeriod(timingCode);
     if (hourlyPeriod !== undefined)
       return `every ${stripTrailingZero(hourlyPeriod)} ${hourlyPeriod === 1 ? "hour" : "hours"}`;
     if (timingCode === "WK") {

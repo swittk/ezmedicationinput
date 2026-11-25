@@ -375,47 +375,9 @@ function applyOffset(clock: string, offsetMinutes: number): ExpandedTime {
   };
 }
 function parseBoundsDurationUnit(quantity: CanonicalMeasure | undefined): DurationUnit | undefined {
-  const candidate = quantity?.code?.trim().toLowerCase() ?? quantity?.unit?.trim().toLowerCase();
-  switch (candidate) {
-    case "s":
-    case "sec":
-    case "second":
-    case "seconds":
-      return DurationUnit.Second;
-    case "min":
-    case "mins":
-    case "minute":
-    case "minutes":
-      return DurationUnit.Minute;
-    case "h":
-    case "hr":
-    case "hrs":
-    case "hour":
-    case "hours":
-      return DurationUnit.Hour;
-    case "d":
-    case "day":
-    case "days":
-      return DurationUnit.Day;
-    case "wk":
-    case "wks":
-    case "week":
-    case "weeks":
-      return DurationUnit.Week;
-    case "mo":
-    case "month":
-    case "months":
-      return DurationUnit.Month;
-    case "a":
-    case "yr":
-    case "yrs":
-    case "year":
-    case "years":
-      return DurationUnit.Year;
-    default:
-      return undefined;
-  }
+  return getQuantityDurationUnit(quantity);
 }
+
 function resolveRepeatBoundsStart(
   repeat: Pick<CanonicalRecurrence, "calendarWindow"> | undefined,
   timeZone: string

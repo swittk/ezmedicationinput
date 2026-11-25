@@ -829,9 +829,9 @@ function completeComplexRows(output) {
         repeat?.timeOfDay?.length || repeat?.when?.length ||
         (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2]) ||
         (repeat?.periodMax !== undefined && repeat.periodMax !== expected[3])) return false;
-    // The final left-eye BID phase is ongoing. A standard repeat bound must
-    // not silently shorten it while the retained step still looks open-ended.
-    if (index === 5 && (repeat?.boundsDuration !== undefined || repeat?.boundsRange !== undefined ||
+    // Both final eye phases are ongoing. A standard repeat bound must not
+    // silently shorten either while its retained step still looks open-ended.
+    if (index >= 4 && (repeat?.boundsDuration !== undefined || repeat?.boundsRange !== undefined ||
         repeat?.boundsPeriod !== undefined)) return false;
     const origin = row.modifierExtension?.find(part =>
       part.url === "urn:ezmedicationinput:StructureDefinition:medication-parallel-component-phase-origin");
@@ -872,10 +872,12 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   for (const bound of [{ boundsDuration: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
     { boundsRange: { low: { value: 1, unit: "d" }, high: { value: 2, unit: "d" } } },
     { boundsPeriod: { end: "2026-12-01T00:00:00Z" } }]) {
-    const shortened = structuredClone(ongoingBidControl);
-    Object.assign(shortened.fhir[5].timing.repeat, bound);
-    if (completeComplexRows(shortened))
-      throw new Error("Six-row oracle accepted a bounded ongoing BID phase");
+    for (const index of [4, 5]) {
+      const shortened = structuredClone(ongoingBidControl);
+      Object.assign(shortened.fhir[index].timing.repeat, bound);
+      if (completeComplexRows(shortened))
+        throw new Error("Six-row oracle accepted a bounded ongoing eye phase");
+    }
   }
   for (const periodMax of [2, 4]) {
     const cadence = structuredClone(ongoingBidControl);

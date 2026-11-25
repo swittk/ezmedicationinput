@@ -5655,9 +5655,11 @@ describe("round62 active range beside a scalar infusion carrier", () => {
         const activeUnitText = unit === "mg" && locale === "th" ? "มก." : unit;
         const escapedUnit = activeUnitText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const completeRange = new RegExp("(?:^|[^0-9.])" + String(low).replace(/[.]/g, "[.]") +
-          "-" + String(high).replace(/[.]/g, "[.]") + " " + escapedUnit + "(?![\\p{L}\\p{N}])", "u");
+          "-" + String(high).replace(/[.]/g, "[.]") + " " + escapedUnit + "(?!\\s*/)(?=$|[\\s,;.)])", "u");
         expect(short).toMatch(completeRange);
         expect("1" + low + "-" + high + " " + activeUnitText).not.toMatch(completeRange);
+        expect(low + "-" + high + " " + activeUnitText + "/h; 50 mL / 1 h").not.toMatch(completeRange);
+        expect(low + "-" + high + " " + activeUnitText + " / h").not.toMatch(completeRange);
         expect(short).toMatch(/50 mL(?: normal saline)? \/ 1 h/);
         if (material.includes("normal saline")) expect(short).toContain("normal saline");
         expect(short).not.toMatch(/intranasal|ทางจมูก/);
@@ -6059,5 +6061,46 @@ describe("round74 class callback receivers", () => {
     expect([...registered.segment("ⴲⴳ")]).toEqual([{ segment: "ⴲ", index: 0 }, { segment: "ⴳ", index: 1 }]);
     expect(registered.script.global).toBe(false);
     expect(registered.script.sticky).toBe(false);
+  });
+});
+
+
+describe("round74 source and timing authority", () => {
+  it.each([12, 24])("renders the existing Q%sH preview shorthand without promoting its identity", hours => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ code: "Q" + hours + "H", _code: { id: "local-preview" } }] } } };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    for (const input of [row, r6]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("every " + hours + " hours");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ทุก " + hours + " ชั่วโมง");
+      expect(formatSig(input, "short", { locale: "en" })).toContain("Q" + hours + "H");
+    }
+    expect(toFhirR5Dosages(r6)[0].timing!.code).toEqual(row.timing!.code);
+    expect(JSON.stringify(row)).toBe(before);
+  });
+
+  it("keeps an unverified maximum narrative separate from the current structured cap", () => {
+    const source = "Take 1 tablet daily, maximum 4 tablets per day.";
+    const row: FhirDosage = { text: source, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" },
+        denominator: { value: 1, unit: "d", code: "d", system: "http://unitsofmeasure.org" } }] };
+    const before = JSON.stringify(row);
+    for (const realizationMode of ["normalized", "roundtrip"] as const) {
+      const options = { locale: "en", realizationMode };
+      for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+        expect(text.split("; original directions:")[0]).toContain("max per period: 2 tab / 1 d");
+        expect(text.split("; original directions:")[0]).not.toContain("maximum 4");
+        if (realizationMode === "roundtrip") expect(text).toContain("original directions: " + source);
+      }
+    }
+    const verified = parseSig("Take 1 tablet daily max 2 tablets per day");
+    for (const input of [verified.fhir[0], JSON.parse(JSON.stringify(verified.fhir[0]))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" }))
+        .toBe("Take 1 tablet daily max 2 tablets per day");
+      expect(fromFhirDosage(input, { locale: "en", realizationMode: "roundtrip" }).longText)
+        .toBe("Take 1 tablet daily max 2 tablets per day");
+    }
+    expect(JSON.stringify(row)).toBe(before);
   });
 });

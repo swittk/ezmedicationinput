@@ -18,21 +18,17 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string | { authored: s
   // Parser rows are immutable by caller contract. Fresh external submissions
   // have no identity marker and verify their supplied fields below.
   if (getFreshDoseSource(dosage)) return false;
-  const first = (dosage as EzDosage).doseAndRate?.[0];
   const originalText = getDosageSourceTextFingerprint(dosage);
   const textChanged = originalText !== undefined && originalText !== dosageTextFingerprint(dosage);
   const matches = dosageMatchesSavedProjection(dosage);
   if (textChanged) return dosage.text?.trim()
     ? matches === true ? dosage.text : { authored: dosage.text }
     : true;
-  // A persisted standalone item can have no source fingerprint. Its explicit
-  // live guards and carrier material own clinical display; unverified narrative is provenance.
-  return matches === false || (matches === undefined && Boolean(first?.doseQuantity?.unit?.includes("/kg") ||
-    first?.rateRatio && clinicalCarrierQuantityFromFhir(dosage)?.carrierMaterial ||
-    (dosage as EzDosage).condition?.length ||
-    (dosage as EzDosage).excludedDates?.length || dosage.modifierExtension?.some(item =>
-      item.url === DOSAGE_CONDITION_R5_URL || item.url === DOSAGE_EXCLUDED_DATES_R5_URL) ||
-    dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)));
+  // Without a saved agreement, narrative is original wording rather than
+  // authority for any live clinical field. Both public preview paths share
+  // this decision and the native renderer retains the authored wording.
+  if (matches === undefined && dosage.text?.trim()) return { authored: dosage.text };
+  return matches === false;
 }
 
 /** Source wording is authoritative only when the live dose still matches its
@@ -124,7 +120,7 @@ import {
 } from "./hpsg/projection";
 import { formatCanonicalClause, independentTimingText } from "./format";
 import { preferredTimingCoding } from "./timing-summary";
-import { canonicalFromFhir, canonicalToFhir, clinicalCarrierQuantityFromFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
+import { canonicalFromFhir, canonicalToFhir, TIMING_ACTIVITY_WINDOW_EXTENSION_URL } from "./fhir";
 import { shiftCanonicalSigClauses } from "./ir";
 import { resolveSigLocalization, resolveCourseLanguage, type CourseLanguage } from "./i18n";
 import { ParserState } from "./parser-state";
