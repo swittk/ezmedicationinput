@@ -12431,3 +12431,73 @@ describe("round74 ancillary advice and independent authored directions", () => {
     }
   });
 });
+
+
+describe("round75 opaque temporal unit ownership", () => {
+  const local = { id: "authored-interval", value: 7, unit: "treatment blocks",
+    system: "urn:clinic:interval-units", code: "d", _value: { id: "interval-value" },
+    extension: [{ url: "urn:clinic:interval-note", valueString: "keep the local definition" }] } satisfies FhirR6Quantity;
+  const event = { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] } };
+  const member: FhirR6Dosage = { doseAndRate: [{ doseQuantity: q(1) }] };
+  const locations = ["repeat-cycle", "start-offset", "stage-start", "stage-range"] as const;
+  type Location = typeof locations[number];
+  const source = (location: Location): FhirR6DosageInstruction => {
+    if (location === "repeat-cycle") return { repeatCycle: local, step: [{ component: [member] }] };
+    if (location === "start-offset") return { step: [{ component: [{ ...member, timing: { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, startOffset: local,
+    } } }] }] };
+    return { step: [{ start: { ...event, ...(location === "stage-start" ? { offsetDuration: local }
+      : { offsetRange: { low: local, high: { ...local, value: 9 } } }) }, component: [member] }] };
+  };
+  const retained = (wire: FhirR6DosageInstruction, location: Location) => location === "repeat-cycle" ? wire.repeatCycle
+    : location === "start-offset" ? wire.step![0].component[0].timing!.repeat!.startOffset
+    : location === "stage-start" ? wire.step![0].start!.offsetDuration : wire.step![0].start!.offsetRange;
+
+  it.each(locations)("keeps a local-coded %s uninterpreted in both languages and interchange forms", location => {
+    const raw = source(location), snapshot = persist(raw);
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) {
+      const before = persist(input);
+      const native = importCanonicalCourse(input);
+      for (const value of [input, native]) for (const locale of ["en", "th"] as const) {
+        const text = formatSig(value, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain("7 treatment blocks");
+        expect(text).not.toMatch(/7 days|7 วัน/u);
+        if (location === "stage-range") expect(text).toContain("9 treatment blocks");
+        if (location === "stage-start") expect(text).not.toMatch(/No doses|งดยา/u);
+        if (location === "repeat-cycle") expect(text).toContain(locale === "en"
+          ? "Repeat-cycle interval: 7 treatment blocks." : "ระยะรอบการใช้ยา: 7 treatment blocks.");
+      }
+      let saved = projectCanonicalCourse(native).fhirNext;
+      for (let pass = 0; pass < 2; pass++) {
+        expect(retained(saved, location)).toEqual(retained(raw, location));
+        saved = toDosageDetails(persist(toFhirR5Dosages(persist(saved))));
+      }
+      expect(input).toEqual(before);
+    }
+    expect(raw).toEqual(snapshot);
+  });
+
+  it("retains independently coded member offsets when their labels share a familiar local code", () => {
+    const outer = { ...local, unit: "outer blocks", code: "mo", system: "urn:clinic:outer-intervals" };
+    const inner = { ...local, value: 3, unit: "inner blocks", code: "mo", system: "urn:clinic:inner-intervals" };
+    const raw: FhirR6DosageInstruction = { step: [{ start: { ...event, offsetDuration: outer }, component: [{ ...member,
+      modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: inner }],
+    }] }] };
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) for (const locale of ["en", "th"] as const) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain("7 outer blocks");
+      expect(text).toContain("3 inner blocks");
+      expect(text).not.toMatch(/7 months|3 months|7 เดือน|3 เดือน/u);
+    }
+  });
+
+  it.each(["ucum", "uncoded"] as const)("keeps an understood %s repeat interval localized", kind => {
+    const interval = { value: 7, unit: "days", ...(kind === "ucum" ? { system: "http://unitsofmeasure.org", code: "d" } : {}) };
+    const raw: FhirR6DosageInstruction = { repeatCycle: interval, step: [{ component: [member] }] };
+    for (const input of [persist(raw), persist(toFhirR5Dosages(persist(raw)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("Repeat this schedule every 7 days");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" })).toContain("ทุก 7 วัน");
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.repeatCycle).toEqual(interval);
+    }
+  });
+});

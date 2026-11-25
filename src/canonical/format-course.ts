@@ -22,6 +22,7 @@ import { clauseForAdministration, doseRangeNeedsEndpointPreview } from "./compil
 import { preferredTimingCoding, isPreviewTimingCoding } from "../timing-summary";
 import { canonicalClauseHasAdministrationSemantics } from "../ir";
 import { getDoseQuantityUnit } from "../maps";
+import { getQuantityDurationUnit } from "../unit-lexicon";
 import { doseUnitUsesTargetScope, formatCanonicalClause, formatDoseEnglish, timingCodeMatchesRecurrence, independentTimingText } from "../format";
 import { resolveBodySitePhrase } from "../body-site-grammar";
 import {
@@ -109,7 +110,7 @@ function exactCourseDays(quantity: CanonicalMeasure | undefined): number | undef
     quantity.value < 0
   )
     return undefined;
-  const unit = quantity.code ?? quantity.unit;
+  const unit = getQuantityDurationUnit(quantity);
   const days = unit === "d" ? quantity.value : unit === "wk" ? quantity.value * 7 : undefined;
   return days !== undefined && Number.isInteger(days) ? days : undefined;
 }
@@ -118,7 +119,7 @@ function exactCourseDays(quantity: CanonicalMeasure | undefined): number | undef
 function treatmentPosition(quantity: CanonicalMeasure): RegimenPosition | undefined {
   const days = exactCourseDays(quantity);
   if (days !== undefined) return { unit: "d", value: days };
-  const unit = quantity.code ?? quantity.unit, value = quantity.value;
+  const unit = getQuantityDurationUnit(quantity), value = quantity.value;
   return value !== undefined && Number.isInteger(value) && value >= 0 && (unit === "mo" || unit === "a")
     ? { unit: "mo", value: unit === "a" ? value * 12 : value } : undefined;
 }
@@ -173,14 +174,14 @@ export function unevaluatedExpressionText(
 /** Preserve temporal units exactly. Locale rules own wording; calendar
  * months/years are never approximated as day counts by realization. */
 function formatCourseTimeQuantity(quantity: CanonicalMeasure, words: CourseLanguage): string {
-  const unit = quantity.code ?? quantity.unit ?? "";
-  const label = words.timeUnit(unit, quantity.value) ?? quantity.unit ?? unit;
+  const unit = getQuantityDurationUnit(quantity);
+  const label = (unit ? words.timeUnit(unit, quantity.value) : undefined) ?? quantity.unit ?? quantity.code ?? "";
   return `${getQuantityComparator(quantity) ?? ""}${quantity.value ?? ""} ${label}`.trim();
 }
 /** Clinical validity is determined here. The language realizes either a
  * known repetition or an uninterpreted source-qualified interval. */
 function formatCourseRepeatCycle(cycle: CanonicalMeasure, words: CourseLanguage, count?: number): string {
-  const unit = cycle.code ?? cycle.unit ?? "";
+  const unit = getQuantityDurationUnit(cycle);
   const exact =
     !getQuantityComparator(cycle) &&
     cycle.value !== undefined &&
@@ -1127,8 +1128,9 @@ export function formatCanonicalCourse(
               !getQuantityComparator(stageOrigin) && !getQuantityComparator(origin)) {
             const memberPosition = treatmentPosition(origin), stagePosition = treatmentPosition(stageOrigin);
             const order = memberPosition && stagePosition ? compareRegimenPositions(stagePosition, memberPosition) : undefined;
+            const stageUnit = getQuantityDurationUnit(stageOrigin);
             stageCoversOrigin = order === 0 || order === 1 ||
-              (stageOrigin.code ?? stageOrigin.unit) === (origin.code ?? origin.unit) &&
+              stageUnit !== undefined && stageUnit === getQuantityDurationUnit(origin) &&
               stageOrigin.value !== undefined && stageOrigin.value >= origin.value;
           }
           if (!stageCoversOrigin) {
