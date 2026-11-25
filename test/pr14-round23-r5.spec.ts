@@ -7236,7 +7236,7 @@ describe("round78 saved action and cycle locale ownership", () => {
   it.each([1, 2, undefined])("states the complete course count without an extra repetition: %s", count => {
     const course: FhirR6DosageInstruction = { repeatCycle: { value: 28, unit: "d", code: "d" },
       step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
-        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", boundsDuration: { value: 7, unit: "d" } } } }] }] };
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, boundsDuration: { value: 7, unit: "d" } } } }] }] };
     if (count !== undefined) setCourseCycleCount(course, count);
     for (const input of [course, persist(toFhirR5Dosages(course))]) {
       const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
