@@ -2586,12 +2586,54 @@ describe("round74 duration terminology ownership", () => {
     }] }] };
     const rows = toFhirR5Dosages(source), before = JSON.stringify(source);
     for (const input of [source, rows, courseFromR6(source)]) {
-      expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(admitted ? ["2026-01-01T09:00:00+00:00"] : []);
-      expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }).totalUnits)
-        .toBe(admitted ? 1 : 0);
+      const unresolved = "system" in quantity && (quantity.system !== "http://unitsofmeasure.org" || quantity.code === "S");
+      if (unresolved) {
+        expect(() => nextDueDoses(input, { ...options, limit: 1 }))
+          .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+        expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }))
+          .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      } else {
+        expect(nextDueDoses(input, { ...options, limit: 1 })).toEqual(admitted ? ["2026-01-01T09:00:00+00:00"] : []);
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 10, durationUnit: Unit.Hour }).totalUnits)
+          .toBe(admitted ? 1 : 0);
+      }
     }
     expect(toDosageDetails(rows).step[0].component[0].timing!.repeat!.boundsDuration).toEqual(quantity);
     expect(JSON.stringify(source)).toBe(before);
+  });
+
+
+  it.each(["none", "count", "end"] as const)("does not ignore an unknown upper course duration beside %s", boundary => {
+    const authored = { value: 3, unit: "treatment blocks", system: "urn:clinic:duration", code: "d",
+      extension: [{ url: "urn:clinic:duration-note", valueString: "Preserve the prescribed duration" }] };
+    const source: FhirR6DosageInstruction = { step: [{
+      ...(boundary === "end" ? { end: { contextCode: { coding: [{
+        system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start",
+      }] }, offsetDuration: { value: 2, unit: "d", system: "http://unitsofmeasure.org", code: "d" } } } : {}),
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: Unit.Day, timeOfDay: ["09:00:00"],
+        ...(boundary === "count" ? { count: 2 } : {}), boundsDuration: authored,
+      } } }],
+    }] };
+    for (const input of [freshExecutionInput(source), courseFromR6(freshExecutionInput(source)),
+      freshExecutionInput(toFhirR5Dosages(source))]) {
+      const before = JSON.stringify(input);
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" })).toContain("treatment blocks");
+      expect(() => nextDueDoses(input, { ...options, limit: 5 }))
+        .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(() => calculateTotalUnits({ dosage: input, ...options, durationValue: 5, durationUnit: Unit.Day }))
+        .toThrow(expect.objectContaining({ code: "course-duration-unresolved" }));
+      expect(projectCanonicalCourse(importCanonicalCourse(input)).fhirNext.step[0].component[0].timing?.repeat?.boundsDuration)
+        .toEqual(authored);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    const known = freshExecutionInput(source);
+    known.step![0].component[0].timing!.repeat!.boundsDuration = { ...authored, unit: "days", system: "http://unitsofmeasure.org" };
+    const expected = boundary === "none" ? 3 : 2;
+    expect(nextDueDoses(known, { ...options, limit: 5 })).toEqual(Array.from({ length: expected },
+      (_, day) => "2026-01-0" + (day + 1) + "T09:00:00+00:00"));
+    expect(calculateTotalUnits({ dosage: known, ...options, durationValue: 5, durationUnit: Unit.Day }))
+      .toMatchObject({ totalUnits: expected, unit: "tab" });
   });
 
   it.each(["S", "s"])("keeps an unknown coded repeat cycle unresolved (%s)", code => {

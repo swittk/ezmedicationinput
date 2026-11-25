@@ -5715,3 +5715,94 @@ describe("round77 weight quantity unit ownership", () => {
     expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].doseAndRate).toEqual(row.doseAndRate);
   });
 });
+
+
+describe("round77 reviewed course ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const duration = (value: number, unit = "d") => ({ value, unit, code: unit, system: "http://unitsofmeasure.org" });
+  const note = { url: "urn:clinic:reviewed-course-note", valueString: "Preserve independent source" };
+  const forms = (source: FhirR6DosageInstruction) => [fresh(source), importCanonicalCourse(fresh(source)),
+    fresh(toFhirR5Dosages(fresh(source))), fresh(toDosageDetails(fresh(toFhirR5Dosages(fresh(source)))))];
+
+  it.each([1, 3])("describes %s treatment cycles as a total including the first", cycleCount => {
+    const course: CanonicalCourse = { kind: "course", cycleInterval: duration(7), cycleCount,
+      stages: [{ administrations: [{ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }],
+        schedule: { recurrence: { count: 1, clocks: ["09:00:00"] } } }] }] };
+    for (const input of [course, ...forms(courseToR6(course))]) {
+      const text = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      if (cycleCount === 1) {
+        expect(text).toContain("1 cycle total");
+        expect(text).not.toContain("Repeat this schedule");
+      } else {
+        expect(text).toContain("Repeat this schedule every 7 days for 3 cycles total");
+        expect(text).toContain("including the first cycle");
+      }
+    }
+  });
+
+  it.each([19, 31])("checks partial events only inside actual phase eligibility (day offset %s)", startDay => {
+    const source: FhirR6DosageInstruction = { repeatCycle: duration(60), step: [{
+      start: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+        offsetDuration: duration(startDay) },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [note],
+        timing: { event: ["2026-01"], repeat: { count: 1, boundsPeriod: { start: "2026-01-01" } } },
+        safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 1, unit: "tab" }, period: duration(1) }] },
+      }],
+    }] };
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-25T00:00:00Z", timeZone: "UTC",
+      durationValue: 14, durationUnit: FhirPeriodUnit.Day };
+    for (const dosage of forms(source)) {
+      const before = fresh(dosage);
+      if (startDay === 31) expect(calculateTotalUnits({ dosage, ...query }).totalUnits).toBe(0);
+      else expect(() => calculateTotalUnits({ dosage, ...query })).toThrow(/resolved administration date/u);
+      expect(dosage).toEqual(before);
+    }
+    const saved = toDosageDetails(fresh(toFhirR5Dosages(source)));
+    expect(saved.step[0].component[0].timing?.event).toEqual(["2026-01"]);
+    expect(saved.step[0].component[0].extension).toContainEqual(note);
+  });
+
+  it.each([-120, 0, 120])("accounts for an actual recorded dose at a %s minute displacement", minutes => {
+    const clock = minutes === -120 ? "07:00:00" : minutes === 120 ? "11:00:00" : "09:00:00";
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      modifierExtension: [{ url: "urn:ezmedicationinput:StructureDefinition:medication-administration-offset",
+        valueQuantity: duration(minutes, "min") }], extension: [note],
+      timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["09:00:00"], boundsPeriod: { start: "2026-01-01T09:00:00Z" } } },
+      maxDosePerPeriod: [{ numerator: { value: 2, unit: "tab" }, denominator: duration(24, "h") }],
+    };
+    const query = { orderedAt: "2026-01-01T09:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC", limit: 3,
+      priorDoseTimes: ["2026-01-01T" + clock + "Z"] };
+    for (const dosage of [fresh(row), ...forms(toDosageDetails([fresh(row)]))]) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-02T" + clock + "+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(dosage).toEqual(before);
+    }
+    expect(toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0].modifierExtension).toEqual(row.modifierExtension);
+  });
+
+  it("does not shift an already resolved phase eligibility floor a second time", () => {
+    const source: FhirR6DosageInstruction = { step: [{ start: {
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: duration(8, "h"),
+    }, component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      modifierExtension: [{ url: "urn:ezmedicationinput:StructureDefinition:medication-administration-offset",
+        valueQuantity: duration(-120, "min") }],
+      timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["09:00:00"], boundsPeriod: { start: "2026-01-01T09:00:00Z" } } },
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 2, unit: "tab" }, period: duration(24, "h") }] },
+    }] }] };
+    const query = { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-02T00:00:00Z", timeZone: "UTC", limit: 3,
+      priorDoseTimes: ["2026-01-01T07:00:00Z"] };
+    for (const dosage of forms(source)) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-02T07:00:00+00:00", "2026-01-03T07:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(dosage).toEqual(before);
+    }
+  });
+
+});

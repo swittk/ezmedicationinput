@@ -86,7 +86,9 @@ export const ENGLISH_COURSE: CourseLanguage = {
   phaseCount: (count) => `Perform this phase ${count} ${count === 1 ? "time" : "times"}`,
   repeatCount: (count) => `for ${count} ${count === 1 ? "cycle" : "cycles"}`,
   repeatCycle: (interval, exact, count) => {
-    const iterations = count === undefined ? "" : ` for ${count} ${count === 1 ? "cycle" : "cycles"}`;
+    if (count === 1) return exact ? "Perform this schedule for 1 cycle total."
+      : `1 cycle total; repeat-cycle interval: ${interval}.`;
+    const iterations = count === undefined ? "" : ` for ${count} cycles total, including the first cycle`;
     return exact
       ? `Repeat this schedule every ${interval}${iterations} (offsets are measured from each cycle start).`
       : `Repeat-cycle interval: ${interval}${iterations}.`;

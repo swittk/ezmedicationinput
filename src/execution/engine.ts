@@ -2442,10 +2442,16 @@ function durationStepper(
       !(purpose === "upper-bound" && (comparator === "<" || comparator === "<="))) ||
     value === undefined ||
     !Number.isFinite(value) ||
-    value <= 0 ||
-    !periodUnit
+    value <= 0
   )
     return null;
+  if (!periodUnit) {
+    if (purpose === "upper-bound") throw new MedicationQuantityCalculationError(
+      "course-duration-unresolved",
+      "The authored course duration has no resolved time unit. Resolve that duration before scheduling or calculating supply; its quantity and source remain retained."
+    );
+    return null;
+  }
   // Day/week course cycles follow calendar dates, not elapsed 24-hour
   // intervals. q24h interval scheduling still uses createIntervalStepper.
   const calendar = normalizedCalendarInterval(value, periodUnit);
@@ -3399,7 +3405,9 @@ function scheduleTreatmentRelativeCourse(
         };
         const eventStatus = collect && requiresCompleteSupplyTiming(options) &&
           original.schedule?.explicitEvents?.length
-          ? quota.explicitEventStatus = { possible: false, from: eventQueryFrom ?? from, end: eventQueryEnd }
+          ? quota.explicitEventStatus = { possible: false,
+            from: eventQueryFrom && eventQueryFrom > effectiveFrom ? eventQueryFrom : effectiveFrom,
+            end: eventQueryEnd }
           : undefined;
         const localOptions = {
           ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin,
@@ -4524,9 +4532,13 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const requestedFrom = coerceDate(options.from, "from");
     const zone = options.timeZone ?? options.config?.timeZone;
     if (!zone) throw new Error("A timeZone is required for counted capped scheduling");
+    const displacement = (getAdministrationOffsetMinutes(one) ?? 0) * 60000;
     let origin = options.orderedAt === undefined ? undefined : coerceDate(options.orderedAt, "orderedAt");
-    const calendarStart = resolveRepeatBoundsStart(repeatForCount, zone);
+    if (origin && displacement) origin = new Date(origin.getTime() + displacement);
+    const calendarStart = resolveRepeatBoundsPeriod(repeatForCount, zone, displacement).start;
     if (calendarStart && (!origin || calendarStart > origin)) origin = calendarStart;
+    // History and replay use actual admission time; an already resolved phase
+    // eligibility floor is actual too and must not receive the offset again.
     if (eligibleAt && (!origin || eligibleAt > origin)) origin = eligibleAt;
     origin ??= requestedFrom;
     let used = options.priorCount ?? 0;
@@ -4565,7 +4577,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
       ? { possible: false, from: requestedFrom } : undefined;
     const candidates = nextDueDoses(uncapped, {
       ...options,
-      ...(singleAdministration ? { orderedAt: origin } : undefined),
+      ...(singleAdministration ? { orderedAt: displacement ? new Date(origin.getTime() - displacement) : origin } : undefined),
       ...(eventStatus ? { explicitEventStatus: eventStatus } : undefined),
       countEligibilityStart: undefined,
       countedActualTimes,
