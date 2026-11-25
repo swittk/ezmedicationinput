@@ -458,6 +458,19 @@ function resolveRepeatBoundsEndExclusive(
   if (Number.isNaN(parsed.getTime())) return null;
   return new Date(parsed.getTime() + 1);
 }
+/** Resolve civil recurrence bounds before displacing the administration.
+ * Cadence keeps its nominal origin; admission and completion use actual bounds. */
+function resolveRepeatBoundsPeriod(
+  repeat: CanonicalRecurrence | undefined, timeZone: string, displacement = 0
+): { nominalStart: Date | null; start: Date | null; end: Date | null } {
+  const nominalStart = resolveRepeatBoundsStart(repeat, timeZone);
+  const nominalEnd = resolveRepeatBoundsEndExclusive(repeat, timeZone);
+  return {
+    nominalStart,
+    start: nominalStart && displacement ? new Date(nominalStart.getTime() + displacement) : nominalStart,
+    end: nominalEnd && displacement ? new Date(nominalEnd.getTime() + displacement) : nominalEnd,
+  };
+}
 function earlierDate(left: Date | null, right: Date | null): Date | null {
   if (!left) return right;
   if (!right) return left;
@@ -467,7 +480,8 @@ function resolveRepeatDurationCapEnd(
   dosage: Pick<CanonicalAdministration, "anchoredLength" | "schedule">,
   anchor: Date,
   timeZone: string,
-  sourceClock?: TreatmentWallClock
+  sourceClock?: TreatmentWallClock,
+  displacement = 0
 ): Date | null {
   const repeat = dosage.schedule?.recurrence;
   const retained = getAnchoredCourseDuration(dosage);
@@ -485,7 +499,8 @@ function resolveRepeatDurationCapEnd(
       "upper-bound",
       capClock
     )?.(durationAnchor);
-    return result && result > durationAnchor ? result : null;
+    if (!result || result <= durationAnchor) return null;
+    return displacement ? new Date(result.getTime() + displacement) : result;
   };
   // A scalar duration or a range's upper endpoint can bound the course.
   // A lower endpoint alone states a minimum, never a treatment stop.
@@ -497,17 +512,19 @@ function resolveRepeatDurationCapEnd(
 }
 function validateRepeatBoundsPeriod(
   repeat: CanonicalRecurrence | undefined,
-  timeZone: string
+  timeZone: string,
+  displacement = 0
 ): {
+  nominalStart: Date | null;
   start: Date | null;
   end: Date | null;
 } {
-  const start = resolveRepeatBoundsStart(repeat, timeZone);
-  const end = resolveRepeatBoundsEndExclusive(repeat, timeZone);
+  const bounds = resolveRepeatBoundsPeriod(repeat, timeZone, displacement);
+  const { start, end } = bounds;
   if (repeat?.calendarWindow?.start && !start) throw new Error("Timing.repeat.boundsPeriod.start is invalid");
   if (repeat?.calendarWindow?.end && !end) throw new Error("Timing.repeat.boundsPeriod.end is invalid");
   if (start && end && end <= start) throw new Error("Timing.repeat.boundsPeriod end must be after its start");
-  return { start, end };
+  return bounds;
 }
 function positiveInteger(value: number | undefined): number | undefined {
   return value !== undefined && Number.isInteger(value) && value > 0 ? value : undefined;
@@ -2500,8 +2517,10 @@ function resolveAdministrationWindow(
   capContext?: MedicationContext, ownPredecessor?: AcceptedStageCompletion, cycleEnd?: Date
 ): ResolvedAdministrationWindow {
   const recurrence = administration.schedule?.recurrence;
-  const absoluteStart = resolveRepeatBoundsStart(recurrence, timeZone);
-  const absoluteEnd = resolveRepeatBoundsEndExclusive(recurrence, timeZone);
+  const delay = getAdministrationOffsetMinutes(administration);
+  const displacement = (delay ?? 0) * 60000;
+  const calendar = resolveRepeatBoundsPeriod(recurrence, timeZone, displacement);
+  const absoluteStart = calendar.nominalStart, actualStart = calendar.start, absoluteEnd = calendar.end;
   if (recurrence?.calendarWindow?.start && !absoluteStart)
     throw new MedicationQuantityCalculationError(
       "invalid-calendar-bounds",
@@ -2512,7 +2531,7 @@ function resolveAdministrationWindow(
       "invalid-calendar-bounds",
       "A calendar-bound dosage has an invalid end date; correct the date before execution."
     );
-  if (absoluteStart && absoluteEnd && absoluteEnd <= absoluteStart)
+  if (actualStart && absoluteEnd && absoluteEnd <= actualStart)
     throw new MedicationQuantityCalculationError(
       "invalid-calendar-order",
       "Absolute calendar component end precedes its start: the calendar-bound dosage ends before its stated start date; correct the date interval."
@@ -2540,19 +2559,18 @@ function resolveAdministrationWindow(
         ownPredecessor?.end ?? (index > 0 ? previousEnd : undefined)
       );
   const stageStart = index === 0 && !stage.start && recurrence?.calendarWindow
-    ? absoluteStart ?? implicitStart : implicitStart;
-  let eligibleFrom = absoluteStart && absoluteStart > stageStart ? absoluteStart : stageStart;
+    ? actualStart ?? implicitStart : implicitStart;
+  let eligibleFrom = actualStart && actualStart > stageStart ? actualStart : stageStart;
   if (cadence.hasPhaseOrigin && cadence.origin > eligibleFrom) eligibleFrom = cadence.origin;
   if (successorFloor && successorFloor > eligibleFrom &&
       !arrayIncludes(recurrence?.anchors ?? [], TimingEvent.Immediate)) eligibleFrom = successorFloor;
-  const delay = getAdministrationOffsetMinutes(administration);
-  const durationOrigin = delay ? new Date(cadence.origin.getTime() + delay * 60000) : cadence.origin;
+  const durationOrigin = displacement ? new Date(cadence.origin.getTime() + displacement) : cadence.origin;
   // A scalar parallel phaseOrigin survives unrelated global step cuts.
   // A relative phaseStart still honors later stage eligibility and takes
   // precedence over that marker, just as it does for cadence resolution.
   // A component calendar start remains a floor for its count history.
   const countFloor = cadence.hasPhaseOrigin && !administration.phaseStart && stage.start
-    ? absoluteStart && absoluteStart > durationOrigin ? absoluteStart : durationOrigin
+    ? actualStart && actualStart > durationOrigin ? actualStart : durationOrigin
     : eligibleFrom;
   const countEligibilityStart =
     countFloor > durationOrigin && recurrence &&
@@ -2560,10 +2578,10 @@ function resolveAdministrationWindow(
       ? countFloor
       : undefined;
   let endExclusive = earlierDate(
-    resolveRepeatDurationCapEnd(administration, durationOrigin, timeZone,
-      delay ? getTimeParts(durationOrigin, timeZone)
+    resolveRepeatDurationCapEnd(administration, cadence.origin, timeZone,
+      delay ? getTimeParts(cadence.origin, timeZone)
         : cadence.capClock && recurrence?.calendarWindow && absoluteStart ? getTimeParts(absoluteStart, timeZone)
-        : cadence.capClock),
+        : cadence.capClock, displacement),
     absoluteEnd
   );
   if (administration.phaseEnd)
@@ -2599,11 +2617,14 @@ function resolveAdministrationWindow(
   if (hasCountCompletion && !deferCount) {
     const completion = finiteAdministrationCompletion(
       administration,
-      cadence.origin,
+      {
+        recurrenceOrigin: cadence.origin,
+        eligibleFrom: countEligibilityStart ?? durationOrigin,
+        endExclusive: earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd ?? null : null),
+        countEligibilityStart,
+      },
       options ?? { from: cadence.origin, orderedAt: cadence.origin, timeZone },
-      timeZone,
-      countEligibilityStart ?? cadence.origin,
-      earlierDate(endExclusive, administration.schedule?.explicitEvents?.length ? cycleEnd ?? null : null) ?? undefined
+      timeZone
     );
     if (completion) {
       const fence = completion.point ? new Date(completion.end.getTime() + 1) : completion.end;
@@ -2790,7 +2811,8 @@ function treatmentStepWindow(
       // this otherwise open execution window without inventing an authored
       // predecessor duration/count or combining disparate parallel origins.
       const successor = nextStage.administrations[0];
-      end = resolveRepeatBoundsStart(successor.schedule?.recurrence, timeZone) ?? undefined;
+      end = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, timeZone,
+        (getAdministrationOffsetMinutes(successor) ?? 0) * 60000).start ?? undefined;
       // A retained empty predecessor cannot block an independently anchored
       // member. Resolve its typed origin through the same cadence owner.
       if (!end && !stage.administrations.length &&
@@ -6985,10 +7007,9 @@ function calculateTotalUnitsSingle(
     throw new MedicationQuantityCalculationError("timing-required",
       "The dosage has no executable frequency or dosing time for supply calculation.");
   const capacityCap = unscheduledOccurrenceCapacity(dosage);
-  const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone);
-  const nominalBoundsStart = boundsPeriod.start;
-  const boundsStart = admissionDisplacement && nominalBoundsStart
-    ? new Date(nominalBoundsStart.getTime() + admissionDisplacement) : nominalBoundsStart;
+  const boundsPeriod = validateRepeatBoundsPeriod(repeat, timeZone, admissionDisplacement);
+  const nominalBoundsStart = boundsPeriod.nominalStart;
+  const boundsStart = boundsPeriod.start;
   let countFrom = boundsStart && boundsStart > from ? boundsStart : from;
   const effectiveOrderedAt =
     nominalBoundsStart && (!orderedAtDate || nominalBoundsStart > orderedAtDate) ? nominalBoundsStart : orderedAtDate;
@@ -7000,11 +7021,8 @@ function calculateTotalUnitsSingle(
   const baseCandidate = effectiveOrderedAt ?? nominalBoundsStart ??
     (admissionDisplacement ? new Date(countFrom.getTime() - admissionDisplacement) : countFrom);
   const baseTime = nominalBoundsStart && nominalBoundsStart > baseCandidate ? nominalBoundsStart : baseCandidate;
-  const durationEnd = resolveRepeatDurationCapEnd(dosage, baseTime, timeZone);
-  endDay = minDate(endDay, durationEnd && admissionDisplacement
-    ? new Date(durationEnd.getTime() + admissionDisplacement) : durationEnd);
-  endDay = minDate(endDay, boundsPeriod.end && admissionDisplacement
-    ? new Date(boundsPeriod.end.getTime() + admissionDisplacement) : boundsPeriod.end);
+  endDay = minDate(endDay, resolveRepeatDurationCapEnd(dosage, baseTime, timeZone, undefined, admissionDisplacement));
+  endDay = minDate(endDay, boundsPeriod.end);
   const needsFilteredEnumeration =
     conditional ||
     excludedDates.length ||
@@ -8143,11 +8161,9 @@ function explicitAdministrationCompletion(
 }
 function finiteAdministrationCompletion(
   dosage: CanonicalAdministration,
-  start: Date,
+  window: Pick<ResolvedAdministrationWindow, "recurrenceOrigin" | "eligibleFrom" | "endExclusive" | "countEligibilityStart">,
   options: NextDueDoseOptions,
-  zone: string,
-  eligibleFrom: Date = start,
-  endExclusive?: Date
+  zone: string
 ):
   | {
       end: Date;
@@ -8158,6 +8174,7 @@ function finiteAdministrationCompletion(
   if (!repeat) return undefined;
   const count = finiteCompletionCount(repeat);
   if (count === undefined) return undefined;
+  const { recurrenceOrigin: start, eligibleFrom, endExclusive, countEligibilityStart } = window;
   // The enclosing course has already supplied the predecessor/cycle context
   // and resolved this component's cadence origin. Count only this local
   // execution copy, rather than reopening it as an isolated persisted row.
@@ -8197,7 +8214,9 @@ function finiteAdministrationCompletion(
     orderedAt: start,
     priorCount: undefined,
     limit: remaining,
-    ...(eligibleFrom > start ? { countEligibilityStart: eligibleFrom } : {}),
+    // The resolved window owns this gate. A positive delay alone is not a
+    // later eligibility cut and must not re-anchor a count-only administration.
+    countEligibilityStart,
   } as PhaseCountOptions);
   if (due.length !== remaining) return undefined;
   const last = new Date(due[due.length - 1]);

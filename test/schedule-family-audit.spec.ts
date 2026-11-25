@@ -4979,3 +4979,104 @@ describe("round65 dated pauses before an unclocked successor", () => {
     }
   });
 });
+
+
+
+describe("round66 actual member boundaries", () => {
+  it.each([
+    [120, "23:00:00", ["2026-12-02T01:00:00+00:00", "2026-12-03T01:00:00+00:00", "2026-12-03T02:00:00+00:00"]],
+    [-120, "01:00:00", ["2026-11-30T23:00:00+00:00", "2026-12-01T23:00:00+00:00", "2026-12-02T22:00:00+00:00"]],
+  ] as const)("preserves displaced calendar doses before an ordinary successor (%s)", (delay, clock, expected) => {
+    const source: FhirR6DosageInstruction = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: [clock],
+        boundsPeriod: { start: "2026-12-01", end: "2026-12-02" },
+      } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }], timing: { repeat: { count: 1 } } }] },
+    ] };
+    const native = JSON.parse(JSON.stringify(importCanonicalCourse(source))) as ReturnType<typeof importCanonicalCourse>;
+    native.stages[0].administrations[0].delayMinutes = delay;
+    const r6 = courseToR6(native);
+    const options = { orderedAt: "2026-11-30T00:00:00Z", from: "2026-11-30T00:00:00Z", timeZone: "UTC", limit: 5 };
+    expect(nextDueDoses(native.stages[0].administrations[0], options)).toEqual(expected.slice(0, 2));
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 4, unit: "tab" });
+    }
+    expect(r6.step[0].component[0].timing?.repeat?.boundsPeriod)
+      .toEqual({ start: "2026-12-01", end: "2026-12-02" });
+  });
+
+  it.each([
+    [120, "01:00:00", "03:00:00", ["2026-12-01T01:00:00+00:00", "2026-12-02T01:00:00+00:00", "2026-12-03T01:00:00+00:00", "2026-12-03T05:00:00+00:00", "2026-12-04T05:00:00+00:00"], 7],
+    [-120, "23:00:00", "01:00:00", ["2026-12-01T23:00:00+00:00", "2026-12-02T23:00:00+00:00", "2026-12-03T23:00:00+00:00"], 5],
+  ] as const)("ends an open predecessor at the dated successor's actual onset (%s)", (delay, firstClock, nextClock, expected, units) => {
+    const source: FhirR6DosageInstruction = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: [firstClock],
+      } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: [nextClock], count: 2,
+        boundsPeriod: { start: "2026-12-03" },
+      } } }] },
+    ] };
+    const native = JSON.parse(JSON.stringify(importCanonicalCourse(source))) as ReturnType<typeof importCanonicalCourse>;
+    native.stages[1].administrations[0].delayMinutes = delay;
+    const r6 = courseToR6(native);
+    const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 8 };
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(dosage, options)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: units, unit: "tab" });
+    }
+    expect(native.stages[0].administrations[0].schedule?.recurrence?.calendarWindow?.end).toBeUndefined();
+  });
+
+  it("counts displaced administrations and records from the actual member start", () => {
+    const source: FhirR6DosageInstruction = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["01:00:00"], count: 2,
+        boundsPeriod: { start: "2026-12-01" },
+      } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }], timing: { repeat: { count: 1 } } }] },
+    ] };
+    const native = JSON.parse(JSON.stringify(importCanonicalCourse(source))) as ReturnType<typeof importCanonicalCourse>;
+    native.stages[0].administrations[0].delayMinutes = -120;
+    const r6 = courseToR6(native);
+    const options = { orderedAt: "2026-11-30T00:00:00Z", from: "2026-11-30T00:00:00Z", timeZone: "UTC", limit: 5 };
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-11-30T23:00:00+00:00", "2026-12-01T23:00:00+00:00", "2026-12-01T23:00:00.001+00:00",
+      ]);
+      const recorded = { ...options, from: "2026-12-01T00:00:00Z", priorDoseTimes: ["2026-11-30T23:00:00Z"] };
+      expect(nextDueDoses(dosage, recorded)).toEqual([
+        "2026-12-01T23:00:00+00:00", "2026-12-01T23:00:00.001+00:00",
+      ]);
+      expect(calculateTotalUnits({ dosage, ...recorded, durationValue: 2, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 3, unit: "tab" });
+    }
+  });
+
+  it("resolves a civil month before applying the member displacement", () => {
+    const source: FhirR6DosageInstruction = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: { repeat: {
+        frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["23:00:00"],
+        boundsDuration: { value: 1, unit: "mo" },
+      } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }], timing: { repeat: { count: 1 } } }] },
+    ] };
+    const native = JSON.parse(JSON.stringify(importCanonicalCourse(source))) as ReturnType<typeof importCanonicalCourse>;
+    native.stages[0].administrations[0].delayMinutes = 120;
+    const r6 = courseToR6(native);
+    const options = { orderedAt: "2026-01-30T23:00:00Z", from: "2026-01-30T23:00:00Z", timeZone: "UTC", limit: 40 };
+    const predecessor = ["2026-01-31T01:00:00+00:00", ...Array.from({ length: 28 }, (_, index) =>
+      `2026-02-${String(index + 1).padStart(2, "0")}T01:00:00+00:00`)];
+    expect(nextDueDoses(native.stages[0].administrations[0], options)).toEqual(predecessor);
+    for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(nextDueDoses(dosage, options)).toEqual([...predecessor, "2026-03-01T01:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 32, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 31, unit: "tab" });
+    }
+  });
+});
