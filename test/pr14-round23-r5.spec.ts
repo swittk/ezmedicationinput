@@ -6543,6 +6543,23 @@ describe("round76 typed action complements in normalized previews", () => {
     }
   });
 
+  it.each(["Remove patch for 12 hours", "เอาแผ่นแปะออกนาน 12 ชั่วโมง"])(
+    "retains the typed removal duration and its licensed relation: %s", source => {
+      const parsed = parsePublicSig(source);
+      const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+      expect(frame.relation).toBe(AdviceRelation.For);
+      expect(frame.args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Duration, quantity: { value: 12, unit: "h" }
+      }));
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en").replace(/\.$/u, ""))
+          .toBe("Remove patch for 12 hours");
+        expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th").replace(/\.$/u, ""))
+          .toBe("เอาแผ่นแปะออกเป็นเวลา 12 ชั่วโมง");
+        expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);
+      }
+    });
+
   it.each([["right", "1290032005", "ตาขวา"], ["left", "1290031003", "ตาซ้าย"]] as const)(
     "keeps the %s eye explicit when the Thai head entails only generic eye", (side, code, thai) => {
       const parsed = parsePublicSig("Close " + side + " eye");

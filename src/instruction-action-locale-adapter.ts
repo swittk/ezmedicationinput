@@ -143,8 +143,10 @@ function realizeTimeArgument(c: InstructionActionRealizationInput): string | und
 function relationDurationContent(c: InstructionActionRealizationInput) {
   const object = c.amount ?? c.theme ?? c.site;
   const target = c.duration ?? c.activity;
-  const relation = target && relationHasGrammarFeature(c.frame.relation, "activityFallback")
-    ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : undefined;
+  const relation = target && (c.duration
+    ? relationHasGrammarFeature(c.frame.relation, "durationComplement") || relationHasGrammarFeature(c.frame.relation, "durationLead")
+    : relationHasGrammarFeature(c.frame.relation, "activityFallback"))
+    ? localizeAdviceRelation(c.frame.relation, c.locale, c.duration ? "duration" : undefined) ?? c.frame.relation : undefined;
   const objectRelation = !c.amount && !target && !c.time && object &&
     relationHasSemanticClass(c.frame.relation, "locative")
     ? localizeAdviceRelation(c.frame.relation, c.locale) ?? c.frame.relation : undefined;
@@ -154,7 +156,7 @@ function relationDurationContent(c: InstructionActionRealizationInput) {
 function renderEnglishRelationDuration(c: InstructionActionRealizationInput): string {
   const { object, target, relation, objectRelation, time } = relationDurationContent(c);
   return `${c.label}${object ? ` ${objectRelation ? objectRelation + " " : ""}${object}` : ""}` +
-    `${target && relation ? ` ${relation} ${target}` : ""}${time ? ` ${time}` : ""}`;
+    `${target ? ` ${relation ? relation + " " : ""}${target}` : ""}${time ? ` ${time}` : ""}`;
 }
 
 export function quantityOnlyInstructionArgument(arg: AdviceArgument | undefined): boolean {
@@ -409,7 +411,7 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
       if (!alias) return renderEnglishRelationDuration(c);
       const { target, relation, time } = relationDurationContent(c);
       return `${alias.lead}${object ? ` ${object}` : ""} ${alias.particle}` +
-        `${target && relation ? ` ${relation} ${target}` : ""}${time ? ` ${time}` : ""}`;
+        `${target ? ` ${relation ? relation + " " : ""}${target}` : ""}${time ? ` ${time}` : ""}`;
     }
     case "relation-duration": return renderEnglishRelationDuration(c);
     case "leave-duration": {
@@ -454,7 +456,7 @@ function thaiAsciiSeparated(value: string | undefined): string {
 function renderThaiRelationDuration(c: InstructionActionRealizationInput): string {
   const { object, target, relation, objectRelation, time } = relationDurationContent(c);
   return `${c.label}${objectRelation ?? ""}${thaiAsciiSeparated(object)}` +
-    `${target && relation ? `${relation}${thaiAsciiSeparated(target)}` : ""}${time ?? ""}`;
+    `${target ? `${relation ?? ""}${thaiAsciiSeparated(target)}` : ""}${time ?? ""}`;
 }
 
 function thaiDirectTime(time: string): string {
@@ -572,7 +574,7 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
       if (!alias) return renderThaiRelationDuration(c);
       const { target, relation, time } = relationDurationContent(c);
       return `${alias.lead}${object ?? ""}${alias.particle}` +
-        `${target && relation ? `${relation}${thaiAsciiSeparated(target)}` : ""}${time ?? ""}`;
+        `${target ? `${relation ?? ""}${thaiAsciiSeparated(target)}` : ""}${time ?? ""}`;
     }
     case "relation-duration": return renderThaiRelationDuration(c);
     case "leave-duration": {
