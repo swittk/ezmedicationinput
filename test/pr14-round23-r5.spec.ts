@@ -12651,7 +12651,7 @@ describe("round76 interchange owners", () => {
     expect(input).toEqual(before);
   });
 
-  it.each(["unchanged", "annotation", "removed"] as const)(
+  it.each(["unchanged", "annotation", "removed", "reordered"] as const)(
     "reuses a draft pause only while its member predecessor link owns completion (%s)", edit => {
     const phase = (member: number, predecessor?: number) => ({
       url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, extension: [
@@ -12676,8 +12676,16 @@ describe("round76 interchange owners", () => {
       { id: "resume", component: [{ id: "maintenance", doseAndRate: [{ doseQuantity: q(3) }],
         timing: { repeat: { ...daily, timeOfDay: ["09:00:00"] } } }] },
     ] };
+    if (edit === "reordered") {
+      input.step![0].component.push({ ...persist(input.step![0].component[0]),
+        id: "other-predecessor", modifierExtension: [phase(2)] });
+      input.step![0].component[1].modifierExtension![0].extension!.push({
+        url: "predecessor", valueInteger: 2, id: "other-dependency",
+      });
+    }
     let wire = r6Save(input);
     const marker = wire.step![0].component[1].modifierExtension!.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)!;
+    if (edit === "reordered") marker.extension!.reverse();
     if (edit === "removed") marker.extension = marker.extension!.filter(child => child.url !== "predecessor");
     if (edit === "annotation") marker.extension!.find(child => child.url === "predecessor")!.id = "dependency-note";
     for (let save = 0; save < 2; save++) {
@@ -12685,6 +12693,8 @@ describe("round76 interchange owners", () => {
       const restored = fromDosageDetails(wire).course.step!;
       expect(restored.map(step => step.id)).toEqual(edit === "removed" ? ["initial", "resume"] : ["initial", "pause", "resume"]);
       expect(wire).toEqual(before);
+      if (edit === "reordered") expect(wire.step![0].component[1].modifierExtension!
+        .find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)).toEqual(marker);
       expect(nextDueDoses(persist(wire), { orderedAt: "2026-12-01T00:00:00Z",
         from: "2026-12-06T00:00:00Z", timeZone: "UTC", limit: 1 }))
         .toEqual([edit === "removed" ? "2026-12-06T09:00:00+00:00" : "2026-12-07T09:00:00+00:00"]);

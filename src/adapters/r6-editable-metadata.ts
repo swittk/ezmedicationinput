@@ -124,8 +124,10 @@ function draftMemberPhase(value: FhirR6Dosage): object | undefined {
     if (child.url === "sourceMember" && child.valueInteger !== undefined) sourceMember = child.valueInteger;
     if (child.url === "predecessor" && child.valueInteger !== undefined) predecessors.push(child.valueInteger);
   }
+  // Dependency order and child annotations do not change completion.
+  if (predecessors.length > 1) predecessors.sort((a, b) => a - b);
   // Typed dependency identity can close a predecessor's cadence even when
-  // the member's own start/end remain unchanged. Child annotations do not.
+  // the member's own start/end remain unchanged.
   return origin || start || end || sourceMember !== undefined
     ? { origin, start, end, sourceMember, predecessors: sourceMember !== undefined ? predecessors : undefined }
     : undefined;
