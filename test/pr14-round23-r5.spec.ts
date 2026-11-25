@@ -10956,6 +10956,31 @@ describe("round62 reviewed interchange ownership", () => {
     }
   });
 
+  it("starts an independent zero-origin member after an empty retained predecessor", () => {
+    const source: FhirR6DosageInstruction = { step: [
+      { id: "loading", component: [{ ...member("first", 1), timing: { repeat: { ...daily, count: 1 } } }] },
+      { id: "independent", component: [{ ...member("later", 2), timing: { repeat: { ...daily, count: 2 } },
+        modifierExtension: [{ url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL, valueQuantity: { value: 0, unit: "d" } }] }] }
+    ] };
+    let rows = persist(toFhirR5Dosages(source).slice(1));
+    const options = { orderedAt: "2026-11-21T00:00:00Z", from: "2026-11-21T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (let save = 0; save < 2; save++) {
+      const native = importCanonicalCourse(rows);
+      expect(native.contextIssue).toBeUndefined();
+      expect(native.stages.map(stage => stage.administrations.length)).toEqual([0, 1]);
+      expect(native.stages[1].administrations[0].phaseOrigin).toEqual({ value: 0, unit: "d" });
+      expect(native.stages[1].administrations[0].amounts![0].quantity).toEqual(q(2));
+      for (const input of [native, rows, persist(toDosageDetails(rows))]) {
+        const before = persist(input);
+        expect(nextDueDoses(input, options)).toEqual(["2026-11-21T08:00:00+00:00", "2026-11-22T08:00:00+00:00"]);
+        expect(calculateTotalUnits({ ...options, dosage: input, durationValue: 14,
+          durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(4);
+        expect(input).toEqual(before);
+      }
+      rows = persist(toFhirR5Dosages(toDosageDetails(rows)));
+    }
+  });
+
   it("accepts native Ratio and Timing values in R6 extensions while R5 remains strict", () => {
     const ratio: FhirR6Extension = { url: "urn:clinic:ratio",
       valueRatio: { numerator: { value: 2, unit: "mg", comparator: "~" }, denominator: { value: 1, unit: "mL" } } };

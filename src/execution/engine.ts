@@ -2769,6 +2769,7 @@ function treatmentStepWindow(
   let end = repetitionWindow?.end ??
     (stage.end ? treatmentRelativeInstant(stage.end, anchor, timeZone, sourceClock) : undefined);
   let completionPoint: Date | undefined;
+  let emptyAtKnownOrigin = false;
   if (!end && allFinite && latest) {
     end = latest.end;
     completionPoint = latest.point;
@@ -2788,11 +2789,15 @@ function treatmentStepWindow(
       // member. Resolve its typed origin through the same cadence owner.
       if (!end && !stage.administrations.length &&
           successor.phaseStart?.anchor !== "previous-phase-next-day" &&
-          (successor.phaseStart || successor.phaseOrigin))
+          (successor.phaseStart || successor.phaseOrigin)) {
         end = parallelComponentCadence(successor, anchor, timeZone, start, sourceClock).origin;
+        // This empty placeholder needs no elapsed time before the known origin.
+        // Authored boundaries and backwards origins retain their order checks.
+        emptyAtKnownOrigin = end.getTime() === start.getTime();
+      }
     }
   }
-  if (end && end <= start)
+  if (end && end <= start && !emptyAtKnownOrigin)
     throw new MedicationQuantityCalculationError(
       "invalid-stage-order",
       "R6 treatment step end must be after its start"
