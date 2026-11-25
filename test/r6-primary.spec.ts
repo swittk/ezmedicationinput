@@ -1950,10 +1950,12 @@ it("normalizes editable R5 and R6 course previews while retaining original wordi
   expect(phases).toHaveLength(2);
   expect(phases[0]).toMatch(/Instill 1 drop every 2 hours[\s\S]*in the right eye/iu);
   expect(phases[1]).toMatch(/Instill 1 drop four times daily[\s\S]*in the right eye/iu);
+  for (const phase of phases) expect(phase).not.toMatch(/\b(?:left|both) eyes?\b|\bbilateral\b/iu);
   const thaiPhases = formatSig(parsed.fhirNext, "long", { locale: "th" }).split("จากนั้น");
   expect(thaiPhases).toHaveLength(2);
   expect(thaiPhases[0]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด ทุก 2 ชั่วโมง/u);
   expect(thaiPhases[1]).toMatch(/หยอดตาขวา ครั้งละ 1 หยด วันละ 4 ครั้ง/u);
+  for (const phase of thaiPhases) expect(phase).not.toMatch(/ตาซ้าย|ทั้งสอง|สองข้าง/u);
   expect(parsed.fhirNext.renderedInstruction).toBe(source);
   expect(formatSigBatch(r5, "long", { locale: "th" })).toContain("ตาขวา");
 });

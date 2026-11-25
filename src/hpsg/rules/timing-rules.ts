@@ -1,3 +1,5 @@
+import { getInstructionActionLocaleAdapter } from "../../instruction-action-locale-adapter";
+import { joinLocalizedTokens } from "../../locale-realization";
 import { clinicalRateHeadAt, clinicalRatePeriodUnit } from "./clinical-quantity-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
@@ -3482,6 +3484,15 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
     if (!matches) continue;
     const tokens = tokensAvailable(context, start, next + 2 - start);
     if (!tokens) continue;
+    const text = clock ? context.state.input.slice(lead.sourceStart, tokens[tokens.length - 1].sourceEnd) : definition.display;
+    const i18n: Record<string, string> = { ...definition.i18n };
+    if (clock) {
+      // The terminology identifies the end event; its authored clock is a
+      // separate typed complement, retained without inventing a calendar date.
+      const sourceClock = context.state.input.slice(clock.tokens[0].sourceStart, clock.tokens[clock.tokens.length - 1].sourceEnd);
+      for (const locale of Object.keys(i18n)) i18n[locale] = joinLocalizedTokens(locale, [i18n[locale],
+        getInstructionActionLocaleAdapter(locale).directTime?.(sourceClock) ?? sourceClock]);
+    }
     return lexicalSign({
       type: 'instruction-sign',
       rule: 'hpsg.lex.instruction.openEndedCourseCondition',
@@ -3492,8 +3503,8 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
         // outcome is unknown. This is a typed, coded NON-calendar directive,
         // never a fabricated boundsPeriod or asNeeded trigger.
         valence: { instructions: [{
-          text: definition.display,
-          i18n: { ...definition.i18n },
+          text,
+          i18n,
           evidence: [{
             rule: 'hpsg.lex.instruction.openEndedCourseCondition',
             spans: [{

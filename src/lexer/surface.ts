@@ -88,8 +88,8 @@ function isSentenceBoundaryChar(input: string, index: number): boolean {
   // 0.1 into 1, a tenfold dose error. This is a lexical boundary, not a
   // separate clinical grammar or a whole-input repair pass.
   if (/[0-9๐-๙]/u.test(after) &&
-      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) ||
-        before === "/" || before === "(" || before === "@" || before === "~" || before === "≈" ||
+      (/[0-9๐-๙]/u.test(before) || index === 0 || isWhitespaceChar(before) || SEPARATOR_CHARS.has(before) ||
+        before === "/" || before === "@" || before === "~" || before === "≈" ||
         before === "≥" || before === "≤" ||
         before === "<" || before === ">" ||
         /[-–—]/u.test(before) && index >= 2 && /[0-9๐-๙]/u.test(input[index - 2]) ||

@@ -4882,7 +4882,7 @@ describe("round54: current unit identity and graph argument ownership", () => {
           expect(text).not.toContain("1 g");
           expect(text.match(locale === "en" ? /gently/gu : /เบาๆ/gu)).toHaveLength(1);
           if (relation === "plain-ear") {
-            expect(text).toContain("ear");
+            expect(text).toMatch(locale === "en" ? /\bear\b/u : /หู|\bear\b/u);
             expect(text).not.toMatch(/above|below|เหนือหู|ใต้หู/u);
           } else {
             expect(text.match(locale === "en" ? new RegExp(relation + " the ear", "gu")

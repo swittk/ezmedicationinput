@@ -241,3 +241,15 @@ describe("comparator-prefixed leading decimal source tokenization", () => {
     expect(tokens.slice(3).some(token => token.lower === "monitor")).toBe(true);
   });
 });
+
+
+describe("round77 leading decimals after clause separators", () => {
+  it.each([",", ";"])("keeps the decimal and separator in compact %s directions", separator => {
+    const source = "1 tab AM" + separator + ".5 tab PM";
+    const tokens = scanSurfaceTokens(source);
+    expect(tokens.map(token => token.original)).toEqual(["1", "tab", "AM", separator, ".5", "tab", "PM"]);
+    expect(tokens[3].kind).toBe(SurfaceTokenKind.Separator);
+    expect(tokens[4]).toMatchObject({ kind: SurfaceTokenKind.Text, start: 9, end: 11 });
+    expect(lexInput(source).find(token => token.sourceStart === 9)).toMatchObject({ value: 0.5 });
+  });
+});

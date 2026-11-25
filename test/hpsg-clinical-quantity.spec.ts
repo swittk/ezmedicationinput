@@ -4317,3 +4317,23 @@ it("round76 retains a daily cumulative volume ceiling under the infusion head", 
     ]);
   }
 });
+
+
+describe("round77 clocked coded course endings", () => {
+  it.each(["10:00", "8:30pm"])("retains the authored %s without inventing a dated end", clock => {
+    const ending = "until " + clock + " next visit";
+    const parsed = parsePublicSig("Take 1 tablet daily " + ending);
+    const instruction = parsed.meta.canonical.clauses[0].additionalInstructions![0];
+    expect(instruction.text).toBe(ending);
+    expect(instruction.coding).toMatchObject({ code: "1287351008", display: "Until next appointment" });
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      for (const locale of ["en", "th"]) expect(formatSig(input, "long", { locale })).toContain(clock);
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts?.[0].quantity).toMatchObject({ value: 1 });
+      expect(administration.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(administration.schedule?.recurrence?.clocks).toBeUndefined();
+      expect(administration.schedule?.recurrence?.calendarWindow).toBeUndefined();
+    }
+  });
+});
