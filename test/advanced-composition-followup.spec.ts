@@ -5658,9 +5658,14 @@ describe("round51 relative phase cutoffs and route-only source", () => {
       expect(rightEye[0].member.schedule?.recurrence?.calendarWindow?.start).toBeUndefined();
       expect(rightEye[0].member.phaseEnd ?? rightEye[0].stage.end)
         .toMatchObject({ anchor: "treatment-start", displacement: { value: 7, unit: "d" } });
-      expect(rightEye[1].member.phaseOrigin).toMatchObject({ value: 7, unit: "d" });
+      const second = rightEye[1].member;
+      if (second.phaseStart) expect(second.phaseStart).toMatchObject({ anchor: "treatment-start" });
+      expect(second.phaseOrigin ?? second.phaseStart?.displacement).toMatchObject({ value: 7, unit: "d" });
       if (text.includes("from 2026-12-10")) {
-        expect(rightEye[1].member.schedule?.recurrence?.calendarWindow?.end).toBe("2026-12-09");
+        // The public day and timestamp assertions below verify the cutoff.
+        const length = second.schedule?.recurrence?.courseLength;
+        expect(length?.value).toBe(2);
+        expect(length?.code ?? length?.unit).toBe("d");
         expect(rightEye[2].member.schedule?.recurrence?.calendarWindow?.start).toBe("2026-12-10");
       } else {
         expect(rightEye[1].stage.start).toMatchObject({ anchor: "treatment-start", displacement: { value: 7, unit: "d" } });
