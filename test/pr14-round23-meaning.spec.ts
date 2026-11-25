@@ -5865,3 +5865,16 @@ describe("round66 explicit replacement directions", () => {
     }
   });
 });
+
+
+it("keeps a distinct dose-only replacement instead of matching inside a larger current amount", () => {
+  const row: FhirDosage = JSON.parse(JSON.stringify(parseSig("Take 1 tablet orally every morning").fhir[0]));
+  row.doseAndRate![0].doseQuantity!.value = 12;
+  row.text = "2 tablets";
+  const options = { locale: "en", realizationMode: "roundtrip" as const };
+  for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+    const [current, authored] = text.split("; original directions: ");
+    expect(current).toMatch(/^Current: Take 12 tablets orally daily in the morning$/u);
+    expect(authored).toBe("2 tablets");
+  }
+});

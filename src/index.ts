@@ -35,6 +35,12 @@ function sourceDisplayEdit(dosage: FhirDosage): boolean | string | { authored: s
     dosage.extension?.some(item => item.url === DOSAGE_EXCLUDED_WEEKDAYS_R5_URL)));
 }
 
+/** The native text-only owner may already lead the generated clauses.
+ * Reuse their exact joining convention; a quantity substring is not that owner. */
+function authoredClauseAlreadyRendered(rendered: string, authored: string): boolean {
+  return rendered === authored || rendered.startsWith(joinGeneratedClauses([authored, ""]));
+}
+
 /** Source wording is authoritative only when the live dose still matches its
  * original source. Direct parser rows carry ownership flags; serialized
  * R5 rows use their existing persisted edit fingerprint. A failed match must
@@ -1190,7 +1196,7 @@ export function formatSig(
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
     const rendered = formatCanonicalCourse(course, style, options ?? {});
-    if (typeof edit === "object" && options?.realizationMode === "roundtrip" && !rendered.includes(edit.authored)) {
+    if (typeof edit === "object" && options?.realizationMode === "roundtrip" && !authoredClauseAlreadyRendered(rendered, edit.authored)) {
       const words = resolveCourseLanguage(options.locale, options.i18n);
       return words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), edit.authored);
     }
@@ -1525,9 +1531,9 @@ function fromFhirDosageInternal(
     // The explicit replacement is independently authored prose. Current
     // structured fields remain the directions; do not certify or parse it.
     const words = resolveCourseLanguage(options.locale, options.i18n, localization);
-    if (!shortText.includes(edit.authored))
+    if (!authoredClauseAlreadyRendered(shortText, edit.authored))
       shortText = words.withAuthoredDirections(shortText.replace(/\.\s*$/u, ""), edit.authored);
-    if (!computedLong.includes(edit.authored))
+    if (!authoredClauseAlreadyRendered(computedLong, edit.authored))
       computedLong = words.withAuthoredDirections(computedLong.replace(/\.\s*$/u, ""), edit.authored);
   }
   const longText = computedLong || dosage.text || "";

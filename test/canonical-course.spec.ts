@@ -1035,7 +1035,7 @@ describe("review 26 external display ownership", () => {
     expect(dosageMatchesSavedProjection(structuredClone(row))).toBe(false);
   });
 
-  it("does not replay a removed persisted rate beside an unchanged maximum", () => {
+  it.each(["", "."])("does not replay a removed persisted rate beside an unchanged maximum: terminator %s", terminator => {
     const source = "Infuse 5 mL/h, maximum 10 mL per administration";
     const row = JSON.parse(JSON.stringify(withDosageEditProvenance([{
       text: source, doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }],
@@ -1050,10 +1050,10 @@ describe("review 26 external display ownership", () => {
       expect(text).not.toContain("5 mL/h");
       expect(text).toContain("10 mL");
     }
-    row.text = "Clinician replacement instruction: maximum 10 mL";
+    row.text = "Clinician replacement instruction: maximum 10 mL" + terminator;
     const currentSource = structuredClone(row);
     const replay = formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" });
-    expect(replay).toBe(row.text + "; max per administration: 10 mL");
+    expect(replay).toBe("Clinician replacement instruction: maximum 10 mL; max per administration: 10 mL");
     expect(fromFhirDosage(structuredClone(row), { realizationMode: "roundtrip" }).longText).toBe(replay);
     expect(replay).not.toContain("5 mL/h");
     expect(fromFhirDosage(structuredClone(row)).fhir).toEqual(currentSource);
