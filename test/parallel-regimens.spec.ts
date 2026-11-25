@@ -2,7 +2,7 @@ import { projectCanonicalCourse } from "../src/index";
 import { describe, expect, it } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, nextDueDoses, calculateTotalUnits, formatSig,
-  toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition, importCanonicalCourse
+  toDosageDetails, toFhirR5Dosages, fromFhir, fromFhirDosage, getDosageCondition, importCanonicalCourse, FhirPeriodUnit
 } from "../src";
 import { createBoundaryPlan } from "../src/regimen/planner";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
@@ -1853,4 +1853,111 @@ describe("round72 dated replacement keeps its authored predecessor length", () =
     }
     expect(JSON.stringify(parsed)).toBe(before);
   });
+});
+
+
+describe("round74 same-day dated clock replacement", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const source = "Instill 1 drop OD at 08:00 and 20:00 daily starting 2026-12-05, then starting 2026-12-05 at 18:00 instill 2 drops OD daily";
+
+  it.each([[false, "UTC", "+00:00"], [true, "UTC", "+00:00"],
+    [false, "Asia/Bangkok", "+07:00"], [true, "Asia/Bangkok", "+07:00"]] as const)(
+    "keeps the morning predecessor and replaces its evening dose (independent=%s, zone=%s)", (independent, timeZone, offset) => {
+      const parsed = parseSig(source + (independent ? "; instill 1 drop OS daily at 10:00 starting 2026-12-05" : ""));
+      const native = parsed.meta.canonical.course!, before = JSON.stringify(parsed);
+      const expected = (independent
+        ? ["2026-12-05T08:00:00", "2026-12-05T10:00:00", "2026-12-05T18:00:00", "2026-12-06T10:00:00", "2026-12-06T18:00:00"]
+        : ["2026-12-05T08:00:00", "2026-12-05T18:00:00", "2026-12-06T18:00:00", "2026-12-07T18:00:00", "2026-12-08T18:00:00"]
+      ).map(time => time + offset);
+      const query = { orderedAt: "2026-12-05T00:00:00" + offset, from: "2026-12-05T00:00:00" + offset, timeZone, limit: 5 };
+      for (const dosage of [parsed, native, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(nextDueDoses(dosage, query)).toEqual(expected);
+        expect(calculateTotalUnits({ dosage, ...query, durationValue: 3, durationUnit: "d" }).totalUnits)
+          .toBe(independent ? 10 : 7);
+      }
+      expect(JSON.stringify(parsed)).toBe(before);
+    });
+
+  it("keeps independently submitted same-day parallel clocks active without a replacement link", () => {
+    const component = (dose: number, clocks: string[]) => ({
+      method: { text: "Instill" }, site: { concept: { text: "right eye" } },
+      doseAndRate: [{ doseQuantity: { value: dose, unit: "drop" } }],
+      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: 1, period: 1,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: clocks } }
+    });
+    const input = { step: [{ component: [component(1, ["08:00:00", "20:00:00"]), component(2, ["18:00:00"])] }] };
+    const before = fresh(input), rows = fresh(toFhirR5Dosages(input));
+    const query = { orderedAt: "2026-12-05T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 4 };
+    for (const dosage of [input, rows, fresh(toDosageDetails(rows))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-06T08:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(4);
+    }
+    expect(input).toEqual(before);
+  });
+
+  it("preserves an independently supplied earlier predecessor end", () => {
+    const input = { step: [
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+        timing: { repeat: { boundsPeriod: { start: "2026-12-05", end: "2026-12-05T12:00:00Z" },
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } } }] },
+      { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
+        timing: { repeat: { boundsPeriod: { start: "2026-12-05" },
+          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["18:00:00"] } } }] }
+    ] };
+    const before = fresh(input), rows = fresh(toFhirR5Dosages(input));
+    const query = { orderedAt: "2026-12-05T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+    for (const dosage of [input, rows, fresh(toDosageDetails(rows))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00", "2026-12-06T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
+    }
+    expect(input).toEqual(before);
+    expect(toDosageDetails(rows).step![0].component[0].timing?.repeat?.boundsPeriod).toEqual(input.step[0].component[0].timing.repeat.boundsPeriod);
+  });
+});
+
+
+it("round74 explicit successor timestamp remains the replacement boundary", () => {
+  const input = { step: [
+    { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
+      timing: { repeat: { boundsPeriod: { start: "2026-12-05" }, frequency: 1, period: 1,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "14:00:00", "20:00:00"] } } }] },
+    { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
+      timing: { repeat: { boundsPeriod: { start: "2026-12-05T12:00:00Z" }, frequency: 1, period: 1,
+        periodUnit: FhirPeriodUnit.Day, timeOfDay: ["18:00:00"] } } }] }
+  ] };
+  const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(input)));
+  const query = { orderedAt: "2026-12-05T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+  for (const dosage of [input, rows, toDosageDetails(rows)]) {
+    expect(nextDueDoses(dosage, query)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00", "2026-12-06T18:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
+  }
+});
+
+
+it("round74 same-day replacement caps a longer authored duration without rewriting it", () => {
+  const parsed = parseSig("Instill 1 drop OD at 08:00 and 20:00 daily for 1 day starting 2026-12-05, then starting 2026-12-05 at 18:00 instill 2 drops OD daily");
+  const before = JSON.stringify(parsed), query = { orderedAt: "2026-12-05T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC", limit: 3 };
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+    expect(nextDueDoses(dosage, query)).toEqual(["2026-12-05T08:00:00+00:00", "2026-12-05T18:00:00+00:00", "2026-12-06T18:00:00+00:00"]);
+    expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(3);
+  }
+  expect(parsed.meta.canonical.course!.stages[0].administrations[0].anchoredLength?.quantity).toEqual({ value: 1, unit: "d" });
+  expect(JSON.stringify(parsed)).toBe(before);
+});
+
+it("round74 a late absolute query retains the dated replacement opening without an order date", () => {
+  const source = "Instill 1 drop OD at 08:00 and 20:00 daily starting 2026-12-05, then starting 2026-12-05 at 18:00 instill 2 drops OD daily";
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  for (const independent of [false, true]) {
+    const parsed = parseSig(source + (independent ? "; instill 1 drop OS daily at 10:00 starting 2026-12-05" : ""));
+    const query = { from: "2026-12-06T00:00:00Z", timeZone: "UTC", limit: 2 };
+    for (const dosage of [parsed, parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(independent
+        ? ["2026-12-06T10:00:00+00:00", "2026-12-06T18:00:00+00:00"]
+        : ["2026-12-06T18:00:00+00:00", "2026-12-07T18:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(independent ? 3 : 2);
+    }
+  }
 });

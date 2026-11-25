@@ -385,6 +385,17 @@ export function courseFromPartialParallel(
           if (finitePredecessors) dependsOnPrevious = true;
           else a.phaseStart = { anchor: "unresolved" };
         }
+        // A same-day dated replacement still belongs to this track. Retain
+        // that relation so execution can close the predecessor at the owned
+        // successor clock in the requested timezone, rather than at midnight.
+        const datedStart = a.schedule?.recurrence?.calendarWindow?.start;
+        if (!dependsOnPrevious && index > 0 && datedStart?.length === 10 &&
+            a.schedule?.recurrence?.clocks?.length && !a.asNeeded && !a.predicate && !a.calendarPredicate) {
+          let sameDay = priorEnd > priorStart;
+          for (let parent = priorStart; sameDay && parent < priorEnd; parent++)
+            sameDay = administrations[parent].schedule?.recurrence?.calendarWindow?.start === datedStart;
+          if (sameDay) dependsOnPrevious = true;
+        }
         if (dependsOnPrevious) {
           if (!predecessors) {
             predecessors = [];
