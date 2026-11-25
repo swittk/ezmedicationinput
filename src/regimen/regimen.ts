@@ -625,7 +625,7 @@ export function scopeSequentialPhaseSemantics(
         fields.push('method');
       }
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
-        prior.length === 1 && schedule && !hasRecurringSchedule(schedule);
+        !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule);
       if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && shared) {
         // A timing anaphor or licensed onset-only dose continuation inherits
         // recurrence, not the preceding phase's duration, count or dates.
