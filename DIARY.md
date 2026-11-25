@@ -15887,3 +15887,32 @@ Validation passed 8,191 source tests, configured strict TypeScript, the build,
 and four distribution tests. Representative paired measurements and focused
 preview checks found no reproducible meaningful regression above 4%. The
 changed-path count remains 100. Detailed review dispositions remain separate.
+
+
+## 2026-11-25 — Current structured values and complete clinical bounds
+
+Weight-resolved doses and numeric member limits share the existing phase
+planner while rate forms retain their duration ownership. Complete maxima
+after preparation remain dose limits. Selected action definitions, compatible
+route inheritance and full relation Codings retain their existing ownership.
+Recognized event phrases consume only their complete timing constituent.
+
+Fresh safety and expression edits retain their current scope and payload.
+Displaced annotations remain preserved as inactive source. R6 extension-bearing
+elements retain their public types. Source replay requires the existing positive
+verification, so stale authored timing cannot override current structured data.
+
+English and Thai previews distinguish count ranges and Boolean comparisons,
+retain target counts and unknown site labels, and preserve explicit local timing
+labels alongside the existing abbreviation vocabulary. Authored course lengths
+remain visible once at their own origin without restarting in copied stages.
+
+Execution retains structured upper bounds, long calendar selectors, equivalent
+fractional-week grids and known dated successors. Conflicting standard cadences
+are rejected before selection. Benchmark controls assert exact clinical results
+outside measurement and reject qualified or restricted exact-dose fixtures.
+
+Validation passed 8,268 source tests, configured strict TypeScript, the build,
+and four distribution tests. Sixteen representative paired workloads and a
+focused longer Thai parsing check found no reproducible meaningful-workload
+regression above 4%. The changed-path count remains 100.
