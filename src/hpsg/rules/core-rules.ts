@@ -1528,13 +1528,14 @@ function isClockDoseContext(context: HpsgClauseContext, start: number, lower: st
 // treating "over" as a generic gap connector competes with that sign and
 // destroys its rateRatio. When no such sign owns it, "over" can introduce
 // an ordinary HPSG temporal/locative phrase without losing source coverage.
-const TYPED_CLINICAL_QUANTITY = clinicalQuantityLexicalRule();
+let typedClinicalQuantity: HpsgLexicalRule<HpsgClauseContext> | undefined;
 
 function overBelongsToTypedClinicalQuantity(context: HpsgClauseContext, position: number): boolean {
   const token = context.tokens[position];
   if (!token) return false;
+  const quantityRule = typedClinicalQuantity ??= clinicalQuantityLexicalRule();
   for (let start = Math.max(0, position - 7); start < position; start += 1) {
-    if (TYPED_CLINICAL_QUANTITY.match(context, start).some(sign =>
+    if (quantityRule.match(context, start).some(sign =>
       sign.synsem.head.dose?.clinicalQuantity?.status === "resolved" &&
       sign.consumedTokenIndices.indexOf(token.index) >= 0
     )) return true;

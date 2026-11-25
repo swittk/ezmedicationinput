@@ -16,7 +16,7 @@ import {
   toFhirR5Dosages
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import { EventTiming, FhirPeriodUnit, type FhirDosage, type FhirQuantity, type ParseOptions } from "../src/types";
+import { EventTiming, FhirPeriodUnit, RouteCode, type FhirDosage, type FhirQuantity, type ParseOptions } from "../src/types";
 import { EMA_QUANTITY_COMPARATOR_EXTENSION_URL, getQuantityComparator } from "../src/fhir-quantity-operator";
 import { formatZonedIso } from "../src/execution/calendar";
 
@@ -4284,3 +4284,33 @@ it.each([["mL/hour", 1], ["mL/.5 hours", 0.5]] as const)(
       expect(member.limits).toMatchObject([{ scope: "period", amount: { value: 10, unit: "mL" }, period: { value: period, unit: "h" } }]);
     }
   });
+
+
+it.each([
+  ["by mouth", undefined],
+  ["custom oral route", { routeMap: { "custom oral route": RouteCode["Oral route"] } }],
+] as const)("round76 keeps the cumulative cap under a typed %s route", (route, options) => {
+  const parsed = parsePublicSig("Give 5 mL " + route + ", no more than 10 mL/hour", options);
+  for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+    const member = importCanonicalCourse(input).stages[0].administrations[0];
+    expect(member.amounts?.[0].quantity).toMatchObject({ value: 5, unit: "mL" });
+    expect(member.amounts?.[0].rate).toBeUndefined();
+    expect(member.limits).toMatchObject([
+      { scope: "period", amount: { value: 10, unit: "mL" }, period: { value: 1, unit: "h" } }
+    ]);
+  }
+});
+
+it("round76 retains a daily cumulative volume ceiling under the infusion head", () => {
+  const parsed = parsePublicSig("Infuse 100 mL IV, no more than 500 mL/day");
+  for (const input of [parsed.meta.canonical.course!, parsed.fhir, parsed.fhirNext,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+    const member = importCanonicalCourse(input).stages[0].administrations[0];
+    expect(member.amounts?.[0].quantity).toMatchObject({ value: 100, unit: "mL" });
+    expect(member.amounts?.[0].rate).toBeUndefined();
+    expect(member.limits).toMatchObject([
+      { scope: "period", amount: { value: 500, unit: "mL" }, period: { value: 1, unit: "d" } }
+    ]);
+  }
+});

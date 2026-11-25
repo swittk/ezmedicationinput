@@ -1,3 +1,4 @@
+import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
 import { getRouteMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
@@ -192,7 +193,7 @@ function clinicalDurationNumber(token: HpsgClauseContext["tokens"][number] | und
   return value !== undefined && value > 0 ? value : undefined;
 }
 
-function timeUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
+export function clinicalRatePeriodUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | undefined {
   if (/^(?:h|hr|hrs|hour|hours)$/u.test(raw)) return FhirPeriodUnit.Hour;
   if (/^(?:min|mins|minute|minutes)$/u.test(raw)) return FhirPeriodUnit.Minute;
   return undefined;
@@ -201,7 +202,7 @@ function timeUnit(raw: string): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | un
 function weightRatePeriodUnit(
   raw: string
 ): FhirPeriodUnit.Hour | FhirPeriodUnit.Minute | FhirPeriodUnit.Week | undefined {
-  return timeUnit(raw) ??
+  return clinicalRatePeriodUnit(raw) ??
     (/^(?:wk|wks|week|weeks)$/u.test(raw) ? FhirPeriodUnit.Week : undefined);
 }
 
@@ -211,12 +212,21 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
   for (let index = before - 1; index >= first; index -= 1) {
     const token = context.tokens[index];
     const lower = normalizeTokenLower(token);
-    // An explicit oral route keeps a generic GIVE/ADMINISTER head from
-    // licensing a flow-rate reading of its later cumulative limit.
-    if (getRouteMeaning(token)?.code === RouteCode["Oral route"]) return false;
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
-    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) return !precedingAmount || allowPrecedingDose;
+    if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) {
+      if (!precedingAmount) return true;
+      if (!allowPrecedingDose) return false;
+      // A borrowed administration head still belongs to its typed route.
+      // Reuse the route constituent so multiword and configured routes retain
+      // the same ownership as a single annotated route token.
+      const route = routeLexicalRule();
+      for (let routeStart = index + 1; routeStart < before; routeStart++)
+        for (const sign of route.match(context, routeStart))
+          if (sign.tokens[sign.tokens.length - 1].index < context.tokens[before].index &&
+              sign.synsem.head.route?.code === RouteCode["Oral route"]) return false;
+      return true;
+    }
     if ((token.kind === LexKind.Number || token.kind === LexKind.NumberRange ||
         DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // Only a medication amount owns the cue. Product strengths (0.9 %)
@@ -445,8 +455,8 @@ function infusionDurationAt(context: HpsgClauseContext, start: number) {
         DOSE_UNIT_CONNECTORS.has(normalizeTokenLower(context.tokens[unitIndex]))) unitIndex++;
   }
   const unitToken = context.tokens[unitIndex];
-  const unit = rawUnit ? timeUnit(rawUnit) :
-    unitToken && available(context, unitIndex) ? timeUnit(normalizeTokenLower(unitToken)) : undefined;
+  const unit = rawUnit ? clinicalRatePeriodUnit(rawUnit) :
+    unitToken && available(context, unitIndex) ? clinicalRatePeriodUnit(normalizeTokenLower(unitToken)) : undefined;
   if (value === undefined || !unit) return undefined;
   return { value, unit, comparator: qualified?.comparator,
     end: unitIndex + (rawUnit ? 0 : 1) };
@@ -625,7 +635,7 @@ function fixedRate(
   const parts = expression.compact.split("/");
   if (parts.length !== 2) return undefined;
   const numerator = volumeOrMassTerm(value, parts[0]);
-  const denominatorUnit = timeUnit(parts[1]);
+  const denominatorUnit = clinicalRatePeriodUnit(parts[1]);
   // A bare/approximate per-time rate can complete the preceding volume,
   // with or without a comma. A qualified limit still needs its own marker
   // or local head; the earlier volume cannot lend the administration cue.
@@ -827,7 +837,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     // An unsupported fixed-rate range still owns both numeric endpoints.
     // Neither endpoint may become an exact rate or an independent scalar dose.
     const weight = expression && weightQuantity(context, quantityEnd, value, expression, phraseStart);
-    if (expression && (timeUnit(expression.compact.split("/")[1]) ||
+    if (expression && (clinicalRatePeriodUnit(expression.compact.split("/")[1]) ||
         weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity")) {
       const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
       for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);
