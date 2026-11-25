@@ -976,24 +976,33 @@ function exactTimingEventOccurrences(
         const wholeYear = value.length === 4;
         const month = wholeYear ? 1 : Number(value.slice(5));
         // These bound the possible date range; they are never dose instants.
-        let start = calendarBoundaryDate(timeZone, year, month, 1, 0, 0, 0);
-        let end = calendarBoundaryDate(timeZone,
+        const start = calendarBoundaryDate(timeZone, year, month, 1, 0, 0, 0);
+        const end = calendarBoundaryDate(timeZone,
           wholeYear || month === 12 ? year + 1 : year,
           wholeYear || month === 12 ? 1 : month + 1, 1, 0, 0, 0);
-        if (start && end && expanded.length) {
-          let firstShift = expanded[0].dayShift, lastShift = firstShift;
-          for (const entry of expanded) {
-            if (entry.dayShift < firstShift) firstShift = entry.dayShift;
-            if (entry.dayShift > lastShift) lastShift = entry.dayShift;
-          }
-          if (firstShift) start = addLocalDays(start, firstShift, timeZone);
-          if (lastShift) end = addLocalDays(end, lastShift, timeZone);
-        }
         const queryFrom = eventStatus?.from ?? from;
         const queryEnd = earlierDate(courseEnd, eventStatus?.end ?? null);
         const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
-        partialEvent = !start || !end || end > begin &&
-          (!queryEnd || start < queryEnd && begin < queryEnd);
+        partialEvent = !start || !end;
+        if (start && end) {
+          if (!expanded.length) partialEvent = end > begin &&
+            (!queryEnd || start < queryEnd && begin < queryEnd);
+          else for (const entry of expanded) {
+            const opening = entry.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
+            const closing = entry.dayShift ? addLocalDays(end, entry.dayShift, timeZone) : end;
+            const stop = earlierDate(closing, queryEnd)!;
+            let day = begin > opening ? startOfLocalDay(begin, timeZone) : opening;
+            // Test possibility only: these clocks never become a selected
+            // event date or spend a count. Reuse exact-event local resolution,
+            // including skipped clocks, before declaring a window disjoint.
+            while (day < stop) {
+              const possible = makeZonedDateFromDay(day, timeZone, entry.time);
+              if (possible && possible >= begin && possible < stop) { partialEvent = true; break; }
+              day = addLocalDays(day, 1, timeZone);
+            }
+            if (partialEvent) break;
+          }
+        }
       }
       continue;
     }

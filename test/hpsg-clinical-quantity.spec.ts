@@ -27,7 +27,14 @@ function expectSimpleQuantityOperator(quantity: FhirQuantity | undefined, compar
   expect(quantity?.comparator).toBeUndefined();
   expect(quantity?._comparator).toBeUndefined();
   expect(getQuantityComparator(quantity)).toBe(comparator);
-  expect(getEmaQuantityComparator(quantity)).toBe(comparator);
+  if (comparator !== undefined) {
+    const expectedCodes: Record<string, string> = {
+      "<": "100000000050", "<=": "100000000052", ">": "100000000051",
+      ">=": "100000000053", "~": "100000000055", ad: "100000165006"
+    };
+    expect(quantity?.extension?.find(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL)?.valueCoding)
+      .toMatchObject({ system: "http://spor.ema.europa.eu/v1/lists/100000000008", code: expectedCodes[comparator] });
+  }
   if (comparator === undefined) {
     expect(quantity?.extension?.some(item => item.url === EMA_QUANTITY_COMPARATOR_EXTENSION_URL) ?? false).toBe(false);
   }
@@ -1740,12 +1747,14 @@ describe("November 16 qualified glued tablet fractions", () => {
     expect(dose?.comparator).toBe(comparator);
     expect(parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value).toBe(value);
   });
-  it.each(["≤1/0 tablet", "≥2/0 tablet"])("never produces a non-finite dose: %s", sig => {
+  it.each(["≤1/0 tablet", "≥2/0 tablet"])("retains an invalid fraction without inventing a numeric dose: %s", sig => {
     const parsed = parsePublicSig(sig, { context: { dosageForm: "tablet" } });
     for (const value of [parsed.meta.canonical.clauses[0]?.dose?.value,
       parsed.fhir[0]?.doseAndRate?.[0]?.doseQuantity?.value]) {
-      expect(value === undefined || Number.isFinite(value)).toBe(true);
+      expect(value).toBeUndefined();
     }
+    for (const input of [parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "roundtrip" })).toContain(sig);
   });
 });
 

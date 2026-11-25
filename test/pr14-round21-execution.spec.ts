@@ -2853,16 +2853,18 @@ describe("round35 execution cap and history oracles", () => {
     expect(nextDueDoses(input, query)).toEqual(["2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00"]);
     expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 2, durationUnit: Unit.Day }).totalUnits).toBe(1);
     expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(3);
-    loading.excludedDates = ["2026-01-03"];
-    const excluded = wire(course, version);
+    const excludedCourse = freshExecutionInput(course);
+    excludedCourse.stages[0].administrations[0].excludedDates = ["2026-01-03"];
+    const excluded = wire(excludedCourse, version);
     expect(nextDueDoses(excluded, { ...options, limit: 4 })).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-04T08:00:00+00:00", "2026-01-05T08:00:00+00:00",
     ]);
     expect(calculateTotalUnits({ dosage: excluded, ...options, durationValue: 5, durationUnit: Unit.Day }).totalUnits).toBe(4);
     // A whole-course repeat uses the same count admission without running
     // supply maximization when the caller only requests administration clocks.
-    course.cycleInterval = { value: 7, unit: "d" }; course.cycleCount = 1;
-    expect(nextDueDoses(wire(course, version), { ...options, limit: 4 })).toEqual([
+    const repeatedCourse = freshExecutionInput(excludedCourse);
+    repeatedCourse.cycleInterval = { value: 7, unit: "d" }; repeatedCourse.cycleCount = 1;
+    expect(nextDueDoses(wire(repeatedCourse, version), { ...options, limit: 4 })).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-04T08:00:00+00:00", "2026-01-05T08:00:00+00:00",
     ]);
   });
@@ -2878,9 +2880,10 @@ describe("round35 execution cap and history oracles", () => {
       "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00",
     ]);
     expect(calculateTotalUnits({ dosage: wire(course, version), ...options, durationValue: 3, durationUnit: Unit.Day }).totalUnits).toBe(5);
-    loading.amounts![0].range!.low = { value: 1, unit: "tab", comparator: ">" };
-    loading.limits![0].amount!.value = 2;
-    const input = wire(course, version), before = JSON.stringify(input);
+    const strictCourse = freshExecutionInput(course), strictLoading = strictCourse.stages[0].administrations[0];
+    strictLoading.amounts![0].range!.low = { value: 1, unit: "tab", comparator: ">" };
+    strictLoading.limits![0].amount!.value = 2;
+    const input = wire(strictCourse, version), before = JSON.stringify(input);
     expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-03T08:00:00+00:00", "2026-01-04T08:00:00+00:00",
     ]);
@@ -3080,16 +3083,17 @@ describe("round36 execution admission and actual-clock ownership", () => {
         "2026-01-02T00:30:00+00:00", "2026-01-03T00:30:00+00:00",
       ]);
       expect(JSON.stringify(input)).toBe(before);
-      member.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
-      expect(calculateTotalUnits({ ...options, dosage: wire(member, version),
+      const durationBound = freshExecutionInput(member);
+      durationBound.schedule!.recurrence!.courseLength = { value: 1, unit: "d" };
+      expect(calculateTotalUnits({ ...options, dosage: wire(durationBound, version),
         durationValue: 26, durationUnit: Unit.Hour }).totalUnits).toBe(ranged ? 4 : 2);
-      member.schedule!.recurrence!.calendarWindow = { end: "2026-01-01T22:00:00Z" };
-      expect(calculateTotalUnits({ ...options, dosage: wire(member, version),
+      const calendarBound = freshExecutionInput(durationBound);
+      calendarBound.schedule!.recurrence!.calendarWindow = { end: "2026-01-01T22:00:00Z" };
+      expect(calculateTotalUnits({ ...options, dosage: wire(calendarBound, version),
         durationValue: 26, durationUnit: Unit.Hour }).totalUnits).toBe(ranged ? 2 : 1);
-      member.schedule!.recurrence!.courseLength = undefined;
-      member.schedule!.recurrence!.calendarWindow = undefined;
-      member.delayMinutes = 0;
-      expect(nextDueDoses(wire(member, version), { ...options, limit: 2 })).toEqual([
+      const undelayed = freshExecutionInput(member);
+      undelayed.delayMinutes = 0;
+      expect(nextDueDoses(wire(undelayed, version), { ...options, limit: 2 })).toEqual([
         "2026-01-01T00:30:00+00:00", "2026-01-02T00:30:00+00:00",
       ]);
     }
@@ -6750,4 +6754,25 @@ describe("round74 independent count history and cadence origins", () => {
       expect(JSON.stringify(input)).toBe(before);
     }
   });
+  it.each(versions)("uses known clocks only to disprove partial-event overlap (%s)", version => {
+    for (const [partial, from, hours, knownClock, expected] of [
+      ["2026-11", "2026-11-30T18:00:00Z", 1, true, 0],
+      ["2026-11", "2026-11-15T18:00:00Z", 1, true, 0],
+      ["2026", "2026-12-31T18:00:00Z", 1, true, 0],
+      ["2026-11", "2026-11-30T08:00:00Z", 1, true, 0],
+      ["2026-11", "2026-11-30T08:00:00Z", 2, true, undefined],
+      ["2026-11", "2026-11-30T18:00:00Z", 1, false, undefined],
+    ] as const) {
+      const member = dose();
+      member.schedule = { explicitEvents: [partial], ...(knownClock ? { recurrence: { clocks: ["09:00:00"] } } : {}) };
+      const input = wire({ kind: "course", stages: [{ administrations: [member] }] }, version);
+      const before = JSON.stringify(input), query = { orderedAt: origin, from, timeZone: "UTC", limit: 1 };
+      expect(nextDueDoses(input, query)).toEqual([]);
+      const calculate = () => calculateTotalUnits({ dosage: input, ...query, durationValue: hours, durationUnit: Unit.Hour });
+      if (expected === undefined) expect(calculate).toThrow(expect.objectContaining({ code: "timing-required" }));
+      else expect(calculate()).toMatchObject({ totalUnits: expected, unit: "tab" });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
 });

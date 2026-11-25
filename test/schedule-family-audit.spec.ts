@@ -4853,8 +4853,8 @@ describe("round65 execution admissions and phase records", () => {
       for (const dosage of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
         const options = { orderedAt: "2026-01-01T00:00:00Z", from, timeZone: "UTC", limit: 1 };
         const due = nextDueDoses(dosage, options);
-        if (excluded === "none") expect(due[0]).toBe(expected);
-        else expect(due).not.toContain(expected);
+        const resumed = delayMinutes > 0 ? "2026-01-03T01:00:00+00:00" : "2026-01-02T23:00:00+00:00";
+        expect(due).toEqual([excluded === "none" ? expected : resumed]);
         expect(calculateTotalUnits({ dosage, ...options, durationValue: 2, durationUnit: FhirPeriodUnit.Hour }))
           .toMatchObject({ totalUnits: excluded === "none" ? 1 : 0, unit: "tab" });
       }
@@ -5435,10 +5435,13 @@ describe("round69 review calendar, allowance, and next-day ownership", () => {
   ];
 
   it("uses month days with weekday filters while preserving an authored ordinal", () => {
-    for (const [monthDays, weekdayOrdinal, expected] of [
-      [[15], undefined, "2026-01-15T09:00:00+00:00"],
-      [[15], 3, "2026-01-15T09:00:00+00:00"],
-      [undefined, undefined, "2026-01-01T09:00:00+00:00"]
+    for (const [monthDays, weekdayOrdinal, expected, total] of [
+      [[15], undefined, "2026-01-15T09:00:00+00:00", 1],
+      [[15], 3, "2026-01-15T09:00:00+00:00", 1],
+      [[17], undefined, "2026-02-17T09:00:00+00:00", 0],
+      [[8], undefined, "2026-01-08T09:00:00+00:00", 1],
+      [[8], 3, undefined, 0],
+      [undefined, undefined, "2026-01-01T09:00:00+00:00", 5]
     ] as const) {
       const dose = member();
       dose.schedule!.recurrence = {
@@ -5451,10 +5454,10 @@ describe("round69 review calendar, allowance, and next-day ownership", () => {
         const before = JSON.stringify(dosage);
         expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence?.weekdayOrdinal)
           .toBe(weekdayOrdinal);
-        expect(nextDueDoses(dosage, { ...options, limit: 1 })).toEqual([expected]);
+        expect(nextDueDoses(dosage, { ...options, limit: 1 })).toEqual(expected ? [expected] : []);
         expect(calculateTotalUnits({
-          ...options, dosage, durationValue: 16, durationUnit: FhirPeriodUnit.Day
-        }).totalUnits).toBe(monthDays ? 1 : 5);
+          ...options, dosage, durationValue: 18, durationUnit: FhirPeriodUnit.Day
+        }).totalUnits).toBe(total);
         expect(JSON.stringify(dosage)).toBe(before);
       }
     }
