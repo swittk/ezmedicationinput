@@ -16126,3 +16126,22 @@ Twenty-eight representative paired workloads found no reproducible meaningful
 regression above 4%; small fast-call differences were assessed by absolute
 latency and measurement spread. Decimal token tests were regrouped with their
 clinical quantity coverage without dropping assertions.
+
+
+## 2026-11-26 — Coded timing and ordinary course corrections
+
+Coded morning, evening, bedtime and interval instructions remain visible in
+previews. Conditions use their supplied problem identity, and quantity
+calculations retain authored duration bounds, unit labels and rate qualifiers.
+
+Single-dose loading phases, delayed parallel courses, integer sequence groups
+and dated successor previews retain their intended timing. Partial-event
+feasibility respects phase and weekday limits. Cumulative maximum phrases keep
+their own amounts and periods; comparative doses and infusion rates retain
+their existing owners. Scoped warnings retain point clocks and conditions once.
+
+All 8,797 normal tests, strict types, build and four distribution tests passed.
+Twenty-eight representative paired workloads found no reproducible meaningful
+regression above 4%; the small scheduling difference was assessed by absolute
+latency and measurement spread. The concurrent-dose fixture now supplies equal
+sequence values, preserving every existing assertion.
