@@ -1,5 +1,5 @@
 import { MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL } from "../instruction-graph-fhir";
-import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isCompactSourceAgreementMarker } from "../dosage-course";
+import { projectR6ModifierWrapper, reconcileLiftedR5Safety, R5_EXPRESSION_SLOT_SOURCE_URL, getDosageSourceTextAgreement, sourceOwnership, isSourceAgreementMarker } from "../dosage-course";
 import { courseFromR5 } from "./r5-import";
 import { getCourseCycleCount, setCourseCycleCount } from "../fhir-course-cycle-count";
 import { projectNativeR5Course } from "./r5-course";
@@ -66,6 +66,7 @@ import {
   dosageMatchesSavedProjection,
   getFreshDoseSource,
   getDosageSourceTextFingerprint,
+  retainedSourceProjectionFingerprint, dosageHasAgreedSourceText, dosageClinicalProjectionFingerprint,
   dosageTextFingerprint,
   DOSAGE_RECONCILIATION_SOURCE_URL,
   DOSAGE_RENDERED_INSTRUCTION_R5_URL,
@@ -787,6 +788,7 @@ function baseAdministration(
   if (sourceFields?.clocks !== undefined) output.provenance!.sourceHasStructuredClocks = sourceFields.clocks;
   if (sourceFields?.events !== undefined) output.provenance!.sourceHasStructuredEvents = sourceFields.events;
   if (sourceFields?.site !== undefined) output.provenance!.sourceHasStructuredSite = sourceFields.site;
+  if (dosageHasAgreedSourceText(raw)) output.provenance!.sourceTextAgreed = true;
   if (phasePredecessors !== undefined) {
     output.sourceMember = sourceMember;
     output.phasePredecessors = phasePredecessors;
@@ -1896,7 +1898,7 @@ function administrationToWire(
     let kept: FhirExtension[] | undefined;
     for (let i = 0; i < priorExtensions.length; i++) {
       const e = priorExtensions[i];
-      if (isRenderedInstructionMarker(e) || isCompactSourceAgreementMarker(e)) {
+      if (isRenderedInstructionMarker(e) || isSourceAgreementMarker(e)) {
         if (!kept) kept = priorExtensions.slice(0, i);
         if (hasUnrecognizedEditMetadata(e))
           kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [e] });
@@ -1904,6 +1906,7 @@ function administrationToWire(
     }
     if (kept) assign(output, "extension", kept.length ? kept : undefined);
   }
+  let agreedSourceFields: FhirExtension[] | undefined;
   if (target === "r6") {
     const clocks = a.provenance?.sourceHasStructuredClocks ??
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.clocks?.length) : undefined);
@@ -1911,11 +1914,15 @@ function administrationToWire(
       (clause?.instructionGraph ? Boolean(a.schedule?.recurrence?.anchors?.length) : undefined);
     const site = a.provenance?.sourceHasStructuredSite ??
       (clause?.instructionGraph ? Boolean(a.target || a.siteReference) : undefined);
-    if (clocks !== undefined || events !== undefined || site !== undefined) {
-      // Whole-text agreement is never inferred for an R6 import. Keep only
-      // the primary-field evidence needed to distinguish a deletion from
-      // an independent graph clock, event, or site after another external save.
-      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: false }];
+    if (clocks !== undefined || events !== undefined || site !== undefined || a.provenance?.sourceTextAgreed) {
+      // R6 current-source replay remains unverified. Preserve an established
+      // component-text baseline independently of the primary-field evidence
+      // that distinguishes deletions from independent graph facts.
+      const fields: FhirExtension[] = [{ url: "sourceAgreement", valueBoolean: a.provenance?.sourceTextAgreed === true }];
+      if (a.provenance?.sourceTextAgreed && a.text !== undefined) {
+        agreedSourceFields = fields;
+        fields.push({ url: "textFingerprint", valueString: getDosageSourceTextFingerprint(a.provenance.data) ?? dosageTextFingerprint({ text: a.text }) });
+      }
       if (clocks !== undefined) fields.push({ url: "sourceHasStructuredClocks", valueBoolean: clocks });
       if (events !== undefined) fields.push({ url: "sourceHasStructuredEvents", valueBoolean: events });
       if (site !== undefined) fields.push({ url: "sourceHasStructuredSite", valueBoolean: site });
@@ -2054,6 +2061,9 @@ function administrationToWire(
     }
     if (periodLimits) output.maxDosePerPeriod = periodLimits;
   }
+  if (agreedSourceFields)
+    agreedSourceFields.push({ url: "projectionFingerprint", valueString:
+      retainedSourceProjectionFingerprint(a.provenance!.data) ?? dosageClinicalProjectionFingerprint(output as FhirR6Dosage) });
   return output as FhirDosage | FhirR6Dosage;
 }
 /** Direct native-to-R6 component writer. */

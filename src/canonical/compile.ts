@@ -188,7 +188,7 @@ export function administrationFromClause(
         ...(clause.site.coding ? { coding: [clause.site.coding] } : {}),
       }
     : undefined;
-  return {
+  const administration: CanonicalAdministration = {
     kind: "administration",
     stageOrdinal,
     onsetDays: s?.treatmentStartOffsetDays,
@@ -242,6 +242,9 @@ export function administrationFromClause(
       period: quantity(limit.period, limit.periodUnit, limit.periodComparator),
     })),
   };
+  if (text !== undefined && clause.instructionGraph?.actions.length)
+    administration.provenance = { format: "syntax", data: {}, sourceTextAgreed: true };
+  return administration;
 }
 /** Calendar tracks use explicit dates; not offsets from treatment start. */
 export function precedingCalendarDay(value: string): string | undefined {

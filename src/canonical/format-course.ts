@@ -597,7 +597,8 @@ function administrationOwnsSourceDirections(
   if (administrationHasAmountFacts(administration)) return true;
   if (!graph?.actions.length) return false;
   if (graph.primaryOwnership?.dose !== undefined) return true;
-  return sourceText !== undefined && graph.sourceText === sourceText && graph.coverage?.complete === true;
+  return sourceText !== undefined && graph.coverage?.complete === true &&
+    (graph.sourceText === sourceText || sourceText === administration.text && administration.provenance?.sourceTextAgreed === true);
 }
 function courseNeedsAuthoredHeader(course: CanonicalCourse): boolean {
   for (const stage of course.stages) for (const administration of stage.administrations)

@@ -47,7 +47,7 @@ import {
   offsetCadenceFingerprint,
   matchesOffsetCadence,
   matchesDosageProjectionFingerprint,
-  dosageTextFingerprint,
+  dosageTextFingerprint, dosageHasAgreedSourceText,
   isRenderedInstructionMarker,
   hasUnrecognizedEditMetadata,
   localReconciliationSource,
@@ -966,10 +966,11 @@ function reconcileNativeCompactCourse(
     if (!textMatches) textWasEdited = true;
     else allTextsWereEdited = false;
     if (!projectionMatches) structuredWasEdited = true;
-    if ((!projectionMatches && textMatches) || !dosage.text) allTexts = false;
-    if (!projectionMatches && textMatches && (dosage.text !== undefined || dosage._text !== undefined))
+    const retireText = !projectionMatches && textMatches && dosageHasAgreedSourceText(dosage, projectionMatches);
+    if (retireText || !dosage.text) allTexts = false;
+    if (retireText && (dosage.text !== undefined || dosage._text !== undefined))
       sources.push(retainedRowTextSource(dosage, sourceIndex));
-    return !projectionMatches && textMatches ? retireRowText(dosage) : dosage;
+    return retireText ? retireRowText(dosage) : dosage;
   });
   const { step: _editedSteps, renderedInstruction: explicitInstruction, ...courseEdits } = editedCourse ?? {};
   if (historicalHeader && header?.course) {
@@ -1932,7 +1933,7 @@ export function courseFromR5(
       else allTextsWereEdited = false;
       if (!projectionMatches) structuredWasEdited = true;
       if (typeof dosage.text !== "string" || !dosage.text.length) allTexts = false;
-      if (!projectionMatches && textMatches) {
+      if (!projectionMatches && textMatches && dosageHasAgreedSourceText(dosage, projectionMatches)) {
         if (dosage.text !== undefined || dosage._text !== undefined)
           reconciliationSources.push(retainedRowTextSource(dosage, index));
         if (effectiveDosages === dosages) effectiveDosages = dosages.slice();

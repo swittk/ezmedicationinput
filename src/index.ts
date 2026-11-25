@@ -1807,7 +1807,7 @@ function buildParseResult(
   });
   // Mark immutable parser-origin source ownership. Defaulted amounts still
   // do not prove graph authorship; fresh submitted copies use persisted proof.
-  markFreshDoseSource(fhir, clause.dose?.defaulted === true);
+  markFreshDoseSource(fhir, clause.dose?.defaulted === true, Boolean(clause.instructionGraph?.actions.length));
   const tokenUnderstoodByGraph = (value: { sourceStart: number; sourceEnd: number }): boolean =>
     sourceRangeUnderstoodByGraph({ start: value.sourceStart, end: value.sourceEnd });
   const consumedTokens: string[] = [];

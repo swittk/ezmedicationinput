@@ -1370,22 +1370,22 @@ const LIVE_COURSE_ROW_KEYS=new Set(["sequence","stepCount","step","component","c
  * active local row fields and all unrelated source annotations remain hashed.
  * The exact token order is identical to compactProjectionFingerprint so
  * existing persisted edit identities require no migration. */
-export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage):string {
+export function dosageProjectionFingerprint(dosage:FhirDosage|EzDosage|FhirR6Dosage):string {
   return dosageProjectionHash(dosage, false);
 }
 
 /** New agreement excludes narrative annotations; legacy untagged hashes keep
  * their exact saved algorithm. An old hash alone cannot recover prior metadata. */
-export function dosageClinicalProjectionFingerprint(dosage: FhirDosage | EzDosage): string {
+export function dosageClinicalProjectionFingerprint(dosage: FhirDosage | EzDosage | FhirR6Dosage): string {
   return "clinical-v2:" + dosageProjectionHash(dosage, true);
 }
 
-export function matchesDosageProjectionFingerprint(dosage: FhirDosage | EzDosage, expected: string | undefined): boolean {
+export function matchesDosageProjectionFingerprint(dosage: FhirDosage | EzDosage | FhirR6Dosage, expected: string | undefined): boolean {
   return expected === (expected?.startsWith("clinical-v2:")
     ? dosageClinicalProjectionFingerprint(dosage) : dosageProjectionFingerprint(dosage));
 }
 
-function dosageProjectionHash(dosage: FhirDosage | EzDosage, clinical: boolean): string {
+function dosageProjectionHash(dosage: FhirDosage | EzDosage | FhirR6Dosage, clinical: boolean): string {
   const state:ProjectionFingerprintState={first:0x811c9dc5,second:0x9e3779b9};
   const record=dosage as Record<string,unknown>;
   const keys=Object.keys(dosage).sort();
@@ -1461,6 +1461,35 @@ export function getDosageSourceTextFingerprint(dosage: Pick<FhirR6Dosage, "exten
   }
   return undefined;
 }
+/** The original clinical baseline stays bound to its original narrative across saves. */
+export function getDosageSourceProjectionFingerprint(dosage: Pick<FhirR6Dosage, "extension">): string | undefined {
+  for (const marker of dosage.extension ?? []) {
+    if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
+    for (const field of marker.extension ?? []) {
+      if (field.url === "projectionFingerprint") return field.valueString;
+      if (field.url === "row")
+        return field.extension?.find(part => part.url === "projectionFingerprint")?.valueString;
+    }
+  }
+  return undefined;
+}
+/** An unchanged source may receive its equivalent target-version baseline.
+ * Changed clinical fields retain the old hash so saving cannot certify stale text. */
+export function retainedSourceProjectionFingerprint(dosage: FhirDosage | EzDosage | FhirR6Dosage): string | undefined {
+  const projection = getDosageSourceProjectionFingerprint(dosage);
+  return projection !== undefined && dosageMatchesSavedProjection(dosage) === false ? projection : undefined;
+}
+/** Prior wording agreement is narrower than accepting a newly edited text. */
+export function dosageHasAgreedSourceText(
+  dosage: FhirDosage | EzDosage | FhirR6Dosage, currentProjectionMatches?: boolean
+): boolean {
+  const agreement = getDosageSourceTextAgreement(dosage, false);
+  if (agreement === false) return false;
+  const text = getDosageSourceTextFingerprint(dosage);
+  return text !== undefined && text === dosageTextFingerprint(dosage) &&
+    getDosageSourceProjectionFingerprint(dosage) !== undefined &&
+    (agreement === true || (currentProjectionMatches ?? dosageMatchesSavedProjection(dosage)) === true);
+}
 export function getDosageSourceTextAgreement(
   dosage: Pick<FhirR6Dosage, "extension" | "text">, acceptTextEdits = true
 ): boolean | undefined {
@@ -1487,7 +1516,7 @@ export interface FreshDoseSource {
   site: boolean;
 }
 const FRESH_HPSG_DOSE_SOURCE = new WeakMap<FhirDosage, FreshDoseSource>();
-export function markFreshDoseSource(dosage: FhirDosage, defaulted: boolean): void {
+export function markFreshDoseSource(dosage: FhirDosage, defaulted: boolean, sourceTextAgreed = false): void {
   const repeat = dosage.timing?.repeat;
   FRESH_HPSG_DOSE_SOURCE.set(dosage, {
     defaulted,
@@ -1497,6 +1526,14 @@ export function markFreshDoseSource(dosage: FhirDosage, defaulted: boolean): voi
     events: Boolean(repeat?.when?.length),
     site: Boolean(dosage.site),
   });
+  if (sourceTextAgreed && dosage.text !== undefined) {
+    const fields: FhirExtension[] = [
+      { url: "sourceAgreement", valueBoolean: true },
+      { url: "textFingerprint", valueString: dosageTextFingerprint(dosage) },
+      { url: "projectionFingerprint", valueString: dosageClinicalProjectionFingerprint(dosage) },
+    ];
+    (dosage.extension ??= []).push({ url: DOSAGE_RENDERED_INSTRUCTION_R5_URL, extension: fields });
+  }
 }
 export function getFreshDoseSource(dosage: FhirDosage): FreshDoseSource | undefined {
   return FRESH_HPSG_DOSE_SOURCE.get(dosage);
@@ -1524,13 +1561,18 @@ export function sourceOwnership(marker: FhirR6Extension): DosageSourceOwnership 
 
 /** Saved primary-field ownership. Missing evidence never licenses removal
  * of independent clocks, event anchors, or sites supplied only by the graph. */
-export function getDosageSourceOwnership(dosage: Pick<FhirDosage, "extension">): DosageSourceOwnership | undefined {
+export function getDosageSourceOwnership(dosage: Pick<FhirR6Dosage, "extension">): DosageSourceOwnership | undefined {
   for (const marker of dosage.extension ?? []) {
     if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
     const value = sourceOwnership(marker);
     if (value !== undefined) return value;
   }
   return undefined;
+}
+/** Known agreement remains owned even when its source Element has annotations. */
+export function isSourceAgreementMarker(marker: FhirExtension): boolean {
+  return marker.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL &&
+    Boolean(marker.extension?.some(field => field.url === "sourceAgreement" && typeof field.valueBoolean === "boolean"));
 }
 export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
   if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL || Object.keys(marker).length !== 2 ||
@@ -1551,35 +1593,23 @@ export function isCompactSourceAgreementMarker(marker: FhirExtension): boolean {
 
 // Submitted rows are immutable by caller contract. A new supplied object
 // receives its own first-read comparison with its persisted source fingerprint.
-const SAVED_PROJECTION_MATCHES = new WeakMap<FhirDosage | EzDosage, boolean>();
+const SAVED_PROJECTION_MATCHES = new WeakMap<FhirDosage | EzDosage | FhirR6Dosage, boolean>();
 
-/** Verify each immutable submitted R5 row's source clinical authority once.
+/** Verify each immutable submitted dosage's source clinical authority once.
  * Missing provenance is unknown, not a mismatch. Fresh submissions always
  * compare their current fields with the retained projection fingerprint. */
-export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boolean | undefined {
+export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage | FhirR6Dosage): boolean | undefined {
   const cached = SAVED_PROJECTION_MATCHES.get(dosage);
   if (cached !== undefined) return cached;
   if (getDosageSourceTextAgreement(dosage, false) === false) {
     SAVED_PROJECTION_MATCHES.set(dosage, false);
     return false;
   }
-  for (const marker of dosage.extension ?? []) {
-    if (marker.url !== DOSAGE_RENDERED_INSTRUCTION_R5_URL) continue;
-    for (const row of marker.extension ?? []) {
-      if (row.url === "projectionFingerprint") {
-        const matches = matchesDosageProjectionFingerprint(dosage, row.valueString);
-        SAVED_PROJECTION_MATCHES.set(dosage, matches);
-        return matches;
-      }
-      if (row.url !== "row") continue;
-      for (const field of row.extension ?? [])
-        if (field.url === "projectionFingerprint") {
-          const matches = matchesDosageProjectionFingerprint(dosage, field.valueString);
-          SAVED_PROJECTION_MATCHES.set(dosage, matches);
-          return matches;
-        }
-      return false;
-    }
+  const projection = getDosageSourceProjectionFingerprint(dosage);
+  if (projection !== undefined) {
+    const matches = matchesDosageProjectionFingerprint(dosage, projection);
+    SAVED_PROJECTION_MATCHES.set(dosage, matches);
+    return matches;
   }
   // Older detached clock rows declared primary source ownership without a
   // local clinical baseline. That declaration cannot verify replay against
@@ -1604,6 +1634,8 @@ export function dosageTextFingerprint(dosage: FhirDosage | EzDosage | FhirR6Dosa
  */
 export interface DosageSourceTextBaseline {
   sourceAgreement: boolean;
+  sourceTextAgreed?: boolean;
+  projectionFingerprint?: string;
   textFingerprint?: string;
   sourceHasStructuredClocks?: boolean;
   sourceHasStructuredEvents?: boolean;
@@ -1634,9 +1666,7 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
         sourceSite ??= ownership?.site;
       }
       if (!extension) continue;
-      const ownedBaseline = isRenderedInstructionMarker(prior) ||
-        prior.url === DOSAGE_RENDERED_INSTRUCTION_R5_URL &&
-          prior.extension?.some(field => field.url === "sourceAgreement" && typeof field.valueBoolean === "boolean");
+      const ownedBaseline = isRenderedInstructionMarker(prior) || isSourceAgreementMarker(prior);
       if (!ownedBaseline) extension.push(prior);
       else if (hasUnrecognizedEditMetadata(prior))
         extension.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [prior] });
@@ -1691,13 +1721,16 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
     const rowAgreement = original?.sourceAgreement ?? sourceAgreement;
     const currentText = dosageTextFingerprint(row);
     const sourceText = original?.textFingerprint ?? currentText;
-    const localReplay = row.text !== undefined && Boolean(row.maxDosePerPeriod?.length ||
+    const priorProjection = original?.projectionFingerprint ??
+      (rowAgreement && dosageHasAgreedSourceText(row) ? getDosageSourceProjectionFingerprint(row) : undefined);
+    const localReplay = row.text !== undefined && Boolean(original?.sourceTextAgreed || priorProjection || row.maxDosePerPeriod?.length ||
       row.maxDosePerAdministration || row.maxDosePerLifetime || (row as EzDosage).safety ||
       getTimingClocks(row.timing?.repeat)?.length);
     const baseline: FhirExtension[] = [{ url: "textFingerprint", valueString: currentText }];
-    // The containing marker already owns the default; retain only a row's
-    // explicit override here. Local row markers still own independent edits.
-    if (instruction !== undefined && rowAgreement !== sourceAgreement)
+    // Preserve explicit established agreement even when the header has the
+    // same default; legacy implicit agreement requires a current clinical match.
+    if (instruction !== undefined && (rowAgreement !== sourceAgreement || rowAgreement &&
+        (original?.sourceTextAgreed || priorProjection && getDosageSourceTextAgreement(row, false) === true)))
       baseline.push({ url: "sourceAgreement", valueBoolean: rowAgreement });
     const local = row.text !== undefined && (!rowAgreement || !sourceAgreement || localReplay) &&
       (index > 0 || instruction === undefined);
@@ -1717,7 +1750,7 @@ export function withDosageEditProvenance<T extends FhirDosage|EzDosage>(
         if (field.url === "sourceHasStructuredClocks" || field.url === "sourceHasStructuredEvents" ||
             field.url === "sourceHasStructuredSite") localFields.push(field);
     result[index] = row;
-    const projection = instruction !== undefined || localReplay ? dosageClinicalProjectionFingerprint(row) : undefined;
+    const projection = priorProjection ?? (instruction !== undefined || localReplay ? dosageClinicalProjectionFingerprint(row) : undefined);
     if (instruction !== undefined) {
       if (index === 0 && !rowAgreement) children.push({ url: "textFingerprint", valueString: sourceText });
       baseline.unshift({ url: "projectionFingerprint", valueString: projection });

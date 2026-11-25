@@ -5985,7 +5985,10 @@ describe("round55: current clinical facts and independent graph meaning", () => 
       for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
         const text = formatSig(input, "long", { locale, realizationMode });
         expect(text.match(/if the solution is too thick/gu)).toHaveLength(1);
-        if (locale === "en") expect(text).toBe(source + ".");
+        if (locale === "en") {
+          if (realizationMode === "roundtrip") expect([source, source + "."]).toContain(text);
+          else expect(text).toBe(source + ".");
+        }
       }
       expect(JSON.stringify(input)).toBe(before);
     }

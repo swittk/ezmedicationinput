@@ -40,6 +40,7 @@ import {
   createR5EmptyCourseCarrier,
   withDosageEditProvenance,
   getDosageSourceTextAgreement,
+  retainedSourceProjectionFingerprint, dosageHasAgreedSourceText,
   getDosageSourceTextFingerprint,
   type DosageSourceTextBaseline,
   r5StepMetadata,
@@ -333,14 +334,21 @@ export function projectNativeR5Course(
       const originalRow = a.provenance?.format === "r5" ? a.provenance.data as EzDosage : undefined;
       const sourceClocks = a.provenance?.sourceHasStructuredClocks,
         sourceEvents = a.provenance?.sourceHasStructuredEvents,
-        sourceSite = a.provenance?.sourceHasStructuredSite;
-      const originalAgreement = !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
-        ? getDosageSourceTextAgreement(originalRow, false) : undefined;
-      if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined ||
+        sourceSite = a.provenance?.sourceHasStructuredSite,
+        sourceAgreed = a.provenance?.sourceTextAgreed === true;
+      const originalAgreement = sourceAgreed ? true :
+        (originalRow?.text !== undefined && !dosageHasAgreedSourceText(originalRow) ||
+          a.text !== undefined && a.syntax?.instructionGraph?.actions.length) ? false :
+        !deferSourceProvenance && originalRow && a.provenance?.sourceTextVerified !== undefined
+          ? getDosageSourceTextAgreement(originalRow, false) : undefined;
+      if (sourceClocks !== undefined || sourceEvents !== undefined || sourceSite !== undefined || sourceAgreed ||
           !deferSourceProvenance && (originalAgreement === false || sourceAgreement && a.provenance?.format === "r6")) {
         rowSources ??= [];
-        rowSources[rowIndex] = { sourceAgreement: originalAgreement === false ||
-          (sourceAgreement && a.provenance?.format === "r6") ? false : sourceAgreement,
+        rowSources[rowIndex] = { sourceAgreement: sourceAgreed || (originalAgreement !== false &&
+          !(sourceAgreement && a.provenance?.format === "r6") && sourceAgreement),
+          ...(sourceAgreed ? { sourceTextAgreed: true,
+            textFingerprint: getDosageSourceTextFingerprint(a.provenance!.data),
+            projectionFingerprint: retainedSourceProjectionFingerprint(a.provenance!.data) } : {}),
           ...(sourceClocks !== undefined ? { sourceHasStructuredClocks: sourceClocks } : {}),
           ...(sourceEvents !== undefined ? { sourceHasStructuredEvents: sourceEvents } : {}),
           ...(sourceSite !== undefined ? { sourceHasStructuredSite: sourceSite } : {}),

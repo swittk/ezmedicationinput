@@ -228,6 +228,8 @@ export interface CanonicalAdministration {
   provenance?: { format: "r5" | "r6" | "syntax"; data: Record<string, unknown>;
     /** False when preserved wording has no agreement proof for current clinical facts. */
     sourceTextVerified?: boolean;
+    /** This exact component text had established source agreement; current clinical replay is separate. */
+    sourceTextAgreed?: boolean;
     /** Original primary schedule clock ownership; independent graph clocks remain source facts. */
     sourceHasStructuredClocks?: boolean;
     /** Original primary schedule anchor ownership; independent graph events remain source facts. */

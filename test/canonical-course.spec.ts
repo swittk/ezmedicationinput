@@ -3670,3 +3670,119 @@ describe("round74 current instruction identity", () => {
     expect(native).toEqual(before);
   });
 });
+
+
+describe("round76 bound source wording agreement", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const marker = "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction";
+  const graph = "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph";
+  const options = { locale: "en", realizationMode: "normalized" as const };
+
+  it("keeps a later generated procedure localized through independent saves without changing its text", () => {
+    const dose = parseSig("Take 1 tablet daily").fhirNext.step![0].component[0];
+    const procedure = parseSig("Rotate sites after every injection").fhirNext.step![0].component[0];
+    let current: FhirR6DosageInstruction = { step: [{ component: [fresh(dose), fresh(procedure)] }] };
+    for (let save = 0; save < 3; save++) {
+      const before = fresh(current);
+      const english = formatSig(current, "long", options);
+      expect(english).toContain("Rotate sites after each injection");
+      expect(english.match(/Rotate sites/gu)).toHaveLength(1);
+      expect(english).not.toContain("original directions");
+      expect(formatSig(current, "long", { locale: "th", realizationMode: "normalized" }))
+        .not.toMatch(/Rotate|injection|original directions/u);
+      expect(current.step![0].component[1].text).toBe("Rotate sites after each injection.");
+      const rows = fresh(toFhirR5Dosages(current));
+      expect(rows[1].text).toBe("Rotate sites after each injection.");
+      expect(current).toEqual(before);
+      current = fresh(toDosageDetails(rows));
+    }
+  });
+
+  it.each(["unmarked", "replacement"] as const)("keeps %s independent dose text unowned after repeated saves", kind => {
+    let current = fresh(parseSig("Do not crush").fhirNext);
+    current.renderedInstruction = "Swallow 1 tablet whole";
+    const component = current.step![0].component[0];
+    component.text = current.renderedInstruction;
+    if (kind === "unmarked") component.extension = component.extension!.filter(item => item.url !== marker);
+    const note = { url: "urn:clinic:source-note", valueString: "Keep the authored dose directions" };
+    component.extension!.push(note);
+    for (let save = 0; save < 3; save++) {
+      const before = fresh(current);
+      const text = formatSig(current, "long", options);
+      expect(text).toContain("Swallow 1 tablet whole");
+      expect(text).toContain("Do not crush");
+      expect(courseFromR6(current).stages[0].administrations[0].provenance?.sourceTextAgreed).not.toBe(true);
+      expect(current).toEqual(before);
+      current = fresh(toDosageDetails(fresh(toFhirR5Dosages(current))));
+      expect(current.step![0].component[0].text).toBe("Swallow 1 tablet whole");
+      expect(current.step![0].component[0].extension).toContainEqual(note);
+    }
+  });
+
+  it("lets a current graph edit replace old generated wording without validating old replay on save", () => {
+    let current = fresh(parseSig("Rotate sites after every injection").fhirNext);
+    delete current.renderedInstruction;
+    const replacement = parseSig("Rotate sites after each dose").fhirNext.step![0].component[0].extension!
+      .find(item => item.url === graph)!;
+    current.step![0].component[0].extension = current.step![0].component[0].extension!.map(item =>
+      item.url === graph ? fresh(replacement) : item);
+    for (let save = 0; save < 3; save++) {
+      const before = fresh(current);
+      expect(dosageMatchesSavedProjection(current.step![0].component[0])).toBe(false);
+      for (const realizationMode of ["normalized", "roundtrip"] as const)
+        expect(formatSig(current, "long", { locale: "en", realizationMode })).toBe("Rotate sites after each dose.");
+      expect(current).toEqual(before);
+      current = fresh(toDosageDetails(fresh(toFhirR5Dosages(current))));
+    }
+  });
+
+  it.each([false, true])("does not grant unmarked prose agreement before a later independently added graph (legacy=%s)", legacy => {
+    const original: FhirDosage = { text: "Swallow 1 tablet whole", timing: {
+      repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day },
+    } };
+    const source = fresh(original);
+    // Exact unmarked first save from the previously validated public build.
+    const oldRows: FhirDosage[] = JSON.parse("[{\"text\":\"Swallow 1 tablet whole\",\"timing\":{\"repeat\":{\"frequency\":1,\"period\":1,\"periodUnit\":\"d\"}},\"sequence\":1,\"extension\":[{\"url\":\"urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction\",\"extension\":[{\"url\":\"instruction\",\"valueString\":\"Swallow 1 tablet whole\"},{\"url\":\"row\",\"extension\":[{\"url\":\"projectionFingerprint\",\"valueString\":\"clinical-v2:45821bc262703c09\"},{\"url\":\"textFingerprint\",\"valueString\":\"2dcd50ba8eb8a909\"}]}]}]}]");
+    let rows = legacy ? oldRows : fresh(toFhirR5Dosages(toDosageDetails([source])));
+    const warning = parseSig("Do not crush").fhir[0].extension!.find(item => item.url === graph)!;
+    rows[0].extension = [...(rows[0].extension ?? []), fresh(warning)];
+    for (let save = 0; save < 3; save++) {
+      const text = formatSig(rows, "long", options);
+      expect(text).toContain("Swallow 1 tablet whole");
+      expect(text).toContain("Do not crush");
+      expect(text.match(/Swallow 1 tablet whole/gu)).toHaveLength(1);
+      rows = fresh(toFhirR5Dosages(toDosageDetails(rows)));
+    }
+    expect(source).toEqual(original);
+  });
+
+  it("retires annotated old agreement while preserving its metadata on a text replacement", () => {
+    let current = fresh(parseSig("Do not crush").fhirNext);
+    const component = current.step![0].component[0];
+    const baseline = component.extension!.find(item => item.url === marker)!;
+    baseline.id = "authored-baseline-note";
+    baseline.extension!.find(item => item.url === "textFingerprint")!.id = "authored-text-note";
+    component.text = "Swallow 1 tablet whole";
+    for (let save = 0; save < 3; save++) {
+      const before = fresh(current);
+      current = fresh(courseToR6(courseFromR6(current)));
+      expect(before.step![0].component[0].text).toBe("Swallow 1 tablet whole");
+      const active = current.step![0].component[0].extension!.filter(item => item.url === marker);
+      expect(active).toHaveLength(1);
+      expect(active[0].extension).toContainEqual({ url: "sourceAgreement", valueBoolean: false });
+      expect(JSON.stringify(current)).toContain("authored-baseline-note");
+      expect(JSON.stringify(current)).toContain("authored-text-note");
+      const text = formatSig(current, "long", options);
+      expect(text).toContain("Swallow 1 tablet whole");
+      expect(text).toContain("Do not crush");
+    }
+  });
+
+  it("does not use component agreement to suppress a different authored course header", () => {
+    const current = fresh(parseSig("Do not crush").fhirNext);
+    current.renderedInstruction = "Swallow 1 tablet whole";
+    const text = formatSig(current, "long", options);
+    expect(text).toContain("Swallow 1 tablet whole");
+    expect(text).toContain("Do not crush");
+  });
+});
