@@ -6901,22 +6901,29 @@ describe("round76 partial-event selectors and supply qualifications", () => {
 
   it.each([false, true])("keeps qualified-cap supply policy while resolving a finite phase completion (event=%s)", event => {
     const member: CanonicalAdministration = { ...dose(),
-      schedule: event ? { explicitEvents: ["2026-01-01T09:00:00Z"], recurrence: { count: 1 } }
-        : { recurrence: { count: 1, clocks: ["09:00:00"] } },
+      schedule: event ? { explicitEvents: ["2026-01-01T09:00:00Z", "2026-01-01T17:00:00Z"], recurrence: { count: 2 } }
+        : { recurrence: { count: 2, frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["09:00:00", "17:00:00"] } },
       limits: [{ scope: "period", amount: { value: 1, unit: "tab" },
         period: { value: 24, unit: "h", comparator: "<=", id: "authored-cap-period" } }],
     };
     const scalar = supply(member, 1);
-    expect(scalar).toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "maximum" });
+    expect(scalar).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
     expect(scalar.explanation).toContain("could not be applied");
+    const exact = freshExecutionInput(member);
+    delete exact.limits![0].period!.comparator;
+    expect(supply(exact, 1)).toMatchObject({ totalUnits: 1, unit: "tab" });
     const course: CanonicalCourse = { kind: "course", stages: [{
       start: relative(0), end: relative(1), administrations: [member],
     }] };
     for (const input of versions(course)) {
       const before = JSON.stringify(input);
       const result = calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day });
-      expect(result).toMatchObject({ totalUnits: 1, unit: "tab", quantityKind: "maximum" });
+      expect(result).toMatchObject({ totalUnits: 2, unit: "tab", quantityKind: "maximum" });
       expect(result.explanation).toContain("could not be applied");
+      const exactCourse = importCanonicalCourse(freshExecutionInput(input));
+      delete exactCourse.stages[0].administrations[0].limits![0].period!.comparator;
+      expect(calculateTotalUnits({ dosage: exactCourse, ...options, durationValue: 1, durationUnit: Unit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
       expect(() => nextDueDoses(input, { ...options, limit: 1 })).toThrow(/unresolved inequality/u);
       expect(importCanonicalCourse(input).stages[0].administrations[0].limits?.[0].period)
         .toMatchObject({ value: 24, unit: "h", comparator: "<=", id: "authored-cap-period" });

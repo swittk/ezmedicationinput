@@ -1900,7 +1900,7 @@ describe("round74 same-day dated clock replacement", () => {
     const input = { step: [
       { component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }],
         timing: { repeat: { boundsPeriod: { start: "2026-12-05", end: "2026-12-05T12:00:00Z" },
-          frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "20:00:00"] } } }] },
+          frequency: 3, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00", "14:00:00", "20:00:00"] } } }] },
       { component: [{ doseAndRate: [{ doseQuantity: { value: 2, unit: "drop" } }],
         timing: { repeat: { boundsPeriod: { start: "2026-12-05" },
           frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["18:00:00"] } } }] }

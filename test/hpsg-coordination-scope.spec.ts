@@ -1734,24 +1734,28 @@ describe("round76 shared recurrence antecedents", () => {
 
 describe("round76 timing-reference clock compatibility", () => {
   it.each([
-    { frequency: 3, words: "three times daily", afterwards: "" },
-    { frequency: 3, words: "three times daily", afterwards: " afterwards" },
-    { frequency: 2, words: "twice daily", afterwards: " afterwards" },
-  ])("keeps current cadence authoritative before inheriting clock anchors ($frequency/$afterwards)", ({ frequency, words, afterwards }) => {
-    const source = "Take 1 tablet at 08:00 and 20:00 for 3 days, then 2 tablets " + words + " at the same times" + afterwards;
+    { frequency: 3, words: "three times daily", afterwards: "", clocks: ["08:00", "20:00"] },
+    { frequency: 3, words: "three times daily", afterwards: " afterwards", clocks: ["08:00", "20:00"] },
+    { frequency: 2, words: "twice daily", afterwards: " afterwards", clocks: ["07:30", "21:30"] },
+  ])("keeps current cadence authoritative before inheriting clock anchors ($frequency/$afterwards)", ({ frequency, words, afterwards, clocks }) => {
+    const source = "Take 1 tablet at " + clocks.join(" and ") + " for 3 days, then 2 tablets " + words + " at the same times" + afterwards;
     const parsed = parsePublicSig(source);
     const schedule = parsed.meta.canonical.clauses[1].schedule!;
     expect(schedule.frequency).toBe(frequency);
-    expect(schedule.timeOfDay).toEqual(frequency === 2 ? ["08:00:00", "20:00:00"] : undefined);
+    expect(schedule.timeOfDay).toEqual(frequency === 2 ? clocks.map(clock => clock + ":00") : undefined);
     expect(schedule.timingReference).toBe(frequency === 2 ? undefined : "previous");
     if (afterwards) expect(schedule.evidence?.some(item => item.rule === "hpsg.lex.schedule.trailing-phase-relation" &&
       item.scheduleFields === undefined)).toBe(true);
-    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-04T00:00:00Z", timeZone: "UTC", limit: frequency,
-      config: { frequencyDefaultsByCode: { BID: ["08:00", "20:00"], TID: ["08:00", "14:00", "20:00"] } } };
+    const config: NextDueDoseConfig = { frequencyDefaults: {
+      byCode: { BID: ["09:00", "17:00"], TID: ["07:00", "13:00", "19:00"] },
+    } };
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-04T00:00:00Z", timeZone: "UTC", limit: frequency, config };
     for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
       JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
       const before = JSON.stringify(input);
-      expect(nextDueDoses(input, query)).toEqual((frequency === 2 ? ["08:00", "20:00"] : ["08:00", "14:00", "20:00"])
+      expect(importCanonicalCourse(input).stages[1].administrations[0].schedule?.recurrence?.clocks)
+        .toEqual(frequency === 2 ? clocks.map(clock => clock + ":00") : undefined);
+      expect(nextDueDoses(input, query)).toEqual((frequency === 2 ? clocks : ["07:00", "13:00", "19:00"])
         .map(clock => "2026-12-04T" + clock + ":00+00:00"));
       expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(frequency * 2);
       expect(JSON.stringify(input)).toBe(before);

@@ -3999,7 +3999,10 @@ describe("round69 selected infusion head and sequential durations", () => {
       expect(clause.schedule?.count).toBeUndefined();
     }
     const compactDaily = parsePublicSig("Take 3 mg/day for 3 days, then 2 mg/day for 3 days");
-    // An unsupported compact daily-total expression cannot license an infusion.
+    // Compact daily totals remain opaque rather than licensing an infusion or
+    // invented per-administration amounts; retain the authored bound and text.
+    expect(compactDaily.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 3, durationUnit: "d" });
+    expect(compactDaily.fhir[0].text).toBe("Take 3 mg/day for 3 days, then 2 mg/day for 3 days");
     for (const clause of compactDaily.meta.canonical.clauses) {
       expect(clause.clinicalQuantity?.representation).not.toBe("rate-quantity");
       expect(clause.schedule?.administrationDuration).toBeUndefined();

@@ -3298,21 +3298,21 @@ describe("PR14 round 29 execution semantics", () => {
         "2027-01-01T08:00:00+00:00", "2027-01-02T08:00:00+00:00", "2027-01-03T08:00:00+00:00",
       ]);
       expect(calculateTotalUnits({ dosage, ...options,
-        durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+        durationValue: 1, durationUnit: FhirPeriodUnit.Day })).toMatchObject({ totalUnits: 2, unit: "drop" });
     }
     expect(JSON.stringify(course)).toBe(original);
     const uncapped = JSON.parse(original) as FhirR6DosageInstruction;
     delete uncapped.step[0].component[0].safety;
     uncapped.step[0].component[0].timing = { repeat: { count: 1 } };
     for (const dosage of representations(uncapped))
-      expect(calculateTotalUnits({ dosage, ...supplyOptions }).totalUnits).toBe(2);
+      expect(calculateTotalUnits({ dosage, ...supplyOptions })).toMatchObject({ totalUnits: 2, unit: "drop" });
 
     const metric = JSON.parse(JSON.stringify(uncapped)) as FhirR6DosageInstruction;
     metric.step[0].component[0].doseAndRate = [{
       doseQuantity: { value: 1, system: "http://unitsofmeasure.org", code: "mL" }
     }];
     for (const dosage of representations(metric))
-      expect(calculateTotalUnits({ dosage, ...supplyOptions }).totalUnits).toBe(1);
+      expect(calculateTotalUnits({ dosage, ...supplyOptions })).toMatchObject({ totalUnits: 1, unit: "mL" });
   });
 
   it("keeps concrete coded cadence separate from the maximum-frequency supply plan", () => {

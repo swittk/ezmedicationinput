@@ -324,6 +324,8 @@ describe("shared timing article roles", () => {
       expect(schedule.when).toBeUndefined();
       expect(schedule.treatmentStartOffsetDays).toBeUndefined();
       expect(ended.fhir[0].timing!.repeat!.boundsPeriod).toBeUndefined();
+      expect(ended.meta.canonical.course!.stages[0].administrations[0].phaseEnd)
+        .toMatchObject({ anchor: "unresolved", description: `until ${article} next morning` });
       expect(JSON.stringify(ended.fhir[0])).toContain(`until ${article} next morning`);
     }
     // The indefinite quantity determiner has different semantics: it supplies one.
