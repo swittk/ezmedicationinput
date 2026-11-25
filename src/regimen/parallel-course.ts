@@ -1,7 +1,7 @@
 import { projectNativeR5Course } from "../adapters/r5-course";
 import { fromDosageDetails } from '../dosage-course';
 import { type FhirProjectionOptions } from '../fhir';
-import { courseFromParallel } from '../canonical/compile';
+import { courseFromParallel, precedingCalendarDay, orderedCalendarBounds } from '../canonical/compile';
 import { projectFreshlyCompiledCourseToR6 } from '../adapters/canonical-course';
 import { compareRegimenPositions, type CanonicalCourse, type CanonicalBoundary, type RegimenPosition } from '../canonical/course';
 import type { HpsgSigSegment } from '../hpsg/segmenter';
@@ -69,27 +69,6 @@ type ParallelProjection =
     };
 
 const ZERO: RegimenPosition = { unit: 'd', value: 0 };
-
-/** Calendar tracks use explicit dates; not offsets from treatment start. */
-function precedingCalendarDay(value: string): string | undefined {
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
-  const date = new Date(`${value}T00:00:00Z`);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-    return undefined;
-  }
-  date.setUTCDate(date.getUTCDate() - 1);
-  return date.toISOString().slice(0, 10);
-}
-
-/** Dates without times are inclusive local calendar days, never UTC timestamps. */
-function orderedCalendarBounds(earlier: string, later: string): boolean {
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/u;
-  if (dateOnly.test(earlier) && dateOnly.test(later)) return earlier < later;
-  if (dateOnly.test(earlier) || dateOnly.test(later)) return false;
-  const left = Date.parse(earlier);
-  const right = Date.parse(later);
-  return Number.isFinite(left) && Number.isFinite(right) && left < right;
-}
 
 function durationPosition(clause: CanonicalSigClause): RegimenPosition | undefined {
   const schedule = clause.schedule;
@@ -162,18 +141,20 @@ function calendarPhaseMembers(
     const durationEnd = anchoredScheduleDurationEnd(schedule);
     const durationCutsEarlier = Boolean(durationEnd && schedule.boundsEnd &&
       durationEnd < schedule.boundsEnd);
-    // Authored dates are already finite. A previous-day cutoff is needed
-    // only for an open recurrence, not another event on the successor's day.
+    // An authored date list keeps its events. Recurrences stop before their
+    // replacement starts, including when their authored duration ends later.
     const explicitEvents = Boolean(schedule.calendarEvents?.length);
-    const effectiveEnd = durationCutsEarlier ? durationEnd :
-      schedule.boundsEnd ?? (explicitEvents ? undefined : inferredEnd);
+    const authoredEnd = durationCutsEarlier ? durationEnd : schedule.boundsEnd;
+    const nextPhaseCutsEarlier = !explicitEvents && inferredEnd &&
+      (!authoredEnd || orderedCalendarBounds(inferredEnd, authoredEnd));
+    const effectiveEnd = nextPhaseCutsEarlier ? inferredEnd : authoredEnd;
     if ((nextStart && (effectiveEnd ? !orderedCalendarBounds(effectiveEnd, nextStart) : !explicitEvents)) ||
         (effectiveEnd && schedule.boundsStart && orderedCalendarBounds(effectiveEnd, schedule.boundsStart)))
       return 'parallel-regimen-calendar-phase-overlap';
     normalized.push(!effectiveEnd || effectiveEnd === schedule.boundsEnd ? item : {
       ...item,
       effectiveBoundsEnd: effectiveEnd,
-      boundsEndBasis: durationCutsEarlier ? 'anchored-duration' : 'next-phase-start'
+      boundsEndBasis: nextPhaseCutsEarlier ? 'next-phase-start' : 'anchored-duration'
     });
   }
   return normalized;

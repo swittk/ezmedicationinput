@@ -650,7 +650,8 @@ function buildWholeCourseResult(
   // The established editable R5 persistence contract is an OUTPUT adapter.
   // Neither canonical course construction nor native execution consumes it.
   const typedSteps = !parallel && canonical.stages.some(stage => stage.start || stage.end || stage.count !== undefined ||
-    stage.administrations.some(a => a.phaseStart || a.phaseEnd || a.phaseOrigin));
+    stage.administrations.some(a => a.phaseStart || a.phaseEnd || a.phaseOrigin ||
+      a.schedule?.recurrence?.calendarWindow?.end !== a.syntax?.schedule?.boundsEnd));
   const courseProjection = typedRepeatCycle || typedSteps || parallel
     ? projectNativeR5Course(canonical, {
       bodySitePostcoordination:options?.bodySitePostcoordination,

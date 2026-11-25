@@ -1826,3 +1826,31 @@ describe("round56: explicit NEXT daughter with its own dose", () => {
     ]);
   });
 });
+
+
+describe("round72 dated replacement keeps its authored predecessor length", () => {
+  it.each([[false, 2], [false, 7], [true, 2], [true, 7]] as const)("cuts the same-eye recurrence before a dated replacement (independent track %s, duration %s)", (independent, duration) => {
+    const source = `Instill 1 drop OD QID starting 2026-12-01 for ${duration} days, then starting 2026-12-05 instill 2 drops OD BID` +
+      (independent ? "; instill 1 drop OS BID" : "");
+    const parsed = parseSig(source), native = parsed.meta.canonical.course!;
+    const before = JSON.stringify(parsed);
+    const predecessor = native.stages.flatMap(stage => stage.administrations)
+      .find(member => member.target?.text === "right eye" && member.amounts?.[0].quantity?.value === 1)!;
+    expect(predecessor.schedule?.recurrence?.calendarWindow).toEqual({ start: "2026-12-01", end: duration === 7 ? "2026-12-04" : "2026-12-02" });
+    expect(predecessor.anchoredLength?.quantity).toEqual({ value: duration, unit: "d" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.duration).toBe(duration);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-05T00:00:00Z", timeZone: "UTC",
+      limit: independent ? 4 : 2 };
+    for (const dosage of [parsed, native, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      expect(nextDueDoses(dosage, query)).toEqual(independent ? [
+        "2026-12-05T08:00:00+00:00", "2026-12-05T08:00:00+00:00",
+        "2026-12-05T20:00:00+00:00", "2026-12-05T20:00:00+00:00"
+      ] : ["2026-12-05T08:00:00+00:00", "2026-12-05T20:00:00+00:00"]);
+      expect(calculateTotalUnits({ ...query, dosage, durationValue: 1, durationUnit: "d" }).totalUnits).toBe(independent ? 6 : 4);
+      expect(calculateTotalUnits({ ...query, from: "2026-12-04T00:00:00Z", dosage, durationValue: 1, durationUnit: "d" })
+        .totalUnits).toBe((duration === 7 ? 4 : 0) + (independent ? 2 : 0));
+    }
+    expect(JSON.stringify(parsed)).toBe(before);
+  });
+});

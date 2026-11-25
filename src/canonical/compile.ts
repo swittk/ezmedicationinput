@@ -242,6 +242,27 @@ export function administrationFromClause(
     })),
   };
 }
+/** Calendar tracks use explicit dates; not offsets from treatment start. */
+export function precedingCalendarDay(value: string): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return undefined;
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+    return undefined;
+  }
+  date.setUTCDate(date.getUTCDate() - 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Dates without times are inclusive local calendar days, never UTC timestamps. */
+export function orderedCalendarBounds(earlier: string, later: string): boolean {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/u;
+  if (dateOnly.test(earlier) && dateOnly.test(later)) return earlier < later;
+  if (dateOnly.test(earlier) || dateOnly.test(later)) return false;
+  const left = Date.parse(earlier);
+  const right = Date.parse(later);
+  return Number.isFinite(left) && Number.isFinite(right) && left < right;
+}
+
 export function clinicalBoundary(
   position: RegimenPosition | { value: number; unit: string }
 ): CanonicalBoundary {
@@ -738,6 +759,33 @@ export function courseFromAdministrations(
       })
         ? clinicalBoundary({ value: length.value, unit: length.code ?? length.unit! })
         : undefined;
+    // These stage ordinals already encode the selected sequential relation.
+    // A dated replacement closes only the preceding stage's recurrences;
+    // authored event lists and the original duration retain their owners.
+    const previous = stages[stages.length - 1];
+    if (previous) {
+      let nextStart: string | undefined;
+      for (const administration of administrations) {
+        const timing = administration.schedule;
+        const candidate = timing?.recurrence?.calendarWindow?.start;
+        if (candidate && (nextStart === undefined || candidate < nextStart)) nextStart = candidate;
+        if (!candidate) for (const event of timing?.explicitEvents ?? [])
+          if (nextStart === undefined || event < nextStart) nextStart = event;
+      }
+      const cutoff = nextStart ? precedingCalendarDay(nextStart) : undefined;
+      if (cutoff) previous.administrations = previous.administrations.map(administration => {
+        const timing = administration.schedule, recurrence = timing?.recurrence;
+        const window = recurrence?.calendarWindow;
+        if (!recurrence || timing?.explicitEvents?.length ||
+            window?.end && !orderedCalendarBounds(cutoff, window.end) ||
+            window?.start && orderedCalendarBounds(cutoff, window.start)) return administration;
+        return { ...administration,
+          anchoredLength: administration.anchoredLength ?? (recurrence.courseLength || recurrence.courseLengthRange
+            ? { quantity: recurrence.courseLength, range: recurrence.courseLengthRange } : undefined),
+          schedule: { ...timing, recurrence: { ...recurrence, calendarWindow: { ...window, end: cutoff },
+            courseLength: undefined, courseLengthRange: undefined } } };
+      });
+    }
     stages.push({
       administrations,
       ...(start ? { start } : {}),
