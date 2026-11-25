@@ -65,6 +65,7 @@ import {
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
+  MAXIMUM_COUNT_LEAD_TOKENS,
   PRN_LEADS,
   RANGE_CONNECTORS,
   ROUTE_SITE_PREPOSITIONS,
@@ -2231,6 +2232,11 @@ function actionTailIsRegimenModifier(
   const localAmountUnit = definition?.acceptsAmount && previousValue
     ? instructionQuantityUnitAt(parts, index, parts.length, options)
     : undefined;
+  // A delimited nominal maximum is a regimen adjunct after the completed
+  // dose-bearing preparation. Comparator phrases still belong to their own
+  // amount or material argument unless the grammar proves a complete cap.
+  if (!negatedAction && definition?.definesDose && previous &&
+      /^[,;:]$/u.test(previous.original.trim()) && MAXIMUM_COUNT_LEAD_TOKENS.has(token)) return true;
   const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
     WORD_FREQUENCIES[token] ||

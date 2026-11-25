@@ -7569,3 +7569,59 @@ describe("round67 relation Coding follows current action linkage", () => {
     expect(marker).toEqual(before);
   });
 });
+
+
+describe("round68 preparation quantities beside independent clinical limits", () => {
+  it.each(["maximum", "max"])("keeps the delimited %s outside the material on fresh dose edits", lead => {
+    const source = "Dissolve 2 tablets in 100 mL water, " + lead +
+      " 4 tablets per day, then drink daily only if systolic BP > 160";
+    const parsed = parsePublicSig(source, { context: { dosageForm: "effervescent tablet" } });
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 2, unit: "tab" });
+    expect(clause.schedule?.maxDosePerPeriod).toEqual([{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]);
+    const graph = clause.instructionGraph!, owner = graph.primaryOwnership!.dose!;
+    expect(graph.actions[owner.actionIndex].args[owner.argumentIndex].quantity).toMatchObject({ value: 2, unit: "tab" });
+    expect(graph.actions[owner.actionIndex].args.find(arg => arg.role === AdviceArgumentRole.Substance))
+      .toMatchObject({ text: "100 mL water", quantity: { value: 100, unit: "mL" } });
+    const original = JSON.stringify([parsed.fhir, parsed.fhirNext]);
+    const rows: FhirDosage[] = JSON.parse(JSON.stringify(parsed.fhir));
+    const r6: FhirR6DosageInstruction = JSON.parse(JSON.stringify(parsed.fhirNext));
+    rows[0].doseAndRate![0].doseQuantity!.value = 3;
+    r6.step![0].component[0].doseAndRate![0].doseQuantity!.value = 3;
+    for (const input of [rows, r6]) {
+      const before = JSON.stringify(input);
+      const current = Array.isArray(input) ? input : toFhirR5Dosages(input);
+      expect(current[0].maxDosePerPeriod).toEqual([expect.objectContaining({
+        numerator: expect.objectContaining({ value: 4, unit: "tab" }),
+        denominator: expect.objectContaining({ value: 1, unit: "d" })
+      })]);
+      expect(getDosageCondition(current[0])).toMatchObject({ kind: "measurement", value: 160 });
+      for (const realizationMode of ["normalized", "roundtrip"] as const)
+        for (const locale of ["en", "th"] as const) {
+          const text = formatSig(input, "long", { locale, realizationMode });
+          expect(text.match(locale === "en" ? /(?:^|[^0-9.])3 tablets?(?![a-z])/gu : /(?:^|[^0-9.])3 เม็ด/gu)).toHaveLength(1);
+          expect(text).not.toMatch(locale === "en" ? /(?:^|[^0-9.])2 tablets?(?![a-z])/u : /(?:^|[^0-9.])2 เม็ด/u);
+          expect(text.match(locale === "en" ? /100 mL/gu : /100 มิลลิลิตร/gu)).toHaveLength(1);
+          expect(text.match(/160/gu)).toHaveLength(1);
+          expect(text).toContain("4 tab / 1 d");
+        }
+      expect(JSON.stringify(input)).toBe(before);
+    }
+    expect(JSON.stringify([parsed.fhir, parsed.fhirNext])).toBe(original);
+  });
+
+  it.each([
+    ["Dissolve at most 2 tablets in 100 mL water, then drink daily", "<=", undefined],
+    ["Dissolve 2 tablets in water, up to 100 mL, then drink daily", undefined, "<="]
+  ] as const)("keeps comparator quantities on their owned dose or material: %s", (source, doseComparator, materialComparator) => {
+    const parsed = parsePublicSig(source), clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toEqual({ value: 2, unit: "tab", ...(doseComparator ? { comparator: doseComparator } : {}) });
+    expect(clause.schedule?.maxDosePerPeriod).toBeUndefined();
+    const material = clause.instructionGraph!.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Substance)!;
+    expect(material.quantity).toEqual({ value: 100, unit: "mL", ...(materialComparator ? { comparator: materialComparator } : {}) });
+    const text = formatSig(parsed.meta.canonical.course, "long", { locale: "en", realizationMode: "normalized" });
+    expect(text).toContain(doseComparator ? "at most 2 tablets" : "2 tablets");
+    expect(text).toContain(materialComparator ? "at most 100 mL" : "100 mL");
+  });
+});
