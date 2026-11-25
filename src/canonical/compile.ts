@@ -209,8 +209,8 @@ export function administrationFromClause(
       ? {
           recurrence,
           ...(s.timingCode ? { code: timingCode && FHIR_GTS_TIMING_CODES.has(timingCode)
-            ? { text: s.timingCode, coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: timingCode }] }
-            : { text: s.timingCode } } : {}),
+            ? { text: s.timingText ?? s.timingCode, coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: timingCode }] }
+            : { text: s.timingText ?? s.timingCode } } : {}),
           ...(s.calendarEvents?.length
             ? {
                 explicitEvents: s.calendarEvents.map((event) => event.fhirDateTime ?? event.isoDate),
@@ -567,6 +567,7 @@ export function clauseForAdministration(a: CanonicalAdministration, options?: Pa
     schedule.maxDosePerPeriod=limits;
     const timingCode = preferredTimingCoding(a.schedule)?.code;
     schedule.timingCode=timingCode??a.schedule.code?.text;
+    schedule.timingText=timingCode ? a.schedule.code?.text : undefined;
     result.schedule=schedule;
   }else result.schedule=undefined;
   result.clinicalAdjuncts=Object.assign({},base?.clinicalAdjuncts,{condition:a.predicate,

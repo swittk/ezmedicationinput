@@ -1949,8 +1949,8 @@ export function serializeCanonicalSchedule(
     // falsely attaching an HL7 standard identity to non-standard codes.
     dosage.timing.code = FHIR_GTS_TIMING_CODES.has(normalizedCode)
       ? { coding: [{ system: FHIR_GTS_TIMING_SYSTEM, code: normalizedCode }],
-          text: schedule.timingCode }
-      : { text: schedule.timingCode };
+          text: schedule.timingText ?? schedule.timingCode }
+      : { text: schedule.timingText ?? schedule.timingCode };
   }
 
   return dosage;
@@ -2307,6 +2307,7 @@ export function canonicalFromFhir(dosage: FhirDosage, options?: ParseOptions): C
       cycleDayConstraint,
       administrationOffsetMinutes,
       timingCode,
+      timingText: timingCode ? dosage.timing?.code?.text : undefined,
       count: repeat?.count,
       countMax: repeat?.countMax,
       duration: timingBounds.duration,
@@ -2403,6 +2404,7 @@ export function parserStateFromFhir(dosage: FhirDosage, options?: ParseOptions):
     };
   }
   state.timingCode = timingCodeFromFhir(dosage);
+  if (state.timingCode) state.primaryClause.schedule!.timingText = dosage.timing?.code?.text;
   state.count = dosage.timing?.repeat?.count;
   state.countMax = dosage.timing?.repeat?.countMax;
   state.duration = timingBounds.duration;

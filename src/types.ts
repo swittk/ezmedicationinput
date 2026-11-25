@@ -1823,6 +1823,8 @@ export interface CanonicalScheduleExpr {
   /** Elapsed delay from each opportunity in this explicitly retained base schedule. */
   administrationOffsetMinutes?: number;
   timingCode?: string;
+  /** Independent authored Timing.code.text, separate from the cadence code. */
+  timingText?: string;
   count?: number;
   countMax?: number;
   duration?: number;

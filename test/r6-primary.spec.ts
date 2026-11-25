@@ -7303,3 +7303,52 @@ describe("round58 compact timing-code cadence controls", () => {
     expect(toDosageDetails(toFhirR5Dosages(r6)).step![0].component[0].timing?.code?.text).toBe(code);
   });
 });
+
+
+describe("round62 independent timing concept text", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const timingFor = (text: string, frequency = 2) => ({
+    code: { text, coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "WK" }] },
+    repeat: { frequency, period: 1, periodUnit: FhirPeriodUnit.Week },
+  });
+  it.each(["after dialysis", "WK"])("retains independent %s beside current weekly cadence", text => {
+    const timing = timingFor(text);
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing };
+    const input: FhirR6DosageInstruction = { step: [{ component: [row] }] };
+    const before = fresh(input);
+    const rows = fresh(toFhirR5Dosages(input));
+    const reopened = fresh(toDosageDetails(rows));
+    for (const [label, value] of [["R5", row], ["R6", input], ["R5 save", rows], ["R6 reopened", reopened]] as const) {
+      const native = importCanonicalCourse(value);
+      expect(native.stages[0].administrations[0].schedule?.code).toEqual(timing.code);
+      expect(native.stages[0].administrations[0].schedule?.recurrence).toMatchObject(timing.repeat);
+      for (const locale of ["en", "th"]) for (const style of ["short", "long"] as const) {
+        for (const [api, rendered] of [
+          ["direct", formatSig(value, style, { locale, realizationMode: "normalized" })],
+          ["native", formatCanonicalCourse(native, style, { locale, realizationMode: "normalized" })],
+        ]) {
+          expect(rendered).toContain(locale === "th" ? "สัปดาห์ละ 2 ครั้ง" : style === "short" ? "2x/1wk" : "twice weekly");
+          if (text === "after dialysis") {
+            expect(rendered, `${label}/${api}/${locale}/${style}`).toContain(text);
+            expect(rendered.match(/after dialysis/gu)).toHaveLength(1);
+          }
+          else expect(rendered).not.toContain("WK");
+        }
+      }
+    }
+    expect(canonicalToFhir(canonicalFromFhir(row)).timing).toEqual(timing);
+    expect(parserStateToFhir(parserStateFromFhir(row)).timing).toEqual(timing);
+    expect(rows[0].timing).toEqual(timing);
+    expect(reopened.step![0].component[0].timing).toEqual(timing);
+    expect(fresh(fromFhir(input).fhirNext).step![0].component[0].timing).toEqual(timing);
+    expect(input).toEqual(before);
+  });
+  it("keeps a matching cadence code beside an independent short-preview label", () => {
+    const input: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: timingFor("after dialysis", 1),
+    }] }] };
+    expect(formatSig(input, "short", { locale: "en", realizationMode: "normalized" }))
+      .toBe("1 tab WK after dialysis");
+  });
+});

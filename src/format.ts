@@ -1251,7 +1251,9 @@ export function timingCodeMatchesRecurrence(
 
 function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string {
   const schedule = scheduleOf(clause);
-  const timingText = independentTimingText(schedule.timingCode, schedule);
+  const codeText = independentTimingText(schedule.timingCode, schedule);
+  const timingText = schedule.timingText === undefined ? codeText
+    : independentTimingText(schedule.timingText, schedule);
   const parts: string[] = [];
   const dosePart = formatDoseShort(clause.dose);
   if (dosePart) {
@@ -1277,7 +1279,7 @@ function formatShort(clause: CanonicalSigClause, words: CourseLanguage): string 
     parts.push(describeFrequency(schedule, words)!);
   } else if (hasDailyRecurrenceAcrossClocks(schedule)) {
     parts.push("daily");
-  } else if (schedule.timingCode && !timingText && timingCodeMatchesRecurrence(schedule)) {
+  } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (
     schedule.frequency === undefined && schedule.frequencyMax !== undefined &&
@@ -1458,7 +1460,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
     standaloneOccurrenceCount ??
     describeFrequencyCount(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrases(schedule, options);
-  const timingText = independentTimingText(schedule.timingCode, schedule);
+  const timingText = independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowEnglish(schedule, words);
   let clockPart: string | undefined;

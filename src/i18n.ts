@@ -2181,10 +2181,12 @@ function formatShortThai(clause: CanonicalSigClause, words: CourseLanguage = THA
     if (site) parts.push(site);
   }
   const timing = describeFrequencyThai(schedule, words);
-  const timingText = independentTimingText(schedule.timingCode, schedule);
+  const codeText = independentTimingText(schedule.timingCode, schedule);
+  const timingText = schedule.timingText === undefined ? codeText
+    : independentTimingText(schedule.timingText, schedule);
   if (timing) {
     parts.push(timing);
-  } else if (schedule.timingCode && !timingText && timingCodeMatchesRecurrence(schedule)) {
+  } else if (schedule.timingCode && !codeText && timingCodeMatchesRecurrence(schedule)) {
     parts.push(schedule.timingCode);
   } else if (schedule.period && schedule.periodUnit &&
       !(schedule.periodUnit === FhirPeriodUnit.Month && schedule.frequency === undefined &&
@@ -2381,7 +2383,7 @@ function formatLongThai(
     standaloneOccurrenceCount ??
     describeFrequencyCountThai(inferDailyOccurrenceCount(schedule, options));
   const eventParts = alternateEventCadence ? [] : collectWhenPhrasesThai(schedule, options);
-  const timingText = independentTimingText(schedule.timingCode, schedule);
+  const timingText = independentTimingText(schedule.timingText ?? schedule.timingCode, schedule);
   if (timingText) eventParts.push(timingText);
   const eventWindowPart = describeEventWindowThai(schedule, words);
   let clockPart: string | undefined;

@@ -158,7 +158,7 @@ type ScheduleFeatureGroup = keyof typeof SCHEDULE_FEATURE_GROUPS;
  */
 const SCHEDULE_FEATURE_GROUPS = {
   recurrence: [
-    'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
+    'timingCode', 'timingText', 'count', 'countMax', 'frequency', 'frequencyMax',
     'period', 'periodMax', 'periodUnit', 'dayOfWeek', 'dayOfMonth', 'timeOfDay',
     'occurrenceCap', 'maxDosePerPeriod', 'eventWindow', 'clockWindow', 'weekdayOrdinal'
   ],
@@ -192,7 +192,7 @@ const COORDINATED_ANCHOR_CONTEXT_FIELDS = [
   'dayOfWeek', 'dayOfMonth', 'weekdayOrdinal', 'calendarEvents', 'cycleDayConstraint'
 ] as const satisfies readonly ScheduleSemanticField[];
 const NON_ANCHOR_SCHEDULE_FIELDS = [
-  'timingCode', 'count', 'countMax', 'frequency', 'frequencyMax',
+  'timingCode', 'timingText', 'count', 'countMax', 'frequency', 'frequencyMax',
   'period', 'periodMax', 'periodUnit', 'offset', 'offsetMin', 'offsetMax',
   'activityTiming', 'eventWindow', 'clockWindow', 'occurrenceCap', 'maxDosePerPeriod', 'administrationOffsetMinutes',
   'timingReference', 'treatmentStartOffsetDays', 'phaseStartReference', 'repeatCycle', 'repeatCount'
