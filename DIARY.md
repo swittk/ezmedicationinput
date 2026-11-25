@@ -15979,3 +15979,32 @@ Validation passed 8,384 source tests, configured strict TypeScript, the build,
 and four distribution tests. Eighteen representative and affected paired
 workloads passed with equivalent work and no meaningful regression above 4%.
 The changed-path count remains 100. Detailed review dispositions remain separate.
+
+
+## 2026-11-25 — Shared direction ownership and calendar boundaries
+
+Current structured facts own directions while independent original wording and
+unknown annotations survive import and export. Partial administration methods,
+qualitative amounts and ancillary advice share the existing ownership rules.
+Current translated identifiers and reordered instructions retain their identity;
+source-less duration bounds remain distinct from carrier durations.
+
+Selected action heads retain their own material quantities, multiple temporal
+constraints and meal or bedtime relationships. Preparation, route and duration
+arguments remain attached to the owning action. Thai weekday behavior and
+locale-owned wording remain intact. Registered callbacks retain their declared
+receiver, including private class state.
+
+Scheduling and supply share single-cycle prior-count ownership, finite recurrence
+origins and independent clock bounds. Same-day dated replacements preserve
+authored boundaries and predecessor links. The first daylight-saving fold uses
+the existing previous-day seed. Unsupported rate ranges retain their complete
+phrase without becoming exact scalar amounts.
+
+Validation passed 8,493 source tests, including the configured strict TypeScript
+gate, the build and four distribution tests. Twenty representative and affected
+paired cases plus a focused action-parsing measurement preserve equivalent work.
+All meaningful workflows meet the 4% regression limit. The standalone graph
+encoder adds about 1.2 microseconds; complete action parsing improves by 9.8%,
+which supports accepting that small absolute codec cost. The changed-path count
+remains 100. Detailed review dispositions remain separate.
