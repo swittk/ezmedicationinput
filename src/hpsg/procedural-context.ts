@@ -3,7 +3,6 @@ import {
 } from "../instruction-graph";
 import { AdviceArgumentRole, AdvicePolarity, EventTiming, type AdviceFrame } from "../types";
 import { EVENT_TIMING_TOKENS } from "../maps";
-import { getMedicationInstructionAction } from "../instruction-action-terminology";
 import { ACTION_SEQUENCE_RELATION_SURFACES, relationHasGrammarFeature, relationHasSemanticClass, resolveActionRelationSurface } from "../relation-terminology";
 import { medicationGuardForContext, normalizeTokenLower, parseClockToken, type HpsgClauseContext } from "./rule-context";
 import { LexKind } from "../lexer/token-types";
@@ -181,7 +180,7 @@ function isFixedClockMealCounsel(
   return context.tokens.some((token, index) => token.sourceEnd <= boundary && isClock(index) &&
     !frames.some(owner => {
       if (owner.span.start > token.sourceStart || owner.span.end < token.sourceEnd) return false;
-      const definition = getMedicationInstructionAction(owner.predicate.lemma, context.options);
+      const definition = frameActionDefinition(owner, context.options);
       return definition?.procedural && !definition.primaryAdministrationHead;
     }));
 }
@@ -221,9 +220,7 @@ export function sourceRangeAttachmentClass(
       if (!nearest || frame.span.end > nearest.span.end) nearest = frame;
     }
     if (nearest) {
-      const definition = getMedicationInstructionAction(
-        nearest.predicate.lemma, context.options
-      );
+      const definition = frameActionDefinition(nearest, context.options);
       if (nearest.polarity === AdvicePolarity.Negate ||
           (definition?.procedural && !definition.primaryAdministrationHead)) {
         return "procedure";
@@ -243,7 +240,7 @@ export function sourceRangeAttachmentClass(
     if (frame === enclosing || frame.span.start >= enclosing.span.start || frame.polarity === AdvicePolarity.Negate) {
       return false;
     }
-    const priorDefinition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+    const priorDefinition = frameActionDefinition(frame, context.options);
     return Boolean(
       priorDefinition && (
         !priorDefinition.procedural ||
@@ -263,12 +260,12 @@ export function sourceRangeAttachmentClass(
       .filter((frame) => frame.span.end <= enclosing.span.start && frame.polarity !== AdvicePolarity.Negate)
       .sort((left, right) => left.span.end - right.span.end);
     const retention = priorFrames.slice().reverse().find((frame) =>
-      getMedicationInstructionAction(frame.predicate.lemma, context.options)?.semanticClass === "retain"
+      frameActionDefinition(frame, context.options)?.semanticClass === "retain"
     );
     if (retention) {
       const administrationBeforeRetention = priorFrames.some((frame) => {
         if (frame.span.end > retention.span.start) return false;
-        const priorDefinition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+        const priorDefinition = frameActionDefinition(frame, context.options);
         return Boolean(priorDefinition && (
           !priorDefinition.procedural || priorDefinition.primaryAdministrationHead
         ));

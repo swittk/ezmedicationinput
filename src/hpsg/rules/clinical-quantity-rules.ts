@@ -218,8 +218,15 @@ function hasAdministrationCue(context: HpsgClauseContext, before: number, allowP
         DOSE_NUMBER_WORDS.has(lower) || DOSE_FRACTION_WORDS.has(lower)) &&
         // Only a medication amount owns the cue. Product strengths (0.9 %)
         // and route determiners (via a peripheral IV) are not earlier doses.
-        directDoseUnitAfter(context, index + 1))
+        directDoseUnitAfter(context, index + 1)) {
       precedingAmount = true;
+    } else if (token.kind === LexKind.Word) {
+      // Compact doses own the same numeric argument, including a qualifier
+      // attached to that numeral. Reuse the bounded lexical quantity readers.
+      const rawUnit = attachedNumberUnitAt(lower)?.rawUnit ??
+        doseComparatorNumberAt(context.tokens, index, before, lower)?.rawUnit;
+      if (rawUnit && normalizeUnit(rawUnit, context.options)) precedingAmount = true;
+    }
   }
   return false;
 }

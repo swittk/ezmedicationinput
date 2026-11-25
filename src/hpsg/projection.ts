@@ -4,6 +4,7 @@ import { EVENT_TIMING_TOKENS } from "../maps";
 import { ParserState, Token } from "../parser-state";
 import {
   EventTiming,
+  FhirPeriodUnit,
   FhirDayOfWeek,
   FhirDosage,
   RouteCode,
@@ -268,15 +269,14 @@ function cloneSiteRestrictions(
   }));
 }
 
-function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, clockSlotsRepeat = true): boolean {
+function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, positionsRepeat = true): boolean {
   return Boolean(schedule && (
     schedule.frequency !== undefined ||
     schedule.frequencyMax !== undefined ||
     schedule.period !== undefined ||
     schedule.periodMax !== undefined ||
     schedule.dayOfWeek?.length ||
-    schedule.when?.length ||
-    clockSlotsRepeat && schedule.timeOfDay?.length ||
+    positionsRepeat && (schedule.when?.length || schedule.timeOfDay?.length) ||
     schedule.dayOfMonth?.length ||
     schedule.calendarEvents?.length ||
     schedule.weekdayOrdinal !== undefined ||
@@ -626,14 +626,23 @@ export function projectHpsgSignToState(
       schedule.count === undefined && schedule.countMax === undefined &&
       schedule.frequency === undefined && schedule.frequencyMax === undefined &&
       schedule.period === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
-      !schedule.timingCode && !schedule.timingReference && !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
+      !schedule.timingCode && (!schedule.timingReference || schedule.timingReference === "previous") &&
+      !schedule.dayOfWeek?.length && !schedule.dayOfMonth?.length &&
       !schedule.calendarEvents?.length && schedule.weekdayOrdinal === undefined &&
       !schedule.cycleDayConstraint && !schedule.repeatCycle && !schedule.activityTiming?.length &&
       schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
       !schedule.boundsEnd && sign.evidence.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) {
     // A PRN onset locates eligibility; it does not prescribe one lifetime use.
-    if (!state.asNeeded)
-      state.count = dividedCount ?? Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+    if (!state.asNeeded) {
+      if (schedule.timingReference === "previous") {
+        // The timing anaphor resolves its positions during regimen composition.
+        // NEXT owns one civil day without guessing a lifetime count beforehand.
+        state.duration = 1;
+        state.durationUnit = FhirPeriodUnit.Day;
+      } else {
+        state.count = dividedCount ?? Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
+      }
+    }
   }
 
   const clinicalDuration = dose?.attachmentClass !== "procedure"

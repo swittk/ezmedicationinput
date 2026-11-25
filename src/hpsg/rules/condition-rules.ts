@@ -681,12 +681,14 @@ export function calendarExclusionLexicalRule(): HpsgLexicalRule<HpsgClauseContex
   });
 }
 
-function isSafetyTarget(context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number]): boolean {
+function isSafetyTarget(
+  context: HpsgClauseContext, frame: ReturnType<typeof getProceduralFrames>[number],
+  selected: ReturnType<typeof frameActionDefinition>
+): boolean {
   if (frame.polarity === AdvicePolarity.Negate) return true;
   // Selected identity owns code collisions; unresolved lexical frames can
   // still carry a surface rather than a saved predicate code.
-  const definition = frameActionDefinition(frame, context.options) ??
-    resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
+  const definition = selected ?? resolveMedicationInstructionAction(frame.predicate.lemma, context.options);
   return definition?.safetyScopeTarget === true;
 }
 
@@ -694,7 +696,7 @@ function isScopeTarget(context: HpsgClauseContext, frame: ReturnType<typeof getP
   const definition = frameActionDefinition(frame, context.options);
   return Boolean(
     definition?.procedural || isConditionalAdviceFrame(context, frame) ||
-    isSafetyTarget(context, frame)
+    isSafetyTarget(context, frame, definition)
   );
 }
 
@@ -790,7 +792,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       const conditionEnd = Math.max(...tokens.map((token) => token.sourceEnd));
       const text = context.state.input.slice(lead.sourceStart, conditionEnd).trim();
       const fullText = context.state.input.slice(lead.sourceStart, targetEnd).trim();
-      const safety = program.some((frame) => isScopeTarget(context, frame) && isSafetyTarget(context, frame));
+      const safety = program.some((frame) => frame.polarity === AdvicePolarity.Negate ||
+        isSafetyTarget(context, frame, frameActionDefinition(frame, context.options)));
       const sourceRange = { start: lead.sourceStart, end: conditionEnd };
       const withheld = withholdingAdjunct(context, sourceRange, program);
       return [lexicalSign({
@@ -835,7 +838,8 @@ export function conditionLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
     const sourceEnd = Math.max(...tokens.map((token) => token.sourceEnd));
     const text = context.state.input.slice(lead.sourceStart, sourceEnd).trim();
     const fullText = context.state.input.slice(previous.span.start, sourceEnd).trim();
-    const safety = isSafetyTarget(context, previous);
+    const safety = previous.polarity === AdvicePolarity.Negate ||
+      isSafetyTarget(context, previous, frameActionDefinition(previous, context.options));
     const sourceRange = { start: lead.sourceStart, end: sourceEnd };
     const withheld = withholdingAdjunct(context, sourceRange, [previous]);
     return [lexicalSign({

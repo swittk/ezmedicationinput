@@ -741,6 +741,9 @@ describe('HPSG coordination cadence scope', () => {
       expect(item.meta.canonical.clauses[0].schedule).toMatchObject({ countMax: 3, period: 5, periodUnit: 'min'
       });
       expect(item.fhir.timing?.repeat?.count).toBeUndefined();
+      expect(item.fhir.timing?.repeat?._count).toEqual({ extension: [{
+        url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown'
+      }] });
       expect(item.fhir.timing?.repeat).toMatchObject({ countMax: 3, period: 5, periodUnit: 'min'
       });
       expect(item.longText).toContain('for up to 3 doses');
@@ -866,6 +869,9 @@ describe('HPSG coordination cadence scope', () => {
       }).every(instant => instant >= '2026-11-01')).toBe(true);
     } else {
       expect(fhir.timing?.repeat?.count).toBeUndefined();
+      expect(fhir.timing?.repeat?._count).toEqual({ extension: [{
+        url: 'http://hl7.org/fhir/StructureDefinition/data-absent-reason', valueCode: 'unknown'
+      }] });
       expect(fhir.timing?.repeat?.countMax).toBe(expected);
     }
   });

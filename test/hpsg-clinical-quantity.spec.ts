@@ -3585,10 +3585,15 @@ describe("round58 qualified rate ownership and Thai unit aliases", () => {
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 500, unit: "mL" });
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
     expect(parsed.meta.leftoverText).toBe("not more than 1000 units/hr");
-    for (const dose of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]]) {
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(1);
+    for (const dose of [...parsed.fhir, ...parsed.fhirNext.step[0].component]) {
       expect(dose.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
-      expect(dose.doseAndRate?.[0].rateQuantity).toBeUndefined();
-      expect(dose.doseAndRate?.[0].rateRatio).toBeUndefined();
+      for (const amount of dose.doseAndRate ?? []) {
+        expect(amount.rateQuantity).toBeUndefined();
+        expect(amount.rateRatio).toBeUndefined();
+      }
       expect(JSON.stringify(dose)).toContain("not more than 1000 units/hr");
     }
   });
@@ -3667,5 +3672,106 @@ describe("round60 divided ranges beside independent infusion rates", () => {
     const scalar = parsePublicSig("Infuse 100 mL daily in 2 divided doses at 30 mL/hr");
     expect(scalar.meta.canonical.course!.stages[0].administrations[0].amounts)
       .toMatchObject([{ quantity: { value: 50, unit: "mL" }, rate: { value: 30, unit: "mL/h" } }]);
+  });
+});
+
+describe("round63 local timing and quantity ownership", () => {
+  it.each([
+    ["Take 1 tablet at 8 AM in the morning and at bedtime every day", [EventTiming["Before Sleep"]], ["08:00", "22:00"]],
+    ["Take 1 tablet at 8 AM and in the morning and at bedtime every day", [EventTiming.Morning, EventTiming["Before Sleep"]], ["08:00", "09:00", "22:00"]]
+  ] as const)("keeps only independently authored positions: %s", (source, events, clocks) => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.when).toEqual(events);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", limit: clocks.length * 2, eventClock: { MORN: "09:00", HS: "22:00" } };
+    const expected = [1, 2].flatMap(day => clocks.map(clock => `2026-12-0${day}T${clock}:00+00:00`));
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))])
+      expect(nextDueDoses(input, query)).toEqual(expected);
+  });
+
+  it.each([false, true])("keeps finite event-anchored divisions distinct from daily divisions (%s)", daily => {
+    const parsed = parsePublicSig("Infuse 100 mL at 30 mL/hr" + (daily ? " daily" : "") +
+      " in 2 divided doses in the morning and at bedtime");
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.dose).toMatchObject({ value: 50, unit: "mL" });
+    expect(clause.clinicalQuantity?.dividedDoseCount).toBe(2);
+    expect(clause.schedule?.count).toBe(daily ? undefined : 2);
+    expect(clause.schedule?.when).toEqual([EventTiming.Morning, EventTiming["Before Sleep"]]);
+    const query = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z",
+      timeZone: "UTC", limit: 5, eventClock: { MORN: "09:00", HS: "22:00" } };
+    const expected = ["2026-12-01T09:00:00+00:00", "2026-12-01T22:00:00+00:00",
+      ...(daily ? ["2026-12-02T09:00:00+00:00", "2026-12-02T22:00:00+00:00", "2026-12-03T09:00:00+00:00"] : [])];
+    for (const input of [parsed, parsed.meta.canonical.course!, parsed.fhirNext, JSON.parse(JSON.stringify(parsed.fhir))]) {
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 3, durationUnit: "d" }))
+        .toMatchObject({ totalUnits: daily ? 300 : 100, unit: "mL" });
+    }
+  });
+
+  it.each(["~500mL", "about 500 mL", "500mL"])("keeps a later source-only limit independent of the %s dose", amount => {
+    const parsed = parsePublicSig("Infuse " + amount + ", not more than 1000 units/hr");
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 500, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    expect(parsed.meta.leftoverText).toBe("not more than 1000 units/hr");
+    expect(parsed.fhir).toHaveLength(1);
+    expect(parsed.fhirNext.step).toHaveLength(1);
+    expect(parsed.fhirNext.step[0].component).toHaveLength(1);
+    for (const row of [...parsed.fhir, ...parsed.fhirNext.step[0].component]) {
+      for (const dose of row.doseAndRate ?? []) {
+        expect(dose.rateQuantity).toBeUndefined();
+        expect(dose.rateRatio).toBeUndefined();
+      }
+      expect(JSON.stringify(row)).toContain("not more than 1000 units/hr");
+    }
+    const licensed = parsePublicSig("Infuse " + amount + " at approximately 1000 units/hr");
+    expect(licensed.meta.canonical.clauses[0].clinicalQuantity?.numerator)
+      .toMatchObject({ value: 1000, unit: "[iU]", comparator: "~" });
+  });
+
+  it.each(["up to 3 doses", "for 3 doses"])("keeps a capped successor separate from its loading phase: %s", count => {
+    const parsed = parsePublicSig("Take 1 tablet daily for 3 days, then 2 tablets " + count);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses.map(clause => clause.dose?.value)).toEqual([1, 2]);
+    const [first, second] = parsed.meta.canonical.clauses;
+    expect(first.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d", duration: 3, durationUnit: "d" });
+    expect(first.schedule?.count).toBeUndefined();
+    expect(first.schedule?.countMax).toBeUndefined();
+    expect(second.schedule?.count).toBe(count.startsWith("up") ? undefined : 3);
+    expect(second.schedule?.countMax).toBe(count.startsWith("up") ? 3 : undefined);
+    expect(parsed.fhir.map(row => row.doseAndRate?.[0].doseQuantity?.value)).toEqual([1, 2]);
+    expect(parsed.fhirNext.step).toHaveLength(2);
+  });
+
+  it("keeps a built-in procedural action's immediate modifier under a custom code collision", () => {
+    const options: ParseOptions = { instructionActionMap: { flush: { code: "rinse", procedural: false, display: "Flush" } } };
+    for (const supplied of [undefined, options]) {
+      const parsed = parsePublicSig("Apply 1 g cream daily; rinse immediately", supplied);
+      expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(parsed.meta.canonical.clauses[0].schedule?.when).toBeUndefined();
+      expect(parsed.fhir[0].timing?.repeat?.when).toBeUndefined();
+    }
+    const immediate = parsePublicSig("Infuse 1 mL immediately", options);
+    expect(immediate.meta.canonical.clauses[0].schedule?.when).toContain(EventTiming.Immediate);
+  });
+});
+
+describe("round63 inherited next-day positions", () => {
+  it.each([false, true])("keeps an inherited clock list within its authored day unless recurrence is explicit (%s)", daily => {
+    const parsed = parsePublicSig("Take 1 tablet at 8 AM and 8 PM for 3 days, then take 2 tablets the next day" +
+      (daily ? " at 8 AM and 8 PM every day" : " at the same times"));
+    const schedule = parsed.meta.canonical.clauses[1].schedule!;
+    expect(schedule.phaseStartReference).toBe("previous-phase-next-day");
+    expect(schedule.timeOfDay).toEqual(["08:00:00", "20:00:00"]);
+    expect(schedule.count).toBeUndefined();
+    expect(schedule.duration).toBe(daily ? undefined : 1);
+    expect(schedule.durationUnit).toBe(daily ? undefined : "d");
+    const query = { orderedAt: "2026-11-01T00:00:00Z", from: "2026-11-01T00:00:00Z",
+      timeZone: "UTC", limit: 9 };
+    const due = nextDueDoses(parsed, query);
+    expect(due).toHaveLength(daily ? 9 : 8);
+    expect(due[7]).toBe("2026-11-04T20:00:00+00:00");
+    if (daily) expect(due[8]).toBe("2026-11-05T08:00:00+00:00");
+    expect(calculateTotalUnits({ dosage: parsed, ...query, durationValue: 5, durationUnit: "d" }).totalUnits)
+      .toBe(daily ? 14 : 10);
   });
 });

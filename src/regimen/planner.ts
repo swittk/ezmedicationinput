@@ -438,7 +438,7 @@ class EvidenceContext {
       method: Boolean(c.method?.coding?.code || c.method?.text),
       hasSchedule: Boolean(s && (s.frequency !== undefined || s.frequencyMax !== undefined || s.period !== undefined ||
         s.periodMax !== undefined || s.duration !== undefined || s.durationMax !== undefined || s.boundsStart !== undefined ||
-        s.boundsEnd !== undefined || s.count !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
+        s.boundsEnd !== undefined || s.count !== undefined || s.countMax !== undefined || s.timingCode || s.dayOfWeek?.length || s.when?.length ||
         s.timeOfDay?.length || s.calendarEvents?.length || s.timingReference !== undefined ||
         s.administrationOffsetMinutes !== undefined)),
       hasRecurringCadence: Boolean(s && (s.timingCode || s.frequency !== undefined || s.period !== undefined || s.dayOfWeek?.length)),

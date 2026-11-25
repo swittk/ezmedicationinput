@@ -1089,24 +1089,35 @@ function fixedClockEventAdjunctSynsem(
     return false;
   };
   const mealQualification = meal.when.every(isMeal);
-  const daypartQualification = meal.offset === undefined && meal.offsetMin === undefined &&
-    meal.offsetMax === undefined && meal.when.every(event => {
+  let qualifiedDayparts: Set<EventTiming> | undefined;
+  if (meal.offset === undefined && meal.offsetMin === undefined && meal.offsetMax === undefined) {
+    for (const event of meal.when) {
       const range = DOSE_TARGET_DAYPART_CLOCK_RANGES.get(event);
-      // Other authored clocks remain independent; one matching clock owns
-      // this daypart qualifier without adding a configured event occurrence.
-      return range && clock.timeOfDay!.some(value => {
+      // A matching clock owns only its daypart qualifier. Other coordinated
+      // events, such as bedtime, retain their independent occurrences.
+      if (range && clock.timeOfDay.some(value => {
         const hour = Number(value.slice(0, 2));
         return hour >= range.startHour && hour < range.endHour;
-      });
-    });
+      })) (qualifiedDayparts ??= new Set()).add(event);
+    }
+  }
+  const daypartQualification = Boolean(qualifiedDayparts?.size);
   if (!mealQualification && !daypartQualification) return undefined;
   const tokensFor = (sign: HpsgSign, field: "when" | "timeOfDay") => {
     const indices = new Set<number>();
+    let qualifyingIndices: Set<number> | undefined;
+    if (field === "when" && qualifiedDayparts) {
+      qualifyingIndices = new Set();
+      for (const token of sign.tokens)
+        if (qualifiedDayparts.has(EVENT_TIMING_TOKENS[token.canonical ?? token.lower]))
+          qualifyingIndices.add(token.index);
+    }
     for (const item of sign.evidence) {
       // A refined NEXT daypart still owns its onset tokens, not the
       // remaining meal modifier or a coordinator between them.
       if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields ||
           field === "when" && mealSynsem !== mealSign.synsem && item.rule === NEXT_DAY_SCHEDULE_RULE) continue;
+      if (qualifyingIndices && !item.tokenIndices.some(index => qualifyingIndices!.has(index))) continue;
       for (const index of item.tokenIndices) indices.add(index);
     }
     return sign.tokens.filter(token => indices.has(token.index));
