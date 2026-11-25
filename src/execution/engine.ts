@@ -7030,7 +7030,7 @@ function calculateTotalUnitsSingle(
     if ((rangePlan?.caps ?? executableQuantityCaps(dosage, context)).length < suppliedPeriodLimits)
       unevaluatedMaximumDose = true;
   }
-  const hasPartialR6Safety = Boolean((dosage as CanonicalAdministration).safety);
+  const hasSafetyPolicy = Boolean(dosage.safety);
   const unresolvedOneTimeActivity = Boolean(
     dosage.schedule?.recurrence &&
       isSingleAdministrationRepeat(dosage.schedule.recurrence) &&
@@ -7050,7 +7050,7 @@ function calculateTotalUnitsSingle(
     doseForLimits?.comparator === "<" || doseForLimits?.comparator === "<=" ||
     lifetimeMaximum !== undefined ||
     unevaluatedMaximumDose ||
-    hasPartialR6Safety ||
+    hasSafetyPolicy ||
     unresolvedOneTimeActivity;
   const orderedAtDate = options.orderedAt === undefined ? null : coerceDate(options.orderedAt, "orderedAt");
   const eventClock: EventClockMap = {
@@ -7360,10 +7360,12 @@ function calculateTotalUnitsSingle(
     );
   if (unevaluatedMaximumDose)
     maximumExplanations.push("an unevaluable maximum-dose constraint was retained but could not be applied");
-  if (hasPartialR6Safety)
+  if (hasUnevaluatedSafety(dosage.safety))
     maximumExplanations.push(
       "R6 safety details not expressible as numeric calendar limits were retained but not evaluated"
     );
+  else if (dosage.safety?.maximaDeclared)
+    maximumExplanations.push("the course retains declared maximum-dose limits");
   if (unresolvedOneTimeActivity)
     maximumExplanations.push(
       "the activity trigger has no known timestamp; a one-time dose is only a maximum supply estimate, not a scheduled administration"
@@ -7976,14 +7978,29 @@ function calculateCourseTotalUnits(
   if (assumptions.length) result.explanation = [result.explanation, ...assumptions].filter(Boolean).join(" ");
   return qualifyCourseSupply(course, result);
 }
+/** Declared numeric maxima keep their existing upper-supply policy without
+ * claiming that their separately owned limits were not evaluated. */
+function hasUnevaluatedSafety(safety: CanonicalAdministration["safety"]): boolean {
+  return Boolean(safety && (safety.maximaDeclared !== true || safety.ifExceeded !== undefined ||
+    safety.requiresReview || safety.limits?.length));
+}
 function qualifyCourseSupply(course: CanonicalCourse, result: TotalUnitsResult): TotalUnitsResult {
-  const hasPartialSafety =
-    Boolean(course.safety) ||
-    course.stages.some(
-      (step) =>
-        Boolean(step.safety) || step.administrations.some((component) => Boolean(component.safety))
-    );
-  if (!hasPartialSafety) return result;
+  let hasSafety = Boolean(course.safety);
+  let hasPartialSafety = hasUnevaluatedSafety(course.safety);
+  if (!hasPartialSafety) for (const step of course.stages) {
+    if (step.safety) {
+      hasSafety = true;
+      if (hasUnevaluatedSafety(step.safety)) { hasPartialSafety = true; break; }
+    }
+    for (const component of step.administrations) {
+      if (!component.safety) continue;
+      hasSafety = true;
+      if (hasUnevaluatedSafety(component.safety)) { hasPartialSafety = true; break; }
+    }
+    if (hasPartialSafety) break;
+  }
+  if (!hasPartialSafety)
+    return hasSafety && result.quantityKind !== "maximum" ? { ...result, quantityKind: "maximum" } : result;
   const note = "R6 safety details that are not numeric calendar limits were retained but not evaluated.";
   return {
     ...result,

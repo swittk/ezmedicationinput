@@ -463,7 +463,8 @@ export function safetyFromWire(
   safety: FhirR6DosageSafety | undefined,
   includeLimits = false
 ): CanonicalSafety | undefined {
-  if (!safety || !includeLimits && onlyOwnedMemberQuantityLimits(safety)) return undefined;
+  if (!safety) return undefined;
+  if (!includeLimits && onlyOwnedMemberQuantityLimits(safety)) return { maximaDeclared: true };
   return {
     ...(safety.ifExceeded !== undefined ? { ifExceeded: safety.ifExceeded } : {}),
     ...(includeLimits && safety.doseLimit

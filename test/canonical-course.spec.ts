@@ -3544,17 +3544,18 @@ describe("round68 numeric member safety qualification", () => {
   it.each([
     { strength: "20 mg/mL" },
     { strengthRatio: { numerator: quantity(20, "mg"), denominator: quantity(1, "mL") } },
-  ])("keeps exact counted liquid supply scheduled with numeric safety only (%j)", context => {
+  ])("keeps numeric maximum accounting without an unevaluated-safety warning (%j)", context => {
     const source = liquidCourse(), before = fresh(source);
     for (const dosage of views(source)) {
       const original = fresh(dosage);
       expect(calculateTotalUnits({ dosage, ...query, context }))
-        .toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "scheduled" });
+        .toMatchObject({ totalUnits: 16, unit: "mL", quantityKind: "maximum" });
       expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, durationValue: 1, context }))
-        .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "scheduled" });
+        .toMatchObject({ totalUnits: 10, unit: "mL", quantityKind: "maximum" });
       expect(calculateTotalUnits({ dosage: fresh(dosage), ...query, from: "2026-12-02T00:00:00Z",
         durationValue: 1, context }))
-        .toMatchObject({ totalUnits: 6, unit: "mL", quantityKind: "scheduled" });
+        .toMatchObject({ totalUnits: 6, unit: "mL", quantityKind: "maximum" });
+      expect(calculateTotalUnits({ dosage, ...query, context }).explanation).not.toContain("not evaluated");
       const saved = toDosageDetails(savedRows(dosage)).step[0].component[0];
       expect(saved.safety).toEqual(source.step[0].component[0].safety);
       expect(saved.extension).toContainEqual(source.step[0].component[0].extension![0]);

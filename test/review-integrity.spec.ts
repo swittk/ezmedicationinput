@@ -931,7 +931,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       ...supply, dosage: toDosageDetails([lifetime])
     })).toMatchObject({
       totalUnits: 10, unit: "tab", quantityKind: "maximum",
-      explanation: expect.stringMatching(/R6 safety details.*retained/i)
+      explanation: expect.stringMatching(/full lifetime maximum.*no prior administrations/i)
     });
   });
 
