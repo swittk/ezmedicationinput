@@ -1045,7 +1045,11 @@ describe("review 26 external display ownership", () => {
       expect(text).toContain("10 mL");
     }
     row.text = "Clinician replacement instruction: maximum 10 mL";
-    expect(formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" })).toBe(row.text);
+    const currentSource = structuredClone(row);
+    const replay = formatSig(structuredClone(row), "long", { realizationMode: "roundtrip" });
+    expect(replay).toBe(row.text + "; max per administration: 10 mL");
+    expect(replay).not.toContain("5 mL/h");
+    expect(fromFhirDosage(structuredClone(row)).fhir).toEqual(currentSource);
     const normalized = formatSig(structuredClone(row), "long", { realizationMode: "normalized" });
     expect(formatSig(structuredClone(row), "long")).toBe(normalized);
     expect(normalized).toContain("10 mL");

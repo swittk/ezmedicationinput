@@ -611,7 +611,7 @@ function formatCanonicalBase(
   if (authoredDirectionsOnly) {
     const advice = a.additionalInstructions?.length || a.patientInstruction
       ? formatCanonicalClause(compiled ?? clauseForAdministration(a, options), style, env.localization, options) : "";
-    return appendDoseLimits(joinGeneratedClauses([a.text!, advice]), a.limits, words, undefined, a.safety?.ifExceeded);
+    return appendDoseLimits(joinGeneratedClauses([a.text!, advice].filter(Boolean)), a.limits, words, undefined, a.safety?.ifExceeded);
   }
   const primary = a.amounts?.[0];
   const maxima = Boolean(a.limits?.length);
