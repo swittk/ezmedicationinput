@@ -21,7 +21,9 @@ export function registerMedicationSurfaceSegmenter(segmenter: MedicationSurfaceS
   normalized.script = script.global || script.sticky
     ? new RegExp(script.source, script.flags.replace(/[gy]/g, "")) : script;
   const prototype = Object.getPrototypeOf(segmenter);
-  if (prototype !== Object.prototype && prototype !== null) {
+  // An ordinary descriptor's prototype is its realm's root Object prototype.
+  // It must receive the normalized script even when created in another realm.
+  if (prototype !== null && Object.getPrototypeOf(prototype) !== null) {
     normalized.locale = segmenter.locale;
     // Class callbacks retain their private receiver regardless of placement.
     normalized.segment = segmenter.segment.bind(segmenter);

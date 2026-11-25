@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { THAI_COURSE } from "../src/locales/course/th";
 import { ENGLISH_COURSE } from "../src/locales/course/en";
 import { withDosageEditProvenance, encodeR6SourceMetadata, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
@@ -5805,13 +5806,18 @@ describe("round62 review: typed grammar and partial display facts", () => {
     expect(JSON.stringify(amount)).toContain("[iU]");
   });
 
-  it("retains a non-enumerable plain segment callback on its normalized receiver", () => {
-    const provider: MedicationSurfaceSegmenter = { locale: "round62-descriptor", script: /[ⴵⴶ]/gyu,
-      *segment(input) {
-        expect(this.script.global).toBe(false);
-        expect(this.script.sticky).toBe(false);
-        for (let index = 0; index < input.length; index++) yield { segment: input[index], index };
-      } };
+  it.each(["local", "second realm"] as const)(
+    "retains a non-enumerable plain segment callback on its normalized receiver (%s)", realm => {
+    const provider: MedicationSurfaceSegmenter = realm === "local"
+      ? { locale: "round62-descriptor", script: /[ⴵⴶ]/gyu,
+        *segment(input) {
+          expect(this.script.global).toBe(false);
+          expect(this.script.sticky).toBe(false);
+          for (let index = 0; index < input.length; index++) yield { segment: input[index], index };
+        } }
+      : runInNewContext("({ locale: 'round62-descriptor', script: /[ⴵⴶ]/gyu, " +
+        "*segment(input) { for (let index = 0; index < input.length; index++) " +
+        "if (this.script.test(input[index])) yield { segment: input[index], index }; } })");
     Object.defineProperty(provider, "segment", { value: provider.segment, enumerable: false });
     registerMedicationSurfaceSegmenter(provider);
     const stored = listMedicationSurfaceSegmenters().find(item => item.locale === provider.locale)!;
