@@ -1654,7 +1654,12 @@ describe("round71 prepared successor without an authored cadence", () => {
         expect(text).toMatch(locale === "en"
           ? /dissolve 2 tablets in 60 mL water/iu : /ละลาย\s*2 เม็ดในน้ำ 60 มิลลิลิตร/u);
         expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(2);
-        expect(text.match(locale === "en" ? /once daily/gu : /วันละครั้ง/gu)).toHaveLength(1);
+        const cadence = locale === "en" ? "once daily" : "วันละครั้ง";
+        const firstDose = text.indexOf(locale === "en" ? "1 tablet" : "1 เม็ด");
+        const secondDose = text.indexOf(locale === "en" ? "2 tablets" : "2 เม็ด");
+        expect(text.slice(firstDose, secondDose)).toContain(cadence);
+        expect(text.slice(secondDose)).not.toContain(cadence);
+        expect(text.split(cadence)).toHaveLength(2);
       }
       expect(JSON.stringify(input)).toBe(before);
     }

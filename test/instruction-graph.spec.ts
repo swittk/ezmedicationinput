@@ -7993,14 +7993,19 @@ describe("round73 registered Time beside an oral procedure duration", () => {
       requests.push(request.sourceText);
       if (request.sourceText !== source) return undefined;
       return { actions: [{ action: "rinse_mouth", range: { start: 0, end: source.length }, args: [
-        { role: AdviceArgumentRole.Amount, range: { start: 10, end: 28 }, quantity: { value: 15, unit: "mL" } },
-        { role: AdviceArgumentRole.Duration, range: { start: 29, end: 43 }, quantity: { value: 30, unit: "s" } },
-        ...(timed ? [{ role: AdviceArgumentRole.Time, range: { start: 44, end: source.length }, concept: "bedtime" }] : [])
+        { role: AdviceArgumentRole.Amount, range: { start: 10, end: 29 }, quantity: { value: 15, unit: "mL" } },
+        { role: AdviceArgumentRole.Duration, range: { start: 30, end: 44 }, quantity: { value: 30, unit: "s" } },
+        ...(timed ? [{ role: AdviceArgumentRole.Time, range: { start: 45, end: source.length }, concept: "bedtime" }] : [])
       ] }] };
     } });
     expect(requests).toContain(source);
     const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
     expect(frame.predicate.realizer).toBe("amount-duration");
+    for (const [role, phrase] of [[AdviceArgumentRole.Amount, "fifteen millilitres"],
+      [AdviceArgumentRole.Duration, "thirty seconds"], ...(timed ? [[AdviceArgumentRole.Time, "lights-out"]] : [])]) {
+      const range = frame.args.find(arg => arg.role === role)!.span!;
+      expect(source.slice(range.start, range.end)).toBe(phrase);
+    }
     expect(frame.args).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: AdviceArgumentRole.Amount, quantity: { value: 15, unit: "mL" } }),
       expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 30, unit: "s" } })
@@ -8136,6 +8141,8 @@ it("round74 retains distinct saved Time quantities with the same normalized unit
   const before = JSON.stringify(row), r6 = toDosageDetails([row]);
   for (const input of [[row], r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) for (const locale of ["en", "th"]) {
     const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+    for (const phrase of locale === "en" ? ["after 1 hour", "after 2 hours"] : ["หลัง1 ชั่วโมง", "หลัง2 ชั่วโมง"])
+      expect(text.split(phrase)).toHaveLength(2);
     expect(text.match(/[0-9]+/gu)).toEqual(["1", "2"]);
   }
   expect(JSON.stringify(row)).toBe(before);

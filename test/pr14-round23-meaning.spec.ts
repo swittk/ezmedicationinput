@@ -4806,7 +4806,11 @@ describe("round54: current unit identity and graph argument ownership", () => {
         ...parsed, sourceText: source, span: { start: 0, end: source.length },
         args: [parsed.args.find(arg => arg.role === AdviceArgumentRole.Amount)!, object]
       }] };
-      const row = rowForGraph(graph), expected = persist(parseInstructionGraphExtension(row.extension)!);
+      const row = rowForGraph(graph), decoded = parseInstructionGraphExtension(row.extension)!;
+      const accompaniment = decoded.actions[0].args.find(arg => arg.text === object.text)!;
+      expect(accompaniment.role).toBe(object.role);
+      expect(accompaniment.relation).toBe(object.relation);
+      const expected = persist(decoded);
       const saved = JSON.stringify(row), graphSaved = JSON.stringify(graph);
       const thai = kind === "unmarked-theme" ? "กลืนยา 1 เม็ด." : "กลืน 1 เม็ดร่วมกับแอปเปิลบด.";
       for (const input of graphViews(row)) {

@@ -3730,6 +3730,7 @@ describe("round63 local timing and quantity ownership", () => {
     expect(parsed.fhirNext.step).toHaveLength(1);
     expect(parsed.fhirNext.step[0].component).toHaveLength(1);
     for (const row of [...parsed.fhir, ...parsed.fhirNext.step[0].component]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 500, unit: "mL" });
       expectSimpleQuantityOperator(row.doseAndRate?.[0].doseQuantity, comparator);
       for (const dose of row.doseAndRate ?? []) {
         expect(dose.rateQuantity).toBeUndefined();
