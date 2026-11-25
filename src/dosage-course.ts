@@ -1565,6 +1565,13 @@ export function dosageMatchesSavedProjection(dosage: FhirDosage | EzDosage): boo
       return false;
     }
   }
+  // Older detached clock rows declared primary source ownership without a
+  // local clinical baseline. That declaration cannot verify replay against
+  // current clocks; retain the source while rendering the submitted fields.
+  if (getDosageSourceOwnership(dosage)?.clocks) {
+    SAVED_PROJECTION_MATCHES.set(dosage, false);
+    return false;
+  }
   return undefined;
 }
 

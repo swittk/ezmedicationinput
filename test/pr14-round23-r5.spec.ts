@@ -10933,6 +10933,212 @@ describe("round62 reviewed interchange ownership", () => {
     expect(row).toEqual(original);
   });
 
+  // Complete detached second row exported by parseSig at 3699b99, before
+  // clocked rows carried their own clinical projection fingerprint.
+  const historicalClockRow: FhirDosage = {
+    "extension": [
+      {
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-instruction-graph",
+        "extension": [
+          {"url": "sourceText", "valueString": "swallow 2 tablets slowly with water at 20:00"},
+          {"url": "sourceLocale", "valueCode": "en"},
+          {"url": "primaryAdministrationStart", "valueInteger": 0},
+          {"url": "primaryAdministrationEnd", "valueInteger": 7},
+          {
+            "url": "action",
+            "extension": [
+              {"url": "sequenceIndex", "valueInteger": 0},
+              {"url": "force", "valueCode": "sequence"},
+              {
+                "url": "relationCoding",
+                "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+              },
+              {"url": "predicateLemma", "valueString": "swallow"},
+              {"url": "predicateDisplay", "valueString": "Swallow"},
+              {"url": "semanticClass", "valueString": "ingest"},
+              {
+                "url": "predicateTranslation",
+                "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "กลืน"}]
+              },
+              {
+                "url": "predicateCoding",
+                "valueCoding": {"system": "http://snomed.info/sct", "code": "738995006", "display": "Swallow"}
+              },
+              {
+                "url": "predicateCoding",
+                "valueCoding": {
+                  "system": "http://snomed.info/sct",
+                  "code": "421521009",
+                  "display": "Swallow - dosing instruction imperative"
+                }
+              },
+              {"url": "spanStart", "valueInteger": 0},
+              {"url": "spanEnd", "valueInteger": 44},
+              {"url": "sourceText", "valueString": "swallow 2 tablets slowly with water at 20:00"},
+              {
+                "url": "argument",
+                "extension": [
+                  {"url": "role", "valueCode": "object"},
+                  {"url": "text", "valueString": "2 tablets slowly"},
+                  {"url": "normalized", "valueString": "2 tablets slowly"}
+                ]
+              },
+              {
+                "url": "argument",
+                "extension": [
+                  {"url": "role", "valueCode": "substance"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "421463005", "display": "With - dosing instruction fragment"}
+                  },
+                  {"url": "text", "valueString": "water"},
+                  {"url": "normalized", "valueString": "water"},
+                  {"url": "conceptId", "valueString": "water"},
+                  {
+                    "url": "coding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}
+                  },
+                  {
+                    "url": "argumentCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "11713004", "display": "Water"}
+                  },
+                  {
+                    "url": "translation",
+                    "extension": [{"url": "locale", "valueCode": "en"}, {"url": "text", "valueString": "water"}]
+                  },
+                  {
+                    "url": "translation",
+                    "extension": [{"url": "locale", "valueCode": "th"}, {"url": "text", "valueString": "น้ำ"}]
+                  }
+                ]
+              },
+              {
+                "url": "argument",
+                "extension": [
+                  {"url": "role", "valueCode": "time"},
+                  {
+                    "url": "relationCoding",
+                    "valueCoding": {"system": "http://snomed.info/sct", "code": "420862001", "display": "On"}
+                  },
+                  {"url": "text", "valueString": "20:00"},
+                  {"url": "normalized", "valueString": "20:00:00"},
+                  {"url": "spanStart", "valueInteger": 39},
+                  {"url": "spanEnd", "valueInteger": 44}
+                ]
+              },
+              {
+                "url": "argument",
+                "extension": [
+                  {"url": "role", "valueCode": "amount"},
+                  {"url": "text", "valueString": "2 tablets"},
+                  {"url": "normalized", "valueString": "tab"},
+                  {"url": "spanStart", "valueInteger": 8},
+                  {"url": "spanEnd", "valueInteger": 17},
+                  {
+                    "url": "quantity",
+                    "extension": [{"url": "value", "valueDecimal": 2}, {"url": "unit", "valueString": "tab"}]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "url": "coverage",
+            "extension": [
+              {"url": "understoodCharacters", "valueInteger": 44},
+              {"url": "opaqueCharacters", "valueInteger": 0},
+              {"url": "ratio", "valueDecimal": 1},
+              {"url": "complete", "valueBoolean": true}
+            ]
+          }
+        ]
+      },
+      {
+        "url": "urn:ezmedicationinput:StructureDefinition:medication-rendered-instruction",
+        "extension": [
+          {"url": "sourceAgreement", "valueBoolean": true},
+          {"url": "textFingerprint", "valueString": "2c1b7585d11b2d37"},
+          {"url": "sourceHasStructuredClocks", "valueBoolean": true},
+          {"url": "sourceHasStructuredEvents", "valueBoolean": false},
+          {"url": "sourceHasStructuredSite", "valueBoolean": false}
+        ]
+      }
+    ],
+    "route": {"text": "by mouth", "coding": [{"system": "http://snomed.info/sct", "code": "26643006", "display": "Oral route"}]},
+    "method": {
+      "text": "Swallow",
+      "_text": {
+        "extension": [
+          {
+            "url": "http://hl7.org/fhir/StructureDefinition/translation",
+            "extension": [{"url": "lang", "valueCode": "th"}, {"url": "content", "valueString": "กลืน"}]
+          }
+        ]
+      },
+      "coding": [
+        {
+          "system": "http://snomed.info/sct",
+          "code": "738995006",
+          "display": "Swallow",
+          "_display": {
+            "extension": [
+              {
+                "url": "http://hl7.org/fhir/StructureDefinition/translation",
+                "extension": [{"url": "lang", "valueCode": "th"}, {"url": "content", "valueString": "รับประทาน"}]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "timing": {"repeat": {"timeOfDay": ["20:00:00"]}},
+    "doseAndRate": [{"doseQuantity": {"value": 2, "unit": "tab", "system": "http://standardterms.edqm.eu", "code": "15054000"}}],
+    "text": "Swallow 2 tablets slowly on 20:00:00 with water at 8:00 pm."
+  };
+
+  it.each(["20:00:00", "22:00:00"])("uses current %s clocks from a historical detached R5 row", clock => {
+    const submitted = persist(historicalClockRow);
+    const clockAnnotation = { id: "current-clock", extension: [{ url: "https://example.test/clock-note", valueString: "retain clock note" }] };
+    const rowAnnotation = { url: "https://example.test/row-note", valueString: "retain row note" };
+    submitted.timing!.repeat!.timeOfDay = [clock];
+    submitted.timing!.repeat!._timeOfDay = [clockAnnotation];
+    submitted.extension!.push(rowAnnotation);
+    const original = persist(submitted);
+    const originalGraph = original.extension![0];
+    const expectedClock = clock === "20:00:00" ? /20:00|8:00 pm/u : /22:00|10:00 pm/u;
+    const otherClock = clock === "20:00:00" ? /22:00|10:00 pm/u : /20:00|8:00 pm/u;
+    let current = submitted;
+    for (let save = 0; save < 3; save++) {
+      const before = persist(current);
+      expect(dosageMatchesSavedProjection(current)).toBe(false);
+      if (save > 0) expect(getDosageSourceTextAgreement(current, false)).toBe(false);
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        const options = { locale: "en", realizationMode };
+        const imported = fromFhirDosage(current, options);
+        for (const preview of [formatSig(current, "long", options), imported.longText]) {
+          expect(preview).toMatch(/\b2 tablets\b/u);
+          expect(preview).toMatch(expectedClock);
+          expect(preview).not.toMatch(otherClock);
+          expect(preview).toContain("slowly");
+          expect(preview).toContain("water");
+        }
+        expect(imported.fhir).toEqual(before);
+      }
+      expect(current.timing!.repeat!.timeOfDay).toEqual([clock]);
+      expect(current.timing!.repeat!._timeOfDay).toEqual([clockAnnotation]);
+      expect(current.doseAndRate).toEqual([{
+        doseQuantity: { value: 2, unit: "tab", system: "http://standardterms.edqm.eu", code: "15054000" }
+      }]);
+      expect(current.extension).toContainEqual(originalGraph);
+      expect(current.extension).toContainEqual(rowAnnotation);
+      expect(current).toEqual(before);
+      current = save === 0
+        ? persist(toFhirR5Dosages([current]))[0]
+        : persist(toFhirR5Dosages(persist(toDosageDetails([current]))))[0];
+    }
+    expect(submitted).toEqual(original);
+  });
+
   it("keeps an independent numeric member origin after its predecessor is removed", () => {
     const source: FhirR6DosageInstruction = { step: [
       { id: "loading", component: [{ ...member("first", 1), timing: { repeat: { ...daily, count: 1 } } }] },
