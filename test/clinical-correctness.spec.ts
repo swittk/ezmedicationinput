@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FhirR6DosageInstruction } from "../src";
-import { formatParseBatch, parseInstructionActions, importCanonicalCourse } from "../src";
+import { formatParseBatch, parseInstructionActions, importCanonicalCourse, FhirPeriodUnit, EventTiming } from "../src";
 import { buildInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { retainDraftSteps } from "../src/adapters/r6-editable-metadata";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
@@ -3646,12 +3646,12 @@ describe("round79 current clinical preview ownership", () => {
   });
   const component = (value: number) => ({
     doseAndRate: [{ doseQuantity: { value, unit: "mg" } }],
-    timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" as const } }
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } }
   });
 
   it.each([false, true])("keeps the unresolved predecessor before an event end (explicit start=%s)", explicit => {
     const raw: FhirR6DosageInstruction = { step: [
-      { component: [{ ...component(1), timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", count: 2 } } }] },
+      { component: [{ ...component(1), timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, count: 2 } } }] },
       { ...(explicit ? { start: boundary(2) } : {}),
         end: { contextCode: { coding: [{ system: "https://clinic.example/events", code: "follow-up" }] } },
         component: [component(2)] }
@@ -3712,7 +3712,7 @@ describe("round79 current clinical preview ownership", () => {
     expect(saved).toEqual(before);
   });
 
-  it.each(["MORN", "HS", undefined] as const)("lets current event timing own a retained BED code (%s)", when => {
+  it.each([EventTiming.Morning, EventTiming["Before Sleep"], undefined] as const)("lets current event timing own a retained BED code (%s)", when => {
     const code = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] };
     const raw: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: { value: 5, unit: "mg" } }],
@@ -3721,7 +3721,7 @@ describe("round79 current clinical preview ownership", () => {
     for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) {
       for (const locale of ["en", "th"] as const) {
         const short = formatSig(input, "short", { locale, realizationMode: "normalized" });
-        if (when === "MORN") {
+        if (when === EventTiming.Morning) {
           expect(short).not.toContain("BED");
           expect(formatSig(input, "long", { locale, realizationMode: "normalized" }))
             .toContain(locale === "en" ? "morning" : "เช้า");
@@ -3751,7 +3751,7 @@ describe("round79 current clinical preview ownership", () => {
       _expression: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] } };
     const raw: FhirR6DosageInstruction = { step: [{ component: [{
       text: "Take 5 mg daily", doseAndRate: [{ [field]: expression }],
-      ...(field === "rateExpression" ? { timing: { repeat: { duration: 1, durationUnit: "h" } } } : {})
+      ...(field === "rateExpression" ? { timing: { repeat: { duration: 1, durationUnit: FhirPeriodUnit.Hour } } } : {})
     }] }] };
     for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"] as const)
       expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain("Take 5 mg daily");
