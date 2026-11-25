@@ -809,6 +809,7 @@ function completeComplexRows(output) {
   return complexRowFacts.every((expected, index) => {
     const row = rows[index], amount = row?.doseAndRate?.[0]?.doseQuantity;
     if (!row || (row.asNeeded !== undefined && row.asNeeded !== false) || row.asNeededFor?.length ||
+        row.maxDosePerLifetime !== undefined ||
         row.doseAndRate?.length !== 1 || amount?.value !== 1 || amount.unit !== "drop" ||
         amount.comparator !== undefined || amount.extension?.some(extension =>
           extension.url === "http://ema.europa.eu/fhir/extension/comparator" &&
@@ -845,6 +846,10 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   const ongoingBidControl = baseline.fromFhir(complex, { locale: "en" });
   if (!completeComplexRows(ongoingBidControl))
     throw new Error("Six-row oracle rejected the complete unbounded BID control");
+  const lifetimeCapped = structuredClone(ongoingBidControl);
+  lifetimeCapped.fhir[5].maxDosePerLifetime = { ...lifetimeCapped.fhir[5].doseAndRate[0].doseQuantity };
+  if (completeComplexRows(lifetimeCapped))
+    throw new Error("Six-row oracle accepted an added lifetime dose maximum");
   const conditional = structuredClone(ongoingBidControl);
   delete conditional.fhir[5].asNeeded;
   conditional.fhir[5].asNeededFor = [{ text: "eye discomfort" }];
