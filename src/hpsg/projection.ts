@@ -1,5 +1,5 @@
 import { equalStructuredValues } from "../stable-structure";
-import { FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, NEXT_DAY_SCHEDULE_RULE } from "./lexical-classes";
+import { FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, NEXT_DAY_SCHEDULE_RULE, NEXT_DAY_ONSET_RULE } from "./lexical-classes";
 import { EVENT_TIMING_TOKENS } from "../maps";
 import { ParserState, Token } from "../parser-state";
 import {
@@ -622,6 +622,7 @@ export function projectHpsgSignToState(
   // NEXT day/daypart locates the composed administration positions once.
   // An independently stated cadence or course keeps its own recurrence; the onset supplies
   // neither a daily repetition nor an invented event clock.
+  let nextDayCourseDuration = false;
   if (schedule?.phaseStartReference === "treatment-day-start" &&
       schedule.count === undefined && schedule.countMax === undefined &&
       schedule.frequency === undefined && schedule.frequencyMax === undefined &&
@@ -639,6 +640,7 @@ export function projectHpsgSignToState(
         // NEXT owns one civil day without guessing a lifetime count beforehand.
         state.duration = 1;
         state.durationUnit = FhirPeriodUnit.Day;
+        nextDayCourseDuration = true;
       } else {
         state.count = dividedCount ?? Math.max(1, (positions?.length ?? 0) + (schedule.timeOfDay?.length ?? 0));
       }
@@ -665,7 +667,7 @@ export function projectHpsgSignToState(
           field === "duration" || field === "durationMax" || field === "durationUnit"
         )
       );
-      if (!hasCourseDurationEvidence) {
+      if (!hasCourseDurationEvidence && !nextDayCourseDuration) {
         delete target.duration;
         delete target.durationMax;
         delete target.durationUnit;
@@ -681,6 +683,7 @@ export function projectHpsgSignToState(
     if (!hasRecurringSchedule(schedule, dividedCount === undefined) &&
         !hasRecurringSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
+        !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE) &&
         (dividedCount !== undefined || target.timingReference !== "previous") &&
         target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;
   }

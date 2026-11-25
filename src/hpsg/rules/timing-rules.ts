@@ -57,6 +57,7 @@ import {
   attachedNumberUnitAt,
   isEndBoundDaypartAt,
   NEXT_DAY_SCHEDULE_RULE,
+  NEXT_DAY_ONSET_RULE,
   compactDurationParts,
   EVENT_ARTICLE_TOKENS,
   EVENT_OFFSET_ARTICLES,
@@ -2836,7 +2837,7 @@ function nextDayScheduleSign(context: HpsgClauseContext, start: number): HpsgSig
   if (!members) return undefined;
   const event = EVENT_TIMING_TOKENS[normalizeTokenLower(context.tokens[onset.headIndex])];
   return lexicalSign({
-    type: "schedule-sign", rule: NEXT_DAY_SCHEDULE_RULE, tokens: members,
+    type: "schedule-sign", rule: onset.explicitStart ? NEXT_DAY_ONSET_RULE : NEXT_DAY_SCHEDULE_RULE, tokens: members,
     synsem: { head: { schedule: {
       treatmentStartOffsetDays: 1, phaseStartReference: "treatment-day-start",
       ...(event ? { when: [event] } : {})

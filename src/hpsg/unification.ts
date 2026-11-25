@@ -3,7 +3,7 @@ import { EVENT_TIMING_TOKENS } from "../maps";
 import { composeLocalizedRecords } from "../localization";
 import { joinLocalizedTokens, localizedTimeArgument } from "../locale-realization";
 import { localizeAdviceRelation } from "../relation-terminology";
-import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, NEXT_DAY_SCHEDULE_RULE, coordinationConnectorKind } from "./lexical-classes";
+import { ACTION_COORDINATION_CONNECTOR_I18N, CLOCK_LEAD_TOKENS, DOSE_TARGET_DAYPART_CLOCK_RANGES, FIXED_CLOCK_DAYPART_QUALIFICATION_RULE, MEAL_TIMING_BY_RELATION, isNextDayScheduleRule, coordinationConnectorKind } from "./lexical-classes";
 import { equalStructuredValues, hashStructuredValue } from "../stable-structure";
 import { getUnitCategory } from "../utils/units";
 import {
@@ -1119,7 +1119,7 @@ function fixedClockEventAdjunctSynsem(
       // A refined NEXT daypart still owns its onset tokens, not the
       // remaining meal modifier or a coordinator between them.
       if (item.scheduleFields?.indexOf(field) === -1 || !item.scheduleFields ||
-          field === "when" && mealSynsem !== mealSign.synsem && item.rule === NEXT_DAY_SCHEDULE_RULE) continue;
+          field === "when" && mealSynsem !== mealSign.synsem && isNextDayScheduleRule(item.rule)) continue;
       if (qualifyingIndices && !item.tokenIndices.some(index => qualifyingIndices!.has(index))) continue;
       for (const index of item.tokenIndices) indices.add(index);
     }
@@ -1157,7 +1157,7 @@ function fixedClockEventAdjunctSynsem(
     for (const sign of [clockSign, mealSign]) {
       for (const evidence of sign.evidence) {
         if (!evidence.scheduleFields?.length ||
-            !(mealSynsem !== mealSign.synsem && evidence.rule === NEXT_DAY_SCHEDULE_RULE) &&
+            !(mealSynsem !== mealSign.synsem && isNextDayScheduleRule(evidence.rule)) &&
             !evidence.scheduleFields.every(field => fields.indexOf(field) >= 0)) continue;
         for (const index of evidence.tokenIndices) allowed.add(index);
       }
@@ -1219,7 +1219,7 @@ function nextDayClockAdjunctSynsem(
   const clock = clockSign.synsem.head.schedule, onset = onsetSign.synsem.head.schedule;
   if (!clock?.timeOfDay?.length || !onset?.when?.length ||
       onset.phaseStartReference !== "treatment-day-start") return undefined;
-  const nextDay = onsetSign.evidence.find(item => item.rule === NEXT_DAY_SCHEDULE_RULE);
+  const nextDay = onsetSign.evidence.find(item => isNextDayScheduleRule(item.rule));
   if (!nextDay) return undefined;
   const onsetIndices = new Set(nextDay.tokenIndices), clockIndices = new Set<number>();
   for (const evidence of clockSign.evidence)

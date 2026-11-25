@@ -1,4 +1,4 @@
-import { NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
+import { isNextDayScheduleRule } from "../hpsg/lexical-classes";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
@@ -117,7 +117,7 @@ function typedNextPoint(f: BoundaryFacts): boolean {
     !schedule.clockWindow && !schedule.eventWindow && !schedule.activityTiming?.length &&
     !schedule.repeatCycle && !schedule.cycleDayConstraint && !schedule.dayOfMonth?.length &&
     schedule.weekdayOrdinal === undefined &&
-    schedule.evidence?.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE));
+    schedule.evidence?.some(item => isNextDayScheduleRule(item.rule)));
 }
 
 /** An explicit later number may omit the repeated dose unit after THEN.

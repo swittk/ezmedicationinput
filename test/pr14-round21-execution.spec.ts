@@ -5408,8 +5408,10 @@ describe("round57 typed timing and civil boundaries", () => {
     expect(savedMember.schedule!.recurrence!.anchors ?? []).not.toContain(EventTiming.Morning);
     expect(savedDeadline.step![0].component[0].timing?.repeat).toMatchObject({ count: 1 });
     expect(formatSig(savedDeadline, "long", { locale: "en", realizationMode: "normalized" })).toContain("by the next morning");
+    const savedBefore = JSON.stringify(savedDeadline);
     expect(() => nextDueDoses(savedDeadline, { ...options, limit: 2 }))
       .toThrow(/Unsupported R6 step RelativeTime: requires a treatment-start offset/u);
+    expect(JSON.stringify(savedDeadline)).toBe(savedBefore);
     const positive = r6Wire(onset.fhirNext, version);
     expect(nextDueDoses(positive, { ...options, limit: 2 })).toEqual(["2026-01-02T08:00:00+00:00"]);
     expect(JSON.stringify(input)).toBe(before);

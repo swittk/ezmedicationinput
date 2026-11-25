@@ -1,6 +1,7 @@
-import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
+import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, isNextDayScheduleRule } from "../hpsg/lexical-classes";
 import { singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
 import { applyAdministrationDurationSemantics } from "../hpsg/defaults";
+import { hasRecurringSchedule as hasIndependentRecurrence } from "../hpsg/projection";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from '../hpsg/signature';
@@ -405,7 +406,7 @@ export function scopeSequentialPhaseSemantics(
     for (const member of next) {
       const clause = states[member]?.primaryClause;
       const schedule = clause?.schedule;
-      if (!clause || !schedule?.evidence?.some(item => item.rule === NEXT_DAY_SCHEDULE_RULE)) continue;
+      if (!clause || !schedule?.evidence?.some(item => isNextDayScheduleRule(item.rule))) continue;
       if (contextualPredecessor === undefined) {
         const preceding = prior.length === 1 ? schedules[0] : undefined;
         // A sequential next-morning construction closes one explicitly
@@ -437,9 +438,10 @@ export function scopeSequentialPhaseSemantics(
         contextualPredecessor = !start && (singleClockPredecessor !== undefined || priorStart === null ||
           schedules.some(value => value?.count !== undefined || value?.countMax !== undefined ||
             value?.phaseStartReference === 'previous-phase-next-day' ||
-            value?.duration !== undefined || value?.durationUnit !== undefined));
+            value?.duration !== undefined || value?.durationUnit !== undefined ||
+            hasIndependentRecurrence(value, false)));
       }
-      const authoredOffset = schedule.evidence.some(item => item.rule !== NEXT_DAY_SCHEDULE_RULE &&
+      const authoredOffset = schedule.evidence.some(item => !isNextDayScheduleRule(item.rule) &&
         (item.scheduleFields?.indexOf('treatmentStartOffsetDays') ?? -1) >= 0 &&
         item.spans.some(span => span.start >= 0 && span.end <= clause.rawText.length));
       // A standalone NEXT starts at the next civil day. In a sequence this

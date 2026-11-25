@@ -530,8 +530,13 @@ export const TREATMENT_PERIOD_START_LEADS = setOf(source.treatmentPeriodStartLea
 export const RELATIVE_TIME_END_LEADS = setOf(source.relativeTimeEndLeads);
 export const NEXT_DAY_MODIFIERS = setOf(source.nextDayModifiers);
 export const NEXT_DAY_HEADS = setOf(source.nextDayHeads);
+const NEXT_DAY_START_LEADS = setOf(source.nextDayStartLeads);
 /** Typed derivation identity shared by lexical timing and phase composition. */
 export const NEXT_DAY_SCHEDULE_RULE = "hpsg.lex.schedule.nextDay";
+export const NEXT_DAY_ONSET_RULE = "hpsg.lex.schedule.nextDay.onset";
+export function isNextDayScheduleRule(rule: string): boolean {
+  return rule === NEXT_DAY_SCHEDULE_RULE || rule === NEXT_DAY_ONSET_RULE;
+}
 export const FIXED_CLOCK_DAYPART_QUALIFICATION_RULE = "hpsg.cx.schedule.fixed-clock-daypart-qualification";
 function hasRelativeTimeEndGovernor(tokens: readonly LexToken[], start: number): boolean {
   let before = start - 1;
@@ -555,11 +560,13 @@ export function isEndBoundDaypartAt(tokens: readonly LexToken[], head: number): 
 }
 /** Bounded NEXT + day/daypart nominal, with an optional locale article. */
 export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit: number):
-  { headIndex: number; tokenEnd: number } | undefined {
+  { headIndex: number; tokenEnd: number; explicitStart: boolean } | undefined {
   const first = tokens[start];
   if (!first || start >= limit) return undefined;
-  let cursor = start;
-  if (EVENT_ARTICLE_TOKENS.has(first.canonical ?? first.lower)) cursor++;
+  const explicitStart = NEXT_DAY_START_LEADS.has(first.canonical ?? first.lower);
+  let cursor = start + (explicitStart ? 1 : 0);
+  const article = tokens[cursor];
+  if (article && EVENT_ARTICLE_TOKENS.has(article.canonical ?? article.lower)) cursor++;
   const modifier = tokens[cursor];
   if (!modifier || !NEXT_DAY_MODIFIERS.has(modifier.canonical ?? modifier.lower)) return undefined;
   const headIndex = cursor + 1;
@@ -568,7 +575,7 @@ export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit
   // An end governor owns this nominal, including a cover starting at NEXT
   // rather than its article. Ordinary non-NEXT tokens never inspect it.
   if (hasRelativeTimeEndGovernor(tokens, start)) return undefined;
-  return { headIndex, tokenEnd: headIndex + 1 };
+  return { headIndex, tokenEnd: headIndex + 1, explicitStart };
 }
 export const ACTION_COORDINATION_CONNECTOR_I18N = source.actionCoordinationConnectorI18n as
   Record<string, Record<string, string>>;

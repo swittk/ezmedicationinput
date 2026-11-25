@@ -2330,6 +2330,7 @@
   "relativeTimeEndLeads": ["until", "through", "till", "before", "by"],
   "nextDayModifiers": ["next", "following"],
   "nextDayHeads": ["day", "morning", "afternoon", "evening", "night"],
+  "nextDayStartLeads": ["from", "starting"],
   "treatmentPeriodStartLeads": [
     "from",
     "starting",

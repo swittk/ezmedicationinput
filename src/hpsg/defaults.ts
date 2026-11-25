@@ -18,6 +18,7 @@ import { normalizeDosageForm } from "../context";
 import { lexInput } from "../lexer/lex";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
 import { hasRecurringSchedule } from "./projection";
+import { NEXT_DAY_ONSET_RULE } from "./lexical-classes";
 
 export interface HpsgDefaultConstraintDeps {
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
@@ -555,6 +556,7 @@ export function applyAdministrationDurationSemantics(
   delete schedule.durationUnit;
   if ((state.primaryClause.dose || state.primaryClause.clinicalQuantity) &&
       !hasRecurringSchedule(schedule) && !state.asNeeded &&
+      !state.primaryClause.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE) &&
       schedule.timingReference !== "previous" &&
       schedule.count === undefined && schedule.countMax === undefined) schedule.count = 1;
 }

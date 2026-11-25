@@ -690,10 +690,11 @@ function resolveCalendarDaySelection(
   const value = repeat.weekdayOrdinal;
   if (value === -1 || (value !== undefined && Number.isInteger(value) && value >= 1 && value <= 5))
     return { ...membership, ordinal: value };
+  if (membership) return membership;
   const parts = getTimeParts(anchor, timeZone);
   const nextWeek = addLocalDays(startOfLocalDay(anchor, timeZone), 7, timeZone);
   const isLast = getTimeParts(nextWeek, timeZone).month !== parts.month;
-  return { ...membership, ordinal: isLast ? -1 : Math.ceil(parts.day / 7) };
+  return { ordinal: isLast ? -1 : Math.ceil(parts.day / 7) };
 }
 /** Match explicit month days and any resolved weekday ordinal.
  * @param date Candidate administration date.
@@ -751,8 +752,11 @@ function finiteCompletionCount(repeat: CanonicalRecurrence | undefined): number 
   return count !== undefined && Number.isInteger(count) && count > 0 &&
     (repeat?.countMax === undefined || repeat.countMax === count) ? count : undefined;
 }
-function isSingleAdministrationRepeat(repeat: CanonicalRecurrence): boolean {
+function isSingleAdministrationRepeat(
+  repeat: CanonicalRecurrence, explicitEvents: readonly string[] | undefined
+): boolean {
   return (
+    !explicitEvents?.length &&
     repeatOccurrenceCap(repeat) === 1 &&
     repeat.frequency === undefined &&
     repeat.frequencyMax === undefined &&
@@ -1305,7 +1309,7 @@ function unscheduledOccurrenceCapacity(
     repeat?.frequencyMax === undefined &&
     repeat?.period === undefined &&
     repeat?.periodMax === undefined &&
-    (dosage.asNeeded || !repeat || !isSingleAdministrationRepeat(repeat))
+    (dosage.asNeeded || !repeat || !isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents))
     ? cap
     : undefined;
 }
@@ -3281,7 +3285,7 @@ function scheduleTreatmentRelativeCourse(
           quota.historyEnd = effectiveEnd?.getTime();
         }
         // Only the acceptor can spend an overlapping phase's count/caps.
-        const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat)
+        const counted = collect && originalRepeat && !isSingleAdministrationRepeat(originalRepeat, original.schedule?.explicitEvents)
           ? { ...originalRepeat, count: undefined, countMax: undefined, occurrenceCap: undefined }
           : originalRepeat;
         // The resolved end fences actual administrations. The recurrence
@@ -3946,6 +3950,17 @@ function chronologicalRepeatedEvents(
   return selected;
 }
 
+/** An untimed count can spend only one unambiguous cycle/member allowance. */
+function singleCyclePriorCount(course: CanonicalCourse, count: number | undefined): number | undefined {
+  if (count === undefined || course.cycleCount !== 1 || hasRepeatedStep(course)) return undefined;
+  let members = 0;
+  for (const stage of course.stages) {
+    members += stage.administrations.length;
+    if (members > 1) return undefined;
+  }
+  return members === 1 ? count : undefined;
+}
+
 function scheduleRepeatedCourse(
   course: CanonicalCourse,
   options: NextDueDoseOptions,
@@ -3977,6 +3992,7 @@ function scheduleRepeatedCourse(
     return events.map(event => event.iso);
   }
   if (rollingUsage) options = withActualReplayHistory(options, from);
+  const cyclePriorCount = rollingUsage ? undefined : singleCyclePriorCount(course, options.priorCount);
   let cycleStart = anchor;
   let guard = 0;
   const historicalOrdinal = cycleOrdinalNearQuery(course.cycleInterval, anchor, from, timeZone);
@@ -4027,7 +4043,7 @@ function scheduleRepeatedCourse(
           from: rollingUsage ? cycleStart : from > cycleStart ? from : cycleStart,
           ...(rollingUsage ? { prnOpportunityFrom: from } : {}),
           orderedAt: cycleStart,
-          priorCount: undefined,
+          priorCount: cyclePriorCount,
           limit: rollingUsage ? 10000 : limit,
         },
         cycleEnd,
@@ -4405,7 +4421,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
   // promise. A one-time count-only instruction keeps its unique identity.
   const constrainedCount = repeatForCount &&
       (repeatForCount.count !== undefined || repeatForCount.countMax !== undefined) &&
-      !isSingleAdministrationRepeat(repeatForCount) &&
+      !isSingleAdministrationRepeat(repeatForCount, one.schedule?.explicitEvents) &&
       (hasPeriodLimits(one) || getTimingOccurrenceCap(repeatForCount) ||
        one.predicate || one.excludedDates?.length || one.excludedWeekdays?.length)
     ? repeatOccurrenceCap(repeatForCount) : undefined;
@@ -4442,7 +4458,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const capped = Math.min(available, 10000);
     // A count-only single administration has no recurrence after removing its
     // count. Keep that identity and anchor its one event at phase eligibility.
-    const singleAdministration = repeatForCount && isSingleAdministrationRepeat(repeatForCount);
+    const singleAdministration = repeatForCount && isSingleAdministrationRepeat(repeatForCount, one.schedule?.explicitEvents);
     const uncapped: CanonicalAdministration = singleAdministration ? one : {
       ...one,
       schedule: {
@@ -4540,7 +4556,7 @@ export function nextDueDoses(dosage: CanonicalScheduleInput, options: NextDueDos
     const unconstrained: CanonicalAdministration = withoutOccurrenceCap({
       ...plainDosage,
       limits: one.limits?.filter((item) => item.scope !== "period"),
-      ...(exactCount !== undefined && sourceRepeat && !isSingleAdministrationRepeat(sourceRepeat) ? {
+      ...(exactCount !== undefined && sourceRepeat && !isSingleAdministrationRepeat(sourceRepeat, one.schedule?.explicitEvents) ? {
         // Only multi-opportunity recurrences need their count removed
         // while evaluating eligibility. An authored one-time count=1
         // has NO cadence without this identity; keep its unique instant.
@@ -4952,7 +4968,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     return [];
   }
   const effectiveLimit = remainingCount !== undefined ? Math.min(limit, remainingCount) : limit;
-  if (isSingleAdministrationRepeat(repeat)) {
+  if (isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents)) {
     if (parseActivityTimingExtensions(repeat)?.length) {
       return [];
     }
@@ -5997,7 +6013,7 @@ function countScheduleEvents(
     return 0;
   }
   const hardLimit = Number.isFinite(countLimit) ? countLimit : 365 * 31;
-  if (isSingleAdministrationRepeat(repeat)) {
+  if (isSingleAdministrationRepeat(repeat, dosage.schedule?.explicitEvents)) {
     if (parseActivityTimingExtensions(repeat)?.length) {
       // A one-time activity trigger has no executable timestamp. Supply may
       // still need one administration after the order, but never before it.
@@ -6398,7 +6414,7 @@ function measureRangedSchedule(
     ...dosage, limits: dosage.limits?.filter(limit => limit.scope !== "period"),
     schedule: { ...dosage.schedule, recurrence: {
       ...repeat,
-      ...(!isSingleAdministrationRepeat(repeat ?? {}) ? { count: undefined, countMax: undefined } : {}),
+      ...(!isSingleAdministrationRepeat(repeat ?? {}, dosage.schedule?.explicitEvents) ? { count: undefined, countMax: undefined } : {}),
       occurrenceCap: undefined,
       calendarWindow: { ...repeat?.calendarWindow, end: new Date(end.getTime() - (getAdministrationOffsetMinutes(dosage) ?? 0) * 60000 - 1).toISOString() },
     } },
@@ -7033,7 +7049,7 @@ function calculateTotalUnitsSingle(
   const hasSafetyPolicy = Boolean(dosage.safety);
   const unresolvedOneTimeActivity = Boolean(
     dosage.schedule?.recurrence &&
-      isSingleAdministrationRepeat(dosage.schedule.recurrence) &&
+      isSingleAdministrationRepeat(dosage.schedule.recurrence, dosage.schedule.explicitEvents) &&
       parseActivityTimingExtensions(dosage.schedule.recurrence)?.length
   );
   const conditional = getDosageCondition(dosage);
@@ -7803,6 +7819,7 @@ function calculateCourseTotalUnits(
     }
     if (priorCycleUsage) options = { ...withActualReplayHistory(options, queryStart),
       prnOpportunityFrom: queryStart } as CanonicalSupplyOptions & PhaseCountOptions;
+    const cyclePriorCount = priorCycleUsage ? undefined : singleCyclePriorCount(course, options.priorCount);
     let cycleStart = anchor;
     let guard = 0;
     while (
@@ -7836,7 +7853,7 @@ function calculateCourseTotalUnits(
             orderedAt: cycleStart,
             durationValue: (windowEnd.getTime() - windowStart.getTime()) / 1000,
             durationUnit: DurationUnit.Second,
-            priorCount: undefined,
+            priorCount: cyclePriorCount,
             roundToMultiple: undefined,
           },
           cycleEnd,
