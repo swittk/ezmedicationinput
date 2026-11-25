@@ -1991,6 +1991,10 @@ function measuredRateDurationRange(
   if ((range.low && !low) || (range.high && !high)) return undefined;
   return { ...(low ? { low } : {}), ...(high ? { high } : {}) };
 }
+/** Numeric cap compatibility must not borrow an opaque code's display label. */
+function capQuantityUnit(quantity: CanonicalMeasure | undefined): string {
+  return getDoseQuantityUnit(quantity, false);
+}
 function executableQuantityCaps(
   dosage: CanonicalAdministration,
   context?: MedicationContext,
@@ -2049,8 +2053,9 @@ function executableQuantityCaps(
     ) {
       continue;
     }
-    const actualUnit = getDoseQuantityUnit(dose);
-    const maximumUnit = getDoseQuantityUnit(numerator);
+    const actualUnit = capQuantityUnit(dose);
+    const maximumUnit = capQuantityUnit(numerator);
+    if ((!actualUnit && dose.code) || (!maximumUnit && numerator?.code)) continue;
     const normalizedActual = normalizeQuantityCapUnit(actualUnit);
     const normalizedMaximum = normalizeQuantityCapUnit(maximumUnit);
     const perTargetDose =
@@ -6723,13 +6728,13 @@ function prepareMeasuredDose(
     const low = range.low;
     const measured = range === first.range ? dosage :
       { ...dosage, amounts: [{ ...first, range }] };
-    const maximum = numericAdministrationLimits(measured, measuredStrengthRatio(options.context), getDoseQuantityUnit).administration;
+    const maximum = numericAdministrationLimits(measured, measuredStrengthRatio(options.context), capQuantityUnit).administration;
     const operator = maximum?.comparator;
     quantity = high?.value !== undefined && Number.isFinite(high.value) && high.value > 0
       ? high : undefined;
     if (!quantity && low?.value !== undefined && Number.isFinite(low.value) && low.value > 0) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
-        const unit = getDoseQuantityUnit(low), maxUnit = getDoseQuantityUnit(maximum);
+        const unit = capQuantityUnit(low), maxUnit = capQuantityUnit(maximum);
         const amount = normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
           ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
         const value = amount === null ? undefined : amount / getAdministrationTargetMultiplier(dosage, options.context);
@@ -6741,11 +6746,11 @@ function prepareMeasuredDose(
     }
     if (quantity) {
       if (maximum?.value !== undefined && (!operator || operator === "~" || operator === "<=")) {
-        const unit = getDoseQuantityUnit(quantity), maxUnit = getDoseQuantityUnit(maximum);
+        const unit = capQuantityUnit(quantity), maxUnit = capQuantityUnit(maximum);
         const converted = normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(maxUnit)
           ? maximum.value : convertValue(maximum.value, normalizeQuantityCapUnit(maxUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
         const bound = converted === null ? undefined : converted / getAdministrationTargetMultiplier(dosage, options.context);
-        const lowUnit = getDoseQuantityUnit(low);
+        const lowUnit = capQuantityUnit(low);
         const minimum = low?.value === undefined ? 0 :
           normalizeQuantityCapUnit(unit) === normalizeQuantityCapUnit(lowUnit) ? low.value :
             convertValue(low.value, normalizeQuantityCapUnit(lowUnit), normalizeQuantityCapUnit(unit), measuredStrengthRatio(options.context));
@@ -7019,7 +7024,7 @@ function remainingLifetimeSupply(
   if (lifetime.value === undefined || !Number.isFinite(lifetime.value) || lifetime.value < 0 ||
       (operator && operator !== "~" && operator !== "<=")) return undefined;
   const dose = dosage.amounts?.[0]?.quantity;
-  const doseUnit = getDoseQuantityUnit(dose), lifetimeUnit = getDoseQuantityUnit(lifetime);
+  const doseUnit = capQuantityUnit(dose), lifetimeUnit = capQuantityUnit(lifetime);
   const converted = normalizeQuantityCapUnit(lifetimeUnit) === normalizeQuantityCapUnit(doseUnit)
     ? lifetime.value
     : convertValue(lifetime.value, normalizeQuantityCapUnit(lifetimeUnit), normalizeQuantityCapUnit(doseUnit), strength);
@@ -7104,7 +7109,7 @@ function calculateTotalUnitsSingle(
   const dosage = prepareMeasuredDose(maximalTiming.dosage, options);
   const rangePlan = dosage.amounts?.[0]?.range ? executableDoseRange(dosage, context) : undefined;
   const strength = measuredStrengthRatio(context);
-  const numericLimits = numericAdministrationLimits(dosage, strength, getDoseQuantityUnit);
+  const numericLimits = numericAdministrationLimits(dosage, strength, capQuantityUnit);
   // Applicable maxima intersect; retained incomplete bounds still explain
   // why only part of the authored constraints could be evaluated.
   let unevaluatedMaximumDose = numericLimits.multiple;
@@ -7128,8 +7133,8 @@ function calculateTotalUnitsSingle(
     ) {
       unevaluatedMaximumDose = true;
     } else {
-      const fromUnit = getDoseQuantityUnit(dose);
-      const limitUnit = getDoseQuantityUnit(limit);
+      const fromUnit = capQuantityUnit(dose);
+      const limitUnit = capQuantityUnit(limit);
       const perTarget =
         normalizeQuantityCapUnit(fromUnit) === normalizeQuantityCapUnit(limitUnit)
           ? dose.value
@@ -8298,12 +8303,12 @@ function clockCadenceEligible(
     const delta = getLocalDayNumber(day, timeZone) - getLocalDayNumber(anchor, timeZone);
     return delta >= 0 && delta % (7 * repeat.period) === 0;
   }
-  if ((repeat.periodUnit === "mo" || repeat.periodUnit === "a") && !dayFiltered) {
+  if (repeat.periodUnit === "mo" || repeat.periodUnit === "a") {
     const months = getLocalMonthIndex(day, timeZone) - getLocalMonthIndex(anchor, timeZone);
     const period = repeat.period * (repeat.periodUnit === "a" ? 12 : 1);
     if (months < 0 || months % period !== 0) return false;
-    // The explicit selector already owns the date within an eligible month.
-    if (repeat.monthDays?.length) return true;
+    // A weekday or explicit selector owns the date within an eligible month.
+    if (dayFiltered || repeat.monthDays?.length) return true;
     return (
       getTimeParts(day, timeZone).day ===
       getTimeParts(addCalendarMonths(anchor, months, timeZone), timeZone).day
@@ -8424,12 +8429,12 @@ function finiteAdministrationCompletion(
     return !endExclusive || last < endExclusive
       ? completionAfterAcceptedAdministration(dosage, last, zone) : undefined;
   }
-  // A PRN phase cannot complete from unrecorded opportunities before this
-  // query. Its supplied prior count reduces only the remaining allowance.
-  const used = dosage.asNeeded ? options.priorCount ?? actual.length : actual.length;
+  // Supplied consumption and PRN use do not imply nominal past events.
+  // A count alone reduces the allowance without supplying a completion time.
+  const used = options.priorCount ?? actual.length;
   const remaining = count - used;
   if (remaining <= 0) return undefined;
-  const future = !!actual.length || !!dosage.asNeeded;
+  const future = options.priorCount !== undefined || !!actual.length || !!dosage.asNeeded;
   const probe = future ? {
     ...local, schedule: { ...local.schedule, recurrence: { ...executionRepeat, count: undefined, countMax: undefined } },
   } : local;

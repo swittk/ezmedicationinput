@@ -5861,3 +5861,87 @@ describe("round78 ranged actual-count origins", () => {
     }
   });
 });
+
+
+describe("round79 reviewed cap, cadence and consumed-count ownership", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const ucum = "http://unitsofmeasure.org", local = "urn:clinic:quantity-codes";
+  const q = (value: number, unit: string) => ({ value, unit, code: unit, system: ucum });
+  const note = { url: "urn:clinic:reviewed-cap-note", valueString: "Keep independent quantity identities" };
+  const forms = (source: FhirR6DosageInstruction) => [fresh(source), importCanonicalCourse(fresh(source)),
+    fresh(toFhirR5Dosages(fresh(source))), fresh(toDosageDetails(fresh(toFhirR5Dosages(fresh(source)))))];
+  const from = "2026-01-01T00:00:00Z";
+  const query = { from, orderedAt: from, timeZone: "UTC", limit: 3 };
+
+  it.each([
+    ["period", local, undefined, 2],
+    ["period", ucum, undefined, 1],
+    ["period", local, "mg/kg", 1],
+    ["lifetime", local, undefined, 2],
+    ["administration", local, undefined, 4],
+  ] as const)("compares the %s cap with the actual quantity identity (%s, %s)", (scope, system, unit, expected) => {
+    const amount = { value: 1, system, code: "mg/kg", ...(unit ? { unit } : {}), extension: [note] };
+    const row: FhirDosage = {
+      doseAndRate: [scope === "administration" ? { doseRange: { low: amount, high: { ...amount, value: 2 } } }
+        : { doseQuantity: amount }],
+      timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+        timeOfDay: ["08:00:00", "20:00:00"], boundsPeriod: { start: "2026-01-01", end: "2026-01-01" } } },
+      ...(scope === "period" ? { maxDosePerPeriod: [{ numerator: q(1, "mg/kg"), denominator: q(24, "h") }] }
+        : scope === "lifetime" ? { maxDosePerLifetime: q(1, "mg/kg") }
+          : { maxDosePerAdministration: q(1, "mg/kg") }),
+    };
+    for (const dosage of [fresh(row), ...forms(toDosageDetails([fresh(row)]))]) {
+      const before = fresh(dosage);
+      const times = ["2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"];
+      expect(nextDueDoses(dosage, query)).toEqual(scope === "period" && expected === 1 ? times.slice(0, 1) : times);
+      const total = calculateTotalUnits({ dosage, ...query, durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+      expect(total).toMatchObject({ totalUnits: expected, unit: "mg/kg" });
+      if (system === local && !unit) {
+        expect(total.quantityKind).toBe("maximum");
+        expect(total.explanation).toContain("an unevaluable maximum-dose constraint was retained but could not be applied");
+      }
+      expect(dosage).toEqual(before);
+    }
+    const saved = toFhirR5Dosages(fresh(toDosageDetails([fresh(row)])))[0];
+    expect(saved.doseAndRate).toEqual(row.doseAndRate);
+    expect(saved.maxDosePerPeriod).toEqual(row.maxDosePerPeriod);
+    expect(saved.maxDosePerLifetime).toEqual(row.maxDosePerLifetime);
+    expect(saved.maxDosePerAdministration).toEqual(row.maxDosePerAdministration);
+  });
+
+  it.each([[1, FhirPeriodUnit.Year], [12, FhirPeriodUnit.Month], [2, FhirPeriodUnit.Month]] as const)(
+    "keeps the %s %s month stride with a weekday and day-of-month selector", (period, periodUnit) => {
+    const course: CanonicalCourse = { kind: "course", stages: [{ administrations: [{ kind: "administration",
+      amounts: [{ quantity: { value: 1, unit: "tab" } }], schedule: { recurrence: {
+        period, periodUnit, clocks: ["09:00:00"], dayOfWeek: [FhirDayOfWeek.Thursday], monthDays: [15],
+        calendarWindow: { start: "2026-01-01", end: "2026-12-31" },
+      } },
+    }] }] };
+    for (const dosage of [fresh(course), ...forms(courseToR6(course))]) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, query)).toEqual(["2026-01-15T09:00:00+00:00"]);
+      expect(calculateTotalUnits({ dosage, ...query, durationValue: 365, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 1, unit: "tab" });
+      expect(dosage).toEqual(before);
+    }
+  });
+
+  it.each([undefined, 0, 1, 2])("uses supplied consumed count %s before resolving a scheduled phase end", priorCount => {
+    const source: FhirR6DosageInstruction = { step: [{ start: {
+      contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+      offsetDuration: q(0, "d"),
+    }, component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [note],
+      timing: { repeat: { count: 2, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } },
+    }] }] };
+    const options = { ...query, from: "2026-01-03T00:00:00Z", priorCount };
+    const days = priorCount === 0 ? [3, 4] : priorCount === 1 ? [3] : [];
+    for (const dosage of forms(source)) {
+      const before = fresh(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual(days.map(day => "2026-01-0" + day + "T09:00:00+00:00"));
+      const total = calculateTotalUnits({ dosage, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day });
+      expect(total.totalUnits).toBe(days.length ? 1 : 0);
+      if (days.length) expect(total.unit).toBe("tab");
+      expect(dosage).toEqual(before);
+    }
+  });
+});
