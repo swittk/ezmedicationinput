@@ -16008,3 +16008,40 @@ All meaningful workflows meet the 4% regression limit. The standalone graph
 encoder adds about 1.2 microseconds; complete action parsing improves by 9.8%,
 which supports accepting that small absolute codec cost. The changed-path count
 remains 100. Detailed review dispositions remain separate.
+
+
+## 2026-11-25 — Source agreement and typed procedure complements
+
+Duration previews now use the shared namespace-aware quantity owner while
+retaining authored labels and independent endpoints. Frequency-only maxima do
+not acquire an unauthored period. Article periods, fractional range endpoints
+and rate limits preserve the selected quantity and its clinical scope.
+
+Procedure realization retains removal times, closure sites, repeat relations
+and before-dose timing. The selected Time relation is projected once, and
+locale adapters own wording. Thai generic-eye entailment keeps explicit right
+and left qualifiers. Existing lexical article roles also serve registered
+additional-language aliases.
+
+Original component wording, current replay authority and stale-text retirement
+have separate responsibilities. The shared native amount predicate governs
+current direction ownership. Unowned source-only text survives later advice,
+while known clinical edits retire old active wording into retained provenance.
+Detached rows use their local baselines; final saved hashes follow final
+metadata placement. These corrections use the existing source fields and keep
+ordinary scalar R6 representation unchanged. Primitive quantity annotations,
+spatial translations and graph source-text annotations survive fresh saves.
+
+Cadence inheritance checks predecessor compatibility before copying clocks,
+removing the redundant later cleanup. Partial calendar events respect their
+authored month days, and supply retains its quantity-context explanations.
+Cross-realm segmentation preserves the registered receiver contract.
+
+Validation passed 8,599 source tests, including configured strict TypeScript,
+the build and four distribution tests. Twenty-one representative paired cases
+and a focused repeat found no reproducible meaningful-work regression above
+4%. The initial complex-import timing suspect did not reproduce. Three fast
+call differences of about 0.7–2.5 microseconds were assessed against their
+ordinary call frequency; graph encoding improved by about 57%. Oversized test
+groups were redistributed without changing their clinical assertions. The
+changed-path count remains 100. Detailed review dispositions remain separate.
