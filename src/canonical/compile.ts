@@ -350,6 +350,8 @@ export function courseFromPartialParallel(
               finitePredecessors = Boolean(previous.phaseEnd || repeat?.calendarWindow?.end ||
                 repeat?.courseLength?.value !== undefined &&
                   !repeat.courseLength.comparator ||
+                previous.anchoredLength?.quantity?.value !== undefined &&
+                  !previous.anchoredLength.quantity.comparator ||
                 repeat?.count !== undefined &&
                   (repeat.countMax === undefined || repeat.countMax === repeat.count) ||
                 repeat?.count === undefined && repeat?.anchors?.length === 1 && repeat.anchors[0] === "IMD" &&

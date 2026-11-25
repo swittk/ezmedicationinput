@@ -606,8 +606,13 @@ function usesIntervalCadence(repeat: CanonicalRecurrence): boolean {
   if (repeat.frequency !== 1) return false;
   return repeat.periodUnit !== DurationUnit.Day || repeat.period !== 1;
 }
-function calendarScanLimit(start: Date, end: Date | null | undefined, resultLimit: number): number {
-  const minimum = Math.max(366, Math.ceil(resultLimit) * 366);
+function calendarScanLimit(
+  start: Date, end: Date | null | undefined, resultLimit: number, repeat?: CanonicalRecurrence
+): number {
+  const cadence = repeat && normalizedCalendarInterval(repeat.period, repeat.periodUnit);
+  const cadenceDays = cadence?.days ?? (cadence?.months ? cadence.months * 31 : 0);
+  // Include the next recurrence even after today's clock has already passed.
+  const minimum = Math.max(366, Math.ceil(resultLimit) * Math.max(366, cadenceDays) + 1);
   if (!end) return minimum;
   const spanDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
   return Math.max(minimum, spanDays + 3);
@@ -3444,11 +3449,17 @@ function maximumTimedRangePlan(
   }
   const futureCounts = new Map<CycleEventQuota, number>();
   const futureBuckets = occurrence ? new Map<string, number>() : undefined;
-  const capPartitions: Array<{ width: number; maximum: number; bucket: number; slots: number; total: number }> = [];
+  const capPartitions: Array<{ width: number; maximum: number; bucket: number; slots: number; last: number; total: number }> = [];
   for (const cap of range.caps) {
     const width = elapsedCapMilliseconds(cap);
-    if (width) capPartitions.push({ width, maximum: cap.max, bucket: 0, slots: 0, total: 0 });
+    if (width) capPartitions.push({ width, maximum: cap.max, bucket: 0, slots: 0, last: 0, total: 0 });
   }
+  const partitionSupply = (partition: typeof capPartitions[number]) => {
+    const recorded = priorTimes.length && partition.slots
+      ? (upperBoundTimestamp(priorTimes, partition.last) -
+          upperBoundTimestamp(priorTimes, partition.last - partition.width)) * range.high : 0;
+    return Math.min(partition.slots * range.high, Math.max(0, partition.maximum - recorded));
+  };
   let firstFuture = Infinity;
   for (const event of candidates) {
     const bucket = occurrence ? occurrenceCapBucketKey(new Date(event.at), occurrence, zone) : "";
@@ -3461,11 +3472,12 @@ function maximumTimedRangePlan(
       for (const partition of capPartitions) {
         const bucket = Math.floor((event.at - firstFuture) / partition.width);
         if (bucket !== partition.bucket) {
-          partition.total += Math.min(partition.slots * range.high, partition.maximum);
+          partition.total += partitionSupply(partition);
           partition.bucket = bucket;
           partition.slots = 0;
         }
         partition.slots++;
+        partition.last = event.at;
       }
     }
     buckets.push(bucket);
@@ -3505,7 +3517,7 @@ function maximumTimedRangePlan(
     upper = Math.min(upper, occurrenceUpper);
   }
   for (const partition of capPartitions)
-    upper = Math.min(upper, partition.total + Math.min(partition.slots * range.high, partition.maximum));
+    upper = Math.min(upper, partition.total + partitionSupply(partition));
   const completed = new Map<CycleEventQuota, number>();
   for (const [quota, count] of ledger.quotas)
     if (quota.advance && quota.remaining === 0 && count !== undefined) completed.set(quota, count);
@@ -4264,6 +4276,8 @@ type PhaseCountOptions = NextDueDoseOptions & {
   quantityEstimation?: true;
   /** Completion/range callers decide completeness after their own count admission. */
   explicitEventStatus?: ExplicitEventStatus;
+  /** Only rounded course supply collects one remaining ceiling per contributing member. */
+  roundingLimits?: Map<string, { remaining: number | undefined; unit: string | undefined }>;
 };
 /** Nonoverlapping cycle replay has at most one opportunity per member at
  * an instant. Reuse the scalar pre-admission filter; overlapping cycles keep
@@ -4630,7 +4644,7 @@ function generateWakingHoursIntervalSeries(
   let currentDay = startOfLocalDay(from, timeZone);
   if (overnight) currentDay = addLocalDays(currentDay, -1, timeZone);
   let dayIterations = 0;
-  const maxDays = calendarScanLimit(currentDay, courseEnd, limit);
+  const maxDays = calendarScanLimit(currentDay, courseEnd, limit, repeat);
   while (results.length < limit && dayIterations < maxDays && (!courseEnd || currentDay < courseEnd)) {
     if (
       (!firstTreatmentDay || currentDay >= firstTreatmentDay) &&
@@ -5001,7 +5015,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
         ? new ChronologicalQueue<ChronologicalEvent>() : undefined;
       let serial = 0;
       let iterations = 0;
-      const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit) + Math.max(0, -firstShift);
+      const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit, repeat) + Math.max(0, -firstShift);
       while (
         results.length < effectiveLimit &&
         iterations < maxIterations &&
@@ -5113,7 +5127,7 @@ function nextDueDosesSingle(dosage: CanonicalAdministration, options: NextDueDos
     if (clocks.length === 0) return [];
     let currentDay = startOfLocalDay(from, timeZone);
     let iterations = 0;
-    const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit);
+    const maxIterations = calendarScanLimit(currentDay, courseEnd, effectiveLimit, repeat);
     while (
       results.length < effectiveLimit &&
       iterations < maxIterations &&
@@ -6811,6 +6825,7 @@ function calculateTotalUnitsSingle(
     rangePrior?: readonly SupplyAllocation[];
     rangeAccepted?: SupplyAllocation[];
     capacityWindows?: readonly SupplyCapacityWindow[];
+    roundingKey?: string;
   }
 ): TotalUnitsResult {
   const { dosage: sourceDosage, roundToMultiple, context } = options;
@@ -7281,6 +7296,14 @@ function calculateTotalUnitsSingle(
     result.quantityKind = "scheduled";
     result.explanation = "Weight-normalized total; provide patientWeightKg for an absolute quantity.";
   }
+  const roundingLimits = (options as PhaseCountOptions).roundingLimits;
+  const roundingKey = supplyAccounting?.roundingKey;
+  if (roundingLimits && roundingKey !== undefined && totalUnits > 0 && !roundingLimits.has(roundingKey))
+    roundingLimits.set(roundingKey, {
+      remaining: lifetimeMaximum === undefined ? undefined :
+        lifetimeMaximum + (supplyAccounting?.usedQuantity ?? 0),
+      unit: result.unit,
+    });
   // Handle containers
   const containerValue = context?.containerValue;
   const containerUnit = context?.containerUnit;
@@ -7398,10 +7421,11 @@ function calculateChronologicalCourseUnits(
           durationValue:(queryEnd.getTime()-queryStart.getTime())/1000,
           durationUnit:DurationUnit.Second,roundToMultiple:undefined,
           evaluateCondition:undefined,
-        }, group.count, lifetimeUsage || group.quantity !== undefined ? {
+        }, group.count, lifetimeUsage || group.quantity !== undefined || (options as PhaseCountOptions).roundingLimits ? {
           usedQuantity: lifetimeUsage?.get(key) ?? 0,
           actualPriorCount: options.priorDoseTimes?.length ?? 0,
           acceptedQuantity: group.quantity,
+          roundingKey: key,
         } : undefined);
         if (lifetimeUsage && hasLifetimeLimit(group.member))
           lifetimeUsage.set(key, (lifetimeUsage.get(key) ?? 0) + total.totalUnits);
@@ -7586,7 +7610,7 @@ function calculateCourseTotalUnits(
         } : {}),
       }, undefined, {
         actualPriorCount: options.priorDoseTimes?.length ?? 0,
-        usedQuantity: lifetimeUsage?.get(key) ?? 0, capacityWindows: future,
+        usedQuantity: lifetimeUsage?.get(key) ?? 0, capacityWindows: future, roundingKey: key,
         ...(ranged && history.length ? { rangePrior: history } : {}),
       });
       if (lifetimeUsage && hasLifetimeLimit(source))
@@ -7794,10 +7818,10 @@ function calculateCourseTotalUnits(
         ) } : {}),
         ...(member.countEligibilityStart ? { countEligibilityStart: member.countEligibilityStart } : {}),
       } as CanonicalSupplyOptions & PhaseCountOptions & { dosage: CanonicalAdministration },
-        undefined, lifetimeUsage || acceptedTimes || rangeAccepted ? {
+        undefined, lifetimeUsage || acceptedTimes || rangeAccepted || (options as PhaseCountOptions).roundingLimits ? {
           usedQuantity: lifetimeUsage?.get(key) ?? 0,
           actualPriorCount: options.priorDoseTimes?.length ?? 0,
-          acceptedTimes, rangePrior, rangeAccepted,
+          acceptedTimes, rangePrior, rangeAccepted, roundingKey: key,
         } : undefined);
       if (rangeAccepted?.length && rangeUsage) {
         if (rangePrior) (rangePrior as SupplyAllocation[]).push(...rangeAccepted);
@@ -7853,17 +7877,27 @@ export function calculateTotalUnits(options: CanonicalSupplyOptions): TotalUnits
   if (course) {
     const single = scalarCourseAdministration(course);
     if (!single) {
-      const member = course.stages.length === 1 && course.stages[0].administrations.length === 1
-        ? course.stages[0].administrations[0] : undefined;
-      if (options.roundToMultiple && options.roundToMultiple > 0 && member && hasLifetimeLimit(member)) {
-        const total = calculateCourseTotalUnits(course, { ...options, roundToMultiple: undefined });
+      if (options.roundToMultiple && options.roundToMultiple > 0) {
+        const roundingLimits: NonNullable<PhaseCountOptions["roundingLimits"]> = new Map();
+        const total = calculateCourseTotalUnits(course, {
+          ...options, roundToMultiple: undefined, roundingLimits,
+        } as CanonicalSupplyOptions & PhaseCountOptions);
         if (total.totalUnits === 0) return total;
-        const measured = prepareMeasuredDose(prepareMaximumSupplyTiming(member, true).dosage, options);
         const strength = measuredStrengthRatio(options.context);
-        const lifetime = numericAdministrationLimits(measured, strength, getDoseQuantityUnit).lifetime;
-        const ceiling = lifetime ? remainingLifetimeSupply(measured, options, lifetime, strength) : undefined;
-        // Round the combined course once, then apply its remaining lifetime
-        // ceiling before deriving package and approximate-quantity estimates.
+        let ceiling: number | undefined = 0;
+        for (const limit of roundingLimits.values()) {
+          if (limit.remaining === undefined) { ceiling = undefined; break; }
+          let amount: number | null = limit.remaining;
+          if (limit.unit !== total.unit) {
+            if (!limit.unit || !total.unit) { ceiling = undefined; break; }
+            amount = convertValue(limit.remaining, normalizeQuantityCapUnit(limit.unit),
+              normalizeQuantityCapUnit(total.unit), strength);
+          }
+          if (amount === null) { ceiling = undefined; break; }
+          ceiling += amount;
+        }
+        // Each contributing member owns one lifetime allowance across repeated
+        // windows. An uncapped member leaves the combined course uncapped.
         return sumCourseUnits([{ total, unit: total.unit }], options, ceiling);
       }
       return calculateCourseTotalUnits(course, options);

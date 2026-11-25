@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 /** Short paired hot-path performance diagnostic.
  *
  * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
@@ -94,8 +95,8 @@ function checkpoint(complete = false) {
     ...checked.map(c => c.api), ...report.newApiSmokeChecks.map(c => c.api),
   ]).size;
   if (outputPath) {
-    const temporary = outputPath + ".tmp";
-    writeFileSync(temporary, JSON.stringify(report, null, 2) + "\n");
+    const temporary = outputPath + "." + randomUUID() + ".tmp";
+    writeFileSync(temporary, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
     renameSync(temporary, outputPath);
   }
 }
@@ -794,7 +795,8 @@ function completeComplexRows(output) {
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
     if (repeat?.count !== undefined || repeat?.countMax !== undefined ||
-        (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2])) return false;
+        (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2]) ||
+        (repeat?.periodMax !== undefined && repeat.periodMax !== expected[3])) return false;
     // The final left-eye BID phase is ongoing. A standard repeat bound must
     // not silently shorten it while the retained step still looks open-ended.
     if (index === 5 && (repeat?.boundsDuration !== undefined || repeat?.boundsRange !== undefined ||
@@ -818,6 +820,12 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
     Object.assign(shortened.fhir[5].timing.repeat, bound);
     if (completeComplexRows(shortened))
       throw new Error("Six-row oracle accepted a bounded ongoing BID phase");
+  }
+  for (const periodMax of [2, 4]) {
+    const cadence = structuredClone(ongoingBidControl);
+    cadence.fhir[0].timing.repeat.periodMax = periodMax;
+    if (completeComplexRows(cadence) !== (periodMax === 2))
+      throw new Error("Six-row oracle failed the fixed Q2H period control");
   }
   for (const frequencyMax of [2, 3]) {
     const cadence = structuredClone(ongoingBidControl);
@@ -1069,6 +1077,18 @@ for (const test of cases) {
     report.errors.push({ name: test.name, error: String(error.stack ?? error) });
     console.error("ERROR", test.name, error.message);
   } finally {
+    if (test.name === "nextDueDoses/fresh-calendars") {
+      const freshBaseline = freshCalendarState.get(baseline);
+      const freshCandidate = freshCalendarState.get(candidate);
+      const aligned = JSON.stringify(freshBaseline) === JSON.stringify(freshCandidate);
+      report.freshCalendarPreparation = {
+        policy: "97 weekly base instants plus one millisecond per 97-query cycle; prepared outside timing",
+        baseline: freshBaseline, candidate: freshCandidate, aligned,
+      };
+      if (!aligned) report.errors.push({
+        name: test.name, error: "Builds used different fresh-calendar query sequences",
+      });
+    }
     checkpoint();
   }
 }
@@ -1113,18 +1133,6 @@ for (const test of candidateOnlyCases) {
   } finally {
     checkpoint();
   }
-}
-const freshBaseline = freshCalendarState.get(baseline);
-const freshCandidate = freshCalendarState.get(candidate);
-if (freshBaseline.nextOrdinal || freshCandidate.nextOrdinal) {
-  const aligned = JSON.stringify(freshBaseline) === JSON.stringify(freshCandidate);
-  report.freshCalendarPreparation = {
-    policy: "97 weekly base instants plus one millisecond per 97-query cycle; prepared outside timing",
-    baseline: freshBaseline, candidate: freshCandidate, aligned,
-  };
-  if (!aligned) report.errors.push({
-    name: "nextDueDoses/fresh-calendars", error: "Builds used different fresh-calendar query sequences",
-  });
 }
 if (!report.cases.length && !report.newApiMeasurements.length && !report.newApiSmokeChecks.length)
   report.errors.push({ name: "selection", error: "--only selected no runnable benchmark scenarios" });
