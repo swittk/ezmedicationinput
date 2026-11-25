@@ -6869,10 +6869,11 @@ describe("round29 typed course display scope", () => {
     const before = JSON.stringify(source);
     for (const locale of ["en", "th"]) {
       const text = formatSig(source, "long", { locale, realizationMode: "normalized" });
-      expect(text).toMatch(/(?:1|one|หนึ่ง)\s*(?:tablet|เม็ด)/u);
-      expect(text).toMatch(/>\s*160\b/u);
+      const administration = locale === "en" ? "Use 1 tablet only if SBP > 160"
+        : "ใช้ครั้งละ 1 เม็ด เฉพาะเมื่อ SBP > 160";
+      expect(text.split(";")[0]).toBe(administration);
       expect(text).toContain("Call the clinic");
-      expect(text.indexOf("160")).toBeLessThan(text.indexOf("Call the clinic"));
+      expect(text.indexOf(administration)).toBeLessThan(text.indexOf("Call the clinic"));
     }
     expect(JSON.stringify(source)).toBe(before);
   });
@@ -6945,8 +6946,10 @@ describe("round42 supported course preview boundaries", () => {
       expect(en.includes("onward")).toBe(!hasEnd);
       expect(th.includes("เป็นต้นไป")).toBe(!hasEnd);
       if (hasEnd) {
-        expect(en).toContain("End timing requires review");
-        expect(th).toContain("ต้องตรวจสอบเวลาสิ้นสุด");
+        expect(en).toContain("Timing requires review");
+        expect(th).toContain("ต้องตรวจสอบช่วงเวลา");
+        expect(en).toContain("follow-up");
+        expect(th).toContain("follow-up");
       }
     }
     if (hasEnd) expect(toDosageDetails(saved).step[0].end).toEqual(end);

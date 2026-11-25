@@ -87,6 +87,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
+  TIMING_CODE_HOURLY_PERIODS,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
   type TimingSummaryOptions
@@ -1352,14 +1353,14 @@ function describeFrequencyThai(schedule: CanonicalScheduleExpr | undefined, word
     return `${countPrefix}ทุก ${stripTrailingZero(period)} ปี`;
   }
   if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
+    const hourlyPeriod = TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()];
+    if (hourlyPeriod !== undefined) return `ทุก ${stripTrailingZero(hourlyPeriod)} ชั่วโมง`;
     const map: Record<string, string> = {
       BID: "วันละ 2 ครั้ง",
       TID: "วันละ 3 ครั้ง",
       QID: "วันละ 4 ครั้ง",
       QD: "วันละครั้ง",
       QOD: "วันเว้นวัน",
-      Q6H: "ทุก 6 ชั่วโมง",
-      Q8H: "ทุก 8 ชั่วโมง",
       WK: "สัปดาห์ละครั้ง",
       MO: "เดือนละครั้ง"
     };

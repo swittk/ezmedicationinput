@@ -251,6 +251,10 @@ function boundaryEventText(
     const display = coding.display?.trim();
     if (display) { context = display; break; }
   }
+  if (!context) for (const coding of boundary.contextCode?.coding ?? []) {
+    const code = coding.code?.trim();
+    if (code) { context = code; break; }
+  }
   const event = boundary.anchor === "treatment-start" ? cycleStart ?? words.treatmentStart
     : boundary.anchor === "treatment-day-start" ? words.treatmentDayStart
     : boundary.anchor === "previous-phase-next-day" ? words.nextDayAfterPreviousPhase

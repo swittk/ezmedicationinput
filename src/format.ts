@@ -65,6 +65,7 @@ import {
 } from "./types";
 import {
   getMealTimingGroup,
+  TIMING_CODE_HOURLY_PERIODS,
   TIMING_CODE_DAILY_FREQUENCIES,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
@@ -556,6 +557,9 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
     return `${countPrefix}every ${stripTrailingZero(period)} years`;
   }
   if (timingCode && timingCodeMatchesRecurrence(schedule!)) {
+    const hourlyPeriod = TIMING_CODE_HOURLY_PERIODS[timingCode.toUpperCase()];
+    if (hourlyPeriod !== undefined)
+      return `every ${stripTrailingZero(hourlyPeriod)} ${hourlyPeriod === 1 ? "hour" : "hours"}`;
     if (timingCode === "WK") {
       return "once weekly";
     }
@@ -567,9 +571,7 @@ function describeFrequency(schedule: CanonicalScheduleExpr | undefined, words: C
       TID: "three times daily",
       QID: "four times daily",
       QD: "once daily",
-      QOD: "every other day",
-      Q6H: "every 6 hours",
-      Q8H: "every 8 hours"
+      QOD: "every other day"
     };
     if (map[timingCode]) {
       return map[timingCode];

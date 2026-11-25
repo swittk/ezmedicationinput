@@ -609,7 +609,7 @@ Object.assign(report, {
     .update(readFileSync(new URL("../dist/index.js", import.meta.url)))
     .digest("hex"),
   baseline: resolve(baselinePath),
-  candidate: new URL("../dist/index.js", import.meta.url).pathname,
+  candidate: candidateEntry,
   publicFunctions: Object.keys(candidate).filter((k) => typeof candidate[k] === "function").length,
   coveredPublicFunctions: covered.size,
   newApis: [...newApis],
@@ -826,7 +826,7 @@ function completeComplexRows(output) {
         part("stepCount")?.valueInteger !== 3) return false;
     const repeat = row.timing?.repeat, step = part("step");
     if (repeat?.count !== undefined || repeat?.countMax !== undefined || repeat?.dayOfWeek?.length ||
-        repeat?.timeOfDay?.length ||
+        repeat?.timeOfDay?.length || repeat?.when?.length ||
         (repeat?.frequencyMax !== undefined && repeat.frequencyMax !== expected[2]) ||
         (repeat?.periodMax !== undefined && repeat.periodMax !== expected[3])) return false;
     // The final left-eye BID phase is ongoing. A standard repeat bound must
@@ -858,6 +858,10 @@ if (filter.test("fromFhir/complex/en") || filter.test("fromFhir/complex/th")) {
   clocked.fhir[5].timing.repeat.timeOfDay = ["06:00:00", "12:00:00"];
   if (completeComplexRows(clocked))
     throw new Error("Six-row oracle accepted fixed clocks in the unclocked BID phase");
+  const mealAnchored = structuredClone(ongoingBidControl);
+  mealAnchored.fhir[5].timing.repeat.when = ["ACM", "ACV"];
+  if (completeComplexRows(mealAnchored))
+    throw new Error("Six-row oracle accepted meal anchors in the unanchored BID phase");
   const qualifiedDose = structuredClone(ongoingBidControl);
   qualifiedDose.fhir[0].doseAndRate[0].doseQuantity.extension = [{
     url: "http://ema.europa.eu/fhir/extension/comparator",

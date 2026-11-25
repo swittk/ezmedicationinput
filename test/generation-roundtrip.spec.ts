@@ -701,10 +701,12 @@ describe("round63 imported member preview ownership", () => {
       expect(rendered).toContain("After the previous phase");
       const phases = rendered.split("After the previous phase");
       expect(phases).toHaveLength(2);
-      expect(phases[0]).toMatch(/2 (?:tab|tablets)\b/u);
+      expect(phases[0]).toMatch(style === "short"
+        ? /^2 tab 1x\/d x4(?:;|$)/u : /^Use 2 tablets once daily for 4 doses(?:;|$)/u);
       const count = style === "short" ? /x4\b/u : /4 (?:dose|administration)/u;
       expect(phases[0]).toMatch(count);
-      expect(phases[1]).toMatch(/1 (?:tab|tablet)\b/u);
+      expect(phases[1]).toMatch(style === "short"
+        ? /^: 1 tab 1x\/d$/u : /^: Use 1 tablet once daily\.$/u);
       expect(phases[1]).not.toMatch(count);
     }
     const independent = fresh(source);

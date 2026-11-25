@@ -5946,3 +5946,48 @@ describe("round69 current structured preview ownership", () => {
     expect(toDosageDetails(rows).step[0].component[0].timing?.code).toEqual(code);
   });
 });
+
+
+describe("round72 hourly and coded-event previews", () => {
+  it.each([["Q1H", 1], ["Q2H", 2], ["Q3H", 3], ["Q4H", 4], ["Q6H", 6], ["Q8H", 8]] as const)(
+    "retains the code-only %s interval in both long locales", (code, hours) => {
+      const wire: FhirR6DosageInstruction = { step: [{ component: [{
+        doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code }] } }
+      }] }] };
+      const before = JSON.stringify(wire);
+      for (const input of [wire, JSON.parse(JSON.stringify(toFhirR5Dosages(wire)))]) {
+        expect(formatSig(input, "long", { locale: "en" })).toContain(`every ${hours} ${hours === 1 ? "hour" : "hours"}`);
+        expect(formatSig(input, "long", { locale: "th" })).toContain(`ทุก ${hours} ชั่วโมง`);
+      }
+      expect(JSON.stringify(wire)).toBe(before);
+    });
+
+  it("keeps the structured interval over a conflicting hourly abbreviation", () => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "Q4H" }] },
+        repeat: { frequency: 1, period: 6, periodUnit: FhirPeriodUnit.Hour } } };
+    for (const input of [row, toDosageDetails([row])]) {
+      expect(formatSig(input, "long", { locale: "en" })).toContain("every 6 hours");
+      expect(formatSig(input, "long", { locale: "th" })).toContain("ทุก 6 ชั่วโมง");
+      expect(formatSig(input, "long", { locale: "en" })).not.toContain("every 4 hours");
+      expect(formatSig(input, "long", { locale: "th" })).not.toContain("ทุก 4 ชั่วโมง");
+    }
+  });
+
+  it("keeps an opaque event code visible without inventing an event date", () => {
+    const source: FhirR6DosageInstruction = { step: [{
+      start: { contextCode: { coding: [{ system: "urn:clinic:event", code: "DIALYSIS", _code: { id: "event-origin" } }] },
+        offsetDuration: { value: 2, unit: "d", code: "d", system: "http://unitsofmeasure.org" } },
+      component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }] }]
+    }] };
+    const before = JSON.stringify(source), rows = JSON.parse(JSON.stringify(toFhirR5Dosages(source)));
+    for (const input of [source, rows]) for (const locale of ["en", "th"]) {
+      const text = formatSig(input, "long", { locale });
+      expect(text).toContain("DIALYSIS");
+      expect(text).toContain(locale === "en" ? "2 days" : "2 วัน");
+    }
+    expect(toDosageDetails(rows).step[0].start).toEqual(source.step[0].start);
+    expect(JSON.stringify(source)).toBe(before);
+  });
+});

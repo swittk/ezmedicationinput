@@ -1639,3 +1639,30 @@ it.each([
     expect(row.timing?.repeat?.frequencyMax).toBeUndefined();
   }
 });
+
+
+it("retains non-enumerable own calendar resolver callbacks", () => {
+  class OffsetCalendar {
+    id = "round72-own-calendar";
+    #offset = 1000;
+    constructor() {
+      Object.defineProperty(this, "resolveYear", { value: this.resolveYear.bind(this) });
+      Object.defineProperty(this, "calendarYearFromIsoYear", { value: this.calendarYearFromIsoYear.bind(this) });
+    }
+    resolveYear(sourceYear: number, digits: number) {
+      return digits === 4 && sourceYear >= 3000
+        ? { isoYear: sourceYear - this.#offset, calendarYear: sourceYear, inferredYear: false } : undefined;
+    }
+    calendarYearFromIsoYear(isoYear: number) { return isoYear + this.#offset; }
+  }
+  const resolver = new OffsetCalendar();
+  expect(Object.keys(resolver)).not.toContain("resolveYear");
+  expect(Object.keys(resolver)).not.toContain("calendarYearFromIsoYear");
+  registerMedicationDateResolver(resolver);
+  const options: ParseOptions = { datePolicy: { calendars: [resolver.id], referenceDate: REFERENCE_DATE } };
+  for (const source of ["take 1 tablet on 28/9/3026", "take 1 tablet on 28/9"]) {
+    const parsed = parseBatch(source, options);
+    expect(parsed.fhir[0].timing?.event).toEqual(["2026-09-28"]);
+    expect(parsed.fhirNext.step[0].component[0].timing?.event).toEqual(["2026-09-28"]);
+  }
+});
