@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { resolveSigLocalization } from "../src/i18n";
 import {
@@ -331,5 +332,22 @@ describe("shared timing article roles", () => {
     // The indefinite quantity determiner has different semantics: it supplies one.
     expect(parseSig("Take 1 tablet daily for a week").fhir[0].timing!.repeat!.boundsDuration)
       .toMatchObject({ value: 1, code: "wk" });
+  });
+});
+
+describe("round79 locale detector receiver", () => {
+  it("normalizes a cross-realm plain descriptor while preserving a class receiver", () => {
+    const plain = runInNewContext("({ locale: 'fr-CA', priority: 900, test(text) { return this.locale === 'fr' && text === '__round79_fr__'; } })");
+    registerMedicationLocaleDetector(plain);
+    expect(inferMedicationLocale("__round79_fr__")).toBe("fr");
+    expect(plain.locale).toBe("fr-CA");
+    class Detector {
+      locale = "de-AT";
+      priority = 900;
+      #text = "__round79_de__";
+      test(text: string) { return this.locale === "de-AT" && text === this.#text; }
+    }
+    registerMedicationLocaleDetector(new Detector());
+    expect(inferMedicationLocale("__round79_de__")).toBe("de");
   });
 });

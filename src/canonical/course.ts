@@ -406,6 +406,11 @@ export function compareRegimenPositions(
   return leftMax < rightMin ? -1 : rightMax < leftMin ? 1 : undefined;
 }
 
+function expressionHasContent(expression: CanonicalExpression | undefined): boolean {
+  return Boolean(expression && (expression.expression || expression.reference ||
+    expression.description || expression.name));
+}
+
 /** Text and foreign Element metadata alone do not establish clinical facts
  * that can replace an authored instruction with a generated preview. */
 export function administrationHasAmountFacts(
@@ -414,10 +419,10 @@ export function administrationHasAmountFacts(
 ): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
-        amount.range?.high?.value !== undefined || amount.expression || includeRates && (
+        amount.range?.high?.value !== undefined || expressionHasContent(amount.expression) || includeRates && (
           amount.rate?.value !== undefined || amount.rateRange?.low?.value !== undefined ||
           amount.rateRange?.high?.value !== undefined || amount.rateRatio?.numerator?.value !== undefined ||
-          amount.rateExpression)) return true;
+          expressionHasContent(amount.rateExpression))) return true;
   // Coded qualitative amounts use the same typed administration templates
   // as clause realization. Unrelated advice cannot replace source-only dose
   // wording, and opaque text never supplies an amount here.

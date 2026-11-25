@@ -66,6 +66,7 @@ import {
   getMealTimingGroup,
   hourlyTimingPreviewPeriod, isCompactIntervalTimingCode,
   TIMING_CODE_DAILY_FREQUENCIES,
+  timingPreviewDescriptor,
   inferDailyOccurrenceCount,
   type MealTimingGroup,
   type TimingSummaryOptions
@@ -1227,7 +1228,7 @@ export function independentTimingText(
 ): string | undefined {
   if (!code || TIMING_CODE_DAILY_FREQUENCIES[code] !== undefined) return undefined;
   const lower = code.toLowerCase();
-  if (TIMING_ABBREVIATIONS[lower]) return undefined;
+  if (timingPreviewDescriptor(code)) return undefined;
   if (WORD_FREQUENCIES[lower] && recurrence &&
       (recurrence.frequency !== undefined || recurrence.frequencyMax !== undefined ||
        recurrence.period !== undefined || recurrence.periodMax !== undefined ||
@@ -1244,7 +1245,7 @@ export function timingCodeMatchesRecurrence(
   if (!code) return true;
   const daily = TIMING_CODE_DAILY_FREQUENCIES[code];
   const interval = daily === undefined || schedule.when?.length || schedule.timeOfDay?.length
-    ? TIMING_ABBREVIATIONS[code.toLowerCase()] : undefined;
+    ? timingPreviewDescriptor(code) : undefined;
   if (interval?.when?.length && (schedule.when?.length
       ? interval.when.length !== schedule.when.length ||
         schedule.when.some((event, index) => event !== interval.when![index])
@@ -1920,7 +1921,7 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       ? formatPatientInstructionSentence(preGraphInstruction)
       : undefined;
   const hasAdministrationTiming = Boolean(
-    schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length || schedule.calendarEvents?.length ||

@@ -4701,9 +4701,17 @@ describe("course locale boundary", () => {
     );
   });
   it("adds a third language through the same registration including clauses, stages, rates and conditions", () => {
+    let checkMethod = false, methodChecks = 0;
     registerSigLocalization({
       locale: "course-test",
-      formatLong: () => "Dose locale.",
+      formatLong: ({ clause }) => {
+        if (checkMethod) {
+          expect(clause.method?.text).toBe("Apply");
+          expect(clause.schedule).toMatchObject({ frequency: 2, period: 1, periodUnit: "d" });
+          methodChecks++;
+        }
+        return "Dose locale.";
+      },
       formatShort: () => "Dose locale.",
       course: {
         ...ENGLISH_COURSE,
@@ -4753,13 +4761,15 @@ describe("course locale boundary", () => {
     };
     const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
     const methodR6 = fresh(toDosageDetails([fresh(methodRow)]));
+    checkMethod = true;
     for (const options of [
       { locale: "course-test", realizationMode: "normalized" as const },
       { i18n: { inherit: "course-test", locale: "course-derived" }, realizationMode: "normalized" as const }
     ]) {
       for (const input of [fresh(methodRow), fresh(methodR6), fresh(toFhirR5Dosages(methodR6))]) {
-        const before = fresh(input);
+        const before = fresh(input), previousChecks = methodChecks;
         expect(formatSig(input, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
+        expect(methodChecks).toBeGreaterThan(previousChecks);
         expect(input).toEqual(before);
       }
       expect(formatCanonicalAdministration({
@@ -4767,6 +4777,7 @@ describe("course locale boundary", () => {
         schedule: { recurrence: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day } }
       }, "long", options)).toBe("Current: Dose locale; original directions: Dose locale.");
     }
+    checkMethod = false;
     expect(toDosageDetails(fresh(toFhirR5Dosages(methodR6)))).toEqual(methodR6);
   });
   it("applies per-call inheritance to public R5 choices and standalone course wording", () => {

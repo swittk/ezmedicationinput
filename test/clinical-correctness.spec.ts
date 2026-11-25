@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { FhirR6DosageInstruction } from "../src";
+import { formatParseBatch, parseInstructionActions, importCanonicalCourse } from "../src";
+import { buildInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { retainDraftSteps } from "../src/adapters/r6-editable-metadata";
 import { AdviceArgumentRole, AdvicePolarity } from "../src/types";
 import { calculateTotalUnits, formatSig, lintSig, nextDueDoses, parseStrengthComponents, getDosageCondition, getDosageExcludedDates, getDosageExcludedWeekdays, setDosageExcludedWeekdays, toDosageDetails, toFhirR5Dosages, evaluateMedicationCondition, RouteCode } from "../src";
 import { parseSig, parseSigAsync } from "./helpers/r5-parser";
@@ -3507,7 +3511,11 @@ describe("round52 live site and partial-direction previews", () => {
           expect(current).toMatch(exactAmount);
           expect(current).not.toContain("1 tablet");
           expect(current).not.toContain("1 เม็ด");
-        } else expect(preview).toContain(authored);
+        } else {
+          expect(preview).toContain(authored);
+          if (current !== preview)
+            expect(current).not.toMatch(/\d+(?:\.\d+)?\s*(?:tablets?\b|tab\b|เม็ด)/u);
+        }
       }
       expect(input).toEqual(before);
     }
@@ -3623,4 +3631,124 @@ describe("round52 source-only and repeated-window preview ownership", () => {
       expect(r6).toEqual(expected);
     }
   );
+});
+
+describe("round79 current clinical preview ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const boundary = (days: number) => ({
+    contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+    offsetDuration: { value: days, unit: "d", code: "d" }
+  });
+  const component = (value: number) => ({
+    doseAndRate: [{ doseQuantity: { value, unit: "mg" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: "d" as const } }
+  });
+
+  it.each([false, true])("keeps the unresolved predecessor before an event end (explicit start=%s)", explicit => {
+    const raw: FhirR6DosageInstruction = { step: [
+      { component: [{ ...component(1), timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", count: 2 } } }] },
+      { ...(explicit ? { start: boundary(2) } : {}),
+        end: { contextCode: { coding: [{ system: "https://clinic.example/events", code: "follow-up" }] } },
+        component: [component(2)] }
+    ] };
+    const before = fresh(raw);
+    for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        const predecessor = locale === "en" ? "After the previous phase" : "หลังขั้นตอนก่อนหน้า";
+        expect(text).toContain("follow-up");
+        expect(text.includes(predecessor)).toBe(!explicit);
+        if (!explicit) expect(text.indexOf(predecessor)).toBeLessThan(text.indexOf("follow-up"));
+      }
+    }
+    expect(raw).toEqual(before);
+  });
+
+  it("keeps the applicable stage cap in each standalone saved row", () => {
+    const raw: FhirR6DosageInstruction = { step: [
+      { end: boundary(2), safety: { doseLimit: [{ scope: "administration", valueQuantity: { value: 8, unit: "mg" } }] },
+        component: [component(5)] },
+      { start: boundary(2), component: [component(3)] }
+    ] };
+    const rows = fresh(toFhirR5Dosages(raw)), before = fresh(rows);
+    for (const locale of ["en", "th"] as const) {
+      const first = fromFhirDosage(fresh(rows[0]), { locale, realizationMode: "normalized" });
+      const second = fromFhirDosage(fresh(rows[1]), { locale, realizationMode: "normalized" });
+      for (const text of [first.shortText, first.longText]) {
+        expect(text).toContain(locale === "en" ? "Within this stage: " : "ในขั้นตอนนี้: ");
+        expect(text).toContain("max per administration: 8 mg");
+      }
+      for (const text of [second.shortText, second.longText]) expect(text).not.toContain("8 mg");
+    }
+    expect(rows).toEqual(before);
+  });
+
+  it.each([false, true])("displays saved inactive draft bounds without inventing an administration (bounded=%s)", bounded => {
+    const saved: FhirR6DosageInstruction = { step: [] };
+    retainDraftSteps(saved, [{ index: 0, step: bounded ? { start: boundary(2), end: boundary(5) } : {} }]);
+    const before = fresh(saved), rows = fresh(toFhirR5Dosages(saved));
+    for (const input of [fresh(saved), rows]) {
+      const course = importCanonicalCourse(input);
+      expect(course.stages.flatMap(stage => stage.administrations)).toEqual([]);
+      for (const locale of ["en", "th"] as const) {
+        const options = { locale, realizationMode: "normalized" as const };
+        const previews = [formatSig(input, "long", options)];
+        if (!Array.isArray(input))
+          previews.push(formatParseBatch(fromFhir(input, options), "long", options));
+        for (const text of previews) {
+          if (bounded) {
+            expect(text).toContain(locale === "en" ? "2 days after treatment start" : "2 วันหลังเริ่มการรักษา");
+            expect(text).toContain(locale === "en" ? "5 days after treatment start" : "5 วันหลังเริ่มการรักษา");
+            expect(text).not.toMatch(/(?:tablet|\bmg\b|เม็ด|รับประทาน)/u);
+          } else expect(text).toBe("");
+        }
+      }
+    }
+    expect(saved).toEqual(before);
+  });
+
+  it.each(["MORN", "HS", undefined] as const)("lets current event timing own a retained BED code (%s)", when => {
+    const code = { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BED" }] };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      doseAndRate: [{ doseQuantity: { value: 5, unit: "mg" } }],
+      timing: { code, ...(when ? { repeat: { when: [when] } } : {}) }
+    }] }] };
+    for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) {
+      for (const locale of ["en", "th"] as const) {
+        const short = formatSig(input, "short", { locale, realizationMode: "normalized" });
+        if (when === "MORN") {
+          expect(short).not.toContain("BED");
+          expect(formatSig(input, "long", { locale, realizationMode: "normalized" }))
+            .toContain(locale === "en" ? "morning" : "เช้า");
+        } else expect(short).toContain("BED");
+      }
+    }
+    expect(toDosageDetails(fresh(toFhirR5Dosages(raw))).step[0].component[0].timing?.code).toEqual(code);
+  });
+
+  it.each([false, true])("retains literal timing beside an independent graph warning (timing=%s)", timed => {
+    const source = "Do not crush";
+    const marker = buildInstructionGraphExtension({ sourceText: source, sourceLocale: "en", actions: parseInstructionActions(source) })!;
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      extension: [marker],
+      ...(timed ? { timing: { code: { coding: [{ system: "https://clinic.example/timing", code: "dialysis-after", display: "after dialysis" }] } } } : {})
+    }] }] };
+    for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"] as const) {
+      const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "Do not crush" : "ห้ามบด");
+      expect(text.includes("after dialysis")).toBe(timed);
+      if (!timed) expect(text).toBe(locale === "en" ? "Do not crush." : "ห้ามบด.");
+    }
+  });
+
+  it.each(["doseExpression", "rateExpression"] as const)("retains authored dose beside an annotation-only %s", field => {
+    const expression = { id: "unavailable-dose", language: "text/fhirpath",
+      _expression: { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{
+      text: "Take 5 mg daily", doseAndRate: [{ [field]: expression }]
+    }] }] };
+    for (const input of [fresh(raw), fresh(toFhirR5Dosages(raw))]) for (const locale of ["en", "th"] as const)
+      expect(formatSig(input, "long", { locale, realizationMode: "normalized" })).toContain("Take 5 mg daily");
+    expect(toDosageDetails(fresh(toFhirR5Dosages(raw))).step[0].component[0].doseAndRate?.[0]?.[field]).toEqual(expression);
+  });
 });

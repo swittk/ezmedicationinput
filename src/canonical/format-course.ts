@@ -766,12 +766,13 @@ export function formatCanonicalAdministration(
   style: "short" | "long" = "long",
   options?: FormatOptions,
   compiled?: ReadonlyMap<CanonicalAdministration, CanonicalSigClause>,
-  authored?: AuthoredDirectionsState
+  authored?: AuthoredDirectionsState,
+  stageSafety?: CanonicalSafety
 ): string {
   // A component's authored source is distinct from a course-wide instruction.
   if (
     a.provenance?.format !== "r6" && a.provenance?.sourceTextVerified !== false &&
-    options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded &&
+    options?.realizationMode !== "normalized" && !a.predicate && !a.safety?.ifExceeded && !stageSafety &&
     a.text?.trim() &&
     (a.schedule?.recurrence?.startOffset ||
       a.schedule?.recurrence?.endOffset ||
@@ -784,7 +785,7 @@ export function formatCanonicalAdministration(
     return a.text;
   }
   return formatCanonicalCourse(
-    { kind: "course", stages: [{ administrations: [a] }] },
+    { kind: "course", stages: [{ administrations: [a], safety: stageSafety }] },
     style,
     options,
     compiled,
@@ -1152,7 +1153,7 @@ export function formatCanonicalCourse(
     );
     if (step.safety)
       rendered = appendDoseLimits(rendered, step.safety.limits, words, "stage", step.safety.ifExceeded);
-    if (!rendered.trim()) continue;
+    if (!rendered.trim() && !step.start && !step.end && step.count === undefined) continue;
     let timing = "";
     if (step.start || step.end || index > 0) {
       const previous = !step.start && !choiceDependentStart && index > 0 ? oneOrCourse.stages[index - 1] : undefined;
@@ -1208,6 +1209,8 @@ export function formatCanonicalCourse(
               (!step.start || startQuantity || startRange || contextualStart) &&
               (!step.end || endQuantity || endRange || contextualEnd)
               ? window : words.reviewTiming(window || undefined);
+            if (index > 0 && !step.start && !startQuantity)
+              timing = words.afterPreviousPhase + "; " + timing;
           }
         }
       } else if (startAnchor === "treatment-day-start" &&
@@ -1248,7 +1251,8 @@ export function formatCanonicalCourse(
     }
     const stageCount = step.count !== undefined ? words.phaseCount(step.count) : "";
     const heading = [timing, stageCount].filter(Boolean).join("; ");
-    stages.push(heading ? `${heading}: ${rendered}` : rendered);
+    if (rendered.trim()) stages.push(heading ? `${heading}: ${rendered}` : rendered);
+    else if (heading) stages.push(heading);
   }
   const pauseText = (pause: { start: number; end: number }, anchor: CanonicalBoundary["anchor"] | undefined): string =>
     anchor === "treatment-day-start"

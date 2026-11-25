@@ -56,6 +56,11 @@ export const TIMING_CODE_HOURLY_PERIODS: Readonly<Record<string, number>> = {
   Q1H: 1, Q2H: 2, Q3H: 3, Q4H: 4, Q6H: 6, Q8H: 8
 };
 
+/** Standard BED and the existing QHS shorthand share the same event anchor. */
+export function timingPreviewDescriptor(code: string) {
+  return TIMING_ABBREVIATIONS[code === "BED" ? "qhs" : code.toLowerCase()];
+}
+
 /** Human previews also recognize existing SIG shorthand without treating it
  * as a standard FHIR timing identity or changing its structured projection. */
 export function hourlyTimingPreviewPeriod(code: string): number | undefined {

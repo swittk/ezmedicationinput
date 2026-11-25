@@ -2796,7 +2796,7 @@ function formatLongThai(
     )
   ));
   const hasAdministrationTiming = Boolean(
-    schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
+    timingText || schedule.frequency !== undefined || schedule.frequencyMax !== undefined ||
     schedule.period !== undefined || schedule.periodMax !== undefined ||
     schedule.when?.length || schedule.eventWindow || schedule.dayOfWeek?.length || schedule.dayOfMonth?.length ||
     schedule.timeOfDay?.length || schedule.calendarEvents?.length ||

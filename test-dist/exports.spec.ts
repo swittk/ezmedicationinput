@@ -190,6 +190,7 @@ describe("published package entrypoints", () => {
           currentText,
           originalInstruction: parsed.fhirNext.renderedInstruction,
           originalComponentText: parsed.fhirNext.step[0]?.component[0]?.text,
+          roundTripAdministrationCount: reparsed.fhirNext.step.reduce((count, step) => count + (step.component?.length ?? 0), 0),
           roundTripDoseCount: reparsed.fhirNext.step[0]?.component[0]?.doseAndRate?.length ?? 0,
           roundTripSiteCode: reparsed.fhirNext.step[0]?.component[0]?.site?.concept?.coding?.[0]?.code,
           roundTripFrequency: reparsed.fhirNext.step[0]?.component[0]?.timing?.repeat?.frequency,
@@ -205,6 +206,7 @@ describe("published package entrypoints", () => {
     expect(result.originalComponentText).toBe("หยอดตาขวา วันละ 4 ครั้ง ตอนเช้า, ตอนเที่ยง, ตอนเย็น และ ก่อนนอน.");
     expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalComponentText);
     expect(result.roundTripText).toContain("; ข้อความเดิม: " + result.originalInstruction);
+    expect(result.roundTripAdministrationCount).toBe(1);
     expect(result.roundTripDoseCount).toBe(0);
     expect(result.roundTripSiteCode).toBe("1290032005");
     expect(result.roundTripFrequency).toBe(4);

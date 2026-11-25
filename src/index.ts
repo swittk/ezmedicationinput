@@ -1117,7 +1117,8 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
         // full-course rows use the existing native owner reconciliation.
         (child.url === "dosageDetails" || child.url === "component" &&
           child.extension?.some(field => field.url === "site" &&
-            field.valueCodeableReference?.reference?.display)))))
+            field.valueCodeableReference?.reference?.display)) ||
+        child.url === "step" && child.extension?.some(field => field.url === "safety"))))
     return true;
   const primary = dosage.doseAndRate?.[0];
   // Native source ownership preserves directions beside independent advice.
@@ -1486,7 +1487,8 @@ function fromFhirDosageInternal(
   const nativeCourse = unverified || needsNativeR5Preview(dosage, options)
     ? courseFromR5([dosage], undefined, undefined, undefined, true)
     : undefined;
-  const native = nativeCourse?.stages.find(stage => stage.administrations.length)?.administrations[0];
+  const nativeStage = nativeCourse?.stages.find(stage => stage.administrations.length);
+  const native = nativeStage?.administrations[0];
   if (unverified && native?.provenance) native.provenance.sourceTextVerified = false;
   if (unverified && nativeCourse && !native)
     (nativeCourse.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
@@ -1510,11 +1512,11 @@ function fromFhirDosageInternal(
   const authored = typeof edit === "object" && options?.realizationMode === "roundtrip" ? edit.authored : undefined;
   const shortAuthored = authored ? { text: authored, rendered: false } : undefined;
   const longAuthored = authored ? { text: authored, rendered: false } : undefined;
-  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled, shortAuthored)
+  let shortText = replacementText ?? (native ? formatCanonicalAdministration(native, "short", options, compiled, shortAuthored, nativeStage?.safety)
     : nativeCourse ? formatCanonicalCourse(nativeCourse, "short", options, undefined, shortAuthored) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "short", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "short", localization, options));
-  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled, longAuthored)
+  let computedLong = replacementText ?? (native ? formatCanonicalAdministration(native, "long", options, compiled, longAuthored, nativeStage?.safety)
     : nativeCourse ? formatCanonicalCourse(nativeCourse, "long", options, undefined, longAuthored) : suppressMaximumDisplay
     ? provisionalFhirDisplay(dosage, clause, "long", localization, options, false)
     : exactSource ?? formatCanonicalClause(clause, "long", localization, options));
