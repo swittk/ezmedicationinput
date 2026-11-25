@@ -2988,6 +2988,14 @@ function actionSemanticScore(frame: AdviceFrame): number {
   return score;
 }
 
+function sameArgumentQuantity(left: AdviceArgument, right: AdviceArgument): boolean {
+  return left.quantity?.value === right.quantity?.value &&
+    left.quantity?.unit === right.quantity?.unit &&
+    left.quantity?.comparator === right.quantity?.comparator &&
+    left.quantity?.range?.low === right.quantity?.range?.low &&
+    left.quantity?.range?.high === right.quantity?.range?.high;
+}
+
 function sourceBackedTimeExtension(
   existing: AdviceFrame,
   candidate: AdviceFrame
@@ -3010,11 +3018,7 @@ function sourceBackedTimeExtension(
     return candidate.args.some((next) =>
       next.role === arg.role &&
       normalizedInstructionSurface(next.text ?? next.normalized ?? "") === surface &&
-      next.quantity?.value === arg.quantity?.value &&
-      next.quantity?.unit === arg.quantity?.unit &&
-      next.quantity?.comparator === arg.quantity?.comparator &&
-      next.quantity?.range?.low === arg.quantity?.range?.low &&
-      next.quantity?.range?.high === arg.quantity?.range?.high
+      sameArgumentQuantity(next, arg)
     );
   });
 }
@@ -4026,7 +4030,8 @@ const ACTION_REALIZERS: Partial<Record<MedicationInstructionActionRealizer, Acti
 function sameTimeConstraint(left: AdviceArgument, right: AdviceArgument, inherited: AdviceRelation | undefined): boolean {
   return left.role === AdviceArgumentRole.Time &&
     (left.relation ?? inherited) === (right.relation ?? inherited) &&
-    (left.normalized ?? left.conceptId ?? left.text) === (right.normalized ?? right.conceptId ?? right.text);
+    (left.normalized ?? left.conceptId ?? left.text) === (right.normalized ?? right.conceptId ?? right.text) &&
+    sameArgumentQuantity(left, right);
 }
 
 function realizeAction(

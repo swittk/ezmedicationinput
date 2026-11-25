@@ -8117,3 +8117,21 @@ describe("round74 independent material and time owners", () => {
       quantity: { value: 1, unit: "tab" } }));
   });
 });
+
+
+it("round74 retains distinct saved Time quantities with the same normalized unit", () => {
+  const source = parseInstructionActions("Rinse eyes after breakfast")[0];
+  const frame: AdviceFrame = { ...source, sourceText: "", relation: AdviceRelation.After,
+    args: [...source.args.filter(arg => arg.role !== AdviceArgumentRole.Time), ...[1, 2, 1].map(value => ({
+      role: AdviceArgumentRole.Time, relation: AdviceRelation.After, text: value + " hours", normalized: "h",
+      quantity: { value, unit: "h" } }))] };
+  const row: FhirDosage = { extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
+  const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+  for (const input of [[row], r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) for (const locale of ["en", "th"]) {
+    const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+    expect(text.match(/[0-9]+/gu)).toEqual(["1", "2"]);
+  }
+  expect(JSON.stringify(row)).toBe(before);
+  expect(parseInstructionGraphExtension(toFhirR5Dosages(r6)[0].extension)?.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => arg.quantity))
+    .toEqual([{ value: 1, unit: "h" }, { value: 2, unit: "h" }, { value: 1, unit: "h" }]);
+});
