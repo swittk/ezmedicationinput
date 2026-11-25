@@ -1142,7 +1142,7 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
 function defaultFormatOptions(options?: FormatBatchOptions, separator?: string): FormatBatchOptions {
   if (options?.realizationMode !== undefined && separator === undefined) return options;
   if (!options) return { realizationMode: "normalized", ...(separator !== undefined ? { separator } : {}) };
-  return {
+  return Object.assign({}, options, {
     locale: options.locale,
     i18n: options.i18n,
     groupMealTimingsByRelation: options.groupMealTimingsByRelation,
@@ -1150,7 +1150,7 @@ function defaultFormatOptions(options?: FormatBatchOptions, separator?: string):
     sitePlacement: options.sitePlacement,
     separator: separator ?? options.separator,
     realizationMode: options.realizationMode ?? "normalized",
-  };
+  });
 }
 
 export function formatSig(
