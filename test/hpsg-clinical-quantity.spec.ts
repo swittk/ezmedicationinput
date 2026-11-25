@@ -3605,7 +3605,9 @@ describe("round58 qualified rate ownership and Thai unit aliases", () => {
     const parsed = parsePublicSig("Infuse 500 mL, not more than 1000 units/hr");
     expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 500, unit: "mL" });
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
-    expect(parsed.meta.leftoverText).toBe("not more than 1000 units/hr");
+    expect(parsed.meta.canonical.clauses[0].additionalInstructions)
+      .toContainEqual({ text: "not more than 1000 units/hr" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod).toBeUndefined();
     expect(parsed.fhir).toHaveLength(1);
     expect(parsed.fhirNext.step).toHaveLength(1);
     expect(parsed.fhirNext.step[0].component).toHaveLength(1);
@@ -3735,7 +3737,9 @@ describe("round63 local timing and quantity ownership", () => {
     const comparator = amount === "500mL" ? undefined : "~";
     expect(parsed.meta.canonical.clauses[0].dose?.comparator).toBe(comparator);
     expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
-    expect(parsed.meta.leftoverText).toBe("not more than 1000 units/hr");
+    expect(parsed.meta.canonical.clauses[0].additionalInstructions)
+      .toContainEqual({ text: "not more than 1000 units/hr" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod).toBeUndefined();
     expect(parsed.fhir).toHaveLength(1);
     expect(parsed.fhirNext.step).toHaveLength(1);
     expect(parsed.fhirNext.step[0].component).toHaveLength(1);
@@ -4456,6 +4460,44 @@ describe("round80 dated single-administration duration ownership", () => {
 
 
 describe("qualified maximum and omitted-unit ownership", () => {
+  it.each(["not more than", "no more than"])("keeps the one-tablet PRN dose distinct from its daily %s limit", lead => {
+    const parsed = parsePublicSig("Take 1 tablet as needed for pain, " + lead + " 4 tablets per day");
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule?.maxDosePerPeriod)
+      .toEqual([{ amount: 4, unit: "tab", period: 1, periodUnit: "d" }]);
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(row.asNeeded).toBe(true);
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: 4, unit: "tab" }, denominator: { value: 1, unit: "d" } }
+      ]);
+    }
+  });
+
+  it.each([
+    ["every 6 hours", { period: 6, periodUnit: "h" }],
+    ["q6h", { period: 6, periodUnit: "h" }],
+    ["BID", { frequency: 2, period: 1, periodUnit: "d" }]
+  ] as const)("keeps a qualified daily volume cap on the %s administration", (cadence, schedule) => {
+    const parsed = parsePublicSig("Give 1 mL " + cadence + ", no more than 3 mL per 24 hours");
+    expect(parsed.meta.canonical.clauses).toHaveLength(1);
+    expect(parsed.meta.canonical.clauses[0].dose).toEqual({ value: 1, unit: "mL" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({
+      ...schedule, maxDosePerPeriod: [{ amount: 3, unit: "mL", period: 24, periodUnit: "h" }]
+    });
+    for (const row of [...parsed.fhir, ...toFhirR5Dosages(parsed.fhirNext)]) {
+      expect(row.doseAndRate?.[0].doseQuantity).toMatchObject({ value: 1, unit: "mL" });
+      expect(row.doseAndRate?.[0].rateQuantity).toBeUndefined();
+      expect(row.doseAndRate?.[0].rateRatio).toBeUndefined();
+      expect(row.timing?.repeat).toMatchObject(schedule);
+      expect(row.timing?.repeat?.duration).toBeUndefined();
+      expect(row.maxDosePerPeriod).toMatchObject([
+        { numerator: { value: 3, unit: "mL" }, denominator: { value: 24, unit: "h" } }
+      ]);
+    }
+  });
+
   it.each([
     ["Infuse 100 mL, no greater than 50 mL over 1 hour", 100, "mL", 50, 1],
     ["Give 5 mg IV, maximum 10 mg per 2 hours", 5, "mg", 10, 2],

@@ -4124,7 +4124,7 @@ function realizeAction(
     substance, result, activity, time, timeRelation: timeArg ? timeArg.relation ?? inheritedTimeRelation : undefined, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
-    timeWasRendered: coverage ? false : undefined,
+    timeWasRendered: coverage || frame.polarity === AdvicePolarity.Negate ? false : undefined,
     translateArgumentConcept: (arg) => translatedArgumentConcept(arg, locale),
     translateQuantity: (quantity) => translatedQuantity(quantity, locale)
   };
@@ -4145,6 +4145,8 @@ function realizeAction(
   // Independent typed event adjuncts compose AFTER their head action's
   // material/site valence. Never infer a temporal relation from display text.
   let complete = realized;
+  if (negated && input.time && !input.timeWasRendered)
+    complete = joinLocalizedTokens(locale, [complete, realizeTimeArgument(input)]);
   if (coverage && clause) coverage.singleScheduledEvent = Boolean(
     input.timeWasRendered && timeArg && timeArgumentCoversSingleScheduledEvent(frame, timeArg, clause)
   );
@@ -5421,6 +5423,7 @@ export function realizeInstructionGraph(
     }
     if (options?.primaryConditions && relation.toActionIndex === coveredPrimaryAction &&
         relationHasGrammarFeature(relation.kind, "conditionScope")) {
+      if (!relation.span && position === "pre") continue;
       options.primaryConditions.push({
         ...condition,
         position: relation.span && relation.span.end <= (primary?.start ?? target.span.start) ? "pre" : "post"

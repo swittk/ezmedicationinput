@@ -5461,6 +5461,49 @@ it.each([false, true])("round76 retains every saved point Time and its explicit 
 
 describe("scoped action conditions and independent complements", () => {
   const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    [AdviceRelation.On, "at 08:00", "เวลา 08:00"],
+    [AdviceRelation.Before, "before 08:00", "ก่อน08:00"],
+    [AdviceRelation.After, "after 08:00", "หลัง08:00"]
+  ] as const)("retains the selected %s clock on a negated patch instruction", (relation, enTime, thTime) => {
+    const frame: AdviceFrame = {
+      force: AdviceForce.Warning, polarity: AdvicePolarity.Negate,
+      predicate: { lemma: "apply_patch", display: "Apply", i18n: { th: "แปะ" }, realizer: "object-time" },
+      args: [
+        { role: AdviceArgumentRole.Object, text: "new patch", i18n: { en: "new patch", th: "แผ่นใหม่" } },
+        { role: AdviceArgumentRole.Time, text: "08:00", normalized: "08:00", relation }
+      ],
+      sourceText: "", span: { start: 0, end: 0 }, sequenceIndex: 0
+    };
+    const graph = { sourceText: "", sourceLocale: "en", actions: [frame] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    const r6 = toDosageDetails([fresh(row)]);
+    for (const [locale, clock, body] of [
+      ["en", enTime, "Do not apply new patch"], ["th", thTime, "ห้ามแปะแผ่นใหม่"]
+    ]) {
+      for (const text of [
+        realizeInstructionGraph(graph, locale),
+        ...[fresh([row]), fresh(r6)].map(input => formatSig(input, "long", { locale, realizationMode: "normalized" }))
+      ]) {
+        expect(text).toContain(body);
+        expect(text).toContain(clock);
+        expect(text?.split("08:00")).toHaveLength(2);
+      }
+    }
+  });
+
+  it("renders the selected clock once when negated Mix already consumes it", () => {
+    const frame = parseInstructionActions("Do not mix with milk at 08:00")[0];
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Time, relation: AdviceRelation.On, normalized: "08:00:00"
+    }));
+    for (const locale of ["en", "th"]) {
+      const text = realizeInstructionAction(frame, locale);
+      expect(text.split("08:00")).toHaveLength(2);
+      expect(text).toContain(locale === "en" ? "Do not mix with milk" : "ห้ามผสม");
+    }
+  });
+
   it.each([false, true])("keeps a saved target-indexed condition with source offsets=%s", withSpan => {
     const condition = "if able to swallow", source = condition + ", Swallow 1 tablet whole";
     const frame = parseInstructionActions("Swallow 1 tablet whole", condition.length + 2)[0];
@@ -5470,12 +5513,16 @@ describe("scoped action conditions and independent complements", () => {
         ...(withSpan ? { span: { start: 0, end: condition.length } } : {}) }] })!;
     const graph = parseInstructionGraphExtension([fresh(marker)])!;
     expect(graph.relations?.[0].span).toEqual(withSpan ? { start: 0, end: condition.length } : undefined);
-    for (const locale of ["en", "th"]) expect(realizeInstructionGraph(graph, locale)).toContain(condition);
+    for (const locale of ["en", "th"])
+      expect(realizeInstructionGraph(graph, locale)?.toLowerCase().split(condition)).toHaveLength(2);
     const row: FhirDosage = { method: { text: "Swallow" }, doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
       extension: [fresh(marker)] };
     const r6 = toDosageDetails([fresh(row)]);
     for (const input of [fresh([row]), fresh(r6), fresh(toFhirR5Dosages(fresh(r6)))])
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }).toLowerCase()).toContain(condition);
+      for (const locale of ["en", "th"]) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" }).toLowerCase();
+        expect(text.split(condition), text).toHaveLength(2);
+      }
   });
 
   it.each(["breakfast", "08:00"])("retains a dilution destination after the temporal complement %s", event => {

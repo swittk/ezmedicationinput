@@ -1,10 +1,10 @@
 import { routeLexicalRule } from "./core-rules";
 import { LexKind } from "../../lexer/token-types";
-import { getRouteMeaning } from "../../lexer/meaning";
+import { getRouteMeaning, hasTimingAbbreviationMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { HpsgClauseContext, lexicalRule, maximumDosePerPeriodAt, normalizeTokenLower } from "../rule-context";
-import { FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
+import { EVERY_INTERVAL_TOKENS, FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   doseRangeNumberAt,
@@ -21,6 +21,7 @@ import {
   DOSE_UNIT_CONNECTORS,
   MEDICATION_OBJECT_FILLERS,
   MAXIMUM_COUNT_LEAD_TOKENS,
+  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   SITE_TRAILING_INSTRUCTION_WORDS
 } from "../lexical-classes";
 import {
@@ -209,15 +210,21 @@ function weightRatePeriodUnit(
 
 function hasAdministrationCue(context: HpsgClauseContext, before: number, allowPrecedingDose = false): boolean {
   const first = Math.max(0, before - 8);
-  let precedingAmount = false;
+  const maximum = allowPrecedingDose &&
+    MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(context.tokens[before]));
+  let precedingAmount = false, precedingCadence = false;
   for (let index = before - 1; index >= first; index -= 1) {
     const token = context.tokens[index];
     const lower = normalizeTokenLower(token);
+    if (maximum && (EVERY_INTERVAL_TOKENS.has(lower) || hasTimingAbbreviationMeaning(token)))
+      precedingCadence = true;
     // An administration head owns its nearest numeric argument. A later
     // cumulative limit cannot borrow it across the already administered dose.
     if (/^(?:infuse|infusion|run|administer|give)$/u.test(lower)) {
       if (!precedingAmount) return true;
-      if (!allowPrecedingDose) return false;
+      // A recurring dose keeps its own administration head. A later limit
+      // cannot borrow that head as an infusion-rate instruction.
+      if (!allowPrecedingDose || precedingCadence) return false;
       // A borrowed administration head still belongs to its typed route.
       // Reuse the route constituent so multiword and configured routes retain
       // the same ownership as a single annotated route token.

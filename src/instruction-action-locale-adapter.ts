@@ -36,7 +36,7 @@ export interface InstructionActionRealizationInput {
   time?: string;
   /** Selected Time's explicit or licensed inherited relation. */
   timeRelation?: AdviceRelation;
-  /** Optional output evidence requested by a rich primary formatter. Set only
+  /** Optional output evidence requested by action composition. Set only
    * at the branch that actually includes the selected Time in its wording. */
   timeWasRendered?: boolean;
   duration?: string;

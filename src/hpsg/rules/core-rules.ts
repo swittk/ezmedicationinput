@@ -88,6 +88,7 @@ import {
   isPunctuation,
   joinTokenText,
   lexicalRule,
+  maximumDosePerPeriodAt,
   normalizeTokenLower,
   parseClockToken,
   rangeFromTokens,
@@ -1108,6 +1109,10 @@ function comparativeDoseAt(
 ): HpsgSign | undefined {
   const qualified = doseComparatorNumberAt(context.tokens, start, context.limit, lower);
   if (!qualified) return undefined;
+  // An explicit cumulative period belongs to the maximum. A bare daily
+  // cadence can still modify an administered comparative dose.
+  const maximum = maximumDosePerPeriodAt(context, start);
+  if (maximum && (maximum.period.unitDenominator || maximum.period.tokens.length > 1)) return undefined;
   const { comparator, value, numericIndex, rawUnit } = qualified;
   const compactUnit = rawUnit ? normalizeUnit(rawUnit, context.options) : undefined;
   if (rawUnit && !compactUnit) return undefined;

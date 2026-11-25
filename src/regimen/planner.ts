@@ -11,7 +11,7 @@ import {
 } from '../lexer/meaning';
 import { LexKind } from '../lexer/token-types';
 import { EVENT_TIMING_TOKENS } from '../maps';
-import { parseClockToken } from '../hpsg/rule-context';
+import { maximumDosePerPeriodAt, parseClockToken } from '../hpsg/rule-context';
 import { explicitDoseLexicalEnd, phaseAdjustmentAt } from '../hpsg/rules/core-rules';
 import {
   ordinalWeekStageSequence, followingCourseDurationHeaderAt,
@@ -22,7 +22,7 @@ import { FREQUENCY_SIMPLE_WORDS, mapFrequencyAdverb } from '../hpsg/timing-lexic
 import { ACTION_DISCOURSE_CONNECTORS, ACTION_COORDINATION_CONNECTORS, ACTION_SEQUENCE_MARKERS, CLAUSE_LEAD_WORDS,
   DOSE_ADDITIVE_QUANTITY_CONNECTORS, DOSE_FRACTION_ARTICLES,
   DOSE_FRACTION_DENOMINATOR_WORDS, DOSE_FRACTION_WORDS, DOSE_NUMBER_WORDS,
-  HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd,
+  HARD_SEGMENT_BOUNDARY_TOKENS, sequenceConnectorEnd, MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   TREATMENT_PERIOD_START_LEADS,
   LATERAL_MODIFIER_WORDS, SITE_ANCHORS, SITE_MULTIPLICITY_WORDS,
   coordinationConnectorKind } from '../hpsg/lexical-classes';
@@ -176,6 +176,11 @@ function candidateSites(input: string, tokens: Token[], options?: ParseOptions):
   const sites: BoundarySite[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
+    // The existing maximum constituent owns its qualifier, amount and period.
+    // Its internal numerals cannot introduce independent administrations.
+    const maximum = MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lexeme(token))
+      ? maximumDosePerPeriodAt({ tokens, options }, i) : undefined;
+    if (maximum) { i += maximum.tokens.length - 1; continue; }
     // A typed phase-adjustment predicate supplies a candidate boundary;
     // its complete dosage daughter is still checked by the boundary grammar.
     // This includes ADD, replacements and resumed treatment, not only THEN.
