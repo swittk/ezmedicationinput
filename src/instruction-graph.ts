@@ -3920,7 +3920,7 @@ const DEFAULT_ACTION_REALIZER = (
   }
 
   text = appendDuration(text, c.duration);
-  const timeSemanticRelation = c.timeRelation ?? c.frame.relation;
+  const timeSemanticRelation = c.timeRelation;
   const timeRelation = c.time && relationHasGrammarFeature(timeSemanticRelation, "timeComplement")
     ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation
     : undefined;
@@ -4080,18 +4080,21 @@ function realizeAction(
   let temporalAdjuncts: AdviceArgument[] | undefined;
   let retainedMeasuredSource: string | undefined;
   const independentTemporal = !frame.relation || !relationHasSemanticClass(frame.relation, "temporal");
+  // A frame relation can govern its Time only when that registered relation
+  // admits a temporal complement. Duration/purpose relations keep their owner.
+  const inheritedTimeRelation = relationHasGrammarFeature(frame.relation, "timeComplement") ? frame.relation : undefined;
   for (const arg of frame.args) {
     if (instructionArgumentNeedsAuthoredDirections(arg, locale) && arg.text)
       retainedMeasuredSource = retainedMeasuredSource ? retainedMeasuredSource + "; " + arg.text : arg.text;
     const firstTime = firstArguments[AdviceArgumentRole.Time];
     const additionalTime = arg.role === AdviceArgumentRole.Time && firstTime !== undefined;
     if (arg.role === AdviceArgumentRole.Time) {
-      let duplicate = firstTime !== undefined && sameTimeConstraint(firstTime, arg, frame.relation);
+      let duplicate = firstTime !== undefined && sameTimeConstraint(firstTime, arg, inheritedTimeRelation);
       if (!duplicate) for (const prior of temporalAdjuncts ?? [])
-        if (sameTimeConstraint(prior, arg, frame.relation)) { duplicate = true; break; }
+        if (sameTimeConstraint(prior, arg, inheritedTimeRelation)) { duplicate = true; break; }
       if (duplicate) continue;
     }
-    const temporalRelation = arg.relation ?? (additionalTime ? frame.relation : undefined);
+    const temporalRelation = arg.relation ?? (additionalTime ? inheritedTimeRelation : undefined);
     const additionalPointTime = additionalTime && !temporalRelation;
     if (additionalPointTime || (independentTemporal || additionalTime || (arg.role === AdviceArgumentRole.Result || arg.role === AdviceArgumentRole.Time ||
         arg.role === AdviceArgumentRole.Activity) && arg.relation !== frame.relation) &&
@@ -4132,7 +4135,7 @@ function realizeAction(
   const manner = first(AdviceArgumentRole.Manner);
   let input: InstructionActionRealizationInput = {
     frame, locale, label, amount, theme, container, destination, site,
-    substance, result, activity, time, timeRelation: timeArg?.relation, duration, material, manner,
+    substance, result, activity, time, timeRelation: timeArg ? timeArg.relation ?? inheritedTimeRelation : undefined, duration, material, manner,
     realizerConfig: frame.predicate.realizerConfig ?? definition?.realizerConfig,
     definition,
     timeWasRendered: coverage ? false : undefined,

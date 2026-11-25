@@ -1821,7 +1821,12 @@
       ],
       "procedural": true,
       "argumentParser": "bare-duration",
-      "realizer": "duration"
+      "realizer": "duration",
+      "realizerConfig": {
+        "locales": {
+          "th": { "suppressSiteConcepts": ["eye"] }
+        }
+      }
     },
     {
       "code": "press",

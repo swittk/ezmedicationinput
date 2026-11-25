@@ -8387,3 +8387,77 @@ describe("round76 action source-text metadata", () => {
     expect(wire).toEqual(before);
   });
 });
+
+
+describe("round76 typed action complements in normalized previews", () => {
+  const fresh = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+  const current = (value: string, locale: string) => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "");
+
+  it.each([
+    { source: "Remove patch at bedtime.", action: "remove", role: AdviceArgumentRole.Time,
+      relation: AdviceRelation.On, en: ["Remove patch at bedtime"], th: ["เอาแผ่นแปะออกก่อนนอน"] },
+    { source: "Close eye and press inner corner for 1 minute.", action: "close", role: AdviceArgumentRole.Site,
+      relation: undefined, en: ["Close the eye", "press inner corner for 1 minute"], th: ["หลับตา", "press inner corner for 1 minute"] },
+    { source: "Repeat in the other eye.", action: "repeat", role: AdviceArgumentRole.Object,
+      relation: AdviceRelation.In, en: ["Repeat in the other eye"], th: ["Repeat in the other eye"] },
+    { source: "Shake suspension well before each dose; discard after 14 days.", action: "shake", role: AdviceArgumentRole.Time,
+      relation: AdviceRelation.Before, en: ["Shake suspension well before each dose", "discard after 14 days"],
+      th: ["เขย่าsuspension wellก่อนการให้ยาแต่ละครั้ง", "ทิ้งหลัง 14 วัน"] },
+  ])("retains the owned complements of $action across native and saved wire views", fixture => {
+    const parsed = parsePublicSig(fixture.source);
+    const graph = parsed.meta.canonical.clauses[0].instructionGraph!;
+    const frame = graph.actions.find(value => value.predicate.lemma === fixture.action)!;
+    expect(frame.relation).toBe(fixture.relation);
+    expect(frame.args.some(arg => arg.role === fixture.role)).toBe(true);
+    if (fixture.action === "remove") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, normalized: "HS" }));
+    if (fixture.action === "close") {
+      expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Site, coding: expect.objectContaining({ code: "81745001" }) }));
+      expect(graph.actions[1].args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Duration, quantity: { value: 1, unit: "min" } }));
+    }
+    if (fixture.action === "repeat") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Object, text: "the other eye" }));
+    if (fixture.action === "shake") expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Time, conceptId: "each-dose" }));
+    for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const displayed = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        for (const phrase of fixture[locale]) expect(displayed).toContain(phrase);
+        if (fixture.action === "close" && locale === "th") expect(displayed).not.toContain("หลับตาตา");
+        if (fixture.action === "shake" && locale === "en") expect(displayed).not.toContain("at each dose");
+      }
+      const restored = importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!;
+      expect(restored.sourceText).toBe(fixture.source);
+      expect(restored.actions.find(value => value.predicate.lemma === fixture.action)!.args.some(arg => arg.role === fixture.role)).toBe(true);
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it.each([["right", "1290032005", "ตาขวา"], ["left", "1290031003", "ตาซ้าย"]] as const)(
+    "keeps the %s eye explicit when the Thai head entails only generic eye", (side, code, thai) => {
+      const parsed = parsePublicSig("Close " + side + " eye");
+      const site = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Site)!;
+      expect(site.conceptId).toBe(side + " eye");
+      expect(site.coding).toMatchObject({ code });
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+        expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en"))
+          .toContain("Close the " + side + " eye");
+        expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th"))
+          .toContain("หลับตา (" + thai + ")");
+      }
+    });
+
+  it("keeps a configured closing head's explicit site when that label does not entail it", () => {
+    const parsed = parsePublicSig("Shut eye", { instructionActionMap: { shut: {
+      code: "close", display: "Shut", semanticClass: "manipulate", i18n: { th: "ปิด" }, aliases: ["shut"],
+      procedural: true, argumentParser: "bare-duration", realizer: "duration"
+    } } });
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.predicate.display).toBe("Shut");
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Site, conceptId: "eye" }));
+    for (const input of [fresh(parsed.fhir), fresh(parsed.fhirNext), fresh(toFhirR5Dosages(parsed.fhirNext))]) {
+      expect(current(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }), "en")).toContain("Shut the eye");
+      expect(current(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), "th")).toContain("ปิดตา");
+    }
+  });
+});
