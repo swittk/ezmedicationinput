@@ -1190,7 +1190,7 @@ export function formatSig(
     if (administration?.provenance) administration.provenance.sourceTextVerified = false;
     (course.provenance ??= { format: "r5", data: {} }).sourceTextVerified = false;
     const rendered = formatCanonicalCourse(course, style, options ?? {});
-    if (typeof edit === "object" && options?.realizationMode === "roundtrip") {
+    if (typeof edit === "object" && options?.realizationMode === "roundtrip" && !rendered.includes(edit.authored)) {
       const words = resolveCourseLanguage(options.locale, options.i18n);
       return words.withAuthoredDirections(rendered.replace(/\.\s*$/u, ""), edit.authored);
     }
@@ -1525,8 +1525,10 @@ function fromFhirDosageInternal(
     // The explicit replacement is independently authored prose. Current
     // structured fields remain the directions; do not certify or parse it.
     const words = resolveCourseLanguage(options.locale, options.i18n, localization);
-    shortText = words.withAuthoredDirections(shortText.replace(/\.\s*$/u, ""), edit.authored);
-    computedLong = words.withAuthoredDirections(computedLong.replace(/\.\s*$/u, ""), edit.authored);
+    if (!shortText.includes(edit.authored))
+      shortText = words.withAuthoredDirections(shortText.replace(/\.\s*$/u, ""), edit.authored);
+    if (!computedLong.includes(edit.authored))
+      computedLong = words.withAuthoredDirections(computedLong.replace(/\.\s*$/u, ""), edit.authored);
   }
   const longText = computedLong || dosage.text || "";
   const warnings = [...(clause.warnings ?? [])];

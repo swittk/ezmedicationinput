@@ -983,7 +983,7 @@ export function reconcileR5SafetySnapshot(
   // Compare the complete saved wire projection before restoring metadata:
   // unchanged duplicate Ratios retain their distinct authored R6 texts.
   if (partialPeriods || baseline === compactProjectionFingerprint(projected)) {
-    const saved: FhirDosage = {}, limits = retained.doseLimit!;
+    const saved: FhirDosage = {}, limits = retained.doseLimit ?? [];
     for (const index of r5ProjectedSafetyLimitIndices(limits, baseline)) {
       const limit = limits[index];
       if (limit.scope === "period")

@@ -195,7 +195,7 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
       expect(imported.meta.canonical.clauses[0].rawText).toBe(text);
       // The modifier changes the clinical projection, so even roundtrip
       // renders structured facts while preserving the complete source.
-      expect(imported.longText).toBe("Use 1 tablet twice daily.");
+      expect(imported.longText).toBe("Current: Use 1 tablet twice daily; original directions: " + text);
       for (const value of [1, 2]) {
         const current = JSON.parse(JSON.stringify(original)) as FhirDosage;
         current.doseAndRate![0].doseQuantity!.value = value;
@@ -204,8 +204,9 @@ describe("external review: FHIR R5/R6 and medication correctness", () => {
           const submitted = JSON.parse(JSON.stringify(current)) as FhirDosage;
           const normalized = fromFhirDosage(submitted,
             mode === undefined ? undefined : { realizationMode: mode });
-          expect(normalized.longText).toBe(value === 1
-            ? "Use 1 tablet twice daily." : "Use 2 tablets twice daily.");
+          const currentText = value === 1 ? "Use 1 tablet twice daily" : "Use 2 tablets twice daily";
+          expect(normalized.longText).toBe(mode === "roundtrip"
+            ? "Current: " + currentText + "; original directions: " + text : currentText + ".");
           expect(submitted).toEqual(expected);
           expect(normalized.fhir).toEqual(expected);
           expect(normalized.meta.canonical.clauses[0].rawText).toBe(text);

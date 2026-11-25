@@ -321,10 +321,12 @@ describe("round23 external R6 wording across R5", () => {
       expect(rows[0].timing?.repeat).toMatchObject({
         frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day
       });
-      // Replacement text is preserved, but the unverified clinical projection
-      // cannot certify source replay over the current structured rate.
+      // Current structured rate wording remains authoritative. Roundtrip may
+      // show the explicit replacement separately, without certifying its graph.
       for (const realizationMode of ["normalized", "roundtrip"] as const) {
-        const expected = "Take 1 tablet orally once daily; Rate: 5 mL/h";
+        const current = "Take 1 tablet orally once daily; Rate: 5 mL/h";
+        const expected = realizationMode === "roundtrip"
+          ? "Current: " + current + "; original directions: " + replacement : current;
         expect(formatSig(rows[0], "long", { locale: "en", realizationMode })).toBe(expected);
         const imported = fromFhirDosage(rows[0], { locale: "en", realizationMode });
         expect(imported.longText).toBe(expected);
@@ -347,7 +349,9 @@ describe("round23 external R6 wording across R5", () => {
     const submitted = persist(rows);
     expect(dosageMatchesSavedProjection(rows[1])).toBe(false);
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
-      const expected = "Take 2 tablets orally once daily; Rate: 5 mL/h";
+      const current = "Take 2 tablets orally once daily; Rate: 5 mL/h";
+      const expected = realizationMode === "roundtrip"
+        ? "Current: " + current + "; original directions: " + rows[1].text : current;
       expect(formatSig(rows[1], "long", { locale: "en", realizationMode })).toBe(expected);
       const imported = fromFhirDosage(rows[1], { locale: "en", realizationMode });
       expect(imported.longText).toBe(expected);
@@ -6972,9 +6976,11 @@ describe("round44 interop ownership", () => {
     expect(dosageMatchesSavedProjection(row)).toBe(false);
     const expected = "Infuse 20 mg once over 2 hours; max per period: 100 mg / 1 d; Rate: 100 mL dextrose / 2 h";
     for (const realizationMode of ["normalized", "roundtrip"] as const) {
-      expect(formatSig(row, "long", { locale: "en", realizationMode })).toBe(expected);
+      const preview = realizationMode === "roundtrip"
+        ? "Current: " + expected + "; original directions: " + row.text : expected;
+      expect(formatSig(row, "long", { locale: "en", realizationMode })).toBe(preview);
       const imported = fromFhirDosage(row, { locale: "en", realizationMode });
-      expect(imported.longText).toBe(expected);
+      expect(imported.longText).toBe(preview);
       expect(imported.fhir).toEqual(authored);
       expect(imported.meta.canonical.clauses[0].rawText).toBe(row.text);
     }
