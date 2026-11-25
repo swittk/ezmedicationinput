@@ -6998,6 +6998,39 @@ describe("round62 review: instruction argument ownership", () => {
     }
   });
 
+  it.each(["at 10:00", "daily"])("localizes an unchanged typed amount independently of opaque manner: %s", timing => {
+    const source = "Swallow 1 tablet slowly with water " + timing;
+    const options = { locale: "th", realizationMode: "normalized" as const };
+    for (const parseOptions of [undefined, options]) {
+      const parsed = parsePublicSig(source, parseOptions), before = fresh(parsed.fhir);
+      const primary = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+      expect(primary.args).toContainEqual(expect.objectContaining({
+        role: AdviceArgumentRole.Amount, quantity: { value: 1, unit: "tab" },
+        span: { start: 8, end: 16 }
+      }));
+      if (parseOptions) {
+        expect(parsed.longText).toContain("1 เม็ด");
+        expect(parsed.longText).not.toContain("tablet");
+      }
+      for (const input of [parsed.meta.canonical.course!, fresh(parsed.fhir[0]),
+        fresh(parsed.fhir), fresh(parsed.fhirNext)]) {
+        const original = fresh(input);
+        const text = formatSig(input, "long", options);
+        expect(text.match(/\b1 เม็ด/gu)).toHaveLength(1);
+        expect(text).not.toContain("tablet");
+        expect(text).toContain("กลืน");
+        expect(text).toContain("slowly");
+        expect(text).toContain("น้ำ");
+        expect(text).toContain(timing === "daily" ? "วันละครั้ง" : "10:00");
+        expect(input).toEqual(original);
+      }
+      expect(formatSig(parsed.meta.canonical.course!, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+      if (!parseOptions)
+        expect(formatSig(fresh(parsed.fhir), "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+      expect(parsed.fhir).toEqual(before);
+    }
+  });
+
   it("retires a neutral edited clock while preserving a directional clock constraint", () => {
     const source = "Swallow 1 tablet slowly with water at 10:00";
     const parsed = parsePublicSig(source), original = fresh(parsed.fhir[0]);
@@ -7019,7 +7052,7 @@ describe("round62 review: instruction argument ownership", () => {
         .toMatchObject({ value: 1, unit: "tab" });
       expect(text).toContain(locale === "en" ? "Swallow" : "กลืน");
       // The owned Amount localizes independently; the uncoded manner stays verbatim.
-      expect(text).toContain(locale === "en" ? "1 tablet slowly" : "slowly 1 เม็ด");
+      expect(text).toContain(locale === "en" ? "slowly 1 tablet" : "slowly 1 เม็ด");
       if (locale === "th") expect(text).not.toContain("tablet");
     }
     expect(saved).toEqual(before);

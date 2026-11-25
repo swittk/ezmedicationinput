@@ -4076,23 +4076,25 @@ export function realizeInstructionAction(frame: AdviceFrame, locale = "en"): str
  * This is a display-only frame copy, not an edit of source graph/provenance. */
 export function realizeRichPrimaryWithCanonicalDose(
   frame: AdviceFrame, clause: CanonicalSigClause, locale: string,
-  options?: Pick<ParseOptions, "instructionActionMap">,
+  options?: Pick<ParseOptions, "instructionActionMap" | "realizationMode">,
   coverage?: { singleScheduledEvent: boolean }
 ): string {
   const sourceFrame = frame;
   frame = frameWithCanonicalPrimaryContext(frame, clause);
   const conflictingAmount = primaryActionAmountConflicts(frame, clause.dose,
     !clause.dose && clause.sourceProjectionVerified === false);
-  // Once current context forbids raw-source replay, its typed Amount must use
-  // the target locale even when the numeric dose itself did not change.
-  // The existing ownership reconciliation keeps any opaque nominal remainder.
-  const localizeAmount = Boolean(!frame.sourceText && clause.dose && clause.instructionGraph &&
-    baseLanguageTag(clause.instructionGraph.sourceLocale ?? "en") !== baseLanguageTag(locale));
-  if (conflictingAmount || localizeAmount) {
+  // Generated realization composes an owned Amount from its typed facts,
+  // independently of an opaque nominal remainder or the requested parse locale.
+  // Verified roundtrip source replay remains separate from this display copy.
+  const normalizeAmount = Boolean(clause.dose &&
+    (options?.realizationMode !== "roundtrip" || !frame.sourceText) &&
+    frame.args.some(arg => arg.role === AdviceArgumentRole.Object || arg.role === AdviceArgumentRole.Theme) &&
+    (frame.predicate.realizer ?? frameActionDefinition(frame, options)?.realizer ?? "default") === "default");
+  if (conflictingAmount || normalizeAmount) {
     const ownsAmount = Boolean(clause.instructionGraph &&
       primaryDoseAmountOwner(clause.instructionGraph, clause, options) === sourceFrame);
     if (conflictingAmount || ownsAmount)
-      frame = frameWithReconciledAmount(frame, clause.dose, ownsAmount, localizeAmount && ownsAmount);
+      frame = frameWithReconciledAmount(frame, clause.dose, ownsAmount, normalizeAmount && ownsAmount);
   }
   if (clause.method && !actionMatchesCanonicalMethod(frame, clause, options)) {
     const method = clause.method;
@@ -4664,7 +4666,7 @@ function sourceAmountLabelOffset(text: string, label: string): number {
  * display use the same typed ownership. */
 function frameWithReconciledAmount(
   frame: AdviceFrame, currentDose: CanonicalDoseExpr | undefined, replaceAtOwner = false,
-  localizeOwnedAmount = false
+  normalizeOwnedAmount = false
 ): AdviceFrame {
   const replacement = replaceAtOwner && currentDose &&
     (currentDose.value !== undefined || currentDose.range) ? {
@@ -4673,14 +4675,14 @@ function frameWithReconciledAmount(
     } : undefined;
   const sourceAmounts = frame.args.filter(arg =>
     arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-    (localizeOwnedAmount || !quantityCoveredByDose(arg, currentDose)));
+    (normalizeOwnedAmount || !quantityCoveredByDose(arg, currentDose)));
   const args: AdviceArgument[] = [];
   for (const arg of frame.args) {
     // Only the dose-bearing Amount belongs to the canonical dose. An
     // independent 100 mL mixing Substance or 5-minute Duration must never
     // disappear because the tablet amount changed.
     if (arg.role === AdviceArgumentRole.Amount && arg.quantity &&
-        (localizeOwnedAmount || !quantityCoveredByDose(arg, currentDose))) {
+        (normalizeOwnedAmount || !quantityCoveredByDose(arg, currentDose))) {
       if (replacement) args.push({ ...arg, quantity: replacement, i18n: undefined });
       continue;
     }
