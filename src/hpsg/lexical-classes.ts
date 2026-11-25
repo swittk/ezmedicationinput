@@ -337,6 +337,9 @@ export const MAXIMUM_COUNT_LEAD_TOKENS = setOf(source.maximumCountLeadTokens ?? 
 export const MAXIMUM_COUNT_LEAD_SEQUENCES = (source.maximumCountLeadSequences ?? [])
   .map((parts) => [...parts])
   .sort((left, right) => right.length - left.length);
+export const MAXIMUM_COUNT_LEAD_FIRST_TOKENS = new Set(
+  MAXIMUM_COUNT_LEAD_SEQUENCES.map((parts) => parts[0]).filter(Boolean)
+);
 export const OCCURRENCE_COUNT_WORDS = setOf(source.occurrenceCountWords ?? []);
 export const OCCURRENCE_COUNT_MODIFIERS = setOf(source.occurrenceCountModifiers);
 export const MAXIMUM_PERIOD_PREPOSITIONS = setOf(source.maximumPeriodPrepositions);

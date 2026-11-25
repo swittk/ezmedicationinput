@@ -20,7 +20,7 @@ import { lexInput } from "./lexer/lex";
 import { normalizeUnit } from "./unit-lexicon";
 import { EVENT_TIMING_TOKENS, PRODUCT_FORM_HINTS, TIMING_ABBREVIATIONS, WORD_FREQUENCIES } from "./maps";
 import { resolveEventTimingExpression } from "./event-timing-expression";
-import { parseClockToken } from "./hpsg/rule-context";
+import { maximumDosePerPeriodAt, parseClockToken } from "./hpsg/rule-context";
 import { resolveSymptomDefinition } from "./symptom-terminology";
 import { baseLanguageTag, composeLocalizedRecords, localizedConfig, localizedValue, quantityComparatorText } from "./localization";
 import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-detection";
@@ -65,7 +65,7 @@ import {
   INSTRUCTION_DURATION_UNITS,
   INSTRUCTION_QUANTITY_UNIT_LABELS,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_TOKENS,
+  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   PRN_LEADS,
   RANGE_CONNECTORS,
   ROUTE_SITE_PREPOSITIONS,
@@ -2232,11 +2232,11 @@ function actionTailIsRegimenModifier(
   const localAmountUnit = definition?.acceptsAmount && previousValue
     ? instructionQuantityUnitAt(parts, index, parts.length, options)
     : undefined;
-  // A delimited nominal maximum is a regimen adjunct after the completed
-  // dose-bearing preparation. Comparator phrases still belong to their own
-  // amount or material argument unless the grammar proves a complete cap.
+  // The complete typed maximum is a regimen adjunct after the preparation.
+  // A comparator without a period still belongs to its own amount/material.
   if (!negatedAction && definition?.definesDose && previous &&
-      /^[,;:]$/u.test(previous.original.trim()) && MAXIMUM_COUNT_LEAD_TOKENS.has(token)) return true;
+      /^[,;:]$/u.test(previous.original.trim()) && MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(token) &&
+      maximumDosePerPeriodAt({ tokens: parts, options }, index)) return true;
   const timing = !localAmountUnit && Boolean(
     TIMING_ABBREVIATIONS[token] ||
     WORD_FREQUENCIES[token] ||

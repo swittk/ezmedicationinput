@@ -70,12 +70,9 @@ import {
   isThaiDaypartListSeparator,
   MEAL_RELATION_BY_TOKEN,
   MEAL_TIMING_BY_RELATION,
-  MAXIMUM_COUNT_LEAD_SEQUENCES,
-  OCCURRENCE_CAP_PERIOD_PHRASES,
+  MAXIMUM_COUNT_LEAD_FIRST_TOKENS,
   OCCURRENCE_COUNT_WORDS,
   OCCURRENCE_COUNT_MODIFIERS,
-  MAXIMUM_PERIOD_PREPOSITIONS,
-  MAXIMUM_PERIOD_MODIFIERS,
   RANGE_CONNECTORS,
   RELATIVE_INTERVAL_TRAILING_RELATIONS,
   SCHEDULE_UNIT_SEPARATOR_TOKENS,
@@ -89,6 +86,9 @@ import {
 } from "../lexical-classes";
 import {
   HpsgClauseContext,
+  maximumCountLeadAt,
+  maximumDosePerPeriodAt,
+  occurrenceCapPeriodAt,
   isAmPmLower,
   isClockLikeLower,
   isPunctuation,
@@ -2621,102 +2621,6 @@ function timingRangeIsProcedureLocalDuration(
   return false;
 }
 
-const MAXIMUM_COUNT_LEAD_FIRST_TOKENS = new Set(
-  MAXIMUM_COUNT_LEAD_SEQUENCES.map((parts) => parts[0]).filter(Boolean)
-);
-
-function maximumCountLeadAt(context: HpsgClauseContext, start: number): Token[] | undefined {
-  for (const parts of MAXIMUM_COUNT_LEAD_SEQUENCES) {
-    const tokens = tokensAvailable(context, start, parts.length);
-    if (!tokens) continue;
-    if (tokens.every((candidate, offset) => normalizeTokenLower(candidate) === parts[offset])) {
-      return tokens;
-    }
-  }
-  return undefined;
-}
-
-function occurrenceCapPeriodAt(
-  context: HpsgClauseContext,
-  start: number
-): { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit } | undefined {
-  const adverb = tokensAvailable(context, start, 1)?.[0];
-  const adverbUnit = adverb ? mapFrequencyAdverb(normalizeTokenLower(adverb)) : undefined;
-  if (adverb && adverbUnit) return { tokens: [adverb], period: 1, periodUnit: adverbUnit };
-  for (const definition of OCCURRENCE_CAP_PERIOD_PHRASES) {
-    const tokens = tokensAvailable(context, start, definition.parts.length);
-    if (!tokens) continue;
-    if (!tokens.every((candidate, offset) => normalizeTokenLower(candidate) === definition.parts[offset])) continue;
-    const periodUnit = mapIntervalUnit(definition.periodUnit);
-    if (!periodUnit) continue;
-    return { tokens, period: definition.period, periodUnit };
-  }
-  return undefined;
-}
-
-type MaximumDosePeriod =
-  | { tokens: Token[]; period: number; periodUnit: FhirPeriodUnit }
-  | { tokens: Token[]; daypart: true };
-
-function maximumDosePeriodAt(
-  context: HpsgClauseContext,
-  start: number
-): MaximumDosePeriod | undefined {
-  const defined = occurrenceCapPeriodAt(context, start);
-  if (defined) return defined;
-
-  const connector = context.tokens[start];
-  const unitToken = context.tokens[start + 1];
-  if (!connector || !unitToken ||
-      context.state.consumed.has(connector.index) ||
-      context.state.consumed.has(unitToken.index)) return undefined;
-  const connectorLower = normalizeTokenLower(connector);
-  if (MAXIMUM_PERIOD_PREPOSITIONS.has(connectorLower)) {
-    let cursor = start + 1;
-    const article = context.tokens[cursor];
-    if (article && !context.state.consumed.has(article.index) &&
-        ["a", "an", "the"].indexOf(normalizeTokenLower(article)) >= 0) cursor++;
-    const modifier = context.tokens[cursor];
-    if (modifier && !context.state.consumed.has(modifier.index) &&
-        MAXIMUM_PERIOD_MODIFIERS.has(normalizeTokenLower(modifier))) cursor++;
-    const value = context.tokens[cursor];
-    const attached = value?.kind !== LexKind.Number && value
-      ? attachedNumberUnitAt(value.lower.replace(/[{};]+|\.+$/gu, "")) : undefined;
-    const unit = attached ? undefined : context.tokens[cursor + 1];
-    const amount = attached?.value ?? (value?.kind === LexKind.Number ? value.value
-      : value ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(value)] : undefined);
-    const unitLower = attached?.rawUnit ?? (unit && normalizeTokenLower(unit));
-    const periodUnit = unitLower && mapIntervalUnit(unitLower);
-    if (amount !== undefined && amount > 0 && periodUnit && value &&
-        !context.state.consumed.has(value.index) && (!unit || !context.state.consumed.has(unit.index))) {
-      const tokens = context.tokens.slice(start, cursor + (attached ? 1 : 2));
-      return DAYPART_INTERVAL_TOKENS.has(unitLower!)
-        ? { tokens, daypart: true } : { tokens, period: amount, periodUnit };
-    }
-  }
-  if (connectorLower !== "/" && connectorLower !== "per" && connectorLower !== "a") {
-    return undefined;
-  }
-  const unitLower = normalizeTokenLower(unitToken);
-  const periodUnit = mapIntervalUnit(unitLower);
-  if (periodUnit) {
-    const tokens = [connector, unitToken];
-    return DAYPART_INTERVAL_TOKENS.has(unitLower)
-      ? { tokens, daypart: true } : { tokens, period: 1, periodUnit };
-  }
-  const attached = attachedNumberUnitAt(unitToken.lower.replace(/[{};]+|\.+$/gu, ""));
-  const amount = attached?.value ?? (unitToken.kind === LexKind.Number
-    ? unitToken.value : FREQUENCY_NUMBER_WORDS[unitLower]);
-  const elapsedUnit = attached ? undefined : context.tokens[start + 2];
-  if (elapsedUnit && context.state.consumed.has(elapsedUnit.index)) return undefined;
-  const elapsedSurface = attached?.rawUnit ?? (elapsedUnit && normalizeTokenLower(elapsedUnit));
-  const elapsedPeriodUnit = elapsedSurface && mapIntervalUnit(elapsedSurface);
-  if (amount === undefined || amount <= 0 || !elapsedPeriodUnit) return undefined;
-  const tokens = attached ? [connector, unitToken] : [connector, unitToken, elapsedUnit!];
-  return DAYPART_INTERVAL_TOKENS.has(elapsedSurface!)
-    ? { tokens, daypart: true } : { tokens, period: amount, periodUnit: elapsedPeriodUnit };
-}
-
 /**
  * A maximum medication quantity is a typed schedule adjunct, not another
  * administration dose. The full lexical sign owns its source span so a
@@ -2724,63 +2628,9 @@ function maximumDosePeriodAt(
  */
 export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
   return lexicalRule("hpsg.lex.schedule.maximumDosePerPeriod", (context, start) => {
-    const first = context.tokens[start];
-    if (!first || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(first))) return [];
-    const lead = maximumCountLeadAt(context, start);
-    if (!lead) return [];
-
-    let cursor = start + lead.length;
-    const matched = [...lead];
-    const punctuation = context.tokens[cursor];
-    if (punctuation && !context.state.consumed.has(punctuation.index) &&
-        punctuation.original === ".") {
-      matched.push(punctuation);
-      cursor += 1;
-    }
-
-    const leadingPeriod = occurrenceCapPeriodAt(context, cursor);
-    const periodFirst = leadingPeriod?.tokens.length === 1
-      ? leadingPeriod
-      : undefined;
-    if (periodFirst) {
-      matched.push(...periodFirst.tokens);
-      cursor += periodFirst.tokens.length;
-    }
-
-    const valueToken = context.tokens[cursor];
-    const unitToken = context.tokens[cursor + 1];
-    const amount = valueToken?.kind === LexKind.Number ? valueToken.value
-      : valueToken ? FREQUENCY_NUMBER_WORDS[normalizeTokenLower(valueToken)] : undefined;
-    if (!valueToken || amount === undefined || !Number.isFinite(amount) ||
-        amount <= 0 || !unitToken ||
-        context.state.consumed.has(valueToken.index) ||
-        context.state.consumed.has(unitToken.index)) return [];
-    const unitSurface = normalizeTokenLower(unitToken);
-    // `tablets/day` remains one lossless lexical token; split only this
-    // explicitly bounded dimensional suffix inside the maximum construction.
-    const compactUnitPeriod = unitSurface.match(/^(.+?)\/([^/]+)$/u);
-    const compactAmount = compactUnitPeriod ? attachedNumberUnitAt(compactUnitPeriod[2]) : undefined;
-    const hybridValue = compactUnitPeriod && /^\d+$/u.test(compactUnitPeriod[2])
-      ? Number(compactUnitPeriod[2]) : undefined;
-    const followingUnit = hybridValue !== undefined && hybridValue > 0 ? context.tokens[cursor + 2] : undefined;
-    const hybridUnit = followingUnit && !context.state.consumed.has(followingUnit.index)
-      ? mapIntervalUnit(normalizeTokenLower(followingUnit)) : undefined;
-    const compactPeriodSurface = compactAmount?.rawUnit ?? (hybridUnit ? normalizeTokenLower(followingUnit!) : compactUnitPeriod?.[2]);
-    const compactPeriodUnit = compactPeriodSurface ? mapIntervalUnit(compactPeriodSurface) : undefined;
-    if (OCCURRENCE_COUNT_WORDS.has(unitSurface)) return [];
-    const unit = normalizeUnit(compactPeriodUnit ? compactUnitPeriod![1] : unitSurface, context.options);
-    if (!unit) return [];
-    matched.push(valueToken, unitToken);
-    cursor += 2;
-
-    const compactPeriod: MaximumDosePeriod | undefined = compactPeriodUnit
-      ? DAYPART_INTERVAL_TOKENS.has(compactPeriodSurface!)
-        ? { tokens: hybridUnit ? [followingUnit!] : [], daypart: true }
-        : { tokens: hybridUnit ? [followingUnit!] : [], period: compactAmount?.value ?? (hybridUnit ? hybridValue! : 1), periodUnit: compactPeriodUnit }
-      : undefined;
-    const period = periodFirst ?? compactPeriod ?? maximumDosePeriodAt(context, cursor);
-    if (!period) return [];
-    if (!periodFirst) matched.push(...period.tokens);
+    const maximum = maximumDosePerPeriodAt(context, start);
+    if (!maximum) return [];
+    const { tokens: matched, amount, unit, period } = maximum;
     if ("daypart" in period) {
       // Own the complete maximum constituent without turning its daypart into
       // either an elapsed cap, another administration event, or course duration.

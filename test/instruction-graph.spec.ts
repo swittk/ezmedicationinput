@@ -7572,9 +7572,15 @@ describe("round67 relation Coding follows current action linkage", () => {
 
 
 describe("round68 preparation quantities beside independent clinical limits", () => {
-  it.each(["maximum", "max"])("keeps the delimited %s outside the material on fresh dose edits", lead => {
-    const source = "Dissolve 2 tablets in 100 mL water, " + lead +
-      " 4 tablets per day, then drink daily only if systolic BP > 160";
+  it.each([
+    ...["maximum", "max"].map(lead => ({
+      source: "Dissolve 2 tablets in 100 mL water, " + lead +
+        " 4 tablets per day, then drink daily only if systolic BP > 160",
+      materialText: "100 mL water", condition: true
+    })),
+    { source: "ละลาย2เม็ดในน้ำ100มล., ไม่เกิน4เม็ด/วัน, แล้วดื่มวันละครั้ง",
+      materialText: "น้ำ100มล", condition: false }
+  ])("keeps the delimited maximum outside the material on fresh dose edits: $source", ({ source, materialText, condition }) => {
     const parsed = parsePublicSig(source, { context: { dosageForm: "effervescent tablet" } });
     expect(parsed.meta.canonical.clauses).toHaveLength(1);
     const clause = parsed.meta.canonical.clauses[0];
@@ -7583,7 +7589,7 @@ describe("round68 preparation quantities beside independent clinical limits", ()
     const graph = clause.instructionGraph!, owner = graph.primaryOwnership!.dose!;
     expect(graph.actions[owner.actionIndex].args[owner.argumentIndex].quantity).toMatchObject({ value: 2, unit: "tab" });
     expect(graph.actions[owner.actionIndex].args.find(arg => arg.role === AdviceArgumentRole.Substance))
-      .toMatchObject({ text: "100 mL water", quantity: { value: 100, unit: "mL" } });
+      .toMatchObject({ text: materialText, quantity: { value: 100, unit: "mL" } });
     const original = JSON.stringify([parsed.fhir, parsed.fhirNext]);
     const rows: FhirDosage[] = JSON.parse(JSON.stringify(parsed.fhir));
     const r6: FhirR6DosageInstruction = JSON.parse(JSON.stringify(parsed.fhirNext));
@@ -7596,14 +7602,15 @@ describe("round68 preparation quantities beside independent clinical limits", ()
         numerator: expect.objectContaining({ value: 4, unit: "tab" }),
         denominator: expect.objectContaining({ value: 1, unit: "d" })
       })]);
-      expect(getDosageCondition(current[0])).toMatchObject({ kind: "measurement", value: 160 });
+      if (condition) expect(getDosageCondition(current[0])).toMatchObject({ kind: "measurement", value: 160 });
+      else expect(getDosageCondition(current[0])).toBeUndefined();
       for (const realizationMode of ["normalized", "roundtrip"] as const)
         for (const locale of ["en", "th"] as const) {
           const text = formatSig(input, "long", { locale, realizationMode });
           expect(text.match(locale === "en" ? /(?:^|[^0-9.])3 tablets?(?![a-z])/gu : /(?:^|[^0-9.])3 เม็ด/gu)).toHaveLength(1);
           expect(text).not.toMatch(locale === "en" ? /(?:^|[^0-9.])2 tablets?(?![a-z])/u : /(?:^|[^0-9.])2 เม็ด/u);
           expect(text.match(locale === "en" ? /100 mL/gu : /100 มิลลิลิตร/gu)).toHaveLength(1);
-          expect(text.match(/160/gu)).toHaveLength(1);
+          if (condition) expect(text.match(/160/gu)).toHaveLength(1);
           expect(text).toContain("4 tab / 1 d");
         }
       expect(JSON.stringify(input)).toBe(before);
