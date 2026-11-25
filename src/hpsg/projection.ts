@@ -683,7 +683,7 @@ export function projectHpsgSignToState(
     if (!hasRecurringSchedule(schedule, dividedCount === undefined) &&
         !hasRecurringSchedule(target, dividedCount === undefined) &&
         !sign.synsem.valence.prn && !state.asNeeded &&
-        !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE) &&
+        (dividedCount !== undefined || !sign.evidence.some(item => item.rule === NEXT_DAY_ONSET_RULE)) &&
         (dividedCount !== undefined || target.timingReference !== "previous") &&
         target.count === undefined && target.countMax === undefined) target.count = dividedCount ?? 1;
   }

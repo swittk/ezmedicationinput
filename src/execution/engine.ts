@@ -4641,7 +4641,7 @@ function intervalEventWindow(repeat: CanonicalRecurrence | undefined):
   )
     return undefined;
   const typed = getTimingEventWindow(repeat);
-  if (typed) return normalizedCalendarInterval(repeat.period, repeat.periodUnit) ? undefined : typed;
+  if (typed) return typed;
   // The legacy WAKE-plus-interval shorthand remains limited to subday units.
   if (repeat.periodUnit !== DurationUnit.Second && repeat.periodUnit !== DurationUnit.Minute &&
       repeat.periodUnit !== DurationUnit.Hour) return undefined;
@@ -7839,8 +7839,9 @@ function calculateCourseTotalUnits(
           ...options, from: cycleStart, orderedAt: cycleStart,
           durationValue: (priorEnd.getTime() - cycleStart.getTime()) / 1000,
           durationUnit: DurationUnit.Second, priorCount: undefined,
-          roundToMultiple: undefined,
-        }, cycleEnd, guard, originalClock, priorCycleUsage, undefined, rangeUsage, capacityOnly, capacityWindows);
+          // History owns rolling admission capacity, not the queried window's rounding ceiling.
+          roundToMultiple: undefined, roundingLimits: undefined,
+        } as CanonicalSupplyOptions & PhaseCountOptions, cycleEnd, guard, originalClock, priorCycleUsage, undefined, rangeUsage, capacityOnly, capacityWindows);
       }
       if (windowEnd > windowStart) {
         const total = calculateCourseTotalUnits(

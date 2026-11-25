@@ -813,13 +813,21 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     (context.clinicalCache.quantityLookahead ??= new Map()).set(start, signs);
     return signs;
   }
-  if (rangedNumber) return [];
   const accepts = (candidate: string) =>
     /^(?:mcg|ug|mg|g|u|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
     /^(?:ml|l|mcg|ug|mg|g|u|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
   );
+  if (rangedNumber) {
+    // An unsupported fixed-rate range still owns both numeric endpoints.
+    // Neither endpoint may become an exact rate or an independent scalar dose.
+    if (expression && timeUnit(expression.compact.split("/")[1])) {
+      const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
+      for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);
+    }
+    return [];
+  }
   if (!expression) {
     // Only a scalar unit can finish the additive dose construction. A per-time
     // continuation belongs to the complete mixed numeric daughter above.

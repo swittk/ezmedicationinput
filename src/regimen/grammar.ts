@@ -1,4 +1,5 @@
 import { isNextDayScheduleRule } from "../hpsg/lexical-classes";
+import { equalStructuredValues } from "../stable-structure";
 import { AdviceArgumentRole, AdvicePolarity, AdviceRelation, EventTiming, type CanonicalSigClause } from "../types";
 import type {
   BoundaryDecision,
@@ -109,7 +110,9 @@ function typedNextPoint(f: BoundaryFacts): boolean {
       singleClockWithoutRecurrence(f.left.clause.schedule) === undefined) return false;
   const schedule = f.right.clause.schedule;
   return Boolean(schedule?.phaseStartReference === "treatment-day-start" &&
-    schedule.treatmentStartOffsetDays === 1 && schedule.count === 1 && schedule.countMax === undefined &&
+    schedule.treatmentStartOffsetDays === 1 &&
+    (schedule.count === 1 || (schedule.timeOfDay?.length ?? 0) > 1 && schedule.count === schedule.timeOfDay!.length) &&
+    schedule.countMax === undefined &&
     !f.right.hasRecurringCadence && !f.right.hasOffset && !f.right.hasDates &&
     schedule.frequencyMax === undefined && schedule.periodMax === undefined && schedule.periodUnit === undefined &&
     schedule.duration === undefined && schedule.durationMax === undefined && schedule.durationUnit === undefined &&
@@ -122,9 +125,12 @@ function typedNextPoint(f: BoundaryFacts): boolean {
 
 /** An explicit later number may omit the repeated dose unit after THEN.
  * The typed predecessor supplies the unit; the recipient keeps its own
- * amount and comparator. Independent action heads require an explicit unit. */
+ * amount and comparator. A repeated selected head may also omit the unit
+ * when it explicitly refers to the preceding timing; independent heads may not. */
 const hasContinuationDoseUnit = (f: BoundaryFacts): boolean =>
-  f.explicitRightUnit || f.site.kind === 'sequence' && !f.right.method &&
+  f.explicitRightUnit || f.site.kind === 'sequence' &&
+    (!f.right.method || f.right.clause.schedule?.timingReference === 'previous' &&
+      equalStructuredValues(f.left.clause.method, f.right.clause.method)) &&
     f.right.hasDose && !f.right.clause.dose?.unit &&
     (Boolean(f.left.clause.dose?.unit) || f.inheritedAdministration && f.left.hasDose && !f.left.method);
 

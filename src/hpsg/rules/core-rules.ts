@@ -1124,6 +1124,7 @@ function comparativeDoseAt(
     const nextDay = !weekdayLead && nextDayOnsetAt(context.tokens, numericIndex + 1, context.limit);
     const nextDayLead = nextDay && tokensAvailable(context, numericIndex + 1, nextDay.tokenEnd - numericIndex - 1);
     if (!weekdayLead && !nextDayLead && !isScheduleLead(context, numericIndex + 1) &&
+        !timingLexicalRule().match(context, numericIndex + 1).some(sign => sign.synsem.head.schedule?.timingReference === "previous") &&
         !routeLexicalRule().match(context, numericIndex + 1).length) return undefined;
   }
   if (value === undefined || !Number.isFinite(value)) return undefined;

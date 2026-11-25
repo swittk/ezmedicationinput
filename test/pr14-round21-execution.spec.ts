@@ -375,7 +375,12 @@ describe("round23 execution families", () => {
 
   describe("joint ranged allocation", () => {
     it("allocates 1.5 plus 1.5 across two authored clocks", () => {
-      expect(supply(ranged(), 2).totalUnits).toBe(3);
+      const member = ranged();
+      member.schedule!.recurrence = { frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"] };
+      expect(nextDueDoses(member, { ...options, limit: 2 })).toEqual([
+        "2026-01-01T08:00:00+00:00", "2026-01-01T20:00:00+00:00"
+      ]);
+      expect(supply(member, 1).totalUnits).toBe(3);
     });
     it("jointly allocates across daily repeated phases", () => {
       const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" },
@@ -4914,16 +4919,21 @@ describe("round55 execution preserves authored calendar and terminology meaning"
     }
   });
 
-  it.each(["r5", "r6"] as const)("keeps punctual WAKE and whole-calendar cadence controls distinct (%s)", version => {
+  it.each(["r5", "r6"] as const)("keeps punctual WAKE, explicit windows, and unwindowed calendar controls distinct (%s)", version => {
     const punctual: FhirR6DosageInstruction = { step: [{ component: [{ ...quantity(),
       timing: { repeat: { frequency: 1, period: 1, periodUnit: Unit.Day, when: [EventTiming.Wake], extension: [note] } } }] }] };
     const calendar: FhirR6DosageInstruction = { step: [{ component: [{ ...quantity(),
       timing: { repeat: { period: 1, periodUnit: Unit.Day, extension: [eventWindow, note] } } }] }] };
+    const unwindowed: FhirR6DosageInstruction = { step: [{ component: [{ ...quantity(),
+      timing: { repeat: { period: 1, periodUnit: Unit.Day, extension: [note] } } }] }] };
     const query = { ...options, eventClock: { WAKE: "08:00", HS: "20:00" }, limit: 2 };
     expect(nextDueDoses(wire(punctual, version), query)).toEqual([
       "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
     ]);
     expect(nextDueDoses(wire(calendar, version), query)).toEqual([
+      "2026-01-01T08:00:00+00:00", "2026-01-02T08:00:00+00:00",
+    ]);
+    expect(nextDueDoses(wire(unwindowed, version), query)).toEqual([
       "2026-01-01T00:00:00+00:00", "2026-01-02T00:00:00+00:00",
     ]);
   });

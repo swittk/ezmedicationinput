@@ -5176,7 +5176,7 @@ describe("round66 reviewed execution families", () => {
   });
 
   it.each([true, false])("preserves supply classification when weight is absent (PRN %s)", prn => {
-    const row = dailyDose({ asNeededBoolean: prn,
+    const row = dailyDose({ asNeeded: prn,
       doseAndRate: [{ doseQuantity: { value: 1, unit: "mg/kg" } }],
       timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } } });
     for (const dosage of versions(row)) {
@@ -5204,7 +5204,7 @@ describe("round67 weight-resolved dose maxima", () => {
   it.each(["period", "administration", "lifetime"] as const)(
     "resolves the %s maximum in the same weight dimension as its dose range", scope => {
       const cap = scope === "administration" ? 1.5 : 3;
-      const row: FhirDosage = { asNeededBoolean: true,
+      const row: FhirDosage = { asNeeded: true,
         doseAndRate: [{ doseRange: { low: quantity(1), high: quantity(2) } }],
         timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
           timeOfDay: ["09:00:00", "21:00:00"] } },
@@ -5239,7 +5239,7 @@ describe("round67 weight-resolved dose maxima", () => {
   });
 
   it("retains weighted period caps while a counted phase completes before its successor", () => {
-    const first = importCanonicalCourse({ asNeededBoolean: true,
+    const first = importCanonicalCourse({ asNeeded: true,
       doseAndRate: [{ doseRange: { low: quantity(1), high: quantity(2) } }],
       timing: { repeat: { count: 2, frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
         timeOfDay: ["09:00:00", "21:00:00"] } },
@@ -5449,6 +5449,8 @@ describe("round69 review calendar, allowance, and next-day ownership", () => {
       };
       for (const dosage of forms({ kind: "course", stages: [{ administrations: [dose] }] })) {
         const before = JSON.stringify(dosage);
+        expect(importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence?.weekdayOrdinal)
+          .toBe(weekdayOrdinal);
         expect(nextDueDoses(dosage, { ...options, limit: 1 })).toEqual([expected]);
         expect(calculateTotalUnits({
           ...options, dosage, durationValue: 16, durationUnit: FhirPeriodUnit.Day
@@ -5554,4 +5556,53 @@ describe("round69 review calendar, allowance, and next-day ownership", () => {
         expect(JSON.stringify(dosage)).toBe(before);
       }
     });
+});
+
+
+describe("round72 reviewed calendar windows and rounding ownership", () => {
+  const member = (): CanonicalAdministration => ({ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] });
+  const forms = (course: CanonicalCourse) => [
+    structuredClone(course),
+    JSON.parse(JSON.stringify(courseToR6(course))) as FhirR6DosageInstruction,
+    JSON.parse(JSON.stringify(courseToR5(course))) as FhirDosage[]
+  ];
+
+  it.each([true, false])("keeps the calendar cadence inside its resolved waking window: event window %s", eventWindow => {
+    const dose = member();
+    dose.schedule = { recurrence: { frequency: 1, period: 2, periodUnit: FhirPeriodUnit.Day,
+      ...(eventWindow ? { eventWindow: { start: EventTiming.Wake, end: EventTiming["Before Sleep"] } }
+        : { clockWindow: { start: "08:00:00", end: "22:00:00", endInclusive: false } })
+    } };
+    const options = { orderedAt: "2026-12-01T12:00:00Z", from: "2026-12-01T12:00:00Z",
+      timeZone: "UTC", eventClock: { WAKE: "08:00", HS: "22:00" }, limit: 3 };
+    for (const dosage of forms({ kind: "course", stages: [{ administrations: [dose] }] })) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-12-03T08:00:00+00:00", "2026-12-05T08:00:00+00:00", "2026-12-07T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 5, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 2, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each([FhirDayOfWeek.Monday, FhirDayOfWeek.Tuesday])("counts only actual supply contributors in a repeated-course rounding ceiling: %s", weekday => {
+    const capped = member(), uncapped = member();
+    capped.schedule = { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, clocks: ["08:00:00"] } };
+    capped.limits = [
+      { scope: "lifetime", amount: { value: 3, unit: "tab" } },
+      { scope: "period", amount: { value: 2, unit: "tab" }, period: { value: 24, unit: "h" } }
+    ];
+    uncapped.schedule = { recurrence: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day,
+      dayOfWeek: [weekday], clocks: ["09:00:00"] } };
+    const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 1, unit: "d" }, cycleCount: 3,
+      stages: [{ administrations: [capped, uncapped] }] };
+    for (const dosage of forms(course)) {
+      const before = JSON.stringify(dosage);
+      const result = calculateTotalUnits({ dosage, orderedAt: "2026-11-30T00:00:00Z", from: "2026-12-01T00:00:00Z",
+        timeZone: "UTC", durationValue: 1, durationUnit: FhirPeriodUnit.Day, roundToMultiple: 5 });
+      expect(result).toMatchObject({ totalUnits: weekday === FhirDayOfWeek.Monday ? 3 : 5, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
 });

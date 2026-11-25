@@ -3917,10 +3917,10 @@ describe("round68 active biologic quantity and authored decimal maximum", () => 
 
 describe("round69 selected infusion head and sequential durations", () => {
   it.each([
-    "Infuse 0.1 mg/kg/hr for 2 hours, then 0.05 mg/kg/hr for 4 hours",
-    "Infuse 7 mg/hr for 2 hours, then 3.5 mg/hr for 4 hours",
-    "Infuse 14 mg over 2 hours, then 14 mg over 4 hours"
-  ])("preserves both finite administrations and their independent amounts: %s", source => {
+    { source: "Infuse 0.1 mg/kg/hr for 2 hours, then 0.05 mg/kg/hr for 4 hours", field: "rate", values: [0.1, 0.05], unit: "mg/kg/h" },
+    { source: "Infuse 7 mg/hr for 2 hours, then 3.5 mg/hr for 4 hours", field: "rate", values: [7, 3.5], unit: "mg/h" },
+    { source: "Infuse 14 mg over 2 hours, then 14 mg over 4 hours", field: "quantity", values: [14, 14], unit: "mg" }
+  ])("preserves both finite administrations and their independent amounts: $source", ({ source, field, values, unit }) => {
     const parsed = parsePublicSig(source);
     expect(parsed.meta.canonical.clauses).toHaveLength(2);
     expect(parsed.meta.leftoverText).toBeUndefined();
@@ -3945,6 +3945,12 @@ describe("round69 selected infusion head and sequential durations", () => {
     ];
     for (const dosage of views) {
       const original = JSON.stringify(dosage);
+      const stages = importCanonicalCourse(dosage).stages;
+      expect(stages).toHaveLength(2);
+      for (let index = 0; index < 2; index++) {
+        const amount = stages[index].administrations[0].amounts[0];
+        expect(field === "rate" ? amount.rate : amount.quantity).toMatchObject({ value: values[index], unit });
+      }
       expect(calculateTotalUnits({
         ...options, dosage, durationValue: 1, durationUnit: "d"
       })).toMatchObject({ totalUnits: 28, unit: "mg", quantityKind: "scheduled" });
@@ -4038,4 +4044,97 @@ describe("round70 compact minute clocks", () => {
       expect(parsed.fhir[0].timing?.repeat?.timeOfDay).toEqual([expected]);
       expect(parsed.fhirNext.step[0].component[0].timing?.repeat?.timeOfDay).toEqual([expected]);
     });
+});
+
+
+describe("round72 reviewed quantity and onset ownership", () => {
+  const views = (parsed: ReturnType<typeof parsePublicSig>) => [
+    structuredClone(parsed.meta.canonical.course!),
+    JSON.parse(JSON.stringify(parsed.fhir)) as FhirDosage[],
+    JSON.parse(JSON.stringify(parsed.fhirNext)) as typeof parsed.fhirNext,
+    JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))) as FhirDosage[]
+  ];
+
+  it("retains an authored divided count beside an explicit next-day onset", () => {
+    const parsed = parsePublicSig("Infuse 100 mL at 30 mL/hr in 2 divided doses starting the next day at 08:00 and 20:00");
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity?.dividedDoseCount).toBe(2);
+    const options = { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-01T00:00:00Z", timeZone: "UTC", limit: 5 };
+    for (const dosage of views(parsed)) {
+      const before = JSON.stringify(dosage);
+      const member = importCanonicalCourse(dosage).stages[0].administrations[0];
+      expect(member.amounts[0].quantity).toMatchObject({ value: 50, unit: "mL" });
+      expect(member.schedule?.recurrence?.count).toBe(2);
+      expect(member.schedule?.recurrence?.frequency).toBeUndefined();
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-12-02T08:00:00+00:00", "2026-12-02T20:00:00+00:00"
+      ]);
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+    const untimed = parsePublicSig("Infuse 100 mL over 2 hours in 2 divided doses starting the next day");
+    for (const dosage of views(untimed)) {
+      const recurrence = importCanonicalCourse(dosage).stages[0].administrations[0].schedule?.recurrence;
+      expect(recurrence?.count).toBe(2);
+      expect(recurrence?.frequency).toBeUndefined();
+      expect(recurrence?.clocks).toBeUndefined();
+      expect(nextDueDoses(dosage, options)).toEqual([]);
+    }
+  });
+
+  it.each(["50 to 100", "50–100", "50-100"])("does not detach an exact endpoint from an unsupported rate range: %s", range => {
+    const source = "Infuse at " + range + " mL/hr";
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses[0].raw.text).toBe(source);
+    expect(parsed.meta.canonical.clauses[0].clinicalQuantity).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].dose).toBeUndefined();
+    for (const dosage of views(parsed))
+      expect(importCanonicalCourse(dosage).stages[0].administrations[0].amounts ?? []).toEqual([]);
+    const exact = parsePublicSig("Infuse at 100 mL/hr");
+    expect(exact.fhir[0].doseAndRate?.[0].rateQuantity).toMatchObject({ value: 100, code: "mL/h" });
+  });
+
+  it("locates every clock on the next civil day after the predecessor occurrence", () => {
+    const parsed = parsePublicSig("Take 1 tablet at 22:00 and take 2 tablets the next day at 06:00 and 08:00");
+    const options = { orderedAt: "2026-12-01T23:00:00Z", from: "2026-12-01T23:00:00Z", timeZone: "UTC", limit: 5 };
+    for (const dosage of views(parsed)) {
+      const before = JSON.stringify(dosage);
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-12-02T22:00:00+00:00", "2026-12-03T06:00:00+00:00", "2026-12-03T08:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ ...options, dosage, durationValue: 4, durationUnit: FhirPeriodUnit.Day }))
+        .toMatchObject({ totalUnits: 5, unit: "tab" });
+      expect(JSON.stringify(dosage)).toBe(before);
+    }
+  });
+
+  it.each(["take about 2", "about 2", "take about 2 tablets"])("keeps an approximate continued dose beside its timing reference: %s", continuation => {
+    const parsed = parsePublicSig("Take 1 tablet at 8 AM and 8 PM for 3 days, then " + continuation + " at the same times");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.canonical.clauses[1].dose).toMatchObject({ value: 2, unit: "tab", comparator: "~" });
+    for (const dosage of views(parsed)) {
+      const member = importCanonicalCourse(dosage).stages[1].administrations[0];
+      expect(member.amounts[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+      expect(getQuantityComparator(member.amounts[0].quantity)).toBe("~");
+      expect(member.schedule?.recurrence?.clocks).toEqual(["08:00:00", "20:00:00"]);
+      expect(nextDueDoses(dosage, { orderedAt: "2026-12-01T00:00:00Z", from: "2026-12-04T00:00:00Z", timeZone: "UTC", limit: 2 }))
+        .toEqual(["2026-12-04T08:00:00+00:00", "2026-12-04T20:00:00+00:00"]);
+    }
+  });
+
+  it("keeps independent heads excluded from unit inheritance and preserves route-licensed quantities", () => {
+    const changed = parsePublicSig("Take 1 tablet at 8 AM and 8 PM for 3 days, then give about 2 at the same times");
+    expect(changed.meta.canonical.clauses).toHaveLength(1);
+    expect(changed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(changed.meta.canonical.clauses[0].additionalInstructions?.[0].text).toContain("Give about 2");
+    const route = parsePublicSig("Take about 2 tablets by mouth").meta.canonical.clauses[0];
+    expect(route.dose).toMatchObject({ value: 2, unit: "tab", comparator: "~" });
+    expect(route.route?.code).toBe("26643006");
+  });
+
+  it.each(["mL/.5 hours", "mL/0.5 hours", "mL/.5h"])("retains the fractional maximum period in %s", units => {
+    const parsed = parsePublicSig("Infuse 100 mL, no more than 50 " + units);
+    for (const dosage of views(parsed)) {
+      const limit = importCanonicalCourse(dosage).stages[0].administrations[0].limits?.[0];
+      expect(limit).toMatchObject({ scope: "period", amount: { value: 50, unit: "mL" }, period: { value: 0.5, unit: "h" } });
+    }
+  });
 });
