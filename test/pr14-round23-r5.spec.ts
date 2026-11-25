@@ -7196,8 +7196,10 @@ describe("round78 saved action and cycle locale ownership", () => {
   it.each([AdviceRelation.On, AdviceRelation.Before, undefined])("realizes the saved patch Time with its relation %s", relation => {
     const frame = parseInstructionActions("Apply patch in the morning")[0];
     const clocked = relation !== undefined;
-    const graph: CanonicalInstructionGraph = { sourceText: clocked ? "Apply patch at 08:00" : "Apply patch in the morning",
-      sourceLocale: "en", actions: [{ ...frame, sourceText: "", relation, args: [{
+    const sourceText = relation === AdviceRelation.On ? "Apply patch at 08:00" : relation === AdviceRelation.Before
+      ? "Apply patch before 08:00" : "Apply patch in the morning";
+    const graph: CanonicalInstructionGraph = { sourceText,
+      sourceLocale: "en", actions: [{ ...frame, sourceText, span: { start: 0, end: sourceText.length }, relation, args: [{
         role: AdviceArgumentRole.Time, text: clocked ? "08:00" : "morning", normalized: clocked ? "08:00" : "MORN",
         ...(clocked ? { relation } : { i18n: { en: "the morning", th: "ตอนเช้า" } })
       }] }] };
