@@ -541,8 +541,10 @@ function safetyHasClinicalFacts(safety: CanonicalSafety | undefined): boolean {
 function administrationHasAmountFacts(a: CanonicalAdministration): boolean {
   for (const amount of a.amounts ?? [])
     if (amount.quantity?.value !== undefined || amount.range?.low?.value !== undefined ||
-        amount.range?.high?.value !== undefined || amount.expression || amount.rate ||
-        amount.rateRange || amount.rateRatio || amount.rateExpression) return true;
+        amount.range?.high?.value !== undefined || amount.expression || amount.rate?.value !== undefined ||
+        amount.rateRange?.low?.value !== undefined || amount.rateRange?.high?.value !== undefined ||
+        amount.rateRatio?.numerator?.value !== undefined || amount.rateRatio?.denominator?.value !== undefined ||
+        amount.rateExpression) return true;
   return false;
 }
 function administrationHasClinicalFacts(a: CanonicalAdministration, includeMemberBounds = true, includeSafety = true, includeAdvice = true): boolean {

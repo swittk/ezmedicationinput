@@ -7789,7 +7789,12 @@ describe("round48 interop value ownership and primitive annotations", () => {
         expect(view.course.step?.map(step => step.id)).toEqual(["induction", "pause", "resume"]);
         expect(wire).toEqual(before);
         const current = wire.step![0].component[0].timing!.repeat!;
-        expect(current).toMatchObject(repeat);
+        if (field === "_when") {
+          const { timeOfDay, ...recurrence } = repeat;
+          expect(current).toMatchObject(recurrence);
+          expect(getTimingClocks(current)).toEqual(timeOfDay);
+          if (save > 0) expect(current.timeOfDay).toBeUndefined();
+        } else expect(current).toMatchObject(repeat);
         expect((current as unknown as Record<string, unknown>)[field]).toEqual(annotation);
         wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
       }
@@ -11233,6 +11238,10 @@ describe("round62 reviewed interchange ownership", () => {
     // @ts-expect-error R5 Timing repeat does not expose native R6 period offsets.
     const strictTiming: FhirExtension = { url: "urn:clinic:timing", valueTiming: { repeat: { startOffset: { value: 2, unit: "h" } } } };
     void strictRatio; void strictTiming;
+    const nativeSite: FhirR6Dosage = { site: { extension: [{ url: "urn:clinic:site-quantity", valueQuantity: { value: 2, comparator: "~" } }] } };
+    // @ts-expect-error R5 site extensions retain strict R5 Quantity comparators.
+    const strictSite: FhirDosage = { site: { extension: [{ url: "urn:clinic:site-quantity", valueQuantity: { value: 2, comparator: "~" } }] } };
+    void nativeSite; void strictSite;
     const source: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: q(1) }], extension: [ratio, timing]
     }] }] };
@@ -11287,5 +11296,62 @@ describe("round62 reviewed interchange ownership", () => {
     if (field === "high") expect(actual.range).toEqual({ low: 100, high: 300 });
     if (field === "unit") expect(actual).toMatchObject({ value: 0.1, unit: "L" });
     expect(wire).toEqual(before);
+  });
+});
+
+
+describe("round64 preserved R5 list and replacement ownership", () => {
+  it("does not revive an expression-only dose after the saved slot is replaced by a rate", () => {
+    const source = course({ doseAndRate: [{ doseExpression: expression("authoredDose") }] });
+    const rows = persist(toFhirR5Dosages(source));
+    expect(rows[0].doseAndRate![0].extension?.some(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL)).toBe(true);
+    expect(toDosageDetails(rows).step![0].component[0].doseAndRate![0].doseExpression).toEqual(expression("authoredDose"));
+    const replacement: FhirDosage = { ...rows[0], doseAndRate: [{ rateQuantity: { value: 5, unit: "mL/h" } }] };
+    const reopened = toDosageDetails([replacement]);
+    expect(reopened.step![0].component[0].doseAndRate![0].doseExpression).toBeUndefined();
+    expect(reopened.step![0].component[0].doseAndRate![0].rateQuantity).toEqual({ value: 5, unit: "mL/h" });
+    expect(JSON.stringify(reopened)).toContain("%authoredDose");
+    const withRate = persist(toFhirR5Dosages(course({ doseAndRate: [{
+      doseExpression: expression("independentDose"), rateQuantity: { value: 5, unit: "mL/h" }
+    }] })));
+    const changedRate: FhirDosage = { ...withRate[0], doseAndRate: [{ ...withRate[0].doseAndRate![0], rateQuantity: { value: 7, unit: "mL/h" } }] };
+    expect(toDosageDetails([changedRate]).step![0].component[0].doseAndRate![0].doseExpression).toEqual(expression("independentDose"));
+  });
+
+  it("keeps annotation-only period maxima in their authored array positions", () => {
+    const first = { id: "first", numerator: q(4), denominator: { value: 1, unit: "d" } };
+    const note = { id: "annotation-only", extension: [{ url: "urn:example:maximum-note", valueString: "source only" }] };
+    const last = { id: "last", numerator: q(2), denominator: { value: 8, unit: "h" } };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(1) }], maxDosePerPeriod: [first, note, last] };
+    const reopened = toDosageDetails(persist([row]));
+    expect(toFhirR5Dosages(reopened)[0].maxDosePerPeriod).toEqual([first, note, last]);
+  });
+
+  it.each([false, true])("keeps an unchanged step modifier wrapper before unrelated extensions (annotated %s)", annotated => {
+    const wrapper = { ...(annotated ? { id: "authored-wrapper" } : {}), url: "urn:ezmedicationinput:StructureDefinition:r5-step-modifier-extensions",
+      extension: [{ url: "urn:example:step-modifier", valueString: "retain" }] };
+    const unrelated = { url: "urn:example:step-note", valueString: "after wrapper" };
+    const source: FhirR6DosageInstruction = { step: [{ extension: [wrapper, unrelated], component: [{ doseAndRate: [{ doseQuantity: q(1) }] }] }] };
+    const reopened = toDosageDetails(persist(toFhirR5Dosages(source)));
+    expect(reopened.step![0].extension).toEqual([wrapper, unrelated]);
+  });
+});
+
+
+describe("round64 declared format options", () => {
+  it.each([undefined, "roundtrip"] as const)("preserves a prototype locale getter while defaulting mode %s", realizationMode => {
+    class ThaiOptions implements FormatOptions {
+      #locale = "th";
+      constructor(public realizationMode?: "roundtrip") {}
+      get locale() { return this.#locale; }
+    }
+    const options = new ThaiOptions(realizationMode);
+    const expected = { locale: "th", realizationMode: realizationMode ?? "normalized" as const };
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: q(2) }],
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+    expect(formatSig(row, "long", options)).toBe(formatSig(row, "long", expected));
+    expect(fromFhirDosage(row, options).longText).toBe(fromFhirDosage(row, expected).longText);
+    const rows = [{ ...row, sequence: 1 }, { ...row, sequence: 2 }];
+    expect(formatSigBatch(rows, "long", options)).toBe(formatSigBatch(rows, "long", expected));
   });
 });

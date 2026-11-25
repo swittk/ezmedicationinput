@@ -17,10 +17,10 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
   // descriptors keep their existing registered configuration through `this`.
   const normalized: MedicationLocaleDetector = Object.assign({}, detector);
   normalized.locale = locale;
+  normalized.priority = detector.priority;
+  normalized.joinsAdjacentSourceTokens = detector.joinsAdjacentSourceTokens;
   const prototype = Object.getPrototypeOf(detector);
   if (prototype !== Object.prototype && prototype !== null) {
-    normalized.priority = detector.priority;
-    normalized.joinsAdjacentSourceTokens = detector.joinsAdjacentSourceTokens;
     if (!Object.prototype.hasOwnProperty.call(detector, "test"))
       normalized.test = detector.test.bind(detector);
   }
@@ -29,8 +29,8 @@ export function registerMedicationLocaleDetector(detector: MedicationLocaleDetec
     priority = normalized.priority ?? 0;
   if (previous) {
     DETECTORS[previous.position] = normalized;
-    // Keep the previous ordering value, not a live input-object read: a
-    // caller can edit a provider and explicitly register that input again.
+    // Keep the registered ordering value when a fresh descriptor replaces
+    // this locale's provider.
     // Equal priority preserves stable tie order without another full sort.
     if (previous.priority === priority) return;
   } else DETECTORS.push(normalized);

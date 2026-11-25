@@ -26,6 +26,14 @@ export function withR5DurationMinimum<T extends Pick<FhirTimingRepeat, "duration
   }] } };
 }
 
+/** R5 tim-6 requires a lower-period Element, without inventing a numeric cadence. */
+export function withR5PeriodMinimum<T extends Pick<FhirTimingRepeat, "period" | "periodMax" | "_period">>(repeat: T): T {
+  if (repeat.periodMax === undefined || repeat.period !== undefined || repeat._period !== undefined) return repeat;
+  return { ...repeat, _period: { extension: [{
+    url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
+  }] } };
+}
+
 /** Modifier extensions: ignoring either can change whether a dose may be given. */
 export const DOSAGE_CONDITION_R5_URL =
   "urn:ezmedicationinput:StructureDefinition:medication-conditional-dose";
@@ -72,22 +80,26 @@ export function projectR6ModifierWrapper(output: ModifierWrapperOwner, url: stri
   const { modifierExtension, extension } = output;
   delete output.modifierExtension;
   if (modifierExtension === undefined && !extension?.length) return;
-  let existing: FhirExtension | undefined, extensions: FhirExtension[] | undefined;
+  let existing: FhirExtension | undefined, extensions: FhirExtension[] | undefined, existingIndex = -1;
   for (let index = 0; index < (extension?.length ?? 0); index++) {
     const item = extension![index];
     if (item.url !== url) extensions?.push(item);
     else {
       extensions ??= extension!.slice(0, index);
-      if (!existing) existing = item;
+      if (!existing) { existing = item; existingIndex = index; }
       else extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [item] });
     }
   }
   const modifiers = modifierExtension ?? existing?.extension;
   if (modifiers?.length) {
-    if (existing && modifierExtension !== undefined &&
-        !equalStructuredValues(modifierExtension, existing.extension))
-      (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
-    (extensions ??= extension?.slice() ?? []).push({ ...existing, url, extension: modifiers });
+    const unchanged = existing && (modifierExtension === undefined ||
+      equalStructuredValues(modifierExtension, existing.extension));
+    if (unchanged) extensions!.splice(existingIndex, 0, existing!);
+    else {
+      if (existing)
+        (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
+      (extensions ??= extension?.slice() ?? []).push({ ...existing, url, extension: modifiers });
+    }
   } else if (existing && (existing.extension?.length || hasOtherOwnField(existing, "extension")))
     (extensions ??= []).push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [existing] });
   // Empty lists retain explicit clear ownership; unchanged foreign-only
@@ -1811,7 +1823,7 @@ export interface ComponentDeltaBaseline {
   condition?: string;
   safety?: string;
   site?: string;
-  doseAndRate?: Array<{ dose?: string; rate?: string; doseExpression?: string; rateExpression?: string }>;
+  doseAndRate?: Array<{ dose?: string; rate?: string; doseExpression?: string; rateExpression?: string; expressionSlot?: boolean }>;
   timing?: string;
 }
 
@@ -2145,6 +2157,13 @@ export function retainedDoseRateMatches(
     for(let i=0;i<live.length;i++)if(!matches.has(i)&&!identity(live[i])){if(liveRemaining>=0){liveRemaining=-2;break;}liveRemaining=i;}
     if(oldRemaining>=0&&liveRemaining>=0)matches.set(liveRemaining,oldRemaining);
   }
+  // The generated extension was the editable owner of an otherwise empty
+  // expression-only slot. Removing it replaces that slot; its old expression
+  // remains source provenance even when a new rate occupies the same position.
+  if (baselines) for (const [liveIndex, sourceIndex] of matches)
+    if (baselines[sourceIndex]?.expressionSlot &&
+        !live[liveIndex].extension?.some(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL))
+      matches.delete(liveIndex);
   return matches;
 }
 
@@ -2302,7 +2321,8 @@ const COMPACT_ROW: BridgeShape = {
     site: { value: "valueString" }, timing: { value: "valueString" },
     doseAndRate: { repeated: true, fields: {
       dose: { value: "valueString" }, rate: { value: "valueString" },
-      doseExpression: { value: "valueString" }, rateExpression: { value: "valueString" }
+      doseExpression: { value: "valueString" }, rateExpression: { value: "valueString" },
+      expressionSlot: { value: "valueBoolean" }
     } }
   } },
   context: { value: "valueString" },

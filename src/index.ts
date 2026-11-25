@@ -1137,12 +1137,29 @@ function needsNativeR5Preview(dosage: EzDosage, options?: FormatOptions): boolea
     (range.high.unit ?? getDoseQuantityUnit(range.high))));
 }
 
+/** Apply public defaults through declared fields so prototype/getter options
+ * retain the same values as direct reads. Explicit modes need no copy. */
+function defaultFormatOptions(options?: FormatBatchOptions, separator?: string): FormatBatchOptions {
+  if (options?.realizationMode !== undefined && separator === undefined) return options;
+  if (!options) return { realizationMode: "normalized", ...(separator !== undefined ? { separator } : {}) };
+  return {
+    ...options,
+    locale: options.locale,
+    i18n: options.i18n,
+    groupMealTimingsByRelation: options.groupMealTimingsByRelation,
+    includeTimesPerDaySummary: options.includeTimesPerDaySummary,
+    sitePlacement: options.sitePlacement,
+    separator: separator ?? options.separator,
+    realizationMode: options.realizationMode ?? "normalized",
+  };
+}
+
 export function formatSig(
   input: FhirDosage | FhirR6DosageInstructionInput | readonly EzDosage[] | CanonicalCourse | CanonicalAdministration,
   style: "short" | "long" = "short",
   options?: FormatOptions
 ): string {
-  if (options?.realizationMode === undefined) options = { ...options, realizationMode: "normalized" };
+  options = defaultFormatOptions(options);
   if (Array.isArray(input)) {
     return formatSigBatch(input as EzDosage[], style, options);
   }
@@ -1254,9 +1271,8 @@ export function formatSigBatch(
   if(hasCourse||hasChoice) {
     // The complete native group owns choice wording; individual row previews
     // may already need that formatter for their independent clinical facts.
-    if(!hasCourse)options={...options,separator};
     return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,
-      options?.realizationMode ? options : { ...options, realizationMode: "normalized" });
+      defaultFormatOptions(options, hasCourse ? undefined : separator));
   }
   const text:string[]=[];
   for(const dosage of dosages){const value=formatSig(dosage,style,options);if(value.trim())text.push(value);}
@@ -1438,7 +1454,7 @@ function fromFhirDosageInternal(
   dosage: FhirDosage,
   options: FormatOptions | undefined
 ): ParseResult {
-  if (options?.realizationMode === undefined) options = { ...options, realizationMode: "normalized" };
+  options = defaultFormatOptions(options);
   const edit = sourceDisplayEdit(dosage);
   const replacementText = typeof edit === "string" && options?.realizationMode === "roundtrip" ? edit : undefined;
   const unverified = replacementText === undefined &&

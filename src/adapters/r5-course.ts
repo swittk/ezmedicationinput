@@ -28,6 +28,7 @@ import { getStandardDoseUnitCoding } from "../maps";
 import { simpleQuantityForR5 } from "../fhir-quantity-operator";
 import {
   DOSAGE_DETAILS_R5_URL,
+  R5_EXPRESSION_SLOT_SOURCE_URL,
   DOSAGE_RETAINED_R5_SEQUENCE_URL,
   conditionToR6,
   getDosageCondition,
@@ -207,6 +208,8 @@ function retentionForAdministration(
         : {}),
     });
     fingerprints!.push({
+      ...(projected?.extension?.some(item => item.url === R5_EXPRESSION_SLOT_SOURCE_URL)
+        ? { expressionSlot: true } : {}),
       ...(editable && value.expression ? { doseExpression: compactProjectionFingerprint(value.expression) } : {}),
       ...(editable && value.rateExpression ? { rateExpression: compactProjectionFingerprint(value.rateExpression) } : {}),
       ...(hasDose || projected?.doseQuantity || projected?.doseRange

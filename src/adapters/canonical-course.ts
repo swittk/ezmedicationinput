@@ -59,7 +59,7 @@ import {
   hasUnrecognizedEditMetadata,
   retainField,
   readRetainedField,
-  withR5CountMinimum, withR5DurationMinimum,
+  withR5CountMinimum, withR5DurationMinimum, withR5PeriodMinimum,
   encodeR6SourceMetadata,
   decodeR6SourceMetadata,
   dosageMatchesSavedProjection,
@@ -152,9 +152,10 @@ function sourceMaximumToR5(maximum: FhirRatio): boolean {
   return maximum.numerator !== undefined && maximum.denominator !== undefined ||
     maximum.numerator === undefined && maximum.denominator === undefined && !!maximum.extension?.length;
 }
-function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6"): FhirRatio[] | undefined {
+interface SourceMaximum { maximum: FhirRatio; position?: number }
+function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6"): SourceMaximum[] | undefined {
   const original = output.extension as FhirExtension[] | undefined;
-  let extensions: FhirExtension[] | undefined, maxima: FhirRatio[] | undefined;
+  let extensions: FhirExtension[] | undefined, maxima: SourceMaximum[] | undefined;
   for (let index = 0; index < (original?.length ?? 0); index++) {
     const marker = original![index];
     if (marker.url !== R5_SOURCE_ONLY_MAXIMUM_URL || !marker.valueRatio &&
@@ -164,11 +165,13 @@ function projectSourceMaxima(output: Record<string, unknown>, target: "r5" | "r6
     }
     const maximum = marker.valueRatio ?? readRetainedField(marker) as FhirRatio;
     if (target === "r5" && sourceMaximumToR5(maximum)) {
-      (maxima ??= []).push(maximum);
+      const position = marker.extension?.find(child => child.url === "r5Position")?.valueInteger;
+      (maxima ??= []).push({ maximum, position });
       extensions ??= original!.slice(0, index);
-      if (!equalStructuredValues(marker, marker.valueRatio
-          ? { url: R5_SOURCE_ONLY_MAXIMUM_URL, valueRatio: maximum }
-          : retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum)))
+      const expected: FhirExtension = marker.valueRatio ? { url: R5_SOURCE_ONLY_MAXIMUM_URL, valueRatio: maximum }
+        : retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum);
+      if (position !== undefined) expected.extension!.push({ url: "r5Position", valueInteger: position });
+      if (!equalStructuredValues(marker, expected))
         extensions.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: [marker] });
     } else if (marker.valueRatio) {
       // Accept older source markers, but never re-emit a one-ended valueRatio.
@@ -774,9 +777,12 @@ function baseAdministration(
   if (sourceTextVerified !== undefined) output.provenance!.sourceTextVerified = sourceTextVerified;
   if (format === "r5") {
     let limits: CanonicalDoseLimit[] | undefined, sourceMaxima: FhirExtension[] | undefined;
-    for (const maximum of input.maxDosePerPeriod ?? []) {
+    for (let index = 0; index < (input.maxDosePerPeriod?.length ?? 0); index++) {
+      const maximum = input.maxDosePerPeriod![index];
       if (maximum.numerator === undefined || maximum.denominator === undefined) {
-        (sourceMaxima ??= []).push(retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum));
+        const marker = retainField(R5_SOURCE_ONLY_MAXIMUM_URL, maximum);
+        marker.extension!.push({ url: "r5Position", valueInteger: index });
+        (sourceMaxima ??= []).push(marker);
         continue;
       }
       (limits ??= []).push({
@@ -1125,6 +1131,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
   }
   if (target === "r5" && repeat?.countMax !== undefined) repeat = withR5CountMinimum(repeat);
   if (target === "r5" && repeat?.durationMax !== undefined) repeat = withR5DurationMinimum(repeat);
+  if (target === "r5" && repeat?.periodMax !== undefined) repeat = withR5PeriodMinimum(repeat);
   // Import has already separated executable values from metadata-only wire
   // positions. The immutable native timing keeps its imported event projection.
   const events = original?.event ?? t.explicitEvents;
@@ -1966,7 +1973,7 @@ function administrationToWire(
     delete output.maxDosePerPeriod;
     delete output.maxDosePerAdministration;
     delete output.maxDosePerLifetime;
-    let periodLimits = sourceMaxima;
+    let periodLimits: FhirRatio[] | undefined;
     let administrationMaximum: R5MaximumSelection | undefined, lifetimeMaximum: R5MaximumSelection | undefined;
     for (const limit of a.limits ?? []) {
       if (!limit.amount) continue;
@@ -1991,6 +1998,19 @@ function administrationToWire(
     }
     if (administrationMaximum) output.maxDosePerAdministration = simpleQuantityForR5(administrationMaximum.quantity);
     if (lifetimeMaximum) output.maxDosePerLifetime = simpleQuantityForR5(lifetimeMaximum.quantity);
+    if (sourceMaxima) {
+      // Only source-only entries need a merge. Ordinary complete maxima keep
+      // their direct append path; annotation-only Ratios retain authored order.
+      const complete = periodLimits ?? [];
+      periodLimits = [];
+      let index = 0;
+      for (const source of sourceMaxima) {
+        while (index < complete.length && periodLimits.length < (source.position ?? 0))
+          periodLimits.push(complete[index++]);
+        periodLimits.push(source.maximum);
+      }
+      while (index < complete.length) periodLimits.push(complete[index++]);
+    }
     if (periodLimits) output.maxDosePerPeriod = periodLimits;
   }
   return output as FhirDosage | FhirR6Dosage;

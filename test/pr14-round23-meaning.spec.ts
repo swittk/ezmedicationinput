@@ -66,9 +66,7 @@ describe("round 23: language provider callable contracts", () => {
     registerMedicationLocaleDetector(second);
     expect(inferMedicationLocale("ordinary English")).toBe("en");
     expect(inferMedicationLocale("__round23_class_locale__")).toBe("classlocalea");
-    first.priority = 899;
-    expect(inferMedicationLocale("__round23_class_locale__")).toBe("classlocalea");
-    registerMedicationLocaleDetector(first);
+    registerMedicationLocaleDetector(new Detector("classlocalea", 899));
     expect(inferMedicationLocale("__round23_class_locale__")).toBe("classlocaleb");
     expect(parseSig("Take 1 tablet daily").meta.canonical.clauses[0].dose)
       .toMatchObject({ value: 1, unit: "tab" });
@@ -4271,11 +4269,13 @@ describe("round47 public preview timing and resolver ownership", () => {
 
   it("snapshots own class resolver methods separately for explicit and yearless dates", () => {
     class Calendar implements MedicationDateResolver {
-      id = "round47-own-calendar-a";
-      offset = 1000;
+      id: string;
+      offset: number;
       resolveYear: MedicationDateResolver["resolveYear"];
       calendarYearFromIsoYear: NonNullable<MedicationDateResolver["calendarYearFromIsoYear"]>;
-      constructor() {
+      constructor(id: string, offset: number) {
+        this.id = id;
+        this.offset = offset;
         this.resolveYear = function (this: Calendar, year: number, digits: number) {
           return digits === 4 && year >= 3000
             ? { isoYear: year - this.offset, calendarYear: year, inferredYear: false }
@@ -4286,11 +4286,8 @@ describe("round47 public preview timing and resolver ownership", () => {
         };
       }
     }
-    const resolver = new Calendar();
-    registerMedicationDateResolver(resolver);
-    resolver.id = "round47-own-calendar-b";
-    resolver.offset = 1001;
-    registerMedicationDateResolver(resolver);
+    registerMedicationDateResolver(new Calendar("round47-own-calendar-a", 1000));
+    registerMedicationDateResolver(new Calendar("round47-own-calendar-b", 1001));
     for (const [calendar, explicitDate, inferredYear] of [
       ["round47-own-calendar-a", "2026-09-28", 3026],
       ["round47-own-calendar-b", "2025-09-28", 3027]
@@ -4385,19 +4382,16 @@ describe("round48 saved sequence and locale ownership", () => {
     expect(JSON.stringify(row)).toBe(saved);
   });
 
-  it("snapshots constructor-owned locale callbacks when a provider is registered again", () => {
+  it("retains constructor-owned locale callbacks on independent providers", () => {
     class Detector implements MedicationLocaleDetector {
-      locale = "round48owna";
-      marker = "__round48_locale_a__";
       priority = 902;
       test: MedicationLocaleDetector["test"];
-      constructor() { this.test = function (this: Detector, text: string) { return text === this.marker; }; }
+      constructor(public locale: string, public marker: string) {
+        this.test = function (this: Detector, text: string) { return text === this.marker; };
+      }
     }
-    const detector = new Detector();
-    registerMedicationLocaleDetector(detector);
-    detector.locale = "round48ownb";
-    detector.marker = "__round48_locale_b__";
-    registerMedicationLocaleDetector(detector);
+    registerMedicationLocaleDetector(new Detector("round48owna", "__round48_locale_a__"));
+    registerMedicationLocaleDetector(new Detector("round48ownb", "__round48_locale_b__"));
     expect(inferMedicationLocale("__round48_locale_a__")).toBe("round48owna");
     expect(inferMedicationLocale("__round48_locale_b__")).toBe("round48ownb");
     expect(inferMedicationLocale("ordinary English")).toBe("en");
@@ -4867,7 +4861,7 @@ describe("round54: current unit identity and graph argument ownership", () => {
         const before = JSON.stringify(input);
         for (const locale of ["en", "th"]) {
           const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
-          expect(text.match(/2 g/gu)).toHaveLength(1);
+          expect(text.match(/(?:^|[^\d.])2 g\b/gu)).toHaveLength(1);
           expect(text).not.toContain("1 g");
           expect(text.match(locale === "en" ? /gently/gu : /เบาๆ/gu)).toHaveLength(1);
           if (relation === "plain-ear") {

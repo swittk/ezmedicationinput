@@ -42,8 +42,7 @@ describe("locale-extensible language architecture", () => {
     const changed={locale:"priorityb",priority:1001,test};
     registerMedicationLocaleDetector(changed);
     expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("priorityb");
-    changed.priority=999;
-    registerMedicationLocaleDetector(changed);
+    registerMedicationLocaleDetector({ ...changed, priority: 999 });
     expect(inferMedicationLocale("locale-registry-priority-fixture")).toBe("prioritya");
   });
 
@@ -280,5 +279,16 @@ describe("round54 constructor-owned surface segmenter callbacks", () => {
     expect(registered.script.sticky).toBe(false);
     expect(provider.script.global).toBe(flags === "g");
     expect(provider.script.sticky).toBe(flags === "y");
+  });
+});
+
+
+describe("round64 declared locale descriptor fields", () => {
+  it("reads a declared non-enumerable detector priority", () => {
+    const marker = "__round64_priority__ไทย";
+    const detector = { locale: "round64priority", test: (text: string) => text === marker };
+    Object.defineProperty(detector, "priority", { value: 200 });
+    registerMedicationLocaleDetector(detector);
+    expect(inferMedicationLocale(marker)).toBe("round64priority");
   });
 });

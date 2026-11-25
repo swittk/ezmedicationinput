@@ -3373,3 +3373,61 @@ describe("round58 direct activity projection", () => {
     expect(JSON.parse(JSON.stringify(projected.fhir[0]))).toEqual(projected.fhir[0]);
   });
 });
+
+
+describe("round64 independent endpoint and authored direction ownership", () => {
+  const options = { locale: "en", realizationMode: "normalized" as const };
+  const absent = { extension: [{ url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown" }] };
+
+  it.each(["low", "high"] as const)("does not borrow a unit from a metadata-only %s endpoint", missing => {
+    const range = missing === "low"
+      ? { low: { unit: "mg", _value: absent }, high: { value: 500 } }
+      : { low: { value: 500 }, high: { unit: "mg", _value: absent } };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ doseAndRate: [{ doseRange: range }] }] }] };
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(raw))) as FhirDosage[];
+    for (const input of [raw, rows]) {
+      const text = formatSig(input, "long", options);
+      expect(text).toContain("500");
+      expect(text).not.toContain("mg");
+      expect((Array.isArray(input) ? toDosageDetails(input) : courseToR6(courseFromR6(input))).step[0].component[0].doseAndRate![0].doseRange).toEqual(range);
+    }
+    const valued = missing === "low" ? { ...range, high: { value: 500, unit: "mg" } }
+      : { ...range, low: { value: 500, unit: "mg" } };
+    expect(formatSig({ step: [{ component: [{ doseAndRate: [{ doseRange: valued }] }] }] }, "long", options)).toContain("500 mg");
+  });
+
+  it.each(["rateRange", "rateQuantity", "rateRatio"] as const)("keeps authored directions beside a metadata-only %s", field => {
+    const metadata = { id: "unknown-rate", extension: absent.extension };
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ text: "Infuse over 30 minutes", doseAndRate: [{ [field]: metadata }] }] }] };
+    for (const input of [raw, JSON.parse(JSON.stringify(toFhirR5Dosages(raw))) as FhirDosage[]]) {
+      expect(formatSig(input, "long", options)).toContain("Infuse over 30 minutes");
+      expect((Array.isArray(input) ? toDosageDetails(input) : courseToR6(courseFromR6(input))).step[0].component[0].doseAndRate![0][field]).toEqual(metadata);
+    }
+    const rate = field === "rateQuantity" ? { value: 5, unit: "mL/h" }
+      : field === "rateRatio" ? { numerator: { value: 5, unit: "mL" }, denominator: { value: 1, unit: "h" } }
+      : { low: { value: 5, unit: "mL/h" }, high: { value: 10, unit: "mL/h" } };
+    const valued: FhirR6DosageInstruction = { step: [{ component: [{ text: "Infuse over 30 minutes", doseAndRate: [{ [field]: rate }] }] }] };
+    const text = formatSig(valued, "long", options);
+    expect(text).toContain("5");
+    expect(text).not.toContain("30 minutes");
+  });
+
+  it("supplies only a primitive companion for a missing R5 period minimum", () => {
+    const raw: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat: {
+      frequency: 2, periodMax: 3, periodUnit: FhirPeriodUnit.Day
+    } } }] }] };
+    const repeat = toFhirR5Dosages(raw)[0].timing!.repeat!;
+    expect(repeat.period).toBeUndefined();
+    expect(repeat.periodMax).toBe(3);
+    expect(repeat._period).toEqual(absent);
+    const companion = { id: "authored-period", extension: [{ url: "urn:example:period-note", valueString: "minimum unknown" }] };
+    const withMetadata: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat: {
+      ...raw.step[0].component[0].timing!.repeat!, _period: companion
+    } } }] }] };
+    expect(toFhirR5Dosages(withMetadata)[0].timing!.repeat!._period).toEqual(companion);
+    const exact: FhirR6DosageInstruction = { step: [{ component: [{ timing: { repeat: {
+      frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day
+    } } }] }] };
+    expect(toFhirR5Dosages(exact)[0].timing!.repeat!._period).toBeUndefined();
+  });
+});
