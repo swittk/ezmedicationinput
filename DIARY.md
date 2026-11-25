@@ -15824,3 +15824,10 @@ and all four distribution tests. Thirteen representative paired workloads
 and focused checks found no reproducible meaningful-workload regression
 above 4%. The small R5 formatter cost measured approximately 3 microseconds
 per call and remains a separate optimization opportunity.
+
+
+The formatter profile identified an unnecessary deep copy of immutable method
+primitive metadata. Reusing that metadata preserves its text-identity guard
+and annotations. The complete 8,060-test suite, strict types, build and four
+distribution tests pass after this correction. Focused paired checks now
+measure both affected formatter calls faster than the baseline.
