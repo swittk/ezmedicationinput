@@ -5348,15 +5348,16 @@ describe("cross-pass preservation and execution family audit", () => {
     const course: FhirR6DosageInstruction = {
       repeatCycle: { value: 1, unit: "a", code: "a" },
       step: [{ start: day(0), end: day(1), component: [{ ...ordinary,
-        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } }
+        timing: { repeat: { frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["03:15:00", "08:00:00"] } }
       }] }]
     };
     const options = { from: "2026-03-14T02:30:00-04:00", orderedAt: "2026-03-14T02:30:00-04:00",
-      timeZone: "America/New_York", limit: 3 };
-    const expected = ["2026-03-14T08:00:00-04:00", "2027-03-14T08:00:00-04:00", "2028-03-14T08:00:00-04:00"];
-    for (const dosage of [course, toFhirR5Dosages(course)]) {
+      timeZone: "America/New_York", limit: 5 };
+    const expected = ["2026-03-14T03:15:00-04:00", "2026-03-14T08:00:00-04:00",
+      "2027-03-14T08:00:00-04:00", "2028-03-14T03:15:00-04:00", "2028-03-14T08:00:00-04:00"];
+    for (const dosage of [course, JSON.parse(JSON.stringify(toFhirR5Dosages(course)))]) {
       expect(nextDueDoses(dosage, options)).toEqual(expected);
-      expect(calculateTotalUnits({ dosage, ...options, durationValue: 366, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(2);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 366, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
     }
   });
 });

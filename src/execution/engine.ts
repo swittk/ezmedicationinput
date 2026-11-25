@@ -239,6 +239,7 @@ function isDateAlignedToPeriodCycle(
     if (deltaDays < 0) {
       return false;
     }
+    if (!Number.isInteger(period)) return deltaDays % (period * 7) === 0;
     const deltaWeeks = Math.floor(deltaDays / 7);
     return deltaWeeks % period === 0;
   }
@@ -1249,13 +1250,23 @@ function licensedDailyRangeRecurrence(
   return { ...repeat, frequency: daily >= 1 ? daily : 1, frequencyMax: undefined,
     period: daily >= 1 ? 1 : 1 / daily, periodMax: undefined, periodUnit: DurationUnit.Day };
 }
-/** A known code and a complete repeat must have an overlapping cadence.
+/** Standard codes must agree with one another and overlap a complete repeat.
  * A disjoint frequency/period range cannot make contradictory facts executable. */
 function requireConsistentTimingCode(timing: CanonicalTiming | undefined): void {
   const repeat = timing?.recurrence;
   const codings = timing?.code?.coding;
-  if (!codings?.length || repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit)
-    return;
+  if (!codings?.length) return;
+  let cadence: number | undefined;
+  for (const coding of codings) {
+    if (!coding.code) continue;
+    const daily = standardTimingCodeFrequency(coding, true);
+    if (daily === undefined) continue;
+    if (cadence !== undefined && cadence !== daily)
+      throw new MedicationQuantityCalculationError("timing-code-repeat-conflict",
+        "The timing codes specify different numeric cadences. Resolve the conflicting schedule before scheduling or calculating supply.");
+    cadence = daily;
+  }
+  if (repeat?.frequency === undefined || repeat.period === undefined || !repeat.periodUnit) return;
   const ranged = (repeat.frequencyMax !== undefined && repeat.frequencyMax !== repeat.frequency) ||
     (repeat.periodMax !== undefined && repeat.periodMax !== repeat.period);
   const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
@@ -5890,11 +5901,7 @@ function generateDayFilteredPeriodSeries(options: DayFilteredPeriodSeriesOptions
   const clocks = [defaultClock ?? "08:00:00"];
   let currentDay = startOfLocalDay(startDay, timeZone);
   let iterations = 0;
-  const startMs = currentDay.getTime();
-  const estimatedDays = to
-    ? Math.max(1, Math.ceil((to.getTime() - startMs) / (24 * 60 * 60 * 1000)))
-    : limit * 366;
-  const maxIterations = Math.max(limit * 366, estimatedDays + 31);
+  const maxIterations = calendarScanLimit(currentDay, to, limit, repeat);
   while (results.length < limit && iterations < maxIterations && (!to || currentDay < to)) {
     const inPeriodCycle = clockCadenceEligible(currentDay, anchorDay, repeat, timeZone, dayFilter.size > 0);
     if (inPeriodCycle && matchesCalendarDay(currentDay, dayFilter, dayFilter.size > 0, calendarDays, timeZone)) {
@@ -6281,7 +6288,8 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
   ) {
     // A zero/absent lower frequency has no concrete plan unless clocks or a
     // timing code supply one. Use the executable upper recurrence directly.
-    if (!frequency && !repeat.clocks?.length && !repeat.anchors?.length && !dosage.schedule?.code)
+    if (!frequency && !repeat.clocks?.length && !repeat.anchors?.length &&
+        standardTimingCodeFrequency(executionTimingCoding(dosage.schedule!), true) === undefined)
       preserveCadence = false;
     if (!preserveCadence) nextRepeat = {
       ...nextRepeat,

@@ -147,9 +147,10 @@ function calendarPhaseMembers(
   members: readonly CanonicalParallelComponent[],
   nextStarts: readonly (string | undefined)[] | undefined
 ): CanonicalParallelComponent[] | string {
-  if (nextStarts?.some(value => !value)) return 'parallel-regimen-next-calendar-start-required';
-  const nextStart = nextStarts?.reduce<string>((earliest, value) =>
-    value && value < earliest ? value : earliest, nextStarts[0]!);
+  let nextStart: string | undefined;
+  for (const value of nextStarts ?? [])
+    if (value && (nextStart === undefined || value < nextStart)) nextStart = value;
+  if (nextStarts?.length && !nextStart) return 'parallel-regimen-next-calendar-start-required';
   const inferredEnd = nextStart ? precedingCalendarDay(nextStart) : undefined;
   const normalized: CanonicalParallelComponent[] = [];
   for (const item of members) {
