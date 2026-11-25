@@ -640,7 +640,6 @@ function directUnitSuggestions(
   if (/^(?:po|prn|q\d|qd|od|bid|tid|qid)$/i.test(fragment)) return undefined;
   const locale = suggestionLocale(input, options);
   const localeAdapter = getSuggestLocaleAdapter(locale);
-  const pairs = buildUnitRoutePairs(inferUnitFromContext(options?.context ?? undefined), options);
   const suggestions: string[] = [];
   const seen = new Set<string>();
   const add = (surface: string, unit: string, route: string): boolean => {
@@ -667,12 +666,14 @@ function directUnitSuggestions(
 
   if (localeAdapter.unitSuggestionUsesLocaleLexemes) {
     for (const lexeme of suggestionLexemes(locale)) {
+      if (!lexeme.surface.toLowerCase().startsWith(fragment)) continue;
       const unit = normalizeUnit(lexeme.canonical, options);
       if (!unit) continue;
       const pair = buildUnitRoutePairs(unit, options)[0] ?? { unit, route: "po" };
       if (add(lexeme.surface, unit, pair.route)) return suggestions;
     }
   } else {
+    const pairs = buildUnitRoutePairs(inferUnitFromContext(options?.context ?? undefined), options);
     for (const pair of pairs) {
       for (const variant of getUnitVariants(pair.unit)) {
         if (add(variant.value, pair.unit, pair.route)) return suggestions;
