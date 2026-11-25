@@ -1573,11 +1573,15 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       arg.quantity?.comparator === clause.dose?.comparator
     )
   ));
+  const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
+    baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   const primaryGraphAction = roundTrip
     ? instructionGraphRoundTripPrimaryAction(clause)
     : undefined;
+  // If whole-source replay is unavailable in this locale, an action's partial
+  // source cannot stand in for its independently structured cadence.
   const needsCurrentPrimary = Boolean(primaryGraphAction && (
-    !primaryGraphAction.sourceText.trim() || clause.sourceProjectionVerified === false ||
+    !graphSourceIsEnglish || !primaryGraphAction.sourceText.trim() || clause.sourceProjectionVerified === false ||
     !graphRepresentsDose && instructionGraphSourceConflictsWithDose(clause, options)
   ));
   const richPrimaryGraphAction = !roundTrip || !primaryGraphAction
@@ -1855,8 +1859,6 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
   if (patientInstruction) instructionPhrases.push(patientInstruction);
   const trailingInstructionText = instructionPhrases.join(" ").trim() || undefined;
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);
-  const graphSourceIsEnglish = !clause.instructionGraph?.sourceLocale ||
-    baseLanguageTag(clause.instructionGraph.sourceLocale) === "en";
   if (
     roundTrip && (!hasExplicitMethod || primaryGraphAction && !needsCurrentPrimary) && graphSourceIsEnglish &&
     clause.instructionGraph?.sourceText.trim() && !instructionGraphSourceConflictsWithDose(clause, options) &&

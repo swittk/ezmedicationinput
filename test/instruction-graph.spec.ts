@@ -7025,8 +7025,19 @@ describe("round62 review: instruction argument ownership", () => {
         expect(input).toEqual(original);
       }
       expect(formatSig(parsed.meta.canonical.course!, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
-      if (!parseOptions)
-        expect(formatSig(fresh(parsed.fhir), "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
+      const roundtrip = { locale: "en", realizationMode: "roundtrip" as const };
+      if (!parseOptions) expect(formatSig(fresh(parsed.fhir), "long", roundtrip)).toBe(source);
+      else {
+        const previews = [formatSig(fresh(parsed.fhir[0]), "long", roundtrip),
+          formatSig(fresh(parsed.fhir), "long", roundtrip),
+          formatSig(fresh(parsed.fhirNext), "long", roundtrip),
+          fromFhirDosage(fresh(parsed.fhir[0]), roundtrip).longText];
+        for (const text of previews) {
+          expect(text.match(/\b1 tablet\b/gu)).toHaveLength(1);
+          expect(text).toContain("slowly");
+          expect(text).toContain(timing === "daily" ? "once daily" : "10:00");
+        }
+      }
       expect(parsed.fhir).toEqual(before);
     }
   });
