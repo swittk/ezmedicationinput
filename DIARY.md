@@ -16103,3 +16103,26 @@ Source tests and the final terminology follow-up, strict types, build and four
 distribution tests passed. Representative paired measurements found no
 reproducible meaningful-work regression above 4%; the small scalar supply
 difference was assessed by absolute latency and ordinary call frequency.
+
+
+## 2026-11-26 — Quantity limits and authored phase execution
+
+Cumulative maxima retain their own amounts and periods beside administered
+volumes. Decimal ranges, scoped action conditions and dilution complements
+preserve the existing typed owners. Known unit identities govern target counts,
+container estimates and equivalent presentation caps without rewriting authored
+quantities or labels.
+
+Dated replacements retain earlier eligible doses across concurrent members.
+Immediate starts, integer sequence groups and phase-local consumption use the
+shared execution windows. Independent course limits, compact cadence codes and
+quantity/source annotations survive ordinary formatting and conversion.
+Historical exported-FHIR editing and reconciliation remain best effort; the
+product contract and review configuration now state that boundary explicitly.
+
+Validation passed 8,753 normal tests and 1,328 affected tests for the final
+presentation-cap correction, strict types, build and four distribution tests.
+Twenty-eight representative paired workloads found no reproducible meaningful
+regression above 4%; small fast-call differences were assessed by absolute
+latency and measurement spread. Decimal token tests were regrouped with their
+clinical quantity coverage without dropping assertions.
