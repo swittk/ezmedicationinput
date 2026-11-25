@@ -199,13 +199,17 @@ export function getTimeParts(date: Date, timeZone: string): TimeParts {
   return result;
 }
 
-/** Calculates the time-zone offset in minutes for a given instant. */
-export function getOffset(date: Date, timeZone: string): number {
-  const { year, month, day, hour, minute, second } = getTimeParts(date, timeZone);
+function offsetFromTimeParts(date: Date, parts: TimeParts): number {
+  const { year, month, day, hour, minute, second } = parts;
   const zonedTime = Date.UTC(year, month - 1, day, hour, minute, second);
   // Intl parts are whole-second precision. Match that precision on the
   // source instant (including pre-epoch times) before calculating minutes.
   return (zonedTime - (date.getTime() - date.getUTCMilliseconds())) / (SECONDS_PER_MINUTE * 1000);
+}
+
+/** Calculates the time-zone offset in minutes for a given instant. */
+export function getOffset(date: Date, timeZone: string): number {
+  return offsetFromTimeParts(date, getTimeParts(date, timeZone));
 }
 
 /** Locate the offset transition within one civil day. Calendar arithmetic
@@ -228,8 +232,9 @@ export function calendarOffsetTransition(start: Date, end: Date, timeZone: strin
  * defaulting to UTC.
  */
 export function formatZonedIso(date: Date, timeZone: string): string {
-  const { year, month, day, hour, minute, second } = getTimeParts(date, timeZone);
-  const offsetMinutes = getOffset(date, timeZone);
+  const parts = getTimeParts(date, timeZone);
+  const { year, month, day, hour, minute, second } = parts;
+  const offsetMinutes = offsetFromTimeParts(date, parts);
   const offsetSign = offsetMinutes >= 0 ? "+" : "-";
   const absoluteOffset = Math.abs(offsetMinutes);
   const offsetHours = Math.floor(absoluteOffset / SECONDS_PER_MINUTE);
@@ -260,13 +265,14 @@ export function makeZonedDate(
   // A date boundary owns the first occurrence of midnight in a fold.
   // Seed from the preceding civil day without adding another offset lookup.
   let candidate = new Date(initialUtc - (preferEarlier ? 86400000 : 0));
-  let offset = getOffset(candidate, timeZone);
+  const offset = getOffset(candidate, timeZone);
   candidate = new Date(initialUtc - offset * SECONDS_PER_MINUTE * 1000);
-  const recalculatedOffset = getOffset(candidate, timeZone);
+  let parts = getTimeParts(candidate, timeZone);
+  const recalculatedOffset = offsetFromTimeParts(candidate, parts);
   if (recalculatedOffset !== offset) {
     candidate = new Date(initialUtc - recalculatedOffset * SECONDS_PER_MINUTE * 1000);
+    parts = getTimeParts(candidate, timeZone);
   }
-  const parts = getTimeParts(candidate, timeZone);
   if (
     parts.year !== year ||
     parts.month !== month ||
