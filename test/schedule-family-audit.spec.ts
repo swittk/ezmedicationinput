@@ -13,7 +13,7 @@ import { createBoundaryPlan } from "../src/regimen/planner";
 import { buildRegimenGraph } from "../src/regimen/regimen";
 import { recognizeCycles } from "../src/hpsg/rules/timing-rules";
 import { PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
-import { getCourseCycleCount } from "../src/fhir-course-cycle-count";
+import { COURSE_CYCLE_COUNT_EXTENSION_URL, getCourseCycleCount } from "../src/fhir-course-cycle-count";
 import { calendarBoundaryDate, makeZonedDate } from "../src/execution/calendar";
 
 const start = "2024-01-01T00:00:00Z";
@@ -4733,6 +4733,46 @@ describe("round63: recorded caps, combined ceilings and finite calendar successo
         durationValue: 7, durationUnit: FhirPeriodUnit.Day, roundToMultiple: 5,
         ...(recorded ? { priorDoseTimes: ["2025-12-31T08:00:00Z"] } : {}) }))
         .toMatchObject({ totalUnits: expected, unit: mixed ? "g" : "tab" });
+  });
+
+  it.each([
+    ["uncapped alternative", false, false, false, false, 3, 3],
+    ["capped alternative", false, true, false, false, 3, 3],
+    ["mixed-unit alternative", true, true, false, false, 3, 3],
+    ["selected uncapped member", false, false, true, false, 1, 5],
+    ["independent capped members", false, true, false, true, 4, 4],
+    ["independent uncapped member", false, false, false, true, 4, 5],
+  ] as const)("rounds only the selected clock plan: %s", (_label, mixed, capped, upperWins, independent, unrounded, rounded) => {
+    const unit = mixed ? "g" : "tab", otherUnit = mixed ? "mg" : "tab", otherAmount = mixed ? 1000 : 1;
+    const source: FhirR6DosageInstruction = { step: [{ count: independent ? undefined : 2,
+      end: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
+        offsetDuration: { value: independent ? 2 : 1, unit: "d" } },
+      component: [
+        { doseAndRate: [{ doseQuantity: { value: 3, unit } }],
+          timing: { repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
+            timeOfDay: [upperWins ? "20:00:00" : "14:00:00"] } },
+          safety: { doseLimit: [
+            { scope: "lifetime", valueQuantity: { value: 3, unit } },
+            { scope: "period", valueQuantity: { value: 3, unit }, period: { value: 24, unit: "h" } },
+          ] } },
+        { doseAndRate: [{ doseQuantity: { value: otherAmount, unit: otherUnit } }],
+          timing: { repeat: { frequency: 1, frequencyMax: 3, period: 1, periodUnit: FhirPeriodUnit.Day,
+            timeOfDay: ["20:00:00"] } },
+          safety: { doseLimit: [
+            { scope: "period", valueQuantity: { value: 100 * otherAmount, unit: otherUnit }, period: { value: 24, unit: "h" } },
+            ...(capped ? [{ scope: "lifetime" as const, valueQuantity: { value: otherAmount, unit: otherUnit } }] : []),
+          ] } },
+      ] }] };
+    if (independent) {
+      source.repeatCycle = { value: 1, unit: "d" };
+      source.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 1 }];
+    }
+    const query = { from: "2026-01-01T13:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC",
+      durationValue: 2, durationUnit: FhirPeriodUnit.Hour };
+    for (const dosage of [source, importCanonicalCourse(source), JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
+      expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: unrounded, unit });
+      expect(calculateTotalUnits({ dosage, ...query, roundToMultiple: 5 })).toMatchObject({ totalUnits: rounded, unit });
+    }
   });
 
   it.each([1, 2])("finds a clocked annual recurrence with result limit %s", limit => {

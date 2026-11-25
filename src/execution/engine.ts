@@ -7499,22 +7499,32 @@ function maximumChronologicalTimedCourseUnits(
   const independent = hasIndependentClockAlternatives(course);
   const upperMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
   const upperUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
+  // A discarded clock plan must not contribute a member's rounding ceiling.
+  const roundingLimits = (options as PhaseCountOptions).roundingLimits;
+  const upperLimits = roundingLimits ? new Map(roundingLimits) : undefined;
+  const upperOptions = upperLimits ? { ...options, roundingLimits: upperLimits } : options;
   const upper = calculateChronologicalCourseUnits(maximum.course, maximum.originalOf,
-    options, zone, queryStart, queryEnd, anchor, upperUsage, upperMembers);
+    upperOptions, zone, queryStart, queryEnd, anchor, upperUsage, upperMembers);
   if (attainedChronologicalSupplyBound(maximum.course, upper, options, queryStart, queryEnd)) {
     if (lifetimeUsage && upperUsage) {
       lifetimeUsage.clear();
       for (const [key, value] of upperUsage) lifetimeUsage.set(key, value);
     }
+    if (roundingLimits && upperLimits)
+      for (const [key, limit] of upperLimits) roundingLimits.set(key, limit);
     return upper;
   }
   const authored = maximumChronologicalSupplyCourse(course, options, true);
   const authoredUsage = lifetimeUsage ? new Map(lifetimeUsage) : undefined;
   const authoredMembers = independent ? new Map<string, TotalUnitsResult>() : undefined;
+  const authoredLimits = roundingLimits ? new Map(roundingLimits) : undefined;
+  const authoredOptions = authoredLimits ? { ...options, roundingLimits: authoredLimits } : options;
   const concrete = calculateChronologicalCourseUnits(authored.course, authored.originalOf,
-    options, zone, queryStart, queryEnd, anchor, authoredUsage, authoredMembers);
+    authoredOptions, zone, queryStart, queryEnd, anchor, authoredUsage, authoredMembers);
   const selected = largerSupplyPlan(upper, concrete, options.context);
+  const selectedLimits = selected === concrete ? authoredLimits : upperLimits;
   if (upperMembers && authoredMembers) {
+    const independentLimits = roundingLimits ? new Map(roundingLimits) : undefined;
     const entries: Array<{ total: TotalUnitsResult; unit: string | undefined }> = [];
     for (const [key, upperTotal] of upperMembers) {
       const authoredTotal = authoredMembers.get(key);
@@ -7522,21 +7532,35 @@ function maximumChronologicalTimedCourseUnits(
       entries.push({ total, unit: total.unit });
       const usage = total === authoredTotal ? authoredUsage : upperUsage;
       if (lifetimeUsage && usage?.has(key)) lifetimeUsage.set(key, usage.get(key)!);
+      if (independentLimits && total.totalUnits > 0) {
+        const limit = (total === authoredTotal ? authoredLimits : upperLimits)?.get(key);
+        if (limit) independentLimits.set(key, limit);
+      }
     }
     for (const [key, total] of authoredMembers) {
       if (upperMembers.has(key)) continue;
       entries.push({ total, unit: total.unit });
       if (lifetimeUsage && authoredUsage?.has(key)) lifetimeUsage.set(key, authoredUsage.get(key)!);
+      if (independentLimits && total.totalUnits > 0) {
+        const limit = authoredLimits?.get(key);
+        if (limit) independentLimits.set(key, limit);
+      }
     }
     // Preserve the established whole-plan units/explanation when independently
     // choosing clocks does not increase the feasible supply.
-    return largerSupplyPlan(selected, sumCourseUnits(entries, options), options.context);
+    const result = largerSupplyPlan(selected, sumCourseUnits(entries, options), options.context);
+    const limits = result === selected ? selectedLimits : independentLimits;
+    if (roundingLimits && limits)
+      for (const [key, limit] of limits) roundingLimits.set(key, limit);
+    return result;
   }
   const selectedUsage = selected === concrete ? authoredUsage : upperUsage;
   if (lifetimeUsage && selectedUsage) {
     lifetimeUsage.clear();
     for (const [key, value] of selectedUsage) lifetimeUsage.set(key, value);
   }
+  if (roundingLimits && selectedLimits)
+    for (const [key, limit] of selectedLimits) roundingLimits.set(key, limit);
   return selected;
 }
 /** Untimed use allowances have no event timestamps. Resolve their original
