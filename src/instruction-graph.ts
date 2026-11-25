@@ -3752,7 +3752,10 @@ function hasUntranslatedThaiArgument(frame: AdviceFrame, locale: string): boolea
 }
 
 function actionLabel(frame: AdviceFrame, locale: string, roundtripSafe = false): string {
-  const definition = getMedicationInstructionAction(frame.predicate.lemma);
+  const fallback = getMedicationInstructionAction(frame.predicate.lemma);
+  // A selected custom head may share a default code without sharing its label.
+  // Only matching default wording can supply a missing locale translation.
+  const definition = !frame.predicate.display || frame.predicate.display === fallback?.display ? fallback : undefined;
   return (roundtripSafe ? localizedValue(definition?.roundtripI18n, locale) : undefined) ??
     localizedValue(frame.predicate.i18n, locale) ??
     localizedValue(definition?.i18n, locale) ??

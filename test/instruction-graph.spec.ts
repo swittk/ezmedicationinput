@@ -6848,6 +6848,19 @@ describe("round62 selected action ownership", () => {
     for (const row of [parsed.fhir[0], parsed.fhirNext.step![0].component[0]])
       expect(row.doseAndRate).toMatchObject([{ doseQuantity: { value: 2, unit: "tab" } }]);
     expect(parsed.longText).toBe("Disperse 2 tablets in water.");
+    const edited = fresh(parsed.fhir);
+    edited[0].doseAndRate![0].doseQuantity!.value = 3;
+    const beforeEdit = JSON.stringify(edited), r6 = toDosageDetails(edited);
+    for (const input of [edited, fresh(r6), fresh(toFhirR5Dosages(r6))])
+      for (const realizationMode of ["normalized", "roundtrip"] as const) {
+        expect(formatSig(input, "long", { ...options, locale: "en", realizationMode }))
+          .toBe("Disperse 3 tablets in water.");
+        // This selected head has no declared Thai label. Its shared code
+        // cannot borrow the unrelated built-in Mix translation.
+        expect(formatSig(input, "long", { ...options, locale: "th", realizationMode }))
+          .toBe("Disperse 3 เม็ดในน้ำ.");
+      }
+    expect(JSON.stringify(edited)).toBe(beforeEdit);
     expect(JSON.stringify(options)).toBe(beforeOptions);
   });
 
