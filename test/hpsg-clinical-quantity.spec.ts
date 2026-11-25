@@ -5,7 +5,7 @@ import { projectHpsgSignToState } from "../src/hpsg/projection";
 import { canonicalFromFhir, canonicalToFhir, parserStateFromFhir, TIMING_ADMINISTRATION_DURATION_EXTENSION_URL } from "../src/fhir";
 import {
   calculateTotalUnits, importCanonicalCourse,
-  getEmaQuantityComparator,
+  getEmaQuantityComparator, getMedicationInstructionAction,
   parseInstructionActions,
   getDosageCondition,
   nextDueDoses,
@@ -4002,5 +4002,28 @@ describe("round69 selected infusion head and sequential durations", () => {
       dosage: parsed, orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
       timeZone: "UTC", durationValue: 6, durationUnit: "d"
     })).toMatchObject({ totalUnits: 135, unit: "mg" });
+  });
+});
+
+describe("round69 selected administration duration ownership", () => {
+  it.each([
+    { source: "Infuse 14 mg over 2 hours", method: "Infuse", borrowed: "mix", code: "infuse", elapsed: 2 },
+    { source: "Take 14 mg over 2 hours", method: "Take", borrowed: "infuse", code: "take", elapsed: undefined }
+  ])("retains the selected duration license despite a distinct code collision: $source", ({ source, method, borrowed, code, elapsed }) => {
+    const options: ParseOptions = { instructionActionMap: { "custom-procedure": {
+      ...getMedicationInstructionAction(borrowed)!, code, display: "Custom procedure", aliases: []
+    } } };
+    for (const supplied of [undefined, options]) {
+      const parsed = parsePublicSig(source, supplied);
+      expect(parsed.meta.canonical.clauses[0].method?.text).toBe(method);
+      for (const clause of [parsed.meta.canonical.clauses[0],
+        ...[parsed.fhir[0], toFhirR5Dosages(parsed.fhirNext)[0]].map(row => canonicalFromFhir(row))]) {
+        expect(clause.dose).toMatchObject({ value: 14, unit: "mg" });
+        expect(clause.schedule?.administrationDuration).toBe(elapsed);
+        expect(clause.schedule?.administrationDurationUnit).toBe(elapsed === undefined ? undefined : "h");
+        expect(clause.schedule?.duration).toBe(elapsed === undefined ? 2 : undefined);
+      }
+      expect(parsed.input).toBe(source);
+    }
   });
 });

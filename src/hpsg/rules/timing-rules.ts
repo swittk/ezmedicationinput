@@ -101,7 +101,7 @@ import {
 } from "../rule-context";
 import { HpsgLexicalRule, HpsgScheduleFeature, HpsgSign, lexicalSign } from "../signature";
 import { getProceduralFrames, sourceRangeAttachmentClass } from "../procedural-context";
-import { getMedicationInstructionAction, listMedicationInstructionActions, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { listMedicationInstructionActions, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { combineSignFeatureStructures } from "../feature-structure";
 import { medicationInstructionConceptCodings, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import { getDoseUnitKind, normalizeUnit } from "../../unit-lexicon";
@@ -2596,7 +2596,7 @@ function timingRangeIsProcedureLocalDuration(
   end: number
 ): boolean {
   for (const frame of getProceduralFrames(context)) {
-    const definition = getMedicationInstructionAction(frame.predicate.lemma, context.options);
+    const definition = frameActionDefinition(frame, context.options);
     if (definition?.procedural) {
       for (const arg of frame.args) {
         if (arg.role !== AdviceArgumentRole.Duration || !arg.span) continue;
