@@ -1,13 +1,17 @@
-/** Public API performance gate, not just parse/format/supply.
+/** Short paired hot-path performance diagnostic.
  *
  * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
- *   [--only regex] [--rounds 10] [--target-ms 12] [--smoke] [--json report.json]
+ *   [--only regex | --all] [--rounds 6] [--target-ms 8] [--smoke] [--json report.json]
  *
- * Each exported function has a fixture or an explicit new-API classification.
- * Ordinary and adversarial API families are separate measurements; a fast
- * scheduler cannot hide slow suggestions/import/formatting. Paired alternating
- * runs share inputs, JIT warmup and invocation counts. No timing assertion lives
- * inside correctness tests. Tiny noisy APIs report both absolute time and spread.
+ * The default covers representative parse, format, FHIR, scheduling, supply and
+ * suggestion workflows. --only selects a suspect workflow; --all opts into the
+ * complete existing scenario inventory. No exhaustive sweep or confirmation is
+ * required. Paired warm runs share inputs and invocation counts.
+ *
+ * Judge absolute latency, frequency, spread and reproducibility, not an arbitrary
+ * relative cutoff. Investigate significant common-workload regressions with a
+ * focused measurement. Timing alone never sets a failing exit code; unavailable
+ * scenarios and clinical correctness errors still do.
  */
 import { performance } from "node:perf_hooks";
 import { readFileSync, writeFileSync, renameSync, realpathSync } from "node:fs";
@@ -25,9 +29,18 @@ const argv = process.argv.slice(2),
   };
 const baselinePath = value("--baseline", process.env.EZMED_BASELINE);
 if (!baselinePath) throw new Error("Supply --baseline pointing to the built origin/master package");
-const filter = new RegExp(value("--only", ".")),
-  requestedRounds = Number(value("--rounds", "10"));
-const targetMs = Number(value("--target-ms", "12")),
+const representative = [
+  "parseSig/ordinary", "parseSig/thai", "parseSig/staged",
+  "formatSig/R5/en", "formatSig/R6-source-less/th",
+  "fromFhir/simple/en", "fromFhirDosage/en",
+  "toDosageDetails/simple", "toFhirR5Dosages/R6-simple",
+  "nextDueDoses/scalar", "calculateTotalUnits/scalar",
+  "suggestSig/1 tab po q", "suggestSig/กิน",
+];
+const all = argv.includes("--all");
+const filter = new RegExp(value("--only", all ? "." : "^(?:" + representative.join("|") + ")$")),
+  requestedRounds = Number(value("--rounds", "6"));
+const targetMs = Number(value("--target-ms", "8")),
   smoke = argv.includes("--smoke");
 if (!smoke && (!Number.isInteger(requestedRounds) || requestedRounds < 1))
   throw new Error("--rounds must be a positive integer for timed measurements");
@@ -41,7 +54,6 @@ const baselineEntry = realpathSync(resolve(baselinePath));
 const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
 if (baselineEntry === candidateEntry)
   throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
-const maxRegression = 0.04;
 const outputPath = value("--json", undefined);
 const report = {
   mode: smoke ? "smoke" : "timed",
@@ -65,8 +77,6 @@ function checkpoint(complete = false) {
   const checked = report.cases.filter(c => c.smoke);
   report.timedComparisons = timed.length;
   report.smokeComparisons = checked.length;
-  report.passing = timed.filter(c => c.pass === true).length;
-  report.failing = timed.filter(c => c.pass === false).length;
   report.nonEquivalent = report.cases.filter((c) => c.equivalentWork === false).length;
   report.measuredPublicFunctions = new Set([
     ...timed.map(c => c.api), ...report.newApiMeasurements.map(c => c.api),
@@ -543,7 +553,7 @@ const newApis = new Set([...covered].filter(api =>
 const missing = Object.keys(candidate).filter(
   (key) => typeof candidate[key] === "function" && !covered.has(key)
 );
-if (missing.length) {
+if (all && missing.length) {
   const error = new Error("Uncovered public APIs: " + missing.join(", "));
   report.phase = "setup-error";
   report.errors.push({ name: "setup", error: String(error.stack ?? error) });
@@ -574,7 +584,6 @@ Object.assign(report, {
   publicFunctions: Object.keys(candidate).filter((k) => typeof candidate[k] === "function").length,
   coveredPublicFunctions: covered.size,
   newApis: [...newApis],
-  threshold: 1 + maxRegression,
   methodology:
     "Balanced alternating paired warm batches; median log paired ratio; helper exports captured before timing; no cross-domain averaging",
   filter: filter.source,
@@ -604,12 +613,12 @@ async function measure(test, module, iterations, async) {
 }
 /** Calibrate to steady-state duration, not a three-call pilot that can be
  * dominated by a first JIT transition for sub-microsecond getters. Both builds
- * use the identical final count; threshold and paired ordering stay fixed.
+ * use the identical final count and balanced paired ordering.
  * Calibrate to the slower side: a 100x speedup must not force 100x-longer
  * baseline batches merely to give the faster implementation a long sample. */
 async function calibratedIterations(test, modules, async) {
   // Scale the ceiling with the requested duration so tiny cached getters can
-  // reach it. A fixed million calls truncated 100 ms confirmations to 20 ms.
+  // reach it when a focused investigation requests longer batches.
   const maxIterations = Math.max(1000000, Math.ceil(targetMs * 1000 / 0.005));
   let iterations = 4;
   for (let attempt = 0; attempt < 7; attempt++) {
@@ -1012,16 +1021,19 @@ for (const test of cases) {
       ratio,
       samples: { baselineUs: a, candidateUs: b },
       changePercent: (ratio - 1) * 100,
+      changeUs: current - old,
       ...equivalence,
-      ...(equivalentWork ? { pass: ratio <= 1 + maxRegression } : {}),
       baselineSpread: (Math.max(...a) - Math.min(...a)) / old,
       candidateSpread: (Math.max(...b) - Math.min(...b)) / current,
     };
     report.cases.push(result);
     console.log(
-      `${!equivalentWork ? "DIFFERENT" : result.pass ? "PASS" : "FAIL"} ${test.name}: ${old.toFixed(2)} -> ${current.toFixed(
-        2
-      )} us (${result.changePercent.toFixed(1)}%)`
+      (equivalentWork ? "TIMING " : "DIFFERENT ") + test.name + ": " +
+      old.toFixed(2) + " -> " + current.toFixed(2) + " us (" +
+      ratio.toFixed(2) + "x, " + result.changePercent.toFixed(1) + "%; delta " +
+      result.changeUs.toFixed(2) + " us; spread " +
+      (result.baselineSpread * 100).toFixed(1) + "% -> " +
+      (result.candidateSpread * 100).toFixed(1) + "%)"
     );
   } catch (error) {
     report.errors.push({ name: test.name, error: String(error.stack ?? error) });
@@ -1099,10 +1111,9 @@ console.log(
     smokeComparisons: report.smokeComparisons,
     measuredPublicFunctions: report.measuredPublicFunctions,
     smokePublicFunctions: report.smokePublicFunctions,
-    passing: report.passing,
-    failing: report.failing,
     unavailable: report.unavailable,
     errors: report.errors,
   })
 );
-if (report.errors.length || report.failing || report.unavailable.length) process.exitCode = 1;
+console.log("Diagnostic only: judge absolute latency, workload frequency, spread and reproducibility; investigate significant regressions with --only.");
+if (report.errors.length || report.unavailable.length) process.exitCode = 1;

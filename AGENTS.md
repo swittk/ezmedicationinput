@@ -6,7 +6,7 @@ Fresh independently constructed or persisted R5/current-R6 values are supported 
 
 The existing explicit spatial clone retains its narrow field/value contract: distinct clone shells and detached standard primitive companions, extension content and translations. Preserve opaque extra values, which may remain shared under the immutable contract; do not introduce universal recursive isolation for arbitrary custom metadata.
 
-The current PR #14 engineering loop is authorized to continue through full CodeRabbit reviews after source, storage and the unchanged per-scenario 4% performance gates pass. Reply in original threads and resolve addressed findings before requesting exactly a full review. B4's pure-event same-day policy remains settled; no new chronology inference is authorized. No merge, publishing or deployment.
+The current PR #14 engineering loop is authorized to continue through full CodeRabbit reviews after meaningful correctness checks and practical performance review. Under the owner's 2026-11-24 AgentBoard #1838/#1852 direction, use the short representative paired benchmark by default; inspect absolute latency, affected frequency, spread and reproducibility, and measure a suspect workflow with --only. There is no fixed percentage hard fail, compulsory exhaustive sweep or automatic confirmation. Significant real regressions on common workloads still require a fix. Reply in original threads and resolve addressed findings before requesting exactly a full review. B4's pure-event same-day policy remains settled; no new chronology inference is authorized. No merge, publishing or deployment.
 
 # OWNER UNIT-PRESERVATION CLARIFICATION — 2026-11-22
 

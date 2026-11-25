@@ -341,9 +341,11 @@ If learned behavior is added later, it should be:
   native edit API. Fresh independently submitted wire values must read their
   current clinical contents; per-instance verification need not recheck an
   already-consumed object for later caller mutation.
-- Performance acceptance: no reproducible >4% slowdown in ANY parser,
-  import, formatter, scheduling or supply domain versus origin/master;
-  target faster in every domain, with no aggregate-median waiver.
+- Performance review (updated by the owner on 2026-11-24): use short paired
+  measurements of representative parse, format, FHIR, schedule, supply and
+  suggestion workflows. Judge absolute latency, usage frequency, CPU spread
+  and reproducibility. Investigate and fix significant real regressions;
+  a fixed relative percentage is not an acceptance rule.
 - Original audit blocker (resolved in the later direct-adapter checkpoint):
   native-to-R5 used to construct R6 first. Complete R5 and R6 sibling
   projection/import now independently own their source-compatibility codecs.
@@ -376,11 +378,13 @@ locales/course/ supply calendars, stages, temporal units, conjunctions,
 conditions, exclusions, rate/dose labels and technical fallbacks. A third
 language test covers registration and inheritance without a second parser.
 
-The all-public benchmark covers all legacy exports including autocomplete
-(suggestSig), date and locale registration, graph encode/decode, R5/R6
-interchange, scheduling and supply, not only parseSig/formatSig.
-The 4% regression ceiling applies independently to each measured domain
-against the exact built origin/master, never to an aggregate median.
+The public API benchmark defaults to one short representative diagnostic,
+including parse, format, FHIR interchange, scheduling, supply and suggestions.
+It reports absolute latency, paired ratios and spread without a timing-based
+exit failure. Use --only for a suspect workflow; --all retains the optional
+complete scenario inventory. No exhaustive sweep or confirmation run is
+mandatory. Compare against a relevant built baseline and investigate meaningful
+reproducible regressions without treating small relative noise as a blocker.
 
 
 ## 2026-11-17 — Chronological overlap and source replay ownership
