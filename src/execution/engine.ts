@@ -2504,7 +2504,8 @@ function resolveAdministrationWindow(
   sourceClock: TreatmentWallClock | undefined, capClock: TreatmentWallClock | undefined,
   options: NextDueDoseOptions | undefined, predecessorPoint: Date | undefined,
   successorFloor: Date | undefined, deferFiniteCompletion: boolean,
-  capContext?: MedicationContext, ownPredecessor?: AcceptedStageCompletion, cycleEnd?: Date
+  capContext?: MedicationContext, ownPredecessor?: AcceptedStageCompletion, cycleEnd?: Date,
+  replacementEnd?: Date
 ): ResolvedAdministrationWindow {
   const recurrence = administration.schedule?.recurrence;
   const delay = getAdministrationOffsetMinutes(administration);
@@ -2577,6 +2578,7 @@ function resolveAdministrationWindow(
   if (administration.phaseEnd)
     endExclusive = earlierDate(endExclusive,
       treatmentRelativeInstant(administration.phaseEnd, anchor, timeZone, sourceClock));
+  if (replacementEnd) endExclusive = earlierDate(endExclusive, replacementEnd);
   let completionPoint: Date | undefined;
   if (administration.schedule?.explicitEvents?.length) {
     // Absolute events belong to the cycle containing their authored instant.
@@ -2667,6 +2669,66 @@ function completePhaseDependency(
   }
   return ready;
 }
+/** A same-day dated replacement starts at its authored clock, not midnight.
+ * Resolve that occurrence with the ordinary admission owner in the requested
+ * zone. An inferred event clock or conditional opportunity proves no boundary. */
+function sameDayDatedSuccessorBoundary(
+  successor: CanonicalAdministration, precedingStart: Date,
+  zone: string, options?: NextDueDoseOptions
+): Date | undefined {
+  const repeat = successor.schedule?.recurrence;
+  if (repeat?.calendarWindow?.start?.length !== 10 || !repeat.clocks?.length ||
+      repeat.anchors?.length || successor.asNeeded ||
+      successor.predicate || successor.calendarPredicate || hasAlternativeChoice(successor)) return undefined;
+  const bounds = resolveRepeatBoundsPeriod(repeat, zone, (getAdministrationOffsetMinutes(successor) ?? 0) * 60000);
+  if (!bounds.start || !bounds.nominalStart ||
+      getLocalDayNumber(bounds.start, zone) !== getLocalDayNumber(precedingStart, zone)) return undefined;
+  const execution = { ...successor, phaseOrigin: undefined, phaseStart: undefined, phaseEnd: undefined,
+    phaseOriginIssue: undefined, phasePredecessors: undefined };
+  const first = nextDueDosesSingle(execution, {
+    ...options, from: bounds.start, orderedAt: bounds.nominalStart, timeZone: zone, limit: 1,
+    // This is the independently authored phase opening, not the next query
+    // opportunity after prior use. History still belongs to actual execution.
+    priorCount: undefined, priorDoseTimes: undefined, quantityEstimation: undefined,
+    countEligibilityStart: undefined, countedActualTimes: undefined,
+    prnOpportunityFrom: undefined, explicitEventStatus: undefined, roundingLimits: undefined,
+  } as PhaseCountOptions)[0];
+  const at = first ? new Date(first) : undefined;
+  return at && getLocalDayNumber(at, zone) === getLocalDayNumber(bounds.start, zone) ? at : undefined;
+}
+
+/** Existing predecessor links distinguish replacement from intentional parallel
+ * use. Index only linked stages; every edge is visited once. */
+function datedMemberReplacementEnds(
+  stage: CanonicalStage, zone: string, options?: NextDueDoseOptions
+): Map<number, Date> | undefined {
+  if (stage.administrations.length < 2) return undefined;
+  let members: Map<number, CanonicalAdministration> | undefined;
+  let ends: Map<number, Date> | undefined;
+  for (const successor of stage.administrations) {
+    if (!successor.phasePredecessors?.length) continue;
+    const start = resolveRepeatBoundsPeriod(successor.schedule?.recurrence, zone,
+      (getAdministrationOffsetMinutes(successor) ?? 0) * 60000).start;
+    if (!start) continue;
+    const end = sameDayDatedSuccessorBoundary(successor, start, zone, options);
+    if (!end) continue;
+    if (!members) {
+      members = new Map();
+      for (const member of stage.administrations)
+        if (member.sourceMember !== undefined) members.set(member.sourceMember, member);
+    }
+    for (const id of successor.phasePredecessors) {
+      const predecessor = members.get(id);
+      const priorStart = predecessor && resolveRepeatBoundsPeriod(predecessor.schedule?.recurrence, zone,
+        (getAdministrationOffsetMinutes(predecessor) ?? 0) * 60000).start;
+      if (!priorStart || getLocalDayNumber(priorStart, zone) !== getLocalDayNumber(start, zone)) continue;
+      const earlier = ends?.get(id);
+      if (!earlier || end < earlier) (ends ??= new Map()).set(id, end);
+    }
+  }
+  return ends;
+}
+
 /** Resolve clinical phase semantics ONCE for both event enumeration and
  * numerical supply. No caller is allowed to reconstruct a second onset/cap
  * policy from raw dosing fields. Ordinarily this is one linear component
@@ -2693,11 +2755,24 @@ function treatmentStepWindow(
   nextStageIndex = index + 1
 ): TreatmentStepWindow {
   const stage = course.stages[index];
-  const start = repetitionWindow ? repetitionWindow.start : stage.start
+  let start = repetitionWindow ? repetitionWindow.start : stage.start
     ? stage.start.anchor === "previous-phase-next-day"
       ? previousPhaseNextDay(stage.start, index > 0 ? previousEnd : undefined, timeZone)
       : treatmentRelativeInstant(stage.start, anchor, timeZone, sourceClock)
     : predecessorPoint ?? previousEnd;
+  if (index === 0 && !stage.start && !repetitionWindow && options?.orderedAt === undefined &&
+      stage.administrations[0]?.schedule?.recurrence?.calendarWindow?.start) {
+    // A fully dated initial phase supplies its own clinical opening. A late
+    // query without an order date cannot move that opening past its known end.
+    let opening: Date | undefined, allDated = true;
+    for (const member of stage.administrations) {
+      const dated = !member.phaseStart && !member.phaseOrigin && resolveRepeatBoundsPeriod(
+        member.schedule?.recurrence, timeZone, (getAdministrationOffsetMinutes(member) ?? 0) * 60000).start;
+      if (!dated) { allDated = false; break; }
+      if (!opening || dated < opening) opening = dated;
+    }
+    if (allDated && opening) start = opening;
+  }
   const capClock = repetitionWindow ? repetitionWindow.capClock
     : stageCalendarClock(course, index, start, anchor, timeZone, sourceClock, predecessorClock);
   const administrations: ResolvedAdministrationWindow[] = [];
@@ -2707,6 +2782,7 @@ function treatmentStepWindow(
   const successorFloor =
     predecessorPoint && !stage.start ? new Date(predecessorPoint.getTime() + 1) : undefined;
   let dependencies: PhaseDependencies | undefined;
+  const replacementEnds = datedMemberReplacementEnds(stage, timeZone, options);
   for (let sourceIndex = 0; sourceIndex < stage.administrations.length; sourceIndex++) {
     const administration = stage.administrations[sourceIndex];
     const predecessors = administration.phasePredecessors;
@@ -2716,7 +2792,8 @@ function treatmentStepWindow(
         resolve: (member, memberIndex, predecessor) => {
           const resolved = resolveAdministrationWindow(member, stage, index, anchor, start, previousEnd,
             timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
-            deferFiniteCompletion, capContext, predecessor, cycleEnd);
+            deferFiniteCompletion, capContext, predecessor, cycleEnd,
+            member.sourceMember === undefined ? undefined : replacementEnds?.get(member.sourceMember));
           resolved.sourceIndex = memberIndex;
           return resolved;
         },
@@ -2753,7 +2830,8 @@ function treatmentStepWindow(
     }
     const window = resolveAdministrationWindow(administration, stage, index, anchor, start, previousEnd,
       timeZone, sourceClock, capClock, options, predecessorPoint, successorFloor,
-      deferFiniteCompletion, capContext, ownPredecessor, cycleEnd);
+      deferFiniteCompletion, capContext, ownPredecessor, cycleEnd,
+      sourceMember === undefined ? undefined : replacementEnds?.get(sourceMember));
     if (dependencies) window.sourceIndex = sourceIndex;
     administrations.push(window);
     completionPending ||= Boolean(window.completionPending);
@@ -2790,8 +2868,19 @@ function treatmentStepWindow(
   if (!end && allFinite && latest) {
     end = latest.end;
     completionPoint = latest.point;
-  } else if (!end) {
-    const nextStage = course.stages[nextStageIndex];
+  }
+  const nextStage = course.stages[nextStageIndex];
+  if (!nextStage?.start && nextStage?.administrations.length === 1) {
+    let opening = administrations[0]?.eligibleFrom ?? start;
+    for (let member = 1; member < administrations.length; member++)
+      if (administrations[member].eligibleFrom < opening) opening = administrations[member].eligibleFrom;
+    const replacement = sameDayDatedSuccessorBoundary(nextStage.administrations[0], opening, timeZone, options);
+    if (replacement && (!end || replacement < end)) {
+      end = replacement;
+      completionPoint = undefined;
+    }
+  }
+  if (!end) {
     const nextStart = nextStage?.start;
     // A predecessor-dependent start cannot prove its own predecessor's end.
     if (nextStart && nextStart.anchor !== "previous-phase-next-day")
@@ -2994,7 +3083,11 @@ function repeatedCourseHorizon(
 ): Date {
   let horizon = nextCycle;
   const eventCycleEnd = nextAbsoluteEventCycleBoundary(course, nextCycle, cycleIndex);
-  for (const { window } of treatmentStepWindows(course, anchor, timeZone, sourceClock, options, false, undefined, eventCycleEnd)) {
+  // The cycle traversal already owns this origin, even if the public query
+  // omitted orderedAt. Its horizon must use the same anchor as execution.
+  const cycleOptions = options?.orderedAt === undefined
+    ? { ...options, from: options?.from ?? anchor, orderedAt: anchor } : options;
+  for (const { window } of treatmentStepWindows(course, anchor, timeZone, sourceClock, cycleOptions, false, undefined, eventCycleEnd)) {
     if (window.end && window.end > horizon) horizon = window.end;
     for (const member of window.administrations)
       if (member.endExclusive && member.endExclusive > horizon) horizon = member.endExclusive;
