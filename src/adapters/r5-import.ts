@@ -2125,7 +2125,7 @@ export function courseFromR5(
   if (effectiveDosages.length === 1 && !course?.step?.length) {
     const row = effectiveDosages[0],
       sequence = row.sequence ?? 1;
-    if (!Number.isInteger(sequence) || sequence < 1)
+    if (!Number.isInteger(sequence))
       addWarning(
         warnings,
         "Invalid Dosage.sequence was preserved in the component and projected into the first stage for correction."
@@ -2141,7 +2141,7 @@ export function courseFromR5(
   const groups = new Map<number, CanonicalAdministration[]>();
   for (const row of effectiveDosages) {
     const requested = row.sequence ?? 1,
-      sequence = Number.isInteger(requested) && requested >= 1 ? requested : 1;
+      sequence = Number.isInteger(requested) ? requested : 1;
     if (sequence !== requested)
       addWarning(
         warnings,

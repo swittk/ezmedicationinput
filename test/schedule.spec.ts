@@ -5426,3 +5426,68 @@ describe("authored immediate start and integer sequence execution", () => {
     expect(dosage.map(item => item.sequence)).toEqual([first + 2, first, first]);
   });
 });
+
+
+describe("ordinary recurrence and partial-event supply boundaries", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+  const forms = (course: CanonicalCourse) => [course, courseToR5(course), courseToR6(course)];
+  const member = (): CanonicalAdministration => ({ kind: "administration", amounts: [{ quantity: { value: 1, unit: "tab" } }] });
+
+  it("uses BID clocks when only an upper frequency bound is supplied", () => {
+    for (const frequency of [undefined, 2]) {
+      const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+        code: { coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-GTSAbbreviation", code: "BID" }] },
+        repeat: { ...(frequency === undefined ? {} : { frequency }), frequencyMax: 3, period: 1, periodUnit: Unit.Day }
+      } };
+      for (const input of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+        expect(nextDueDoses(input, { ...options, limit: 4 })).toEqual([
+          "2027-01-01T08:00:00+00:00", "2027-01-01T20:00:00+00:00",
+          "2027-01-02T08:00:00+00:00", "2027-01-02T20:00:00+00:00"
+        ]);
+        // Numerical supply retains the independent authored upper bound.
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits).toBe(3);
+      }
+    }
+  });
+
+  it.each([true, false])("excludes impossible weekdays from a partial event window (clock=%s)", clock => {
+    const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], timing: {
+      event: ["2026-11"], repeat: { dayOfWeek: [FhirDayOfWeek.Monday], ...(clock ? { timeOfDay: ["09:00:00"] } : {}) }
+    } };
+    for (const input of [row, toDosageDetails([row]), importCanonicalCourse([row])]) {
+      const query = { dosage: input, orderedAt: "2026-11-01T00:00:00Z", timeZone: "UTC", durationValue: 2, durationUnit: Unit.Hour };
+      expect(calculateTotalUnits({ ...query, from: "2026-11-01T08:00:00Z" }).totalUnits).toBe(0);
+      expect(() => calculateTotalUnits({ ...query, from: "2026-11-02T08:00:00Z" })).toThrow(/month precision/);
+    }
+  });
+
+  it("applies a counted cycle phase end to an event-only timing", () => {
+    for (const days of [1, 7]) {
+      const dose = member(); dose.schedule = { explicitEvents: ["2027-02"] };
+      dose.limits = [{ scope: "period", amount: { value: 1, unit: "tab" }, period: { value: 1, unit: "d" } }];
+      const course: CanonicalCourse = { kind: "course", cycleInterval: { value: 7, unit: "d" }, cycleCount: 1,
+        stages: [{ end: { anchor: "treatment-start", displacement: { value: days, unit: "d" } }, administrations: [dose] }] };
+      for (const input of forms(course)) {
+        const query = { dosage: input, orderedAt: "2027-01-28T00:00:00Z", from: "2027-02-01T00:00:00Z",
+          timeZone: "UTC", durationValue: 1, durationUnit: Unit.Day };
+        if (days === 1) expect(calculateTotalUnits(query).totalUnits).toBe(0);
+        else expect(() => calculateTotalUnits(query)).toThrow(/month precision/);
+      }
+    }
+  });
+
+  it("keeps zero as a ranged infusion lower bound with a fixed-duration control", () => {
+    for (const variant of ["standard", "typed", "exact"] as const) {
+      const dose = member(); dose.amounts = [{ rate: { value: 10, unit: "mL/h" } }];
+      dose.schedule = { recurrence: { frequency: 2, period: 1, periodUnit: Unit.Day, clocks: ["08:00:00", "20:00:00"],
+        ...(variant === "typed" ? { occurrenceDurationRange: { low: { value: 0, unit: "h" }, high: { value: 2, unit: "h" } } }
+          : { occurrenceDuration: variant === "exact" ? 2 : 0, occurrenceDurationUnit: Unit.Hour,
+            ...(variant === "standard" ? { occurrenceDurationMax: 2 } : {}) }) } };
+      dose.limits = [{ scope: "period", amount: { value: 30, unit: "mL" }, period: { value: 24, unit: "h" } }];
+      for (const input of forms({ kind: "course", stages: [{ administrations: [dose] }] }))
+        // A 1-hour and a 2-hour infusion attain 30 mL; two fixed 2-hour doses cannot both fit the cap.
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: Unit.Day }).totalUnits)
+          .toBe(variant === "exact" ? 20 : 30);
+    }
+  });
+});

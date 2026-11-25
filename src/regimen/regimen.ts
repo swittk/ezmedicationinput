@@ -349,7 +349,7 @@ export function scopeSequentialPhaseSemantics(
     if (edge.relation.semanticLicense === 'dose-continuation' && prior.length === 1 && next.length === 1) {
       const precedingClock = singleClockWithoutRecurrence(schedules[0]);
       const followingSchedule = states[next[0]]?.primaryClause.schedule;
-      const followingClock = precedingClock && singleClockWithoutRecurrence(followingSchedule);
+      const followingClock = followingSchedule?.timeOfDay?.length === 1 ? followingSchedule.timeOfDay[0] : undefined;
       const followingEvent = !followingSchedule?.timeOfDay?.length &&
         followingSchedule?.when?.some(event => event !== SequenceEventTiming.Immediate);
       if (precedingClock && states[prior[0]].primaryClause.prn?.enabled !== true &&
@@ -695,7 +695,8 @@ export function scopeSequentialPhaseSemantics(
       );
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&
         !clause.prn?.enabled && prior.length === 1 && schedule && !hasRecurringSchedule(schedule) &&
-        (shared?.count !== 1 || cadenceKeys.some(key => cadence[key] !== undefined)) && hasRecurringSchedule(shared);
+        (shared?.count !== 1 || cadenceKeys.some(key => cadence[key] !== undefined)) &&
+        (hasRecurringSchedule(shared) || Boolean(shared?.activityTiming?.length));
       if (schedule && (schedule.timingReference === "previous" || onsetOnlyContinuation) && sharedAnchors && sharedCadence && shared) {
         // A timing anaphor or licensed onset-only dose continuation inherits
         // recurrence, not the preceding phase's duration, count or dates.

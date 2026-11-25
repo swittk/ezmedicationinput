@@ -72,9 +72,10 @@ const ZERO: RegimenPosition = { unit: 'd', value: 0 };
 
 function durationPosition(clause: CanonicalSigClause): RegimenPosition | undefined {
   const schedule = clause.schedule;
+  // A delayed duration starts at its resolved administration origin.
   if (!hasExactScheduleDuration(schedule) || schedule.boundsStart || schedule.boundsEnd ||
       schedule.count !== undefined || schedule.countMax !== undefined ||
-      schedule.duration <= 0 || !Number.isInteger(schedule.duration) ||
+      !!schedule.administrationOffsetMinutes || schedule.duration <= 0 || !Number.isInteger(schedule.duration) ||
       schedule.durationMaxUnit !== undefined && schedule.durationMaxUnit !== schedule.durationUnit) {
     return undefined;
   }

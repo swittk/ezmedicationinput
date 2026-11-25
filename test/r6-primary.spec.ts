@@ -7661,3 +7661,30 @@ describe("code-only compact interval previews", () => {
     expect(formatSig(input, "long", { locale: "th" })).toContain("ทุก 6 ชั่วโมง");
   });
 });
+
+
+describe("independently authored integer phase order", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+  it("orders all supplied integer R5 sequences while retaining equal-sequence concurrency", () => {
+    for (const sequence of [[0, 1], [-2, 0]]) {
+      const rows: FhirDosage[] = sequence.map((value, index) => ({ sequence: value,
+        doseAndRate: [{ doseQuantity: { value: index + 1, unit: "tab" } }],
+        timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } } }));
+      const before = JSON.stringify(rows), converted = toDosageDetails(rows);
+      expect(converted.step).toHaveLength(2);
+      for (const input of [rows, converted]) {
+        expect(nextDueDoses(input, { ...options, limit: 3 })).toEqual([
+          "2027-01-01T09:00:00+00:00", "2027-01-02T09:00:00+00:00"
+        ]);
+        expect(calculateTotalUnits({ dosage: input, ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(1);
+      }
+      expect(JSON.stringify(rows)).toBe(before);
+    }
+    const equal: FhirDosage[] = [1, 2].map(value => ({ sequence: 0,
+      doseAndRate: [{ doseQuantity: { value, unit: "tab" } }],
+      timing: { repeat: { count: 1, frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["09:00:00"] } } }));
+    expect(toDosageDetails(equal).step).toHaveLength(1);
+    expect(calculateTotalUnits({ dosage: toDosageDetails(equal), ...options, durationValue: 1, durationUnit: FhirPeriodUnit.Day }).totalUnits).toBe(3);
+  });
+
+});

@@ -5183,3 +5183,59 @@ describe("dated replacement with several target members", () => {
     }
   });
 });
+
+
+describe("ordinary authored phase continuation ownership", () => {
+  const options = { orderedAt: "2027-01-01T00:00:00Z", from: "2027-01-01T00:00:00Z", timeZone: "UTC" };
+  const forms = (parsed: ReturnType<typeof parseSig>) => [parsed, parsed.meta.canonical.course!,
+    parsed.fhirNext, JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))) as FhirDosage[]];
+
+  it("keeps a delayed parallel phase open for its complete authored duration", () => {
+    const source = "Instill 1 drop OD in 6 hours every 6 hours for 1 day, then instill 2 drops OD every 6 hours; instill 1 drop OS daily at 09:00";
+    const parsed = parseSig(source);
+    expect(parsed.meta.canonical.clauses[0].schedule?.administrationOffsetMinutes).toBe(360);
+    for (const dosage of forms(parsed)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 5 })).toEqual([
+        "2027-01-01T06:00:00+00:00", "2027-01-01T09:00:00+00:00",
+        "2027-01-01T12:00:00+00:00", "2027-01-01T18:00:00+00:00", "2027-01-02T00:00:00+00:00"
+      ]);
+      // The delayed one-day phase still owns midnight; its two-drop successor opens at 06:00.
+      for (const [from, total] of [["2027-01-02T00:00:00Z", 1], ["2027-01-02T06:00:00Z", 2]] as const)
+        expect(calculateTotalUnits({ dosage, ...options, from, durationValue: 1, durationUnit: Unit.Hour }).totalUnits).toBe(total);
+    }
+    expect(parsed.fhirNext.renderedInstruction).toBe(source);
+  });
+
+  it("completes an initial single clock before a recurring earlier-clock successor", () => {
+    const parsed = parseSig("Take 1 tablet at 22:00, then 2 tablets daily at 06:00 for 5 days");
+    expect(parsed.meta.canonical.clauses[0].schedule?.count).toBe(1);
+    for (const dosage of forms(parsed)) {
+      expect(nextDueDoses(dosage, { ...options, limit: 8 })).toEqual([
+        "2027-01-01T22:00:00+00:00", "2027-01-02T06:00:00+00:00", "2027-01-03T06:00:00+00:00",
+        "2027-01-04T06:00:00+00:00", "2027-01-05T06:00:00+00:00", "2027-01-06T06:00:00+00:00"
+      ]);
+      expect(calculateTotalUnits({ dosage, ...options, durationValue: 7, durationUnit: Unit.Day }).totalUnits).toBe(11);
+    }
+    const recurring = parseSig("Take 1 tablet daily at 22:00, then 2 tablets daily at 06:00 for 5 days");
+    expect(recurring.meta.canonical.clauses[0].schedule?.count).toBeUndefined();
+    expect(nextDueDoses(recurring, { ...options, limit: 2 })).toEqual([
+      "2027-01-01T22:00:00+00:00", "2027-01-02T22:00:00+00:00"
+    ]);
+  });
+
+  it("inherits an activity-qualified schedule at an explicit later course day", () => {
+    const parsed = parseSig("Take 1 tablet 30 minutes before exercise for 7 days, then 2 tablets from day 8");
+    const first = parsed.meta.canonical.clauses[0].schedule!;
+    const next = parsed.meta.canonical.clauses[1].schedule!;
+    expect(next.activityTiming).toEqual(first.activityTiming);
+    expect(next.activityTiming?.[0]).toMatchObject({ relation: "before", offset: 30, activity: { text: "exercise" } });
+    expect(next.treatmentStartOffsetDays).toBe(7);
+    expect(next.duration).toBeUndefined();
+    for (const input of [parsed.meta.canonical.course!, parsed.fhirNext, toFhirR5Dosages(parsed.fhirNext)]) {
+      const member = importCanonicalCourse(input).stages[1].administrations[0];
+      expect(member.schedule?.recurrence?.activityTiming).toMatchObject([{ relation: "before", offset: 30,
+        activity: { text: "exercise", coding: { code: "256235009" } } }]);
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 2, unit: "tab" });
+    }
+  });
+});

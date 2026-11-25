@@ -986,7 +986,7 @@ function exactTimingEventOccurrences(
         const begin = orderedAt && orderedAt > queryFrom ? orderedAt : queryFrom;
         partialEvent = !start || !end;
         if (start && end) {
-          if (!expanded.length && !calendarDays) partialEvent = end > begin &&
+          if (!expanded.length && !calendarDays && !repeat?.dayOfWeek?.length) partialEvent = end > begin &&
             (!queryEnd || start < queryEnd && begin < queryEnd);
           else for (const entry of expanded.length ? expanded : [undefined]) {
             const opening = entry?.dayShift ? addLocalDays(start, entry.dayShift, timeZone) : start;
@@ -999,7 +999,8 @@ function exactTimingEventOccurrences(
             while (day < stop) {
               const possible = entry ? makeZonedDateFromDay(day, timeZone, entry.time) : day;
               if (possible && (entry ? possible >= begin : stop > begin) && possible < stop &&
-                  matchesCalendarDaySelection(possible, calendarDays, timeZone)) {
+                  matchesCalendarDaySelection(possible, calendarDays, timeZone) &&
+                  (!repeat?.dayOfWeek?.length || arrayIncludes(repeat.dayOfWeek, getLocalWeekday(possible, timeZone)))) {
                 partialEvent = true; break;
               }
               day = addLocalDays(day, 1, timeZone);
@@ -1217,12 +1218,13 @@ function licensedDailyRangeRecurrence(
 ): CanonicalRecurrence | undefined {
   if ((repeat.frequencyMax === undefined && repeat.periodMax === undefined) ||
       !timing?.code || timing.explicitEvents?.length || repeat.clocks?.length || repeat.anchors?.length ||
-      (repeat.frequency !== 0 && !positiveInteger(repeat.frequency)) ||
+      (repeat.frequency === undefined ? !positiveInteger(repeat.frequencyMax)
+        : repeat.frequency !== 0 && !positiveInteger(repeat.frequency)) ||
       !positiveNumber(repeat.period) || !repeat.periodUnit)
     return undefined;
   const seconds = INFUSION_TIME_SECONDS[repeat.periodUnit];
   if (daily === undefined || !seconds) return undefined;
-  const minimum = Math.max(repeat.frequency!, Math.ceil(daily * repeat.period! * seconds / 86400));
+  const minimum = Math.max(repeat.frequency ?? 0, Math.ceil(daily * repeat.period! * seconds / 86400));
   const maximum = Math.min(repeat.frequencyMax ?? repeat.frequency!,
     Math.floor(daily * (repeat.periodMax ?? repeat.period!) * seconds / 86400));
   if (minimum > maximum) return undefined;
@@ -1939,7 +1941,9 @@ function measuredRateQuantity(
   const duration = durationEndpoint ? durationEndpoint.value : recurrence?.occurrenceDuration;
   const durationUnit = durationEndpoint ? getQuantityDurationUnit(durationEndpoint) : recurrence?.occurrenceDurationUnit;
   const seconds = durationUnit ? INFUSION_TIME_SECONDS[durationUnit] : undefined;
-  if (duration === undefined || !Number.isFinite(duration) || duration <= 0 || !seconds)
+  // Zero can bound a duration range without defining an exact infusion.
+  if (duration === undefined || !Number.isFinite(duration) || duration < 0 ||
+      duration === 0 && !durationEndpoint || !seconds)
     return undefined;
   let value: number | undefined;
   let unit: string | undefined;
@@ -1972,7 +1976,8 @@ function measuredRateQuantity(
       comparator = measuredRateComparator(numerator.comparator, denominator.comparator);
     }
   }
-  if (value === undefined || !Number.isFinite(value) || value <= 0 || !unit)
+  if (value === undefined || !Number.isFinite(value) || value < 0 ||
+      value === 0 && !durationEndpoint || !unit)
     return undefined;
   const durationComparator = durationEndpoint ? getQuantityComparator(durationEndpoint) : recurrence?.occurrenceDurationComparator;
   if (durationComparator)
@@ -3426,7 +3431,7 @@ function scheduleTreatmentRelativeCourse(
           original.schedule?.explicitEvents?.length
           ? quota.explicitEventStatus = { possible: false,
             from: eventQueryFrom && eventQueryFrom > effectiveFrom ? eventQueryFrom : effectiveFrom,
-            end: eventQueryEnd }
+            end: earlierDate(effectiveEnd ?? null, eventQueryEnd ?? null) ?? undefined }
           : undefined;
         const localOptions = {
           ...options, from: effectiveFrom, orderedAt: member.recurrenceOrigin, priorCount: member.priorCount,
@@ -6452,18 +6457,18 @@ function prepareMaximumSupplyTiming(dosage: CanonicalAdministration, preserveCad
     // duration independently, then uses the existing ranged quantity planner.
     infusionDurationMaximum = true;
   } else if (isRateDose && repeat.occurrenceDurationMax !== undefined) {
-    const duration = positiveNumber(repeat.occurrenceDuration);
+    const duration = repeat.occurrenceDuration === 0 ? 0 : positiveNumber(repeat.occurrenceDuration);
     const durationMax = positiveNumber(repeat.occurrenceDurationMax);
     if (
       durationMax &&
-      (!duration || durationMax >= duration) &&
+      (duration === undefined || durationMax >= duration) &&
       repeat.occurrenceDurationUnit &&
       durationMax !== duration
     ) {
       // Standard duration/durationMax has the same attainable amounts as
       // the typed range. Preserve both endpoints for the existing cap planner;
       // this shallow supply projection never changes the authored recurrence.
-      nextRepeat = duration ? { ...nextRepeat, occurrenceDurationRange: {
+      nextRepeat = duration !== undefined ? { ...nextRepeat, occurrenceDurationRange: {
         low: { value: duration, unit: repeat.occurrenceDurationUnit,
           ...(repeat.occurrenceDurationComparator ? { comparator: repeat.occurrenceDurationComparator } : {}) },
         high: { value: durationMax, unit: repeat.occurrenceDurationUnit }
