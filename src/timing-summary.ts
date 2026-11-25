@@ -1,4 +1,5 @@
 import { EventTiming, FhirDayOfWeek, FhirPeriodUnit, type ParseOptions } from "./types";
+import { TIMING_ABBREVIATIONS } from "./maps";
 
 /** Exact standard timing identities shared by native compilation and wire
  * projection. Local codes remain text unless this vocabulary recognizes them. */
@@ -9,10 +10,17 @@ export const FHIR_GTS_TIMING_CODES = new Set([
   "BED", "WK", "MO"
 ]);
 
-/** Only a supported standard identity owns executable/abbreviation meaning. */
+/** Supported standard identity for coding selection and wire projection. */
 export function isStandardTimingCoding(coding: { system?: string; code?: string } | undefined): boolean {
   return Boolean(coding?.code && (!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) &&
     FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()));
+}
+
+/** Existing clinical preview abbreviations include shorthand such as QHS
+ * that is not emitted as a standard FHIR code. Foreign systems stay opaque. */
+export function isPreviewTimingCoding(coding: { system?: string; code?: string } | undefined): boolean {
+  return Boolean(coding?.code && (!coding.system || coding.system === FHIR_GTS_TIMING_SYSTEM) &&
+    (FHIR_GTS_TIMING_CODES.has(coding.code.toUpperCase()) || TIMING_ABBREVIATIONS[coding.code.toLowerCase()]));
 }
 
 /** Prefer an understood cadence over a local translation without changing
