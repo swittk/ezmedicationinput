@@ -8075,13 +8075,16 @@ function completionAfterAcceptedAdministration(
         !lowUnit || !highUnit) return undefined;
     // Match createIntervalStepper: whole days/weeks are civil intervals,
     // while fractional day counts and seconds/minutes/hours are elapsed.
+    const lowDays = lowUnit === "d" ? low.value : lowUnit === "wk" ? low.value * 7 : undefined;
+    const highDays = highUnit === "d" ? high.value : highUnit === "wk" ? high.value * 7 : undefined;
     const lowElapsed = lowUnit === "s" || lowUnit === "min" || lowUnit === "h" ||
-      (lowUnit === "d" || lowUnit === "wk") && !Number.isInteger(low.value * (lowUnit === "wk" ? 7 : 1));
+      lowDays !== undefined && !Number.isInteger(lowDays);
     const highElapsed = highUnit === "s" || highUnit === "min" || highUnit === "h" ||
-      (highUnit === "d" || highUnit === "wk") && !Number.isInteger(high.value * (highUnit === "wk" ? 7 : 1));
+      highDays !== undefined && !Number.isInteger(highDays);
     const sameDuration = lowUnit === highUnit ? low.value === high.value :
-      lowElapsed && highElapsed &&
-      low.value * INFUSION_TIME_SECONDS[lowUnit] === high.value * INFUSION_TIME_SECONDS[highUnit];
+      lowElapsed && highElapsed
+        ? low.value * INFUSION_TIME_SECONDS[lowUnit] === high.value * INFUSION_TIME_SECONDS[highUnit]
+        : lowDays !== undefined && Number.isInteger(lowDays) && lowDays === highDays;
     // A variable duration cannot supply an exact completion point for an
     // implicit successor. Equivalent exact endpoints can.
     if (!sameDuration) return undefined;

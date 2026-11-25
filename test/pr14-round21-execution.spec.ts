@@ -6153,3 +6153,61 @@ describe("round60 supported execution and quantity boundaries", () => {
     expect(plan.relations.some(relation => relation.rule === "regimen.sequence")).toBe(false);
   });
 });
+
+
+describe("round61 equivalent civil infusion endpoints", () => {
+  const versions = ["native", "R5", "R6"] as const;
+  const variants = [
+    { name: "week/day", low: { value: 1, unit: "wk" }, high: { value: 7, unit: "d" }, exact: true },
+    { name: "day/week", low: { value: 7, unit: "d" }, high: { value: 1, unit: "wk" }, exact: true },
+    { name: "week/week", low: { value: 1, unit: "wk" }, high: { value: 1, unit: "wk" }, exact: true },
+    { name: "day/day", low: { value: 7, unit: "d" }, high: { value: 7, unit: "d" }, exact: true },
+    { name: "unequal civil bounds", low: { value: 1, unit: "wk" }, high: { value: 8, unit: "d" }, exact: false },
+    { name: "civil day/elapsed hours", low: { value: 1, unit: "d" }, high: { value: 24, unit: "h" }, exact: false },
+    { name: "civil week/elapsed hours", low: { value: 1, unit: "wk" }, high: { value: 168, unit: "h" }, exact: false },
+  ];
+  const query = {
+    orderedAt: "2026-03-01T00:00:00-05:00", from: "2026-03-01T00:00:00-05:00",
+    timeZone: "America/New_York", limit: 2,
+  };
+  for (const version of versions) for (const variant of variants) {
+    it("preserves authored endpoints and resolves only equal civil intervals across DST (" + variant.name + "/" + version + ")", () => {
+      const range = {
+        low: { ...variant.low, id: "authored-lower-duration", extension: [
+          { url: "urn:clinic:duration-note", valueString: "Keep this lower endpoint" },
+        ] },
+        high: { ...variant.high, id: "authored-upper-duration", extension: [
+          { url: "urn:clinic:duration-note", valueString: "Keep this upper endpoint" },
+        ] },
+      };
+      const course = courseFromR6({
+        step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 100, unit: "mL" } }],
+          timing: { repeat: { count: 1, timeOfDay: ["08:00:00"], extension: [{
+            url: "urn:ezmedicationinput:StructureDefinition:timing-administration-duration",
+            valueRange: range,
+          }] } },
+        }] }, { component: [{ doseAndRate: [{ doseQuantity: { value: 50, unit: "mL" } }],
+          timing: { repeat: { count: 1, timeOfDay: ["22:00:00"] } },
+        }] }],
+      });
+      const input = version === "native" ? course
+        : freshExecutionInput(version === "R5" ? courseToR5(course) : courseToR6(course));
+      const before = JSON.stringify(input);
+      const expected = variant.exact
+        ? ["2026-03-01T08:00:00-05:00", "2026-03-08T22:00:00-04:00"]
+        : ["2026-03-01T08:00:00-05:00"];
+      expect(nextDueDoses(input, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: input, ...query, durationValue: 8, durationUnit: Unit.Day }).totalUnits)
+        .toBe(variant.exact ? 150 : 100);
+      expect(importCanonicalCourse(input).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange)
+        .toEqual(range);
+      const saved = freshExecutionInput(toDosageDetails(freshExecutionInput(courseToR5(importCanonicalCourse(input)))));
+      expect(nextDueDoses(saved, query)).toEqual(expected);
+      expect(calculateTotalUnits({ dosage: saved, ...query, durationValue: 8, durationUnit: Unit.Day }).totalUnits)
+        .toBe(variant.exact ? 150 : 100);
+      expect(importCanonicalCourse(saved).stages[0].administrations[0].schedule!.recurrence!.occurrenceDurationRange)
+        .toEqual(range);
+      expect(JSON.stringify(input)).toBe(before);
+    });
+  }
+});
