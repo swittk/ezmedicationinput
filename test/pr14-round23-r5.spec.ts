@@ -1347,7 +1347,8 @@ it.each(["limit", "action"] as const)("round27 reconciles a live lifted safety %
       expect(scoped.step.doseLimit).toEqual([{ id: "stage-cap", scope: "administration", valueQuantity: q(1) }]);
       expect(scoped.step.ifExceeded).toBe("Hold the next dose");
     } else {
-      expect(scoped.course.ifExceeded).toBeUndefined();
+      // The edited header owns its action even when the phase uses the same text.
+      expect(scoped.course.ifExceeded).toBe("Hold the next dose");
       expect(scoped.course.doseLimit).toEqual(courseSafety.doseLimit);
       expect(scoped.step).toEqual(stepSafety);
     }
