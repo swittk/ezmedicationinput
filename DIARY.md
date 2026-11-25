@@ -15859,3 +15859,31 @@ above 4%. Two formatter regressions were corrected with native option
 assignment that retains configured terminology and declared getter values.
 Benchmark controls reject qualified exact-dose fixtures and keep fresh
 calendar queries on the same side of the dose boundary.
+
+
+## 2026-11-25 — Shared timing boundaries and persisted action ownership
+
+Enumeration, supply and phase completion reuse the actual administration
+boundaries while retaining nominal recurrence origins and calendar-duration
+clamping. Dated pauses apply to unclocked and end-bounded successors; mixed
+calendar phases close each predecessor without changing its authored duration.
+Standalone dependencies remain unresolved until their predecessor is present.
+Fractional-week intervals retain their civil grid, and noon remains independent
+of separately authored clocks. Missing weight no longer relabels PRN maxima.
+
+The selected administration head and exact dose-bearing argument are retained
+separately through saved edits. Preparation quantities and clocks remain local,
+and English/Thai wording uses typed ownership without requiring the original
+custom registry. Meal-state advice remains separate from its accompaniment.
+
+Interchange retains current carrier text, versioned counseling translations,
+condition-dependent pause ownership, spatial Coding metadata and graph-field
+annotations. Cleared graph quantities keep valid inactive annotation metadata.
+Relation Coding follows the current action linkage. Explicitly replaced prose
+can remain labeled beside current structured directions; complete-clause
+comparison prevents numeric substring loss and duplicate authored wording.
+
+Validation passed 8,191 source tests, configured strict TypeScript, the build,
+and four distribution tests. Representative paired measurements and focused
+preview checks found no reproducible meaningful regression above 4%. The
+changed-path count remains 100. Detailed review dispositions remain separate.
