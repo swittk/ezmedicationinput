@@ -146,7 +146,7 @@ export function followingCourseDurationHeaderAt(tokens: readonly Token[], start:
   const lead = tokens[start];
   if (!lead || !DURATION_LEAD_TOKENS.has(normalizeTokenLower(lead))) return undefined;
   let cursor = start + 1;
-  if (tokens[cursor] && normalizeTokenLower(tokens[cursor]) === 'the') cursor++;
+  if (tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(tokens[cursor]))) cursor++;
   const modifier = tokens[cursor];
   if (!modifier || !COURSE_CONTINUATION_MODIFIERS.has(normalizeTokenLower(modifier))) return undefined;
   const valueIndex = cursor + 1;
@@ -326,7 +326,7 @@ function monthlyOrdinalWeekdaySign(
     return token ? normalizeTokenLower(token) : "";
   };
   if (lowerAt(cursor) === "on") take("on");
-  if (lowerAt(cursor) === "the") take("the");
+  if (EVENT_ARTICLE_TOKENS.has(lowerAt(cursor))) take();
 
   const ordinalToken = context.tokens[cursor];
   const ordinal = ordinalToken
@@ -2947,7 +2947,7 @@ export function durationNominalAt(
     if (unit) return make(cursor + 1, 1, unit,
       "hpsg.lex.schedule.duration.indefiniteQuantity", 21);
   }
-  if (headed && tokens[cursor] && normalizeTokenLower(tokens[cursor]) === "the") cursor += 1;
+  if (headed && tokens[cursor] && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(tokens[cursor]))) cursor += 1;
   const following = headed ? followingCourseDurationHeaderAt(tokens, start) : undefined;
   if (following?.implicitSingle) {
     const unit = tokens[following.valueIndex];
@@ -3141,7 +3141,7 @@ export function countAndDurationRule(): HpsgLexicalRule<HpsgClauseContext> {
     if (COUNT_MARKER_TOKENS.has(lower) || DURATION_LEAD_TOKENS.has(lower)) {
       const headed = DURATION_LEAD_TOKENS.has(lower);
       const article = headed && context.tokens[start + 1] &&
-        normalizeTokenLower(context.tokens[start + 1]) === "the";
+        EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(context.tokens[start + 1]));
       const valueIndex = start + (article ? 2 : 1);
       const valueToken = context.tokens[valueIndex];
       const value = frequencyCardinalValue(valueToken);
@@ -3430,7 +3430,7 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   const preposition = context.tokens[next];
   if (preposition && NEXT_DAY_PREPOSITIONS.has(normalizeTokenLower(preposition))) next += 1;
   const article = context.tokens[next];
-  if (article && normalizeTokenLower(article) === 'the') next += 1;
+  if (article && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(article))) next += 1;
   // A relative end owns its optional clock and NEXT + day/daypart nominal. Its clock is
   // unresolved, so retain the authored ending instruction without creating a
   // recurring morning/evening dose or inventing an absolute end instant.

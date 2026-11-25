@@ -19,6 +19,7 @@ import {
   getMedicationLexerLocalePack,
   getSuggestLocaleAdapter,
   inferMedicationLocale,
+  parseSig,
   listMedicationLocaleLexemes,
   listMedicationSurfaceSegmenters,
   registerAdviceLocaleAdapter,
@@ -288,5 +289,45 @@ describe("round64 declared locale descriptor fields", () => {
     Object.defineProperty(detector, "priority", { value: 200 });
     registerMedicationLocaleDetector(detector);
     expect(inferMedicationLocale(marker)).toBe("round64priority");
+  });
+});
+
+
+describe("shared timing article roles", () => {
+  it("accepts a registered Spanish article alias through existing timing constructions", () => {
+    registerMedicationLocaleDetector({ locale: "es", priority: 1000, test: text => /\bel\b/u.test(text) });
+    registerMedicationLexerLocalePack({
+      locale: "es",
+      apply: tokens => tokens.map((token, index) => ({ ...token, index,
+        ...(token.lower === "el" ? { canonical: "the" } : {}) })),
+      listLexemes: () => [{ surface: "el", canonical: "the" }],
+    });
+    const durationCases = [
+      { suffix: "for el next week", value: 1, code: "wk" },
+      { suffix: "for el next 3 days", value: 3, code: "d" },
+      { suffix: "for el 3 days", value: 3, code: "d" },
+    ];
+    for (const { suffix, value, code } of durationCases) for (const wording of [suffix, suffix.replace("el", "the")]) {
+      const parsed = parseSig("Take 1 tablet daily " + wording);
+      expect(parsed.fhir[0].doseAndRate![0].doseQuantity!.value).toBe(1);
+      expect(parsed.fhir[0].timing!.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d",
+        boundsDuration: { value, code } });
+    }
+    for (const article of ["el", "the"]) {
+      const counted = parseSig(`Take 1 tablet daily for ${article} 3 doses`);
+      expect(counted.fhir[0].timing!.repeat).toMatchObject({ count: 3, frequency: 1, period: 1, periodUnit: "d" });
+      const monthly = parseSig(`Take 1 tablet on ${article} first Monday of every month`);
+      expect(monthly.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "mo", dayOfWeek: ["mon"], weekdayOrdinal: 1 });
+      const ended = parseSig(`Take 1 tablet daily until ${article} next morning`);
+      const schedule = ended.meta.canonical.clauses[0].schedule!;
+      expect(schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+      expect(schedule.when).toBeUndefined();
+      expect(schedule.treatmentStartOffsetDays).toBeUndefined();
+      expect(ended.fhir[0].timing!.repeat!.boundsPeriod).toBeUndefined();
+      expect(JSON.stringify(ended.fhir[0])).toContain(`until ${article} next morning`);
+    }
+    // The indefinite quantity determiner has different semantics: it supplies one.
+    expect(parseSig("Take 1 tablet daily for a week").fhir[0].timing!.repeat!.boundsDuration)
+      .toMatchObject({ value: 1, code: "wk" });
   });
 });
