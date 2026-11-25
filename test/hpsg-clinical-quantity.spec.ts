@@ -3836,3 +3836,34 @@ describe("round65 supported quantity and successor ownership", () => {
       expect(row.timing?.repeat?.frequency).toBe(prn ? undefined : 1);
   });
 });
+
+describe("round65 preparation and application sites", () => {
+  it.each([",", ";"])("keeps each action's independently authored site across %s", separator => {
+    const source = "Rinse the skin" + separator + " apply 1 g to the rash";
+    const options: ParseOptions = { instructionActionMap: { flush: { code: "rinse", procedural: false, display: "Flush" } } };
+    for (const supplied of [undefined, options]) {
+      const parsed = parsePublicSig(source, supplied), clause = parsed.meta.canonical.clauses[0];
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      expect(clause.dose).toEqual({ value: 1, unit: "g" });
+      expect(clause.site?.text).toBe("rash");
+      expect(clause.site?.coding).toBeUndefined();
+      expect(clause.instructionGraph?.actions.find(action => action.predicate.lemma === "rinse")?.args)
+        .toContainEqual(expect.objectContaining({ role: "site", normalized: "skin" }));
+      for (const value of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)), JSON.parse(JSON.stringify(parsed.fhirNext))]) {
+        const text = formatSig(value, "long");
+        expect(text).toMatch(/rinse the skin/iu);
+        expect(text).toMatch(/apply 1 g to the rash/iu);
+        expect(text.match(/skin/giu)).toHaveLength(1);
+        expect(text.match(/rash/giu)).toHaveLength(1);
+      }
+      expect(parsed.fhir[0].site?.text).toBe("rash");
+    }
+  });
+  it("retains the site of standalone cleansing and the existing shared-site preparation", () => {
+    const standalone = parsePublicSig("Rinse the skin");
+    expect(standalone.meta.canonical.clauses[0].method?.text).toBe("Rinse");
+    expect(standalone.meta.canonical.clauses[0].site?.text).toBe("skin");
+    const shared = parsePublicSig("wash affected area then apply thin layer bid");
+    expect(shared.longText).toBe("Wash affected area; then apply a thin layer twice daily to the affected area.");
+  });
+});

@@ -255,6 +255,20 @@ export function sourceRangeAttachmentClass(
     enclosing.args.some((arg) => arg.role === AdviceArgumentRole.Activity);
   if (localActivityRelation) return "procedure";
 
+  if (definition?.semanticClass === "cleanse") {
+    // An undosed preparation keeps its own site when the following quantified
+    // administration explicitly supplies another site. Otherwise the existing
+    // standalone/shared-site interpretation remains available.
+    if (!enclosing.args.some(arg => arg.quantity)) {
+      for (const following of frames) {
+        if (following.span.start < enclosing.span.end || following.polarity === AdvicePolarity.Negate ||
+            !following.args.some(arg => arg.role === AdviceArgumentRole.Amount && arg.quantity) ||
+            !following.args.some(arg => arg.role === AdviceArgumentRole.Site)) continue;
+        const followingDefinition = frameActionDefinition(following, context.options);
+        if (followingDefinition && !followingDefinition.procedural) return "procedure";
+      }
+    }
+  }
   if (definition?.primaryAdministrationHead && definition.semanticClass === "cleanse") {
     const priorFrames = getProceduralFrames(context)
       .filter((frame) => frame.span.end <= enclosing.span.start && frame.polarity !== AdvicePolarity.Negate)
