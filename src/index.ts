@@ -1264,7 +1264,8 @@ export function formatSigBatch(
       if(e.url===DOSAGE_DETAILS_R5_URL||e.url===PARALLEL_COMPONENT_PHASE_ORIGIN_URL)hasCourse=true;
     if(!hasChoice&&getDosageAlternativeChoice(dosage))hasChoice=true;
   }
-  if(hasCourse)return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,options??{});
+  if(hasCourse)return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,
+    options?.realizationMode ? options : { ...options, realizationMode: "normalized" });
   if(hasChoice)return formatChoiceMembers(dosages,dosage=>formatSig(dosage,style,options),options,separator);
   const text:string[]=[];
   for(const dosage of dosages){const value=formatSig(dosage,style,options);if(value.trim())text.push(value);}
@@ -1294,7 +1295,7 @@ function formatParseBatchContents(
   let memberIndex=0;
   for(const item of batch.items){
     const member=members?.[memberIndex++];
-    if(member?.phaseOrigin||member?.phaseStart||getDosageAlternativeChoice(item.fhir))
+    if(member?.phaseOrigin||member?.phaseStart||member?.phasePredecessors?.length||getDosageAlternativeChoice(item.fhir))
       return style==="short"?batch.shortText:batch.longText;
     const value=style==="short"?item.shortText:item.longText;if(value?.trim())text.push(value);
   }

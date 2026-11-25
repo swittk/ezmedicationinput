@@ -1716,7 +1716,26 @@ function buildActionFrame(
       relationHasGrammarFeature(relation, "accompanimentComplement") ||
     (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
       !relationHasSemanticClass(relation, "temporal");
-  const amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  let amountEnd = headOwnsAmount && relIndex >= argumentStart ? Math.min(relIndex, semanticEnd) : semanticEnd;
+  // A leading temporal adjunct does not transfer ownership of a later
+  // material/destination quantity to the head. Follow the same typed valence
+  // through later relations while retaining post-temporal head amounts.
+  if (!headOwnsAmount && definition.acceptsAmount && relIndex >= argumentStart &&
+      relationHasSemanticClass(relation, "temporal")) {
+    let index = nextRelationIndex, current = nextRelation;
+    while (index >= 0 && index < semanticEnd) {
+      const following = relationIndex(parts, index + 1, semanticEnd);
+      const ownsQuantity = directObjectValence
+        ? relationHasGrammarFeature(current, "accompanimentComplement") &&
+          !timeArgumentFromParts(parts, index + 1, following < 0 ? semanticEnd : following, input)
+        : (definition.argumentParser === "amount-material-destination" || definition.argumentParser === "mix-substance") &&
+          !relationHasSemanticClass(current, "temporal");
+      if (ownsQuantity) { amountEnd = index; break; }
+      index = following;
+      current = index >= 0 ? resolveActionRelationSurface(key(parts[index]),
+        definition.preferredRelationSemanticClasses) : undefined;
+    }
+  }
   // Unit meaning can depend on the full typed action context (a measured
   // topical line and its destination), while its numeric head stays local.
   const amount = definition.acceptsAmount
@@ -4729,7 +4748,7 @@ function primaryDoseAmountOwner(
       if (!theme && (arg.role === AdviceArgumentRole.Theme || arg.role === AdviceArgumentRole.Object)) theme = arg;
     }
     if (!amount) continue;
-    const definition = getMedicationInstructionAction(action.predicate.lemma, options);
+    const definition = frameActionDefinition(action, options);
     if(primary && !overlap && action.span.start<primary.end&&primary.start<action.span.end)
       overlap=action;
     if(!primary || action.span.end<=primary.start) {

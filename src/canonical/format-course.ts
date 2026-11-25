@@ -551,7 +551,7 @@ function administrationHasClinicalFacts(a: CanonicalAdministration, includeMembe
       a.route || a.method || a.predicate || a.calendarPredicate || a.syntax?.instructionGraph?.actions.length ||
       (includeAdvice && (a.patientInstruction || a.additionalInstructions?.length)) ||
       a.excludedDates?.length || a.excludedWeekdays?.length ||
-      (includeSafety && (a.limits?.length || safetyHasClinicalFacts(a.safety))) || a.choice || a.phaseOrigin ||
+      (includeSafety && (a.limits?.length || safetyHasClinicalFacts(a.safety))) || a.phaseOrigin ||
       (includeMemberBounds && (a.phaseStart || a.phaseEnd)) || a.anchoredLength ||
       a.onsetDays !== undefined || a.delayMinutes !== undefined || a.cycleDays) return true;
   const timing = a.schedule;
@@ -570,7 +570,7 @@ function courseHasClinicalFacts(course: CanonicalCourse): boolean {
   if (course.cycleInterval || course.cycleCount !== undefined || safetyHasClinicalFacts(course.safety)) return true;
   for (const stage of course.stages) {
     if (stage.start || stage.end || stage.count !== undefined || safetyHasClinicalFacts(stage.safety)) return true;
-    for (const a of stage.administrations) if (administrationHasClinicalFacts(a)) return true;
+    for (const a of stage.administrations) if (a.choice || administrationHasClinicalFacts(a)) return true;
   }
   return false;
 }

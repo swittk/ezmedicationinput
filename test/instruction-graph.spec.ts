@@ -2958,7 +2958,7 @@ describe("round30 method and current timing ownership", () => {
     input.timing!.repeat!.timeOfDay = ["09:00:00", "17:00:00"];
     if (withEvent) {
       input.timing!.repeat!.when = [EventTiming.Morning];
-      const graph = parseInstructionGraphExtension(input.extension)!;
+      const graph = copy(parseInstructionGraphExtension(input.extension)!);
       graph.actions[0].args.push({ role: AdviceArgumentRole.Time, text: "morning", normalized: EventTiming.Morning });
       const marker = buildInstructionGraphExtension(graph)!;
       input.extension = input.extension!.map(item => item.url === marker.url ? marker : item);
@@ -7017,9 +7017,89 @@ describe("round62 review: instruction argument ownership", () => {
       expect(text).not.toContain("10:00");
       expect(importCanonicalCourse(value).stages[0].administrations[0].amounts![0].quantity)
         .toMatchObject({ value: 1, unit: "tab" });
+      expect(text).toContain(locale === "en" ? "Swallow" : "กลืน");
+      // This uncoded source object has no Thai translation. Keep its authored
+      // amount-and-manner wording while localizing the known action and clocks.
       expect(text).toContain("1 tablet slowly");
     }
     expect(saved).toEqual(before);
     expect(saved.extension).toContainEqual(marker);
+  });
+});
+
+describe("round63 instruction complement and saved coding ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  it.each([
+    ["Dilute before 08:00 to 10 mL", undefined],
+    ["Dilute 1 mL before 08:00 to 10 mL", 1],
+    ["Dilute before 08:00 with 100 mL saline to 10 mL", undefined]
+  ] as const)("keeps complement quantities outside the head Amount: %s", (source, expected) => {
+    const frame = parseInstructionActions(source)[0];
+    const amounts = frame.args.filter(arg => arg.role === AdviceArgumentRole.Amount);
+    expect(amounts.map(arg => arg.quantity?.value)).toEqual(expected === undefined ? [] : [expected]);
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Destination, quantity: expect.objectContaining({ value: 10, unit: "mL" })
+    }));
+    const rendered = realizeInstructionAction({ ...frame, sourceText: "" }, "en");
+    expect(rendered.match(/10 mL/gu)).toHaveLength(1);
+    if (expected !== undefined) expect(rendered.match(/(?:^|[^0-9])1 mL/gu)).toHaveLength(1);
+  });
+
+  it("keeps an administration amount following a temporal adjunct", () => {
+    const frame = parseInstructionActions("Take before meals 5 mL")[0];
+    expect(frame.args).toContainEqual(expect.objectContaining({
+      role: AdviceArgumentRole.Amount, quantity: expect.objectContaining({ value: 5, unit: "mL" })
+    }));
+  });
+
+  it.each([false, true])("reconciles the selected preparation before an amountless drink (selected first %s)", selectedFirst => {
+    const selected = { code: "clinic-mix", display: "Disperse", semanticClass: "procedure",
+      procedural: true, acceptsAmount: true, definesDose: true,
+      argumentParser: "amount-material-destination" as const, realizer: "amount-material-destination" as const };
+    const other = { ...getMedicationInstructionAction("mix")!, code: "clinic-mix", display: "Blend",
+      aliases: [], definesDose: false };
+    const options: ParseOptions = { instructionActionMap: selectedFirst
+      ? { disperse: selected, blend: other } : { blend: other, disperse: selected } };
+    const source = "Disperse 2 tablets in water, then drink slowly";
+    const parsed = parsePublicSig(source, options);
+    const wire = fresh(parsed.fhirNext);
+    wire.step![0].component[0].doseAndRate![0].doseQuantity!.value = 3;
+    const before = fresh(wire);
+    for (const input of [wire, fresh(toFhirR5Dosages(wire))]) {
+      const text = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
+      expect(text).toMatch(/Disperse 3 tablets in water/u);
+      expect(text).toMatch(/drink slowly/iu);
+      expect(text).not.toMatch(/2 tablets|drink 3 tablets/iu);
+      expect(text.match(/3 tablets/gu)).toHaveLength(1);
+    }
+    expect(wire).toEqual(before);
+  });
+
+  it.each([false, true].flatMap(translated => [false, true].map(opaque => ({ translated, opaque }))))(
+    "retains saved Coding display metadata (translations $translated, opaque $opaque)", ({ translated, opaque }) => {
+    const frame = fresh(parseInstructionActions("Swallow 1 tablet")[0]);
+    frame.predicate.codings = [{ system: "urn:test:action", code: "swallow", display: "Swallow",
+      _display: { id: "clinic-label", ...(opaque ? { extension: [{ url: "urn:test:display", valueInteger: 7 }] } : {}) },
+      ...(translated ? { i18n: { th: "กลืน" } } : {}) }];
+    const source = { sourceText: "", sourceLocale: "en", actions: [frame] };
+    const before = fresh(source);
+    const first = buildInstructionGraphExtension(source)!;
+    const rebuilt = buildInstructionGraphExtension(parseInstructionGraphExtension([first])!)!;
+    for (const value of [first, rebuilt]) {
+      const action = value.extension!.find(item => item.url === "action")!;
+      const coding = action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!;
+      expect(coding._display?.id).toBe("clinic-label");
+      if (opaque) expect(coding._display?.extension).toContainEqual({ url: "urn:test:display", valueInteger: 7 });
+      expect(coding._display?.extension?.some(item => item.url === "http://hl7.org/fhir/StructureDefinition/translation") ?? false).toBe(translated);
+    }
+    expect(source).toEqual(before);
+  });
+
+  it("does not create display metadata when the coding has none", () => {
+    const frame = fresh(parseInstructionActions("Swallow 1 tablet")[0]);
+    frame.predicate.codings = [{ system: "urn:test:action", code: "swallow", display: "Swallow" }];
+    const value = buildInstructionGraphExtension({ sourceText: "", actions: [frame] })!;
+    const action = value.extension!.find(item => item.url === "action")!;
+    expect(action.extension!.find(item => item.url === "predicateCoding")!.valueCoding!._display).toBeUndefined();
   });
 });

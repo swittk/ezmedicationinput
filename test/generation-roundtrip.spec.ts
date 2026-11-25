@@ -3,11 +3,12 @@ import cases from "./generation-roundtrip-cases.json";
 import thaiCases from "./generation-roundtrip-thai-cases.json";
 import crossLanguageCases from "./generation-cross-language-cases.json";
 import {
-  formatSig, formatSigBatch, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
+  parseSig as parsePublicSig, formatSig, formatSigBatch, formatParseBatch, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
   nextDueDoses, calculateTotalUnits, FhirPeriodUnit
 } from "../src/index";
 import { parseSig } from "./helpers/r5-parser";
-import type { AdviceArgument, AdviceFrame, CanonicalSigClause } from "../src/types";
+import { DOSAGE_ALTERNATIVE_CHOICE_URL, PARALLEL_COMPONENT_PHASE_ORIGIN_URL } from "../src/dosage-course";
+import type { AdviceArgument, AdviceFrame, CanonicalSigClause, FhirR6DosageInstruction, FhirR6Extension } from "../src/types";
 
 type Result = ReturnType<typeof parseSig>;
 
@@ -620,5 +621,77 @@ describe("round49 endpoint units and normalized conditions", () => {
       expect(formatSig(row, style, { locale, realizationMode: "roundtrip" })).toBe(source);
     expect(fromFhirDosage(row, { locale, realizationMode: "roundtrip" }).longText).toBe(source);
     expect(JSON.stringify(row)).toBe(saved);
+  });
+});
+
+describe("round63 imported member preview ownership", () => {
+  const fresh = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const choice = (branchId: string): FhirR6Extension => ({
+    url: DOSAGE_ALTERNATIVE_CHOICE_URL, extension: [
+      { url: "groupId", valueString: "daily-time" },
+      { url: "branchId", valueString: branchId },
+      { url: "selectionBehavior", valueCode: "exactly-one" }
+    ]
+  });
+
+  it.each(["short", "long"] as const)("retains both authored text-only choice members in %s previews", style => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [
+      { text: "Take 1 tablet in the morning", modifierExtension: [choice("morning")] },
+      { text: "Take 1 tablet at bedtime", modifierExtension: [choice("bedtime")] }
+    ] }] };
+    const before = fresh(source);
+    for (const input of [source, fresh(toFhirR5Dosages(source))]) {
+      const rendered = formatSig(input, style, { locale: "en" });
+      expect(rendered).toContain("Take 1 tablet in the morning");
+      expect(rendered).toContain("Take 1 tablet at bedtime");
+      expect(rendered).toMatch(/ or /u);
+    }
+    const structured = fresh(source);
+    structured.step![0].component[0].doseAndRate = [{ doseQuantity: { value: 2, unit: "tab" } }];
+    const rendered = formatSig(structured, style, { locale: "en" });
+    expect(rendered).toMatch(style === "short" ? /2 tab\b/u : /2 tablets/u);
+    expect(rendered).not.toContain("Take 1 tablet in the morning");
+    expect(rendered).toContain("Take 1 tablet at bedtime");
+    expect(source).toEqual(before);
+  });
+
+  it("keeps explicit member predecessors in the batch preview and independent separators", () => {
+    const phase = (sourceMember: number, predecessor?: number): FhirR6Extension => ({
+      url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,
+      extension: [{ url: "sourceMember", valueInteger: sourceMember },
+        ...(predecessor === undefined ? [] : [{ url: "predecessor", valueInteger: predecessor }])]
+    });
+    const source: FhirR6DosageInstruction = { step: [{ component: [
+      { doseAndRate: [{ doseQuantity: { value: 2, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, count: 4 } },
+        modifierExtension: [phase(0)] },
+      { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+        modifierExtension: [phase(1, 0)] }
+    ] }] };
+    const batch = fromFhir(source, { locale: "en" });
+    for (const style of ["short", "long"] as const) {
+      const rendered = formatParseBatch(batch, style, " | ");
+      expect(rendered).toContain("After the previous phase");
+      expect(rendered).toMatch(/2 (?:tab|tablets)/u);
+      expect(rendered).toMatch(style === "short" ? /x4\b/u : /4 (?:dose|administration)/u);
+      expect(rendered).toMatch(/After the previous phase[^.]*1 (?:tab|tablet)/u);
+    }
+    const independent = fresh(source);
+    for (const component of independent.step![0].component) delete component.modifierExtension;
+    const separate = fromFhir(independent);
+    expect(formatParseBatch(separate, "long", " | ")).toBe(separate.items.map(item => item.longText).join(" | "));
+  });
+
+  it("uses normalized batch previews by default while keeping explicit source replay", () => {
+    const source = "1 drop OD q2h x7d then QID; 1 drop OS QID x1mo then BID";
+    const complete = fresh(parsePublicSig(source).fhir);
+    const normalized = formatSigBatch(complete, "long", { locale: "en", realizationMode: "normalized" });
+    expect(formatSigBatch(complete, "long", { locale: "en" })).toBe(normalized);
+    expect(normalized).toMatch(/7 days/u);
+    expect(normalized).toMatch(/1 month/u);
+    expect(normalized).toMatch(/right eye/u);
+    expect(normalized).toMatch(/left eye/u);
+    expect(formatSigBatch(complete, "long", { locale: "en", realizationMode: "roundtrip" })).toBe(source);
   });
 });

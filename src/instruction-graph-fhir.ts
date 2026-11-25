@@ -69,7 +69,19 @@ function valueBoolean(url: string, value: boolean | undefined): FhirExtension | 
  * members: strict nested Extension unions validate the in-memory FHIR shape.
  */
 function wireCoding(value: FhirCoding): FhirCoding {
-  const displayPrimitive = mergeTranslationPrimitiveElement(value._display, value.i18n);
+  let displayPrimitive = value._display;
+  if (value.i18n) {
+    const merged = mergeTranslationPrimitiveElement(displayPrimitive, value.i18n);
+    if (displayPrimitive) {
+      // Base Element data is already immutable wire input. Retain it intact;
+      // only newly supplied translations need to be appended.
+      const original = displayPrimitive.extension ?? [];
+      const additions = merged?.extension?.slice(original.length);
+      if (additions?.length) displayPrimitive = {
+        ...displayPrimitive, extension: [...original, ...additions]
+      };
+    } else displayPrimitive = merged;
+  }
   // One typed wire value, not a chain of optional fragment objects and
   // transpiled spread-descriptor walks for every Coding in an action graph.
   const result:FhirCoding={};
