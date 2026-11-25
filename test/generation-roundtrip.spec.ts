@@ -655,6 +655,32 @@ describe("round63 imported member preview ownership", () => {
     expect(source).toEqual(before);
   });
 
+  it.each([false, true])("owns one generated choice prompt beside partial facts (authored prompt %s)", authoredPrompt => {
+    const directions = (authoredPrompt ? "Choose one: " : "") + "Apply 1 patch";
+    const source: FhirR6DosageInstruction = { step: [{ component: [directions, "Apply 2 patches"].map((text, index) => ({
+      text, route: { text: "transdermal" },
+      site: { concept: { text: "left arm" } },
+      timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day, timeOfDay: ["08:00:00"] } },
+      safety: { doseLimit: [{ scope: "administration" as const, valueQuantity: { value: 2, unit: "patch" } }] },
+      modifierExtension: [{ ...choice(String(index)), id: "choice-" + index,
+        extension: [...choice(String(index)).extension!, { url: "urn:test:choice-note", valueString: "Keep this annotation" }] }]
+    })) }] };
+    const before = fresh(source);
+    for (const input of [source, fresh(toFhirR5Dosages(source))]) {
+      const original = fresh(input);
+      for (const style of ["short", "long"] as const) {
+        const rendered = formatSig(input, style, { locale: "en" });
+        expect(rendered.match(/Choose one:/gu)).toHaveLength(authoredPrompt ? 2 : 1);
+        expect(rendered).toContain(directions);
+        expect(rendered).toContain("Apply 2 patches");
+        expect(rendered).toContain("left arm");
+        expect(rendered).toContain("max per administration: 2 patch");
+      }
+      expect(input).toEqual(original);
+    }
+    expect(source).toEqual(before);
+  });
+
   it("keeps explicit member predecessors in the batch preview and independent separators", () => {
     const phase = (sourceMember: number, predecessor?: number): FhirR6Extension => ({
       url: PARALLEL_COMPONENT_PHASE_ORIGIN_URL,

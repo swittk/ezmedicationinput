@@ -4,7 +4,7 @@ import { projectNativeR5Course } from "./adapters/r5-course";
 import { formatCanonicalCourse, formatCanonicalAdministration, prefersSourceInstruction,
   joinGeneratedClauses, appendMedicationConditionText, appendMedicationExcludedDatesText,
   appendMedicationExcludedWeekdaysText, unevaluatedExpressionText,
-  rateRangePreview, formatCourseChoices } from "./canonical/format-course";
+  rateRangePreview } from "./canonical/format-course";
 import { administrationFromClause, courseFromAdministrations, courseFromParallel, courseFromPartialParallel, clauseForAdministration } from "./canonical/compile";
 import { courseFromR6, courseToR6, projectFreshlyCompiledCourseToR6, rangeFromFhir, unchangedR6SourceDisplay, isR6DosageInstruction } from "./adapters/canonical-course";
 import type { CanonicalCourse, CanonicalAdministration } from "./canonical/course";
@@ -1070,19 +1070,6 @@ export async function parseSigAsync(
 }
 
 
-/** Render same-step concurrent members and typed alternative branches distinctly.
- * @param members Editable R5 or R6 components carrying native modifier extensions.
- * @param render A component realizer; never a semantic parser.
- * @param options Requested locale and conjunction punctuation.
- * @param separator Separator for independently concurrent members.
- */
-function formatChoiceMembers<T extends Pick<FhirDosage,"modifierExtension">>(
-  members:readonly T[],render:(member:T)=>string,options?:FormatOptions,separator="; "
-):string {
-  return formatCourseChoices(members,render,getDosageAlternativeChoice,
-    resolveCourseLanguage(options?.locale,options?.i18n),separator);
-}
-
 /** Append structured rate ranges ONLY to a freshly computed preview.
  * Authored text is selected by the CALLER, not inferred here from the
  * presence of Dosage.text (which may be unused during structured editing).
@@ -1264,9 +1251,13 @@ export function formatSigBatch(
       if(e.url===DOSAGE_DETAILS_R5_URL||e.url===PARALLEL_COMPONENT_PHASE_ORIGIN_URL)hasCourse=true;
     if(!hasChoice&&getDosageAlternativeChoice(dosage))hasChoice=true;
   }
-  if(hasCourse)return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,
-    options?.realizationMode ? options : { ...options, realizationMode: "normalized" });
-  if(hasChoice)return formatChoiceMembers(dosages,dosage=>formatSig(dosage,style,options),options,separator);
+  if(hasCourse||hasChoice) {
+    // The complete native group owns choice wording; individual row previews
+    // may already need that formatter for their independent clinical facts.
+    if(!hasCourse)options={...options,separator};
+    return formatCanonicalCourse(courseFromR5(dosages,undefined,undefined,undefined,true),style,
+      options?.realizationMode ? options : { ...options, realizationMode: "normalized" });
+  }
   const text:string[]=[];
   for(const dosage of dosages){const value=formatSig(dosage,style,options);if(value.trim())text.push(value);}
   return text.join(separator);
