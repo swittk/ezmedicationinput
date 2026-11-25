@@ -392,17 +392,14 @@ function renderEnglish(realizer: MedicationInstructionActionRealizer, c: Instruc
     }
     case "object-time": {
       const object = c.theme ?? c.site;
-      const timeRelation = c.timeRelation;
       // Unmarked dayparts retain this realizer's established English
-      // preposition; an authored relation always owns its own wording.
-      const relation = c.time && !timeRelation ? "in"
-        : c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
-          ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      // preposition; authored relations use the shared typed Time owner.
+      const realizedTime = realizeTimeArgument(c);
+      const time = c.time && !c.timeRelation ? "in " + c.time : realizedTime;
       const amount = c.amount ? (c.theme ? " (" + c.amount + ")" : " " + c.amount) : "";
       const site = c.theme && c.site ? " to " + c.site : "";
       return c.label + (object ? " " + object : "") + amount + site +
-        (c.time ? " " + (relation ? relation + " " : "") + c.time : "");
+        (time ? " " + time : "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;
@@ -560,13 +557,10 @@ function renderThai(realizer: MedicationInstructionActionRealizer, c: Instructio
     }
     case "object-time": {
       const object = c.theme ?? c.site;
-      const timeRelation = c.timeRelation;
-      const relation = c.time && timeRelation && relationHasGrammarFeature(timeRelation, "timeComplement")
-        ? localizeAdviceRelation(timeRelation, c.locale, "temporal") ?? timeRelation : undefined;
-      if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
+      const time = realizeTimeArgument(c);
       const amount = c.amount ? " " + c.amount : "";
       const site = c.theme && c.site ? "บริเวณ" + c.site : "";
-      return c.label + (object ?? "") + amount + site + (c.time ? (relation ?? "") + c.time : "");
+      return c.label + (object ?? "") + amount + site + (time ?? "");
     }
     case "separable-object-relation": {
       const object = c.theme ?? c.site;

@@ -576,7 +576,7 @@ export function resolveMedicationInstructionActionByMethod(
     // each group prefer a matching display, then the first exact code match.
     for (const surface of Object.keys(customMap)) {
       const input = customMap[surface];
-      const method = sameMethodCoding(input.administrationMethod, coding);
+      const method = sameMethodCoding(input.administrationMethod, coding) || sameMethodCoding(input.coding, coding);
       if (!method && !input.externalCodings?.some(item => sameMethodCoding(item, coding))) continue;
       const matchesDisplay = !display || input.display && normalizeActionSurface(input.display) === display ||
         customDefinitionMatchesSurface(surface, input, display);

@@ -7188,3 +7188,89 @@ describe("round80 R6 Ratio annotation types", () => {
     expect(strictR5.extension![0].valueQuantity!.comparator).toBe("~");
   });
 });
+
+
+describe("round78 saved action and cycle locale ownership", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+
+  it.each([AdviceRelation.On, AdviceRelation.Before, undefined])("realizes the saved patch Time with its relation %s", relation => {
+    const frame = parseInstructionActions("Apply patch in the morning")[0];
+    const clocked = relation !== undefined;
+    const graph: CanonicalInstructionGraph = { sourceText: clocked ? "Apply patch at 08:00" : "Apply patch in the morning",
+      sourceLocale: "en", actions: [{ ...frame, sourceText: "", relation, args: [{
+        role: AdviceArgumentRole.Time, text: clocked ? "08:00" : "morning", normalized: clocked ? "08:00" : "MORN",
+        ...(clocked ? { relation } : { i18n: { en: "the morning", th: "ตอนเช้า" } })
+      }] }] };
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    const r6 = toDosageDetails([persist(row)]);
+    for (const input of [[row], persist(r6), persist(toFhirR5Dosages(r6))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe(relation === AdviceRelation.On ? "Apply patch at 08:00." : relation === AdviceRelation.Before
+          ? "Apply patch before 08:00." : "Apply patch in the morning.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe(relation === AdviceRelation.On ? "แปะ เวลา 08:00." : relation === AdviceRelation.Before
+          ? "แปะก่อน08:00." : "แปะตอนเช้า.");
+      expect(parseInstructionGraphExtension(toFhirR5Dosages(input)[0].extension)?.actions[0].args[0])
+        .toMatchObject({ role: AdviceArgumentRole.Time, text: clocked ? "08:00" : "morning" });
+    }
+  });
+
+  it("matches an imported method to the configured primary action Coding", () => {
+    const coding = { system: "urn:clinic:action", code: "coat-lightly", id: "authored-action",
+      extension: [{ url: "urn:clinic:note", valueString: "retain" }] };
+    const options: ParseOptions = { instructionActionMap: { "coat lightly": {
+      code: "coat-lightly", display: "Coat lightly", semanticClass: "administration", coding,
+      administrationMethod: { system: "urn:clinic:method", code: "coat" }, i18n: { en: "Coat lightly", th: "ทาบาง ๆ" }
+    } } };
+    const row: FhirDosage = { method: { coding: [coding] }, doseAndRate: [{ doseQuantity: { value: 1, unit: "g" } }] };
+    const r6 = toDosageDetails([persist(row)]);
+    for (const input of [[row], persist(r6), persist(toFhirR5Dosages(r6))]) {
+      expect(formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" })).toBe("Coat lightly 1 g.");
+      expect(formatSig(input, "long", { ...options, locale: "th", realizationMode: "normalized" })).toBe("ทาบาง ๆครั้งละ 1 g.");
+      expect(toFhirR5Dosages(input)[0].method?.coding).toEqual([coding]);
+    }
+  });
+
+  it.each([1, 2, undefined])("states the complete course count without an extra repetition: %s", count => {
+    const course: FhirR6DosageInstruction = { repeatCycle: { value: 28, unit: "d", code: "d" },
+      step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: "d", boundsDuration: { value: 7, unit: "d" } } } }] }] };
+    if (count !== undefined) setCourseCycleCount(course, count);
+    for (const input of [course, persist(toFhirR5Dosages(course))]) {
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      if (count === 1) {
+        expect(th).toContain("ใช้แผนการใช้ยานี้รวม 1 รอบ.");
+        expect(th).not.toContain("ทำซ้ำ");
+        expect(th).not.toContain("ทุก 28 วัน");
+      } else {
+        expect(th).toContain("ทำซ้ำแผนการใช้ยานี้ทุก 28 วัน");
+        expect(th.includes("จำนวน 2 รอบ")).toBe(count === 2);
+      }
+      expect(getCourseCycleCount(Array.isArray(input) ? toDosageDetails(input) : input)).toBe(count);
+    }
+  });
+});
+
+
+it("round78 keeps a fresh public OR condition authoritative over its retained source mirror", () => {
+  const persist = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const parsed = parsePublicSig("Swallow 1 tablet whole if SBP > 160");
+  const row = persist(parsed.fhir[0]);
+  setDosageCondition(row, { kind: "any", conditions: [
+    { kind: "measurement", name: "SBP", operation: "gt", value: 160, text: "SBP > 160" },
+    { kind: "state", name: "dizziness", expected: true, text: "dizziness" }
+  ] });
+  const current = toDosageDetails([persist(row)]);
+  for (const input of [[row], importCanonicalCourse([persist(row)]), persist(current), persist(toFhirR5Dosages(current))]) {
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Swallow 1 tablet whole only if SBP > 160 or dizziness.");
+    expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+      .toBe("กลืน 1 เม็ดทั้งเม็ด เฉพาะเมื่อ SBP > 160 หรือ dizziness.");
+    const clause = importCanonicalCourse(input).stages[0].administrations[0];
+    expect(clause.predicate).toMatchObject({ kind: "any", conditions: [
+      { kind: "measurement", value: 160 }, { kind: "state", name: "dizziness", expected: true }
+    ] });
+  }
+  expect(parseInstructionGraphExtension(row.extension)?.relations)
+    .toContainEqual(expect.objectContaining({ kind: AdviceRelation.If, toActionIndex: 0, text: "if SBP > 160" }));
+});

@@ -3436,7 +3436,12 @@ describe("round52 live site and partial-direction previews", () => {
         const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
         expect(en).toMatch(/(?:^|[^0-9.])1 drop\b/u);
         expect(en).toContain(order === "local-only" ? "SITE-OD" : "right eye");
-        if (order !== "local-only") {
+        if (order === "local-only") {
+          expect(en).not.toMatch(/\b(?:right|left|both)\b|\beyes?\b/iu);
+          const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+          expect(th).toContain("SITE-OD");
+          expect(th).not.toMatch(/ตาขวา|ตาซ้าย|ตาทั้งสอง|ทั้งสองข้าง/u);
+        } else {
           expect(en).not.toContain("SITE-OD");
           expect(en).not.toContain("left eye");
           const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
