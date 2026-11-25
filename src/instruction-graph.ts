@@ -4076,7 +4076,7 @@ function realizeAction(
   const genericRealizer = ACTION_REALIZERS[realizerKey];
   const genericText = genericRealizer && (!negated ||
       realizerKey === "amount-material-destination" ||
-      realizerKey === "default" && firstArguments[AdviceArgumentRole.Amount]?.quantity)
+      (realizerKey === "default" || realizerKey === "result") && firstArguments[AdviceArgumentRole.Amount]?.quantity)
     ? genericRealizer === DEFAULT_ACTION_REALIZER
       ? DEFAULT_ACTION_REALIZER(input, input.frame === frame ? defaultArguments : undefined)
       : genericRealizer(input)

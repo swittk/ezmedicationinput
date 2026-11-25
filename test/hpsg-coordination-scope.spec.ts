@@ -1582,6 +1582,12 @@ describe("round69 prepared dose phase ownership", () => {
         expect(text).not.toMatch(locale === "en" ? /[12] tablets?/u : /[12] เม็ด/u);
         expect(text.match(locale === "en" ? /30 mL/gu : /30 มิลลิลิตร/gu)).toHaveLength(1);
         expect(text.match(locale === "en" ? /60 mL/gu : /60 มิลลิลิตร/gu)).toHaveLength(1);
+        const firstPreparation = text.search(locale === "en"
+          ? /dissolve 3 tablets in 30 mL water/iu : /ละลาย\s*3 เม็ดในน้ำ 30 มิลลิลิตร/u);
+        const secondPreparation = text.search(locale === "en"
+          ? /dissolve 4 tablets in 60 mL water/iu : /ละลาย\s*4 เม็ดในน้ำ 60 มิลลิลิตร/u);
+        expect(firstPreparation, text).toBeGreaterThanOrEqual(0);
+        expect(secondPreparation).toBeGreaterThan(firstPreparation);
         expect(text.match(locale === "en" ? /drink/giu : /ดื่ม/gu)).toHaveLength(2);
         expect(text.match(locale === "en" ? /once daily/gu : /วันละครั้ง/gu)).toHaveLength(2);
       }

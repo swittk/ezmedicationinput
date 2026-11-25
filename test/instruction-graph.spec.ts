@@ -4732,10 +4732,12 @@ describe("round42 graph participant and preparation ownership", () => {
     };
     const before = JSON.stringify(row), r6 = toDosageDetails([row]);
     for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
-        .toBe("Spray 1 spray. Prime with 2 sprays.");
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toBe("พ่นครั้งละ 1 พ่น. เตรียมอุปกรณ์พ่น 2 พ่น.");
+      // This spanless input supplies two distinct amounts, but no relative order.
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.split(/\.\s*/u).filter(Boolean).sort()).toEqual(["Prime with 2 sprays", "Spray 1 spray"]);
+      expect(th.split(/\.\s*/u).filter(Boolean).sort())
+        .toEqual(["พ่นครั้งละ 1 พ่น", "เตรียมอุปกรณ์พ่น 2 พ่น"].sort());
     }
     expect(JSON.stringify(row)).toBe(before);
   });
@@ -4981,11 +4983,13 @@ describe("round44 public vocabulary and parsed frame isolation", () => {
   });
 
   it.each(["list", "get", "resolve"] as const)("detaches the public concept %s value", lookup => {
-    const entry = lookup === "list" ? listMedicationInstructionConcepts().find(value => value.code === "occlusive_dressing")!
+    const read = () => lookup === "list" ? listMedicationInstructionConcepts().find(value => value.code === "occlusive_dressing")!
       : lookup === "get" ? getMedicationInstructionConcept("occlusive_dressing")! : resolvePublicConcept("occlusive dressing")!;
+    const entry = read();
     const display = entry.display;
     try {
       entry.display = "Local dressing label";
+      expect(read().display).toBe(display);
       expect(parseInstructionActions("Cover with an occlusive dressing")[0].args
         .find(arg => arg.conceptId === "occlusive_dressing")?.normalized).toBe("an occlusive dressing");
     } finally { entry.display = display; }
@@ -6465,10 +6469,12 @@ describe("round57 independent graph and calendar meaning", () => {
       extension: [buildInstructionGraphExtension({ sourceText: "", sourceLocale: "en", actions: [frame] })!] };
     const before = fresh(row);
     for (const input of views(row)) {
-      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
-        .toBe("Use 2 sprays via nasal route. Prime with 2 sprays.");
-      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
-        .toBe("พ่นครั้งละ 2 พ่น ทางจมูก. เตรียมอุปกรณ์พ่น 2 พ่น.");
+      const en = formatSig(input, "long", { locale: "en", realizationMode: "normalized" });
+      const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
+      expect(en.split(/\.\s*/u).filter(Boolean).sort())
+        .toEqual(["Prime with 2 sprays", "Use 2 sprays via nasal route"]);
+      expect(th.split(/\.\s*/u).filter(Boolean).sort())
+        .toEqual(["พ่นครั้งละ 2 พ่น ทางจมูก", "เตรียมอุปกรณ์พ่น 2 พ่น"].sort());
     }
     expect(row).toEqual(before);
   });
@@ -7460,8 +7466,8 @@ describe("round66 persisted primary action and amount ownership", () => {
         const administrationStart = text.search(locale === "en" ? /\bdrink\b/iu : /ดื่ม/u);
         expect(administrationStart).toBeGreaterThan(0);
         const preparation = text.slice(0, administrationStart), administration = text.slice(administrationStart);
-        const preparationClock = /(?:^|[^\d:])0?8:00(?::00)?(?: am)?(?![\d:])/gu;
-        const administrationClock = /(?:^|[^\d:])10:00(?::00)?(?: am)?(?![\d:])/gu;
+        const preparationClock = /(?:^|[^\d:])0?8:00(?::00)?(?: am\b|(?!\s*[ap]m\b))(?![\d:])/giu;
+        const administrationClock = /(?:^|[^\d:])10:00(?::00)?(?: am\b|(?!\s*[ap]m\b))(?![\d:])/giu;
         expect(preparation.match(preparationClock)).toHaveLength(1);
         expect(preparation).not.toMatch(administrationClock);
         expect(administration.match(administrationClock)).toHaveLength(1);
@@ -7691,7 +7697,13 @@ describe("round68 preparation quantities beside independent clinical limits", ()
           expect(text.match(locale === "en" ? /(?:^|[^0-9.])3 tablets?(?![a-z])/gu : /(?:^|[^0-9.])3 เม็ด/gu)).toHaveLength(1);
           expect(text).not.toMatch(locale === "en" ? /(?:^|[^0-9.])2 tablets?(?![a-z])/u : /(?:^|[^0-9.])2 เม็ด/u);
           expect(text.match(locale === "en" ? /100 mL/gu : /100 มิลลิลิตร/gu)).toHaveLength(1);
-          if (condition) expect(text.match(/160/gu)).toHaveLength(1);
+          if (condition) {
+            expect(text.match(/160/gu)).toHaveLength(1);
+            const drink = text.search(locale === "en" ? /\bdrink\b/iu : /ดื่ม/u);
+            expect(drink).toBeGreaterThan(0);
+            expect(text.slice(0, drink)).not.toContain("160");
+            expect(text.slice(drink).split(/[.;]/u)[0]).toMatch(/>\s*160/u);
+          }
           expect(text).toContain("4 tab / 1 d");
         }
       expect(JSON.stringify(input)).toBe(before);
@@ -7844,6 +7856,7 @@ describe("round70 quantified vehicle nominal ownership", () => {
     const parsed = parsePublicSig(source), graph = parsed.meta.canonical.clauses[0].instructionGraph!;
     const vehicle = graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Destination)!;
     expect(vehicle.normalized).toBe(nominal);
+    expect(vehicle.relation).toBe(nominal === "mL" ? AdviceRelation.To : AdviceRelation.With);
     expect(vehicle.quantity).toEqual({ value: amount, unit: "mL" });
     expect(source).toContain(vehicle.text);
     expect(graph.actions[0].args.find(arg => arg.role === AdviceArgumentRole.Amount)?.quantity)
@@ -7857,9 +7870,12 @@ describe("round70 quantified vehicle nominal ownership", () => {
       expect(th).toContain("เจือจาง 1 มิลลิลิตร");
       expect(th).toContain(amount + " มิลลิลิตร");
       if (nominal !== "mL") {
-        expect(en).toContain(nominal);
-        expect(th).toContain(nominal);
-      } else expect(en).toBe("Dilute 1 mL to 10 mL.");
+        expect(en).toContain(`with ${amount} mL ${nominal}`);
+        expect(th).toContain(`พร้อม${amount} มิลลิลิตร${nominal}`);
+      } else {
+        expect(en).toBe("Dilute 1 mL to 10 mL.");
+        expect(th).toBe("เจือจาง 1 มิลลิลิตรไปยัง10 มิลลิลิตร.");
+      }
     }
   });
 });
@@ -7892,4 +7908,46 @@ describe("round71 current method identity across shared action codes", () => {
     expect(formatSig(parsed.fhir, "long", { ...options, locale: "en", realizationMode: "normalized" }))
       .toBe("Swallow 1 tablet whole.");
   });
+});
+
+
+describe("round72 scoped graph quantity warnings", () => {
+  it("keeps a saved typed Rub amount under negation", () => {
+    const source = "Do not rub more than 1 g";
+    const frame = { ...parseInstructionActions(source)[0], args: [{ role: AdviceArgumentRole.Amount,
+      text: "more than 1 g", quantity: { value: 1, unit: "g", comparator: ">" as const },
+      span: { start: 11, end: source.length } }] };
+    expect(frame.predicate.realizer).toBe("result");
+    expect(frame.polarity).toBe(AdvicePolarity.Negate);
+    expect(realizeInstructionAction(frame, "en")).toBe("Do not rub more than 1 g");
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension({
+      sourceText: source, sourceLocale: "en", actions: [frame]
+    })!] };
+    const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+    expect(parseInstructionGraphExtension(row.extension)?.actions[0].args[0].quantity)
+      .toEqual({ value: 1, unit: "g", comparator: ">" });
+    for (const input of [row, JSON.parse(JSON.stringify(r6)), JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+        .toBe("Do not rub more than 1 g.");
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+        .toBe("ห้ามถู มากกว่า 1 g.");
+    }
+    expect(JSON.stringify(row)).toBe(before);
+  });
+});
+
+
+it("round72 keeps authored priming before the freshly edited administration", () => {
+  const source = "Prime with 2 sprays, then spray 1 spray";
+  const parsed = parsePublicSig(source), row: FhirDosage = JSON.parse(JSON.stringify(parsed.fhir[0]));
+  row.doseAndRate![0].doseQuantity!.value = 3;
+  const before = JSON.stringify(row), r6 = toDosageDetails([row]);
+  for (const input of [row, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+    expect(formatSig(input, "long", { locale: "en", realizationMode: "normalized" }))
+      .toBe("Prime with 2 sprays; then spray 3 sprays.");
+    expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }))
+      .toBe("เตรียมอุปกรณ์พ่น 2 พ่น จากนั้นพ่นครั้งละ 3 พ่น.");
+  }
+  expect(JSON.stringify(row)).toBe(before);
+  expect(JSON.stringify(r6)).toContain(source);
 });
