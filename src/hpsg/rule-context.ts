@@ -211,8 +211,10 @@ function maximumTokensAvailable(context: MaximumDoseLexicalContext, start: numbe
 
 export function maximumCountLeadAt(context: MaximumDoseLexicalContext, start: number): Token[] | undefined {
   const first = context.tokens[start];
-  if (!first || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(normalizeTokenLower(first))) return undefined;
+  const lower = first && normalizeTokenLower(first);
+  if (!lower || !MAXIMUM_COUNT_LEAD_FIRST_TOKENS.has(lower)) return undefined;
   for (const parts of MAXIMUM_COUNT_LEAD_SEQUENCES) {
+    if (parts[0] !== lower) continue;
     const tokens = maximumTokensAvailable(context, start, parts.length);
     if (!tokens) continue;
     if (tokens.every((candidate, offset) => normalizeTokenLower(candidate) === parts[offset])) {
