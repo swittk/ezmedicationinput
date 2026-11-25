@@ -11891,3 +11891,52 @@ describe("round71 recognized graph component annotations", () => {
     expect(marker).toEqual(before);
   });
 });
+
+describe("round71 predicate component annotations", () => {
+  it("retains source annotations while a fresh typed Coding replacement stays active", () => {
+    const parsed = parseSig("Rub cream gently");
+    const marker = buildInstructionGraphExtension(parsed.meta.canonical.clauses[0].instructionGraph!)!;
+    const component = (wire: FhirExtension) => wire.extension!.find(item => item.url === "action")!
+      .extension!.find(item => item.url === "predicateComponent")!;
+    const part = component(marker), role = part.extension!.find(item => item.url === "role")!,
+      coding = part.extension!.find(item => item.url === "coding")!;
+    const note: FhirExtension = { url: "urn:clinic:mechanism-note", valueString: "retain the authored annotation" };
+    part.id = "friction-component";
+    role.id = "mechanism-role";
+    role._valueCode = { id: "mechanism-value", extension: [note] };
+    coding.id = "friction-coding";
+    Object.assign(coding.valueCoding!, { id: "friction-source", extension: [note], clinicSource: { revision: "authored" } });
+    part.extension!.push(note);
+    const before = persist(marker), expected = persist(part);
+    let current = marker;
+    for (let save = 0; save < 2; save++) {
+      current = buildInstructionGraphExtension(parseInstructionGraphExtension([persist(current)])!)!;
+      expect(component(current)).toEqual(expected);
+    }
+    const row = persist(parsed.fhir[0]);
+    row.extension = [...(row.extension ?? []).filter(item => item.url !== marker.url), marker];
+    const rowBefore = persist(row), wire = toDosageDetails([row]);
+    const saved = toFhirR5Dosages(persist(wire));
+    expect(component(saved[0].extension!.find(item => item.url === marker.url)!)).toEqual(expected);
+    expect(row).toEqual(rowBefore);
+
+    const decoded = parseInstructionGraphExtension([persist(marker)])!, edited = persist(decoded);
+    const replacement = { system: "https://example.org/clinic/mechanisms", code: "gentle-rubbing", display: "Gentle rubbing" };
+    edited.actions[0].predicate.semanticComponents![0].coding = replacement;
+    const editedBefore = persist(edited);
+    current = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = component(current).extension!;
+      expect(fields.filter(item => item.url === "coding")).toEqual([{ url: "coding", valueCoding: replacement }]);
+      expect(fields.filter(item => item.url === "sourceCoding")).toEqual([{ ...coding, url: "sourceCoding" }]);
+      expect(fields).toContainEqual(role);
+      expect(fields).toContainEqual(note);
+      const fresh = parseInstructionGraphExtension([persist(current)])!;
+      expect(fresh.actions[0].predicate.semanticComponents![0].coding).toEqual(replacement);
+      current = buildInstructionGraphExtension(fresh)!;
+    }
+    expect(edited).toEqual(editedBefore);
+    expect(decoded.actions[0].predicate.semanticComponents![0].coding).toEqual(coding.valueCoding);
+    expect(marker).toEqual(before);
+  });
+});

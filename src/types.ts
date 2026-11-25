@@ -996,6 +996,9 @@ export interface InstructionConceptComponent {
 export interface InstructionActionSemanticComponent {
   role: "activity" | "technique" | "target-state" | "target-site" | "target-object" | "operation" | "orientation" | "mechanism" | "situation";
   coding: FhirCoding;
+  /** Retained wire annotations are source data, never constituent meaning. */
+  sourceId?: string;
+  sourceExtensions?: FhirExtension[];
 }
 
 export interface AdviceArgument {

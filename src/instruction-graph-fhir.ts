@@ -131,6 +131,25 @@ function addRelation(
   return sourceCoding && !currentCoding ? valueCoding("sourceRelationCoding", sourceCoding) : undefined;
 }
 
+/** Merge annotations on component fields while current typed values stay active. */
+function addComponentSource(parts: FhirExtension[], sources: FhirExtension[] | undefined): void {
+  for (const source of sources ?? []) {
+    let index = -1;
+    if (source.url === "role" || source.url === "text" || source.url === "coding") {
+      for (let i = 0; i < parts.length; i++) if (parts[i].url === source.url) { index = i; break; }
+    }
+    if (source.url === "coding" && source.valueCoding) {
+      const current = index >= 0 ? parts[index].valueCoding : undefined, old = source.valueCoding;
+      if (!current || current.system !== old.system || current.version !== old.version || current.code !== old.code) {
+        parts.push({ ...source, url: "sourceCoding" });
+        continue;
+      }
+    }
+    if (index >= 0) parts[index] = { ...source, ...parts[index] };
+    else parts.push(source);
+  }
+}
+
 function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   const nested: FhirExtension[] = [];
   add(nested, valueCode("role", argument.role));
@@ -148,12 +167,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
       { url: "text", valueString: component.text }
     ];
     add(parts, valueCoding("coding", component.coding));
-    for (const source of component.sourceExtensions ?? []) {
-      const index = source.url === "role" ? 0 : source.url === "text" ? 1
-        : source.url === "coding" && component.coding ? 2 : -1;
-      if (index >= 0) parts[index] = { ...source, ...parts[index] };
-      else parts.push(source.url === "coding" && source.valueCoding ? { ...source, url: "sourceCoding" } : source);
-    }
+    addComponentSource(parts, component.sourceExtensions);
     nested.push({ ...(component.sourceId ? { id: component.sourceId } : {}), url: "component", extension: parts });
   }
   if (argument.span) {
@@ -274,10 +288,12 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   }
   for (const coding of frame.predicate.codings ?? []) nested.push({ url: "predicateCoding", valueCoding: wireCoding(coding) });
   for (const part of frame.predicate.semanticComponents ?? []) {
-    nested.push({ url: "predicateComponent", extension: [
+    const parts: FhirExtension[] = [
       { url: "role", valueCode: part.role },
       { url: "coding", valueCoding: wireCoding(part.coding) }
-    ] });
+    ];
+    addComponentSource(parts, part.sourceExtensions);
+    nested.push({ ...(part.sourceId ? { id: part.sourceId } : {}), url: "predicateComponent", extension: parts });
   }
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
@@ -543,12 +559,23 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
     case "predicateRealizerThaiFallbackObject":if(!legacyFallback)legacyFallback=field;break;
     case "predicateRealizerThaiSuppressActivityConcept":if(field.valueString)legacyActivities.push(field.valueString);break;
     case "predicateComponent":{
-      let role:FhirExtension|undefined,coding:FhirExtension|undefined;
-      for(const part of field.extension??[])switch(part.url){case "role":if(!role)role=part;break;case "coding":if(!coding)coding=part;break;}
+      let role:FhirExtension|undefined,coding:FhirExtension|undefined,componentSource:FhirExtension[]|undefined;
+      for(const part of field.extension??[])switch(part.url){
+        case "role":
+          if(!role)role=part;
+          if(hasFieldMetadata(part,"valueCode"))(componentSource??=[]).push(part);
+          break;
+        case "coding":
+          if(!coding)coding=part;
+          if(hasFieldMetadata(part,"valueCoding")||hasCodingMetadata(part.valueCoding))(componentSource??=[]).push(part);
+          break;
+        default:(componentSource??=[]).push(part);break;
+      }
       const value=role?.valueCode,code=readCoding(coding?.valueCoding);
       if((value==="activity"||value==="technique"||value==="target-state"||value==="target-site"||
         value==="target-object"||value==="operation"||value==="orientation"||value==="mechanism"||value==="situation")&&code?.system&&code.code)
-        semanticComponents.push({role:value,coding:code});
+        semanticComponents.push({role:value,coding:code,...(field.id?{sourceId:field.id}:{}),
+          ...(componentSource?{sourceExtensions:componentSource}:{})});
       break;
     }
     default:(sourceExtensions??=[]).push(field);break;
