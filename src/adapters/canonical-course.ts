@@ -1596,7 +1596,8 @@ function administrationToWire(
         original.doseRange === value.range &&
         original.rateQuantity === value.rate &&
         (target !== "r5" || simpleQuantityForR5(value.quantity) === value.quantity &&
-          simpleQuantityForR5(value.rate) === value.rate) &&
+          simpleQuantityForR5(value.rate) === value.rate &&
+          generalQuantityForR5(value.rateRatio?.numerator) === value.rateRatio?.numerator) &&
         original.rateRange === value.rateRange &&
         original.rateRatio === value.rateRatio &&
         original.type === value.role &&
