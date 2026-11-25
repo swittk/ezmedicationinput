@@ -9,8 +9,10 @@ import type { ParseOptions, FhirDayOfWeek } from "./types";
 import type { HpsgClinicalQuantityFeature } from "./hpsg/signature";
 import {
   buildAdditionalInstructionFramesFromCoding,
-  findAdditionalInstructionDefinitionByCoding
+  findAdditionalInstructionDefinitionByCoding,
+  realizeAdviceFramesText
 } from "./advice";
+import { localeKeys } from "./localization";
 import {
   buildBodySiteAdministrationTargetCountExtension,
   getBodySiteAdministrationTargetCount, resolveBodySiteTargetText
@@ -1652,9 +1654,21 @@ export function serializeCanonicalContext(
   for (const instruction of clause.additionalInstructions ?? []) {
     const text = instruction.text?.trim();
     if (!text) continue;
+    let i18n = instruction.i18n;
+    if (options?.includeTranslationExtensions && !i18n && !instruction.coding?.code && instruction.frames?.length) {
+      const labels: Array<Record<string, string> | undefined> = [];
+      for (const frame of instruction.frames) {
+        labels.push(frame.predicate.i18n);
+        for (const arg of frame.args) labels.push(arg.i18n);
+      }
+      for (const locale of localeKeys(...labels)) {
+        const translated = realizeAdviceFramesText(instruction.frames, locale);
+        if (translated) (i18n ??= {})[locale] = translated;
+      }
+    }
     additionalInstructions.push({
       text,
-      i18n: instruction.i18n,
+      i18n,
       coding: instruction.coding,
       hasTypedEvidence: Boolean(instruction.evidence?.length)
     });

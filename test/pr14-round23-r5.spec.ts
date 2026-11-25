@@ -6642,3 +6642,119 @@ describe("round77 procedure target beside duration and time", () => {
     }
   });
 });
+
+
+describe("round77 independent advice and selected Time ownership", () => {
+  const current = (value: string, locale: "en" | "th") => value
+    .split(locale === "en" ? "; original directions: " : "; ข้อความเดิม: ")[0]
+    .replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "")
+    .replace(/\.$/u, "");
+
+  it.each([false, true])("keeps an independent warning outside the administration guard (dose=%s)", withDose => {
+    const source = persist(parsePublicSig("1 tab only if SBP > 160").fhirNext);
+    const component = source.step![0].component[0];
+    delete source.renderedInstruction;
+    delete component.text;
+    if (!withDose) delete component.doseAndRate;
+    component.additionalInstruction = [{ text: "Do not crush", _text: { extension: [{
+      url: FHIR_TRANSLATION_EXTENSION_URL, extension: [
+        { url: "lang", valueCode: "th" }, { url: "content", valueString: "ห้ามบด" }
+      ]
+    }] } }];
+    for (const input of [source, importCanonicalCourse(source), persist(toFhirR5Dosages(source)),
+      persist(toDosageDetails(toFhirR5Dosages(source)))]) {
+      const before = JSON.stringify(input);
+      for (const locale of ["en", "th"] as const) {
+        const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        const guard = locale === "en" ? "Use" + (withDose ? " 1 tablet" : "") + " only if SBP > 160"
+          : "ใช้" + (withDose ? "ครั้งละ 1 เม็ด" : "") + " เฉพาะเมื่อ SBP > 160";
+        const warning = locale === "en" ? "Do not crush" : "ห้ามบด";
+        expect(text).toBe(guard + ". " + warning);
+      }
+      expect(importCanonicalCourse(input).stages[0].administrations[0].predicate).toMatchObject({ kind: "measurement", value: 160 });
+      expect(JSON.stringify(input)).toBe(before);
+    }
+  });
+
+  it("preserves a disjunctive meal complement without promoting breakfast to the sole event", () => {
+    const source = "Rinse mouth 15 mL after breakfast or dinner";
+    const parsed = parsePublicSig(source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time)).toHaveLength(0);
+    expect(frame.args).toContainEqual(expect.objectContaining({ role: AdviceArgumentRole.Activity, text: "breakfast or dinner" }));
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale);
+        expect(text).toContain("breakfast or dinner");
+        expect(text).toContain(locale === "en" ? "15 mL" : "15 มิลลิลิตร");
+      }
+      expect(importCanonicalCourse(input).stages[0].administrations[0].syntax!.instructionGraph!.sourceText).toBe(source);
+    }
+  });
+
+  it.each(["breakfast", "breakfast and dinner"])("retains supported conjunctive Time daughters for %s", event => {
+    const parsed = parsePublicSig("Rinse mouth 15 mL after " + event);
+    const times = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0].args.filter(arg => arg.role === AdviceArgumentRole.Time);
+    expect(times.map(arg => arg.normalized)).toEqual(event === "breakfast" ? ["CM"] : ["CM", "CV"]);
+    for (const locale of ["en", "th"] as const) {
+      const text = formatSig(persist(parsed.fhirNext), "long", { locale, realizationMode: "normalized" });
+      expect(text).toContain(locale === "en" ? "after breakfast" : "หลังอาหารเช้า");
+      if (times.length === 2) expect(text).toContain(locale === "en" ? "after dinner" : "หลังอาหารเย็น");
+    }
+  });
+
+  it.each([
+    { suffix: "at bedtime", events: ["HS"], en: "Rub to form foam at bedtime", th: "ถูให้เกิดฟองก่อนนอน" },
+    { suffix: "before breakfast and before dinner", events: ["CM", "CV"],
+      en: "Rub to form foam before breakfast before dinner", th: "ถูให้เกิดฟองก่อนอาหารเช้าก่อนอาหารเย็น" }
+  ])("realizes a result action's typed Time: $suffix", fixture => {
+    const source = "Rub to form foam " + fixture.suffix;
+    const parsed = parsePublicSig(source);
+    const frame = parsed.meta.canonical.clauses[0].instructionGraph!.actions[0];
+    expect(frame.args.find(arg => arg.role === AdviceArgumentRole.Result)?.conceptId).toBe("foam");
+    expect(frame.args.filter(arg => arg.role === AdviceArgumentRole.Time).map(arg => arg.normalized)).toEqual(fixture.events);
+    for (const input of [parsed.meta.canonical.course!, persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const)
+        expect(current(formatSig(input, "long", { locale, realizationMode: "normalized" }), locale)).toBe(fixture[locale]);
+      const administration = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(administration.amounts).toBeUndefined();
+      expect(administration.syntax!.instructionGraph!.sourceText).toBe(source);
+    }
+  });
+
+  it("exports requested uncoded advice translations from the existing typed realization", () => {
+    const source = "Take 1 tablet daily, do not lie down immediately";
+    const parsed = parsePublicSig(source, { locale: "th" });
+    for (const instruction of [parsed.fhir[0].additionalInstruction![0], parsed.fhirNext.step![0].component[0].additionalInstruction![0],
+      toFhirR5Dosages(persist(parsed.fhirNext))[0].additionalInstruction![0]]) {
+      expect(instruction.text).toBe("do not lie down immediately");
+      expect(instruction.coding).toBeUndefined();
+      expect(getPrimitiveTranslation(instruction._text, "th")).toBe("ห้ามนอนราบ ทันที");
+    }
+    expect(parsePublicSig(source).fhir[0].additionalInstruction![0]._text).toBeUndefined();
+    expect(parsed.meta.canonical.clauses[0].dose).toMatchObject({ value: 1, unit: "tab" });
+    expect(parsed.meta.canonical.clauses[0].schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+  });
+});
+
+
+describe("round77 selected procedural definition", () => {
+  it("keeps the selected Rinse procedure when another configured action shares its code", () => {
+    const parsed = parsePublicSig("Rinse the left eye daily", { instructionActionMap: { inspect: {
+      code: "rinse", display: "Inspect", aliases: ["inspect"], procedural: false
+    } } });
+    const clause = parsed.meta.canonical.clauses[0];
+    expect(clause.instructionGraph!.actions[0].predicate).toMatchObject({ lemma: "rinse", display: "Rinse" });
+    expect(clause.method?.text).toBe("Rinse");
+    expect(clause.site?.coding?.code).toBe("1290031003");
+    expect(clause.schedule).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+    expect(clause.patientInstruction).toBeUndefined();
+    for (const input of [persist(parsed.fhir), persist(parsed.fhirNext), persist(toFhirR5Dosages(parsed.fhirNext))]) {
+      for (const locale of ["en", "th"] as const) {
+        const text = formatSig(input, "long", { locale, realizationMode: "normalized" });
+        expect(text).toContain(locale === "en" ? "left eye" : "ตาซ้าย");
+        expect(text).not.toContain("Inspect");
+      }
+    }
+  });
+});

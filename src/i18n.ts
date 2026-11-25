@@ -2779,9 +2779,9 @@ function formatLongThai(
       })) continue;
       parts.push(value);
     }
-    const text = parts.join(" ").trim() || `${verb}.`;
-    return clause.clinicalAdjuncts?.condition
-      ? appendClinicalConditionText(text, clause.clinicalAdjuncts.condition, words) : text;
+    if (clause.clinicalAdjuncts?.condition)
+      parts.unshift(appendClinicalConditionText(verb, clause.clinicalAdjuncts.condition, words));
+    return parts.join(" ").trim() || `${verb}.`;
   }
 
   const hasExplicitMethod = Boolean(clause.method?.text?.trim() || clause.method?.coding?.code);

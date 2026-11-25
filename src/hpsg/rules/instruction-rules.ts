@@ -3,7 +3,7 @@ import { clinicalQuantityAt } from "./clinical-quantity-rules";
 import { EVENT_TIMING_TOKENS } from "../../maps";
 import { parseAdditionalInstructions, realizeAdviceFramesText } from "../../advice";
 import { resolveBodySiteLexeme } from "../../body-site-grammar";
-import { getMedicationInstructionAction, resolveMedicationInstructionAction } from "../../instruction-action-terminology";
+import { resolveMedicationInstructionAction } from "../../instruction-action-terminology";
 import { listMedicationInstructionConcepts, medicationInstructionConceptCodings, normalizeConceptSurface, resolveMedicationInstructionConcept } from "../../instruction-concept-terminology";
 import {
   getAdviceRelationRealizations,
@@ -300,7 +300,7 @@ export function workflowLexicalRule(): HpsgLexicalRule<HpsgClauseContext> {
       frame.span.start <= first.sourceStart && first.sourceEnd <= frame.span.end
     );
     const firstDefinition = firstFrame
-      ? getMedicationInstructionAction(firstFrame.predicate.lemma, context.options)
+      ? frameActionDefinition(firstFrame, context.options)
       : undefined;
     const structurallyHeadedProcedure = Boolean(
       firstFrame &&
@@ -421,7 +421,7 @@ function instructionStartIsLicensed(
       // Their partial generic heads must not compete with that full typed
       // constituent. Unquantified ordinary advice keeps its old pathway.
       (WORKFLOW_START_WORDS.has(frame.predicate.lemma) &&
-        getMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true))
+        frameActionDefinition(frame, context.options)?.procedural === true))
   ));
   // A procedural quantity constituent owns its action head and duration.
   // Generic fallback must not take only that head/lead while an ambiguous
@@ -431,7 +431,7 @@ function instructionStartIsLicensed(
   const enclosedByProcedure = Boolean(token && frames.some((frame) => {
     if (frame.span.start >= token.sourceStart || token.sourceEnd > frame.span.end) return false;
     if (frame.polarity === AdvicePolarity.Negate) return false;
-    return getMedicationInstructionAction(frame.predicate.lemma, context.options)?.procedural === true;
+    return frameActionDefinition(frame, context.options)?.procedural === true;
   }));
   // A comma inside an already-composed procedural argument cannot make
   // that argument's homographic noun a second directive ("before food,

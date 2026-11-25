@@ -1911,8 +1911,8 @@ function formatLong(clause: CanonicalSigClause, options: TimingSummaryOptions | 
       })) continue;
       parts.push(value);
     }
-    const text = parts.join(" ").trim() || `${verb}.`;
-    return condition ? appendClinicalConditionText(text, condition, words) : text;
+    if (condition) parts.unshift(appendClinicalConditionText(verb, condition, words));
+    return parts.join(" ").trim() || `${verb}.`;
   }
   const leadingInstructionText = preFlowsIntoAdministration
     ? undefined

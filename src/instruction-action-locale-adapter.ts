@@ -129,7 +129,7 @@ const EN_POSITIVE_MODALITY_PREFIX: Partial<Record<AdviceModality, string>> = {
 };
 
 /** Consume the selected typed Time once; locale adapters own direct wording. */
-function realizeTimeArgument(c: InstructionActionRealizationInput): string | undefined {
+export function realizeTimeArgument(c: InstructionActionRealizationInput): string | undefined {
   if (!c.time) return undefined;
   const relation = c.timeRelation;
   const text = !relation || relationHasGrammarFeature(relation, "directTimeRealization")

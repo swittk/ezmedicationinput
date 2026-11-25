@@ -27,6 +27,7 @@ import { inferMedicationLocale, shouldJoinAdjacentSourceTokens } from "./locale-
 import {
   getInstructionActionLocaleAdapter,
   instructionArgumentNeedsAuthoredDirections,
+  realizeTimeArgument,
   InstructionActionRealizationInput
 } from "./instruction-action-locale-adapter";
 import { joinLocalizedTokens, localeRealizationProfile, localizedTimeArgument, renderLocaleTemplate } from "./locale-realization";
@@ -604,7 +605,10 @@ function timeArgumentsFromParts(
   offset: number, relation: AdviceRelation | undefined, singleEnd = endExclusive
 ): AdviceArgument[] | undefined {
   const members = argumentCoordinationMembers(parts, start, endExclusive);
-  if (members.length > 1 && members.every(member => member.connector !== "or")) {
+  // A choice is not a list of conjunctive event obligations. Preserve its
+  // complete source complement through the existing opaque argument owner.
+  if (members.some(member => member.connector === "or")) return undefined;
+  if (members.length > 1) {
     const times: AdviceArgument[] = [];
     let inheritedRelation = relation;
     for (const member of members) {
@@ -3911,15 +3915,7 @@ const DEFAULT_ACTION_REALIZER = (
   }
 
   text = appendDuration(text, c.duration);
-  const timeSemanticRelation = c.timeRelation;
-  const timeRelation = c.time && relationHasGrammarFeature(timeSemanticRelation, "timeComplement")
-    ? localizeAdviceRelation(timeSemanticRelation, c.locale) ?? timeSemanticRelation
-    : undefined;
-  if (c.timeWasRendered !== undefined && c.time) c.timeWasRendered = true;
-  const directTime = !timeSemanticRelation || relationHasGrammarFeature(timeSemanticRelation, "directTimeRealization");
-  const timePhrase = c.time ? (directTime ? getInstructionActionLocaleAdapter(c.locale).directTime?.(c.time) : undefined) ??
-    joinLocalizedTokens(c.locale, [timeRelation, c.time]) : undefined;
-  text = appendLocale(text, timePhrase);
+  text = appendLocale(text, realizeTimeArgument(c));
   if (withTarget && targetRelation) {
     const materialRelation = localizeAdviceRelation(
       targetRelation, c.locale, "complement"
@@ -3967,7 +3963,7 @@ const RESULT_REALIZER: ActionRealizer = (c) => {
       joinLocalizedTokens(c.locale, [profile.durationPrefix || undefined, c.duration])
     ]);
   }
-  return text;
+  return joinLocalizedTokens(c.locale, [text, realizeTimeArgument(c)]);
 };
 
 const AMOUNT_MATERIAL_DESTINATION_REALIZER: ActionRealizer = (c) => {
