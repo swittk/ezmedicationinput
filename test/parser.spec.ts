@@ -5557,6 +5557,10 @@ describe("time-based schedules", () => {
     expect(result.longText).toBe("Use 1 tablet with breakfast, with lunch and at 9:00 am, 5:00 pm.");
     expect(result.fhir.timing?.repeat?.when).toEqual(["CM", "CD"]);
     expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(["09:00:00", "17:00:00"]);
+    expect(result.fhir.timing?.repeat?.extension?.filter(extension =>
+      extension.url === "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock"))
+      .toEqual([{ url: "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock", valueTime: "09:00:00" },
+        { url: "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock", valueTime: "17:00:00" }]);
     expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
     expect(result.warnings).toEqual([]);
   });
@@ -5566,6 +5570,9 @@ describe("time-based schedules", () => {
     expect(result.longText).toBe("Use 1 tablet with meals and at 10:00 am.");
     expect(result.fhir.timing?.repeat?.when).toEqual(["C"]);
     expect(getTimingClocks(result.fhir.timing?.repeat)).toEqual(["10:00:00"]);
+    expect(result.fhir.timing?.repeat?.extension).toContainEqual({
+      url: "urn:ezmedicationinput:StructureDefinition:medication-timing-additional-clock", valueTime: "10:00:00"
+    });
     expect(result.fhir.timing?.repeat?.timeOfDay).toBeUndefined();
   });
 

@@ -1,6 +1,6 @@
 import { getInstructionActionLocaleAdapter } from "../../instruction-action-locale-adapter";
 import { joinLocalizedTokens } from "../../locale-realization";
-import { clinicalRateHeadAt, clinicalRatePeriodUnit } from "./clinical-quantity-rules";
+import { clinicalRateHeadAt, clinicalRatePeriodUnit, volumeOrMassTerm } from "./clinical-quantity-rules";
 import { frameActionDefinition } from "../../instruction-graph";
 import { courseContinuationDurationAt } from "../lexical-classes";
 import { parseMedicationDateListAt, type MedicationDateListMatch } from "../../date-interpretation";
@@ -2637,7 +2637,8 @@ export function maximumDosePerPeriodRule(): HpsgLexicalRule<HpsgClauseContext> {
     const maximum = maximumDosePerPeriodAt(context, start);
     if (!maximum) return [];
     const { tokens: matched, amount, unit, period } = maximum;
-    const rateHead = period.unitDenominator && !("daypart" in period) && clinicalRatePeriodUnit(period.periodUnit)
+    const rateHead = period.unitDenominator && volumeOrMassTerm(amount, unit) &&
+      !("daypart" in period) && clinicalRatePeriodUnit(period.periodUnit)
       ? clinicalRateHeadAt(context, start, start + matched.length, true) : undefined;
     // The earlier clinical quantity rule already owns a licensed rate, including
     // its external AT marker. That same constituent cannot also be a dose cap.
@@ -3441,93 +3442,88 @@ function codedCourseEndCondition(context: HpsgClauseContext, start: number): Hps
   if (preposition && NEXT_DAY_PREPOSITIONS.has(normalizeTokenLower(preposition))) next += 1;
   const article = context.tokens[next];
   if (article && EVENT_ARTICLE_TOKENS.has(normalizeTokenLower(article))) next += 1;
-  // A relative end owns its optional clock and NEXT + day/daypart nominal. Its clock is
-  // unresolved, so retain the authored ending instruction without creating a
-  // recurring morning/evening dose or inventing an absolute end instant.
   const modifier = context.tokens[next], head = context.tokens[next + 1];
-  if (modifier && head && NEXT_DAY_MODIFIERS.has(normalizeTokenLower(modifier)) &&
-      NEXT_DAY_HEADS.has(normalizeTokenLower(head))) {
-    let endIndex = next + 2;
-    const trailingLead = context.tokens[endIndex];
-    const clockLeadLength = trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead)) ? 1 : 0;
-    const trailingClock = parseClockToken(context.tokens[endIndex + clockLeadLength], context.tokens[endIndex + clockLeadLength + 1]);
-    if (trailingClock) endIndex += clockLeadLength + trailingClock.tokens.length;
-    const tokens = tokensAvailable(context, start, endIndex - start);
-    if (tokens) {
-      const end = tokens[tokens.length - 1].sourceEnd;
-      const text = context.state.input.slice(lead.sourceStart, end);
-      return lexicalSign({
-        type: "instruction-sign", rule: "hpsg.lex.instruction.relativeCourseEnd", tokens,
-        synsem: { head: {}, valence: { instructions: [{ text }] },
-          cont: { clauseKind: "administration", clinicalAdjunct: {
-            unresolved: true,
-            localRanges: [{ start: lead.sourceStart, end }],
-            evidence: [{
-              rule: "hpsg.lex.instruction.relativeCourseEnd", kind: "unresolved",
-              ranges: [{ start: lead.sourceStart, end }]
-            }]
-          } } },
-        score: 58 + tokens.length
-      });
+  if (!modifier || !head) return undefined;
+  const left = normalizeTokenLower(modifier), right = normalizeTokenLower(head);
+  const relativeDay = NEXT_DAY_MODIFIERS.has(left) && NEXT_DAY_HEADS.has(right);
+  let definition: typeof OPEN_ENDED_COURSE_END_CONDITIONS[number] | undefined;
+  if (!relativeDay) {
+    // These terminology entries describe UNTIL, not every relative end relation.
+    if (normalizeTokenLower(lead) !== "until") return undefined;
+    for (const candidate of OPEN_ENDED_COURSE_END_CONDITIONS) {
+      const matches = candidate.kind === 'next-event'
+        ? candidate.modifiers?.indexOf(left) !== -1 && candidate.heads?.indexOf(right) !== -1
+        : candidate.subjects?.indexOf(left) !== -1 && candidate.predicates?.indexOf(right) !== -1;
+      if (matches) { definition = candidate; break; }
     }
+    if (!definition) return undefined;
   }
-  // These terminology entries describe UNTIL, not every relative end relation.
-  if (normalizeTokenLower(lead) !== "until") return undefined;
-  for (const definition of OPEN_ENDED_COURSE_END_CONDITIONS) {
-    const first = context.tokens[next];
-    const second = context.tokens[next + 1];
-    if (!first || !second) continue;
-    const left = normalizeTokenLower(first), right = normalizeTokenLower(second);
-    const matches = definition.kind === 'next-event'
-      ? definition.modifiers?.indexOf(left) !== -1 && definition.heads?.indexOf(right) !== -1
-      : definition.subjects?.indexOf(left) !== -1 && definition.predicates?.indexOf(right) !== -1;
-    if (!matches) continue;
-    const tokens = tokensAvailable(context, start, next + 2 - start);
-    if (!tokens) continue;
-    const text = clock ? context.state.input.slice(lead.sourceStart, tokens[tokens.length - 1].sourceEnd) : definition.display;
-    const i18n: Record<string, string> = { ...definition.i18n };
-    if (clock) {
-      // The terminology identifies the end event; its authored clock is a
-      // separate typed complement, retained without inventing a calendar date.
-      const sourceClock = context.state.input.slice(clock.tokens[0].sourceStart, clock.tokens[clock.tokens.length - 1].sourceEnd);
-      for (const locale of Object.keys(i18n)) i18n[locale] = joinLocalizedTokens(locale, [i18n[locale],
-        getInstructionActionLocaleAdapter(locale).directTime?.(sourceClock) ?? sourceClock]);
-    }
+  // Both end nominals own the same optional clock complement. It remains
+  // part of the ending instruction, never a new recurring dose clock.
+  let endIndex = next + 2;
+  const trailingLead = context.tokens[endIndex];
+  const clockLeadLength = trailingLead && CLOCK_LEAD_TOKENS.has(normalizeTokenLower(trailingLead)) ? 1 : 0;
+  const trailingClock = parseClockToken(context.tokens[endIndex + clockLeadLength], context.tokens[endIndex + clockLeadLength + 1]);
+  if (trailingClock) endIndex += clockLeadLength + trailingClock.tokens.length;
+  const tokens = tokensAvailable(context, start, endIndex - start);
+  if (!tokens) return undefined;
+  const end = tokens[tokens.length - 1].sourceEnd;
+  const sourceText = context.state.input.slice(lead.sourceStart, end);
+  if (!definition) {
+    // Relative day/daypart ends remain unresolved; do not invent a dated end.
     return lexicalSign({
-      type: 'instruction-sign',
-      rule: 'hpsg.lex.instruction.openEndedCourseCondition',
-      tokens,
-      synsem: {
-        head: {},
-        // R5 has no executable end-date when the patient visit/clinical
-        // outcome is unknown. This is a typed, coded NON-calendar directive,
-        // never a fabricated boundsPeriod or asNeeded trigger.
-        valence: { instructions: [{
-          text,
-          i18n,
+      type: "instruction-sign", rule: "hpsg.lex.instruction.relativeCourseEnd", tokens,
+      synsem: { head: {}, valence: { instructions: [{ text: sourceText }] },
+        cont: { clauseKind: "administration", clinicalAdjunct: {
+          unresolved: true,
+          localRanges: [{ start: lead.sourceStart, end }],
           evidence: [{
-            rule: 'hpsg.lex.instruction.openEndedCourseCondition',
-            spans: [{
-              start: lead.sourceStart,
-              end: tokens[tokens.length - 1].sourceEnd,
-              text: context.state.input.slice(lead.sourceStart, tokens[tokens.length - 1].sourceEnd)
-            }]
-          }],
-          // Clinical state changes without an independently established
-          // terminology identity remain typed, editable, and source-backed.
-          // Never borrow a code for a different clinical improvement concept.
-          ...(definition.code ? { coding: {
-            system: 'http://snomed.info/sct',
-            code: definition.code,
-            display: definition.display
-          } } : {})
-        }] },
-        cont: { clauseKind: 'administration' }
-      },
+            rule: "hpsg.lex.instruction.relativeCourseEnd", kind: "unresolved",
+            ranges: [{ start: lead.sourceStart, end }]
+          }]
+        } } },
       score: 58 + tokens.length
     });
   }
-  return undefined;
+  const endClock = clock ?? trailingClock;
+  const text = endClock ? sourceText : definition.display;
+  const i18n: Record<string, string> = { ...definition.i18n };
+  if (endClock) {
+    // The terminology identifies the end event; its authored clock is a
+    // separate typed complement, retained without inventing a calendar date.
+    const sourceClock = context.state.input.slice(endClock.tokens[0].sourceStart, endClock.tokens[endClock.tokens.length - 1].sourceEnd);
+    for (const locale of Object.keys(i18n)) i18n[locale] = joinLocalizedTokens(locale, [i18n[locale],
+      getInstructionActionLocaleAdapter(locale).directTime?.(sourceClock) ?? sourceClock]);
+  }
+  return lexicalSign({
+    type: 'instruction-sign',
+    rule: 'hpsg.lex.instruction.openEndedCourseCondition',
+    tokens,
+    synsem: {
+      head: {},
+      // R5 has no executable end-date when the patient visit/clinical
+      // outcome is unknown. This is a typed, coded NON-calendar directive,
+      // never a fabricated boundsPeriod or asNeeded trigger.
+      valence: { instructions: [{
+        text,
+        i18n,
+        evidence: [{
+          rule: 'hpsg.lex.instruction.openEndedCourseCondition',
+          spans: [{ start: lead.sourceStart, end, text: sourceText }]
+        }],
+        // Clinical state changes without an independently established
+        // terminology identity remain typed, editable, and source-backed.
+        // Never borrow a code for a different clinical improvement concept.
+        ...(definition.code ? { coding: {
+          system: 'http://snomed.info/sct',
+          code: definition.code,
+          display: definition.display
+        } } : {})
+      }] },
+      cont: { clauseKind: 'administration' }
+    },
+    score: 58 + tokens.length
+  });
 }
 
 export function openEndedScheduleRule() {

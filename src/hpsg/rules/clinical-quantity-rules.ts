@@ -4,7 +4,7 @@ import { getRouteMeaning } from "../../lexer/meaning";
 import { FhirPeriodUnit, RouteCode } from "../../types";
 import { normalizeUnit } from "../../unit-lexicon";
 import { HpsgClauseContext, lexicalRule, normalizeTokenLower } from "../rule-context";
-import { FREQUENCY_NUMBER_WORDS } from "../timing-lexicon";
+import { FREQUENCY_NUMBER_WORDS, mapIntervalUnit } from "../timing-lexicon";
 import {
   doseComparatorNumberAt,
   doseRangeNumberAt,
@@ -174,7 +174,7 @@ function massTerm(value: number, raw: string): HpsgDimensionalQuantityTerm | und
   return undefined;
 }
 
-function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQuantityTerm | undefined {
+export function volumeOrMassTerm(value: number, raw: string): HpsgDimensionalQuantityTerm | undefined {
   const mass = massTerm(value, raw);
   if (mass) return mass;
   const normalized = raw.toLowerCase();
@@ -829,7 +829,8 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
   }
   const accepts = (candidate: string) =>
     /^(?:mcg|ug|mg|g|u|unit|units|iu)\/kg(?:\/[^/]+)?$/u.test(candidate) ||
-    /^(?:ml|l|mcg|ug|mg|g|u|unit|units|iu)\/(?:h|hr|hrs|hour|hours|min|mins|minute|minutes)$/u.test(candidate);
+    /^(?:ml|l|mcg|ug|mg|g|u|unit|units|iu)\/[^/]+$/u.test(candidate) &&
+      Boolean(mapIntervalUnit(candidate.slice(candidate.indexOf("/") + 1)));
   const expression = compactUnitExpression(
     context, quantityEnd + 1, accepts, unit ?? ""
   );
@@ -837,7 +838,7 @@ function matchClinicalQuantity(context: HpsgClauseContext, start: number): HpsgS
     // An unsupported fixed-rate range still owns both numeric endpoints.
     // Neither endpoint may become an exact rate or an independent scalar dose.
     const weight = expression && weightQuantity(context, quantityEnd, value, expression, phraseStart);
-    if (expression && (clinicalRatePeriodUnit(expression.compact.split("/")[1]) ||
+    if (expression && (mapIntervalUnit(expression.compact.split("/")[1]) ||
         weight?.synsem.head.dose?.clinicalQuantity?.representation === "rate-quantity")) {
       const owned = context.clinicalCache.unlicensedRateTokenIndices ??= new Set<number>();
       for (let index = phraseStart; index < expression.end; index++) owned.add(context.tokens[index].index);

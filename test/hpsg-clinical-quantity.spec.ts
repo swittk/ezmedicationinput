@@ -2823,10 +2823,11 @@ describe("round38 independent occurrence duration endpoints", () => {
         const th = formatSig(input, "long", { locale: "th", realizationMode: "normalized" });
         if (lowText) expect(en).toContain(lowText);
         if (highText) expect(en).toContain(highText);
-        if (low && "comparator" in low && low.comparator === ">=")
+        if (low && (!high || "comparator" in low && low.comparator === ">="))
           expect(en).toContain("at least " + lowText);
         if (high && "comparator" in high && high.comparator === "<")
           expect(en).toContain("less than " + highText);
+        if (high && !low) expect(en).toContain("up to " + highText);
         if (lowThai) expect(th).toContain(lowThai);
         if (highThai) expect(th).toContain(highThai);
         if (lowThai && highThai) expect(th.indexOf(lowThai)).toBeLessThan(th.indexOf(highThai));
@@ -4004,10 +4005,16 @@ describe("round69 selected infusion head and sequential durations", () => {
     expect(compactDaily.meta.canonical.clauses[0].schedule).toMatchObject({ duration: 3, durationUnit: "d" });
     expect(compactDaily.fhir[0].text).toBe("Take 3 mg/day for 3 days, then 2 mg/day for 3 days");
     for (const clause of compactDaily.meta.canonical.clauses) {
+      expect(clause.dose).toBeUndefined();
       expect(clause.clinicalQuantity?.representation).not.toBe("rate-quantity");
       expect(clause.schedule?.administrationDuration).toBeUndefined();
       expect(clause.schedule?.count).toBeUndefined();
     }
+    for (const stage of compactDaily.meta.canonical.course!.stages)
+      for (const member of stage.administrations)
+        for (const amount of member.amounts ?? []) expect(amount.quantity).toBeUndefined();
+    for (const dosage of [...compactDaily.fhir, ...compactDaily.fhirNext.step.flatMap(step => step.component)])
+      for (const amount of dosage.doseAndRate ?? []) expect(amount.doseQuantity).toBeUndefined();
   });
 
   it("preserves explicit divided daily totals under the inherited oral head", () => {
@@ -4336,4 +4343,59 @@ describe("round77 clocked coded course endings", () => {
       expect(administration.schedule?.recurrence?.calendarWindow).toBeUndefined();
     }
   });
+});
+
+
+describe("round78 next-day onset and complete clinical cap ownership", () => {
+  it.each(["starting on the next day", "starting the next day"])(
+    "keeps %s open after its first clock", onset => {
+      const parsed = parsePublicSig("Take 1 tablet at 8 AM " + onset);
+      const schedule = parsed.meta.canonical.clauses[0].schedule!;
+      expect(schedule).toMatchObject({ phaseStartReference: "treatment-day-start", treatmentStartOffsetDays: 1,
+        timeOfDay: ["08:00:00"] });
+      expect(schedule.count).toBeUndefined();
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+        expect(nextDueDoses(input, { orderedAt: "2026-01-01T00:00:00Z", from: "2026-01-01T00:00:00Z",
+          timeZone: "UTC", limit: 2 })).toEqual(["2026-01-02T08:00:00+00:00", "2026-01-03T08:00:00+00:00"]);
+      }
+    });
+
+  it.each(["tablets/24h", "tablets per 24 hours"])("retains the cumulative %s limit after Give", unit => {
+    const parsed = parsePublicSig("Give 1 tablet, maximum 3 " + unit);
+    expect(parsed.fhir[0].maxDosePerPeriod).toMatchObject([{
+      numerator: { value: 3, unit: "tab" }, denominator: { value: 24, unit: "h" }
+    }]);
+    for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+      JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+      const member = importCanonicalCourse(input).stages[0].administrations[0];
+      expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+      expect(member.amounts?.[0].rate).toBeUndefined();
+      expect(member.limits).toMatchObject([
+        { scope: "period", amount: { value: 3, unit: "tab" }, period: { value: 24, unit: "h" } }
+      ]);
+    }
+  });
+
+  it.each(["until the next appointment at 8 AM", "until 8 AM the next appointment", "until the next appointment"])(
+    "keeps %s outside the recurring cadence", ending => {
+      const parsed = parsePublicSig("Take 1 tablet daily " + ending);
+      const clocked = ending.includes("8 AM");
+      const instruction = parsed.meta.canonical.clauses[0].additionalInstructions![0];
+      expect(instruction.text).toBe(clocked ? ending : "Until next appointment");
+      expect(instruction.coding?.code).toBe("1287351008");
+      for (const input of [parsed.meta.canonical.course!, JSON.parse(JSON.stringify(parsed.fhir)),
+        JSON.parse(JSON.stringify(parsed.fhirNext)), JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext)))]) {
+        const member = importCanonicalCourse(input).stages[0].administrations[0];
+        expect(member.amounts?.[0].quantity).toMatchObject({ value: 1, unit: "tab" });
+        expect(member.schedule?.recurrence).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
+        expect(member.schedule?.recurrence?.clocks).toBeUndefined();
+        expect(member.schedule?.recurrence?.calendarWindow).toBeUndefined();
+        for (const locale of ["en", "th"]) {
+          const rendered = formatSig(input, "long", { locale, realizationMode: "normalized" });
+          expect(rendered.includes("8 AM")).toBe(clocked);
+          expect(rendered).toContain(locale === "en" ? "appointment" : "นัดครั้งถัดไป");
+        }
+      }
+    });
 });

@@ -568,6 +568,8 @@ export function nextDayOnsetAt(tokens: readonly LexToken[], start: number, limit
   if (!first || start >= limit) return undefined;
   const explicitStart = NEXT_DAY_START_LEADS.has(first.canonical ?? first.lower);
   let cursor = start + (explicitStart ? 1 : 0);
+  const preposition = tokens[cursor];
+  if (explicitStart && preposition && NEXT_DAY_PREPOSITIONS.has(preposition.canonical ?? preposition.lower)) cursor++;
   const article = tokens[cursor];
   if (article && EVENT_ARTICLE_TOKENS.has(article.canonical ?? article.lower)) cursor++;
   const modifier = tokens[cursor];
