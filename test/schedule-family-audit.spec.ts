@@ -4736,17 +4736,22 @@ describe("round63: recorded caps, combined ceilings and finite calendar successo
   });
 
   it.each([
-    ["uncapped alternative", false, false, false, false, 3, 3],
-    ["capped alternative", false, true, false, false, 3, 3],
-    ["mixed-unit alternative", true, true, false, false, 3, 3],
-    ["selected uncapped member", false, false, true, false, 1, 5],
-    ["independent capped members", false, true, false, true, 4, 4],
-    ["independent uncapped member", false, false, false, true, 4, 5],
-  ] as const)("rounds only the selected clock plan: %s", (_label, mixed, capped, upperWins, independent, unrounded, rounded) => {
+    ["one fixed stage", false, true, false, "once", 4, 4],
+    ["uncapped fixed repetition", false, false, false, "repeated", 4, 5],
+    ["capped fixed repetition", false, true, false, "repeated", 4, 4],
+    ["mixed-unit fixed repetition", true, true, false, "repeated", 4, 4],
+    ["fixed course cycles", false, true, false, "cycles", 4, 4],
+    ["selected uncapped member", false, false, true, "repeated", 1, 5],
+    ["independent capped members", false, true, false, "independent", 4, 4],
+    ["independent uncapped member", false, false, false, "independent", 4, 5],
+    ["uncapped coupled alternative", false, false, false, "phased", 3, 3],
+    ["capped coupled alternative", false, true, false, "phased", 3, 3],
+    ["mixed-unit coupled alternative", true, true, false, "phased", 3, 3],
+  ] as const)("keeps independent clock maxima and selected rounding ceilings: %s", (_label, mixed, capped, upperWins, mode, unrounded, rounded) => {
     const unit = mixed ? "g" : "tab", otherUnit = mixed ? "mg" : "tab", otherAmount = mixed ? 1000 : 1;
-    const source: FhirR6DosageInstruction = { step: [{ count: independent ? undefined : 2,
+    const source: FhirR6DosageInstruction = { step: [{ count: mode === "repeated" ? 2 : undefined,
       end: { contextCode: { coding: [{ system: "http://hl7.org/fhir/evidence-variable-event", code: "treatment-start" }] },
-        offsetDuration: { value: independent ? 2 : 1, unit: "d" } },
+        offsetDuration: { value: mode === "independent" ? 2 : 1, unit: "d" } },
       component: [
         { doseAndRate: [{ doseQuantity: { value: 3, unit } }],
           timing: { repeat: { frequency: 1, frequencyMax: 2, period: 1, periodUnit: FhirPeriodUnit.Day,
@@ -4763,15 +4768,30 @@ describe("round63: recorded caps, combined ceilings and finite calendar successo
             ...(capped ? [{ scope: "lifetime" as const, valueQuantity: { value: otherAmount, unit: otherUnit } }] : []),
           ] } },
       ] }] };
-    if (independent) {
-      source.repeatCycle = { value: 1, unit: "d" };
-      source.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: 1 }];
+    if (mode === "phased") {
+      // B starts only after A's one administration: A at 14:00 and B's
+      // unchanged 14:00 clock cannot coexist. The whole-plan maximum is 3.
+      const components = source.step![0].component!;
+      components[0].timing!.repeat!.count = 1;
+      components[1].timing!.repeat!.frequencyMax = undefined;
+      components[1].timing!.repeat!.timeOfDay = ["14:00:00"];
+      source.step = components.map(component => ({ component: [component] }));
     }
+    if (mode === "independent" || mode === "phased" || mode === "cycles") {
+      source.repeatCycle = { value: 1, unit: "d" };
+      source.modifierExtension = [{ url: COURSE_CYCLE_COUNT_EXTENSION_URL, valueInteger: mode === "cycles" ? 2 : 1 }];
+    }
+    // Fixed parallel windows can combine A's authored 14:00 dose of 3 with
+    // B's inferred 14:00 dose of 1. In the capped cases, their summed
+    // lifetime allowances prove 4 optimal.
     const query = { from: "2026-01-01T13:00:00Z", orderedAt: "2026-01-01T00:00:00Z", timeZone: "UTC",
       durationValue: 2, durationUnit: FhirPeriodUnit.Hour };
+    const outputUnit = mixed && mode === "repeated" ? "mg" : unit;
+    const scale = outputUnit === "mg" ? 1000 : 1;
     for (const dosage of [source, importCanonicalCourse(source), JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]) {
-      expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: unrounded, unit });
-      expect(calculateTotalUnits({ dosage, ...query, roundToMultiple: 5 })).toMatchObject({ totalUnits: rounded, unit });
+      expect(calculateTotalUnits({ dosage, ...query })).toMatchObject({ totalUnits: unrounded * scale, unit: outputUnit });
+      expect(calculateTotalUnits({ dosage, ...query, roundToMultiple: 5 * scale }))
+        .toMatchObject({ totalUnits: rounded * scale, unit: outputUnit });
     }
   });
 

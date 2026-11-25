@@ -7478,11 +7478,13 @@ function largerSupplyPlan(
  * member's feasible clock plan separately. Shared caps and phase dependencies
  * couple those choices and must retain a joint course plan. */
 function hasIndependentClockAlternatives(course: CanonicalCourse): boolean {
-  if (course.stages.length !== 1 || course.safety ||
-      (course.cycleInterval && course.cycleCount !== 1)) return false;
+  if (course.stages.length !== 1 || course.safety) return false;
   const stage = course.stages[0];
-  if (stage.safety || (stage.count !== undefined && stage.count !== 1) ||
-      stage.administrations.length < 2) return false;
+  if (stage.safety || stage.administrations.length < 2) return false;
+  // An explicit stage end fixes every repetition window independently of
+  // its members' clock choices. Count-completed phases remain joint plans.
+  if (!stage.end && ((course.cycleInterval && course.cycleCount !== 1) ||
+      (stage.count !== undefined && stage.count !== 1))) return false;
   for (const member of stage.administrations)
     if (member.phasePredecessors?.length) return false;
   return true;
