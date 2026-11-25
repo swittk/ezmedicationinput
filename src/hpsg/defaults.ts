@@ -17,6 +17,7 @@ import {
 import { normalizeDosageForm } from "../context";
 import { lexInput } from "../lexer/lex";
 import { resolveMedicationInstructionAction } from "../instruction-action-terminology";
+import { hasRecurringSchedule } from "./projection";
 
 export interface HpsgDefaultConstraintDeps {
   setRoute: (state: ParserState, code: RouteCode, text?: string) => void;
@@ -511,7 +512,10 @@ function applySmartMealExpansion(state: ParserState, options: ParseOptions | und
   replaceWhen(state, sortWhenCodes(uniqueWhen(normalizeMealRelations(when, options)), options));
 }
 
-function applyAdministrationDurationSemantics(state: ParserState, options?: ParseOptions): void {
+/** Resolve the duration under the selected local or inherited administration head. */
+export function applyAdministrationDurationSemantics(
+  state: ParserState, options?: ParseOptions, inheritedMethod = false
+): void {
   const schedule = state.primaryClause.schedule;
   if (!schedule || schedule.duration === undefined || !schedule.durationUnit || state.methodText === undefined) return;
   if (schedule.administrationDuration !== undefined || schedule.administrationDurationUnit !== undefined) return;
@@ -520,7 +524,7 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   const introducers = new Set(definition?.administrationDurationIntroducers ?? []);
   if (!introducers.size) return;
 
-  let methodEnd = -1;
+  let methodEnd = inheritedMethod ? 0 : -1;
   let durationSpan: { start: number; end: number } | undefined;
   let durationSpanCount = 0;
   for (const item of state.primaryClause.evidence) {
@@ -549,6 +553,10 @@ function applyAdministrationDurationSemantics(state: ParserState, options?: Pars
   delete schedule.duration;
   delete schedule.durationMax;
   delete schedule.durationUnit;
+  if ((state.primaryClause.dose || state.primaryClause.clinicalQuantity) &&
+      !hasRecurringSchedule(schedule) && !state.asNeeded &&
+      schedule.timingReference !== "previous" &&
+      schedule.count === undefined && schedule.countMax === undefined) schedule.count = 1;
 }
 
 /** A coordinated weekday recurrence supplies its slot cardinality unless

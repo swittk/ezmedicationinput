@@ -1,5 +1,6 @@
 import { DOSE_TARGET_EVENT_MEMBERS, DOSE_TARGET_DAYPART_CLOCK_RANGES, NEXT_DAY_SCHEDULE_RULE } from "../hpsg/lexical-classes";
 import { singleClockWithoutRecurrence, terminalAdministrationDelay } from "./grammar";
+import { applyAdministrationDurationSemantics } from "../hpsg/defaults";
 import { EventTiming as SequenceEventTiming, FhirPeriodUnit } from '../types';
 import { equalStructuredValues, cloneStructuredValue } from '../stable-structure';
 import type { BoundaryPlan, BoundaryRelation } from '../hpsg/signature';
@@ -9,7 +10,8 @@ import type {
   CanonicalEvidence,
   CanonicalSigClause,
   CanonicalSourceSpan,
-  FhirQuantity
+  FhirQuantity,
+  ParseOptions
 } from '../types';
 
 export interface RegimenPhase {
@@ -293,7 +295,8 @@ export function scopeSequentialPhaseSemantics(
   states: readonly ParserState[],
   segments: readonly HpsgSigSegment[],
   graph: RegimenGraph,
-  source: string
+  source: string,
+  options?: ParseOptions
 ): InheritanceEvidence[] {
   const applications: InheritanceEvidence[] = [];
   for (const state of states) {
@@ -653,6 +656,7 @@ export function scopeSequentialPhaseSemantics(
       });
       if (sharedMethod && !clause.method && routeCompatible && (!recipientHasRate || priorHasRate)) {
         clause.method = cloneInheritedValue(sharedMethod, donorStart, recipientStart);
+        applyAdministrationDurationSemantics(states[index], options, true);
         fields.push('method');
       }
       const onsetOnlyContinuation = edge.relation.rule === "regimen.treatment-relative-phase-onset" &&

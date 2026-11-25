@@ -3913,3 +3913,94 @@ describe("round68 active biologic quantity and authored decimal maximum", () => 
       })]);
   });
 });
+
+describe("round69 selected infusion head and sequential durations", () => {
+  it.each([
+    "Infuse 0.1 mg/kg/hr for 2 hours, then 0.05 mg/kg/hr for 4 hours",
+    "Infuse 7 mg/hr for 2 hours, then 3.5 mg/hr for 4 hours",
+    "Infuse 14 mg over 2 hours, then 14 mg over 4 hours"
+  ])("preserves both finite administrations and their independent amounts: %s", source => {
+    const parsed = parsePublicSig(source);
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    expect(parsed.meta.leftoverText).toBeUndefined();
+    for (let index = 0; index < 2; index += 1) {
+      const clause = parsed.meta.canonical.clauses[index];
+      expect(clause.method?.coding?.code).toBe("764794000");
+      expect(clause.schedule).toMatchObject({
+        count: 1, administrationDuration: index === 0 ? 2 : 4,
+        administrationDurationUnit: "h"
+      });
+      expect(clause.schedule?.duration).toBeUndefined();
+    }
+    const options = {
+      orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+      timeZone: "UTC", patientWeightKg: 70, limit: 5
+    };
+    const views = [
+      importCanonicalCourse(parsed.fhirNext),
+      JSON.parse(JSON.stringify(parsed.fhir)) as typeof parsed.fhir,
+      JSON.parse(JSON.stringify(parsed.fhirNext)) as typeof parsed.fhirNext,
+      JSON.parse(JSON.stringify(toFhirR5Dosages(parsed.fhirNext))) as FhirDosage[]
+    ];
+    for (const dosage of views) {
+      const original = JSON.stringify(dosage);
+      expect(calculateTotalUnits({
+        ...options, dosage, durationValue: 1, durationUnit: "d"
+      })).toMatchObject({ totalUnits: 28, unit: "mg", quantityKind: "scheduled" });
+      expect(nextDueDoses(dosage, options)).toEqual([
+        "2026-12-01T08:00:00+00:00", "2026-12-01T10:00:00+00:00"
+      ]);
+      expect(JSON.stringify(dosage)).toBe(original);
+    }
+  });
+
+  it("keeps a recurring or PRN mass infusion free of an invented once cap", () => {
+    for (const suffix of ["daily", "as needed for pain"]) {
+      const parsed = parsePublicSig("Infuse 14 mg over 2 hours " + suffix);
+      const schedule = parsed.meta.canonical.clauses[0].schedule;
+      expect(schedule).toMatchObject({ administrationDuration: 2, administrationDurationUnit: "h" });
+      expect(schedule?.count).toBeUndefined();
+      expect(schedule?.duration).toBeUndefined();
+    }
+  });
+
+  it("does not give an inherited oral head administration-duration ownership", () => {
+    const parsed = parsePublicSig("Take 14 mg over 2 hours, then 14 mg over 4 hours");
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    for (let index = 0; index < 2; index += 1) {
+      const clause = parsed.meta.canonical.clauses[index];
+      expect(clause.method?.text).toBe("Take");
+      expect(clause.schedule).toMatchObject({ duration: index === 0 ? 2 : 4, durationUnit: "h" });
+      expect(clause.schedule?.administrationDuration).toBeUndefined();
+      expect(clause.schedule?.count).toBeUndefined();
+    }
+    const compactDaily = parsePublicSig("Take 3 mg/day for 3 days, then 2 mg/day for 3 days");
+    // An unsupported compact daily-total expression cannot license an infusion.
+    for (const clause of compactDaily.meta.canonical.clauses) {
+      expect(clause.clinicalQuantity?.representation).not.toBe("rate-quantity");
+      expect(clause.schedule?.administrationDuration).toBeUndefined();
+      expect(clause.schedule?.count).toBeUndefined();
+    }
+  });
+
+  it("preserves explicit divided daily totals under the inherited oral head", () => {
+    const parsed = parsePublicSig(
+      "Take 30 mg daily in 3 divided doses for 3 days, then 15 mg daily in 3 divided doses for 3 days"
+    );
+    expect(parsed.meta.canonical.clauses).toHaveLength(2);
+    for (let index = 0; index < 2; index += 1) {
+      const clause = parsed.meta.canonical.clauses[index];
+      expect(clause.method?.text).toBe("Take");
+      expect(clause.dose).toMatchObject({ value: index === 0 ? 10 : 5, unit: "mg" });
+      expect(clause.schedule).toMatchObject({
+        frequency: 3, period: 1, periodUnit: "d", duration: 3, durationUnit: "d"
+      });
+      expect(clause.schedule?.administrationDuration).toBeUndefined();
+      expect(clause.schedule?.count).toBeUndefined();
+    }
+    expect(calculateTotalUnits({
+      dosage: parsed, orderedAt: "2026-12-01T08:00:00Z", from: "2026-12-01T08:00:00Z",
+      timeZone: "UTC", durationValue: 6, durationUnit: "d"
+    })).toMatchObject({ totalUnits: 135, unit: "mg" });
+  });
+});

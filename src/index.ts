@@ -817,14 +817,15 @@ function prepareCanonicalParallel(
  */
 function composeParsedStates(
   input: string, boundaryPlan: BoundaryPlan,
-  segments: ReturnType<typeof parseSigSegments>, states: ParserState[]
+  segments: ReturnType<typeof parseSigSegments>, states: ParserState[],
+  options?: ParseOptions
 ) {
   scopeCoordinatedSegmentStates(states, boundaryPlan, segments, input);
   scopeTrailingSharedDuration(states, segments);
   scopeTrailingSharedNegativeInstructions(states, boundaryPlan, segments, input);
   scopeMedicationConditionTargets(states, boundaryPlan, segments);
   const regimenGraph = buildRegimenGraph(boundaryPlan, segments, states);
-  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input);
+  scopeSequentialPhaseSemantics(states, segments, regimenGraph, input, options);
   const timingComposition = states.length > 1
     ? composeCoordinatedTimingAnchors(states, boundaryPlan, segments, input)
     : undefined;
@@ -914,7 +915,7 @@ function finishParsedBatch(
   segments: ReturnType<typeof parseSigSegments>, states: ParserState[]
 ): ParseBatchResult {
   const { regimenGraph, outputStates, outputSegments, outputRegimenGraph, phaseSequences } =
-    composeParsedStates(input, boundaryPlan, segments, states);
+    composeParsedStates(input, boundaryPlan, segments, states, options);
   const canonicalParallel = prepareCanonicalParallel(outputStates, outputSegments, boundaryPlan, outputRegimenGraph);
   const hasParallel = canonicalParallel.kind === "resolved" ||
     canonicalParallel.kind === "unresolved" && Boolean(canonicalParallel.tracks);
@@ -974,7 +975,7 @@ export function lintSig(input: string, options?: ParseOptions): LintBatchResult 
     states.push(state);
   }
   const { outputStates, outputSegments, phaseSequences } =
-    composeParsedStates(input, boundaryPlan, segments, states);
+    composeParsedStates(input, boundaryPlan, segments, states, options);
   const results: LintResult[] = [];
   const resultSegments: typeof segments = [];
 

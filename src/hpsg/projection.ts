@@ -269,7 +269,7 @@ function cloneSiteRestrictions(
   }));
 }
 
-function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, positionsRepeat = true): boolean {
+export function hasRecurringSchedule(schedule: HpsgScheduleFeature | undefined, positionsRepeat = true): boolean {
   return Boolean(schedule && (
     schedule.frequency !== undefined ||
     schedule.frequencyMax !== undefined ||

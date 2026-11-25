@@ -625,9 +625,13 @@ function fixedRate(
   // with or without a comma. A qualified limit still needs its own marker
   // or local head; the earlier volume cannot lend the administration cue.
   const completesVolume = comparator === undefined || comparator === "~";
-  if (!numerator || !denominatorUnit ||
-      (!hasRateMarker && !hasInfusionRoute && !hasAdministrationCue(context, phraseStart, completesVolume))) return undefined;
   const duration = durationAfter(context, expression.end);
+  // A clause-initial rate with its own elapsed duration is a complete typed
+  // complement. The selected sequential construction owns its omitted method.
+  const completeRateComplement = completesVolume && phraseStart === 0 && duration !== undefined;
+  if (!numerator || !denominatorUnit ||
+      (!hasRateMarker && !hasInfusionRoute && !completeRateComplement &&
+       !hasAdministrationCue(context, phraseStart, completesVolume))) return undefined;
   const indices = [
     ...(hasSeparateRateMarker ? [phraseStart - 1] : []),
     ...Array.from({ length: expression.end - start }, (_, offset) => start + offset)
