@@ -2066,6 +2066,12 @@ const SNOMED_PRODUCT_DOSE_UNIT_CODES: Record<string, string> = {
   dropperful: "421954001", scoop: "415505006", "pea-sized amount": "769392001",
   enema: "1382282001"
 };
+const NCIT_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(NCIT_PRODUCT_DOSE_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
+const SNOMED_UNIT_BY_CODE = new Map<string, string>(
+  objectEntries(SNOMED_PRODUCT_DOSE_UNIT_CODES).map(([unit, code]): [string, string] => [code, unit])
+);
 
 
 /** Resolve standard codes and plain unit labels to the same calculation unit.
@@ -2087,6 +2093,12 @@ export function getDoseQuantityUnit(
   if (quantity.system === "http://spor.ema.europa.eu/v1/lists/200000000014" && quantity.code) {
     return EMA_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
   }
+  if (quantity.unit === undefined && quantity.system === "http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl" && quantity.code) {
+    return NCIT_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
+  if (quantity.unit === undefined && quantity.system === "http://snomed.info/sct" && quantity.code) {
+    return SNOMED_UNIT_BY_CODE.get(quantity.code) ?? quantity.unit ?? fallbackCode ?? "";
+  }
   const recognizedUnit = (label: string | undefined): string | undefined => {
     if (!label) return undefined;
     if (label === "5.mL") return "tsp";
@@ -2103,9 +2115,10 @@ export function getDoseQuantityUnit(
   // A foreign code must not override the authored unit as a UCUM spelling.
   // Keep the existing lexical and opaque-label fallbacks for imported quantities.
   const codedUnit = !quantity.system || quantity.system === "http://unitsofmeasure.org"
-    ? recognizedUnit(quantity.code) ?? (!includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
-      ? quantity.code : undefined) : undefined;
-  return codedUnit ?? recognizedUnit(quantity.unit) ?? quantity.unit ?? fallbackCode ?? "";
+    ? recognizedUnit(quantity.code) : undefined;
+  const dimensionalCode = !includeOpaqueCode && quantity.system === "http://unitsofmeasure.org"
+    ? quantity.code : undefined;
+  return codedUnit ?? recognizedUnit(quantity.unit) ?? dimensionalCode ?? quantity.unit ?? fallbackCode ?? "";
 }
 
 /** Resolve a known dosage unit without changing its display or numerical value.

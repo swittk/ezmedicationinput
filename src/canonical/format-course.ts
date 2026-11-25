@@ -518,6 +518,8 @@ function formatDoseLimits(limits: readonly CanonicalDoseLimit[], words: CourseLa
       : limit.scope === "lifetime" ? words.maxLifetimeLabel : words.maxDosageLabel;
     if (rendered) rendered += "; ";
     rendered += label + value + (limit.period ? " / " + readable(limit.period) : "");
+    if (limit.text?.trim() && (limit.amount || limit.count !== undefined || limit.expression))
+      rendered += " (" + limit.text.trim() + ")";
   }
   return rendered;
 }

@@ -693,13 +693,15 @@ export function clinicalCarrierQuantityFromFhir(
   const doseLabel = active?.unit ?? active?.code;
   const volumeLabel = carrier?.unit ?? carrier?.code;
   const durationUnit = getQuantityDurationUnit(duration);
-  const selfCarrier = !material && doseUnit === volumeUnit && active?.value === carrier?.value;
+  const matchingAmount = doseUnit === volumeUnit && active?.value === carrier?.value;
+  const selfCarrier = !material && matchingAmount &&
+    !(active?.system && carrier?.system && active.system !== carrier.system);
   // The current range remains in doseRange; its explicitly named carrier
   // needs no scalar medication amount to retain that separate material.
   if (active && (typeof active.value !== "number" || !Number.isFinite(active.value) ||
       active.value <= 0 || !doseUnit)) return undefined;
   if (!active && !measure?.doseRange) return undefined;
-  if ((!material && !selfCarrier) ||
+  if ((!material && !matchingAmount) ||
       typeof carrier?.value !== "number" || !Number.isFinite(carrier.value) ||
       typeof duration?.value !== "number" || !Number.isFinite(duration.value) ||
       carrier.value <= 0 || duration.value <= 0 || !volumeUnit ||
@@ -730,8 +732,8 @@ export function clinicalCarrierQuantityFromFhir(
           ...(carrierComparator ? { comparator: carrierComparator } : {})
         } }
       : {}),
-    administrationDuration: { value: duration.value, unit: periodUnit,
-      ...(durationComparator ? { comparator: durationComparator } : {}) },
+    ...(material || selfCarrier ? { administrationDuration: { value: duration.value, unit: periodUnit,
+      ...(durationComparator ? { comparator: durationComparator } : {}) } } : {}),
     ...(material ? { carrierMaterial: material } : {})
   };
 }
@@ -2795,10 +2797,13 @@ function projectHpsgClinicalQuantityToFhir(
     }];
     return;
   }
-  const duration = quantity.administrationDuration;
+  // An explicit ratio period survives even when independent coded quantities
+  // do not establish a carrier administration duration.
+  const period = quantity.administrationDuration ?? (quantity.denominators.length === 1 &&
+    quantity.denominators[0].dimension === "time" ? quantity.denominators[0] : undefined);
   const dose = quantity.projectedDose;
   const rate = quantity.rateNumerator ?? dose;
-  if (!duration || !rate || (!dose && !originalAmount?.doseRange)) return;
+  if (!period || !rate || (!dose && !originalAmount?.doseRange)) return;
   const doseQuantity = dose ? { ...resolvedDose(dose),
     ...(dose.system ? { system: dose.system } : {}),
     ...(dose.code ? { code: dose.code } : {}) } : undefined;
@@ -2809,7 +2814,7 @@ function projectHpsgClinicalQuantityToFhir(
     ...(doseQuantity ? { doseQuantity } : { doseRange: originalAmount!.doseRange }),
     rateRatio: {
       numerator: rate.comparator ? quantityForR5({ ...rateNumerator, comparator: rate.comparator })! : rateNumerator,
-      denominator: buildFhirDoseQuantity(duration.value, duration.unit, duration.comparator)
+      denominator: buildFhirDoseQuantity(period.value, period.unit, period.comparator)
     }
   }];
   if (quantity.carrierMaterial?.text) {

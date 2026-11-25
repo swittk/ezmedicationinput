@@ -390,7 +390,12 @@ export function buildInstructionGraphExtension(
     }
     nested.push({ url: "opaque", extension: opaqueNested });
   }
-  if (graph.sourceExtensions) for (const field of graph.sourceExtensions) nested.push(field);
+  if (graph.sourceExtensions) for (const field of graph.sourceExtensions) {
+    if (field.url === "sourceText") {
+      const { valueString: _sourceText, ...annotations } = field;
+      nested[0] = { ...annotations, ...(graph.sourceText ? { valueString: graph.sourceText } : {}) };
+    } else nested.push(field);
+  }
   const result: FhirExtension = { url: MEDICATION_INSTRUCTION_GRAPH_EXTENSION_URL, extension: nested };
   if (graph.sourceId !== undefined) result.id = graph.sourceId;
   return result;
@@ -737,7 +742,13 @@ export function parseInstructionGraphExtension<T extends Pick<FhirExtension,"url
     case "primaryAdministrationStart":if(!start)start=field;break;
     case "primaryAdministrationEnd":if(!end)end=field;break;
     case "primaryOwnership":if(!ownership)ownership=field;break;
-    case "sourceText":if(!source)source=field;break;case "sourceLocale":if(!locale)locale=field;break;
+    case "sourceText":
+      if (!source) {
+        source = field;
+        if (hasFieldMetadata(field, "valueString")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "sourceLocale":if(!locale)locale=field;break;
     default:(sourceExtensions??=[]).push(field);
   }
   if(!actions.length&&!opaque.length)return undefined;

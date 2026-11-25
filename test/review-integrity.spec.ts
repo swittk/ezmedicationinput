@@ -1,5 +1,6 @@
+import { simpleQuantityForR5, getQuantityComparator } from "../src/fhir-quantity-operator";
 import { cloneStructuredValue } from "../src/stable-structure";
-import { parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
+import { buildInstructionGraphExtension, parseInstructionGraphExtension } from "../src/instruction-graph-fhir";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -7,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   parseSig, parseSigAsync, lintSig, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages,
   calculateTotalUnits, nextDueDoses, formatSig, getDosageCondition, FhirPeriodUnit,
-  getDosageAlternativeChoice,
+  getDosageAlternativeChoice, importCanonicalCourse, projectCanonicalCourse, parseInstructionActions,
   type FhirDosage, type FhirR6DosageInstruction, type EzDosage, type FhirExtension
 } from "../src";
 import {
@@ -2663,5 +2664,129 @@ describe("round 32 known cadence and repeat range intersection", () => {
         .toThrow(expect.objectContaining({ code: "timing-code-repeat-conflict" }));
       expect(JSON.stringify(dosage)).toBe(original);
     }
+  });
+});
+
+
+describe("review source and interchange ownership", () => {
+  const saved = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+  const measure = (value: number, unit = "mg") => ({
+    value, unit, system: "http://unitsofmeasure.org", code: unit,
+  });
+  const start = "2026-12-01T08:00:00Z";
+
+  it.each([
+    ["http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl", "C111984", "pump"],
+    ["http://snomed.info/sct", "421954001", "dropperful"],
+  ])("applies a code-only %s presentation limit", (system, code, unit) => {
+    const quantity = { value: 1, system, code };
+    const input: FhirDosage = {
+      timing: { repeat: { frequency: 1, period: 8, periodUnit: FhirPeriodUnit.Hour } },
+      doseAndRate: [{ doseQuantity: quantity }],
+      maxDosePerPeriod: [{ numerator: { ...quantity, value: 2 }, denominator: measure(24, "h") }],
+    };
+    const before = saved(input);
+    expect(calculateTotalUnits({ dosage: [input], from: start, orderedAt: start,
+      timeZone: "UTC", durationValue: 1, durationUnit: "d" })).toMatchObject({ totalUnits: 2, unit });
+    expect(nextDueDoses([saved(input)], { from: start, orderedAt: start, timeZone: "UTC", limit: 3 }))
+      .toEqual(["2026-12-01T08:00:00+00:00", "2026-12-01T16:00:00+00:00", "2026-12-02T08:00:00+00:00"]);
+    expect(projectCanonicalCourse(importCanonicalCourse([saved(input)])).fhir[0].doseAndRate?.[0].doseQuantity)
+      .toEqual(quantity);
+    expect(input).toEqual(before);
+  });
+
+  it.each([false, true])("shows retained course limits in scalar previews (stage cap=%s)", withStage => {
+    const input: FhirR6DosageInstruction = {
+      safety: { doseLimit: [{ scope: "lifetime", valueQuantity: measure(30) }] },
+      step: [{ ...(withStage ? { safety: { doseLimit: [{ scope: "administration" as const,
+        valueQuantity: measure(8) }] } } : {}), component: (withStage ? [5, 7] : [5]).map(value => ({
+        doseAndRate: [{ doseQuantity: measure(value) }],
+        timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } },
+      })) }],
+    };
+    const rows = toFhirR5Dosages(input), row = saved(rows[0]);
+    const opened = fromFhirDosage(row);
+    for (const text of [formatSig(saved(row)), formatSig(saved(row), { style: "long" }),
+      opened.shortText, opened.longText]) {
+      expect(text).toContain("Across this course: max lifetime: 30 mg");
+      expect(text).not.toContain("7 mg");
+      if (withStage) expect(text).toContain("Within this stage: max per administration: 8 mg");
+    }
+    expect(importCanonicalCourse(saved(rows)).safety?.limits?.[0].amount?.value).toBe(30);
+  });
+
+  it.each(["urn:clinic:pump-units", "http://unitsofmeasure.org"])
+    ("infers carrier duration only for matching coded quantities (%s)", system => {
+      const input: FhirDosage = { doseAndRate: [{
+        doseQuantity: { value: 100, unit: "milliliter dose", system, code: "mL" },
+        rateRatio: { numerator: measure(100, "mL"),
+          denominator: simpleQuantityForR5({ ...measure(2, "h"), comparator: "~" }) },
+      }] };
+      const current = importCanonicalCourse([input]).stages[0].administrations[0];
+      if (system === "http://unitsofmeasure.org") {
+        expect(current.schedule?.recurrence).toMatchObject({
+          occurrenceDuration: 2, occurrenceDurationUnit: "h", occurrenceDurationComparator: "~",
+        });
+        expect(fromFhirDosage(saved(input)).longText).toContain("over approximately 2 hours");
+      } else {
+        expect(current.schedule?.recurrence?.occurrenceDuration).toBeUndefined();
+        expect(fromFhirDosage(saved(input)).longText).not.toContain("over approximately 2 hours");
+      }
+      expect(current.amounts?.[0].quantity).toEqual(input.doseAndRate![0].doseQuantity);
+      expect(current.amounts?.[0].rateRatio?.numerator).toEqual(input.doseAndRate![0].rateRatio!.numerator);
+      expect(current.amounts?.[0].rateRatio?.denominator).toMatchObject({ value: 2, comparator: "~" });
+    });
+
+  it("retains a supplied graph source annotation through public decode and rebuild", () => {
+    const sourceText = "Cover with an occlusive dressing";
+    const marker = saved(buildInstructionGraphExtension({ sourceText, sourceLocale: "en",
+      actions: parseInstructionActions(sourceText) })!);
+    const source = marker.extension!.find(field => field.url === "sourceText")!;
+    source.id = "graph-source";
+    source._valueString = { id: "authored-source", extension: [
+      { url: "urn:clinic:provenance-note", valueString: "Retain this source annotation" },
+    ] };
+    const graph = parseInstructionGraphExtension([marker])!;
+    const rebuilt = buildInstructionGraphExtension(graph)!;
+    expect(rebuilt.extension!.filter(field => field.url === "sourceText")).toEqual([source]);
+    expect(graph.sourceText).toBe(sourceText);
+  });
+
+  it("renders an independent limit note beside its four-tablet cap", () => {
+    const amount = 4;
+    const note = "Include tablets from other acetaminophen products in this total.";
+    const input: FhirR6DosageInstruction = { safety: { doseLimit: [{
+      scope: "period", valueQuantity: { value: amount, unit: "tab" }, period: measure(1, "d"), text: note,
+    }] }, step: [{ component: [{ doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+      timing: { repeat: { frequency: 4, period: 1, periodUnit: FhirPeriodUnit.Day } },
+    }] }] };
+    for (const value of [input, toFhirR5Dosages(saved(input))]) {
+      const text = formatSig(value);
+      expect(text).toContain(`Across this course: max per period: ${amount} tab / 1 d`);
+      expect(text).toContain(note);
+      expect(text.split(note)).toHaveLength(2);
+    }
+  });
+
+  it.each(["r5", "r6"] as const)("converts an independent %s range annotation using the target quantity codec", version => {
+    const approximate = { value: 10, unit: "mL", comparator: "~" as const };
+    const annotation = { url: "urn:clinic:independent-quantity", valueQuantity:
+      version === "r5" ? simpleQuantityForR5(approximate)! : approximate };
+    const doseAndRate = [{ doseRange: {
+      low: { ...measure(1), _value: { id: "range-value", extension: [annotation] } }, high: measure(2),
+    } }];
+    const input = version === "r5" ? [{ doseAndRate }]
+      : { step: [{ component: [{ doseAndRate }] }] };
+    const output = projectCanonicalCourse(importCanonicalCourse(input));
+    const r6 = output.fhirNext.step![0].component[0].doseAndRate![0].doseRange!;
+    expect(r6.low?.value).toBe(1);
+    expect(r6.low?._value).toEqual({ id: "range-value", extension: [
+      { url: annotation.url, valueQuantity: approximate },
+    ] });
+    expect(r6.low?.comparator).toBeUndefined();
+    const r5 = output.fhir[0].doseAndRate![0].doseRange!;
+    const nested = r5.low?._value?.extension?.[0].valueQuantity;
+    expect(nested?.comparator).toBeUndefined();
+    expect(getQuantityComparator(nested)).toBe("~");
   });
 });

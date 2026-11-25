@@ -1070,7 +1070,7 @@ export function boundaryToWire(b: CanonicalBoundary | undefined): FhirR6Relative
   }
   assign(output, "text", b.description);
   assign(output, "offsetDuration", quantityForR6(b.displacement));
-  assign(output, "offsetRange", b.displacementRange ? serializeRange(b.displacementRange) : undefined);
+  assign(output, "offsetRange", b.displacementRange ? serializeRange(b.displacementRange, "r6") : undefined);
   return output as FhirR6RelativeTime;
 }
 /** Reuse an unchanged Timing fragment by value/reference comparison on the
@@ -1084,7 +1084,7 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
   let repeat: FhirR6Timing["repeat"];
   if (r) {
     const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : quantityForR6(r.courseLength);
-    const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange) : undefined;
+    const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange, target) : undefined;
     const start = target === "r6" ? simpleQuantityForR6(r.startOffset) : undefined;
     const end = target === "r6" ? simpleQuantityForR6(r.endOffset) : undefined;
     // Clinical zero frequency and signed/fractional offsets are carried by
@@ -1492,7 +1492,7 @@ function administrationToWire(
                   : serializeDuration(source.courseLength),
             }
           : {}),
-        ...(source?.courseLengthRange ? { boundsRange: serializeRange(source.courseLengthRange, true) } : {}),
+        ...(source?.courseLengthRange ? { boundsRange: serializeRange(source.courseLengthRange, target, true) } : {}),
       };
     }
     if (annotations?._event) wireTiming._event = annotations._event;
@@ -1519,7 +1519,7 @@ function administrationToWire(
     if (repeat !== wireTiming.repeat) wireTiming = { ...wireTiming, repeat };
   }
   const currentRange = wireTiming?.repeat?.boundsRange ??
-    (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, Boolean(clause)) : undefined);
+    (a.anchoredLength?.range ? serializeRange(a.anchoredLength.range, target, Boolean(clause)) : undefined);
   const modifiers = output.modifierExtension as FhirExtension[] | undefined;
   const oldDuration = modifiers?.find(item => item.url === ANCHORED_COURSE_DURATION_EXTENSION_URL);
   const projection = currentRange ? projectCourseDurationRange(currentRange) : undefined;
@@ -1588,6 +1588,8 @@ function administrationToWire(
     "doseAndRate",
     a.amounts?.map((value) => {
       const original = value.provenance as NonNullable<FhirR6Dosage["doseAndRate"]>[number] | undefined;
+      const projectedDoseRange = value.range && serializeRange(value.range, target, false, Boolean(clause));
+      const projectedRateRange = value.rateRange && serializeRange(value.rateRange, target);
       const ratioExtensions = (value.rateRatio as { extension?: FhirR6Extension[] } | undefined)?.extension;
       const projectedRatioExtensions = target === "r5" && ratioExtensions?.length
         ? quantityAnnotationExtensions(ratioExtensions, "r5") : ratioExtensions;
@@ -1604,14 +1606,14 @@ function administrationToWire(
         !doseConflict && !rateConflict && !clause &&
         original &&
         original.doseQuantity === value.quantity &&
-        original.doseRange === value.range &&
+        original.doseRange === projectedDoseRange &&
         original.rateQuantity === value.rate &&
         (target !== "r5" || simpleQuantityForR5(value.quantity) === value.quantity &&
           simpleQuantityForR5(value.rate) === value.rate &&
           generalQuantityForR5(value.rateRatio?.numerator) === value.rateRatio?.numerator &&
           simpleQuantityForR5(value.rateRatio?.denominator) === value.rateRatio?.denominator &&
           projectedRatioExtensions === ratioExtensions) &&
-        original.rateRange === value.rateRange &&
+        original.rateRange === projectedRateRange &&
         original.rateRatio === value.rateRatio &&
         original.type === value.role &&
         original.doseExpression === value.expression &&
@@ -1654,7 +1656,7 @@ function administrationToWire(
       assign(
         rate,
         "doseRange",
-        value.range && serializeRange(value.range, false, Boolean(clause))
+        projectedDoseRange
       );
       assign(rate, "doseExpression", target === "r6" ? value.expression : undefined);
       assign(
@@ -1665,7 +1667,7 @@ function administrationToWire(
       assign(
         rate,
         "rateRange",
-        value.rateRange && serializeRange(value.rateRange)
+        projectedRateRange
       );
       assign(
         rate,
@@ -2135,9 +2137,9 @@ function serializeDuration(q: CanonicalMeasure): FhirR6Quantity {
     code: unit,
   };
 }
-function serializeRange(value: CanonicalRange, duration = false, doseCoding = false): FhirRange {
+function serializeRange(value: CanonicalRange, target: "r5" | "r6", duration = false, doseCoding = false): FhirRange {
   const q = (item: CanonicalMeasure) =>
-    simpleQuantityForR5(
+    (target === "r5" ? simpleQuantityForR5 : simpleQuantityForR6)(
       duration
         ? serializeDuration(item)
         : doseCoding
