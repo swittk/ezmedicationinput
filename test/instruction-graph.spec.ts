@@ -2675,8 +2675,10 @@ describe("PR14 new review: R5 roundtrip source-dose provenance", () => {
       doseAndRate: [{ ...entry, doseQuantity: { ...entry.doseQuantity, value: 2 } }]
     };
     const text = formatSig(changed, "long", { locale: "th", realizationMode: "roundtrip" });
-    expect(text).toMatch(/(?:2|สอง)\s*หยด/u);
-    expect(text).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
+    const [current, original] = text.split("; ข้อความเดิม: ");
+    expect(current).toMatch(/(?:2|สอง)\s*หยด/u);
+    expect(current).not.toMatch(/(?:1|หนึ่ง)\s*หยด/u);
+    expect(original).toBe(row.text);
     expect(text).not.toBe(source);
     expect(entry.doseQuantity.value).toBe(1);
   });
@@ -6283,16 +6285,20 @@ describe("round56: authored administration and independent advice", () => {
         const before = JSON.stringify(input);
         for (const locale of ["en", "th"]) for (const realizationMode of ["normalized", "roundtrip"] as const) {
           const text = formatSig(input, "long", { locale, realizationMode });
-          expect(text.match(/systolic BP > 160/gu)).toHaveLength(1);
+          const separator = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+          const [current, original] = text.split(separator);
+          const active = current.replace(locale === "en" ? /^Current: /u : /^ปัจจุบัน: /u, "");
+          if (original !== undefined) expect(original).toBe(row.text);
+          expect(active.match(/systolic BP > 160/gu)).toHaveLength(1);
           const condition = locale === "en" ? "only if systolic BP > 160" : "เฉพาะเมื่อ systolic BP > 160";
-          if (!structured) expect(text).toContain("Swallow 1 tablet whole " + condition + ".");
-          else expect(text).toMatch(locale === "en"
+          if (!structured) expect(active).toContain("Swallow 1 tablet whole " + condition + ".");
+          else expect(active).toMatch(locale === "en"
             ? /(?:^|\.\s*)Use 2 tablets only if systolic BP > 160\.(?=\s|$)/u
             : /(?:^|\.\s*)ใช้(?:ครั้งละ)? 2 เม็ด เฉพาะเมื่อ systolic BP > 160\.(?=\s|$)/u);
           if (hold) {
-            expect(text).toContain("Otherwise hold.");
-            expect(text).not.toContain("Otherwise hold " + condition);
-          } else expect(text).not.toContain("Otherwise hold");
+            expect(active).toMatch(/(?:^|\.\s*)Otherwise hold\.?$/u);
+            expect(active).not.toContain("Otherwise hold " + condition);
+          } else expect(active).not.toContain("Otherwise hold");
         }
         expect(toFhirR5Dosages(input)[0].extension).toContainEqual(marker);
         expect(JSON.stringify(input)).toBe(before);

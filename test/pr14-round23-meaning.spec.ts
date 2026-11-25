@@ -5048,9 +5048,12 @@ describe("round59 partial facts and complete authored directions", () => {
       for (const value of [row, ...views(input)]) for (const locale of ["en", "th"])
         for (const style of ["short", "long"] as const) {
           const rendered = formatSig(value, style, { locale, realizationMode: "normalized" });
-          // Owner decision1377 defers inferring this untyped qualifier beside
-          // a bare method. Keep the original fixture and text in wire/source.
-          expect(rendered).not.toContain("Apply a thin layer");
+          // The live method/site/route remains separate from the untyped
+          // qualitative amount, which is retained as labeled original wording.
+          const separator = locale === "en" ? "; original directions: " : "; ข้อความเดิม: ";
+          const [current, original] = rendered.split(separator);
+          expect(original).toBe(row.text);
+          expect(current).not.toContain("a thin layer");
           expect(rendered.trim()).not.toBe("");
           if (style === "long" || !hasSite && !hasRoute)
             expect(rendered).toMatch(locale === "en" ? /apply/iu : /ทา/u);
@@ -5069,9 +5072,12 @@ describe("round59 partial facts and complete authored directions", () => {
       const typed = parseSig("apply a thin layer twice daily").items[0].fhir;
       expect(typed.additionalInstruction?.some(instruction =>
         instruction.coding?.some(coding => coding.code === "420162004"))).toBe(true);
-      for (const value of [fresh(typed), ...views(fresh(toDosageDetails([fresh(typed)])))])
-        expect(formatSig(value, "long", { realizationMode: "normalized" }))
-          .toBe("Apply a thin layer topically twice daily.");
+      for (const value of [fresh(typed), ...views(fresh(toDosageDetails([fresh(typed)])))]) {
+        const [current, original] = formatSig(value, "long", { realizationMode: "normalized" })
+          .split("; original directions: ");
+        expect(current).toMatch(/^(?:Current: )?Apply a thin layer topically twice daily\.?$/u);
+        if (original !== undefined) expect(original).toBe(typed.text);
+      }
       expect(input.step![0].component[0].doseAndRate).toBeUndefined();
       expect(input.step![0].component[0].route).toEqual(row.route);
       expect(row).toEqual(before);
