@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatSig } from "../src/index";
+import { getPrimitiveTranslations } from "../src/fhir-translations";
 import { parseSig } from "./helpers/r5-parser";
 import { FhirDayOfWeek, FhirPeriodUnit, type FhirDosage } from "../src/types";
 
@@ -103,7 +104,14 @@ describe("Thai formatter human-review follow-up", () => {
       expect.objectContaining({ system: SNOMED, code: "360314001" })
     ]);
     expect(action?.predicate.codings?.some((coding) => coding.system?.startsWith("urn:ezmedicationinput:"))).toBe(false);
-    expect(parsed.fhir.additionalInstruction).toEqual([{ text: "ห้ามตัดแผ่นแปะ" }]);
+    expect(parsed.fhir.additionalInstruction).toHaveLength(1);
+    const instruction = parsed.fhir.additionalInstruction![0];
+    expect(instruction.text).toBe("ห้ามตัดแผ่นแปะ");
+    expect(instruction.coding).toBeUndefined();
+    expect(getPrimitiveTranslations(instruction._text)).toEqual({
+      en: "Do not cut patch", th: "ห้ามตัด แผ่นแปะ"
+    });
+    expect(parsed.longText).toBe("ห้ามตัดแผ่นแปะ.");
   });
 
   it("parses external genital wash with an internal-vaginal prohibition as typed site semantics", () => {

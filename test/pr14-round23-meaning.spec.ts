@@ -5612,18 +5612,22 @@ describe("round61 supported grammar and display ownership", () => {
     const options: ParseOptions = { instructionActionMap: { "clinic warning": {
       code: "rinse", display: "Clinic warning", semanticClass: "procedure", procedural: false, safetyScopeTarget: true
     } } };
-    const source = "If dizzy, rinse the skin", parsed = parseSig(source, options);
-    const clause = parsed.meta.canonical.clauses[0];
-    expect(clause.additionalInstructions).toBeUndefined();
-    expect(clause.patientInstruction).toBe("rinse the skin");
-    expect(clause.instructionGraph?.relations?.some(relation => relation.kind === AdviceRelation.If)).toBe(true);
+    for (const selectedOptions of [undefined, options]) {
+      const source = "If dizzy, rinse the skin", parsed = parseSig(source, selectedOptions);
+      expect(parsed.meta.canonical.clauses).toHaveLength(1);
+      const clause = parsed.meta.canonical.clauses[0];
+      expect(clause.additionalInstructions).toBeUndefined();
+      expect(clause.patientInstruction).toBe("rinse the skin");
+      expect(clause.prn?.enabled).not.toBe(true);
+      expect(clause.instructionGraph?.relations?.some(relation => relation.kind === AdviceRelation.If)).toBe(true);
+      for (const input of views(parsed.fhirNext)) {
+        const text = formatSig(input, "long", { ...selectedOptions, locale: "en", realizationMode: "normalized" });
+        expect(text).toMatch(/if dizzy/iu);
+        expect(text).toMatch(/rinse the skin/iu);
+      }
+    }
     expect(parseSig("If dizzy, clinic warning", options).meta.canonical.clauses[0].additionalInstructions)
       .toMatchObject([{ text: "If dizzy, clinic warning" }]);
-    for (const input of views(parsed.fhirNext)) {
-      const text = formatSig(input, "long", { ...options, locale: "en", realizationMode: "normalized" });
-      expect(text).toMatch(/if dizzy/iu);
-      expect(text).toMatch(/rinse the skin/iu);
-    }
   });
 
   it.each([1, 2, undefined])("shows a supplied partial frequency without inventing a period: %s", frequency => {

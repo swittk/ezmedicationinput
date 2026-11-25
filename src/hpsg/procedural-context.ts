@@ -123,8 +123,11 @@ export function conditionalAdviceOwnerAt(context: HpsgClauseContext, index: numb
 
 /** Whether this existing action daughter is governed as conditional advice. */
 export function isConditionalAdviceFrame(context: HpsgClauseContext, frame: AdviceFrame): boolean {
-  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Amount ||
-      argument.role === AdviceArgumentRole.Site)) return false;
+  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Amount)) return false;
+  // A selected procedure's Site is its target, not a newly quantified
+  // administration. Keep the conditional owner already selected above.
+  if (frame.args.some(argument => argument.role === AdviceArgumentRole.Site) &&
+      !frameActionDefinition(frame, context.options)?.procedural) return false;
   for (const program of conditionalAdviceOwners(context).values()) if (program.indexOf(frame) >= 0) return true;
   return false;
 }
