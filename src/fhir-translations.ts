@@ -1,6 +1,8 @@
 import {
   FhirExtension,
-  FhirPrimitiveElement
+  FhirPrimitiveElement,
+  FhirR6PrimitiveElement,
+  FhirR6Extension
 } from "./types";
 
 export const FHIR_TRANSLATION_EXTENSION_URL =
@@ -166,7 +168,7 @@ export function mergeTranslationPrimitiveElement(
 }
 
 function getTranslationParts(
-  extension: FhirExtension
+  extension: FhirR6Extension
 ): { locale?: string; content?: string } {
   const parts = extension.extension ?? [];
   let locale: string | undefined;
@@ -189,7 +191,7 @@ function getTranslationParts(
 }
 
 export function getPrimitiveTranslation(
-  element: FhirPrimitiveElement | undefined,
+  element: FhirR6PrimitiveElement | undefined,
   locale: string | undefined
 ): string | undefined {
   const targetLocale = normalizeLocaleKey(locale);
@@ -223,7 +225,7 @@ export function getPrimitiveTranslation(
 }
 
 export function getPrimitiveTranslations(
-  element: FhirPrimitiveElement | undefined
+  element: FhirR6PrimitiveElement | undefined
 ): Record<string, string> | undefined {
   if (!element?.extension?.length) {
     return undefined;

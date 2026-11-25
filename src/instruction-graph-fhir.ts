@@ -289,10 +289,15 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   }
   add(nested, valueInteger("spanStart", frame.span.start));
   add(nested, valueInteger("spanEnd", frame.span.end));
+  const sourceTextIndex = nested.length;
   add(nested, valueString("sourceText", frame.sourceText));
   for (const argument of frame.args) nested.push(buildArgumentExtension(argument));
   add(nested, sourceRelation);
-  if (frame.sourceExtensions) for (const field of frame.sourceExtensions) nested.push(field);
+  if (frame.sourceExtensions) for (const field of frame.sourceExtensions) {
+    if (field.url === "sourceText")
+      nested[sourceTextIndex] = { ...field, valueString: frame.sourceText };
+    else nested.push(field);
+  }
   return { url: "action", extension: nested };
 }
 
@@ -546,7 +551,13 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
   for(const field of extension.extension??[])switch(field.url){
     case "predicateLemma":if(!lemma)lemma=field;break;
     case "spanStart":if(!start)start=field;break;case "spanEnd":if(!end)end=field;break;
-    case "sourceText":if(!source)source=field;break;case "force":if(!force)force=field;break;
+    case "sourceText":
+      if (!source) {
+        source = field;
+        if (hasFieldMetadata(field, "valueString")) (sourceExtensions ??= []).push(field);
+      }
+      break;
+    case "force":if(!force)force=field;break;
     case "origin":if(!origin)origin=field;break;case "confidence":if(!confidence)confidence=field;break;
     case "polarity":if(!polarity)polarity=field;break;case "polaritySource":if(!polaritySource)polaritySource=field;break;
     case "modality":if(!modality)modality=field;break;

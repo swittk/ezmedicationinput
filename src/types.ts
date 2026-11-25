@@ -57,7 +57,12 @@ export interface FhirExtension {
 }
 
 /** R6 Extension values retain their native datatype contracts. */
-export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference"> {
+export interface FhirR6Extension extends Omit<FhirExtension, "extension" | "valueQuantity" | "valueRatio" | "valueTiming" | "valueReference" | "valueCodeableReference" |
+  "_valueCode" | "_valueString" | "_valueDecimal" | "_valueTime"> {
+  _valueCode?: FhirR6PrimitiveElement;
+  _valueString?: FhirR6PrimitiveElement;
+  _valueDecimal?: FhirR6PrimitiveElement;
+  _valueTime?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   valueQuantity?: FhirR6Quantity;
   valueRatio?: FhirR6Ratio;
@@ -84,6 +89,8 @@ export interface FhirBackboneElement extends FhirElement {
 
 /** FHIR primitive metadata can carry both Element.id and extensions. */
 export type FhirPrimitiveElement = FhirElement;
+/** R6 primitive companions carry the same R6 Extension choices as their owner. */
+export type FhirR6PrimitiveElement = FhirR6Element;
 
 export interface FhirQuantity extends FhirElement {
   value?: number;
@@ -443,14 +450,22 @@ export interface FhirTimingRepeat extends FhirElement {
 
 /** R6 Snapshot 1 adds period-local interlacing windows to Timing.repeat.
  * These are not R5 Timing fields and must remain confined to the R6 wire type. */
-export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "extension">, FhirR6Element {
+export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDuration" | "extension" |
+  "_count" | "_duration" | "_period" | "_dayOfWeek" | "_timeOfDay" | "_when">, FhirR6Element {
+  _count?: FhirR6PrimitiveElement;
+  _duration?: FhirR6PrimitiveElement;
+  _period?: FhirR6PrimitiveElement;
+  _dayOfWeek?: Array<FhirR6PrimitiveElement | null>;
+  _timeOfDay?: Array<FhirR6PrimitiveElement | null>;
+  _when?: Array<FhirR6PrimitiveElement | null>;
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
   startOffset?: FhirSimpleQuantity;
   endOffset?: FhirSimpleQuantity;
 }
 
-export interface FhirR6Timing extends Omit<FhirTiming, "repeat" | "extension" | "modifierExtension">, FhirR6BackboneElement {
+export interface FhirR6Timing extends Omit<FhirTiming, "repeat" | "extension" | "modifierExtension" | "_event">, FhirR6BackboneElement {
+  _event?: Array<FhirR6PrimitiveElement | null>;
   repeat?: FhirR6TimingRepeat;
 }
 
@@ -515,45 +530,45 @@ export type MedicationCondition =
  * a choice here does not make it executable as a medication predicate. */
 interface FhirR6DosageConditionValues {
   valueBase64Binary?: string;
-  _valueBase64Binary?: FhirPrimitiveElement;
+  _valueBase64Binary?: FhirR6PrimitiveElement;
   valueBoolean?: boolean;
-  _valueBoolean?: FhirPrimitiveElement;
+  _valueBoolean?: FhirR6PrimitiveElement;
   valueCanonical?: string;
-  _valueCanonical?: FhirPrimitiveElement;
+  _valueCanonical?: FhirR6PrimitiveElement;
   valueCode?: string;
-  _valueCode?: FhirPrimitiveElement;
+  _valueCode?: FhirR6PrimitiveElement;
   valueDate?: string;
-  _valueDate?: FhirPrimitiveElement;
+  _valueDate?: FhirR6PrimitiveElement;
   valueDateTime?: string;
-  _valueDateTime?: FhirPrimitiveElement;
+  _valueDateTime?: FhirR6PrimitiveElement;
   valueDecimal?: number;
-  _valueDecimal?: FhirPrimitiveElement;
+  _valueDecimal?: FhirR6PrimitiveElement;
   valueId?: string;
-  _valueId?: FhirPrimitiveElement;
+  _valueId?: FhirR6PrimitiveElement;
   valueInstant?: string;
-  _valueInstant?: FhirPrimitiveElement;
+  _valueInstant?: FhirR6PrimitiveElement;
   valueInteger?: number;
-  _valueInteger?: FhirPrimitiveElement;
+  _valueInteger?: FhirR6PrimitiveElement;
   valueInteger64?: string;
-  _valueInteger64?: FhirPrimitiveElement;
+  _valueInteger64?: FhirR6PrimitiveElement;
   valueMarkdown?: string;
-  _valueMarkdown?: FhirPrimitiveElement;
+  _valueMarkdown?: FhirR6PrimitiveElement;
   valueOid?: string;
-  _valueOid?: FhirPrimitiveElement;
+  _valueOid?: FhirR6PrimitiveElement;
   valuePositiveInt?: number;
-  _valuePositiveInt?: FhirPrimitiveElement;
+  _valuePositiveInt?: FhirR6PrimitiveElement;
   valueString?: string;
-  _valueString?: FhirPrimitiveElement;
+  _valueString?: FhirR6PrimitiveElement;
   valueTime?: string;
-  _valueTime?: FhirPrimitiveElement;
+  _valueTime?: FhirR6PrimitiveElement;
   valueUnsignedInt?: number;
-  _valueUnsignedInt?: FhirPrimitiveElement;
+  _valueUnsignedInt?: FhirR6PrimitiveElement;
   valueUri?: string;
-  _valueUri?: FhirPrimitiveElement;
+  _valueUri?: FhirR6PrimitiveElement;
   valueUrl?: string;
-  _valueUrl?: FhirPrimitiveElement;
+  _valueUrl?: FhirR6PrimitiveElement;
   valueUuid?: string;
-  _valueUuid?: FhirPrimitiveElement;
+  _valueUuid?: FhirR6PrimitiveElement;
   valueAddress?: Record<string, unknown>;
   valueAge?: FhirR6Quantity;
   valueAnnotation?: Record<string, unknown>;
@@ -610,14 +625,15 @@ export type FhirR6DoseLimit = FhirR6Element & {
   text?: string;
 } & (
   | { valueQuantity: FhirR6Quantity; valueInteger?: never; _valueInteger?: never; valueExpression?: never }
-  | { valueInteger: number; _valueInteger?: FhirPrimitiveElement; valueQuantity?: never; valueExpression?: never }
-  | { _valueInteger: FhirPrimitiveElement; valueInteger?: never; valueQuantity?: never; valueExpression?: never }
+  | { valueInteger: number; _valueInteger?: FhirR6PrimitiveElement; valueQuantity?: never; valueExpression?: never }
+  | { _valueInteger: FhirR6PrimitiveElement; valueInteger?: never; valueQuantity?: never; valueExpression?: never }
   | { valueExpression: FhirExpression; valueQuantity?: never; valueInteger?: never; _valueInteger?: never }
 );
 
 export interface FhirR6DosageSafety extends FhirR6BackboneElement {
   doseLimit?: FhirR6DoseLimit[];
   ifExceeded?: string;
+  _ifExceeded?: FhirR6PrimitiveElement;
 }
 
 /** R6 Reference carries standard Reference.identifier and Element metadata. */
@@ -644,8 +660,14 @@ export interface FhirReference extends FhirElement {
 }
 
 /** Native R6 Reference annotations use native R6 Extension values. */
-export interface FhirR6Reference extends Omit<FhirReference, "extension" | "identifier">, FhirR6Element {
-  identifier?: Omit<NonNullable<FhirReference["identifier"]>, "extension" | "assigner"> & FhirR6Element & {
+export interface FhirR6Reference extends Omit<FhirReference, "extension" | "identifier" | "_reference" | "_type" | "_display">, FhirR6Element {
+  _reference?: FhirR6PrimitiveElement;
+  _type?: FhirR6PrimitiveElement;
+  _display?: FhirR6PrimitiveElement;
+  identifier?: Omit<NonNullable<FhirReference["identifier"]>, "extension" | "assigner" | "_use" | "_system" | "_value"> & FhirR6Element & {
+    _use?: FhirR6PrimitiveElement;
+    _system?: FhirR6PrimitiveElement;
+    _value?: FhirR6PrimitiveElement;
     assigner?: FhirR6Reference;
   };
 }
@@ -664,7 +686,9 @@ export interface FhirR6CodeableReference extends Omit<FhirCodeableReference, "ex
 /** FHIR R6 draft Dosage: no R5 sequence/legacy maxima/PRN alias. */
 export interface FhirR6Dosage extends Omit<FhirDosage,
   "sequence" | "_sequence" | "site" | "maxDosePerPeriod" | "maxDosePerAdministration" |
-  "maxDosePerLifetime" | "doseAndRate" | "timing" | "extension" | "modifierExtension"> {
+  "maxDosePerLifetime" | "doseAndRate" | "timing" | "extension" | "modifierExtension" | "_text" | "_asNeeded"> {
+  _text?: FhirR6PrimitiveElement;
+  _asNeeded?: FhirR6PrimitiveElement;
   extension?: FhirR6Extension[];
   modifierExtension?: FhirR6Extension[];
   timing?: FhirR6Timing;
@@ -688,7 +712,7 @@ export interface FhirR6DosageStep extends FhirR6Element {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
-  _count?: FhirPrimitiveElement;
+  _count?: FhirR6PrimitiveElement;
   component: FhirR6Dosage[];
   safety?: FhirR6DosageSafety;
 }
@@ -696,7 +720,7 @@ export interface FhirR6DosageStep extends FhirR6Element {
 /** Official FHIR R6 Snapshot 1 DosageInstruction course container. */
 export interface FhirR6DosageInstruction extends FhirR6BackboneElement {
   renderedInstruction?: string;
-  _renderedInstruction?: FhirPrimitiveElement;
+  _renderedInstruction?: FhirR6PrimitiveElement;
   repeatCycle?: FhirR6Quantity;
   step?: FhirR6DosageStep[];
   safety?: FhirR6DosageSafety;
@@ -756,13 +780,13 @@ export interface EzCourseStep extends FhirR6BackboneElement {
   start?: FhirR6RelativeTime;
   end?: FhirR6RelativeTime;
   count?: number;
-  _count?: FhirPrimitiveElement;
+  _count?: FhirR6PrimitiveElement;
   safety?: FhirR6DosageSafety;
 }
 
 export interface EzCourseMetadata extends FhirR6BackboneElement {
   renderedInstruction?: string;
-  _renderedInstruction?: FhirPrimitiveElement;
+  _renderedInstruction?: FhirR6PrimitiveElement;
   repeatCycle?: FhirR6Quantity;
   safety?: FhirR6DosageSafety;
   step?: EzCourseStep[];
@@ -1070,7 +1094,7 @@ export interface AdviceFrame {
   origin?: "grammar" | "semantic-resolver";
   confidence?: number;
   coding?: FhirCoding;
-  /** Unrecognized imported action children, retained as non-executable FHIR data. */
+  /** Imported action child annotations and unrecognized children, retained as non-executable FHIR data. */
   sourceExtensions?: FhirExtension[];
 }
 

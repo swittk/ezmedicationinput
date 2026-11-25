@@ -6,6 +6,7 @@ import {
   FhirExtension
 } from "./types";
 import { cloneStructuredValue } from "./stable-structure";
+import { mergeTranslationPrimitiveElement } from "./fhir-translations";
 
 const SNOMED_SYSTEM = "http://snomed.info/sct";
 
@@ -54,7 +55,10 @@ function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | un
   if (!coding?.code) {
     return undefined;
   }
-  return coding.system !== undefined ? coding : { ...coding, system: SNOMED_SYSTEM };
+  if (!coding.i18n) return coding.system !== undefined ? coding : { ...coding, system: SNOMED_SYSTEM };
+  const { i18n, ...wire } = coding as FhirCoding;
+  return { ...wire, system: coding.system ?? SNOMED_SYSTEM,
+    _display: mergeTranslationPrimitiveElement(wire._display, i18n) };
 }
 
 function firstCodingWithCode(concept: FhirCodeableConcept | undefined): FhirCoding | undefined {

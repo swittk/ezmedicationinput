@@ -11,7 +11,7 @@ import { FhirDayOfWeek, FhirDosage, FhirExtension, FhirR6Extension, FhirQuantity
 
 /** R5 tim-8 requires the lower-count Element beside countMax, not a numeric
  * minimum. Preserve authored companions; an absent minimum remains unknown. */
-export function withR5CountMinimum<T extends Pick<FhirTimingRepeat, "count" | "countMax" | "_count">>(repeat: T): T {
+export function withR5CountMinimum<T extends Pick<FhirR6TimingRepeat, "count" | "countMax" | "_count">>(repeat: T): T {
   if (repeat.countMax === undefined || repeat.count !== undefined || repeat._count !== undefined) return repeat;
   return { ...repeat, _count: { extension: [{
     url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
@@ -19,7 +19,7 @@ export function withR5CountMinimum<T extends Pick<FhirTimingRepeat, "count" | "c
 }
 
 /** R5 tim-7 requires a lower-duration Element, without inventing a numeric bound. */
-export function withR5DurationMinimum<T extends Pick<FhirTimingRepeat, "duration" | "durationMax" | "_duration">>(repeat: T): T {
+export function withR5DurationMinimum<T extends Pick<FhirR6TimingRepeat, "duration" | "durationMax" | "_duration">>(repeat: T): T {
   if (repeat.durationMax === undefined || repeat.duration !== undefined || repeat._duration !== undefined) return repeat;
   return { ...repeat, _duration: { extension: [{
     url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",
@@ -27,7 +27,7 @@ export function withR5DurationMinimum<T extends Pick<FhirTimingRepeat, "duration
 }
 
 /** R5 tim-6 requires a lower-period Element, without inventing a numeric cadence. */
-export function withR5PeriodMinimum<T extends Pick<FhirTimingRepeat, "period" | "periodMax" | "_period">>(repeat: T): T {
+export function withR5PeriodMinimum<T extends Pick<FhirR6TimingRepeat, "period" | "periodMax" | "_period">>(repeat: T): T {
   if (repeat.periodMax === undefined || repeat.period !== undefined || repeat._period !== undefined) return repeat;
   return { ...repeat, _period: { extension: [{
     url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown",

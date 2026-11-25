@@ -424,13 +424,14 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   }
   // Extension-only primitive elements also participate in FHIR tim-10.
   // Keep their annotations in place and use the established clock carrier.
-  const mixed = Boolean((repeat.when?.length || repeat._when?.some(Boolean)) && clocks?.length);
+  const eventAnchored = Boolean(repeat.when?.length || repeat._when?.some(Boolean));
+  const mixed = eventAnchored && Boolean(clocks?.length);
   if (!mixed && !repeat.extension?.length)
     return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   let markers: FhirR6Extension[] | undefined;
   const kept: FhirR6Extension[] = [];
   let bridgeIndex = 0;
-  let bridgeMetadata: FhirTimingRepeat["_timeOfDay"];
+  let bridgeMetadata: FhirR6TimingRepeat["_timeOfDay"];
   let bridgeClocks: FhirTimingRepeat["timeOfDay"];
   let bridgeMatches = wireSource !== undefined && wireSource.timeOfDay === undefined;
   for (const marker of repeat.extension ?? []) {
@@ -447,7 +448,7 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
   if (!mixed && !markers) return restorePositions ? { ...repeat, timeOfDay: clocks } : repeat;
   const unchangedBridge = bridgeMatches && bridgeIndex === (clocks?.length ?? 0);
   if (markers && unchangedBridge &&
-      (mixed || (target === "r5" || repeat.when?.length || repeat._when?.some(Boolean)) && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
+      (mixed || (target === "r5" || eventAnchored) && bridgeClocks && bridgeClocks.length > bridgeIndex)) {
     // Keep metadata-only positions in the authored bridge for R5 or when
     // event anchors exclude core clocks. Other R6 bridges can use core arrays.
     // The native writer supplied timeOfDay temporarily for projection.
@@ -455,6 +456,13 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
     delete output.timeOfDay;
     // With no authored core clock array, _timeOfDay is independent source
     // metadata; the unchanged bridge owns only its own _valueTime annotations.
+    if (eventAnchored && repeat._timeOfDay !== undefined) {
+      output.extension = [...(repeat.extension ?? []), {
+        url: DOSAGE_RECONCILIATION_SOURCE_URL,
+        extension: [retainField("_timeOfDay", repeat._timeOfDay)],
+      }];
+      delete output._timeOfDay;
+    }
     return output;
   }
   if (markers) kept.push({ url: DOSAGE_RECONCILIATION_SOURCE_URL, extension: markers });
@@ -463,7 +471,7 @@ export function projectTimingClocks<T extends Pick<FhirR6TimingRepeat, "timeOfDa
     for (let index = 0; index < primitiveCount; index++) {
       const metadata = repeat._timeOfDay?.[index];
       if (index >= clocks!.length && !metadata) continue;
-      const marker: FhirExtension = { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL };
+      const marker: FhirR6Extension = { url: TIMING_ADDITIONAL_CLOCK_EXTENSION_URL };
       if (clocks![index] != null) marker.valueTime = clocks![index]!;
       if (metadata) marker._valueTime = metadata;
       kept.push(marker);

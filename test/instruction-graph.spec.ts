@@ -8364,3 +8364,26 @@ it.each([false, true])("round76 retains every saved point Time and its explicit 
       directional ? time === "08:00" ? AdviceRelation.Before : AdviceRelation.After : undefined]));
   expect(JSON.stringify(row)).toBe(before);
 });
+
+describe("round76 action source-text metadata", () => {
+  it.each(["Apply one patch", "Apply the replacement patch", ""])(
+    "retains annotated action source text with its current value: %s", text => {
+    const graph = { sourceText: "Apply one patch", actions: parseInstructionActions("Apply one patch") };
+    const wire = JSON.parse(JSON.stringify(buildInstructionGraphExtension(graph)!)) as FhirExtension;
+    const field = wire.extension!.find(child => child.url === "action")!.extension!.find(child => child.url === "sourceText")!;
+    const primitive = { id: "source-string", extension: [{ url: "urn:clinic:patch-source", valueString: "retain" }] };
+    field.id = "source-field";
+    field._valueString = primitive;
+    const before = JSON.parse(JSON.stringify(wire));
+    const decoded = parseInstructionGraphExtension([wire])!;
+    const edited = { ...decoded, actions: decoded.actions.map(action => ({ ...action, sourceText: text })) };
+    let encoded = buildInstructionGraphExtension(edited)!;
+    for (let save = 0; save < 2; save++) {
+      const fields = encoded.extension!.find(child => child.url === "action")!.extension!.filter(child => child.url === "sourceText");
+      expect(fields).toEqual([{ url: "sourceText", valueString: text, id: "source-field", _valueString: primitive }]);
+      expect(parseInstructionGraphExtension([encoded])!.actions[0].sourceText).toBe(text);
+      encoded = buildInstructionGraphExtension(parseInstructionGraphExtension([JSON.parse(JSON.stringify(encoded))])!)!;
+    }
+    expect(wire).toEqual(before);
+  });
+});

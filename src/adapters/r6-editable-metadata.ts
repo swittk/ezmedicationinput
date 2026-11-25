@@ -114,11 +114,21 @@ function draftCompletionBoundary(boundary: FhirR6RelativeTime | undefined): obje
 function draftMemberPhase(value: FhirR6Dosage): object | undefined {
   const marker = value.modifierExtension?.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL);
   if (!marker) return undefined;
-  if (marker.valueQuantity) return { origin: draftCompletionQuantity(marker.valueQuantity) };
-  const fields = decodeR6SourceMetadata(marker, "step");
+  const origin = draftCompletionQuantity(marker.valueQuantity);
+  const fields = origin ? undefined : decodeR6SourceMetadata(marker, "step");
   const start = draftCompletionBoundary(fields?.start as FhirR6RelativeTime | undefined);
   const end = draftCompletionBoundary(fields?.end as FhirR6RelativeTime | undefined);
-  return start || end ? { start, end } : undefined;
+  let sourceMember: number | undefined;
+  const predecessors: number[] = [];
+  for (const child of marker.extension ?? []) {
+    if (child.url === "sourceMember" && child.valueInteger !== undefined) sourceMember = child.valueInteger;
+    if (child.url === "predecessor" && child.valueInteger !== undefined) predecessors.push(child.valueInteger);
+  }
+  // Typed dependency identity can close a predecessor's cadence even when
+  // the member's own start/end remain unchanged. Child annotations do not.
+  return origin || start || end || sourceMember !== undefined
+    ? { origin, start, end, sourceMember, predecessors: sourceMember !== undefined ? predecessors : undefined }
+    : undefined;
 }
 function draftAnchoredLength(dosage: FhirR6Dosage): object | undefined {
   const length = getAnchoredCourseDuration(dosage);

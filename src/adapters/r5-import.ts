@@ -726,6 +726,7 @@ function reconcileNativeCompactCourse(
   let historicalMembers: Map<number, CanonicalAdministration | null> | undefined;
   let historicalStages: Map<number, CanonicalStage> | undefined;
   let historicalHeader: Omit<FhirR6DosageInstruction, "step"> | undefined;
+  let historicalInstruction: string | undefined;
   if (historicalRows) {
     const historicalCarriers = new Set<number>();
     const restored = courseFromR5(historicalRows, undefined, undefined, undefined, sourceContext, historicalCarriers);
@@ -734,6 +735,7 @@ function reconcileNativeCompactCourse(
     const { renderedInstruction: _historicalInstruction, ...fields } =
       restored.provenance?.data ?? {};
     historicalHeader = fields;
+    historicalInstruction = restored.instruction;
     // Active compact header fields may replace the historical header. Its
     // inactive row annotations still belong to these sources independently.
     for (const marker of historicalHeader.extension ?? [])
@@ -1139,7 +1141,11 @@ function reconcileNativeCompactCourse(
   };
   const inheritedPrimitive = currentHeader._renderedInstruction;
   const replacementPrimitive = (courseEdits as Omit<FhirR6DosageInstruction, "step">)._renderedInstruction;
-  if (savedInstruction !== undefined && instruction !== savedInstruction &&
+  // A mixed course cannot replay its historical subset's whole instruction,
+  // but that wording still owns its inherited translation companion.
+  const inheritedInstruction = savedInstruction ??
+    (header?.course?._renderedInstruction === undefined ? historicalInstruction : undefined);
+  if (inheritedInstruction !== undefined && instruction !== inheritedInstruction &&
       (replacementPrimitive === undefined ||
         equalStructuredValues(replacementPrimitive,
           header?.course?._renderedInstruction ?? historicalHeader?._renderedInstruction)) &&
@@ -1148,7 +1154,7 @@ function reconcileNativeCompactCourse(
     // Only a different supplied companion is a replacement. Preserve the old
     // wording with that entire companion before retiring its active translations.
     const original: Omit<FhirR6DosageInstruction, "step"> = {
-      renderedInstruction: savedInstruction, _renderedInstruction: inheritedPrimitive,
+      renderedInstruction: inheritedInstruction, _renderedInstruction: inheritedPrimitive,
     };
     sources.push({ url: DOSAGE_DETAILS_R5_URL, extension: encodeR5RetainedFields({ course: original }) });
   }
