@@ -1,7 +1,7 @@
 /** Short paired hot-path performance diagnostic.
  *
  * Usage: node --expose-gc bench/public-api.mjs --baseline /path/to/dist/index.js
- *   [--only regex | --all] [--rounds 6] [--target-ms 8] [--smoke] [--json report.json]
+ *   [--only regex | --all] [--meaningful] [--rounds 6] [--target-ms 8] [--smoke] [--json report.json]
  *
  * The default covers representative parse, format, FHIR, scheduling, supply and
  * suggestion workflows. --only selects a suspect workflow; --all opts into the
@@ -10,8 +10,11 @@
  *
  * Judge absolute latency, frequency, spread and reproducibility, not an arbitrary
  * relative cutoff. Investigate significant common-workload regressions with a
- * focused measurement. Timing alone never sets a failing exit code; unavailable
- * scenarios and clinical correctness errors still do.
+ * focused measurement. Meaningful workloads retain the 4% limit. The indicative
+ * 0.5 ms boundary avoids mechanical failures for tiny noisy calls; those still
+ * need absolute-time and call-volume review. Use --meaningful with --only when a
+ * frequently called fast workflow has meaningful cumulative impact. Unavailable
+ * scenarios and clinical correctness errors also fail.
  */
 import { performance } from "node:perf_hooks";
 import { readFileSync, writeFileSync, renameSync, realpathSync } from "node:fs";
@@ -54,6 +57,9 @@ const baselineEntry = realpathSync(resolve(baselinePath));
 const candidateEntry = realpathSync(fileURLToPath(new URL("../dist/index.js", import.meta.url)));
 if (baselineEntry === candidateEntry)
   throw new Error("--baseline must be a separate built module, not the candidate entrypoint");
+const maxRegression = 0.04;
+const indicativeMeaningfulUs = 500;
+const forceMeaningful = argv.includes("--meaningful");
 const outputPath = value("--json", undefined);
 const report = {
   mode: smoke ? "smoke" : "timed",
@@ -77,6 +83,13 @@ function checkpoint(complete = false) {
   const checked = report.cases.filter(c => c.smoke);
   report.timedComparisons = timed.length;
   report.smokeComparisons = checked.length;
+  report.meaningfulRegressions = 0;
+  report.fastTimingReview = 0;
+  for (const result of timed) {
+    if (!result.overRegressionLimit) continue;
+    if (result.meaningfulTime) report.meaningfulRegressions++;
+    else report.fastTimingReview++;
+  }
   report.nonEquivalent = report.cases.filter((c) => c.equivalentWork === false).length;
   report.measuredPublicFunctions = new Set([
     ...timed.map(c => c.api), ...report.newApiMeasurements.map(c => c.api),
@@ -586,6 +599,7 @@ Object.assign(report, {
   newApis: [...newApis],
   methodology:
     "Balanced alternating paired warm batches; median log paired ratio; helper exports captured before timing; no cross-domain averaging",
+  meaningfulRegressionLimit: 1 + maxRegression,
   filter: filter.source,
   selectedComparisons: cases.filter(
     (test) => filter.test(test.name) && typeof baseline[test.api] === "function"
@@ -1022,13 +1036,16 @@ for (const test of cases) {
       samples: { baselineUs: a, candidateUs: b },
       changePercent: (ratio - 1) * 100,
       changeUs: current - old,
+      overRegressionLimit: equivalentWork && ratio > 1 + maxRegression,
+      meaningfulTime: forceMeaningful || Math.max(old, current) >= indicativeMeaningfulUs,
       ...equivalence,
       baselineSpread: (Math.max(...a) - Math.min(...a)) / old,
       candidateSpread: (Math.max(...b) - Math.min(...b)) / current,
     };
     report.cases.push(result);
     console.log(
-      (equivalentWork ? "TIMING " : "DIFFERENT ") + test.name + ": " +
+      (!equivalentWork ? "DIFFERENT " : result.overRegressionLimit
+        ? result.meaningfulTime ? "REGRESSION " : "REVIEW " : "TIMING ") + test.name + ": " +
       old.toFixed(2) + " -> " + current.toFixed(2) + " us (" +
       ratio.toFixed(2) + "x, " + result.changePercent.toFixed(1) + "%; delta " +
       result.changeUs.toFixed(2) + " us; spread " +
@@ -1111,9 +1128,11 @@ console.log(
     smokeComparisons: report.smokeComparisons,
     measuredPublicFunctions: report.measuredPublicFunctions,
     smokePublicFunctions: report.smokePublicFunctions,
+    meaningfulRegressions: report.meaningfulRegressions,
+    fastTimingReview: report.fastTimingReview,
     unavailable: report.unavailable,
     errors: report.errors,
   })
 );
-console.log("Diagnostic only: judge absolute latency, workload frequency, spread and reproducibility; investigate significant regressions with --only.");
-if (report.errors.length || report.unavailable.length) process.exitCode = 1;
+console.log("Meaningful workloads retain the 4% limit; selectively confirm suspects with --only. REVIEW marks fast timings needing absolute-latency, frequency and noise judgment, not automatic acceptance; use --meaningful when cumulative impact warrants the limit.");
+if (report.errors.length || report.unavailable.length || report.meaningfulRegressions) process.exitCode = 1;

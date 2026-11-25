@@ -344,8 +344,10 @@ If learned behavior is added later, it should be:
 - Performance review (updated by the owner on 2026-11-24): use short paired
   measurements of representative parse, format, FHIR, schedule, supply and
   suggestion workflows. Judge absolute latency, usage frequency, CPU spread
-  and reproducibility. Investigate and fix significant real regressions;
-  a fixed relative percentage is not an acceptance rule.
+  and reproducibility. Reproducible regressions over 4% on meaningful-time
+  workloads fail acceptance. For tiny routines (indicatively below 0.5 ms),
+  judge absolute change and cumulative call-volume impact instead of mechanical
+  percentage noise; the fast-call category is not a blanket exemption.
 - Original audit blocker (resolved in the later direct-adapter checkpoint):
   native-to-R5 used to construct R6 first. Complete R5 and R6 sibling
   projection/import now independently own their source-compatibility codecs.
@@ -380,10 +382,12 @@ language test covers registration and inheritance without a second parser.
 
 The public API benchmark defaults to one short representative diagnostic,
 including parse, format, FHIR interchange, scheduling, supply and suggestions.
-It reports absolute latency, paired ratios and spread without a timing-based
-exit failure. Use --only for a suspect workflow; --all retains the optional
-complete scenario inventory. No exhaustive sweep or confirmation run is
-mandatory. Compare against a relevant built baseline and investigate meaningful
+It reports absolute latency, paired ratios and spread. Meaningful-work regressions
+over 4% fail; smaller fast-call timings are marked for practical latency and
+frequency review, not automatically accepted. Use --only for a suspect workflow
+and --meaningful if a fast workflow has meaningful cumulative impact. --all
+retains the optional complete inventory. No exhaustive sweep or fixed confirmation
+protocol is mandatory. Compare against a relevant built baseline and investigate
 reproducible regressions without treating small relative noise as a blocker.
 
 
