@@ -55,9 +55,11 @@ function bodySiteCodingToFhir(coding: BodySiteCode | undefined): FhirCoding | un
   if (!coding?.code) {
     return undefined;
   }
-  if (!coding.i18n) return coding.system !== undefined ? coding : { ...coding, system: SNOMED_SYSTEM };
+  if (!coding.i18n) return coding.system !== undefined ? coding : {
+    ...coding, system: SNOMED_SYSTEM, code: coding.code, display: coding.display,
+  };
   const { i18n, ...wire } = coding as FhirCoding;
-  return { ...wire, system: coding.system ?? SNOMED_SYSTEM,
+  return { ...wire, system: coding.system ?? SNOMED_SYSTEM, code: coding.code, display: coding.display,
     _display: mergeTranslationPrimitiveElement(wire._display, i18n) };
 }
 

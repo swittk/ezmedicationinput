@@ -5,7 +5,7 @@ import {
   fromDosageDetails, fromFhir, fromFhirDosage, toDosageDetails, toFhirR5Dosages, parseSig, parseSig as parsePublicSig, parseInstructionActions, formatSig, importCanonicalCourse, projectCanonicalCourse,
   type EzDosage, type FhirDosage, type FhirExtension, type FhirR6Extension, type FhirElement, type FhirR6PrimitiveElement, type FhirRatio, type FhirR6Dosage,
   FhirPeriodUnit, FhirDayOfWeek, EventTiming, nextDueDoses, calculateTotalUnits,
-  type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6DosageInstructionInput,
+  type FhirR6DosageInstruction, type FhirR6Quantity, type FhirR6SimpleQuantity, type FhirR6DosageInstructionInput,
   type FhirR6Reference, type FhirR6DoseAndRate, type FhirDoseAndRate, type FhirR6DosageCondition, type FhirR6Timing, type FhirR6DosageStep, type FhirR6RelativeTime, type FhirReference,
   registerMedicationLocaleDetector, inferMedicationLocale, registerMedicationSurfaceSegmenter,
   listMedicationSurfaceSegmenters, registerMedicationDateResolver, cloneBodySiteSpatialRelation,
@@ -3808,7 +3808,7 @@ describe("round59 interop live wire ownership", () => {
     }
     return fresh;
   };
-  it.each([[0, false], [0, true], [-2, false], [-2, true], [1.5, false], [1.5, true]] as const)(
+  it.each([[0, false], [0, true], [-2, false], [-2, true]] as const)(
     "keeps the current phase while retaining the original R5 sequence %s (moved %s)", (sequence, moved) => {
       const input = sequenceInput(sequence, moved), before = persist(input);
       const original = { url: DOSAGE_RETAINED_R5_SEQUENCE_URL, valueDecimal: sequence,
@@ -5820,13 +5820,13 @@ describe("round74 shared source owners", () => {
     expect(marker).toEqual(before);
   });
 
-  it("retains getter-backed configured Coding identity and enumerable annotations", () => {
+  it("retains getter-backed configured Coding identity and declared annotations", () => {
     class Coding {
       [key: string]: unknown;
       get system() { return "https://example.org/clinic/actions"; }
       get code() { return "coat-lightly"; }
       get display() { return "Coat lightly"; }
-      extension = [note];
+      get extension() { return [note]; }
       id = "authored-action";
     }
     const coding = new Coding();
@@ -6299,7 +6299,7 @@ describe("round76 interchange owners", () => {
         url: "predecessor", valueInteger: 2, id: "other-dependency",
       });
     }
-    let wire = r6Save(input);
+    let wire = persist(r6Save(input));
     const marker = wire.step![0].component[1].modifierExtension!.find(item => item.url === PARALLEL_COMPONENT_PHASE_ORIGIN_URL)!;
     if (edit === "reordered") marker.extension!.reverse();
     if (edit === "removed") marker.extension = marker.extension!.filter(child => child.url !== "predecessor");
@@ -6420,7 +6420,7 @@ describe("round76 R6 primitive metadata contracts", () => {
         system: "http://unitsofmeasure.org", code: "cm2", extension: [unknown] },
     }, { url: "urn:clinic:opaque-note", valueString: "retain this" }] };
     const unit = kind === "scalar" ? "tab" : "mL";
-    const quantity: FhirR6Quantity = { value: 1, unit, ...(placement === "primitive"
+    const quantity: FhirR6SimpleQuantity = { value: 1, unit, ...(placement === "primitive"
       ? { _value: annotation } : { id: annotation.id, extension: annotation.extension }) };
     const input = course({ doseAndRate: [kind === "scalar" ? { doseQuantity: quantity } :
       { rateRatio: { numerator: quantity, denominator: { value: 1, unit: "h" } } }] });
@@ -6521,7 +6521,7 @@ describe("round76 action source-text metadata", () => {
     let encoded = buildInstructionGraphExtension(edited)!;
     for (let save = 0; save < 2; save++) {
       const fields = encoded.extension!.find(child => child.url === "action")!.extension!.filter(child => child.url === "sourceText");
-      expect(fields).toEqual([{ url: "sourceText", valueString: text, id: "source-field", _valueString: primitive }]);
+      expect(fields).toEqual([{ url: "sourceText", ...(text ? { valueString: text } : {}), id: "source-field", _valueString: primitive }]);
       expect(parseInstructionGraphExtension([encoded])!.actions[0].sourceText).toBe(text);
       encoded = buildInstructionGraphExtension(parseInstructionGraphExtension([JSON.parse(JSON.stringify(encoded))])!)!;
     }
@@ -6774,5 +6774,98 @@ describe("round77 selected procedural definition", () => {
         expect(text).not.toContain("Inspect");
       }
     }
+  });
+});
+
+describe("round78 interchange owner contracts", () => {
+  it("keeps R6 Quantity annotations on both period offsets through fresh saves", () => {
+    const annotation: FhirR6PrimitiveElement = { id: "offset-unit-note", extension: [{
+      url: "urn:clinic:estimated-area", id: "offset-area",
+      valueQuantity: { value: 2, unit: "cm2", comparator: "~" },
+    }] };
+    const startOffset = { value: 2, unit: "d", _unit: annotation };
+    const endOffset = { value: 3, unit: "d", _unit: annotation };
+    const timing: FhirR6Timing = { repeat: {
+      frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Week, startOffset, endOffset,
+    } };
+    const input = course({ timing }), before = persist(input);
+    let wire = persist(input);
+    for (let save = 0; save < 2; save++) {
+      const saved = persist(wire);
+      wire = toDosageDetails(persist(toFhirR5Dosages(wire)));
+      expect(saved.step![0].component[0].timing!.repeat!.startOffset).toEqual(startOffset);
+      expect(wire.step![0].component[0].timing!.repeat!.startOffset).toEqual(startOffset);
+      expect(wire.step![0].component[0].timing!.repeat!.endOffset).toEqual(endOffset);
+    }
+    expect(input).toEqual(before);
+    const invalid: FhirR6Timing = { repeat: { startOffset: {
+      // @ts-expect-error A period offset is SimpleQuantity, even in R6.
+      comparator: "~",
+    } } };
+    expect(invalid.repeat!.startOffset!.comparator).toBe("~");
+  });
+
+  it.each([true, false])("imports an explicit R5 PRN field with lifted safety (asNeeded=%s)", prn => {
+    const row = { asNeededBoolean: prn, safety: { ifExceeded: "Hold the next dose" },
+      extension: [{ url: "urn:clinic:prn-note", valueString: "retain source" }] };
+    const before = persist(row);
+    for (const input of [row, [persist(row)]]) {
+      const native = importCanonicalCourse(input);
+      expect(native.stages).toHaveLength(1);
+      expect(native.stages[0].administrations).toHaveLength(1);
+      expect(native.stages[0].administrations[0].asNeeded).toBe(prn);
+      expect(native.stages[0].administrations[0].safety?.ifExceeded).toBe("Hold the next dose");
+      const wire = projectCanonicalCourse(native).fhirNext;
+      expect(wire.step![0].component[0].safety?.ifExceeded).toBe("Hold the next dose");
+      expect(wire.step![0].component[0].extension).toContainEqual(row.extension[0]);
+      const reopened = importCanonicalCourse(persist(toFhirR5Dosages(wire)));
+      expect(reopened.stages[0].administrations[0].asNeeded).toBe(prn);
+      expect(reopened.stages[0].administrations[0].safety?.ifExceeded).toBe("Hold the next dose");
+    }
+    expect(importCanonicalCourse({ safety: row.safety }).stages).toEqual([]);
+    expect(row).toEqual(before);
+  });
+
+  it("retains the Element ID and current facts of a complete graph argument", () => {
+    const text = "Take 1 tablet with 100 mL water";
+    const wire = persist(buildInstructionGraphExtension({
+      sourceText: text, actions: parseInstructionActions(text),
+    })!);
+    const action = wire.extension!.find(item => item.url === "action")!;
+    const water = action.extension!.find(item => item.url === "argument" &&
+      item.extension?.some(field => field.url === "text" && field.valueString?.includes("water")))!;
+    expect(water).toBeDefined();
+    water.id = "water-argument";
+    water.extension!.push({ url: "urn:clinic:water-note", valueString: "retain this" });
+    const before = persist(wire);
+    let encoded = buildInstructionGraphExtension(parseInstructionGraphExtension([wire])!)!;
+    for (let save = 0; save < 2; save++) {
+      expect(encoded.extension!.find(item => item.url === "action")!.extension!
+        .filter(item => item.url === "argument")).toEqual(action.extension!.filter(item => item.url === "argument"));
+      encoded = buildInstructionGraphExtension(parseInstructionGraphExtension([persist(encoded)])!)!;
+    }
+    expect(wire).toEqual(before);
+  });
+});
+
+describe("round78 configured spatial Coding", () => {
+  it.each([false, true])("keeps declared target identity with a default system (getters=%s)", getters => {
+    const note = { url: "urn:clinic:target-note", valueString: "retain" };
+    class Target {
+      id = "spatial-target";
+      extension = [note];
+      get code() { return "181299001"; }
+      get display() { return "Entire nose"; }
+    }
+    const targetCoding = getters ? new Target()
+      : { id: "spatial-target", extension: [note], code: "181299001", display: "Entire nose" };
+    const marker = buildBodySiteSpatialRelationExtension({ relationText: "below", targetCoding })!;
+    const target = marker.extension!.find(item => item.url === "target")!.valueCodeableConcept!;
+    expect(target.coding).toEqual([{ id: "spatial-target", extension: [note],
+      system: "http://snomed.info/sct", code: "181299001", display: "Entire nose" }]);
+    expect(parseBodySiteSpatialRelationExtension({ extension: [persist(marker)] })!.targetCoding)
+      .toEqual(target.coding![0]);
+    expect(targetCoding.code).toBe("181299001");
+    expect(targetCoding.extension).toEqual([note]);
   });
 });

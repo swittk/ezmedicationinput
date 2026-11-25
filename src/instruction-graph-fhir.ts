@@ -228,7 +228,7 @@ function buildArgumentExtension(argument: AdviceArgument): FhirExtension {
   }
   add(nested, sourceRelation);
   if (argument.sourceExtensions) nested.push(...argument.sourceExtensions);
-  return { url: "argument", extension: nested };
+  return { url: "argument", ...(argument.sourceId !== undefined ? { id: argument.sourceId } : {}), extension: nested };
 }
 
 function buildActionExtension(frame: AdviceFrame): FhirExtension {
@@ -295,9 +295,10 @@ function buildActionExtension(frame: AdviceFrame): FhirExtension {
   for (const argument of frame.args) nested.push(buildArgumentExtension(argument));
   add(nested, sourceRelation);
   if (frame.sourceExtensions) for (const field of frame.sourceExtensions) {
-    if (field.url === "sourceText")
-      nested[sourceTextIndex] = { ...field, valueString: frame.sourceText };
-    else nested.push(field);
+    if (field.url === "sourceText") {
+      const { valueString: _sourceText, ...annotations } = field;
+      nested[sourceTextIndex] = { ...annotations, ...(frame.sourceText ? { valueString: frame.sourceText } : {}) };
+    } else nested.push(field);
   }
   return { url: "action", extension: nested };
 }
@@ -470,6 +471,7 @@ function parseArgumentExtension(extension:FhirExtension):AdviceArgument|undefine
     relation:firstRelation(relationCoding?.valueCoding,relation?.valueCode),
     normalized:normalized?.valueString,conceptId:concept?.valueString,
     coding:readCoding(coding?.valueCoding),codings};
+  if(extension.id!==undefined)result.sourceId=extension.id;
   if(relationCoding?.valueCoding)result.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(components.length)result.components=components;
   if(sourceExtensions)result.sourceExtensions=sourceExtensions;
@@ -594,7 +596,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
     }
     default:(sourceExtensions??=[]).push(field);break;
   }
-  if(!lemma?.valueString||start?.valueInteger===undefined||end?.valueInteger===undefined||source?.valueString===undefined||!force?.valueCode)return undefined;
+  if(!lemma?.valueString||start?.valueInteger===undefined||end?.valueInteger===undefined||(!source||(source.valueString===undefined&&source._valueString===undefined))||!force?.valueCode)return undefined;
   if(legacyFallback?.valueString||legacyActivities.length){
     locales??={};locales.th={...locales.th,fallbackObject:legacyFallback?.valueString??locales.th?.fallbackObject,
       suppressActivityConcepts:legacyActivities.length?legacyActivities:locales.th?.suppressActivityConcepts};
@@ -606,7 +608,7 @@ function parseActionExtension(extension:FhirExtension):AdviceFrame|undefined {
     predicate:{lemma:lemma.valueString,display:display?.valueString,i18n:translations,
       semanticClass:semanticClass?.valueString,realizer:realizer?.valueCode as AdviceFrame["predicate"]["realizer"],
       realizerConfig:locales?{locales}:undefined,codings,...(semanticComponents.length?{semanticComponents}:{})},
-    args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString,sequenceIndex:sequence?.valueInteger};
+    args,span:{start:start.valueInteger,end:end.valueInteger},sourceText:source.valueString??"",sequenceIndex:sequence?.valueInteger};
   if(relationCoding?.valueCoding)frame.sourceRelationCoding=readCoding(relationCoding.valueCoding);
   if(sourceExtensions)frame.sourceExtensions=sourceExtensions;
   return frame;

@@ -186,13 +186,15 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   for (const key in source) {
     const value = source[key];
     switch (key) {
-      case "extension": result.extension = coding.extension?.map(extension => ({ ...extension })); break;
+      case "extension": break;
       case "_system": case "_version": case "_code": case "_display": case "_userSelected": case "i18n":
         fields[key] = value ? { ...(value as object) } : value;
         break;
       default: result[key] = value; break;
     }
   }
+  const extensions = coding.extension;
+  if (extensions !== undefined) result.extension = extensions.map(extension => ({ ...extension }));
   // Declared Coding identities can be prototype getters on a registered provider.
   for (const key of ["id", "system", "version", "code", "display", "userSelected"] as const) {
     if (fields[key] !== undefined) continue;

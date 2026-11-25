@@ -87,6 +87,7 @@ function cloneCoding(coding: FhirCoding | undefined): FhirCoding | undefined {
   // Preserve authored Coding metadata without descriptor-based spread overrides.
   const copy = Object.assign({}, coding);
   copy.system = coding.system;
+  copy.version = coding.version;
   copy.code = coding.code;
   copy.display = coding.display;
   copy.extension = cloneStructuredValue(coding.extension);

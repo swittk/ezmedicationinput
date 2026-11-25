@@ -6696,17 +6696,36 @@ describe("round45 public interop preservation", () => {
     }] }] })[0];
     let rows = persist(withDosageEditProvenance([compact, historical], "Take 3 tablets and take 1 tablet daily"));
     if (edit !== "unchanged") rows[1].doseAndRate![0].doseQuantity!.value = 2;
-    if (edit === "replacement") rows[1].text = "Take 2 tablets per the updated plan";
+    const replacementPrimitive = persist(historical._text!);
+    replacementPrimitive.extension![0].extension![1].valueString = "รับประทานครั้งละ 2 เม็ดตามแผนที่ปรับปรุง";
+    if (edit === "replacement") {
+      rows[1].text = "Take 2 tablets per the updated plan";
+      // This fresh replacement supplies its own current translation. The
+      // text fingerprint alone cannot prove a companion was inherited.
+      rows[1]._text = replacementPrimitive;
+    }
     const expectedText = edit === "unchanged" ? "Take 1 tablet daily"
       : edit === "replacement" ? "Take 2 tablets per the updated plan" : undefined;
     for (let save = 0; save < 3; save++) {
       const before = persist(rows), wire = toDosageDetails(rows);
       const member = wire.step![0].component.find(item => item.id === "historical")!;
       expect(member.text).toBe(expectedText);
-      expect(member._text).toEqual(edit !== "dose" ? historical._text : {
-        id: "historical-text", extension: [{ url: "urn:clinic:text-note", valueString: "retain-text-note" }]
-      });
-      expect(JSON.stringify(wire)).toContain("รับประทานครั้งละ 1 เม็ด");
+      expect(member._text).toEqual(edit === "unchanged" ? historical._text
+        : edit === "replacement" ? replacementPrimitive : {
+          id: "historical-text", extension: [{ url: "urn:clinic:text-note", valueString: "retain-text-note" }]
+        });
+      if (edit === "dose") {
+        const retained: Array<Partial<FhirR6Dosage>> = [];
+        for (const source of wire.extension ?? []) {
+          if (source.url !== DOSAGE_RECONCILIATION_SOURCE_URL) continue;
+          for (const marker of source.extension ?? []) {
+            if (marker.url !== DOSAGE_DETAILS_R5_URL) continue;
+            const component = decodeR5RetainedFields(marker).component;
+            if (component) retained.push(component);
+          }
+        }
+        expect(retained).toContainEqual({ text: "Take 1 tablet daily", _text: historical._text });
+      }
       expect(member.doseAndRate).toEqual([{ doseQuantity: q(edit === "unchanged" ? 1 : 2) }]);
       expect(member.site?.reference).toEqual({ reference: "BodyStructure/independent-site" });
       expect(JSON.stringify(wire)).toContain("Take 1 tablet daily");

@@ -470,8 +470,8 @@ export interface FhirR6TimingRepeat extends Omit<FhirTimingRepeat, "boundsDurati
   _when?: Array<FhirR6PrimitiveElement | null>;
   /** R6 Quantity permits the native approximate "~" comparator. */
   boundsDuration?: FhirR6Quantity;
-  startOffset?: FhirSimpleQuantity;
-  endOffset?: FhirSimpleQuantity;
+  startOffset?: FhirR6SimpleQuantity;
+  endOffset?: FhirR6SimpleQuantity;
 }
 
 export interface FhirR6Timing extends Omit<FhirTiming, "repeat" | "extension" | "modifierExtension" | "_event">, FhirR6BackboneElement {
@@ -1056,6 +1056,8 @@ export interface AdviceArgument {
   codings?: FhirCoding[];
   components?: InstructionConceptComponent[];
   i18n?: Record<string, string>;
+  /** Original FHIR Element identity of the argument wrapper. */
+  sourceId?: string;
   /** Unrecognized imported argument children, retained as non-executable FHIR data. */
   sourceExtensions?: FhirExtension[];
   quantity?: {

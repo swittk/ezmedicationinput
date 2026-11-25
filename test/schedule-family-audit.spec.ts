@@ -2197,9 +2197,9 @@ describe("Thai additive and clock-target phase adjustments", () => {
     expect(parsed.fhirNext.step[0].component[0].timing?.code?.coding?.map(coding => coding.code)).toContain("BID");
     const changed = parsed.fhirNext.step[1].component;
     expect(changed.map(component => [component.doseAndRate?.[0]?.doseQuantity?.value,
-      component.timing?.repeat?.timeOfDay])).toEqual(expect.arrayContaining([
+      component.timing?.repeat?.timeOfDay])).toEqual([
       [1, ["08:00:00"]], [0.5, ["20:00:00"]],
-    ]));
+    ]);
     const morning = changed.find(component => component.timing?.repeat?.timeOfDay?.includes("08:00:00"));
     expect(morning?.timing?.repeat).toMatchObject({ frequency: 1, period: 1, periodUnit: "d" });
     for (const component of changed) {

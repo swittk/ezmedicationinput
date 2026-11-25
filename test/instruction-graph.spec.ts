@@ -4130,7 +4130,7 @@ describe("round38 configured terminology retains authored identity", () => {
   it.each([false, true])("keeps custom coding identity and annotations from plain or getter-backed inputs (%s)", getters => {
     class Coding {
       id = "saline-annotation";
-      version = "v2";
+      get version() { return "v2"; }
       get system() { return "urn:clinic:fluid"; }
       get code() { return "saline"; }
       get display() { return "Custom saline"; }
@@ -5016,21 +5016,24 @@ describe("round44 public vocabulary and parsed frame isolation", () => {
       }) },
       { role: "qualifier", text: "occlusive" }
     ];
-    const componentCoding = graph.actions.find(frame => frame.predicate.lemma === "cover")!.args
+    const edited = JSON.parse(before) as typeof graph;
+    const componentCoding = edited.actions.find(frame => frame.predicate.lemma === "cover")!.args
       .find(arg => arg.conceptId === "occlusive_dressing")!.components!.find(component => component.coding)!.coding!;
-    const originalCode = componentCoding.code, originalDisplay = componentCoding.display;
-    try {
-      componentCoding.code = "local-edited-code";
-      componentCoding.display = "Local edited dressing";
-      expect(makeGraph().actions.find(frame => frame.predicate.lemma === "cover")!.args
-        .find(arg => arg.conceptId === "occlusive_dressing")!.components).toEqual(expected);
-    } finally {
-      componentCoding.code = originalCode;
-      componentCoding.display = originalDisplay;
-    }
-    const row: FhirDosage = { extension: [buildInstructionGraphExtension(graph)!] };
+    componentCoding.code = "local-edited-code";
+    componentCoding.display = "Local edited dressing";
+    const editedExpected = [
+      { role: "head", text: "dressing", coding: expect.objectContaining({
+        system: "http://snomed.info/sct", code: "local-edited-code", display: "Local edited dressing"
+      }) },
+      { role: "qualifier", text: "occlusive" }
+    ];
+    const row: FhirDosage = { extension: [buildInstructionGraphExtension(edited)!] };
     const reopened = parseInstructionGraphExtension(toFhirR5Dosages(toDosageDetails([row]))[0].extension)!;
-    for (const current of [graph, makeGraph(), reopened]) {
+    for (const current of [edited, reopened]) {
+      expect(current.actions.find(frame => frame.predicate.lemma === "cover")!.args
+        .find(arg => arg.conceptId === "occlusive_dressing")!.components).toEqual(editedExpected);
+    }
+    for (const current of [graph, makeGraph()]) {
       expect(current.actions.find(frame => frame.predicate.lemma === "cover")!.args
         .find(arg => arg.conceptId === "occlusive_dressing")!.components).toEqual(expected);
     }

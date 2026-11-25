@@ -980,7 +980,7 @@ export function isR6DosageInstruction(input: object): input is FhirR6DosageInstr
   // An extended R5 dosage still owns its explicit dosage fields.
   if ("text" in input || "sequence" in input || "_sequence" in input || "doseAndRate" in input || "timing" in input ||
       "route" in input || "site" in input || "siteReference" in input || "method" in input || "condition" in input ||
-      "asNeeded" in input || "asNeededFor" in input || "additionalInstruction" in input ||
+      "asNeeded" in input || "asNeededBoolean" in input || "asNeededFor" in input || "additionalInstruction" in input ||
       "patientInstruction" in input || "maxDosePerPeriod" in input ||
       "maxDosePerAdministration" in input || "maxDosePerLifetime" in input || "excludedDates" in input) return false;
   if ("safety" in input || getCourseCycleCount(input as FhirR6DosageInstruction) !== undefined) return true;
@@ -1081,8 +1081,8 @@ function timingToWire(t: CanonicalTiming | undefined, target: "r5" | "r6"): Fhir
   if (r) {
     const duration = target === "r5" ? generalQuantityForR5(r.courseLength) : quantityForR6(r.courseLength);
     const lengthRange = r.courseLengthRange ? serializeRange(r.courseLengthRange) : undefined;
-    const start = target === "r6" ? simpleQuantityForR5(r.startOffset) : undefined;
-    const end = target === "r6" ? simpleQuantityForR5(r.endOffset) : undefined;
+    const start = target === "r6" ? simpleQuantityForR6(r.startOffset) : undefined;
+    const end = target === "r6" ? simpleQuantityForR6(r.endOffset) : undefined;
     // Clinical zero frequency and signed/fractional offsets are carried by
     // their typed extensions. Reuse and reconstruction must compare the same
     // positiveInt/unsignedInt-compatible wire values.
