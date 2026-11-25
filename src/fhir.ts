@@ -2227,7 +2227,8 @@ export function deserializeCanonicalContext(
           ? {
             code: coding.code,
             display: coding.display,
-            system: coding.system
+            system: coding.system,
+            version: coding.version
           }
           : undefined,
         frames: coding?.code

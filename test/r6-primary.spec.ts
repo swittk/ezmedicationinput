@@ -3102,7 +3102,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       { doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 1, comparator: "~", unit: "tab" })! }] },
       { doseAndRate: [{ doseQuantity: { value: 3, unit: "tab" } }] }
     ] }] };
-    const rows = toFhirR5Dosages(course);
+    const rows = structuredClone(toFhirR5Dosages(course));
     rows[0].doseAndRate![0].doseQuantity = { value: 2, unit: "tab" };
     const restored = toDosageDetails(rows);
     expect(restored.step[0].component[0].doseAndRate?.[0].doseQuantity)
@@ -3120,7 +3120,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
         startOffset: { value: 2, code: "d", unit: "d" } } },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }]
     }] }] };
-    const edited = toFhirR5Dosages(withOffset);
+    const edited = structuredClone(toFhirR5Dosages(withOffset));
     edited[0].timing!.repeat!.period = 30;
     const changed = toDosageDetails(edited);
     expect(changed.step[0].component[0].timing?.repeat?.startOffset).toBeUndefined();
@@ -3323,7 +3323,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       },
       doseAndRate: [{ doseQuantity: { value: 1, unit: "drop" } }]
     }] }] };
-    const rows = toFhirR5Dosages(source);
+    const rows = structuredClone(toFhirR5Dosages(source));
     rows[0].site = { text: "right eye" };
     const rebuilt = toDosageDetails(rows);
     expect(rebuilt.step[0].component[0].site?.concept?.text).toBe("right eye");
@@ -3559,13 +3559,13 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
       const course: FhirR6DosageInstruction = { step: [{ component: [{
         doseAndRate: [entry("calc", 10), entry("ordered", 5)]
       }] }] };
-      const rows = toFhirR5Dosages(course);
+      const rows = structuredClone(toFhirR5Dosages(course));
       rows[0].doseAndRate!.shift();
       const restored = toDosageDetails(rows);
       expect(restored.step[0].component[0].doseAndRate).toEqual([entry("ordered", 5)]);
       expect(restored.extension?.some(ext =>
         ext.url.includes("medication-course-reconciliation-source"))).toBe(true);
-      const reordered = toFhirR5Dosages(course);
+      const reordered = structuredClone(toFhirR5Dosages(course));
       reordered[0].doseAndRate!.reverse();
       reordered[0].doseAndRate![0].doseQuantity = { value: 7, unit: "mg" };
       const edited = toDosageDetails(reordered);
@@ -3725,7 +3725,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     expect(toDosageDetails(JSON.parse(JSON.stringify(rows)))).toEqual(course);
     expect(fromFhir(course).items[0].longText).toContain("Rate: ~100 mL / 90 min");
 
-    const changed = toFhirR5Dosages(course);
+    const changed = structuredClone(toFhirR5Dosages(course));
     changed[0].doseAndRate![0].rateRatio!.numerator!.value = 120;
     const numeric = toDosageDetails(changed);
     expect(numeric.step[0].component[0].doseAndRate?.[0].rateRatio?.numerator).toEqual({
@@ -3969,7 +3969,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
     const course: FhirR6DosageInstruction = { step: [{ component: [{
       doseAndRate: [{ doseQuantity: simpleQuantityForR5({ value: 5, unit: "mg", comparator: "~" })! }]
     }] }] };
-    const rows = toFhirR5Dosages(course);
+    const rows = structuredClone(toFhirR5Dosages(course));
     const component = rows[0].modifierExtension?.[0].extension?.find(child =>
       child.url === "component");
     const amount = component?.extension?.find(child => child.url === "doseAndRate")
@@ -4347,7 +4347,7 @@ describe("current FHIR R6 DosageInstruction boundary (2026-11-13 Snapshot 1)", (
           valueString: "original-condition" }]
       }]
     }] }] };
-    const row = toFhirR5Dosages(original)[0];
+    const row = structuredClone(toFhirR5Dosages(original)[0]);
     setDosageCondition(row, {
       kind: "measurement", name: "Pressure", operation: "lt",
       value: 120, text: "below 120"
@@ -5436,7 +5436,7 @@ describe("adversarial clinical preservation and cycle wall-clock audit", () => {
     const a = quantityLimit("period", 5, "mg", "A", 1);
     const b = quantityLimit("period", 10, "mg", "B", 7);
     const original = courseWithSafety([a, b]);
-    const rows = toFhirR5Dosages(original);
+    const rows = structuredClone(toFhirR5Dosages(original));
     rows[0].maxDosePerPeriod!.shift();
     rows[0].maxDosePerPeriod!.push({
       numerator: { value: 5, unit: "mL" },
@@ -6471,7 +6471,7 @@ describe("review 2026-11-16 19h: explicit empty-stage carrier indices", () => {
         doseQuantity: { value: 1, unit: "tab" }
       }] }] }]
     };
-    const rows = toFhirR5Dosages(course);
+    const rows = structuredClone(toFhirR5Dosages(course));
     const row = rows[0].modifierExtension?.find(ext =>
       ext.extension?.some(child => child.url === "stepCount"));
     expect(row).toBeDefined();

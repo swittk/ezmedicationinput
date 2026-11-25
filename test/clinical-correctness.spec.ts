@@ -435,6 +435,9 @@ describe("clinical SIG correctness and boundary promotion", () => {
   it("preserves already understood count caps without blocking the schedule", () => {
     const parsed = parseSig("1 tab sl q5min prn chest pain max 3 doses");
     expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?._count?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    });
     expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(parsed.warnings.some(warning => warning.startsWith("Unresolved schedule"))).toBe(false);
   });
@@ -442,6 +445,9 @@ describe("clinical SIG correctness and boundary promotion", () => {
   it("treats 'up to 3 doses' as a total administration cap without absorbing the PRN reason", () => {
     const parsed = parseSig("1 tab SL q5min PRN chest pain up to 3 doses");
     expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?._count?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    });
     expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3,
       period: 5,
       periodUnit: "min"
@@ -1474,6 +1480,9 @@ describe("HPSG count cardinal semantics", () => {
       coding: [{ system: "http://snomed.info/sct", code }]
     });
     expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(parsed.fhir.timing?.repeat?._count?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    });
     expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(parsed.meta.canonical.clauses[0]?.site?.text).toBe(site);
     expect(parsed.meta.leftoverText).toBeUndefined();
@@ -1486,6 +1495,9 @@ describe("HPSG count cardinal semantics", () => {
       expect(parsed.fhir.asNeeded).toBe(true);
       expect(parsed.fhir.asNeededFor?.[0]?.text).toBe("pain");
       expect(parsed.fhir.timing?.repeat?.count).toBeUndefined();
+      expect(parsed.fhir.timing?.repeat?._count?.extension).toContainEqual({
+        url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+      });
       expect(parsed.fhir.timing?.repeat).toMatchObject({ countMax: 3,
         period: 4,
         periodUnit: "h"
@@ -1513,6 +1525,9 @@ describe("HPSG count cardinal semantics", () => {
   it("preserves spelled maximum and periodic occurrence caps", () => {
     const total = parseSig("1 tab q6h max three doses");
     expect(total.fhir.timing?.repeat?.count).toBeUndefined();
+    expect(total.fhir.timing?.repeat?._count?.extension).toContainEqual({
+      url: "http://hl7.org/fhir/StructureDefinition/data-absent-reason", valueCode: "unknown"
+    });
     expect(total.fhir.timing?.repeat).toMatchObject({ countMax: 3 });
     expect(total.meta.leftoverText).toBeUndefined();
 
@@ -3451,6 +3466,12 @@ describe("round52 live site and partial-direction previews", () => {
   it.each([false, true])("keeps the condition and authored directions with live dose=%s", (liveDose) => {
     const authored = "Swallow 1 tablet whole";
     const completeThreshold = /\bSBP > 160(?!\d|\.\d)/u;
+    const positiveThreshold = {
+      en: /only if SBP > 160(?!\d|\.\d)/u,
+      th: /เฉพาะเมื่อ SBP > 160(?!\d|\.\d)/u,
+    };
+    expect("unless SBP > 160").not.toMatch(positiveThreshold.en);
+    expect("เว้นแต่ SBP > 160").not.toMatch(positiveThreshold.th);
     for (const changed of ["SBP > 1600", "SBP > 160.5"])
       expect(changed).not.toMatch(completeThreshold);
     const condition = { kind: "measurement", name: "sbp", operation: "gt", value: 160, text: "SBP > 160" } as const;
@@ -3465,7 +3486,7 @@ describe("round52 live site and partial-direction previews", () => {
       const before = JSON.parse(JSON.stringify(input));
       for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
         const preview = formatSig(input, style, { locale, realizationMode: mode });
-        expect(preview).toMatch(completeThreshold);
+        expect(preview).toMatch(positiveThreshold[locale]);
         if (liveDose) {
           const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
           expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
@@ -3503,7 +3524,7 @@ describe("round52 live site and partial-direction previews", () => {
         const before = structuredClone(input);
         for (const locale of ["en", "th"] as const) for (const mode of ["normalized", "roundtrip"] as const) for (const style of ["short", "long"] as const) {
           const preview = formatSig(input, style, { locale, realizationMode: mode });
-          expect(preview).toMatch(completeThreshold);
+          expect(preview).toMatch(positiveThreshold[locale]);
           const exactAmount = locale === "en" ? /(?:^|[^0-9.])2 (?:tablets|tab)\b/u : /(?:^|[^0-9.])2 เม็ด/u;
           expect(locale === "en" ? "12 tablets" : "12 เม็ด").not.toMatch(exactAmount);
           expect(preview).toMatch(exactAmount);

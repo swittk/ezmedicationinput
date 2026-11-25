@@ -661,8 +661,6 @@ function formatCanonicalBase(
       a.predicate && style === "long" ? appendMedicationConditionText(a.text!, a.predicate, options, env) : a.text!);
   if (a.predicate && style !== "long" && !authoredQualifiers)
     rendered = appendMedicationConditionText(rendered, a.predicate, options, env);
-  if (a.limits?.length || a.safety?.ifExceeded)
-    rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   // The clause's calendar view needs a complete civil date. Partial FHIR
   // dateTimes (for example YYYY-MM) remain useful authored information; show
   // their original values instead of inventing a missing month/day or hiding
@@ -679,6 +677,8 @@ function formatCanonicalBase(
     rendered = appendMedicationExcludedDatesText(rendered, a.excludedDates, options, env);
   if (a.excludedWeekdays?.length)
     rendered = appendMedicationExcludedWeekdaysText(rendered, a.excludedWeekdays, options, env);
+  if (a.limits?.length || a.safety?.ifExceeded)
+    rendered = appendDoseLimits(rendered, a.limits, words, undefined, a.safety?.ifExceeded);
   const ranges: string[] = [];
   const labelled = (a.amounts?.length ?? 0) > 1 || hasAmountRole(primary?.role);
   // Target count is independent of quantity scope. Labelled discrete amounts
@@ -1172,7 +1172,8 @@ export function formatCanonicalCourse(
     // A successor can finish this stage before any open-ended continuation.
     // Show the known origin as a point; do not invent an end that could
     // contradict the member's earlier duration/count completion.
-    if (!step.end && index + 1 < oneOrCourse.stages.length) {
+    if (!step.end && index + 1 < oneOrCourse.stages.length &&
+        (index > 0 || step.start?.anchor !== "previous-phase-next-day")) {
       const quantity = step.start ? treatmentStepOffsetQuantity(step.start)
         : startDays === undefined ? undefined : { value: startDays, unit: "d" };
       const point = treatmentBoundaryRangeText(step.start, words, cycleStart) ??

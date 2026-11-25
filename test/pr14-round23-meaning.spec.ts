@@ -5263,7 +5263,7 @@ describe("round60 typed meaning and interchange ownership", () => {
     const before = JSON.stringify(marker);
     const decoded = parseInstructionGraphExtension([marker])!;
     const rebuilt = buildInstructionGraphExtension(decoded)!;
-    expect(rebuilt.extension!.find(field => field.url === unknown.url)).toBe(unknown);
+    expect(rebuilt.extension!.find(field => field.url === unknown.url)).toEqual(unknown);
     expect(rebuilt.extension!.filter(field => field.url !== unknown.url)).toEqual(known.extension);
     expect(buildInstructionGraphExtension(parseInstructionGraphExtension([known]))).toEqual(known);
     const row: FhirDosage = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }], extension: [rebuilt] };

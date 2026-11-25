@@ -3408,7 +3408,10 @@ describe("round64 independent endpoint and authored direction ownership", () => 
       : { low: { value: 5, unit: "mL/h" }, high: { value: 10, unit: "mL/h" } };
     const valued: FhirR6DosageInstruction = { step: [{ component: [{ text: "Infuse over 30 minutes", doseAndRate: [{ [field]: rate }] }] }] };
     const text = formatSig(valued, "long", options);
-    expect(text).toContain("5");
+    const completeRate = field === "rateQuantity" ? /(?:^|[^\d.])5 mL\/h\b/u
+      : field === "rateRatio" ? /(?:^|[^\d.])5 mL \/ 1 h\b/u
+      : /(?:^|[^\d.])5–10 mL\/h\b/u;
+    expect(text).toMatch(completeRate);
     expect(text).not.toContain("30 minutes");
   });
 
@@ -3429,5 +3432,80 @@ describe("round64 independent endpoint and authored direction ownership", () => 
       frequency: 2, period: 1, periodUnit: FhirPeriodUnit.Day
     } } }] }] };
     expect(toFhirR5Dosages(exact)[0].timing!.repeat!._period).toBeUndefined();
+  });
+});
+
+
+describe("round66 source meaning and authored metadata", () => {
+  const options = { locale: "en", realizationMode: "normalized" as const };
+  const tabletDaily = { doseAndRate: [{ doseQuantity: { value: 1, unit: "tab" } }],
+    timing: { repeat: { frequency: 1, period: 1, periodUnit: FhirPeriodUnit.Day } } };
+
+  it.each([undefined, "2026"])("retains an authored Thai instruction translation with coding version %s", version => {
+    const instruction = { coding: [{ system: "urn:test:counseling", code: "do-not-crush", version }],
+      _text: { id: "authored-counseling", extension: [{ url: "http://hl7.org/fhir/StructureDefinition/translation",
+        extension: [{ url: "lang", valueCode: "th" }, { url: "content", valueString: "ห้ามบดเม็ดยา" }] }] } };
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ ...tabletDaily,
+      additionalInstruction: [instruction] }] }] };
+    for (const [label, input] of [["R6", source], ["native", courseFromR6(source, true)],
+      ["R5", JSON.parse(JSON.stringify(toFhirR5Dosages(source)))]] as const)
+      expect(formatSig(input, "long", { locale: "th", realizationMode: "normalized" }), label).toContain("ห้ามบดเม็ดยา");
+    expect(toDosageDetails(JSON.parse(JSON.stringify(toFhirR5Dosages(source)))).step[0].component[0].additionalInstruction)
+      .toEqual(JSON.parse(JSON.stringify([instruction])));
+  });
+
+  it("attaches excluded dates and weekdays before the independent limit response", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ ...tabletDaily,
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" },
+        period: { value: 1, unit: "d" } }], ifExceeded: "Call the clinic" } }] }] };
+    const native = JSON.parse(JSON.stringify(courseFromR6(source))) as CanonicalCourse;
+    native.stages[0].administrations[0].excludedDates = ["2026-12-25"];
+    native.stages[0].administrations[0].excludedWeekdays = [FhirDayOfWeek.Sunday];
+    const r6 = courseToR6(native);
+    for (const input of [native, r6, JSON.parse(JSON.stringify(toFhirR5Dosages(r6)))]) {
+      const text = formatSig(input, "long", options);
+      expect(text).toContain("except 2026-12-25");
+      expect(text).toContain("except Sunday");
+      expect(text.indexOf("except 2026-12-25")).toBeLessThan(text.indexOf("If the limit is exceeded: Call the clinic"));
+      expect(text.indexOf("except Sunday")).toBeLessThan(text.indexOf("If the limit is exceeded: Call the clinic"));
+    }
+    expect(formatSig(source, "long", options)).toContain("If the limit is exceeded: Call the clinic");
+  });
+
+  it("keeps the unresolved predecessor warning after removing the first saved step", () => {
+    const native: CanonicalCourse = { kind: "course", stages: [
+      { administrations: [{ amounts: [{ quantity: { value: 1, unit: "tab" } }] }] },
+      { start: { anchor: "previous-phase-next-day" }, administrations: [{ amounts: [{ quantity: { value: 2, unit: "tab" } }] }] },
+      { administrations: [{ amounts: [{ quantity: { value: 3, unit: "tab" } }] }] },
+    ] };
+    const saved = courseToR6(native);
+    const edited = { ...saved, step: saved.step.slice(1) };
+    for (const input of [edited, JSON.parse(JSON.stringify(toFhirR5Dosages(edited)))])
+      expect(formatSig(input, "long", options)).toContain("Timing requires review");
+    expect(formatSig(saved, "long", options)).not.toContain("Timing requires review");
+  });
+
+  it("retains a fresh Ratio annotation Coding.version without changing its limit", () => {
+    const source: FhirR6DosageInstruction = { step: [{ component: [{ ...tabletDaily,
+      safety: { doseLimit: [{ scope: "period", valueQuantity: { value: 4, unit: "tab" },
+        period: { value: 1, unit: "d" }, extension: [{ url: "urn:test:limit-annotation",
+          valueCodeableConcept: { coding: [{ system: "urn:test:limit", code: "daily" }] } }] }] } }] }] };
+    const rows = JSON.parse(JSON.stringify(toFhirR5Dosages(source))) as FhirDosage[];
+    rows[0].maxDosePerPeriod![0].extension![0].valueCodeableConcept!.coding![0].version = "2026";
+    const limit = toDosageDetails(rows).step[0].component[0].safety!.doseLimit![0];
+    expect(limit).toMatchObject({ scope: "period", valueQuantity: { value: 4, unit: "tab" },
+      period: { value: 1, unit: "d" }, extension: [{ url: "urn:test:limit-annotation",
+        valueCodeableConcept: { coding: [{ system: "urn:test:limit", code: "daily", version: "2026" }] } }] });
+  });
+
+  it.each(["2026", "2026-12"])("shows reduced-precision R5 events without choosing a day: %s", event => {
+    const row: FhirDosage = { doseAndRate: tabletDaily.doseAndRate,
+      timing: { event: [event], _event: [{ id: "authored-precision" }] } };
+    for (const text of [formatSig(row, "long", options), fromFhirDosage(row, options).longText]) {
+      expect(text).toContain("Scheduled events: " + event);
+      expect(text).not.toContain(event + "-01");
+    }
+    expect(toDosageDetails([row]).step[0].component[0].timing)
+      .toMatchObject({ event: [event], _event: [{ id: "authored-precision" }] });
   });
 });
